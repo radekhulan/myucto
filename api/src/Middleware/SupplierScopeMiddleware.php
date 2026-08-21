@@ -46,7 +46,8 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         // Normalizovaná cesta (viz RequestPath) — výjimky musí platit přesně tam,
         // kam router request doručí.
         $path = RequestPath::normalize($request->getUri()->getPath());
-        if (str_starts_with($path, '/api/auth/webauthn/')
+        if ($path === '/api/tenant-transfer/v1/capabilities'
+            || str_starts_with($path, '/api/auth/webauthn/')
             || str_starts_with($path, '/api/auth/mfa/')
             || str_starts_with($path, '/api/auth/session/')
             || str_starts_with($path, '/api/auth/domain-login/')

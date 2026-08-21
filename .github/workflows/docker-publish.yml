@@ -80,6 +80,8 @@ jobs:
           file: ./Dockerfile.alpine
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_REVISION=${{ github.sha }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           # GHA cache — per-platform scope, aby se amd64/arm64 navzájem nepřepisovaly.
           # ignore-error=true: flaky GHA cache backend (občas „error writing layer blob:
@@ -209,6 +211,9 @@ jobs:
       - name: Tag from ref
         id: tag
         run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Stage immutable build revision
+        run: printf '%s\n' "$GITHUB_SHA" > BUILD_REVISION
 
       - name: Build production bundle tarball
         # Vyloučí: .git, .github, source/, node_modules, api/vendor.prod (cache),

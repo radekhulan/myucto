@@ -38,6 +38,7 @@ FROM php:8.5-fpm-alpine AS runtime
 # librsvg fallback pro konverzi SVG loga, když Imagick nemá SVG delegate (viz
 # Dockerfile). Default zap; pro menší image `--build-arg INSTALL_RSVG=0`.
 ARG INSTALL_RSVG=1
+ARG BUILD_REVISION=unavailable
 
 COPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensions /usr/local/bin/
 
@@ -89,6 +90,8 @@ RUN rm -f /etc/nginx/http.d/default.conf \
 # Application code
 WORKDIR /var/www/html
 COPY --chown=www-data:www-data . .
+RUN printf '%s\n' "$BUILD_REVISION" > BUILD_REVISION \
+ && chown www-data:www-data BUILD_REVISION
 RUN sed -i 's/\r$//' docker/entrypoint-alpine.sh docker/cron-run.sh \
  && chmod +x docker/entrypoint-alpine.sh
 COPY --from=web-build --chown=www-data:www-data /app/dist ./web/dist

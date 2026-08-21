@@ -76,6 +76,13 @@ return [
         'enabled' => false,
     ],
 
+    // Přenos jedné firmy mezi dvěma přesně shodnými verzemi MyÚčta. Funkce je
+    // během dokončování úplného tenantového registru výchozím stavem vypnutá.
+    // ENV varianta: MYINVOICE_TENANT_TRANSFER_ENABLED=1
+    'tenant_transfer' => [
+        'enabled' => false,
+    ],
+
     // Licencování a aktivace (E4). Ed25519 podepsané tokeny se ověřují zabudovaným
     // veřejným klíčem a jednou denně se obnovují u licenčního serveru.
     'license' => [

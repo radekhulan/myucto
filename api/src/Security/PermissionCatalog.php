@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-domains-document-submissions-v1';
+    public const VERSION = '2026-08-tenant-transfer-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -136,6 +136,7 @@ final class PermissionCatalog
             ['settings.branding', 'settings', 'Branding firmy', $staffOnly],
             ['settings.ai_provider', 'settings', 'AI poskytovatel', $staffOnly],
             ['settings.signing', 'utilities', 'Elektronické podepisování', $staffOnly],
+            ['tenant.transfer.export', 'settings', 'Přenést firmu na jinou instanci', $staffOnly],
             ['utilities', 'utilities', 'Nástroje', $staffOnly],
             ['utilities.export', 'utilities', 'Export dat', $staffOnly],
             ['utilities.import', 'utilities', 'Import dat', $staffOnly],
@@ -187,6 +188,7 @@ final class PermissionCatalog
                 'accounting.periods.close', 'accounting.periods.manage',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
                 'settings.company.write', 'settings.domains', 'utilities.import',
+                'tenant.transfer.export',
                 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
                 'payroll.reopen', 'payroll.enforcement', 'payroll.insolvency', 'payroll.rulesets',
                 // Výmaz osobních údajů je nevratný a právně významný — patří ke

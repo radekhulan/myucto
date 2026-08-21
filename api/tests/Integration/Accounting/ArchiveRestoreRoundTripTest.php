@@ -189,6 +189,22 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         $this->tempFiles[] = $zipPath;
         self::assertFileExists($zipPath);
 
+        $zip = new \ZipArchive();
+        self::assertTrue($zip->open($zipPath));
+        $invoiceJsonl = $zip->getFromName('invoices.jsonl');
+        self::assertIsString($invoiceJsonl);
+        self::assertStringNotContainsString(
+            '"approval_token"',
+            $invoiceJsonl,
+            'Archiv nesmí přenášet jednorázový schvalovací token.',
+        );
+        self::assertStringNotContainsString(
+            '"public_token"',
+            $invoiceJsonl,
+            'Archiv nesmí přenášet veřejný token faktury.',
+        );
+        $zip->close();
+
         // Originální bank_statements řádek smaž PO exportu (cascade smaže i
         // bank_transactions/payment_matches originálu) — jinak by find-or-create dedup
         // (stejný file_hash, cíleně přidaný proti UNIQUE kolizi, viz importBankStatement)

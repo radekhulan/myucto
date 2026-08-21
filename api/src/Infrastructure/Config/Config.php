@@ -236,6 +236,11 @@ final class Config
             'domains' => [
                 'enabled' => false,
             ],
+            // Přenos firmy je během stavby protokolu výslovně opt-in. Dokud
+            // TenantDataRegistry nepokrývá celý profil, nesmí se omylem zveřejnit.
+            'tenant_transfer' => [
+                'enabled' => false,
+            ],
             // Kdo nese odpovědnost za odbornou správnost DODANÝCH mzdových
             // legislativních sad v téhle instalaci. Je to vlastnost provozovatele,
             // ne produktu — viz \MyInvoice\Service\Payroll\Ruleset\VendorRulesetApprover.
@@ -283,7 +288,9 @@ final class Config
             'MYINVOICE_APP_ENV'     => ['app.env', 'string'],
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
+            'MYINVOICE_BUILD_REVISION' => ['app.build_revision', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],
+            'MYINVOICE_TENANT_TRANSFER_ENABLED' => ['tenant_transfer.enabled', 'bool'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
             'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],

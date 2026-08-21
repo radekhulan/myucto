@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Backup\BackupZipPermissions;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
+use MyInvoice\Service\TenantTransfer\Registry\TenantDataPolicy;
+use MyInvoice\Service\TenantTransfer\Registry\TenantSecretColumnDetector;
 use PDO;
 use Psr\Log\LoggerInterface;
 
@@ -34,89 +36,10 @@ final class ArchiveService
      */
     private const MANIFEST_VERSION = 2;
 
-    /** Tabulky s přímým supplier_id (pořadí = pořadí exportu, respektuje FK). */
-    private const DIRECT_TABLES = [
-        'accounting_periods',
-        'chart_of_accounts',
-        'posting_rules',
-        'cost_centers',
-        'accounting_supplier_settings',
-        'accounting_closing_steps',
-        'accounting_document_series',
-        'journal_entries',
-        'journal_entry_lines',
-        'clients',
-        'client_bank_accounts',
-        'currencies',
-        'invoices',
-        'purchase_invoices',
-        'assets',
-        'asset_improvements',
-        'depreciation_entries',
-        'payment_matches',
-        // Audit 2026-07 (Fáze F) — rozšíření archivu na kompletní účetní stopu firmy:
-        'cash_registers',            // pokladna (1019)
-        'cash_documents',
-        'invoice_payments',          // částečné úhrady faktur (0108)
-        'income_tax_returns',        // daň z příjmů (1030)
-        'tax_losses',                // daňová ztráta (1042)
-        'tax_loss_applications',
-        'tax_advance_schedules',     // zálohy na daň (1044)
-        'journal_entry_attachments', // §33a přílohy zápisů (metadata; binárky viz files)
-    ];
-
-    /**
-     * Skladové tabulky (SKLAD 1022/1028) — všechny nesou denormalizovaný supplier_id,
-     * takže se filtrují přímo. Exportují se JEN u firem se `supplier.stock_enabled`.
-     * Hodnota = 'id' (keyset PK) nebo řadicí klíč složeného PK (LIMIT/OFFSET).
-     * Pořadí respektuje FK závislosti pro pozdější obnovu.
-     */
-    private const STOCK_TABLES = [
-        'warehouses'                  => 'id',
-        'stock_items'                 => 'id',
-        'manufacturers'               => 'id',
-        'stock_media'                 => 'id',
-        'stock_categories'            => 'id',
-        'stock_category_i18n'         => 'id',
-        'stock_item_categories'       => 'stock_item_id, category_id',
-        'stock_tags'                  => 'id',
-        'stock_item_tags'             => 'stock_item_id, tag_id',
-        'stock_attributes'            => 'id',
-        'stock_attribute_options'     => 'id',
-        'stock_attribute_i18n'        => 'id',
-        'stock_item_attribute_values' => 'id',
-        'stock_fee_types'             => 'id',
-        'stock_item_fees'             => 'id',
-        'stock_item_prices'           => 'id',
-        'stock_item_vendors'          => 'id',
-        'stock_item_i18n'             => 'id',
-        'stock_levels'                => 'warehouse_id, stock_item_id',
-        'stock_documents'             => 'id',
-        'stock_document_lines'        => 'id',
-        'stock_landed_costs'          => 'id',
-        'stock_takes'                 => 'id',
-        'stock_take_lines'            => 'id',
-    ];
-
-    /** BLOB sloupce mimo export (binárky kryje celoinstanční backup, R15). */
-    private const EXCLUDED_COLUMNS = [
-        'bank_statements' => ['file_content', 'pdf_content'],
-    ];
-
-    /**
-     * Citlivé sloupce tabulky `supplier`, které se do přenositelného archivu NEexportují
-     * (šifrované API/OAuth/TSA/cert credentials). Všechny jsou nullable → obnovený řádek
-     * je dostane NULL a účetní je po obnově zadá znovu (bezpečnější default). Matchuje se
-     * case-insensitive jako substring/suffix nad názvem sloupce.
-     */
-    private const SUPPLIER_SECRET_PATTERNS = [
-        '_enc', 'password', 'secret', 'access_token', 'refresh_token',
-        'api_key', 'client_id', 'private_key',
-    ];
-
     public function __construct(
         private readonly Connection $db,
         private readonly LoggerInterface $logger,
+        private readonly AccountingArchiveCatalog $catalog,
     ) {}
 
     /**
@@ -339,110 +262,238 @@ final class ArchiveService
     // ── interní ───────────────────────────────────────────────────────────────
 
     /**
-     * Definice filtrů per tabulka: WHERE + params + řadicí/keyset klíč.
-     * Tabulky bez supplier_id se filtrují JOINem přes rodiče (tenant izolace!);
-     * bank_transactions/bank_statements přes payment_matches / matched_invoice_id;
-     * exchange_rates (globální) na měny firmy a rozsah dat období.
+     * Definice filtrů vznikají ze společného TenantDataRegistry. Pouze tři
+     * historické archivní selektory jsou specializované: bankovní vztahový graf
+     * a globální kurz v rozsahu účetních období.
      *
-     * @return array<string, array{where:string, params:list<mixed>, pk:?string, order:string}>
+     * @return array<string,array{
+     *   where:string,
+     *   params:list<mixed>,
+     *   pk:?string,
+     *   order:string,
+     *   omit_columns:list<string>,
+     *   secret_columns:list<string>
+     * }>
      */
     private function tableSpecs(int $supplierId): array
     {
         $specs = [];
-        // Vlastní master řádek firmy (bez credential sloupců, viz columnList) — nutný,
-        // aby šla firma obnovit jako NOVÁ (ArchiveRestoreService). Filtr `id = supplier`.
-        $specs['supplier'] = [
-            'where' => 'id = ?',
-            'params' => [$supplierId],
-            'pk' => 'id',
-            'order' => 'id',
-        ];
-        foreach (self::DIRECT_TABLES as $table) {
-            $specs[$table] = [
-                'where' => 'supplier_id = ?',
-                'params' => [$supplierId],
-                'pk' => $table === 'accounting_supplier_settings' ? null : 'id',
-                'order' => $table === 'accounting_supplier_settings' ? 'supplier_id' : 'id',
-            ];
-        }
-        // Pokladní DPH řádky nemají supplier_id — filtr přes rodičovský cash_documents.
-        $specs['cash_document_vat_lines'] = [
-            'where' => 'cash_document_id IN (SELECT id FROM cash_documents WHERE supplier_id = ?)',
-            'params' => [$supplierId],
-            'pk' => 'id',
-            'order' => 'id',
-        ];
-        // Sklad (SKLAD 1022/1028) — jen u firem s opt-in modulem.
-        if ($this->stockEnabled($supplierId)) {
-            foreach (self::STOCK_TABLES as $table => $keyCols) {
-                $hasId = $keyCols === 'id';
-                $specs[$table] = [
-                    'where' => 'supplier_id = ?',
-                    'params' => [$supplierId],
-                    'pk' => $hasId ? 'id' : null,
-                    'order' => $keyCols,
-                ];
+        $stockEnabled = null;
+        foreach ($this->catalog->forExport() as $table) {
+            if ($table->featureFlag === 'stock_enabled') {
+                $stockEnabled ??= $this->stockEnabled($supplierId);
+                if (!$stockEnabled) {
+                    continue;
+                }
             }
-        }
-        $specs['invoice_items'] = [
-            'where' => 'invoice_id IN (SELECT id FROM invoices WHERE supplier_id = ?)',
-            'params' => [$supplierId],
-            'pk' => 'id',
-            'order' => 'id',
-        ];
-        $specs['purchase_invoice_items'] = [
-            'where' => 'purchase_invoice_id IN (SELECT id FROM purchase_invoices WHERE supplier_id = ?)',
-            'params' => [$supplierId],
-            'pk' => 'id',
-            'order' => 'id',
-        ];
-        $txWhere = '(id IN (SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
-            . ' OR matched_invoice_id IN (SELECT id FROM invoices WHERE supplier_id = ?)'
-            . ' OR id IN (SELECT last_bank_transaction_id FROM client_bank_accounts'
-            . ' WHERE supplier_id = ? AND last_bank_transaction_id IS NOT NULL))';
-        $specs['bank_transactions'] = [
-            'where' => $txWhere,
-            'params' => [$supplierId, $supplierId, $supplierId],
-            'pk' => 'id',
-            'order' => 'id',
-        ];
-        $specs['bank_statements'] = [
-            'where' => 'id IN (SELECT statement_id FROM bank_transactions WHERE statement_id IS NOT NULL AND ' . $txWhere . ')',
-            'params' => [$supplierId, $supplierId, $supplierId],
-            'pk' => 'id',
-            'order' => 'id',
-        ];
-
-        [$minDate, $maxDate] = $this->periodRange($supplierId);
-        if ($minDate !== null && $maxDate !== null) {
-            $specs['exchange_rates'] = [
-                'where' => 'currency_code IN (SELECT code FROM currencies WHERE supplier_id = ?) AND rate_date BETWEEN ? AND ?',
-                'params' => [$supplierId, $minDate, $maxDate],
-                'pk' => null,
-                'order' => 'rate_date, currency_code',
-            ];
-        } else {
-            $specs['exchange_rates'] = [
-                'where' => '1 = 0',
-                'params' => [],
-                'pk' => null,
-                'order' => 'rate_date, currency_code',
+            [$where, $params] = $this->archiveSelection(
+                $table,
+                $supplierId,
+            );
+            $keysetColumn = $table->primaryKey === ['id'] ? 'id' : null;
+            $specs[$table->name] = [
+                'where' => $where,
+                'params' => $params,
+                'pk' => $keysetColumn,
+                'order' => implode(', ', array_map(
+                    self::quoteIdentifier(...),
+                    $table->primaryKey,
+                )),
+                'omit_columns' => $table->omitColumns,
+                'secret_columns' => array_keys($table->secretPolicies),
             ];
         }
         return $specs;
     }
 
     /**
+     * @return array{0:string,1:list<mixed>}
+     */
+    private function archiveSelection(
+        AccountingArchiveTable $table,
+        int $supplierId,
+    ): array {
+        if ($table->selector === 'ownership') {
+            return $this->ownershipSelection($table, $supplierId);
+        }
+
+        $transactionWhere = '(`id` IN ('
+            . 'SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
+            . ' OR `matched_invoice_id` IN ('
+            . 'SELECT id FROM invoices WHERE supplier_id = ?)'
+            . ' OR `id` IN (SELECT last_bank_transaction_id'
+            . ' FROM client_bank_accounts WHERE supplier_id = ?'
+            . ' AND last_bank_transaction_id IS NOT NULL))';
+        if ($table->selector === 'bank_transaction_relationships') {
+            return [
+                $transactionWhere,
+                [$supplierId, $supplierId, $supplierId],
+            ];
+        }
+        if ($table->selector === 'bank_statement_relationships') {
+            return [
+                '`id` IN (SELECT statement_id FROM bank_transactions'
+                    . ' WHERE statement_id IS NOT NULL AND '
+                    . $transactionWhere . ')',
+                [$supplierId, $supplierId, $supplierId],
+            ];
+        }
+        if ($table->selector === 'accounting_period_currency') {
+            [$minDate, $maxDate] = $this->periodRange($supplierId);
+            if ($minDate === null || $maxDate === null) {
+                return ['1 = 0', []];
+            }
+            return [
+                '`currency_code` IN ('
+                    . 'SELECT code FROM currencies WHERE supplier_id = ?)'
+                    . ' AND `rate_date` BETWEEN ? AND ?',
+                [$supplierId, $minDate, $maxDate],
+            ];
+        }
+
+        throw new \LogicException('Účetní archiv má nepodporovaný selektor.');
+    }
+
+    /** @return array{0:string,1:list<mixed>} */
+    private function ownershipSelection(
+        AccountingArchiveTable $table,
+        int $supplierId,
+    ): array {
+        if ($table->policy === TenantDataPolicy::TenantRoot
+            && ($table->ownership['strategy'] ?? null) === 'selected_supplier'
+            && ($table->ownership['column'] ?? null) === 'id'
+        ) {
+            return ['`id` = ?', [$supplierId]];
+        }
+        if ($table->policy === TenantDataPolicy::TenantOwned
+            && ($table->ownership['strategy'] ?? null) === 'supplier_id'
+            && ($table->ownership['column'] ?? null) === 'supplier_id'
+        ) {
+            return ['`supplier_id` = ?', [$supplierId]];
+        }
+        if ($table->policy === TenantDataPolicy::TenantOwnedIndirect
+            && ($table->ownership['strategy'] ?? null) === 'foreign_key_path'
+        ) {
+            return [
+                $this->ownershipPathWhere($table),
+                [$supplierId],
+            ];
+        }
+
+        throw new \LogicException(
+            'Účetní archiv nemá bezpečný vlastnický selektor pro '
+                . $table->name . '.',
+        );
+    }
+
+    private function ownershipPathWhere(AccountingArchiveTable $table): string
+    {
+        $path = $table->ownership['path'] ?? null;
+        if (!is_array($path) || !array_is_list($path) || $path === []) {
+            throw new \LogicException(
+                'Účetní archiv má neplatnou vlastnickou cestu.',
+            );
+        }
+
+        $from = '';
+        $joins = '';
+        $firstCondition = '';
+        $previousAlias = null;
+        $lastTable = null;
+        $lastColumn = null;
+        foreach ($path as $index => $step) {
+            if (!is_array($step) || array_is_list($step)) {
+                throw new \LogicException(
+                    'Účetní archiv má neplatnou vlastnickou cestu.',
+                );
+            }
+            $fromColumn = self::pathIdentifier($step, 'from_column');
+            $toTable = self::pathIdentifier($step, 'to_table');
+            $toColumn = self::pathIdentifier($step, 'to_column');
+            $alias = '_tenant_path_' . $index;
+            if ($index === 0) {
+                $from = self::quoteIdentifier($toTable)
+                    . ' AS ' . self::quoteIdentifier($alias);
+                $firstCondition = self::quoteIdentifier($table->name)
+                    . '.' . self::quoteIdentifier($fromColumn)
+                    . ' = ' . self::quoteIdentifier($alias)
+                    . '.' . self::quoteIdentifier($toColumn);
+            } else {
+                if ($previousAlias === null) {
+                    throw new \LogicException(
+                        'Účetní archiv má neplatnou vlastnickou cestu.',
+                    );
+                }
+                $joins .= ' JOIN ' . self::quoteIdentifier($toTable)
+                    . ' AS ' . self::quoteIdentifier($alias)
+                    . ' ON ' . self::quoteIdentifier($previousAlias)
+                    . '.' . self::quoteIdentifier($fromColumn)
+                    . ' = ' . self::quoteIdentifier($alias)
+                    . '.' . self::quoteIdentifier($toColumn);
+            }
+            $previousAlias = $alias;
+            $lastTable = $toTable;
+            $lastColumn = $toColumn;
+        }
+        if ($lastTable !== 'supplier'
+            || $lastColumn !== 'id'
+        ) {
+            throw new \LogicException(
+                'Vlastnická cesta účetního archivu nekončí kořenem firmy.',
+            );
+        }
+
+        return 'EXISTS (SELECT 1 FROM ' . $from . $joins
+            . ' WHERE ' . $firstCondition
+            . ' AND ' . self::quoteIdentifier($previousAlias) . '.`id` = ?)';
+    }
+
+    /** @param array<mixed> $step */
+    private static function pathIdentifier(array $step, string $field): string
+    {
+        $value = $step[$field] ?? null;
+        if (!is_string($value)) {
+            throw new \LogicException(
+                'Účetní archiv má neplatnou vlastnickou cestu.',
+            );
+        }
+        self::quoteIdentifier($value);
+        return $value;
+    }
+
+    private static function quoteIdentifier(string $identifier): string
+    {
+        if (preg_match('/^[a-z_][a-z0-9_]{0,63}$/D', $identifier) !== 1) {
+            throw new \LogicException(
+                'Účetní archiv obsahuje neplatný SQL identifikátor.',
+            );
+        }
+        return '`' . $identifier . '`';
+    }
+
+    /**
      * Streamovaný export tabulky do JSONL (dávky po 1000: keyset přes PK, jinak
      * LIMIT/OFFSET). Vrací {rows, sha256} pro manifest.
      *
-     * @param array{where:string, params:list<mixed>, pk:?string, order:string} $spec
+     * @param array{
+     *   where:string,
+     *   params:list<mixed>,
+     *   pk:?string,
+     *   order:string,
+     *   omit_columns:list<string>,
+     *   secret_columns:list<string>
+     * } $spec
      * @return array{rows:int, sha256:string}
      */
     private function exportTable(string $table, array $spec, string $filePath): array
     {
         $pdo = $this->db->pdo();
-        $columns = $this->columnList($table);
+        $columns = $this->columnList(
+            $table,
+            $spec['omit_columns'],
+            $spec['secret_columns'],
+        );
+        $quotedTable = self::quoteIdentifier($table);
         $fh = fopen($filePath, 'wb');
         if ($fh === false) {
             throw new \RuntimeException('Nelze zapsat ' . $filePath);
@@ -454,12 +505,15 @@ final class ArchiveService
             $offset = 0;
             while (true) {
                 if ($spec['pk'] !== null) {
-                    $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $spec['where']
-                        . ($lastId !== null ? ' AND ' . $spec['pk'] . ' > ?' : '')
-                        . ' ORDER BY ' . $spec['pk'] . ' LIMIT 1000';
+                    $quotedKey = self::quoteIdentifier($spec['pk']);
+                    $sql = 'SELECT ' . $columns . ' FROM ' . $quotedTable
+                        . ' WHERE ' . $spec['where']
+                        . ($lastId !== null ? ' AND ' . $quotedKey . ' > ?' : '')
+                        . ' ORDER BY ' . $quotedKey . ' LIMIT 1000';
                     $params = $lastId !== null ? array_merge($spec['params'], [$lastId]) : $spec['params'];
                 } else {
-                    $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $spec['where']
+                    $sql = 'SELECT ' . $columns . ' FROM ' . $quotedTable
+                        . ' WHERE ' . $spec['where']
                         . ' ORDER BY ' . $spec['order'] . ' LIMIT 1000 OFFSET ' . $offset;
                     $params = $spec['params'];
                 }
@@ -480,7 +534,15 @@ final class ArchiveService
                     $rows++;
                 }
                 if ($spec['pk'] !== null) {
-                    $lastId = $batch[count($batch) - 1][$spec['pk']];
+                    $lastRow = $batch[count($batch) - 1];
+                    if (!is_array($lastRow)
+                        || !array_key_exists($spec['pk'], $lastRow)
+                    ) {
+                        throw new \RuntimeException(
+                            'Databáze nevrátila keyset klíč tabulky ' . $table . '.',
+                        );
+                    }
+                    $lastId = $lastRow[$spec['pk']];
                 } else {
                     $offset += count($batch);
                 }
@@ -494,14 +556,18 @@ final class ArchiveService
         return ['rows' => $rows, 'sha256' => hash_final($hash)];
     }
 
-    /** Explicitní seznam sloupců (bez vyloučených BLOBů / credentials), jinak `*`. */
-    private function columnList(string $table): string
-    {
-        $excluded = self::EXCLUDED_COLUMNS[$table] ?? [];
-        $filterSecrets = $table === 'supplier';
-        if ($excluded === [] && !$filterSecrets) {
-            return '*';
-        }
+    /**
+     * Explicitní seznam sloupců bez položek vynechaných registrem, jinak `*`.
+     * Neznámý omit je schema drift a zastaví archiv místo tichého úniku secretu.
+     *
+     * @param list<string> $omitted
+     * @param list<string> $declaredSecrets
+     */
+    private function columnList(
+        string $table,
+        array $omitted,
+        array $declaredSecrets,
+    ): string {
         $stmt = $this->db->pdo()->prepare(
             'SELECT COLUMN_NAME FROM information_schema.COLUMNS
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
@@ -509,28 +575,46 @@ final class ArchiveService
         );
         $stmt->execute([$table]);
         $cols = [];
+        $foundOmissions = [];
+        $foundSecrets = [];
         foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $col) {
-            if (in_array($col, $excluded, true)) {
+            if (!is_string($col)) {
+                throw new \RuntimeException(
+                    'Databáze vrátila neplatný název sloupce tabulky '
+                        . $table . '.',
+                );
+            }
+            $column = $col;
+            if (in_array($column, $declaredSecrets, true)) {
+                $foundSecrets[$column] = true;
+            } elseif (TenantSecretColumnDetector::matches($column)) {
+                throw new \RuntimeException(
+                    'Účetní archiv zastavil neklasifikovaný secret sloupec '
+                        . $table . '.' . $column . '.',
+                );
+            }
+            if (in_array($column, $omitted, true)) {
+                $foundOmissions[$column] = true;
                 continue;
             }
-            if ($filterSecrets && $this->isSupplierSecret((string) $col)) {
-                continue;
-            }
-            $cols[] = '`' . $col . '`';
+            $cols[] = self::quoteIdentifier($column);
+        }
+        if (count($foundOmissions) !== count($omitted)) {
+            throw new \RuntimeException(
+                'Účetní archivní registr odkazuje na neznámý sloupec tabulky '
+                    . $table . '.',
+            );
+        }
+        if (count($foundSecrets) !== count($declaredSecrets)) {
+            throw new \RuntimeException(
+                'Účetní archivní registr odkazuje na neznámý secret sloupec '
+                    . $table . '.',
+            );
+        }
+        if ($omitted === []) {
+            return '*';
         }
         return implode(', ', $cols);
-    }
-
-    /** Je název sloupce supplier tabulky citlivý (credential) → vynechat z archivu. */
-    private function isSupplierSecret(string $column): bool
-    {
-        $lower = strtolower($column);
-        foreach (self::SUPPLIER_SECRET_PATTERNS as $needle) {
-            if (str_contains($lower, $needle)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /** Má firma zapnutý skladový modul (opt-in, SKLAD 1023)? */

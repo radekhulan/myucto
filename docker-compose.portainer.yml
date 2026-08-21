@@ -76,6 +76,7 @@ services:
       MYINVOICE_AUTH_MFA_METHODS: ${MYINVOICE_AUTH_MFA_METHODS:-}
       MYINVOICE_AUTH_PASSWORDLESS_LOGIN: ${MYINVOICE_AUTH_PASSWORDLESS_LOGIN:-}
       MYINVOICE_SESSION_LOCK_AFTER_MINUTES: ${MYINVOICE_SESSION_LOCK_AFTER_MINUTES:-}
+      MYINVOICE_TENANT_TRANSFER_ENABLED: ${MYINVOICE_TENANT_TRANSFER_ENABLED:-0}
 
       # SMTP (volitelné — lze nechat prázdné a doplnit v Nastavení). Prázdné klíče
       # se v Configu ignorují, takže nepřebijí pozdější nastavení ze setup wizardu.

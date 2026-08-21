@@ -18,6 +18,9 @@ final class MfaStepUpService
      */
     public const OPERATION_EPO_CERTIFICATE = 'epo.certificate';
 
+    /** Vydání krátkodobého zdrojového grantu pro kopii celé firmy. */
+    public const OPERATION_TENANT_TRANSFER_GRANT_CREATE = 'tenant_transfer.grant.create';
+
     /** Vygenerování nové sady záložních kódů — stará se tím nevratně zahodí. */
     public const OPERATION_RECOVERY_CODES = 'mfa.recovery_codes';
 
@@ -58,6 +61,7 @@ final class MfaStepUpService
         if ($operation !== self::OPERATION_API_TOKEN_CREATE
             && $operation !== self::OPERATION_PASSKEY_REGISTER
             && $operation !== self::OPERATION_EPO_CERTIFICATE
+            && $operation !== self::OPERATION_TENANT_TRANSFER_GRANT_CREATE
             && $operation !== self::OPERATION_RECOVERY_CODES
             && !$isPasskeyRevoke
             && !$isDomainActivation

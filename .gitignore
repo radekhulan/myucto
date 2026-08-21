@@ -24,6 +24,7 @@ manual/generated.bak/
 manual/manual.pdf
 publish.cmd
 last_deploy.log
+BUILD_REVISION
 
 # OS junk
 .DS_Store

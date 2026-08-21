@@ -132,6 +132,17 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\TenantTransfer\Registry\TenantDataRegistry::class =>
+                static fn (): \MyInvoice\Service\TenantTransfer\Registry\TenantDataRegistry =>
+                    \MyInvoice\Service\TenantTransfer\Registry\TenantDataRegistryFactory::draftV1(),
+            \MyInvoice\Service\TenantTransfer\Compatibility\CompatibilityProfileRegistry::class =>
+                static fn (): \MyInvoice\Service\TenantTransfer\Compatibility\CompatibilityProfileRegistry =>
+                    \MyInvoice\Service\TenantTransfer\Compatibility\CompatibilityProfileRegistry::v1(),
+            \MyInvoice\Service\TenantTransfer\Fingerprint\TenantSchemaMetadataSource::class =>
+                fn (ContainerInterface $c): \MyInvoice\Service\TenantTransfer\Fingerprint\TenantSchemaMetadataSource =>
+                    new \MyInvoice\Service\TenantTransfer\Fingerprint\MariaDbTenantSchemaMetadataSource(
+                        $c->get(Connection::class),
+                    ),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,

@@ -44,105 +44,6 @@ use ZipArchive;
  */
 final class ArchiveRestoreService
 {
-    /**
-     * Pořadí obnovy (rodiče před dětmi). Cykly (supplier↔currencies,
-     * manufacturers↔stock_media↔stock_items, self-ref reversed_by/parent_id) a
-     * dopředné reference (cash_documents.journal_entry_id) řeší druhý průchod
-     * ({@see $deferred}). Tabulky mimo tento seznam v archivu → chyba (neznámá tabulka).
-     */
-    private const RESTORE_ORDER = [
-        'supplier',
-        'accounting_periods',
-        'chart_of_accounts',
-        'currencies',
-        'clients',
-        'posting_rules',
-        'cost_centers',
-        'accounting_supplier_settings',
-        'accounting_document_series',
-        'invoices',
-        'invoice_items',
-        'purchase_invoices',
-        'purchase_invoice_items',
-        'assets',
-        'asset_improvements',
-        'depreciation_entries',
-        'bank_statements',
-        'bank_transactions',
-        'client_bank_accounts',
-        'journal_entries',
-        'journal_entry_lines',
-        'accounting_closing_steps',
-        'payment_matches',
-        'cash_registers',
-        'cash_documents',
-        'cash_document_vat_lines',
-        'invoice_payments',
-        'income_tax_returns',
-        'tax_losses',
-        'tax_loss_applications',
-        'tax_advance_schedules',
-        // Sklad (jen pokud v archivu je):
-        'warehouses',
-        'stock_items',
-        'manufacturers',
-        'stock_media',
-        'stock_categories',
-        'stock_category_i18n',
-        'stock_item_categories',
-        'stock_tags',
-        'stock_item_tags',
-        'stock_attributes',
-        'stock_attribute_options',
-        'stock_attribute_i18n',
-        'stock_item_attribute_values',
-        'stock_fee_types',
-        'stock_item_fees',
-        'stock_item_prices',
-        'stock_item_vendors',
-        'stock_item_i18n',
-        'stock_levels',
-        'stock_documents',
-        'stock_document_lines',
-        'stock_landed_costs',
-        'stock_takes',
-        'stock_take_lines',
-        'journal_entry_attachments',
-        'exchange_rates',
-    ];
-
-    /**
-     * Polymorfní / bez-FK id sloupce, které se přesto musí remapovat na cílovou
-     * tabulku (jinak by zůstalo staré id ukazující jinam v obnovené firmě).
-     * journal_entries.source_id je řešen zvlášť (dle source_type).
-     *
-     * @var array<string, array<string,string>>
-     */
-    private const NONFK_REFS = [
-        'stock_documents' => [
-            'stock_take_id' => 'stock_takes',
-            'reversal_document_id' => 'stock_documents',
-        ],
-        'stock_takes' => [
-            'receipt_document_id' => 'stock_documents',
-            'issue_document_id' => 'stock_documents',
-        ],
-        // Daňové soft-refs (bez DB FK) na income_tax_returns — nutno remapovat, jinak
-        // by staré id ukázalo na přiznání jiné firmy (income_tax_returns je tenant tabulka).
-        'tax_losses' => ['source_return_id' => 'income_tax_returns'],
-        'tax_loss_applications' => ['applied_return_id' => 'income_tax_returns'],
-        'tax_advance_schedules' => ['source_return_id' => 'income_tax_returns'],
-    ];
-
-    /** Tabulky bez sloupce `id` (PK = supplier_id / kompozit) — bez id-mapy. */
-    private const NO_ID_TABLES = [
-        'accounting_supplier_settings',
-        'stock_levels',
-        'stock_item_categories',
-        'stock_item_tags',
-        'exchange_rates',
-    ];
-
     /** @var array<string, array<string,string>> table → col → referenced_table (z info_schema) */
     private array $fkGraph = [];
 
@@ -170,6 +71,7 @@ final class ArchiveRestoreService
     public function __construct(
         private readonly Connection $db,
         private readonly LoggerInterface $logger,
+        private readonly AccountingArchiveCatalog $catalog,
     ) {}
 
     /**
@@ -347,12 +249,13 @@ final class ArchiveRestoreService
 
         $processedTables = [];
         try {
-            foreach (self::RESTORE_ORDER as $table) {
+            foreach ($this->catalog->forRestore() as $archiveTable) {
+                $table = $archiveTable->name;
                 if (!isset($tables[$table])) {
                     continue;
                 }
                 $counts[$table] = $this->importTable(
-                    $table,
+                    $archiveTable,
                     $tmpDir . '/' . $table . '.jsonl',
                     $newSupplierId,
                     $processedTables,
@@ -419,13 +322,19 @@ final class ArchiveRestoreService
      * @param list<string> $processed názvy tabulek s hotovou mapou
      * @param list<string> $warnings (by-ref)
      */
-    private function importTable(string $table, string $path, int $target, array $processed, array &$warnings): int
-    {
+    private function importTable(
+        AccountingArchiveTable $archiveTable,
+        string $path,
+        int $target,
+        array $processed,
+        array &$warnings,
+    ): int {
         if (!is_file($path)) {
             return 0;
         }
+        $table = $archiveTable->name;
         $processedSet = array_fill_keys($processed, true);
-        $hasId = !in_array($table, self::NO_ID_TABLES, true);
+        $hasId = $archiveTable->primaryKey === ['id'];
         $isExchange = $table === 'exchange_rates';
         $isBankStatement = $table === 'bank_statements';
         $pdo = $this->db->pdo();
@@ -501,7 +410,8 @@ final class ArchiveRestoreService
         $vals = [];
         $defers = [];
         $fks = $this->fkGraph[$table] ?? [];
-        $nonFk = self::NONFK_REFS[$table] ?? [];
+        $archiveTable = $this->catalog->get($table);
+        $nonFk = $archiveTable === null ? [] : $archiveTable->softReferences;
 
         foreach ($row as $col => $val) {
             if ($col === 'id') {
@@ -568,12 +478,13 @@ final class ArchiveRestoreService
         // ponechat staré id?" NESMÍ být jen isTenant (má sloupec supplier_id) — tabulky
         // jako bank_transactions/bank_statements jsou per-firmu jen TRANZITIVNĚ (přes
         // JOIN na payment_matches/faktury; export je tak i filtruje), fyzicky supplier_id
-        // nemají, ale JSOU v RESTORE_ORDER (importují se, mají mapu old→new). Kdyby se
+        // nemají, ale JSOU v archivním profilu (importují se, mají mapu old→new). Kdyby se
         // nechalo staré id, FK by tiše mířilo na řádek PŮVODNÍ firmy v běžící instanci
         // (cross-tenant propojení; u ON DELETE CASCADE i cross-tenant destrukce dat).
         // Skutečně globální tabulka (users, countries, vat_rates, units…) je jen ta, která
-        // NENÍ tenant (dle supplier_id) A ZÁROVEŇ se vůbec neimportuje (není v RESTORE_ORDER).
-        $isGlobal = !($this->isTenant[$refTable] ?? false) && !in_array($refTable, self::RESTORE_ORDER, true);
+        // NENÍ tenant (dle supplier_id) A ZÁROVEŇ se vůbec neimportuje.
+        $isGlobal = !($this->isTenant[$refTable] ?? false)
+            && !$this->catalog->has($refTable);
         if ($isGlobal) {
             // id platí instančně (u users tím zůstává zachovaná auditní stopa
             // created_by/posted_by); cross-instance obnova vyžaduje tytéž globální
@@ -592,7 +503,7 @@ final class ArchiveRestoreService
             }
             throw new RestoreException('dangling_fk', "{$table}.{$col}: povinný odkaz #{$old} do {$refTable} chybí v archivu.");
         }
-        if (in_array($refTable, self::RESTORE_ORDER, true)) {
+        if ($this->catalog->has($refTable)) {
             // dopředná/cyklická reference → odlož na druhý průchod
             $defers[] = ['col' => $col, 'ref' => $refTable, 'old' => $old];
             return $nullable ? null : $this->anyId($refTable);
@@ -632,7 +543,7 @@ final class ArchiveRestoreService
         }
         [$cols, $vals, $rowDefers] = $this->buildInsert('bank_statements', $row, $target, $processedSet, $warnings);
         if ($rowDefers !== []) {
-            // bank_statements nemá tenant/RESTORE_ORDER FK kromě globálního imported_by
+            // bank_statements nemá tenantovou archivní FK kromě globálního imported_by
             // (users) — odložený FK by znamenal nečekanou schema změnu, zastav bezpečně.
             throw new RestoreException('unexpected_defer', 'bank_statements: neočekávaný odložený FK sloupec.');
         }
@@ -845,9 +756,8 @@ final class ArchiveRestoreService
     /** @param list<string> $tables */
     private function assertKnownTables(array $tables): void
     {
-        $known = array_fill_keys(self::RESTORE_ORDER, true);
         foreach ($tables as $t) {
-            if (!isset($known[$t])) {
+            if (!is_string($t) || !$this->catalog->has($t)) {
                 throw new RestoreException('unknown_table', "Archiv obsahuje neznámou tabulku '{$t}' — obnova zastavena (bezpečnost).");
             }
         }

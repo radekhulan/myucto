@@ -31,6 +31,7 @@ export const PERMISSION_KEYS = [
   'logbook', 'logbook.write', 'logbook.import', 'logbook.delete',
   'settings.company', 'settings.company.write', 'settings.domains', 'settings.bank_accounts',
   'settings.branding', 'settings.ai_provider', 'settings.signing',
+  'tenant.transfer.export',
   'utilities', 'utilities.export', 'utilities.import', 'utilities.archives',
   'profile', 'profile.tokens',
 ] as const

@@ -65,6 +65,8 @@ use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
+use MyInvoice\Action\TenantTransfer\TenantTransferCapabilitiesAction;
+use MyInvoice\Action\TenantTransfer\TenantTransferGrantAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
 use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
@@ -304,6 +306,7 @@ use MyInvoice\Action\System\HealthAction;
 use MyInvoice\Action\System\OpenApiAction;
 use MyInvoice\Action\System\VersionAction;
 use MyInvoice\Action\Admin\UpdateAction;
+use MyInvoice\Middleware\TenantTransferGrantMiddleware;
 use Slim\App;
 
 final class Routes
@@ -312,6 +315,9 @@ final class Routes
     {
         $app->get('/api/health',  HealthAction::class);
         $app->get('/api/version', VersionAction::class);
+        $app->group('/api/tenant-transfer/v1', function ($group): void {
+            $group->get('/capabilities', TenantTransferCapabilitiesAction::class);
+        })->add(TenantTransferGrantMiddleware::class);
 
         // Public REST API v1 — dokumentace
         $app->get('/api/openapi.yaml', [OpenApiAction::class, 'spec']);
@@ -1648,6 +1654,9 @@ final class Routes
 
         // Admin (M6)
         $app->get    ('/api/admin/activity-log',    ListActivityLogAction::class);
+        $app->get    ('/api/admin/tenant-transfer-grants', [TenantTransferGrantAction::class, 'list']);
+        $app->post   ('/api/admin/tenant-transfer-grants', [TenantTransferGrantAction::class, 'create']);
+        $app->delete ('/api/admin/tenant-transfer-grants/{id:[0-9]+}', [TenantTransferGrantAction::class, 'revoke']);
         $app->get    ('/api/admin/sent-emails',     ListSentEmailsAction::class);
         $app->get    ('/api/admin/smtp-log-analysis', \MyInvoice\Action\Admin\SmtpLogAnalysisAction::class);
         $app->get    ('/api/admin/smtp-log-analysis/status', [\MyInvoice\Action\Admin\InvoiceSmtpLogAction::class, 'status']);

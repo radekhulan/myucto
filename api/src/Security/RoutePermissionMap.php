@@ -14,6 +14,7 @@ final class RoutePermissionMap
     /** @var list<string> */
     private const PUBLIC_PATHS = [
         '/api/health', '/api/version', '/api/openapi.yaml', '/api/docs', '/api/reference', '/api/scalar',
+        '/api/tenant-transfer/v1/capabilities',
         '/api/auth/setup-status', '/api/auth/setup-preflight', '/api/auth/setup', '/api/auth/setup-ares-lookup',
         '/api/auth/setup-crpdph-lookup', '/api/auth/login',
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
@@ -528,6 +529,11 @@ final class RoutePermissionMap
         // (AiExtractPdfAction = přijaté, AiExtractPdfIssuedAction = vystavené).
         ['POST', '#^/api/admin/imports/ai-extract-pdf$#', 'purchase_invoices.scan', AccessLevel::WRITE],
         ['POST', '#^/api/admin/imports/ai-extract-pdf-issued$#', 'invoices.create', AccessLevel::WRITE],
+        // Zdrojový grant je vždy svázaný s aktuální firmou. Zápis navíc vyžaduje
+        // browser session, heslový re-auth a podle politiky instance MFA proof.
+        ['GET', '#^/api/admin/tenant-transfer-grants$#', 'tenant.transfer.export', AccessLevel::READ],
+        ['POST', '#^/api/admin/tenant-transfer-grants$#', 'tenant.transfer.export', AccessLevel::WRITE],
+        ['DELETE', '#^/api/admin/tenant-transfer-grants/[0-9]+$#', 'tenant.transfer.export', AccessLevel::WRITE],
         // Klíče k AI poskytovatelům sem vědomě NEPATŘÍ — zůstávají superadmin-only
         // (F7, viz F7NestedRbacTest). Guard `settings.ai_provider` v akcích je druhá
         // vrstva pro volání mimo middleware, ne pozvánka pustit sem účetní.

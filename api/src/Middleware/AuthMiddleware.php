@@ -39,6 +39,7 @@ final class AuthMiddleware implements MiddlewareInterface
     private const PUBLIC_PATHS = [
         '/api/health',
         '/api/version',
+        '/api/tenant-transfer/v1/capabilities',
         '/api/openapi.yaml',
         '/api/docs',
         '/api/reference',
@@ -95,6 +96,13 @@ final class AuthMiddleware implements MiddlewareInterface
     {
         // Resolve locale per-request: user.locale > Accept-Language > default
         Locale::set(self::detectLocale($request->getHeaderLine('Accept-Language')));
+
+        $path = RequestPath::normalize($request->getUri()->getPath());
+        if ($path === '/api/tenant-transfer/v1/capabilities') {
+            // Inter-instance API má vlastní grant middleware. Běžný bearer ani
+            // browser cookie se zde nesmí pokusit vytvořit aplikační identitu.
+            return $handler->handle($request);
+        }
 
         // 1) Bearer (API token) — pokud je hlavička, použij ji a session ignoruj.
         $authHeader = $request->getHeaderLine('Authorization');
@@ -194,7 +202,6 @@ final class AuthMiddleware implements MiddlewareInterface
         $method     = strtoupper($request->getMethod());
         // Normalizovaná cesta (viz RequestPath) — SESSION_IGNORED_PATHS i detekce
         // logoutu musí sedět na to, co router doručí.
-        $path       = RequestPath::normalize($request->getUri()->getPath());
         $cookieName = (string) $this->config->get('session.cookie_name', '__Host-myinvoice_session');
         $cookies    = $request->getCookieParams();
         $token      = self::isAllowed($method, $path, self::SESSION_IGNORED_PATHS)

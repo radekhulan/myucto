@@ -59,6 +59,32 @@ final class ErrorCatalogTest extends TestCase
         }
     }
 
+    public function testTenantTransferErrorsHaveEnglishTranslations(): void
+    {
+        $messages = [
+            'Nejprve vyber firmu, kterou chceš přenést.'
+                => 'First select the company you want to transfer.',
+            'Opětovné ověření se nezdařilo.'
+                => 'Reauthentication failed.',
+            'Opětovné ověření se nezdařilo. Zkus to později.'
+                => 'Reauthentication failed. Try again later.',
+            'Pro přenos firmy je vyžadováno nové MFA ověření.'
+                => 'A fresh MFA verification is required to transfer the company.',
+            'Pro přenos této firmy nemáš oprávnění.'
+                => 'You do not have permission to transfer this company.',
+            'Správa transfer grantů vyžaduje přihlášenou browser session.'
+                => 'Managing transfer grants requires an authenticated browser session.',
+            'Přenos firem není na této instanci zapnutý.'
+                => 'Company transfer is not enabled on this instance.',
+            'Chybí ID transfer grantu.'
+                => 'Missing transfer grant ID.',
+        ];
+
+        foreach ($messages as $cs => $en) {
+            self::assertSame($en, ErrorCatalog::lookup($cs, 'en'), $cs);
+        }
+    }
+
     public function testEnLocaleReturnsInputForUnknownMessage(): void
     {
         self::assertSame(

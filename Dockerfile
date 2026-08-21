@@ -42,6 +42,7 @@ FROM php:8.5-apache AS runtime
 # SVG loga dodavatele, když Imagick nemá SVG delegate. Pro menší image lze vypnout
 # `--build-arg INSTALL_RSVG=0`. Default 1 = beze změny chování.
 ARG INSTALL_RSVG=1
+ARG BUILD_REVISION=unavailable
 
 # Use mlocati/docker-php-extension-installer — the de-facto installer for PHP-Docker
 # extensions. Handles apt deps, parallel builds, PECL packages and the
@@ -111,6 +112,8 @@ RUN sed -ri \
 # Copy application code
 WORKDIR /var/www/html
 COPY --chown=www-data:www-data . .
+RUN printf '%s\n' "$BUILD_REVISION" > BUILD_REVISION \
+ && chown www-data:www-data BUILD_REVISION
 RUN chmod +x /var/www/html/docker-entrypoint.sh
 COPY --from=web-build --chown=www-data:www-data /app/dist ./web/dist
 COPY --from=php-deps  --chown=www-data:www-data /app/vendor ./api/vendor

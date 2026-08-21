@@ -88,6 +88,30 @@ final class PermissionCatalogTest extends TestCase
         self::assertTrue($checker->allows($superadmin, 'invoices.delete', AccessLevel::WRITE));
     }
 
+    public function testTenantTransferIsStaffOnlyAndNotGrantedToAccountantByDefault(): void
+    {
+        $catalog = new PermissionCatalog();
+        $checker = new PermissionChecker($catalog);
+        $accountant = new EffectiveRole(
+            2,
+            'Účetní',
+            'staff',
+            true,
+            $catalog->legacyPreset('accountant'),
+        );
+        self::assertSame(['staff'], $catalog->all()['tenant.transfer.export']['role_types']);
+        self::assertFalse($checker->allows($accountant, 'tenant.transfer.export'));
+
+        $transferAdmin = new EffectiveRole(9, 'Správce přenosů', 'staff', true, [
+            'tenant.transfer.export' => AccessLevel::WRITE->value,
+        ]);
+        self::assertTrue($checker->allows(
+            $transferAdmin,
+            'tenant.transfer.export',
+            AccessLevel::WRITE,
+        ));
+    }
+
     /**
      * Výmaz osobních údajů je nevratný, proto ho výchozí účetní role NEMÁ —
      * stejně jako schválení běhu. Retenční lhůty naopak ano: prodloužit lhůtu

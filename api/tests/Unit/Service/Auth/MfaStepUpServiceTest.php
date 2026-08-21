@@ -251,7 +251,11 @@ final class MfaStepUpServiceTest extends TestCase
      */
     public function testRecoveryCodeCannotAuthorizeHighValueOperations(): void
     {
-        foreach ([MfaStepUpService::OPERATION_API_TOKEN_CREATE, MfaStepUpService::OPERATION_EPO_CERTIFICATE] as $operation) {
+        foreach ([
+            MfaStepUpService::OPERATION_API_TOKEN_CREATE,
+            MfaStepUpService::OPERATION_EPO_CERTIFICATE,
+            MfaStepUpService::OPERATION_TENANT_TRANSFER_GRANT_CREATE,
+        ] as $operation) {
             $proofs = $this->createMock(MfaStepUpProofStore::class);
             $proofs->expects(self::never())->method('issue');
             $service = new MfaStepUpService(
