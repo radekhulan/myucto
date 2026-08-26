@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 export interface PayrollPersonPickerOption {
   value: number
@@ -22,9 +22,6 @@ const emit = defineEmits<{
 }>()
 
 const useSearch = computed(() => props.options.length > TAB_LIMIT)
-const selectedOption = computed(() =>
-  props.options.find(option => option.value === props.modelValue) ?? null,
-)
 const { t } = useI18n()
 </script>
 
@@ -34,15 +31,13 @@ const { t } = useI18n()
     class="border-b border-neutral-200 bg-surface px-4 py-3 sm:px-5"
     data-test="payroll-person-picker-search"
   >
-    <SearchableSelect
+    <PayrollPersonSearchSelect
       :model-value="modelValue"
-      :options="options"
-      :selected-option="selectedOption"
+      :candidates="options"
+      :limit="25"
+      :label="selectorLabel"
       :clearable="false"
       :placeholder="t('payroll.runs.person_picker.placeholder')"
-      :no-results-label="t('payroll.runs.person_picker.no_results')"
-      :aria-label="selectorLabel"
-      accent="payroll"
       @update:model-value="emit('update:modelValue', $event)"
     />
     <p class="mt-1 text-xs text-neutral-500">

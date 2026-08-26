@@ -136,6 +136,17 @@ function fixture(): PayrollRunResultPerson[] {
   ]
 }
 
+function scaledFixture(count: number): PayrollRunResultPerson[] {
+  const base = fixture()[0]!
+  return Array.from({ length: count }, (_, index) => {
+    const employeeId = index + 1
+    const statutory = structuredClone(base.statutory)!
+    statutory.person_reference = `employee:${employeeId}`
+    statutory.income_tax!.employee_reference = `employee:${employeeId}`
+    return { employee_id: employeeId, statutory }
+  })
+}
+
 describe('PayrollIncomeTaxBreakdown', () => {
   it('shows a complete advance and withholding tax calculation with responsive brackets', () => {
     const wrapper = mount(PayrollIncomeTaxBreakdown, {
@@ -174,6 +185,25 @@ describe('PayrollIncomeTaxBreakdown', () => {
     expect(reasons.match(/tax-residence-unverified/g)).toHaveLength(1)
     expect(wrapper.text()).toContain('payroll.runs.tax.relationship_kind.statutory-body')
     expect(wrapper.text()).toContain('payroll.runs.tax.not_calculated')
+  })
+
+  it('u 500 daňových výsledků nevyrenderuje stovky záložek ani výsledků hledání', async () => {
+    const people = scaledFixture(500)
+    const personNames = Object.fromEntries(
+      people.map(person => [person.employee_id, `Syntetická osoba ${person.employee_id}`]),
+    )
+    const wrapper = mount(PayrollIncomeTaxBreakdown, {
+      props: { people, personNames },
+    })
+
+    expect(wrapper.find('[data-test="payroll-person-picker-tabs"]').exists()).toBe(false)
+    const input = wrapper.get('[data-test="payroll-person-picker-search"] input[role="combobox"]')
+    await input.trigger('focus')
+
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(25)
+    expect(wrapper.find('[data-test="searchable-select-truncated"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="income-tax-breakdown"]').text())
+      .toContain('Syntetická osoba 1')
   })
 
   it('renders nothing when the run snapshot has no income tax result', () => {

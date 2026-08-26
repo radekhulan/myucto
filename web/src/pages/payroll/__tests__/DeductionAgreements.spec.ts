@@ -154,6 +154,30 @@ describe('DeductionAgreements', () => {
     wrapper.unmount()
   })
 
+  it('u 500 zaměstnanců načte do filtru jen omezenou stránku výsledků', async () => {
+    m.peoplePage.mockResolvedValue({
+      items: Array.from({ length: 25 }, (_, index) => ({
+        id: index + 1,
+        full_name: `Syntetická osoba ${index + 1}`,
+      })),
+      total: 500,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(DeductionAgreements)
+    await flushPromises()
+
+    const input = wrapper.get('[data-test="deduction-employee-filter"] input[role="combobox"]')
+    await input.trigger('focus')
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenCalledWith({ limit: 25, offset: 0, q: '' })
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(25)
+    expect(wrapper.find('[data-test="searchable-select-truncated"]').exists()).toBe(true)
+    expect(wrapper.find('select[data-test="deduction-employee-filter"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('pages through the list and re-asks the server with the new offset', async () => {
     m.agreementsPage.mockResolvedValue(page(
       Array.from({ length: 20 }, (_, index) => summary({ id: index + 1 })),
