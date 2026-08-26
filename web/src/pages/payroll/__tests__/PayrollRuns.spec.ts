@@ -69,6 +69,7 @@ function run(overrides: Partial<PayrollRun> = {}): PayrollRun {
     row_version: 2,
     revision_id: null,
     revision_no: null,
+    revision_kind: null,
     revision_status: null,
     payment_materialization_supported: false,
     can_delete: true,

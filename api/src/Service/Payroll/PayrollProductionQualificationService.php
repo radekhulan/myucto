@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -19,13 +21,10 @@ final class PayrollProductionQualificationService
         private readonly PayrollModuleStateRepository $state,
         private readonly SupportMatrix $supportMatrix,
         private readonly ActivityLogger $logger,
+        private readonly DocumentRepository $documents,
     ) {}
 
     /**
-     * Jednotlivé evidence_reference a evidence_sha256 jsou deklarované odkazy
-     * na externí důkaz. Služba ověřuje jejich formát a neměnnost manifestu,
-     * nikoli bajty externího souboru; byte-level vazba vyžaduje DMS integraci.
-     *
      * @param array<array-key,mixed> $evidence
      * @return array{state:array<string,mixed>,qualification:array<string,mixed>}
      */
@@ -75,13 +74,6 @@ final class PayrollProductionQualificationService
             );
         }
 
-        $normalizedEvidence = $this->normalizeEvidence($supplierId, $evidence);
-        $matrix = $this->supportMatrix->all();
-        $matrixJson = CanonicalJson::encode($matrix);
-        $matrixHash = hash('sha256', $matrixJson);
-        $evidenceJson = CanonicalJson::encode($normalizedEvidence);
-        $evidenceHash = hash('sha256', $evidenceJson);
-
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -89,6 +81,12 @@ final class PayrollProductionQualificationService
         }
 
         try {
+            $normalizedEvidence = $this->normalizeEvidence($supplierId, $evidence);
+            $matrixJson = CanonicalJson::encode($this->supportMatrix->all());
+            $matrixHash = hash('sha256', $matrixJson);
+            $evidenceJson = CanonicalJson::encode($normalizedEvidence);
+            $evidenceHash = hash('sha256', $evidenceJson);
+
             $state = $this->state->promoteToActive(
                 $supplierId,
                 $actorUserId,
@@ -118,6 +116,23 @@ final class PayrollProductionQualificationService
                 $actorUserId,
             ]);
             $qualificationId = (int) $pdo->lastInsertId();
+
+            $documentInsert = $pdo->prepare(
+                'INSERT INTO payroll_production_qualification_documents
+                    (supplier_id, qualification_id, evidence_key, sequence_no,
+                     document_id, document_sha256)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($this->evidenceDocuments($normalizedEvidence) as $document) {
+                $documentInsert->execute([
+                    $supplierId,
+                    $qualificationId,
+                    $document['evidence_key'],
+                    $document['sequence_no'],
+                    $document['document_id'],
+                    $document['document_sha256'],
+                ]);
+            }
 
             $this->logger->log(
                 'payroll.activation.production_qualified',
@@ -196,7 +211,14 @@ final class PayrollProductionQualificationService
 
     /**
      * @param array<array-key,mixed> $evidence
-     * @return array<string,mixed>
+     * @return array{
+     *   parallel_runs:list<array{sequence:int,document_id:int,document_sha256:string}>,
+     *   correction_scenario:array{document_id:int,document_sha256:string},
+     *   recovery_drill:array{document_id:int,document_sha256:string},
+     *   expert_approval:array{document_id:int,document_sha256:string},
+     *   rollback_plan:array{document_id:int,document_sha256:string},
+     *   post_go_live_monitoring:array{document_id:int,document_sha256:string}
+     * }
      */
     private function normalizeEvidence(int $supplierId, array $evidence): array
     {
@@ -227,11 +249,9 @@ final class PayrollProductionQualificationService
                 'period_start' => (string) $run['period_start'],
                 'revision_id' => (int) $run['revision_id'],
                 'approved_at' => (string) $run['approved_at'],
-                'evidence_reference' => $this->reference(
-                    $parallelRun['evidence_reference'] ?? null,
-                ),
-                'declared_evidence_sha256' => $this->sha256(
-                    $parallelRun['evidence_sha256'] ?? null,
+                ...$this->evidenceDocument(
+                    $supplierId,
+                    $parallelRun['document_id'] ?? null,
                 ),
             ];
         }
@@ -292,27 +312,23 @@ final class PayrollProductionQualificationService
         }
 
         return [
-            'schema_version' => 'payroll-production-qualification.v2',
+            'schema_version' => 'payroll-production-qualification.v3',
             'parallel_runs' => $normalizedRuns,
             'correction_scenario' => [
                 'payroll_run_id' => $correctionRunId,
                 'period_start' => (string) $correctionRun['period_start'],
                 'revision_id' => (int) $correctionRun['revision_id'],
                 'approved_at' => (string) $correctionRun['approved_at'],
-                'evidence_reference' => $this->reference(
-                    $correction['evidence_reference'] ?? null,
-                ),
-                'declared_evidence_sha256' => $this->sha256(
-                    $correction['evidence_sha256'] ?? null,
+                ...$this->evidenceDocument(
+                    $supplierId,
+                    $correction['document_id'] ?? null,
                 ),
             ],
             'recovery_drill' => [
                 'completed_on' => $this->date($recovery['completed_on'] ?? null),
-                'evidence_reference' => $this->reference(
-                    $recovery['evidence_reference'] ?? null,
-                ),
-                'declared_evidence_sha256' => $this->sha256(
-                    $recovery['evidence_sha256'] ?? null,
+                ...$this->evidenceDocument(
+                    $supplierId,
+                    $recovery['document_id'] ?? null,
                 ),
             ],
             'expert_approval' => [
@@ -325,32 +341,99 @@ final class PayrollProductionQualificationService
                     'Role odborného schvalovatele',
                 ),
                 'approved_on' => $this->date($expertApproval['approved_on'] ?? null),
-                'evidence_reference' => $this->reference(
-                    $expertApproval['evidence_reference'] ?? null,
-                ),
-                'declared_evidence_sha256' => $this->sha256(
-                    $expertApproval['evidence_sha256'] ?? null,
+                ...$this->evidenceDocument(
+                    $supplierId,
+                    $expertApproval['document_id'] ?? null,
                 ),
             ],
             'rollback_plan' => [
                 'verified_on' => $this->date($rollbackPlan['verified_on'] ?? null),
-                'evidence_reference' => $this->reference(
-                    $rollbackPlan['evidence_reference'] ?? null,
-                ),
-                'declared_evidence_sha256' => $this->sha256(
-                    $rollbackPlan['evidence_sha256'] ?? null,
+                ...$this->evidenceDocument(
+                    $supplierId,
+                    $rollbackPlan['document_id'] ?? null,
                 ),
             ],
             'post_go_live_monitoring' => [
                 'prepared_on' => $this->date($monitoring['prepared_on'] ?? null),
-                'evidence_reference' => $this->reference(
-                    $monitoring['evidence_reference'] ?? null,
-                ),
-                'declared_evidence_sha256' => $this->sha256(
-                    $monitoring['evidence_sha256'] ?? null,
+                ...$this->evidenceDocument(
+                    $supplierId,
+                    $monitoring['document_id'] ?? null,
                 ),
             ],
         ];
+    }
+
+    /** @return array{document_id:int,document_sha256:string} */
+    private function evidenceDocument(int $supplierId, mixed $value): array
+    {
+        $documentId = filter_var($value, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        if ($documentId === false) {
+            throw new PayrollProductionQualificationException(
+                'evidence_document_required',
+                'Každý kvalifikační důkaz musí odkazovat na firemní dokument v DMS.',
+            );
+        }
+
+        $document = $this->documents->findActiveReferenceForUpdate(
+            (int) $documentId,
+            $supplierId,
+            DocumentViewerContext::companyOnly(),
+        );
+        if ($document === null) {
+            throw new PayrollProductionQualificationException(
+                'company_evidence_document_required',
+                'Kvalifikační důkaz musí být aktivní firemní dokument této firmy.',
+            );
+        }
+        $sha256 = strtolower($document['sha256']);
+        if (!preg_match('/^[0-9a-f]{64}$/', $sha256)) {
+            throw new \LogicException('Firemní dokument nemá platný SHA-256 otisk.');
+        }
+
+        return ['document_id' => $document['id'], 'document_sha256' => $sha256];
+    }
+
+    /**
+     * @param array{
+     *   parallel_runs:list<array{sequence:int,document_id:int,document_sha256:string}>,
+     *   correction_scenario:array{document_id:int,document_sha256:string},
+     *   recovery_drill:array{document_id:int,document_sha256:string},
+     *   expert_approval:array{document_id:int,document_sha256:string},
+     *   rollback_plan:array{document_id:int,document_sha256:string},
+     *   post_go_live_monitoring:array{document_id:int,document_sha256:string}
+     * } $evidence
+     * @return list<array{evidence_key:string,sequence_no:int,document_id:int,document_sha256:string}>
+     */
+    private function evidenceDocuments(array $evidence): array
+    {
+        $documents = [];
+        foreach ($evidence['parallel_runs'] as $run) {
+            $documents[] = [
+                'evidence_key' => 'parallel_run',
+                'sequence_no' => $run['sequence'],
+                'document_id' => $run['document_id'],
+                'document_sha256' => $run['document_sha256'],
+            ];
+        }
+        foreach ([
+            'correction_scenario',
+            'recovery_drill',
+            'expert_approval',
+            'rollback_plan',
+            'post_go_live_monitoring',
+        ] as $key) {
+            $item = $evidence[$key];
+            $documents[] = [
+                'evidence_key' => $key,
+                'sequence_no' => 1,
+                'document_id' => $item['document_id'],
+                'document_sha256' => $item['document_sha256'],
+            ];
+        }
+
+        return $documents;
     }
 
     /** @return array<string,int|string> */
@@ -417,19 +500,6 @@ final class PayrollProductionQualificationService
         return (int) $int;
     }
 
-    private function reference(mixed $value): string
-    {
-        $reference = is_string($value) ? trim($value) : '';
-        if ($reference === '' || mb_strlen($reference) > 500) {
-            throw new PayrollProductionQualificationException(
-                'invalid_evidence_reference',
-                'Reference kvalifikačního důkazu musí mít 1 až 500 znaků.',
-            );
-        }
-
-        return $reference;
-    }
-
     private function label(mixed $value, string $fieldLabel): string
     {
         $label = is_string($value) ? trim($value) : '';
@@ -441,19 +511,6 @@ final class PayrollProductionQualificationService
         }
 
         return $label;
-    }
-
-    private function sha256(mixed $value): string
-    {
-        $hash = is_string($value) ? strtolower(trim($value)) : '';
-        if (!preg_match('/^[0-9a-f]{64}$/', $hash)) {
-            throw new PayrollProductionQualificationException(
-                'invalid_evidence_hash',
-                'Otisk kvalifikačního důkazu musí být SHA-256 v hex formátu.',
-            );
-        }
-
-        return $hash;
     }
 
     private function date(mixed $value): string

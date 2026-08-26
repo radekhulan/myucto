@@ -21,6 +21,13 @@ Je nutné oprávnění `payroll.settings`. Připravte ověřené identifikační
 
 Rozpracované nastavení lze uložit, ale navazující krok může být blokován. Validační chyba označuje neúplný nebo neplatný údaj. Úspěšné uložení nepotvrzuje, že identifikátor či účet uznala externí instituce.
 
+Po dokončení základního nastavení zůstává firma ve stavu **Testovací provoz**.
+Výpočty a testovací podání fungují, ale ostrá podání a mzdové platební příkazy
+jsou blokované. K jejich povolení otevřete přehled **Mzdy**, vyberte dva
+schválené měsíce a schválenou opravu a připojte souhrnný firemní kvalifikační
+protokol z Dokumentů. Otisk dokumentu ověří server; ručně se nezadává.
+Podrobný postup je v [úvodní kapitole mezd](58_Uplne_mzdy.md#7-projdete-cely-tok-v-testovacim-prostredi-a-povolte-ostry-provoz).
+
 ## Kontroly a bezpečnost
 
 Ověřte každou hodnotu proti oficiálnímu zdroji a správné firmě. Privátní klíče, hesla a SMS kódy nepatří do poznámek ani příloh. Testovací certifikát ČSSZ používejte jen v TEST profilu a produkční konfiguraci ověřte samostatně.

@@ -79,6 +79,7 @@ final class PayrollRunRepository
         $sql = 'SELECT run.*,
                        revision.id AS revision_id,
                        revision.revision_no,
+                       revision.revision_kind,
                        revision.status AS revision_status,
                        revision.calculated_by,
                        revision.reviewed_by,
@@ -126,6 +127,7 @@ final class PayrollRunRepository
             $run['revision_no'] = $row['revision_no'] === null
                 ? null
                 : (int) $row['revision_no'];
+            $run['revision_kind'] = $row['revision_kind'];
             $run['revision_status'] = $row['revision_status'];
             $run['payment_materialization_supported'] =
                 (bool) (int) $row['payment_materialization_supported'];
@@ -160,6 +162,7 @@ final class PayrollRunRepository
             'SELECT run.*,
                     revision.id AS revision_id,
                     revision.revision_no,
+                    revision.revision_kind,
                     revision.status AS revision_status,
                     revision.result_snapshot_json,
                     revision.input_snapshot_json,
@@ -182,6 +185,7 @@ final class PayrollRunRepository
         $run = self::castRun($row);
         $run['revision_id'] = $row['revision_id'] === null ? null : (int) $row['revision_id'];
         $run['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
+        $run['revision_kind'] = $row['revision_kind'];
         $run['revision_status'] = $row['revision_status'];
         $inputSnapshot = $row['input_snapshot_json'] === null
             ? null

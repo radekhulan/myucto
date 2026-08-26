@@ -117,6 +117,9 @@ final class PayrollActivationAction
         if (!$this->requirePermission($request, $response, 'payroll.settings', AccessLevel::WRITE, $error)) {
             return $error;
         }
+        if (!$this->requirePermission($request, $response, 'documents', AccessLevel::READ, $error)) {
+            return $error;
+        }
         if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
             return $error;
         }

@@ -58,6 +58,10 @@ function mountDashboard() {
         ActionBar: actionBarStub,
         PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
         PayrollGuide: { template: '<div data-test="guide-stub" />' },
+        PayrollProductionQualificationPanel: {
+          props: ['state', 'matrixVersion'],
+          template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" />',
+        },
       },
     },
   })
@@ -200,6 +204,7 @@ describe('PayrollDashboard monthly workspace', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="production-qualification-notice"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="qualification-panel-stub"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
 })

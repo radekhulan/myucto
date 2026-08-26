@@ -114,6 +114,24 @@ final class DocumentTrashDeletionGuardTest extends TestCase
         self::assertStringNotContainsStringIgnoringCase('payroll_document_dms_links', $kept['reason']);
     }
 
+    public function testProductionQualificationEvidenceStaysInTrash(): void
+    {
+        $blocked = $this->trashedDocument('qualification');
+        $free = $this->trashedDocument('qualification-free');
+        $this->linkProductionQualificationDocument($blocked);
+
+        $body = $this->json($this->emptyTrash());
+
+        self::assertSame(1, $body['deleted']);
+        self::assertSame(1, $body['kept']);
+        self::assertSame(0, $this->documentCount($free));
+        self::assertSame(1, $this->documentCount($blocked));
+        self::assertStringContainsString(
+            'připravenost firmy k ostrému provozu mezd',
+            $body['kept_documents'][0]['reason'],
+        );
+    }
+
     /**
      * Tichá kaskáda: `tax_submission_artifacts.document_id` je ON DELETE CASCADE,
      * takže vysypání koše mlčky mazalo důkaz o podání na finanční správu. Registr
@@ -271,6 +289,30 @@ final class DocumentTrashDeletionGuardTest extends TestCase
                 (supplier_id, payroll_document_id, dms_document_id, linked_by)
              VALUES (?, ?, ?, ?)'
         )->execute([$this->supplierId, $payrollDocumentId, $documentId, $this->userId]);
+    }
+
+    private function linkProductionQualificationDocument(int $documentId): void
+    {
+        $hash = hash('sha256', "qualification-document-{$documentId}");
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_production_qualifications
+                (supplier_id, module_state_row_version, support_matrix_version,
+                 support_matrix_sha256, evidence_json, evidence_sha256, qualified_by)
+             VALUES (?, 1, "synthetic", ?, "{}", ?, ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            hash('sha256', 'matrix'),
+            hash('sha256', 'evidence'),
+            $this->userId,
+        ]);
+        $qualificationId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_production_qualification_documents
+                (supplier_id, qualification_id, evidence_key, sequence_no,
+                 document_id, document_sha256)
+             VALUES (?, ?, "expert_approval", 1, ?, ?)'
+        )->execute([$this->supplierId, $qualificationId, $documentId, $hash]);
     }
 
     /** Artefakt podání na FS — vazba, kterou databáze kaskáduje, a proto mizela mlčky. */

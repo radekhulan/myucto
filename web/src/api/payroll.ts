@@ -3219,6 +3219,7 @@ export interface PayrollRun {
   row_version: number
   revision_id: number | null
   revision_no: number | null
+  revision_kind: 'regular' | 'correction' | null
   revision_status: string | null
   payment_materialization_supported: boolean
   can_delete: boolean
@@ -3232,6 +3233,31 @@ export interface PayrollRunsPage {
   total: number
   limit: number
   offset: number
+}
+
+export interface PayrollProductionQualification {
+  id: number
+  supplier_id: number
+  module_state_row_version: number
+  support_matrix_version: string
+  support_matrix_sha256: string
+  evidence_sha256: string
+  qualified_by: number | null
+  qualified_at: string
+}
+
+export interface PayrollProductionQualificationEvidence {
+  parallel_runs: Array<{ payroll_run_id: number; document_id: number }>
+  correction_scenario: { payroll_run_id: number; document_id: number }
+  recovery_drill: { completed_on: string; document_id: number }
+  expert_approval: {
+    approver_name: string
+    approver_role: string
+    approved_on: string
+    document_id: number
+  }
+  rollback_plan: { verified_on: string; document_id: number }
+  post_go_live_monitoring: { prepared_on: string; document_id: number }
 }
 
 export interface PayrollRunCommandResponse {
@@ -3688,9 +3714,18 @@ export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
   activation: () =>
-    api.get<{ state: PayrollModuleState }>('/payroll/settings/activation').then(response => response.data.state),
+    api.get<{ state: PayrollModuleState; production_qualification: PayrollProductionQualification | null }>('/payroll/settings/activation')
+      .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
+  qualifyProduction: (payload: {
+    row_version: number
+    support_matrix_version: string
+    evidence: PayrollProductionQualificationEvidence
+  }) => api.post<{
+    state: PayrollModuleState
+    qualification: PayrollProductionQualification
+  }>('/payroll/settings/activation/production-qualification', payload).then(response => response.data),
   /**
    * Stránka seznamu osob. Filtr i hledání jdou na server — kdyby zužoval
    * prohlížeč, hledal by jen v načtené stránce a člověka ze třetí stránky by

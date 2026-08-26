@@ -504,6 +504,7 @@ final class PayrollFoundationTest extends TestCase
         )->execute([$this->supplierId]);
         $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
         $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $evidenceDocumentId = $this->evidenceDocument('qualification');
         $request = $this->request('POST', 'admin')->withParsedBody([
             'row_version' => 1,
             'support_matrix_version' => SupportMatrix::VERSION,
@@ -511,41 +512,34 @@ final class PayrollFoundationTest extends TestCase
                 'parallel_runs' => [
                     [
                         'payroll_run_id' => $firstRunId,
-                        'evidence_reference' => 'synthetic:parallel-april',
-                        'evidence_sha256' => str_repeat('a', 64),
+                        'document_id' => $evidenceDocumentId,
                     ],
                     [
                         'payroll_run_id' => $correctionRunId,
-                        'evidence_reference' => 'synthetic:parallel-may',
-                        'evidence_sha256' => str_repeat('b', 64),
+                        'document_id' => $evidenceDocumentId,
                     ],
                 ],
                 'correction_scenario' => [
                     'payroll_run_id' => $correctionRunId,
-                    'evidence_reference' => 'synthetic:correction-may',
-                    'evidence_sha256' => str_repeat('c', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
                 'recovery_drill' => [
                     'completed_on' => '2026-05-20',
-                    'evidence_reference' => 'synthetic:recovery-drill',
-                    'evidence_sha256' => str_repeat('d', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
                 'expert_approval' => [
                     'approver_name' => 'Syntetický odborný schvalovatel',
                     'approver_role' => 'Syntetický odborný garant mezd',
                     'approved_on' => '2026-05-21',
-                    'evidence_reference' => 'synthetic:expert-approval',
-                    'evidence_sha256' => str_repeat('1', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
                 'rollback_plan' => [
                     'verified_on' => '2026-05-22',
-                    'evidence_reference' => 'synthetic:rollback-plan',
-                    'evidence_sha256' => str_repeat('2', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
                 'post_go_live_monitoring' => [
                     'prepared_on' => '2026-05-23',
-                    'evidence_reference' => 'synthetic:monitoring-plan',
-                    'evidence_sha256' => str_repeat('3', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
             ],
         ]);
@@ -577,7 +571,12 @@ final class PayrollFoundationTest extends TestCase
         $evidence = json_decode((string) $qualification['evidence_json'], true);
         self::assertIsArray($evidence);
         self::assertCount(2, $evidence['parallel_runs']);
-        self::assertSame('payroll-production-qualification.v2', $evidence['schema_version']);
+        self::assertSame('payroll-production-qualification.v3', $evidence['schema_version']);
+        self::assertSame($evidenceDocumentId, $evidence['parallel_runs'][0]['document_id']);
+        self::assertSame(
+            hash('sha256', "qualification-{$this->supplierId}"),
+            $evidence['parallel_runs'][0]['document_sha256'],
+        );
         self::assertSame(
             $correctionRunId,
             $evidence['correction_scenario']['payroll_run_id'],
@@ -592,6 +591,14 @@ final class PayrollFoundationTest extends TestCase
             '2026-05-23',
             $evidence['post_go_live_monitoring']['prepared_on'],
         );
+        $links = $this->db->pdo()->prepare(
+            'SELECT evidence_key, sequence_no, document_id, document_sha256
+               FROM payroll_production_qualification_documents
+              WHERE supplier_id = ?
+              ORDER BY evidence_key, sequence_no'
+        );
+        $links->execute([$this->supplierId]);
+        self::assertCount(7, $links->fetchAll(\PDO::FETCH_ASSOC));
 
         $audit = $this->db->pdo()->prepare(
             'SELECT payload FROM activity_log
@@ -630,6 +637,7 @@ final class PayrollFoundationTest extends TestCase
         );
         $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
         $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $evidenceDocumentId = $this->evidenceDocument('missing-expert');
         $request = $this->request('POST', 'admin')->withParsedBody([
             'row_version' => 1,
             'support_matrix_version' => SupportMatrix::VERSION,
@@ -637,24 +645,20 @@ final class PayrollFoundationTest extends TestCase
                 'parallel_runs' => [
                     [
                         'payroll_run_id' => $firstRunId,
-                        'evidence_reference' => 'synthetic:parallel-april',
-                        'evidence_sha256' => str_repeat('a', 64),
+                        'document_id' => $evidenceDocumentId,
                     ],
                     [
                         'payroll_run_id' => $correctionRunId,
-                        'evidence_reference' => 'synthetic:parallel-may',
-                        'evidence_sha256' => str_repeat('b', 64),
+                        'document_id' => $evidenceDocumentId,
                     ],
                 ],
                 'correction_scenario' => [
                     'payroll_run_id' => $correctionRunId,
-                    'evidence_reference' => 'synthetic:correction-may',
-                    'evidence_sha256' => str_repeat('c', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
                 'recovery_drill' => [
                     'completed_on' => '2026-05-20',
-                    'evidence_reference' => 'synthetic:recovery-drill',
-                    'evidence_sha256' => str_repeat('d', 64),
+                    'document_id' => $evidenceDocumentId,
                 ],
             ],
         ]);
@@ -664,6 +668,43 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame(422, $response->getStatusCode());
         self::assertSame('expert_approval_required', $this->json($response)['error']['code']);
         self::assertSame('setup', $this->states->get($this->supplierId)['status']);
+    }
+
+    public function testProductionQualificationRejectsPersonalDmsDocument(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
+        $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $personalDocumentId = $this->evidenceDocument('personal', 'user');
+        $request = $this->request('POST', 'admin')->withParsedBody([
+            'row_version' => 1,
+            'support_matrix_version' => SupportMatrix::VERSION,
+            'evidence' => $this->completeQualificationEvidence(
+                $firstRunId,
+                $correctionRunId,
+                $personalDocumentId,
+            ),
+        ]);
+
+        $response = $this->activationAction->qualify($request, new Response());
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'company_evidence_document_required',
+            $this->json($response)['error']['code'],
+        );
+        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_production_qualifications WHERE supplier_id = ?'
+        );
+        $count->execute([$this->supplierId]);
+        self::assertSame(0, (int) $count->fetchColumn());
     }
 
     private function request(string $method, string $role): \Psr\Http\Message\ServerRequestInterface
@@ -717,6 +758,64 @@ final class PayrollFoundationTest extends TestCase
         ]);
 
         return $runId;
+    }
+
+    private function evidenceDocument(string $seed, string $scope = 'company'): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, uploaded_by, scope, owner_user_id)
+             VALUES (?, ?, ?, ?, ?, "application/pdf", 128, "pdf", ?, ?, ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            "Kvalifikační důkaz {$seed}",
+            "{$seed}.pdf",
+            "{$seed}.pdf",
+            hash('sha256', "{$seed}-{$this->supplierId}"),
+            $this->userId,
+            $scope,
+            $scope === 'user' ? $this->userId : null,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** @return array<string,mixed> */
+    private function completeQualificationEvidence(
+        int $firstRunId,
+        int $correctionRunId,
+        int $documentId,
+    ): array {
+        return [
+            'parallel_runs' => [
+                ['payroll_run_id' => $firstRunId, 'document_id' => $documentId],
+                ['payroll_run_id' => $correctionRunId, 'document_id' => $documentId],
+            ],
+            'correction_scenario' => [
+                'payroll_run_id' => $correctionRunId,
+                'document_id' => $documentId,
+            ],
+            'recovery_drill' => [
+                'completed_on' => '2026-05-20',
+                'document_id' => $documentId,
+            ],
+            'expert_approval' => [
+                'approver_name' => 'Syntetický odborný schvalovatel',
+                'approver_role' => 'Syntetický odborný garant mezd',
+                'approved_on' => '2026-05-21',
+                'document_id' => $documentId,
+            ],
+            'rollback_plan' => [
+                'verified_on' => '2026-05-22',
+                'document_id' => $documentId,
+            ],
+            'post_go_live_monitoring' => [
+                'prepared_on' => '2026-05-23',
+                'document_id' => $documentId,
+            ],
+        ];
     }
 
     /** @return array<string,mixed> */

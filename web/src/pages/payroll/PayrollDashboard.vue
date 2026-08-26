@@ -15,6 +15,7 @@ import { formatPeriod } from '@/composables/useFormat'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
+import PayrollProductionQualificationPanel from '@/pages/payroll/PayrollProductionQualificationPanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -189,6 +190,10 @@ async function disableSetup() {
   }
 }
 
+function productionQualified(updatedState: PayrollCapabilitiesResponse['state']) {
+  if (capabilities.value) capabilities.value.state = updatedState
+}
+
 onMounted(load)
 </script>
 
@@ -259,6 +264,14 @@ onMounted(load)
           <p class="mt-1 max-w-4xl text-sm text-neutral-700">{{ t('payroll.activation.qualification_description') }}</p>
           <p class="mt-2 max-w-4xl text-xs text-neutral-600">{{ t('payroll.activation.qualification_single_accountant') }}</p>
         </section>
+
+        <PayrollProductionQualificationPanel
+          v-if="needsProductionQualification && canConfigure"
+          :state="state"
+          :matrix-version="capabilities.support_matrix.version"
+          @qualified="productionQualified"
+          @refresh="load"
+        />
 
         <section
           v-if="setupBlockers.length > 0"
