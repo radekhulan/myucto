@@ -177,6 +177,7 @@ final class JmhzScenario1DocumentResolver
             }
             $personSummary = $this->object($person['person_summary'] ?? null);
             $statutory = $this->object($personSummary['statutory'] ?? null);
+            $payslip = $this->object($personSummary['payslip_document'] ?? null);
             if (($statutory['status'] ?? null) !== 'calculated') {
                 $blockers[] = $this->blocker(
                     'jmhz_scenario1_statutory_result_not_calculated',
@@ -358,9 +359,7 @@ final class JmhzScenario1DocumentResolver
                         $blockers,
                     ),
                     'employer_social_czk' => $this->wholeCzk(
-                        is_int($social['employer_contribution_minor_units'] ?? null)
-                            ? $social['employer_contribution_minor_units']
-                            : null,
+                        $this->employerSocialMinor($social, $payslip),
                         '10481',
                         'person',
                         $employeeId,
@@ -1285,6 +1284,21 @@ final class JmhzScenario1DocumentResolver
     private function object(mixed $value): array
     {
         return is_array($value) && !array_is_list($value) ? $value : [];
+    }
+
+    /**
+     * @param array<string,mixed> $social
+     * @param array<string,mixed> $payslip
+     */
+    private function employerSocialMinor(array $social, array $payslip): ?int
+    {
+        $legacy = $social['employer_contribution_minor_units'] ?? null;
+        if (is_int($legacy)) {
+            return $legacy;
+        }
+        $allocated = $payslip['employer_social_minor_units'] ?? null;
+
+        return is_int($allocated) ? $allocated : null;
     }
 
     /** @return array<int|string,int> */

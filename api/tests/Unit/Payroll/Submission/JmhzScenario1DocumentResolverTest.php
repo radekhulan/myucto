@@ -126,6 +126,37 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    public function testUsesFrozenPayslipAllocationForEmployerSocialContribution(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        unset(
+            $payload['people'][0]['person_summary']['statutory']['social_insurance']
+                ['employer_contribution_minor_units'],
+        );
+        $payload['people'][0]['person_summary']['payslip_document'] = [
+            'employer_social_minor_units' => 24_800,
+        ];
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertSame(248, $resolution->candidate?->payload['people'][0]
+            ['summary']['employer_social_czk']);
+        self::assertNotContains(
+            'jmhz_scenario1_whole_czk_required',
+            array_column(
+                array_map(
+                    static fn ($blocker): array => $blocker->toArray(),
+                    $resolution->blockers,
+                ),
+                'code',
+            ),
+        );
+    }
+
     public function testHistoricalPreparationIsVerifiedButNotNormalized(): void
     {
         $preparation = $this->preparation();

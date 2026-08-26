@@ -6,11 +6,16 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
+use MyInvoice\Action\Payroll\PayrollJmhzPreparationAction;
+use MyInvoice\Action\Payroll\PayrollJmhzSubmissionFreezeAction;
+use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
+use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -22,7 +27,11 @@ use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreviewService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -47,6 +56,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     private ContainerInterface $container;
     private PayrollRunCommandService $runs;
     private PayrollAbsenceAction $absences;
+    private PayrollTimeAction $time;
     private PayrollHealthInsuranceOverviewAction $healthOverview;
     private int $supplierId;
     /** @var list<int> */
@@ -60,15 +70,18 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $db = $this->container->get(Connection::class);
         $absences = $this->container->get(PayrollAbsenceAction::class);
         $healthOverview = $this->container->get(PayrollHealthInsuranceOverviewAction::class);
+        $time = $this->container->get(PayrollTimeAction::class);
         if (!$db instanceof Connection
             || !$absences instanceof PayrollAbsenceAction
             || !$healthOverview instanceof PayrollHealthInsuranceOverviewAction
+            || !$time instanceof PayrollTimeAction
         ) {
             throw new \RuntimeException('Služby syntetického mzdového toku nejsou dostupné.');
         }
         $this->db = $db;
         $this->absences = $absences;
         $this->healthOverview = $healthOverview;
+        $this->time = $time;
         foreach ([
             'payroll_runs',
             'payroll_run_revisions',
@@ -89,7 +102,13 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $pdo->beginTransaction();
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $pdo->prepare(
-            "UPDATE supplier SET payroll_enabled = 1, accounting_mode = 'double_entry' WHERE id = ?",
+            "UPDATE supplier
+                SET payroll_enabled = 1,
+                    accounting_mode = 'double_entry',
+                    company_name = 'Syntetický zaměstnavatel',
+                    display_name = 'Syntetický zaměstnavatel',
+                    ic = '00000019'
+              WHERE id = ?",
         )->execute([$this->supplierId]);
 
         $this->actors = [$this->createActor('accountant')];
@@ -275,13 +294,134 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $preview->sha256());
     }
 
-    private function createOffice(): int
+    public function testOrdinaryHppReachesValidJmhzTestSubmissionWithoutTransport(): void
+    {
+        $officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '9990001234');
+        $person = $this->createEmployment(
+            $officeId,
+            'Dana Testovací',
+            4,
+            'hpp',
+            'employment',
+            40,
+            10_000,
+        );
+        $this->completeJmhzEmployment($person);
+        $this->createApprovedTimeMonth($person['employment_id']);
+        $this->createApprovedAverage($person['employment_id']);
+        $this->assignJmhzIdentity($person);
+
+        $baseComponentId = $this->componentId('MZDA_MESICNI_FLOW');
+        $regularBonusId = $this->createComponent('ODMENA_PRAVIDELNA_JMHZ_FLOW', 'bonus', 'one_off');
+        $irregularBonusId = $this->componentId('ODMENA_FLOW');
+        $mappings = $this->container->get(PayrollComponentJmhzMappingRepository::class);
+        if (!$mappings instanceof PayrollComponentJmhzMappingRepository) {
+            throw new \RuntimeException('Mapování mzdových složek JMHZ není dostupné.');
+        }
+        $mappings->put($this->supplierId, $baseComponentId, '10329', null, $this->actors[0]);
+        $mappings->put($this->supplierId, $regularBonusId, '10330', null, $this->actors[0]);
+        $mappings->put($this->supplierId, $irregularBonusId, '10331', null, $this->actors[0]);
+        $this->createApprovedInput($person, $baseComponentId, 4_200_000, 'jmhz-base');
+        $this->createApprovedInput($person, $regularBonusId, 0, 'jmhz-regular-bonus');
+        $this->createApprovedInput($person, $irregularBonusId, 0, 'jmhz-irregular-bonus');
+
+        $run = $this->runs->createRun(
+            $this->supplierId,
+            '2026-06-01',
+            '2026-07-15',
+            $officeId,
+            $this->actors[0],
+        );
+        $locked = $this->runs->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'jmhz-flow-lock',
+            $this->actors[0],
+        );
+        $calculated = $this->runs->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'jmhz-flow-calculate',
+            $this->actors[0],
+        );
+        self::assertSame([], $this->blockingValidations((int) $calculated->revision['id']));
+        $reviewed = $this->runs->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'jmhz-flow-review',
+            $this->actors[0],
+        );
+        $approved = $this->runs->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'jmhz-flow-approve',
+            $this->actors[0],
+        );
+        $revisionId = (int) $approved->revision['id'];
+
+        $prepare = $this->container->get(PayrollJmhzPreparationAction::class);
+        $dryRun = $this->container->get(PayrollJmhzXmlDryRunAction::class);
+        $freeze = $this->container->get(PayrollJmhzSubmissionFreezeAction::class);
+        if (!$prepare instanceof PayrollJmhzPreparationAction
+            || !$dryRun instanceof PayrollJmhzXmlDryRunAction
+            || !$freeze instanceof PayrollJmhzSubmissionFreezeAction
+        ) {
+            throw new \RuntimeException('Akce měsíčního hlášení JMHZ nejsou dostupné.');
+        }
+        $preparationResponse = $prepare(
+            $this->request('POST', "/api/payroll/jmhz/preparations/{$revisionId}")
+                ->withHeader('Idempotency-Key', 'synthetic-jmhz-full-flow')
+                ->withParsedBody(['environment' => 'test']),
+            new Response(),
+            ['revisionId' => (string) $revisionId],
+        );
+        self::assertSame(201, $preparationResponse->getStatusCode(), (string) $preparationResponse->getBody());
+        $preparation = $this->json($preparationResponse);
+        self::assertSame('source_ready', $preparation['readiness_status'], CanonicalJson::encode($preparation['issues']));
+        self::assertSame(0, $preparation['issue_count']);
+
+        $preparationId = (int) $preparation['id'];
+        $dryRunResponse = $dryRun(
+            $this->request('GET', "/api/payroll/jmhz/preparations/{$preparationId}/test")
+                ->withQueryParams(['environment' => 'test', 'office' => (string) $officeId]),
+            new Response(),
+            ['preparationId' => (string) $preparationId],
+        );
+        self::assertSame(200, $dryRunResponse->getStatusCode(), (string) $dryRunResponse->getBody());
+        $tested = $this->json($dryRunResponse);
+        self::assertSame('dry_run_valid', $tested['status'], CanonicalJson::encode($tested));
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $tested['xml_sha256']);
+        self::assertSame(hash('sha256', $tested['xml']), $tested['xml_sha256']);
+
+        $freezeResponse = $freeze(
+            $this->request('POST', "/api/payroll/jmhz/preparations/{$preparationId}/submission")
+                ->withParsedBody(['environment' => 'test', 'office' => $officeId]),
+            new Response(),
+            ['preparationId' => (string) $preparationId],
+        );
+        self::assertSame(201, $freezeResponse->getStatusCode(), (string) $freezeResponse->getBody());
+        $submission = $this->json($freezeResponse);
+        self::assertSame('test', $submission['environment']);
+        self::assertSame('ready', $submission['status']);
+        self::assertTrue($submission['created']);
+        self::assertSame(0, $this->transportAttemptCount((int) $submission['submission_id']));
+    }
+
+    private function createOffice(
+        string $code = 'FLOW',
+        string $name = 'Syntetická účtárna',
+        string $variableSymbol = '1234567890',
+    ): int
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_offices
                 (supplier_id, code, name, social_security_variable_symbol, is_active)
-             VALUES (?, "FLOW", "Syntetická účtárna", "1234567890", 1)',
-        )->execute([$this->supplierId]);
+             VALUES (?, ?, ?, ?, 1)',
+        )->execute([$this->supplierId, $code, $name, $variableSymbol]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 
@@ -469,6 +609,37 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                      "2026-06-15 14:30:00", "Europe/Prague", 30,
                      "published", ?, NOW())',
         )->execute([$this->supplierId, $employmentId, $this->actors[0]]);
+        $average = $this->createApprovedAverage($employmentId);
+        $absenceResponse = $this->absences->create(
+            $this->request('POST', '/api/payroll/absences')->withParsedBody([
+                'employment_id' => $employmentId,
+                'absence_type' => 'vacation',
+                'date_from' => '2026-06-15',
+                'date_to' => '2026-06-15',
+                'timezone_name' => 'Europe/Prague',
+                'partial_first_minutes' => null,
+                'partial_last_minutes' => null,
+                'average_snapshot_id' => $average['id'],
+                'note' => 'Syntetická dovolená full-flow.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $absenceResponse->getStatusCode(), (string) $absenceResponse->getBody());
+        $absence = $this->json($absenceResponse)['absence'];
+        $decision = $this->absences->decision(
+            $this->request('POST', '/api/payroll/absences/decision')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $decision->getStatusCode(), (string) $decision->getBody());
+    }
+
+    /** @return array<string,mixed> */
+    private function createApprovedAverage(int $employmentId): array
+    {
         $averageResponse = $this->absences->createAverage(
             $this->request('POST', '/api/payroll/absences/average')->withParsedBody([
                 'employment_id' => $employmentId,
@@ -495,31 +666,122 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             ['id' => (string) $average['id']],
         );
         self::assertSame(200, $approvedAverageResponse->getStatusCode(), (string) $approvedAverageResponse->getBody());
-        $absenceResponse = $this->absences->create(
-            $this->request('POST', '/api/payroll/absences')->withParsedBody([
+
+        return $average;
+    }
+
+    /** @param array{employee_id:int,employment_id:int,name:string} $person */
+    private function completeJmhzEmployment(array $person): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET activity_code = "1",
+                    jmhz_relationship_detail_code = "1",
+                    work_place = "Hlavní město Praha",
+                    jmhz_workplace_municipality_code = "554782",
+                    jmhz_workplace_country_code = "CZ",
+                    jmhz_external_codebook_overlay_key = ?,
+                    jmhz_external_codebook_manifest_sha256 = ?,
+                    jmhz_apz_contribution_status = "no",
+                    jmhz_functional_benefits_status = "no",
+                    jmhz_temporary_assignment_status = "no",
+                    risky_work = 0
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([
+            JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
+            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            $this->supplierId,
+            $person['employment_id'],
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name,
+                 birth_date, birth_place, birth_country_code,
+                 citizenship_country_code, sex, effective_from)
+             VALUES (?, ?, ?, "Dana", "Testovací", "1991-02-03",
+                     "Testov", "CZ", "CZ", "female", "2026-01-01")',
+        )->execute([$this->supplierId, $person['employee_id'], $person['name']]);
+        $this->insertPersonIdentifier($person['employee_id'], 'birth_number', '9102030014');
+    }
+
+    private function createApprovedTimeMonth(int $employmentId): void
+    {
+        $calendar = $this->time->calendar(
+            $this->request('PUT', "/api/payroll/time/calendars/{$employmentId}")
+                ->withParsedBody([
+                    'name' => 'Syntetický pravidelný týden JMHZ',
+                    'timezone' => 'Europe/Prague',
+                    'schedule_type' => 'regular',
+                    'week_pattern' => [
+                        '1' => 480,
+                        '2' => 480,
+                        '3' => 480,
+                        '4' => 480,
+                        '5' => 480,
+                        '6' => 0,
+                        '7' => 0,
+                    ],
+                    'valid_from' => '2026-01-01',
+                    'valid_to' => null,
+                    'row_version' => 0,
+                    'month_row_version' => 0,
+                    'days' => [],
+                ]),
+            new Response(),
+            ['employmentId' => (string) $employmentId],
+        );
+        self::assertSame(201, $calendar->getStatusCode(), (string) $calendar->getBody());
+        $entry = $this->time->entry(
+            $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
                 'employment_id' => $employmentId,
-                'absence_type' => 'vacation',
-                'date_from' => '2026-06-15',
-                'date_to' => '2026-06-15',
-                'timezone_name' => 'Europe/Prague',
-                'partial_first_minutes' => null,
-                'partial_last_minutes' => null,
-                'average_snapshot_id' => $average['id'],
-                'note' => 'Syntetická dovolená full-flow.',
+                'starts_at' => '2026-06-01T08:00:00+02:00',
+                'ends_at' => '2026-06-01T16:00:00+02:00',
+                'timezone' => 'Europe/Prague',
+                'category' => 'regular',
+                'break_minutes' => 30,
+                'row_version' => 0,
+                'month_row_version' => 0,
+                'supersedes_id' => null,
             ]),
             new Response(),
         );
-        self::assertSame(201, $absenceResponse->getStatusCode(), (string) $absenceResponse->getBody());
-        $absence = $this->json($absenceResponse)['absence'];
-        $decision = $this->absences->decision(
-            $this->request('POST', '/api/payroll/absences/decision')->withParsedBody([
-                'row_version' => $absence['row_version'],
-                'decision' => 'approved',
-            ]),
+        self::assertSame(201, $entry->getStatusCode(), (string) $entry->getBody());
+        $monthVersion = (int) $this->json($entry)['month']['row_version'];
+        $overview = $this->time->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-06']),
             new Response(),
-            ['id' => (string) $absence['id']],
         );
-        self::assertSame(200, $decision->getStatusCode(), (string) $decision->getBody());
+        self::assertSame(200, $overview->getStatusCode(), (string) $overview->getBody());
+        $item = null;
+        foreach ($this->json($overview)['items'] as $candidate) {
+            if (($candidate['employment']['id'] ?? null) === $employmentId) {
+                $item = $candidate;
+                break;
+            }
+        }
+        self::assertIsArray($item);
+        $preview = $item['jmhz_work_summary']['preview'];
+        $approved = $this->time->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-06/approve')
+                ->withParsedBody([
+                    'employment_id' => $employmentId,
+                    'row_version' => $monthVersion,
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+                        'standard_fund_hours' => $preview['suggestions']['agreed_fund_hours'],
+                        'agreed_fund_hours' => $preview['suggestions']['agreed_fund_hours'],
+                        'weekly_work_hours' => '40',
+                        'worked_hours' => $preview['suggestions']['worked_hours'],
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
+                        'confirmation_note' => '',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-06'],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
     }
 
     private function createActor(string $suffix): int
@@ -653,6 +915,86 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             "full-flow-tax-opening-{$sequence}",
             actorUserId: $this->actors[0],
         );
+    }
+
+    /** @param array{employee_id:int,employment_id:int,name:string} $person */
+    private function assignJmhzIdentity(array $person): void
+    {
+        $identities = $this->container->get(PayrollRegistrationIdentityService::class);
+        if (!$identities instanceof PayrollRegistrationIdentityService) {
+            throw new \RuntimeException('Registrační identita JMHZ není dostupná.');
+        }
+        $assigned = $identities->assignManualJmhzIdentity(
+            $this->supplierId,
+            $person['employment_id'],
+            'test',
+            '1000000001',
+            '200000000000000000004',
+            '2026-01-01',
+            null,
+            true,
+            $this->actors[0],
+        );
+        self::assertTrue($assigned['person_external_identifier']['created']);
+        self::assertTrue($assigned['employment_external_identifier']['created']);
+    }
+
+    private function insertPersonIdentifier(int $employeeId, string $type, string $value): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_identifiers
+                (supplier_id, employee_id, identifier_type,
+                 value_ciphertext, value_hash, value_masked)
+             VALUES (?, ?, ?, "enc:v2:pending", ?, "")',
+        )->execute([$this->supplierId, $employeeId, $type, random_bytes(32)]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $sensitive = $this->container->get(PayrollSensitiveData::class);
+        if (!$sensitive instanceof PayrollSensitiveData) {
+            throw new \RuntimeException('Šifrování mzdových identifikátorů není dostupné.');
+        }
+        $sealed = $sensitive->seal(
+            $value,
+            PayrollSensitiveField::PERSONAL_IDENTIFIER,
+            $this->supplierId,
+            $id,
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identifiers
+                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            $sealed->ciphertext,
+            $sealed->lookupHash,
+            $sealed->masked,
+            $this->supplierId,
+            $id,
+        ]);
+    }
+
+    private function componentId(string $code): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code = ?',
+        );
+        $statement->execute([$this->supplierId, $code]);
+        $id = $statement->fetchColumn();
+        if (!is_int($id) && !is_string($id)) {
+            throw new \RuntimeException("Mzdová složka {$code} nebyla nalezena.");
+        }
+
+        return (int) $id;
+    }
+
+    private function transportAttemptCount(int $submissionId): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_submission_transport_attempts
+              WHERE supplier_id = ? AND submission_id = ?',
+        );
+        $statement->execute([$this->supplierId, $submissionId]);
+
+        return (int) $statement->fetchColumn();
     }
 
     /** @return list<array{employment_type:string,relation_type:string}> */
