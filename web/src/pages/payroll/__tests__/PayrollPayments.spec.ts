@@ -18,6 +18,11 @@ const m = vi.hoisted(() => ({
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  routeQuery: {} as Record<string, string>,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.routeQuery }),
 }))
 
 vi.mock('@/api/payrollPayments', () => ({
@@ -98,6 +103,7 @@ function liabilityList(items: Array<Record<string, unknown>>) {
 describe('PayrollPayments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canWrite.mockImplementation(
       (permission: string) => permission === 'payroll.payments',
     )
@@ -273,6 +279,33 @@ describe('PayrollPayments', () => {
         liability_kind: 'net_wage',
       },
     })
+  })
+
+  it('opens the period from a payroll run link and preselects its compatible liabilities', async () => {
+    m.routeQuery = {
+      period: '2026-08',
+      run: '11',
+      focus: 'bank-order',
+    }
+    const base = (await m.liabilities()).items[0]
+    m.liabilities.mockResolvedValue(liabilityList([
+      base,
+      { ...base, id: 42, employee_id: 32, employee_name: 'Druhá osoba' },
+      { ...base, id: 43, run_id: 12, employee_id: 33, employee_name: 'Jiný běh' },
+      { ...base, id: 44, run_id: 11, due_on: '2026-08-20', employee_id: null },
+    ]))
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(m.liabilities).toHaveBeenCalledWith(
+      '2026-08',
+      { limit: 50, offset: 0 },
+    )
+    expect(wrapper.get('[data-test="run-payment-shortcut"]').text())
+      .toContain('payroll.payments.run_shortcut.ready')
+    expect(wrapper.get('[data-test="batch-selection-summary"]').text())
+      .toContain('"count":2')
   })
 
   /*
@@ -591,6 +624,29 @@ describe('PayrollPayments', () => {
     })
     expect(wrapper.find('[data-layout="batch-desktop"]').exists()).toBe(true)
     expect(wrapper.find('[data-layout="batch-mobile"]').exists()).toBe(true)
+  })
+
+  it('admits an idempotent replay instead of claiming a second batch was created', async () => {
+    m.createBatch.mockResolvedValue({
+      batch_id: 51,
+      declared_item_count: 1,
+      created: false,
+      replayed: true,
+    })
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const desktop = wrapper.get('[data-layout="desktop"]')
+    await desktop.findAll('input[type="checkbox"]')[1].setValue(true)
+    await flushPromises()
+    const createButton = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.payments.batch.create'))
+    await createButton!.trigger('click')
+    await flushPromises()
+
+    expect(m.success).toHaveBeenCalledWith(
+      expect.stringContaining('payroll.payments.batch.replayed'),
+    )
   })
 
   it('generates a batch export and downloads it through a one-use grant', async () => {

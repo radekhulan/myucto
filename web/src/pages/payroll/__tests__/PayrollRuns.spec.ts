@@ -15,6 +15,11 @@ const m = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   total: vi.fn(),
+  push: vi.fn(),
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: m.push }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -202,6 +207,27 @@ describe('PayrollRuns', () => {
     expect(m.error).not.toHaveBeenCalled()
     expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
       .toContain('nemá nastavené výplatní pravidlo')
+  })
+
+  it('po přípravě plateb otevře mzdové příkazy ve správném období', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'posted',
+      can_delete: false,
+      available_commands: ['prepare_payments'],
+    })])
+    m.commandRun.mockResolvedValue({
+      outcome: { outcome: 'payments_prepared', details: { created_count: 3 } },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-prepare_payments"]').trigger('click')
+    await flushPromises()
+
+    expect(m.push).toHaveBeenCalledWith({
+      name: 'payroll-payments',
+      query: { period: '2026-08', run: '15', focus: 'bank-order' },
+    })
   })
 
   it('řekne nahlas, že se u daňové evidence nic nezaúčtovalo', async () => {

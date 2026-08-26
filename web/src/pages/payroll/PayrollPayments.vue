@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { payrollApi, type PayrollRun } from '@/api/payroll'
 import {
   payrollPaymentsApi,
@@ -37,9 +38,26 @@ import { formatDate, formatDateTime, formatMoneyMinor as formatMoney } from '@/c
 import { localPayrollPeriod } from './payrollComponentsUi'
 
 const { t } = useI18n()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToast()
-const period = ref(localPayrollPeriod())
+const requestedPeriod = typeof route.query.period === 'string'
+  && /^(20|21)\d{2}-(0[1-9]|1[0-2])$/.test(route.query.period)
+  ? route.query.period
+  : null
+const parsedRequestedRunId = typeof route.query.run === 'string'
+  && /^[1-9]\d*$/.test(route.query.run)
+  ? Number(route.query.run)
+  : null
+const requestedRunId = parsedRequestedRunId !== null
+  && Number.isSafeInteger(parsedRequestedRunId)
+  ? parsedRequestedRunId
+  : null
+const runShortcutRequested = route.query.focus === 'bank-order'
+  && requestedRunId !== null
+const runShortcutApplied = ref(false)
+const runShortcutState = ref<'ready' | 'empty' | null>(null)
+const period = ref(requestedPeriod ?? localPayrollPeriod())
 const activeTab = ref<'liabilities' | 'batches' | 'settlements'>('liabilities')
 const loading = ref(true)
 /*
@@ -390,19 +408,28 @@ function remainingMinor(item: PayrollPaymentLiability): number {
 }
 
 function isSelectable(item: PayrollPaymentLiability): boolean {
-  if (
-    item.batch_eligibility !== 'ready'
-    || !['open', 'partially_batched'].includes(item.state)
-    || remainingMinor(item) <= 0
-  ) return false
+  if (!isOpenBatchable(item)) return false
   const anchor = selectionAnchor.value
   return !anchor
     || anchor.id === item.id
-    || (
-      anchor.due_on === item.due_on
-      && anchor.currency_code === item.currency_code
-      && anchor.recipient_kind === item.recipient_kind
-    )
+    || isSameBatchGroup(anchor, item)
+}
+
+function isOpenBatchable(item: PayrollPaymentLiability): boolean {
+  return !(
+    item.batch_eligibility !== 'ready'
+    || !['open', 'partially_batched'].includes(item.state)
+    || remainingMinor(item) <= 0
+  )
+}
+
+function isSameBatchGroup(
+  anchor: PayrollPaymentLiability,
+  item: PayrollPaymentLiability,
+): boolean {
+  return anchor.due_on === item.due_on
+    && anchor.currency_code === item.currency_code
+    && anchor.recipient_kind === item.recipient_kind
 }
 
 function toggleSelection(item: PayrollPaymentLiability): void {
@@ -664,6 +691,21 @@ async function load(): Promise<void> {
       selectedIds.value = selectedIds.value.filter(id =>
         liabilityList.items.some(item => item.id === id),
       )
+      if (runShortcutRequested && !runShortcutApplied.value) {
+        const candidates = liabilityList.items.filter(item =>
+          item.run_id === requestedRunId && isOpenBatchable(item),
+        )
+        const anchor = candidates[0]
+        selectedIds.value = anchor
+          ? candidates
+            .filter(item => isSameBatchGroup(anchor, item))
+            .map(item => item.id)
+          : []
+        runShortcutState.value = selectedIds.value.length > 0
+          ? 'ready'
+          : 'empty'
+        runShortcutApplied.value = true
+      }
     }
   } catch (error) {
     if (sequence === loadSequence) {
@@ -696,9 +738,12 @@ async function createBatch(): Promise<void> {
         amount_minor: remainingMinor(item),
       })),
     })
-    toast.success(t('payroll.payments.batch.created', {
-      count: result.declared_item_count,
-    }))
+    toast.success(t(
+      result.replayed
+        ? 'payroll.payments.batch.replayed'
+        : 'payroll.payments.batch.created',
+      { count: result.declared_item_count },
+    ))
     selectedIds.value = []
     activeTab.value = 'batches'
     await load()
@@ -1037,6 +1082,28 @@ onMounted(load)
       </div>
     </header>
 
+    <section
+      v-if="runShortcutRequested"
+      data-test="run-payment-shortcut"
+      class="flex items-start gap-3 rounded-xl border border-payroll-200 bg-payroll-50/50 p-4 text-sm text-neutral-700"
+    >
+      <svg class="mt-0.5 h-5 w-5 shrink-0 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path :d="ICONS.coin" />
+      </svg>
+      <div>
+        <p class="font-semibold text-neutral-900">
+          {{ t(`payroll.payments.run_shortcut.${runShortcutState ?? 'loading'}`) }}
+        </p>
+        <p class="mt-1 leading-snug">
+          {{ runShortcutState === 'ready'
+            ? t('payroll.payments.run_shortcut.ready_hint', { count: selectedItems.length })
+            : runShortcutState === 'empty'
+              ? t('payroll.payments.run_shortcut.empty_hint')
+              : t('payroll.payments.run_shortcut.loading_hint') }}
+        </p>
+      </div>
+    </section>
+
     <nav class="flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('payroll.payments.tabs_label')">
       <button
         v-for="tab in (['liabilities', 'batches', 'settlements'] as const)"
@@ -1085,13 +1152,15 @@ onMounted(load)
               {{ t('payroll.payments.batch.new_title') }}
             </h2>
             <p class="mt-1 text-sm text-neutral-600">
-              {{ t('payroll.payments.batch.selection_summary', {
-                count: selectedItems.length,
-                amount: formatMoney(
-                  selectedTotalMinor,
-                  selectionAnchor?.currency_code || 'CZK',
-                ),
-              }) }}
+              <span data-test="batch-selection-summary">
+                {{ t('payroll.payments.batch.selection_summary', {
+                  count: selectedItems.length,
+                  amount: formatMoney(
+                    selectedTotalMinor,
+                    selectionAnchor?.currency_code || 'CZK',
+                  ),
+                }) }}
+              </span>
             </p>
           </div>
           <button type="button" :class="btnOutline('neutral')" @click="selectedIds = []">

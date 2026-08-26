@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollRun,
@@ -22,6 +23,7 @@ import { useToast } from '@/composables/useToast'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 const { t } = useI18n()
+const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
@@ -426,6 +428,18 @@ async function submitCommand(
     commandReason.value = ''
     commandError.value = ''
     await load()
+    if (command === 'prepare_payments'
+      && outcome !== 'payments_not_applicable'
+    ) {
+      void router.push({
+        name: 'payroll-payments',
+        query: {
+          period: run.period_start.slice(0, 7),
+          run: String(run.id),
+          focus: 'bank-order',
+        },
+      })
+    }
   } catch (error: any) {
     const message = error?.response?.data?.error?.message || t('payroll.runs.command_failed')
     if (pendingCommand.value) commandError.value = message
