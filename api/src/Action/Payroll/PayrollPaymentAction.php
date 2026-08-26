@@ -12,6 +12,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationResult;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
@@ -451,6 +453,223 @@ final class PayrollPaymentAction
         return Json::ok(
             $response,
             ['event' => $this->reconciliationResult($result)],
+            201,
+        )->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function matchIncomingRefund(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $body = $request->getParsedBody();
+        if (!is_array($body) || array_is_list($body)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Tělo požadavku musí být objekt.',
+                422,
+            );
+        }
+        $liabilityId = $body['liability_id'] ?? null;
+        $amountMinor = $body['amount_minor'] ?? null;
+        $idempotencyKey = $body['idempotency_key'] ?? null;
+        $rawEvidence = $body['evidence'] ?? null;
+        $userId = $this->userId($request);
+        if (!is_int($liabilityId)
+            || !is_int($amountMinor)
+            || !is_string($idempotencyKey)
+            || $userId === null
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Přijatá vratka vyžaduje závazek, částku, důkaz a idempotentní klíč.',
+                422,
+            );
+        }
+        try {
+            $evidence = $this->evidenceReference($rawEvidence);
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->transaction(function () use (
+                $supplierId,
+                $liabilityId,
+                $amountMinor,
+                $evidence,
+                $idempotencyKey,
+                $userId,
+                $request,
+            ): PayrollIncomingRefundReconciliationResult {
+                $result = $this->reconciliation->matchIncomingRefund(
+                    new PayrollIncomingRefundReconciliationCommand(
+                        $supplierId,
+                        $liabilityId,
+                        $amountMinor,
+                        $evidence,
+                        trim($idempotencyKey),
+                        $userId,
+                    ),
+                );
+                $this->logPaymentActivity(
+                    $request,
+                    $result->replayed
+                        ? 'payroll.incoming_refund_replayed'
+                        : 'payroll.incoming_refund_matched',
+                    'payroll_payment_match',
+                    $result->id,
+                    [
+                        'liability_id' => $result->liabilityId,
+                        'amount_minor' => $result->amountMinor,
+                        'evidence_kind' => $result->evidenceKind,
+                        'actual_payment_date' =>
+                            $result->actualPaymentDate,
+                    ],
+                    $supplierId,
+                    $userId,
+                );
+
+                return $result;
+            });
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'incoming_refund_match_blocked',
+                $exception->getMessage(),
+                409,
+            );
+        } catch (\PDOException $exception) {
+            return $this->reconciliationConflict($response, $exception);
+        }
+
+        return Json::ok(
+            $response,
+            ['event' => $this->incomingRefundResult($result)],
+            201,
+        )->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function reverseIncomingRefund(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize(
+            $request,
+            $response,
+            'payroll.payments',
+            AccessLevel::WRITE,
+            $error,
+        )) {
+            return $this->errorResponse($error);
+        }
+        $body = $request->getParsedBody();
+        if (!is_array($body) || array_is_list($body)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Tělo požadavku musí být objekt.',
+                422,
+            );
+        }
+        $sourceMatchId = $body['source_match_id'] ?? null;
+        $amountMinor = $body['amount_minor'] ?? null;
+        $idempotencyKey = $body['idempotency_key'] ?? null;
+        $rawEvidence = $body['evidence'] ?? null;
+        $userId = $this->userId($request);
+        if (!is_int($sourceMatchId)
+            || !is_int($amountMinor)
+            || !is_string($idempotencyKey)
+            || $userId === null
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Reverze vratky vyžaduje původní příjem, částku, důkaz a idempotentní klíč.',
+                422,
+            );
+        }
+        try {
+            $evidence = $this->evidenceReference($rawEvidence);
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->transaction(function () use (
+                $supplierId,
+                $sourceMatchId,
+                $amountMinor,
+                $evidence,
+                $idempotencyKey,
+                $userId,
+                $request,
+            ): PayrollIncomingRefundReconciliationResult {
+                $result = $this->reconciliation->reverseIncomingRefund(
+                    new PayrollPaymentReversalCommand(
+                        $supplierId,
+                        $sourceMatchId,
+                        $amountMinor,
+                        $evidence,
+                        trim($idempotencyKey),
+                        $userId,
+                    ),
+                );
+                $this->logPaymentActivity(
+                    $request,
+                    $result->replayed
+                        ? 'payroll.incoming_refund_reversal_replayed'
+                        : 'payroll.incoming_refund_reversed',
+                    'payroll_payment_match',
+                    $result->id,
+                    [
+                        'liability_id' => $result->liabilityId,
+                        'source_match_id' => $result->sourceMatchId,
+                        'amount_minor' => $result->amountMinor,
+                        'evidence_kind' => $result->evidenceKind,
+                    ],
+                    $supplierId,
+                    $userId,
+                );
+
+                return $result;
+            });
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'incoming_refund_reversal_blocked',
+                $exception->getMessage(),
+                409,
+            );
+        } catch (\PDOException $exception) {
+            return $this->reconciliationConflict($response, $exception);
+        }
+
+        return Json::ok(
+            $response,
+            ['event' => $this->incomingRefundResult($result)],
             201,
         )->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
@@ -1330,6 +1549,30 @@ final class PayrollPaymentAction
         return [
             'id' => $result->id,
             'allocation_id' => $result->allocationId,
+            'event_kind' => $result->eventKind,
+            'source_match_id' => $result->sourceMatchId,
+            'amount_minor' => $result->amountMinor,
+            'evidence_kind' => $result->evidenceKind,
+            'bank_statement_id' => $result->bankStatementId,
+            'bank_transaction_id' => $result->bankTransactionId,
+            'cash_document_id' => $result->cashDocumentId,
+            'actual_payment_date' => $result->actualPaymentDate,
+            'evidence_amount_minor' => $result->evidenceAmountMinor,
+            'evidence_currency_code' =>
+                $result->evidenceCurrencyCode,
+            'evidence_fact_hash' => $result->evidenceFactHash,
+            'replayed' => $result->replayed,
+        ];
+    }
+
+    /** @return array<string,int|string|bool|null> */
+    private function incomingRefundResult(
+        PayrollIncomingRefundReconciliationResult $result,
+    ): array {
+        return [
+            'id' => $result->id,
+            'allocation_id' => null,
+            'liability_id' => $result->liabilityId,
             'event_kind' => $result->eventKind,
             'source_match_id' => $result->sourceMatchId,
             'amount_minor' => $result->amountMinor,

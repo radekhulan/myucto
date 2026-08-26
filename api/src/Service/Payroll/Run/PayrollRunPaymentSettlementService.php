@@ -99,12 +99,9 @@ final class PayrollRunPaymentSettlementService
                     ) AS allocated_minor,
                     (
                       SELECT COALESCE(SUM(payment_match.amount_minor), 0)
-                        FROM payroll_payment_allocations allocation
-                        JOIN payroll_payment_matches payment_match
-                          ON payment_match.supplier_id = allocation.supplier_id
-                         AND payment_match.allocation_id = allocation.id
-                       WHERE allocation.supplier_id = liability.supplier_id
-                         AND allocation.liability_id = liability.id
+                        FROM payroll_payment_matches payment_match
+                       WHERE payment_match.supplier_id = liability.supplier_id
+                         AND payment_match.liability_id = liability.id
                     ) AS settled_minor,
                     (
                       SELECT COUNT(DISTINCT payment_item.batch_id)
@@ -150,7 +147,9 @@ final class PayrollRunPaymentSettlementService
                 || $allocatedForLiability < 0
                 || $allocatedForLiability > $amount
                 || $settledForLiability < 0
-                || $settledForLiability > $allocatedForLiability
+                || $settledForLiability > $amount
+                || ((string) $row['direction'] === 'outgoing'
+                    && $settledForLiability > $allocatedForLiability)
             ) {
                 throw new \UnexpectedValueException(
                     'Součty skutečných úhrad mzdového závazku jsou mimo povolené meze.',
@@ -256,10 +255,9 @@ final class PayrollRunPaymentSettlementService
             implode('; ', $details),
         );
         if ($coverage['incoming_unsettled_count'] > 0) {
-            $reason .= ' Příchozí opravné částky nelze vložit do odchozí '
-                . 'platební dávky a aktuální agenda je zatím neumí připojit '
-                . 'k mzdovému závazku bez takové dávky. Běh proto zůstává '
-                . 'otevřený; nevytvářejte kvůli tomu falešnou odchozí dávku.';
+            $reason .= ' Příchozí opravné částky nevkládejte do odchozí '
+                . 'platební dávky. Spárujte skutečně přijatý bankovní pohyb '
+                . 'nebo zaúčtovaný příjmový pokladní doklad přímo s vratkou.';
         }
 
         return $reason;

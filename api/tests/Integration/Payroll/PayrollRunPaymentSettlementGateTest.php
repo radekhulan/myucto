@@ -9,7 +9,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
+use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
@@ -33,6 +35,7 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
     private PayrollRunCommandService $commands;
     private PayrollRunRepository $runs;
     private PayrollPaymentReconciliationService $reconciliation;
+    private PayrollPaymentReconciliationQueryService $reconciliationQueries;
     private PayrollPaymentBatchBuilder $batchBuilder;
     private PayrollRunPaymentSettlementService $settlement;
     private int $supplierId;
@@ -50,6 +53,9 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         $reconciliation = $container->get(
             PayrollPaymentReconciliationService::class,
         );
+        $reconciliationQueries = $container->get(
+            PayrollPaymentReconciliationQueryService::class,
+        );
         $batchBuilder = $container->get(PayrollPaymentBatchBuilder::class);
         $settlement = $container->get(
             PayrollRunPaymentSettlementService::class,
@@ -60,6 +66,10 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         self::assertInstanceOf(
             PayrollPaymentReconciliationService::class,
             $reconciliation,
+        );
+        self::assertInstanceOf(
+            PayrollPaymentReconciliationQueryService::class,
+            $reconciliationQueries,
         );
         self::assertInstanceOf(PayrollPaymentBatchBuilder::class, $batchBuilder);
         self::assertInstanceOf(
@@ -81,6 +91,7 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         $this->commands = $commands;
         $this->runs = $runs;
         $this->reconciliation = $reconciliation;
+        $this->reconciliationQueries = $reconciliationQueries;
         $this->batchBuilder = $batchBuilder;
         $this->settlement = $settlement;
         $this->pdo->beginTransaction();
@@ -452,6 +463,350 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
             ]],
             $this->actorId,
         );
+    }
+
+    public function testIncomingCorrectionCanBeSettledByRealBankReceiptWithoutBatch(): void
+    {
+        $statementId = $this->seedBankStatement(
+            $this->pdo,
+            $this->supplierId,
+            'settlement-gate-incoming-refund',
+        );
+        $originalPaymentId = $this->insertBankTransaction(
+            $statementId,
+            '-1000.00',
+            'settlement-gate-before-incoming-refund',
+        );
+        $this->reconciliation->match(
+            new PayrollPaymentReconciliationCommand(
+                $this->supplierId,
+                $this->allocationId,
+                100_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $originalPaymentId,
+                ),
+                'settlement-gate-before-incoming-refund',
+                $this->actorId,
+            ),
+        );
+        [$correctionRevisionId, $incomingLiabilityId] =
+            $this->insertIncomingCorrectionLiability(20_000);
+        $beforeReceipt = $this->reconciliationQueries->forPeriod(
+            $this->supplierId,
+            '2099-01',
+        );
+        self::assertSame(
+            [$incomingLiabilityId],
+            array_column($beforeReceipt['incoming_liabilities'], 'id'),
+        );
+        $incomingTransactionId = $this->insertBankTransaction(
+            $statementId,
+            '200.00',
+            'settlement-gate-incoming-refund',
+        );
+
+        $match = $this->reconciliation->matchIncomingRefund(
+            new PayrollIncomingRefundReconciliationCommand(
+                $this->supplierId,
+                $incomingLiabilityId,
+                20_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $incomingTransactionId,
+                ),
+                'settlement-gate-incoming-refund',
+                $this->actorId,
+            ),
+        );
+        $replay = $this->reconciliation->matchIncomingRefund(
+            new PayrollIncomingRefundReconciliationCommand(
+                $this->supplierId,
+                $incomingLiabilityId,
+                20_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $incomingTransactionId,
+                ),
+                'settlement-gate-incoming-refund',
+                $this->actorId,
+            ),
+        );
+
+        self::assertSame($incomingLiabilityId, $match->liabilityId);
+        self::assertNull($match->allocationId);
+        self::assertSame($match->id, $replay->id);
+        self::assertTrue($replay->replayed);
+        $afterReceipt = $this->reconciliationQueries->forPeriod(
+            $this->supplierId,
+            '2099-01',
+        );
+        self::assertSame([], $afterReceipt['incoming_liabilities']);
+        $listedMatch = array_values(array_filter(
+            $afterReceipt['matches'],
+            static fn (array $item): bool =>
+                ($item['id'] ?? null) === $match->id,
+        ))[0] ?? null;
+        self::assertIsArray($listedMatch);
+        self::assertNull($listedMatch['allocation_id']);
+        self::assertSame(
+            $incomingLiabilityId,
+            $listedMatch['liability_id'],
+        );
+        self::assertSame(
+            0,
+            (int) $this->pdo->query(
+                "SELECT COUNT(*)
+                   FROM payroll_payment_allocations
+                  WHERE supplier_id = {$this->supplierId}
+                    AND liability_id = {$incomingLiabilityId}",
+            )->fetchColumn(),
+            'Příchozí vratka nesmí vytvořit pomocnou platební dávku ani alokaci.',
+        );
+
+        $coverage = $this->settlement->inspect(
+            $this->supplierId,
+            $correctionRevisionId,
+        );
+        self::assertSame(120_000, $coverage['settled_minor']);
+        self::assertSame(0, $coverage['incoming_unsettled_count']);
+        self::assertSame([], $coverage['uncovered']);
+
+        $paid = $this->commands->markPaid(
+            $this->supplierId,
+            $this->runId,
+            1,
+            'settlement-gate-paid-after-incoming-refund',
+            $this->actorId,
+        );
+        self::assertSame('paid', $paid->run['status']);
+    }
+
+    public function testIncomingRefundPartialReversalCapacityAndTenantStayFailClosed(): void
+    {
+        $statementId = $this->seedBankStatement(
+            $this->pdo,
+            $this->supplierId,
+            'settlement-gate-incoming-partial',
+        );
+        $originalPaymentId = $this->insertBankTransaction(
+            $statementId,
+            '-1000.00',
+            'settlement-gate-incoming-partial-original',
+        );
+        $this->reconciliation->match(new PayrollPaymentReconciliationCommand(
+            $this->supplierId,
+            $this->allocationId,
+            100_000,
+            PayrollPaymentEvidenceReference::bank(
+                $statementId,
+                $originalPaymentId,
+            ),
+            'settlement-gate-incoming-partial-original',
+            $this->actorId,
+        ));
+        [$correctionRevisionId, $incomingLiabilityId] =
+            $this->insertIncomingCorrectionLiability(20_000);
+        $receiptId = $this->insertBankTransaction(
+            $statementId,
+            '200.00',
+            'settlement-gate-incoming-partial-receipt',
+        );
+        $match = $this->reconciliation->matchIncomingRefund(
+            new PayrollIncomingRefundReconciliationCommand(
+                $this->supplierId,
+                $incomingLiabilityId,
+                12_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $receiptId,
+                ),
+                'settlement-gate-incoming-partial-receipt',
+                $this->actorId,
+            ),
+        );
+
+        $partial = $this->settlement->inspect(
+            $this->supplierId,
+            $correctionRevisionId,
+        );
+        self::assertSame(112_000, $partial['settled_minor']);
+        self::assertSame(1, $partial['incoming_unsettled_count']);
+        self::assertSame(8_000, $partial['uncovered'][0]['uncovered_minor']);
+
+        $tooLargeReceiptId = $this->insertBankTransaction(
+            $statementId,
+            '90.00',
+            'settlement-gate-incoming-over-capacity',
+        );
+        try {
+            $this->reconciliation->matchIncomingRefund(
+                new PayrollIncomingRefundReconciliationCommand(
+                    $this->supplierId,
+                    $incomingLiabilityId,
+                    9_000,
+                    PayrollPaymentEvidenceReference::bank(
+                        $statementId,
+                        $tooLargeReceiptId,
+                    ),
+                    'settlement-gate-incoming-over-capacity',
+                    $this->actorId,
+                ),
+            );
+            self::fail('Přijaté vratky nesmí překročit příchozí závazek.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString(
+                'překročila příchozí mzdový závazek',
+                $exception->getMessage(),
+            );
+        }
+
+        $otherSupplierId = $this->createIsolatedSupplier(
+            $this->pdo,
+            $this->supplierId,
+        );
+        try {
+            $this->reconciliation->matchIncomingRefund(
+                new PayrollIncomingRefundReconciliationCommand(
+                    $otherSupplierId,
+                    $incomingLiabilityId,
+                    1_000,
+                    PayrollPaymentEvidenceReference::bank(
+                        $statementId,
+                        $receiptId,
+                    ),
+                    'settlement-gate-incoming-wrong-tenant',
+                    $this->actorId,
+                ),
+            );
+            self::fail('Cizí firma nesmí použít příchozí mzdový závazek.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString(
+                'nebyl nalezen v aktuální firmě',
+                $exception->getMessage(),
+            );
+        }
+
+        $reversalId = $this->insertBankTransaction(
+            $statementId,
+            '-50.00',
+            'settlement-gate-incoming-partial-reversal',
+        );
+        $reversal = $this->reconciliation->reverseIncomingRefund(
+            new PayrollPaymentReversalCommand(
+                $this->supplierId,
+                $match->id,
+                5_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $reversalId,
+                ),
+                'settlement-gate-incoming-partial-reversal',
+                $this->actorId,
+            ),
+        );
+        self::assertSame(-5_000, $reversal->amountMinor);
+        self::assertSame($match->id, $reversal->sourceMatchId);
+
+        $afterReversal = $this->settlement->inspect(
+            $this->supplierId,
+            $correctionRevisionId,
+        );
+        self::assertSame(107_000, $afterReversal['settled_minor']);
+        self::assertSame(
+            13_000,
+            $afterReversal['uncovered'][0]['uncovered_minor'],
+        );
+
+        $remainderId = $this->insertBankTransaction(
+            $statementId,
+            '130.00',
+            'settlement-gate-incoming-remainder',
+        );
+        $this->reconciliation->matchIncomingRefund(
+            new PayrollIncomingRefundReconciliationCommand(
+                $this->supplierId,
+                $incomingLiabilityId,
+                13_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $statementId,
+                    $remainderId,
+                ),
+                'settlement-gate-incoming-remainder',
+                $this->actorId,
+            ),
+        );
+        $settled = $this->settlement->inspect(
+            $this->supplierId,
+            $correctionRevisionId,
+        );
+        self::assertSame(120_000, $settled['settled_minor']);
+        self::assertSame([], $settled['uncovered']);
+    }
+
+    public function testIncomingRefundAcceptsPostedCashReceiptAndItsReversal(): void
+    {
+        [$correctionRevisionId, $incomingLiabilityId] =
+            $this->insertIncomingCorrectionLiability(20_000);
+        $registerId = $this->seedCashRegister(
+            $this->pdo,
+            $this->supplierId,
+            'settlement-gate-incoming-cash',
+        );
+        $this->pdo->prepare(
+            'INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, doc_number,
+                 issue_date, description, total_amount, currency_code,
+                 counter_account_code, status)
+             VALUES (?, ?, "in", "other", ?, "2099-01-22",
+                     "Syntetická přijatá mzdová vratka", 200.00, "CZK",
+                     "331", "posted")',
+        )->execute([
+            $this->supplierId,
+            $registerId,
+            "PPD-INCOMING-{$incomingLiabilityId}",
+        ]);
+        $cashDocumentId = (int) $this->pdo->lastInsertId();
+
+        $match = $this->reconciliation->matchIncomingRefund(
+            new PayrollIncomingRefundReconciliationCommand(
+                $this->supplierId,
+                $incomingLiabilityId,
+                20_000,
+                PayrollPaymentEvidenceReference::cash($cashDocumentId),
+                'settlement-gate-incoming-cash',
+                $this->actorId,
+            ),
+        );
+        self::assertSame('cash', $match->evidenceKind);
+        self::assertSame(
+            20_000,
+            $this->settlement->inspect(
+                $this->supplierId,
+                $correctionRevisionId,
+            )['settled_minor'],
+        );
+
+        $this->pdo->prepare(
+            'UPDATE cash_documents SET status = "reversed" WHERE id = ?',
+        )->execute([$cashDocumentId]);
+        $reversal = $this->reconciliation->reverseIncomingRefund(
+            new PayrollPaymentReversalCommand(
+                $this->supplierId,
+                $match->id,
+                20_000,
+                PayrollPaymentEvidenceReference::cash($cashDocumentId),
+                'settlement-gate-incoming-cash-reversal',
+                $this->actorId,
+            ),
+        );
+        self::assertSame(-20_000, $reversal->amountMinor);
+        $coverage = $this->settlement->inspect(
+            $this->supplierId,
+            $correctionRevisionId,
+        );
+        self::assertSame(0, $coverage['settled_minor']);
+        self::assertSame(1, $coverage['incoming_unsettled_count']);
     }
 
     public function testRevisionFromAnotherTenantFailsClosed(): void

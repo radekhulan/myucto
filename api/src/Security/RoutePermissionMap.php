@@ -216,7 +216,7 @@ final class RoutePermissionMap
         // samostatné právo by zamklo hledání a nechalo otevřený celý seznam.
         ['GET', '#^/api/payroll/payments/reconciliation/options$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],
-        ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals)$#', 'payroll.payments', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals|incoming-refunds|incoming-refund-reversals)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/batches/[0-9]+/exports$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/[0-9]+/download-grants$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/download$#', 'payroll.payments', AccessLevel::WRITE],

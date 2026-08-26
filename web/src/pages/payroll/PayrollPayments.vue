@@ -5,6 +5,7 @@ import { useRoute } from 'vue-router'
 import { payrollApi, type PayrollRun } from '@/api/payroll'
 import {
   payrollPaymentsApi,
+  type PayrollIncomingRefundLiability,
   type PayrollPayerOption,
   type PayrollPaymentAllocation,
   type PayrollPaymentBatch,
@@ -84,6 +85,8 @@ const batches = ref<PayrollPaymentBatch[]>([])
  */
 const allocations = ref<PayrollPaymentAllocation[]>([])
 const allocationsTruncated = ref(false)
+const incomingLiabilities = ref<PayrollIncomingRefundLiability[]>([])
+const incomingLiabilitiesTruncated = ref(false)
 const paymentMatches = ref<PayrollPaymentMatch[]>([])
 const reversibleMatchOptions = ref<PayrollPaymentMatch[]>([])
 const bankEvidence = ref<PayrollPaymentEvidence[]>([])
@@ -99,6 +102,12 @@ const matchEvidenceSearching = ref(false)
 const reversalEvidenceSearchResults = ref<PayrollPaymentEvidence[]>([])
 const reversalEvidenceSearchTruncated = ref(false)
 const reversalEvidenceSearching = ref(false)
+const incomingLiabilitySearchResults = ref<PayrollIncomingRefundLiability[]>([])
+const incomingLiabilitySearchTruncated = ref(false)
+const incomingLiabilitySearching = ref(false)
+const incomingEvidenceSearchResults = ref<PayrollPaymentEvidence[]>([])
+const incomingEvidenceSearchTruncated = ref(false)
+const incomingEvidenceSearching = ref(false)
 /*
  * Vybraná položka se drží jako CELÝ objekt, ne jen id: v serverovém režimu
  * zmizí z nabídky, jakmile uživatel napíše jiný dotaz, a bez uloženého objektu
@@ -107,6 +116,8 @@ const reversalEvidenceSearching = ref(false)
 const pickedAllocation = ref<PayrollPaymentAllocation | null>(null)
 const pickedMatchEvidence = ref<PayrollPaymentEvidence | null>(null)
 const pickedReversalEvidence = ref<PayrollPaymentEvidence | null>(null)
+const pickedIncomingLiability = ref<PayrollIncomingRefundLiability | null>(null)
+const pickedIncomingEvidence = ref<PayrollPaymentEvidence | null>(null)
 const selectedIds = ref<number[]>([])
 const exportFormat = ref<'abo' | 'sepa' | 'manual' | null>(null)
 const payerReference = ref<string | null>(null)
@@ -118,6 +129,12 @@ const selectedSourceMatchId = ref<number | null>(null)
 const selectedReversalEvidence = ref<string | null>(null)
 const reversalAmount = ref('')
 const reversing = ref(false)
+const selectedIncomingLiabilityId = ref<number | null>(null)
+const incomingEvidenceKind = ref<'bank' | 'cash'>('bank')
+const selectedIncomingEvidence = ref<string | null>(null)
+const incomingAmount = ref('')
+const incomingConfirmed = ref(false)
+const matchingIncoming = ref(false)
 let loadSequence = 0
 const pendingExportKeys = new Map<number, string>()
 const pendingReconciliationKeys = new Map<string, string>()
@@ -268,6 +285,18 @@ const allocationPool = computed(() => {
 const selectedAllocation = computed(() =>
   allocationPool.value.get(selectedAllocationId.value ?? -1) ?? null,
 )
+const incomingLiabilityPool = computed(() => {
+  const pool = new Map<number, PayrollIncomingRefundLiability>()
+  for (const item of incomingLiabilities.value) pool.set(item.id, item)
+  for (const item of incomingLiabilitySearchResults.value) pool.set(item.id, item)
+  if (pickedIncomingLiability.value) {
+    pool.set(pickedIncomingLiability.value.id, pickedIncomingLiability.value)
+  }
+  return pool
+})
+const selectedIncomingLiability = computed(() =>
+  incomingLiabilityPool.value.get(selectedIncomingLiabilityId.value ?? -1) ?? null,
+)
 // Nabídka storna se bere ze serverem vrácené množiny vratných událostí, ne
 // ze zobrazené stránky historie — jinak by šlo stornovat jen to, co má
 // uživatel zrovna na obrazovce.
@@ -327,6 +356,24 @@ const reversalEvidenceCandidates = computed(() => {
     && item.available_reversal_minor > 0,
   )
 })
+const incomingEvidenceRemote = computed(() => incomingEvidenceKind.value === 'bank'
+  ? bankEvidenceTruncated.value
+  : cashEvidenceTruncated.value)
+const incomingEvidenceCandidates = computed(() => {
+  const liability = selectedIncomingLiability.value
+  if (!liability) return []
+  if (incomingEvidenceRemote.value) return incomingEvidenceSearchResults.value
+  const evidence = incomingEvidenceKind.value === 'bank'
+    ? bankEvidence.value
+    : cashEvidence.value
+  return evidence.filter(item =>
+    item.kind === incomingEvidenceKind.value
+    && item.currency_code === liability.currency_code
+    && item.direction === 'incoming'
+    && item.available_match_minor > 0
+    && (item.kind !== 'cash' || item.status === 'posted'),
+  )
+})
 const allocationOptionSource = computed(() => allocationsTruncated.value
   ? allocationSearchResults.value
   : allocations.value)
@@ -355,6 +402,32 @@ const sourceMatchSelectOptions = computed(() => reversibleMatches.value.map(
 const reversalEvidenceSelectOptions = computed(() =>
   reversalEvidenceCandidates.value.map(evidenceOption),
 )
+function incomingLiabilityOption(item: PayrollIncomingRefundLiability) {
+  return {
+    value: item.id,
+    label: item.employee_name || t('payroll.payments.company'),
+    secondary: `${kindLabel(item.liability_kind)} · ${formatMoney(
+      item.remaining_minor,
+      item.currency_code,
+    )}`,
+  }
+}
+const incomingLiabilityOptionSource = computed(() =>
+  incomingLiabilitiesTruncated.value
+    ? incomingLiabilitySearchResults.value
+    : incomingLiabilities.value,
+)
+const incomingLiabilitySelectOptions = computed(() =>
+  incomingLiabilityOptionSource.value.map(incomingLiabilityOption),
+)
+const selectedIncomingLiabilityOption = computed(() =>
+  selectedIncomingLiability.value
+    ? incomingLiabilityOption(selectedIncomingLiability.value)
+    : null,
+)
+const incomingEvidenceSelectOptions = computed(() =>
+  incomingEvidenceCandidates.value.map(evidenceOption),
+)
 // Vybraný důkaz se hledá v nabídce, a když v ní není (server ji mezitím zúžil
 // jiným dotazem), použije se zapamatovaný objekt. Bez toho by po přepsání
 // hledání spadl limit částky na nulu a tlačítko by zšedlo bez důvodu.
@@ -376,6 +449,20 @@ const selectedReversalEvidenceItem = computed(() =>
     ? pickedReversalEvidence.value
     : null),
 )
+const selectedIncomingEvidenceItem = computed(() =>
+  incomingEvidenceCandidates.value.find(
+    item => evidenceKey(item) === selectedIncomingEvidence.value,
+  )
+  ?? (pickedIncomingEvidence.value
+    && evidenceKey(pickedIncomingEvidence.value) === selectedIncomingEvidence.value
+    ? pickedIncomingEvidence.value
+    : null),
+)
+const selectedIncomingEvidenceOption = computed(() =>
+  selectedIncomingEvidenceItem.value
+    ? evidenceOption(selectedIncomingEvidenceItem.value)
+    : null,
+)
 const matchLimitMinor = computed(() => Math.min(
   selectedAllocation.value?.remaining_minor ?? 0,
   selectedMatchEvidenceItem.value?.available_match_minor ?? 0,
@@ -383,6 +470,10 @@ const matchLimitMinor = computed(() => Math.min(
 const reversalLimitMinor = computed(() => Math.min(
   selectedSourceMatch.value?.reversible_minor ?? 0,
   selectedReversalEvidenceItem.value?.available_reversal_minor ?? 0,
+))
+const incomingLimitMinor = computed(() => Math.min(
+  selectedIncomingLiability.value?.remaining_minor ?? 0,
+  selectedIncomingEvidenceItem.value?.available_match_minor ?? 0,
 ))
 const canMatch = computed(() =>
   auth.canWrite('payroll.payments')
@@ -397,6 +488,14 @@ const canReverse = computed(() =>
   && selectedReversalEvidenceItem.value !== null
   && parseMinor(reversalAmount.value) > 0
   && parseMinor(reversalAmount.value) <= reversalLimitMinor.value,
+)
+const canMatchIncoming = computed(() =>
+  auth.canWrite('payroll.payments')
+  && incomingConfirmed.value
+  && selectedIncomingLiability.value !== null
+  && selectedIncomingEvidenceItem.value !== null
+  && parseMinor(incomingAmount.value) > 0
+  && parseMinor(incomingAmount.value) <= incomingLimitMinor.value,
 )
 
 function signed(item: PayrollPaymentLiability, amount: number): number {
@@ -562,6 +661,53 @@ async function searchReversalEvidenceOptions(query: string): Promise<void> {
   }
 }
 
+async function searchIncomingLiabilityOptions(query: string): Promise<void> {
+  if (!incomingLiabilitiesTruncated.value) return
+  incomingLiabilitySearching.value = true
+  try {
+    const result = await payrollPaymentsApi.searchOptions({
+      period: period.value,
+      kind: 'incoming_liabilities',
+      q: query,
+    })
+    incomingLiabilitySearchResults.value =
+      result.items as PayrollIncomingRefundLiability[]
+    incomingLiabilitySearchTruncated.value = result.truncated
+  } catch (error) {
+    incomingLiabilitySearchResults.value = []
+    incomingLiabilitySearchTruncated.value = false
+    toast.error(apiErrorMessage(error, t('payroll.payments.options_failed')))
+  } finally {
+    incomingLiabilitySearching.value = false
+  }
+}
+
+async function searchIncomingEvidenceOptions(query: string): Promise<void> {
+  const liability = selectedIncomingLiability.value
+  if (!liability || !incomingEvidenceRemote.value) return
+  incomingEvidenceSearching.value = true
+  try {
+    const result = await payrollPaymentsApi.searchOptions({
+      period: period.value,
+      kind: incomingEvidenceKind.value === 'bank'
+        ? 'bank_evidence'
+        : 'cash_evidence',
+      q: query,
+      currency: liability.currency_code,
+      direction: 'incoming',
+      usage: 'match',
+    })
+    incomingEvidenceSearchResults.value = result.items as PayrollPaymentEvidence[]
+    incomingEvidenceSearchTruncated.value = result.truncated
+  } catch (error) {
+    incomingEvidenceSearchResults.value = []
+    incomingEvidenceSearchTruncated.value = false
+    toast.error(apiErrorMessage(error, t('payroll.payments.options_failed')))
+  } finally {
+    incomingEvidenceSearching.value = false
+  }
+}
+
 function parseMinor(value: string): number {
   const normalized = value.trim().replace(/\s+/g, '').replace(',', '.')
   const match = normalized.match(/^(0|[1-9][0-9]*)(?:\.([0-9]{1,2}))?$/)
@@ -659,6 +805,9 @@ async function load(): Promise<void> {
       batches.value = batchList.items
       allocations.value = reconciliation.allocations
       allocationsTruncated.value = reconciliation.allocations_truncated
+      incomingLiabilities.value = reconciliation.incoming_liabilities
+      incomingLiabilitiesTruncated.value =
+        reconciliation.incoming_liabilities_truncated
       paymentMatches.value = reconciliation.matches
       matchTotal.value = reconciliation.matches_total
       reversibleMatchOptions.value = reconciliation.reversible_matches
@@ -672,6 +821,10 @@ async function load(): Promise<void> {
       matchEvidenceSearchTruncated.value = false
       reversalEvidenceSearchResults.value = []
       reversalEvidenceSearchTruncated.value = false
+      incomingLiabilitySearchResults.value = []
+      incomingLiabilitySearchTruncated.value = false
+      incomingEvidenceSearchResults.value = []
+      incomingEvidenceSearchTruncated.value = false
       // Výběr se ruší jen tehdy, když nabídka NENÍ oříznutá. U oříznuté je
       // „není v poslané nabídce" bezcenná informace: alokace může existovat
       // a jen se do stropu nevešla.
@@ -687,6 +840,14 @@ async function load(): Promise<void> {
         item => item.id === selectedSourceMatchId.value,
       )) {
         selectedSourceMatchId.value = null
+      }
+      if (!reconciliation.incoming_liabilities_truncated
+        && !reconciliation.incoming_liabilities.some(
+          item => item.id === selectedIncomingLiabilityId.value,
+        )
+      ) {
+        selectedIncomingLiabilityId.value = null
+        pickedIncomingLiability.value = null
       }
       selectedIds.value = selectedIds.value.filter(id =>
         liabilityList.items.some(item => item.id === id),
@@ -892,6 +1053,39 @@ async function matchPayment(): Promise<void> {
   }
 }
 
+async function matchIncomingRefund(): Promise<void> {
+  const liability = selectedIncomingLiability.value
+  const evidence = selectedIncomingEvidenceItem.value
+  const amountMinor = parseMinor(incomingAmount.value)
+  if (!liability || !evidence || !canMatchIncoming.value || matchingIncoming.value) {
+    return
+  }
+  const scope = `incoming-${liability.id}-${evidenceKey(evidence)}-${amountMinor}`
+  matchingIncoming.value = true
+  try {
+    await payrollPaymentsApi.matchIncomingRefund({
+      liability_id: liability.id,
+      amount_minor: amountMinor,
+      evidence: evidencePayload(evidence),
+      idempotency_key: reconciliationKey(scope),
+    })
+    pendingReconciliationKeys.delete(scope)
+    toast.success(t('payroll.payments.settlements.incoming_success'))
+    selectedIncomingLiabilityId.value = null
+    selectedIncomingEvidence.value = null
+    incomingAmount.value = ''
+    incomingConfirmed.value = false
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.payments.settlements.incoming_failed'),
+    ))
+  } finally {
+    matchingIncoming.value = false
+  }
+}
+
 async function reversePayment(): Promise<void> {
   const source = selectedSourceMatch.value
   const evidence = selectedReversalEvidenceItem.value
@@ -900,7 +1094,10 @@ async function reversePayment(): Promise<void> {
   const scope = `reverse-${source.id}-${evidenceKey(evidence)}-${amountMinor}`
   reversing.value = true
   try {
-    await payrollPaymentsApi.reverse({
+    const reverse = source.allocation_id === null
+      ? payrollPaymentsApi.reverseIncomingRefund
+      : payrollPaymentsApi.reverse
+    await reverse({
       source_match_id: source.id,
       amount_minor: amountMinor,
       evidence: evidencePayload(evidence),
@@ -997,6 +1194,52 @@ watch(selectedReversalEvidence, (key) => {
     item => evidenceKey(item) === key,
   )
   if (found) pickedReversalEvidence.value = found
+})
+
+watch(selectedIncomingLiabilityId, (id) => {
+  pickedIncomingLiability.value = id === null
+    ? null
+    : incomingLiabilityPool.value.get(id) ?? pickedIncomingLiability.value
+  selectedIncomingEvidence.value = null
+  pickedIncomingEvidence.value = null
+  incomingEvidenceSearchResults.value = []
+  incomingEvidenceSearchTruncated.value = false
+  incomingAmount.value = ''
+  incomingConfirmed.value = false
+  if (incomingEvidenceRemote.value) void searchIncomingEvidenceOptions('')
+})
+
+watch(incomingEvidenceKind, () => {
+  selectedIncomingEvidence.value = null
+  pickedIncomingEvidence.value = null
+  incomingEvidenceSearchResults.value = []
+  incomingEvidenceSearchTruncated.value = false
+  incomingAmount.value = ''
+  incomingConfirmed.value = false
+  if (incomingEvidenceRemote.value) void searchIncomingEvidenceOptions('')
+})
+
+watch(selectedIncomingEvidence, (key) => {
+  if (key === null) {
+    pickedIncomingEvidence.value = null
+    incomingAmount.value = ''
+    incomingConfirmed.value = false
+    return
+  }
+  const found = incomingEvidenceCandidates.value.find(
+    item => evidenceKey(item) === key,
+  )
+  if (found) pickedIncomingEvidence.value = found
+  incomingAmount.value = incomingLimitMinor.value > 0
+    ? minorInput(incomingLimitMinor.value)
+    : ''
+  incomingConfirmed.value = false
+})
+
+watch(incomingAmount, (value, previous) => {
+  if (value !== previous && incomingConfirmed.value) {
+    incomingConfirmed.value = false
+  }
 })
 
 watch([selectedAllocationId, selectedMatchEvidence], () => {
@@ -1578,6 +1821,126 @@ onMounted(load)
           class="grid grid-cols-1 gap-4 xl:grid-cols-2"
         >
           <form
+            data-test="incoming-refund-form"
+            class="rounded-xl border border-payroll-300 bg-surface p-5 shadow-sm xl:col-span-2"
+            @submit.prevent="matchIncomingRefund"
+          >
+            <h2 class="font-semibold text-neutral-900">
+              {{ t('payroll.payments.settlements.incoming_title') }}
+            </h2>
+            <p class="mt-1 max-w-3xl text-sm text-neutral-500">
+              {{ t('payroll.payments.settlements.incoming_hint') }}
+            </p>
+            <div class="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium text-neutral-700">
+                  {{ t('payroll.payments.settlements.incoming_liability') }}
+                </span>
+                <SearchableSelect
+                  v-model="selectedIncomingLiabilityId"
+                  :options="incomingLiabilitySelectOptions"
+                  :selected-option="selectedIncomingLiabilityOption"
+                  accent="payroll"
+                  :remote="incomingLiabilitiesTruncated"
+                  :loading="incomingLiabilitySearching"
+                  :truncated="incomingLiabilitiesTruncated && incomingLiabilitySearchTruncated"
+                  :truncated-label="t('payroll.payments.settlements.options_truncated')"
+                  :loading-label="t('common.loading')"
+                  :placeholder="t('payroll.payments.settlements.select_incoming_liability')"
+                  :no-results-label="t('payroll.payments.settlements.no_incoming_liabilities')"
+                  @search="searchIncomingLiabilityOptions"
+                />
+              </label>
+              <fieldset>
+                <legend class="mb-1 block text-sm font-medium text-neutral-700">
+                  {{ t('payroll.payments.settlements.incoming_evidence_kind') }}
+                </legend>
+                <div class="flex min-h-10 flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-neutral-300 px-3 py-2">
+                  <label class="inline-flex items-center gap-2 text-sm text-neutral-800">
+                    <input
+                      v-model="incomingEvidenceKind"
+                      type="radio"
+                      value="bank"
+                      class="text-payroll-600 focus:ring-payroll-500"
+                    >
+                    {{ t('payroll.payments.settlements.incoming_evidence_bank') }}
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-sm text-neutral-800">
+                    <input
+                      v-model="incomingEvidenceKind"
+                      type="radio"
+                      value="cash"
+                      class="text-payroll-600 focus:ring-payroll-500"
+                    >
+                    {{ t('payroll.payments.settlements.incoming_evidence_cash') }}
+                  </label>
+                </div>
+              </fieldset>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium text-neutral-700">
+                  {{ t('payroll.payments.settlements.incoming_evidence') }}
+                </span>
+                <SearchableSelect
+                  v-model="selectedIncomingEvidence"
+                  :options="incomingEvidenceSelectOptions"
+                  :selected-option="selectedIncomingEvidenceOption"
+                  accent="payroll"
+                  :disabled="selectedIncomingLiability === null"
+                  :remote="incomingEvidenceRemote"
+                  :loading="incomingEvidenceSearching"
+                  :truncated="incomingEvidenceRemote && incomingEvidenceSearchTruncated"
+                  :truncated-label="t('payroll.payments.settlements.options_truncated')"
+                  :loading-label="t('common.loading')"
+                  :placeholder="t('payroll.payments.settlements.select_incoming_evidence')"
+                  :no-results-label="t('payroll.payments.settlements.no_incoming_evidence')"
+                  @search="searchIncomingEvidenceOptions"
+                />
+              </label>
+              <label class="block">
+                <span class="mb-1 block text-sm font-medium text-neutral-700">
+                  {{ t('payroll.payments.settlements.incoming_amount') }}
+                </span>
+                <input
+                  v-model="incomingAmount"
+                  type="text"
+                  inputmode="decimal"
+                  class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm focus:border-payroll-500 focus:ring-payroll-500/20"
+                  :placeholder="t('payroll.payments.settlements.amount_placeholder')"
+                >
+              </label>
+              <label class="flex items-start gap-3 rounded-lg border border-warning-300 bg-warning-50 p-3 lg:col-span-2">
+                <input
+                  v-model="incomingConfirmed"
+                  data-test="incoming-refund-confirmation"
+                  type="checkbox"
+                  class="mt-0.5 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
+                >
+                <span class="text-sm font-medium text-warning-900">
+                  {{ t('payroll.payments.settlements.incoming_confirmation') }}
+                </span>
+              </label>
+              <div class="flex flex-wrap items-center justify-between gap-3 lg:col-span-2">
+                <p v-if="selectedIncomingLiability && incomingEvidenceCandidates.length === 0" class="text-sm text-warning-700">
+                  {{ t('payroll.payments.settlements.no_incoming_compatible_evidence') }}
+                </p>
+                <span v-else />
+                <button
+                  type="submit"
+                  :class="btnFilled('success')"
+                  :disabled="!canMatchIncoming || matchingIncoming"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.check" />
+                  </svg>
+                  {{ matchingIncoming
+                    ? t('payroll.payments.settlements.incoming_matching')
+                    : t('payroll.payments.settlements.incoming_match') }}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <form
             class="rounded-xl border border-neutral-200 bg-surface p-5 shadow-sm"
             @submit.prevent="matchPayment"
           >
@@ -1658,6 +2021,7 @@ onMounted(load)
           </form>
 
           <form
+            data-test="payment-reversal-form"
             class="rounded-xl border border-neutral-200 bg-surface p-5 shadow-sm"
             @submit.prevent="reversePayment"
           >

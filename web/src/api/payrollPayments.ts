@@ -151,6 +151,19 @@ export interface PayrollPaymentAllocation {
   remaining_minor: number
 }
 
+export interface PayrollIncomingRefundLiability {
+  id: number
+  liability_reference: string
+  liability_kind: string
+  direction: 'incoming'
+  due_on: string
+  currency_code: string
+  employee_name: string | null
+  amount_minor: number
+  settled_minor: number
+  remaining_minor: number
+}
+
 export interface PayrollPaymentEvidence {
   kind: 'bank' | 'cash'
   bank_statement_id: number | null
@@ -169,7 +182,8 @@ export interface PayrollPaymentEvidence {
 
 export interface PayrollPaymentMatch {
   id: number
-  allocation_id: number
+  allocation_id: number | null
+  liability_id: number
   event_kind: 'matched' | 'reversed'
   source_match_id: number | null
   amount_minor: number
@@ -181,7 +195,7 @@ export interface PayrollPaymentMatch {
   evidence_amount_minor: number
   evidence_currency_code: string
   evidence_fact_hash: string
-  batch_reference: string
+  batch_reference: string | null
   liability_kind: string
   /**
    * Směr a měna PŘÍSLUŠNÉ ALOKACE jedou s událostí. Nabídka alokací je od
@@ -204,6 +218,8 @@ export interface PayrollPaymentReconciliation {
    */
   allocations: PayrollPaymentAllocation[]
   allocations_truncated: boolean
+  incoming_liabilities: PayrollIncomingRefundLiability[]
+  incoming_liabilities_truncated: boolean
   offered_limit: number
   matches: PayrollPaymentMatch[]
   matches_total: number
@@ -222,13 +238,18 @@ export interface PayrollPaymentReconciliation {
 
 export type PayrollPaymentOptionKind =
   | 'allocations'
+  | 'incoming_liabilities'
   | 'bank_evidence'
   | 'cash_evidence'
 
 export interface PayrollPaymentOptionSearch {
   kind: PayrollPaymentOptionKind
   /** Nejlepší shody, nejvýš `limit` kusů. */
-  items: Array<PayrollPaymentAllocation | PayrollPaymentEvidence>
+  items: Array<
+    | PayrollPaymentAllocation
+    | PayrollIncomingRefundLiability
+    | PayrollPaymentEvidence
+  >
   /** Shod je víc, než kolik se vešlo — nabídka NENÍ úplná. */
   truncated: boolean
   limit: number
@@ -236,7 +257,8 @@ export interface PayrollPaymentOptionSearch {
 
 export interface PayrollPaymentReconciliationEventResult {
   id: number
-  allocation_id: number
+  allocation_id: number | null
+  liability_id?: number
   event_kind: 'matched' | 'reversed'
   source_match_id: number | null
   amount_minor: number
@@ -334,6 +356,36 @@ export const payrollPaymentsApi = {
   }) =>
     api.post<{ event: PayrollPaymentReconciliationEventResult }>(
       '/payroll/payments/reconciliation/reversals',
+      payload,
+    ).then(response => response.data.event),
+  matchIncomingRefund: (payload: {
+    liability_id: number
+    amount_minor: number
+    evidence: {
+      kind: 'bank' | 'cash'
+      bank_statement_id?: number
+      bank_transaction_id?: number
+      cash_document_id?: number
+    }
+    idempotency_key: string
+  }) =>
+    api.post<{ event: PayrollPaymentReconciliationEventResult }>(
+      '/payroll/payments/reconciliation/incoming-refunds',
+      payload,
+    ).then(response => response.data.event),
+  reverseIncomingRefund: (payload: {
+    source_match_id: number
+    amount_minor: number
+    evidence: {
+      kind: 'bank' | 'cash'
+      bank_statement_id?: number
+      bank_transaction_id?: number
+      cash_document_id?: number
+    }
+    idempotency_key: string
+  }) =>
+    api.post<{ event: PayrollPaymentReconciliationEventResult }>(
+      '/payroll/payments/reconciliation/incoming-refund-reversals',
       payload,
     ).then(response => response.data.event),
   generateExport: (batchId: number, idempotencyKey: string) =>

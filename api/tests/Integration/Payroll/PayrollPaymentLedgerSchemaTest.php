@@ -48,6 +48,7 @@ final class PayrollPaymentLedgerSchemaTest extends TestCase
         self::assertContains('bank_statement_id', $matchColumns);
         self::assertContains('bank_transaction_id', $matchColumns);
         self::assertContains('cash_document_id', $matchColumns);
+        self::assertContains('liability_id', $matchColumns);
         self::assertNotContains('planned_payment_date', $matchColumns);
 
         $matchCreate = (string) $this->query(
@@ -56,6 +57,14 @@ final class PayrollPaymentLedgerSchemaTest extends TestCase
         )->fetch(PDO::FETCH_NUM)[1];
         self::assertStringContainsString(
             'FOREIGN KEY (`supplier_id`, `allocation_id`)',
+            $matchCreate,
+        );
+        self::assertStringContainsString(
+            'FOREIGN KEY (`supplier_id`, `liability_id`)',
+            $matchCreate,
+        );
+        self::assertMatchesRegularExpression(
+            '/`allocation_id` bigint\(20\) unsigned DEFAULT NULL/i',
             $matchCreate,
         );
         self::assertStringContainsString(
@@ -87,6 +96,47 @@ final class PayrollPaymentLedgerSchemaTest extends TestCase
         }
 
         $connection->close();
+    }
+
+    public function testIncomingRefundMigrationRestoresImmutableGuardAfterBackfill(): void
+    {
+        $path = dirname(__DIR__, 4)
+            . '/db/migrations/1559_payroll_incoming_refund_reconciliation.sql';
+        $migration = file_get_contents($path);
+        self::assertIsString($migration);
+
+        $drop = strpos(
+            $migration,
+            'DROP TRIGGER IF EXISTS trg_payroll_payment_match_immutable_update;',
+        );
+        $backfill = strpos(
+            $migration,
+            'UPDATE payroll_payment_matches payment_match',
+        );
+        $temporaryGuard = strpos(
+            $migration,
+            'CREATE TRIGGER trg_payroll_payment_match_immutable_update',
+        );
+        $restore = strrpos(
+            $migration,
+            'CREATE TRIGGER trg_payroll_payment_match_immutable_update',
+        );
+        self::assertIsInt($drop);
+        self::assertIsInt($backfill);
+        self::assertIsInt($temporaryGuard);
+        self::assertIsInt($restore);
+        self::assertLessThan($temporaryGuard, $drop);
+        self::assertLessThan($backfill, $temporaryGuard);
+        self::assertLessThan($backfill, $drop);
+        self::assertGreaterThan($backfill, $restore);
+        self::assertStringContainsString(
+            'OLD.liability_id IS NULL',
+            substr($migration, $temporaryGuard, $backfill - $temporaryGuard),
+        );
+        self::assertStringContainsString(
+            "SET MESSAGE_TEXT = 'Payroll payment matches are immutable';",
+            substr($migration, $restore),
+        );
     }
 
     public function testActualPaymentDateComesFromPartialBankAndCashEvidence(): void

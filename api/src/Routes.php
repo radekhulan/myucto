@@ -828,6 +828,14 @@ final class Routes
             $g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);
             $g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);
             $g->post(
+                '/payments/reconciliation/incoming-refunds',
+                [PayrollPaymentAction::class, 'matchIncomingRefund'],
+            );
+            $g->post(
+                '/payments/reconciliation/incoming-refund-reversals',
+                [PayrollPaymentAction::class, 'reverseIncomingRefund'],
+            );
+            $g->post(
                 '/payments/batches/{batchId:[0-9]+}/exports',
                 [PayrollPaymentAction::class, 'generateExport'],
             );

@@ -54,6 +54,7 @@ final class PayrollPaymentMatchRepository
     /**
      * @return array{
      *   id:int,
+     *   liability_id:int,
      *   channel:string,
      *   amount_minor:int,
      *   direction:string,
@@ -66,7 +67,8 @@ final class PayrollPaymentMatchRepository
         int $allocationId,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT allocation.id, batch.channel, allocation.amount_minor,
+            'SELECT allocation.id, allocation.liability_id,
+                    batch.channel, allocation.amount_minor,
                     liability.direction, liability.currency_code
                FROM payroll_payment_allocations allocation
                JOIN payroll_payment_items item
@@ -97,6 +99,7 @@ final class PayrollPaymentMatchRepository
 
         return [
             'id' => self::integer($row, 'id'),
+            'liability_id' => self::integer($row, 'liability_id'),
             'channel' => self::text($row, 'channel'),
             'amount_minor' => self::integer($row, 'amount_minor'),
             'direction' => self::text($row, 'direction'),
@@ -111,7 +114,54 @@ final class PayrollPaymentMatchRepository
     /**
      * @return array{
      *   id:int,
-     *   allocation_id:int,
+     *   amount_minor:int,
+     *   direction:string,
+     *   currency_code:string,
+     *   settled_minor:int
+     * }|null
+     */
+    public function lockIncomingLiability(
+        int $supplierId,
+        int $liabilityId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, amount_minor, direction, currency_code
+               FROM payroll_payment_liabilities
+              WHERE supplier_id = ? AND id = ?
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $liabilityId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::row($row, 'příchozí mzdový závazek');
+
+        $settled = $this->db->pdo()->prepare(
+            'SELECT COALESCE(SUM(amount_minor), 0)
+               FROM payroll_payment_matches
+              WHERE supplier_id = ? AND liability_id = ?
+                AND allocation_id IS NULL',
+        );
+        $settled->execute([$supplierId, $liabilityId]);
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'amount_minor' => self::integer($row, 'amount_minor'),
+            'direction' => self::text($row, 'direction'),
+            'currency_code' => self::text($row, 'currency_code'),
+            'settled_minor' => self::scalarInteger(
+                $settled->fetchColumn(),
+                'součet přijatých vratek závazku',
+            ),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
      *   event_kind:string,
      *   source_match_id:?int,
      *   amount_minor:int,
@@ -130,7 +180,8 @@ final class PayrollPaymentMatchRepository
         int $matchId,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, allocation_id, event_kind, source_match_id,
+            'SELECT id, allocation_id, liability_id,
+                    event_kind, source_match_id,
                     amount_minor, bank_statement_id, bank_transaction_id,
                     cash_document_id, actual_payment_date,
                     evidence_amount_minor, evidence_currency_code,
@@ -165,7 +216,8 @@ final class PayrollPaymentMatchRepository
     /**
      * @return array{
      *   id:int,
-     *   allocation_id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
      *   event_kind:string,
      *   source_match_id:?int,
      *   amount_minor:int,
@@ -184,7 +236,8 @@ final class PayrollPaymentMatchRepository
         string $idempotencyKeyHash,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, allocation_id, event_kind, source_match_id,
+            'SELECT id, allocation_id, liability_id,
+                    event_kind, source_match_id,
                     amount_minor, bank_statement_id, bank_transaction_id,
                     cash_document_id, actual_payment_date,
                     evidence_amount_minor, evidence_currency_code,
@@ -390,7 +443,8 @@ final class PayrollPaymentMatchRepository
 
     public function insert(
         int $supplierId,
-        int $allocationId,
+        ?int $allocationId,
+        int $liabilityId,
         string $eventKind,
         ?int $sourceMatchId,
         int $amountMinor,
@@ -402,14 +456,16 @@ final class PayrollPaymentMatchRepository
     ): int {
         $statement = $this->db->pdo()->prepare(
             'INSERT INTO payroll_payment_matches
-                (supplier_id, allocation_id, event_kind, source_match_id,
+                (supplier_id, allocation_id, liability_id,
+                 event_kind, source_match_id,
                  amount_minor, bank_statement_id, bank_transaction_id,
                  cash_document_id, idempotency_key_hash, matched_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         );
         $statement->execute([
             $supplierId,
             $allocationId,
+            $liabilityId,
             $eventKind,
             $sourceMatchId,
             $amountMinor,
@@ -426,7 +482,8 @@ final class PayrollPaymentMatchRepository
     /**
      * @return array{
      *   id:int,
-     *   allocation_id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
      *   event_kind:string,
      *   source_match_id:?int,
      *   amount_minor:int,
@@ -446,7 +503,11 @@ final class PayrollPaymentMatchRepository
 
         return [
             'id' => self::integer($row, 'id'),
-            'allocation_id' => self::integer($row, 'allocation_id'),
+            'allocation_id' => self::nullableInteger(
+                $row,
+                'allocation_id',
+            ),
+            'liability_id' => self::integer($row, 'liability_id'),
             'event_kind' => self::text($row, 'event_kind'),
             'source_match_id' => self::nullableInteger(
                 $row,
