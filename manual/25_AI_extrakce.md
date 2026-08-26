@@ -139,20 +139,25 @@ AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI 
 čtyřmi poskytovateli, mezi kterými si každý dodavatel (tenant) vybere podle toho,
 co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci dat:
 
-- **Anthropic Claude** — BYOK (vlastní klíč z `console.anthropic.com`), modely
-  `claude-haiku-4-5` / `claude-sonnet-4-6` / `claude-opus-4-7`. Výchozí volba,
-  na kterou je AI extrakce v celém manuálu (viz výše) primárně
+- **Anthropic Claude** — BYOK (vlastní klíč z `console.anthropic.com`), výchozí
+  model `claude-haiku-4-5`; dále `claude-sonnet-5`, `claude-sonnet-4-6`,
+  `claude-opus-5`, `claude-opus-4-8`, `claude-opus-4-7` a `claude-fable-5`.
+  Výchozí volba, na kterou je AI extrakce v celém manuálu (viz výše) primárně
   odladěná — umí nativně číst PDF jako dokument (ne jen text/obrázek), takže má
   nejlepší přesnost na vícesloupcových a naskenovaných fakturách.
 - **Azure OpenAI** — vlastní Azure resource (`endpoint` + `deployment` +
   `api_version`), hodí se, pokud firma už má Azure OpenAI smlouvu nebo
   potřebuje EU rezidenci dat se smluvním zajištěním od Microsoftu.
-- **OpenAI** (přímé API) — BYOK klíč z platformy OpenAI, modely řady GPT
-  (`gpt-5`, `gpt-4.1`, `gpt-4o` a jejich `mini` varianty).
+- **OpenAI** (přímé API) — BYOK klíč z platformy OpenAI, výchozí model
+  `gpt-5.4-mini`; dále `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`,
+  `gpt-5.5`, `gpt-5.4`, `gpt-5.1`, `gpt-5`, `gpt-4.1`, `gpt-4o` a jejich
+  `mini` / `nano` varianty. Modely řady `gpt-5` interně „přemýšlejí" — bývají
+  proto výrazně pomalejší než ostatní brány (u běžné faktury desítky sekund
+  místo jednotek), přesnost je srovnatelná.
 - **Google Gemini** — BYOK klíč z Google AI Studio, výchozí model
-  `gemini-3.6-flash`; dostupné jsou také `gemini-3.5-flash`,
-  `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview`, `gemini-2.5-pro` a
-  `gemini-2.5-flash`.
+  `gemini-3.7-flash`; dostupné jsou také `gemini-3.6-flash`,
+  `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`,
+  `gemini-3.1-pro-preview` a `gemini-2.5-pro`.
 
 Nastavení je **per dodavatel** (celá firma/tenant sdílí jednoho aktivního
 poskytovatele a jeho přihlašovací údaje, ne po jednotlivých uživatelích).
@@ -247,16 +252,58 @@ poskytovatele, ne jen nad Anthropic:
   pokud u konkrétního importu nezvolíš jiný. Whitelist modelů je uzavřený —
   nelze zapsat libovolný řetězec, jen jeden z nabízených.
 - Auto-upgrade z [„Auto-upgrade modelu"](#auto-upgrade-modelu) platí analogicky
-  u všech poskytovatelů (Anthropic haiku→sonnet, OpenAI/Azure `*-mini`→plný
-  model, Gemini flash→pro) a upgrade **nikdy nepřeskočí do jiného regionu** —
-  zůstává u stejného poskytovatele a stejné rezidence dat.
+  u všech poskytovatelů a jde vždy o **jeden stupeň nahoru** po žebříčku:
+  Anthropic `haiku → sonnet → opus → fable`, OpenAI/Azure
+  `nano → mini → plný model`, Gemini `lite → flash → pro`. Stupeň, který nemá
+  ve whitelistu žádný model, se přeskočí. Upgrade **nikdy nepřeskočí do jiného
+  regionu** — zůstává u stejného poskytovatele a stejné rezidence dat.
 - Výsledek extrakce nese **provenance badge** — u naimportované faktury vidíš,
   který poskytovatel a jaký region data zpracoval (užitečné pro audit/kontrolu,
   zvlášť když je zapnuté vynucení EU rezidence).
 - Maximální velikost PDF k extrakci se liší poskytovatel od poskytovatele
   (Anthropic 32 MB, ostatní 20 MB) — u větších souborů extrakce vrátí chybu.
 
-### 25.7.4 Omezení a tipy
+### 25.7.4 Ladění extrakce — poznámky a míra uvažování
+
+Pod formulářem přihlašovacích údajů jsou dvě volby, které platí pro **celého
+dodavatele napříč poskytovateli** — nepřenastavují se při přepnutí brány:
+
+**Míra uvažování AI** rozhoduje, kolik práce si model dá, než odpoví:
+
+| Volba | Co dělá |
+|---|---|
+| **Výchozí (podle modelu)** | Neposílá poskytovateli nic navíc — chování před zavedením volby. Doporučené. |
+| **Rychle a levně** | Zkrátí uvažování. Nižší cena a latence, u složitých faktur na úkor přesnosti. |
+| **Přesně (víc uvažování)** | Nechá model uvažovat déle. Vyšší přesnost na komplikovaných dokladech, ale pomalejší a dražší. |
+
+Ne každý model to umí — `claude-haiku-4-5` a modely řady `gpt-4` volbu nemají
+a prostě ji ignorují (extrakce běží dál, jen bez efektu). U Azure OpenAI se
+volba neuplatní vůbec, protože pod deploymentem může být libovolný model.
+
+**Poznámky k extrakci** jsou volný text (max 2000 znaků), který se připojí
+k zadání pro AI. Patří sem to, co model nemá odkud vědět o *vašich* fakturách:
+
+```
+Dodavatel ACME píše variabilní symbol do pole "Reference", ne do VS.
+Faktury z Irska jsou vždy bez DPH (reverse charge).
+U Vodafonu ber částku z řádku "Celkem k úhradě", ne z rekapitulace.
+```
+
+Text jde do zadání jako **doplňující kontext, ne jako pravidlo** — nikdy
+nepřebije JSON schéma ani kontrolní logiku popsanou výše v této kapitole. Když
+si poznámka odporuje s pravidly extrakce, platí pravidla. Delší text se ořízne
+na 2000 znaků.
+
+> [!TIP]
+> Poznámky piš konkrétně a k jednomu dodavateli, ne obecně. „Buď přesnější"
+> modelu nepomůže; „faktury od ACME mají datum plnění v pravém horním rohu" ano.
+> Když se stejná chyba opakuje u jednoho dodavatele, je to přesně případ pro
+> poznámku.
+
+Obojí se ukládá tlačítkem **Uložit ladění** (je aktivní jen při skutečné změně)
+a projeví se okamžitě na další extrakci.
+
+### 25.7.5 Omezení a tipy
 
 - Aktivní poskytovatel je nastavení **celého dodavatele**, ne uživatele — změna
   se projeví pro všechny uživatele firmy okamžitě po uložení.
