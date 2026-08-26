@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterialize
 use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationResult;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentDownloadGrantService;
@@ -31,6 +32,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -48,6 +50,7 @@ final class PayrollPaymentAction
         private readonly PayrollHealthInsuranceLiabilityMaterializer $healthInsurance,
         private readonly PayrollSocialInsuranceLiabilityMaterializer $socialInsurance,
         private readonly PayrollIncomeTaxLiabilityMaterializer $incomeTax,
+        private readonly PayrollInsolvencyLiabilityMaterializer $insolvency,
         private readonly PayrollEnforcementLiabilityMaterializer $enforcement,
         private readonly PayrollRiskySavingsLiabilityMaterializer $riskySavings,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
@@ -55,6 +58,7 @@ final class PayrollPaymentAction
         private readonly PayrollPaymentExportService $exportService,
         private readonly PayrollPaymentDownloadGrantService $downloadGrants,
         private readonly PayrollModuleAccess $moduleAccess,
+        private readonly PayrollProductionGate $productionGate,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
@@ -1218,6 +1222,7 @@ final class PayrollPaymentAction
         }
         $supplierId = $this->currentSupplierId($request);
         try {
+            $this->productionGate->assertActive($supplierId);
             $result = $this->transaction(
                 function () use (
                     $supplierId,
@@ -1295,6 +1300,16 @@ final class PayrollPaymentAction
             );
         }
         $supplierId = $this->currentSupplierId($request);
+        try {
+            $this->productionGate->assertActive($supplierId);
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'payment_liability_blocked',
+                $exception->getMessage(),
+                409,
+            );
+        }
         $liabilityIds = [];
         $createdCount = 0;
         $issues = [];
@@ -1317,6 +1332,11 @@ final class PayrollPaymentAction
                     $userId,
                 ),
             'income_tax' => fn (): array => $this->incomeTax->materialize(
+                $supplierId,
+                $revisionId,
+                $userId,
+            ),
+            'insolvency' => fn (): array => $this->insolvency->materialize(
                 $supplierId,
                 $revisionId,
                 $userId,

@@ -119,6 +119,7 @@ final class RoutePermissionMapTest extends TestCase
             ['PUT', '/api/payroll/employments/42/checklist/employment_contract', 'payroll.employment.write', AccessLevel::WRITE],
             ['GET', '/api/payroll/settings/activation', 'payroll.settings', AccessLevel::READ],
             ['PUT', '/api/payroll/settings/activation', 'payroll.settings', AccessLevel::WRITE],
+            ['POST', '/api/payroll/settings/activation/production-qualification', 'payroll.settings', AccessLevel::WRITE],
             ['GET', '/api/payroll/settings/account-options', 'payroll.settings', AccessLevel::READ],
             ['GET', '/api/payroll/settings/employer', 'payroll.settings', AccessLevel::READ],
             ['PUT', '/api/payroll/settings/employer', 'payroll.settings', AccessLevel::WRITE],

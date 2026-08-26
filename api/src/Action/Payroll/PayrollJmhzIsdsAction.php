@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsRecipientCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
@@ -59,6 +61,7 @@ final class PayrollJmhzIsdsAction
     public function __construct(
         private readonly JmhzIsdsSubmissionService $isds,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /**
@@ -114,12 +117,24 @@ final class PayrollJmhzIsdsAction
         }
 
         try {
+            $supplierId = $this->currentSupplierId($request);
+            $this->productionGate->assertEnvironmentActive(
+                $supplierId,
+                $environment,
+            );
             $result = $this->isds->enqueue(
-                $this->currentSupplierId($request),
+                $supplierId,
                 $environment,
                 $this->id($args, 'submissionId'),
                 $this->userId($request),
             );
+        } catch (PayrollProductionGateException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                PayrollProductionGateException::ERROR_CODE,
+                $exception->getMessage(),
+                409,
+            ));
         } catch (JmhzTransportException $exception) {
             return $this->noStore(Json::error(
                 $response,

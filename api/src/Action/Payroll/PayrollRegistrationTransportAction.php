@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolError;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
@@ -23,6 +25,7 @@ final class PayrollRegistrationTransportAction
     public function __construct(
         private readonly PayrollRegistrationTransportService $transport,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /** @param array{submissionId:string} $args */
@@ -36,14 +39,25 @@ final class PayrollRegistrationTransportAction
             return $this->invalid($response, 'Hlavička Idempotency-Key je povinná.');
         }
 
-        return $this->run($request, $response, fn (string $environment): array =>
-            $this->transport->send(
-                $this->currentSupplierId($request),
+        return $this->run($request, $response, function (string $environment) use (
+            $request,
+            $args,
+            $key,
+        ): array {
+            $supplierId = $this->currentSupplierId($request);
+            $this->productionGate->assertEnvironmentActive(
+                $supplierId,
+                $environment,
+            );
+
+            return $this->transport->send(
+                $supplierId,
                 $environment,
                 $this->id($args, 'submissionId'),
                 $key,
                 $this->userId($request),
-            ));
+            );
+        });
     }
 
     /** @param array{submissionId:string} $args */
@@ -101,6 +115,13 @@ final class PayrollRegistrationTransportAction
         }
         try {
             return $this->noStore(Json::ok($response, $operation($environment)));
+        } catch (PayrollProductionGateException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                PayrollProductionGateException::ERROR_CODE,
+                $exception->getMessage(),
+                409,
+            ));
         } catch (JmhzTransportException $exception) {
             $status = $exception->remoteHttpStatus === 404 ? 404 : 422;
             if (str_starts_with($exception->errorCode, 'jmhz_vrep_')) {

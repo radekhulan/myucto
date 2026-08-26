@@ -9,6 +9,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolExplainer;
@@ -44,6 +46,7 @@ final class PayrollJmhzTransportAction
         private readonly JmhzProtocolExplainer $explainer,
         private readonly PayrollSubmissionTransportAttemptRepository $attempts,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /** @param array{submissionId:string} $args */
@@ -80,8 +83,14 @@ final class PayrollJmhzTransportAction
             $variableSymbol,
             $idempotencyKey,
         ): JmhzDispatchOutcome {
+            $supplierId = $this->currentSupplierId($request);
+            $this->productionGate->assertEnvironmentActive(
+                $supplierId,
+                $environment,
+            );
+
             return $this->dispatch->send(
-                $this->currentSupplierId($request),
+                $supplierId,
                 $environment,
                 $this->id($args, 'submissionId'),
                 is_string($payload) ? $payload : null,
@@ -218,6 +227,13 @@ final class PayrollJmhzTransportAction
         }
         try {
             $outcome = $operation($environment);
+        } catch (PayrollProductionGateException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                PayrollProductionGateException::ERROR_CODE,
+                $exception->getMessage(),
+                409,
+            ));
         } catch (JmhzTransportException $exception) {
             return $this->transportError($response, $exception);
         } catch (\InvalidArgumentException $exception) {

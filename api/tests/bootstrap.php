@@ -112,6 +112,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Payroll/Payment/PayrollEnforcementLiabilityMaterializer.php',
     '*/api/src/Service/Payroll/Payment/PayrollHealthInsuranceLiabilityMaterializer.php',
     '*/api/src/Service/Payroll/Payment/PayrollIncomeTaxLiabilityMaterializer.php',
+    '*/api/src/Service/Payroll/Payment/PayrollInsolvencyLiabilityMaterializer.php',
     '*/api/src/Service/Payroll/Payment/PayrollSocialInsuranceLiabilityMaterializer.php',
     '*/api/src/Service/Payroll/Settings/PayrollSetupCheckService.php',
     '*/api/src/Service/Payroll/Settings/PayrollSetupFeaturesResolver.php',

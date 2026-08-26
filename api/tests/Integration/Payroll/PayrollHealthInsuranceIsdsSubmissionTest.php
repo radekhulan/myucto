@@ -276,6 +276,24 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         );
         $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
 
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame(
+            'payroll_production_qualification_required',
+            $body['error']['code'] ?? null,
+        );
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->userId]);
+        $response = $this->gatewayAction->payrollStart(
+            $request,
+            (new ResponseFactory())->createResponse(),
+            ['id' => (string) $outboxId],
+        );
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+
         self::assertNotSame(403, $response->getStatusCode());
         self::assertNotSame(
             'payroll_gateway_outbox_forbidden',

@@ -342,6 +342,7 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/input-imports/(preview|apply)$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/settings/activation/production-qualification$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/account-options$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::WRITE],

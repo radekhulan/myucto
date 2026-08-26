@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Middleware;
 
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\PermissionMiddleware;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionChecker;
@@ -55,6 +56,49 @@ final class PermissionMiddlewareTest extends TestCase
                 ->process($this->request('GET', '/api/payroll/settings/account-options'), $this->handler())
                 ->getStatusCode(),
         );
+    }
+
+    public function testProductionQualificationRequiresPayrollSettingsWrite(): void
+    {
+        $access = new SupplierAccess(1, false, null);
+        $path = '/api/payroll/settings/activation/production-qualification';
+        $writer = new EffectiveRole(
+            2,
+            'Správce mzdového nastavení',
+            'staff',
+            true,
+            ['payroll.settings' => AccessLevel::WRITE->value],
+        );
+        self::assertSame(
+            204,
+            $this->middleware($writer, $access)
+                ->process($this->request('POST', $path), $this->handler())
+                ->getStatusCode(),
+        );
+
+        foreach ([
+            new EffectiveRole(
+                3,
+                'Čtenář mzdového nastavení',
+                'staff',
+                true,
+                ['payroll.settings' => AccessLevel::READ->value],
+            ),
+            new EffectiveRole(
+                4,
+                'Schvalovatel mezd',
+                'staff',
+                true,
+                ['payroll.approve' => AccessLevel::WRITE->value],
+            ),
+        ] as $role) {
+            self::assertSame(
+                403,
+                $this->middleware($role, $access)
+                    ->process($this->request('POST', $path), $this->handler())
+                    ->getStatusCode(),
+            );
+        }
     }
 
     public function testMissingMembershipHasDedicatedError(): void

@@ -76,6 +76,11 @@ final class PayrollPaymentApiTest extends TestCase
         $pdo->prepare(
             'UPDATE supplier SET payroll_enabled = 1 WHERE id = ?',
         )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->userId]);
     }
 
     protected function tearDown(): void
@@ -293,6 +298,7 @@ final class PayrollPaymentApiTest extends TestCase
                 'health_insurance',
                 'social_insurance',
                 'income_tax',
+                'insolvency',
                 'enforcement',
                 'risky_savings',
             ],
@@ -508,6 +514,9 @@ final class PayrollPaymentApiTest extends TestCase
                 PayrollIncomeTaxLiabilityMaterializer::class,
             ),
             $this->container->get(
+                \MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer::class,
+            ),
+            $this->container->get(
                 PayrollEnforcementLiabilityMaterializer::class,
             ),
             $this->container->get(
@@ -518,6 +527,7 @@ final class PayrollPaymentApiTest extends TestCase
             $this->container->get(PayrollPaymentExportService::class),
             $this->container->get(PayrollPaymentDownloadGrantService::class),
             $this->container->get(PayrollModuleAccess::class),
+            $this->container->get(\MyInvoice\Service\Payroll\PayrollProductionGate::class),
             $failingLogger,
             $this->container->get(IpMatcher::class),
             $this->db,

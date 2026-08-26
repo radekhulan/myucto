@@ -74,6 +74,11 @@ final readonly class GarnishmentInput
                 'decision_verified' => $this->insolvency->decisionVerified,
                 'mode' => $this->insolvency->mode->value,
                 'recipient_verified' => $this->insolvency->recipientVerified,
+                'payment_instruction_id' =>
+                    $this->insolvency->paymentInstructionId,
+                'payment_instruction_hash' =>
+                    $this->insolvency->paymentInstructionHash,
+                'employment_id' => $this->insolvency->employmentId,
             ],
             'payment_date' => $this->paymentDate,
             'period' => $this->period,
@@ -128,6 +133,12 @@ final readonly class GarnishmentInput
                     $insolvency,
                     'court_determined_amount_minor_units',
                 ),
+                self::nullableInt($insolvency, 'payment_instruction_id'),
+                self::nullableString(
+                    $insolvency,
+                    'payment_instruction_hash',
+                ),
+                self::nullableInt($insolvency, 'employment_id'),
             ),
             self::bool($evidence, 'protected_amount_override_verified'),
             self::bool($evidence, 'claim_register_complete'),
@@ -179,6 +190,19 @@ final readonly class GarnishmentInput
         if ($value !== null && !is_int($value)) {
             throw new InvalidArgumentException("{$key} must be a nullable integer.");
         }
+        return $value;
+    }
+
+    /** @param array<string,mixed> $data */
+    private static function nullableString(array $data, string $key): ?string
+    {
+        $value = $data[$key] ?? null;
+        if ($value !== null && !is_string($value)) {
+            throw new InvalidArgumentException(
+                "{$key} must be a nullable string.",
+            );
+        }
+
         return $value;
     }
 

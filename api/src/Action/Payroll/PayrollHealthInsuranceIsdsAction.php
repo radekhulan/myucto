@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
@@ -21,6 +23,7 @@ final class PayrollHealthInsuranceIsdsAction
     public function __construct(
         private readonly HealthInsuranceIsdsSubmissionService $isds,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /** @param array{submissionId:string,insurerCode:string} $args */
@@ -34,12 +37,21 @@ final class PayrollHealthInsuranceIsdsAction
         }
 
         try {
+            $supplierId = $this->currentSupplierId($request);
+            $this->productionGate->assertActive($supplierId);
             $result = $this->isds->enqueue(
-                $this->currentSupplierId($request),
+                $supplierId,
                 $this->positiveInt($args, 'submissionId'),
                 $this->insurerCode($args),
                 $this->userId($request),
             );
+        } catch (PayrollProductionGateException $exception) {
+            return $this->noStore(Json::error(
+                $response,
+                PayrollProductionGateException::ERROR_CODE,
+                $exception->getMessage(),
+                409,
+            ));
         } catch (SubmissionChannelException $exception) {
             return $this->noStore(Json::error(
                 $response,

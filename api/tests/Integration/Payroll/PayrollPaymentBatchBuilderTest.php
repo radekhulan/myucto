@@ -11,6 +11,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -62,6 +63,11 @@ final class PayrollPaymentBatchBuilderTest extends TestCase
             $sourceSupplierId,
         );
         $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", NULL, NOW())',
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
             'UPDATE supplier
                 SET company_name = "Syntetická mzdová firma",
                     display_name = NULL
@@ -83,6 +89,7 @@ final class PayrollPaymentBatchBuilderTest extends TestCase
             new IbanValidator(),
             new CzechBankAccountValidator(),
             new MockClock('2026-08-04 10:11:12 Europe/Prague'),
+            $container->get(PayrollProductionGate::class),
         );
     }
 

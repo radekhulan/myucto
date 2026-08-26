@@ -8,6 +8,8 @@ use MyInvoice\Action\Payroll\PayrollRegistrationTransportAction;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -15,6 +17,7 @@ use Slim\Psr7\Response;
 
 \DG\BypassFinals::allowPaths([
     '*/api/src/Service/Payroll/PayrollModuleAccess.php',
+    '*/api/src/Service/Payroll/PayrollProductionGate.php',
     '*/api/src/Service/Payroll/Submission/Registration/PayrollRegistrationTransportService.php',
 ]);
 
@@ -29,7 +32,11 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $request = $this->request('bearer')
             ->withHeader('Idempotency-Key', 'must-not-run');
 
-        $response = (new PayrollRegistrationTransportAction($transport, $access))->send(
+        $response = (new PayrollRegistrationTransportAction(
+            $transport,
+            $access,
+            $this->createStub(PayrollProductionGate::class),
+        ))->send(
             $request,
             new Response(),
             ['submissionId' => '42'],
@@ -46,7 +53,11 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         $access = $this->createMock(PayrollModuleAccess::class);
         $access->expects(self::once())->method('isEnabled')->with(11)->willReturn(true);
 
-        $response = (new PayrollRegistrationTransportAction($transport, $access))->send(
+        $response = (new PayrollRegistrationTransportAction(
+            $transport,
+            $access,
+            $this->createStub(PayrollProductionGate::class),
+        ))->send(
             $this->request('session'),
             new Response(),
             ['submissionId' => '42'],
@@ -76,7 +87,15 @@ final class PayrollRegistrationTransportActionTest extends TestCase
             ->withHeader('Idempotency-Key', 'accountant-click-1')
             ->withParsedBody(['environment' => 'test']);
 
-        $response = (new PayrollRegistrationTransportAction($transport, $access))->send(
+        $gate = $this->createMock(PayrollProductionGate::class);
+        $gate->expects(self::once())
+            ->method('assertEnvironmentActive')
+            ->with(11, 'test');
+        $response = (new PayrollRegistrationTransportAction(
+            $transport,
+            $access,
+            $gate,
+        ))->send(
             $request,
             new Response(),
             ['submissionId' => '42'],
@@ -104,7 +123,11 @@ final class PayrollRegistrationTransportActionTest extends TestCase
             ->withMethod('GET')
             ->withQueryParams(['environment' => 'test']);
 
-        $response = (new PayrollRegistrationTransportAction($transport, $access))->status(
+        $response = (new PayrollRegistrationTransportAction(
+            $transport,
+            $access,
+            $this->createStub(PayrollProductionGate::class),
+        ))->status(
             $request,
             new Response(),
             ['submissionId' => '42'],
@@ -113,6 +136,34 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         self::assertSame(200, $response->getStatusCode());
         self::assertSame(7, $this->json($response)['attempt']['id']);
         self::assertSame('private, no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    public function testUnqualifiedProductionRegistrationDispatchIsRejected(): void
+    {
+        $transport = $this->createMock(PayrollRegistrationTransportService::class);
+        $transport->expects(self::never())->method('send');
+        $access = $this->createStub(PayrollModuleAccess::class);
+        $access->method('isEnabled')->willReturn(true);
+        $gate = $this->createMock(PayrollProductionGate::class);
+        $gate->expects(self::once())
+            ->method('assertEnvironmentActive')
+            ->with(11, 'production')
+            ->willThrowException(new PayrollProductionGateException());
+        $request = $this->request('session')
+            ->withHeader('Idempotency-Key', 'production-must-not-run')
+            ->withParsedBody(['environment' => 'production']);
+
+        $response = (new PayrollRegistrationTransportAction(
+            $transport,
+            $access,
+            $gate,
+        ))->send($request, new Response(), ['submissionId' => '42']);
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame(
+            PayrollProductionGateException::ERROR_CODE,
+            $this->json($response)['error']['code'],
+        );
     }
 
     private function request(string $method): \Psr\Http\Message\ServerRequestInterface

@@ -16,6 +16,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -57,6 +58,11 @@ final class PayrollRiskySavingsLiabilityMaterializerTest extends TestCase
             $sourceSupplierId,
         );
         $this->actorId = $this->actor($pdo);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->actorId]);
         $this->employmentId = $this->employment($pdo);
         $institutions = new PayrollInstitutionAccountRepository(
             $this->db,
@@ -111,6 +117,7 @@ final class PayrollRiskySavingsLiabilityMaterializerTest extends TestCase
             new IbanValidator(),
             new CzechBankAccountValidator(),
             new MockClock('2026-09-01 10:00:00 Europe/Prague'),
+            $container->get(PayrollProductionGate::class),
         );
     }
 

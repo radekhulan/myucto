@@ -17,7 +17,7 @@ export function pageParams(page?: PayrollPageParams): Record<string, number> {
   }
 }
 
-export type PayrollModuleStatus = 'disabled' | 'setup' | 'active' | 'suspended'
+export type PayrollModuleStatus = 'disabled' | 'setup' | 'qualification_required' | 'active' | 'suspended'
 export type PayrollSupportStatus = 'supported' | 'manual_review' | 'not_supported'
 
 export interface PayrollModuleState {

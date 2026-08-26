@@ -12,6 +12,8 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollProductionQualificationException;
+use MyInvoice\Service\Payroll\PayrollProductionQualificationService;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -26,6 +28,7 @@ final class PayrollActivationAction
         private readonly IpMatcher $ipMatcher,
         private readonly SupportMatrix $supportMatrix,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollProductionQualificationService $qualification,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -37,7 +40,12 @@ final class PayrollActivationAction
             return $error;
         }
 
-        return Json::ok($response, ['state' => $this->state->get($this->currentSupplierId($request))]);
+        $supplierId = $this->currentSupplierId($request);
+
+        return Json::ok($response, [
+            'state' => $this->state->get($supplierId),
+            'production_qualification' => $this->qualification->qualification($supplierId),
+        ]);
     }
 
     public function put(Request $request, Response $response): Response
@@ -102,6 +110,64 @@ final class PayrollActivationAction
         );
 
         return Json::ok($response, ['state' => $state]);
+    }
+
+    public function qualify(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'payroll.settings', AccessLevel::WRITE, $error)) {
+            return $error;
+        }
+        if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) {
+            return $error;
+        }
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        $version = filter_var($body['row_version'] ?? null, FILTER_VALIDATE_INT, [
+            'options' => ['min_range' => 1],
+        ]);
+        $matrixVersion = $body['support_matrix_version'] ?? null;
+        $evidence = $body['evidence'] ?? null;
+        if ($version === false || !is_string($matrixVersion) || !is_array($evidence)) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Chybí row_version, support_matrix_version nebo evidence.',
+                422,
+            );
+        }
+        $actorUserId = $this->userId($request);
+        if ($actorUserId === null) {
+            return Json::error(
+                $response,
+                'authenticated_actor_required',
+                'Produkční aktivace vyžaduje přihlášeného uživatele.',
+                403,
+            );
+        }
+
+        try {
+            $result = $this->qualification->activate(
+                $this->currentSupplierId($request),
+                (int) $version,
+                $matrixVersion,
+                $evidence,
+                $actorUserId,
+            );
+        } catch (PayrollStateConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollProductionQualificationException $e) {
+            $status = in_array($e->errorCode, [
+                'qualification_requires_setup',
+                'support_matrix_changed',
+                'unsupported_start_period',
+            ], true) ? 409 : 422;
+
+            return Json::error($response, $e->errorCode, $e->getMessage(), $status);
+        }
+
+        return Json::ok($response, $result);
     }
 
     private function validPeriod(?string $period): bool

@@ -23,6 +23,7 @@ use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentSnapshotWriter;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentCalculation;
 use MyInvoice\Service\Payroll\Garnishment\PayrollEnforcementStoredResultIntegrity;
+use MyInvoice\Service\Payroll\Garnishment\PayrollInsolvencyPaymentInstructionService;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
@@ -48,7 +49,10 @@ final class PayrollEnforcementRepository implements
 
     public const LIST_DEFAULT_LIMIT = 50;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollInsolvencyPaymentInstructionService $insolvencyInstructions,
+    ) {}
 
     /**
      * Seznam exekučních případů se stránkováním.
@@ -778,6 +782,34 @@ final class PayrollEnforcementRepository implements
             );
             $versionStmt->execute([$supplierId, $employeeId, $periodStart]);
             $currentVersion = $versionStmt->fetchColumn();
+            $instruction = null;
+            if ($insolvency === InsolvencyMode::ApprovedStandard) {
+                if (!self::boolValue($data, 'insolvency_decision_verified')
+                    || !self::boolValue($data, 'insolvency_recipient_verified')
+                ) {
+                    throw new \DomainException(
+                        'Standardní oddlužení vyžaduje ověřené rozhodnutí '
+                        . 'i příjemce platby.',
+                    );
+                }
+                if ($userId === null || $userId <= 0) {
+                    throw new \DomainException(
+                        'Platební pokyn oddlužení musí vytvořit konkrétní uživatel.',
+                    );
+                }
+                $instruction = $this->insolvencyInstructions->resolve(
+                    $supplierId,
+                    $employeeId,
+                    $periodStart,
+                    $data,
+                    $userId,
+                );
+            } elseif ($this->hasInsolvencyPaymentTarget($data)) {
+                throw new \DomainException(
+                    'Platební pokyn lze připnout jen ke standardnímu '
+                    . 'schválenému oddlužení.',
+                );
+            }
             $values = [
                 self::boolInt($data, 'claim_register_evidence_complete'),
                 self::boolInt($data, 'dependants_evidence_complete'),
@@ -789,6 +821,7 @@ final class PayrollEnforcementRepository implements
                 $insolvency->value,
                 self::boolInt($data, 'insolvency_decision_verified'),
                 self::boolInt($data, 'insolvency_recipient_verified'),
+                $instruction === null ? null : (int) $instruction['id'],
                 $courtAmount,
                 $userId,
             ];
@@ -804,8 +837,9 @@ final class PayrollEnforcementRepository implements
                          protected_amount_override_minor_units,
                          protected_amount_override_verified, insolvency_mode,
                          insolvency_decision_verified, insolvency_recipient_verified,
+                         insolvency_payment_instruction_id,
                          court_determined_amount_minor_units, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 $stmt->execute([$supplierId, $employeeId, $periodStart, ...$values]);
             } else {
@@ -825,6 +859,7 @@ final class PayrollEnforcementRepository implements
                             insolvency_mode = ?,
                             insolvency_decision_verified = ?,
                             insolvency_recipient_verified = ?,
+                            insolvency_payment_instruction_id = ?,
                             court_determined_amount_minor_units = ?,
                             updated_by = ?,
                             row_version = row_version + 1
@@ -870,6 +905,11 @@ final class PayrollEnforcementRepository implements
             'insolvency_mode' => InsolvencyMode::None->value,
             'insolvency_decision_verified' => false,
             'insolvency_recipient_verified' => false,
+            'insolvency_payment_instruction_id' => null,
+            'insolvency_employment_id' => null,
+            'insolvency_institution_account_id' => null,
+            'insolvency_decision_document_id' => null,
+            'insolvency_payment_instruction_hash' => null,
             'court_determined_amount_minor_units' => null,
             'row_version' => null,
         ];
@@ -1138,6 +1178,16 @@ final class PayrollEnforcementRepository implements
                     'insolvency_recipient_verified',
                 ),
                 self::nullableIntValue($evidence['court_determined_amount_minor_units'] ?? null),
+                self::nullableIntValue(
+                    $evidence['insolvency_payment_instruction_id'] ?? null,
+                ),
+                self::nullableStringValue(
+                    $evidence['insolvency_payment_instruction_hash'] ?? null,
+                    'insolvency_payment_instruction_hash',
+                ),
+                self::nullableIntValue(
+                    $evidence['insolvency_employment_id'] ?? null,
+                ),
             ),
         );
     }
@@ -1372,15 +1422,18 @@ final class PayrollEnforcementRepository implements
             }
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_enforcement_month_results
-                    (supplier_id, revision_id, employee_id, period_start,
+                    (supplier_id, revision_id, employee_id,
+                     insolvency_payment_instruction_id, period_start,
                      result_status, ruleset_id, ruleset_hash, input_snapshot_json,
                      input_snapshot_hash, result_snapshot_json, result_snapshot_hash,
                      total_withheld_minor_units, employee_payment_minor_units,
                      employer_fee_minor_units, idempotency_key_hash)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
-                $request->supplierId, $revisionId, $request->employeeId, $periodStart,
+                $request->supplierId, $revisionId, $request->employeeId,
+                $calculation->input->insolvency->paymentInstructionId,
+                $periodStart,
                 $result->status->value, $result->rulesetId, $result->rulesetHash,
                 $inputJson, $inputHash, $resultJson, $resultHash,
                 $result->totalWithheldMinorUnits, $result->employeePaymentMinorUnits,
@@ -1395,6 +1448,7 @@ final class PayrollEnforcementRepository implements
                 $request->employeeId,
                 $resultId,
                 $result,
+                $calculation->input->insolvency,
                 $idempotencyKey,
             );
             $this->assertStoredResultIntegrity(
@@ -1945,8 +1999,21 @@ final class PayrollEnforcementRepository implements
         $rows = [];
         foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
             $stmt = $this->db->pdo()->prepare(sprintf(
-                'SELECT * FROM payroll_enforcement_person_month_evidence
-                  WHERE supplier_id = ? AND employee_id IN (%s) AND period_start = ?',
+                'SELECT evidence.*,
+                        instruction.employment_id AS insolvency_employment_id,
+                        instruction.institution_account_id
+                            AS insolvency_institution_account_id,
+                        instruction.decision_document_id
+                            AS insolvency_decision_document_id,
+                        instruction.instruction_hash
+                            AS insolvency_payment_instruction_hash
+                   FROM payroll_enforcement_person_month_evidence evidence
+              LEFT JOIN payroll_insolvency_payment_instructions instruction
+                     ON instruction.supplier_id = evidence.supplier_id
+                    AND instruction.id = evidence.insolvency_payment_instruction_id
+                  WHERE evidence.supplier_id = ?
+                    AND evidence.employee_id IN (%s)
+                    AND evidence.period_start = ?',
                 implode(', ', array_fill(0, count($chunk), '?')),
             ));
             $stmt->execute([$supplierId, ...$chunk, $periodStart]);
@@ -1956,7 +2023,11 @@ final class PayrollEnforcementRepository implements
                 $cast = self::castBooleansAndIntegers(
                     $row,
                     ['id', 'employee_id', 'protected_amount_override_minor_units',
-                        'court_determined_amount_minor_units', 'row_version'],
+                        'court_determined_amount_minor_units', 'row_version',
+                        'insolvency_payment_instruction_id',
+                        'insolvency_employment_id',
+                        'insolvency_institution_account_id',
+                        'insolvency_decision_document_id'],
                     ['claim_register_evidence_complete', 'dependants_evidence_complete',
                         'spouse_evidence_complete', 'has_multiple_payers',
                         'protected_amount_override_verified',
@@ -2066,6 +2137,7 @@ final class PayrollEnforcementRepository implements
         int $employeeId,
         int $resultId,
         GarnishmentResult $result,
+        InsolvencyInstruction $insolvency,
         string $idempotencyKey,
     ): void {
         foreach ($result->allocations as $allocation) {
@@ -2097,6 +2169,9 @@ final class PayrollEnforcementRepository implements
                     $allocation->totalMinorUnits,
                     "{$idempotencyKey}:withheld:{$allocation->claimId}",
                 );
+                if ($insolvency->hasImmutablePaymentInstruction()) {
+                    continue;
+                }
                 $this->insertLedger(
                     $supplierId,
                     null,
@@ -2323,6 +2398,29 @@ final class PayrollEnforcementRepository implements
             throw new \InvalidArgumentException("Pole {$key} musí být boolean.");
         }
         return (int) (bool) $value;
+    }
+
+    /** @param array<string,mixed> $data */
+    private static function boolValue(array $data, string $key): bool
+    {
+        return self::boolInt($data, $key) === 1;
+    }
+
+    /** @param array<string,mixed> $data */
+    private function hasInsolvencyPaymentTarget(array $data): bool
+    {
+        foreach ([
+            'insolvency_payment_instruction_id',
+            'insolvency_employment_id',
+            'insolvency_institution_account_id',
+            'insolvency_decision_document_id',
+        ] as $field) {
+            if (($data[$field] ?? null) !== null) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param array<string,mixed> $data */

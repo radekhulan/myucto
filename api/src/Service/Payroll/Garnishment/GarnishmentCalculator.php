@@ -731,6 +731,11 @@ final class GarnishmentCalculator
             if (!$input->insolvency->recipientVerified) {
                 $issues[] = 'insolvency_recipient_not_verified';
             }
+            if ($input->insolvency->mode === InsolvencyMode::ApprovedStandard
+                && !$input->insolvency->hasImmutablePaymentInstruction()
+            ) {
+                $issues[] = 'insolvency_payment_instruction_missing';
+            }
             if ($activeClaims !== []) {
                 $issues[] = 'concurrent_enforcement_with_insolvency_requires_manual_review';
             }

@@ -7,9 +7,11 @@ namespace MyInvoice\Service\Payroll\Run;
 use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 
 /**
  * Orchestrace platebních závazků schválené revize pro příkaz
@@ -29,6 +31,7 @@ final class PayrollRunPaymentPreparationService
         'health_insurance' => 'zdravotního pojištění',
         'social_insurance' => 'sociálního pojištění',
         'income_tax' => 'daně ze závislé činnosti',
+        'insolvency' => 'srážek ve standardním oddlužení',
         'enforcement' => 'exekučních srážek',
         'risky_savings' => 'povinného spoření u rizikové práce',
     ];
@@ -38,8 +41,10 @@ final class PayrollRunPaymentPreparationService
         private readonly PayrollHealthInsuranceLiabilityMaterializer $healthInsurance,
         private readonly PayrollSocialInsuranceLiabilityMaterializer $socialInsurance,
         private readonly PayrollIncomeTaxLiabilityMaterializer $incomeTax,
+        private readonly PayrollInsolvencyLiabilityMaterializer $insolvency,
         private readonly PayrollEnforcementLiabilityMaterializer $enforcement,
         private readonly PayrollRiskySavingsLiabilityMaterializer $riskySavings,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /**
@@ -57,6 +62,7 @@ final class PayrollRunPaymentPreparationService
                 'Firma, revize a uživatel přípravy plateb musí být kladná čísla.',
             );
         }
+        $this->productionGate->assertActive($supplierId);
         $this->assertPayoutRules($inputSnapshot);
 
         $liabilityIds = [];
@@ -80,6 +86,11 @@ final class PayrollRunPaymentPreparationService
                     $actorUserId,
                 ),
             'income_tax' => fn (): array => $this->incomeTax->materialize(
+                $supplierId,
+                $revisionId,
+                $actorUserId,
+            ),
+            'insolvency' => fn (): array => $this->insolvency->materialize(
                 $supplierId,
                 $revisionId,
                 $actorUserId,
