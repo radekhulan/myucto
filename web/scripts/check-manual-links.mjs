@@ -8,6 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { basename, dirname, extname, join, relative, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -100,9 +101,49 @@ function decoded(value) {
 const anchorsByFile = new Map(manualFiles.map(file => [resolve(file), markdownAnchors(file)]))
 const REFERENCE = /(?:'|")(\d+[a-z]?_[A-Za-z0-9_]+)(?:'|")|ch=(\d+[a-z]?_[A-Za-z0-9_]+)/g
 const MARKDOWN_LINK = /(!?)\[[^\]]*\]\(([^)]+)\)/g
+const MANUAL_QUERY = /\/manual\?ch=(\d+[a-z]?_[A-Za-z0-9_]+)(?:#([A-Za-z0-9_-]+))?/g
+const MANUAL_FILE = /manual[\\/](\d+[a-z]?_[A-Za-z0-9_]+\.md)(?:#([A-Za-z0-9_-]+))?/g
 const broken = []
 let frontendSeen = 0
 let markdownSeen = 0
+let repositorySeen = 0
+
+function trackedTextFiles() {
+  try {
+    const listed = execFileSync('git', ['ls-files', '-z'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return listed
+      .split('\0')
+      .filter(Boolean)
+      .filter(file => /\.(?:md|php|ts|vue|js|mjs|json|ya?ml|ps1|cmd|txt)$/i.test(file))
+      .map(file => join(repoRoot, file))
+      .filter(file => existsSync(file))
+  } catch {
+    return [...walk(srcDir), ...manualFiles]
+  }
+}
+
+function validateChapterAnchor(kind, file, line, chapter, anchor = '') {
+  repositorySeen++
+  if (!chapters.has(chapter)) {
+    broken.push({ kind, file: relative(repoRoot, file), line, ref: chapter })
+    return
+  }
+  if (anchor === '') return
+  const target = resolve(manualDir, `${chapter}.md`)
+  const anchors = anchorsByFile.get(target) ?? markdownAnchors(target)
+  if (!anchors.has(decoded(anchor).toLowerCase())) {
+    broken.push({
+      kind: `${kind} — kotva`,
+      file: relative(repoRoot, file),
+      line,
+      ref: `${chapter}#${anchor}`,
+    })
+  }
+}
 
 for (const file of walk(srcDir)) {
   const src = readFileSync(file, 'utf8')
@@ -115,6 +156,31 @@ for (const file of walk(srcDir)) {
       if (!chapters.has(ref)) {
         broken.push({ kind: 'kapitola frontendu', file: relative(repoRoot, file), line: i + 1, ref })
       }
+    }
+  })
+}
+
+for (const file of trackedTextFiles()) {
+  const lines = readFileSync(file, 'utf8').split(/\r?\n/)
+  lines.forEach((line, index) => {
+    for (const match of line.matchAll(MANUAL_QUERY)) {
+      validateChapterAnchor(
+        'URL manuálu v repozitáři',
+        file,
+        index + 1,
+        match[1],
+        match[2] ?? '',
+      )
+    }
+    for (const match of line.matchAll(MANUAL_FILE)) {
+      const chapter = basename(match[1], '.md')
+      validateChapterAnchor(
+        'soubor manuálu v repozitáři',
+        file,
+        index + 1,
+        chapter,
+        match[2] ?? '',
+      )
     }
   })
 }
@@ -178,6 +244,11 @@ if (markdownSeen === 0) {
   process.exit(1)
 }
 
+if (repositorySeen === 0) {
+  console.error('check-manual-links: nenašel jsem žádný přímý odkaz v repozitáři — sken je rozbitý, ne kód.')
+  process.exit(1)
+}
+
 if (broken.length > 0) {
   console.error(`check-manual-links: ${broken.length} neplatných odkazů manuálu.\n`)
   for (const item of broken) {
@@ -193,4 +264,7 @@ if (broken.length > 0) {
   process.exit(1)
 }
 
-console.log(`check-manual-links: OK — ${frontendSeen} frontendových a ${markdownSeen} Markdown odkazů.`)
+console.log(
+  `check-manual-links: OK — ${frontendSeen} frontendových, ${markdownSeen} Markdown `
+  + `a ${repositorySeen} přímých odkazů v repozitáři.`,
+)

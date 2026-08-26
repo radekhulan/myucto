@@ -4,7 +4,7 @@
  *
  * URL: /manual                    → INDEX.html (rozcestník)
  * URL: /manual?ch=01_Uvod         → kapitola
- * URL: /manual?ch=01_Uvod#1.2     → kapitola se skokem na sekci
+ * URL: /manual?ch=01_Uvod#12-vystavovani-dokladu → kapitola se skokem na sekci
  *
  * Bez auth (manuál je veřejný — není v něm citlivý obsah; pokud chceš
  * auth-gate, doplň session check níže).
