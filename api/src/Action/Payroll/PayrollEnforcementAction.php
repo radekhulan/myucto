@@ -544,6 +544,22 @@ final class PayrollEnforcementAction
         }
         try {
             $body = $this->input($request);
+            if (($body['insolvency_mode'] ?? null) === 'approved_standard'
+                && !$this->requirePermission(
+                    $request,
+                    $response,
+                    'documents',
+                    AccessLevel::READ,
+                    $error,
+                )
+            ) {
+                return $error ?? Json::error(
+                    $response,
+                    'forbidden',
+                    'Pro výběr rozhodnutí oddlužení nemáš oprávnění k dokumentům.',
+                    403,
+                );
+            }
             $evidence = $this->transactional(
                 function () use ($request, $args, $body): array {
                     $evidence = $this->repository->saveMonthEvidence(
@@ -569,6 +585,13 @@ final class PayrollEnforcementAction
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,
             ]);
+        } catch (\DomainException $e) {
+            return Json::error(
+                $response,
+                'invalid_insolvency_evidence',
+                $e->getMessage(),
+                409,
+            );
         }
         return Json::ok($response, ['evidence' => $evidence]);
     }

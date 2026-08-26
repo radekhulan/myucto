@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementPaymentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
@@ -153,7 +154,10 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
 
         $this->enforcement = new PayrollEnforcementRepository(
             $connection,
-            new PayrollInsolvencyPaymentInstructionService($connection),
+            new PayrollInsolvencyPaymentInstructionService(
+                $connection,
+                new DocumentRepository($connection),
+            ),
         );
         $this->enforcementPayments =
             new PayrollEnforcementPaymentRepository($connection);
@@ -340,7 +344,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             self::fail('Rozhodnutí jiné firmy nesmí vytvořit platební pokyn.');
         } catch (\DomainException $exception) {
             self::assertStringContainsString(
-                'dokumentech firmy',
+                'firemních dokumentech',
                 $exception->getMessage(),
             );
         }
@@ -389,6 +393,19 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             $this->actorId,
             null,
         );
+    }
+
+    public function testPersonalDocumentCannotAuthorizeCompanyInsolvencyPayment(): void
+    {
+        $personalDocumentId = $this->createDecisionDocument(
+            $this->supplierId,
+            'personal-decision',
+            'user',
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('firemních dokumentech');
+        $this->saveApprovedInsolvencyEvidence($personalDocumentId);
     }
 
     public function testNonStandardSnapshotCannotMaterializeEvenWithInstructionId(): void
@@ -1281,20 +1298,26 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    private function createDecisionDocument(int $supplierId, string $seed): int
+    private function createDecisionDocument(
+        int $supplierId,
+        string $seed,
+        string $scope = 'company',
+    ): int
     {
         $hash = hash('sha256', "insolvency-decision:{$supplierId}:{$seed}");
         $this->db->pdo()->prepare(
             'INSERT INTO documents
                 (supplier_id, title, original_name, filename, sha256, mime_type,
-                 size_bytes, doc_type, source, uploaded_by, scope)
+                 size_bytes, doc_type, source, uploaded_by, scope, owner_user_id)
              VALUES (?, "Syntetické rozhodnutí oddlužení", "decision.pdf",
-                     ?, ?, "application/pdf", 1, "pdf", "manual", ?, "company")',
+                     ?, ?, "application/pdf", 1, "pdf", "manual", ?, ?, ?)',
         )->execute([
             $supplierId,
             "{$hash}.pdf",
             $hash,
             $this->actorId,
+            $scope,
+            $scope === 'user' ? $this->actorId : null,
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();

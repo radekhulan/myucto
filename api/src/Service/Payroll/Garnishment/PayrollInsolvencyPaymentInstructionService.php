@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Garnishment;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 
 final readonly class PayrollInsolvencyPaymentInstructionService
 {
-    public function __construct(private Connection $db) {}
+    public function __construct(
+        private Connection $db,
+        private DocumentRepository $documents,
+    ) {}
 
     /**
      * @param array<string,mixed> $data
@@ -111,20 +116,18 @@ final readonly class PayrollInsolvencyPaymentInstructionService
             );
         }
 
-        $documentStatement = $pdo->prepare(
-            'SELECT sha256
-               FROM documents
-              WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL
-              FOR UPDATE',
+        $document = $this->documents->findActiveReferenceForUpdate(
+            $documentId,
+            $supplierId,
+            DocumentViewerContext::companyOnly(),
         );
-        $documentStatement->execute([$supplierId, $documentId]);
-        $documentHash = $documentStatement->fetchColumn();
+        $documentHash = $document['sha256'] ?? null;
         if (!is_string($documentHash)
             || preg_match('/^[0-9a-f]{64}$/D', $documentHash) !== 1
         ) {
             throw new \DomainException(
                 'Rozhodnutí k platebnímu pokynu oddlužení nebylo nalezeno '
-                . 'v dokumentech firmy.',
+                . 've firemních dokumentech.',
             );
         }
 
