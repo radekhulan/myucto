@@ -4760,7 +4760,7 @@
             "month_evidence_saved": "The monthly evidence was saved.",
             "month_evidence_load_failed": "The monthly evidence could not be loaded.",
             "transition_saved": "The case status was changed.",
-            "add_case": "New case",
+            "add_case": "New enforcement or agreement",
             "add_claim": "Add claim",
             "employee": "Employee",
             "select_employee": "Select an employee",
@@ -4894,13 +4894,19 @@
                 "protected_override_czk": "Court-determined protected amount (CZK)",
                 "protected_override_verified": "The protected amount is verified",
                 "insolvency_mode": "Insolvency mode",
-                "insolvency_none": "No approved debt relief",
-                "insolvency_alert": "Insolvency alert only",
-                "insolvency_standard": "Approved standard debt relief",
-                "insolvency_court": "Court-determined amount",
+                "insolvency_none": "Debt relief does not apply this month",
+                "insolvency_alert": "Record an alert only",
+                "insolvency_standard": "Approved debt relief — withhold and hold",
+                "insolvency_court": "Individual court-determined amount",
+                "insolvency_impact": {
+                    "none": "No insolvency exception. The calculation follows the employee's ordinary evidence.",
+                    "alert_only": "The alert is recorded only. Payroll requires manual review and does not automatically remit an insolvency amount.",
+                    "approved_standard": "The deduction is calculated under the debt-relief regime but remains on hold for now. Payment to the insolvency administrator must be made and documented manually.",
+                    "court_determined_amount": "The amount is recorded only. Payroll requires manual review and does not apply or remit it automatically."
+                },
                 "court_amount_czk": "Court-determined amount (CZK)",
                 "insolvency_decision": "The insolvency decision is verified",
-                "insolvency_recipient": "The insolvency recipient is verified"
+                "insolvency_recipient": "The recipient was checked against the evidence (this does not replace the payment account or decision)"
             },
             "kinds": {
                 "enforcement": "Statutory deduction / enforcement",

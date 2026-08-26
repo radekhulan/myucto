@@ -76,6 +76,9 @@ const showStateActions = ref(false)
 const showMonthlyExceptions = ref(false)
 const showDependants = ref(false)
 const claimsSection = ref<HTMLElement | null>(null)
+const evidenceSection = ref<HTMLElement | null>(null)
+const monthlySection = ref<HTMLElement | null>(null)
+const timelineSection = ref<HTMLElement | null>(null)
 const pendingCommand = ref<EnforcementCaseCommand | null>(null)
 const transitionReason = ref('')
 const documentQuery = ref('')
@@ -226,40 +229,55 @@ const canDeleteUnusedCase = computed(() => {
     && current.ledger.length === 0
 })
 
+type LocalNextStepAction = 'claim' | 'claims' | 'evidence' | 'monthly' | 'other' | 'timeline'
 type NextStep = {
   key: 'add_claim' | 'verify_claims' | 'verify_evidence' | 'start_withholding'
     | 'verify_recipient' | 'authorize_remittance' | 'monthly_check' | 'resume_when_ready'
     | 'closed'
-  action: 'claim' | EnforcementCaseCommand | null
+  action: LocalNextStepAction | EnforcementCaseCommand | null
+}
+
+const localNextStepActions = new Set<LocalNextStepAction>([
+  'claim', 'claims', 'evidence', 'monthly', 'other', 'timeline',
+])
+
+function isLocalNextStepAction(action: NextStep['action']): action is LocalNextStepAction {
+  return action !== null && localNextStepActions.has(action as LocalNextStepAction)
+}
+
+function nextStepActionVisible(action: NextStep['action']): boolean {
+  if (action === null) return false
+  if (canWrite.value) return true
+  return action === 'claims' || action === 'evidence' || action === 'monthly' || action === 'timeline'
 }
 
 const nextStep = computed<NextStep>(() => {
   const current = detail.value
   if (!current) return { key: 'closed', action: null }
   if (current.status === 'paid' || current.status === 'stopped') {
-    return { key: 'closed', action: null }
+    return { key: 'closed', action: 'timeline' }
   }
   if (current.claims.length === 0) return { key: 'add_claim', action: 'claim' }
   if (current.claims.some(claim => !claimVerified(claim))) {
-    return { key: 'verify_claims', action: null }
+    return { key: 'verify_claims', action: 'claims' }
   }
-  if (!current.evidence_complete) return { key: 'verify_evidence', action: null }
+  if (!current.evidence_complete) return { key: 'verify_evidence', action: 'evidence' }
   if (current.status === 'received') {
     return { key: 'start_withholding', action: 'mark_final' }
   }
   if (current.status === 'withhold_and_hold') {
     if (!current.recipient_verified || current.recipient_institution_id === null) {
-      return { key: 'verify_recipient', action: null }
+      return { key: 'verify_recipient', action: 'evidence' }
     }
     return { key: 'authorize_remittance', action: 'authorize_remittance' }
   }
-  if (current.status === 'remit') return { key: 'monthly_check', action: null }
-  return { key: 'resume_when_ready', action: null }
+  if (current.status === 'remit') return { key: 'monthly_check', action: 'monthly' }
+  return { key: 'resume_when_ready', action: 'other' }
 })
 
 const recommendedCommand = computed<EnforcementCaseCommand | null>(() => {
   const action = nextStep.value.action
-  return action !== null && action !== 'claim' ? action : null
+  return action !== null && !isLocalNextStepAction(action) ? action : null
 })
 
 const otherStateCommands = computed(() => {
@@ -317,7 +335,34 @@ async function executeNextStep() {
     claimsSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
     return
   }
+  if (action === 'claims') {
+    claimsSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (action === 'evidence') {
+    evidenceSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (action === 'monthly') {
+    monthlySection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (action === 'timeline') {
+    timelineSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (action === 'other') {
+    showStateActions.value = true
+    return
+  }
   if (action) await openTransition(action)
+}
+
+function nextStepIcon(): string {
+  const action = nextStep.value.action
+  if (action === 'claim') return ICONS.plus
+  if (isLocalNextStepAction(action)) return ICONS.eye
+  return ICONS.play
 }
 
 const detailActions = computed<ActionItem[]>(() => [{
@@ -380,7 +425,7 @@ function minorUnits(value: string, required = true): number | null {
 function statusClass(status: EnforcementCaseStatus): string {
   if (status === 'paid') return 'bg-success-50 text-success-600'
   if (status === 'stopped') return 'bg-neutral-100 text-neutral-600'
-  if (status.startsWith('deferred')) return 'bg-warning-50 text-warning-700'
+  if (status.startsWith('deferred')) return 'bg-warning-50 text-warning-600'
   if (status === 'remit') return 'bg-primary-50 text-primary-700'
   return 'bg-payroll-50 text-payroll-600'
 }
@@ -962,14 +1007,14 @@ onMounted(load)
               <p class="mt-1 text-sm text-neutral-600">{{ t(`payroll.enforcement.next_steps.${nextStep.key}.hint`) }}</p>
             </div>
             <button
-              v-if="canWrite && nextStep.action"
+              v-if="nextStepActionVisible(nextStep.action)"
               data-test="enforcement-next-step-action"
               :class="btnFilled('primary')"
               :disabled="saving || (recommendedCommand !== null && documentCommands.has(recommendedCommand) && !canReadDocuments)"
               :title="recommendedCommand !== null && documentCommands.has(recommendedCommand) && !canReadDocuments ? t('payroll.enforcement.document_permission_required') : undefined"
               @click="executeNextStep"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="nextStep.action === 'claim' ? ICONS.plus : ICONS.play" /></svg>
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="nextStepIcon()" /></svg>
               {{ t(`payroll.enforcement.next_steps.${nextStep.key}.action`) }}
             </button>
           </div>
@@ -1038,7 +1083,7 @@ onMounted(load)
         </form>
 
         <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <section class="rounded-lg border border-neutral-200 bg-surface p-4">
+          <section ref="evidenceSection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
             <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.evidence_title') }}</h3><p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.evidence_hint') }}</p></div><button v-if="canWrite" :class="btnOutline('success')" :disabled="saving" @click="saveEvidence"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
             <div class="mt-3 flex flex-wrap gap-x-6 gap-y-3"><label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="detail.evidence_complete" :disabled="!canWrite" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.evidence_complete') }}</label><label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="detail.recipient_verified" :disabled="!canWrite" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.recipient_verified') }}</label></div>
             <label v-if="canReadPayrollSettings" class="mt-3 block text-xs font-medium text-neutral-600">
@@ -1064,12 +1109,12 @@ onMounted(load)
           </div>
           <dl class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.withheld_minor) }}</dd></div>
-            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="mt-1 font-medium text-warning-700">{{ money(detail.settlement.held_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="mt-1 font-medium text-warning-600">{{ money(detail.settlement.held_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.liability') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.liability_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="mt-1 font-medium text-success-700">{{ money(detail.settlement.settled_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_minor) }}</dd></div>
           </dl>
-          <p v-if="detail.settlement.held_minor > 0" class="mt-3 text-xs text-warning-700">{{ t('payroll.enforcement.settlement.held_hint') }}</p>
+          <p v-if="detail.settlement.held_minor > 0" class="mt-3 text-xs text-warning-600">{{ t('payroll.enforcement.settlement.held_hint') }}</p>
           <h4 class="mt-4 text-sm font-medium text-neutral-900">{{ t('payroll.enforcement.settlement.per_claim') }}</h4>
           <ul v-if="detail.settlement.claims.length" class="mt-2 space-y-2">
             <li v-for="claim in detail.settlement.claims" :key="claim.claim_id" class="rounded-md border border-neutral-200 px-3 py-2">
@@ -1088,7 +1133,7 @@ onMounted(load)
           <p v-else class="mt-2 text-sm text-neutral-500">{{ t('payroll.enforcement.settlement.empty') }}</p>
         </section>
 
-        <section v-if="canManageInsolvency && monthEvidence" class="rounded-lg border border-neutral-200 bg-surface p-4">
+        <section v-if="canManageInsolvency && monthEvidence" ref="monthlySection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.month_evidence_title') }}</h3>
@@ -1131,11 +1176,11 @@ onMounted(load)
             <div class="flex flex-wrap items-center justify-between gap-3 p-4">
               <div>
                 <h4 class="font-medium text-neutral-900">{{ t('payroll.enforcement.monthly_exceptions.title') }}</h4>
-                <p data-test="month-exceptions-summary" class="mt-1 text-xs" :class="hasMonthlyExceptions ? 'text-warning-700' : 'text-neutral-500'">
+                <p data-test="month-exceptions-summary" class="mt-1 text-xs" :class="hasMonthlyExceptions ? 'text-warning-600' : 'text-neutral-500'">
                   {{ t(hasMonthlyExceptions ? 'payroll.enforcement.monthly_exceptions.summary_active' : 'payroll.enforcement.monthly_exceptions.summary_empty') }}
                 </p>
                 <ul v-if="monthlyExceptionLabels.length" class="mt-2 flex flex-wrap gap-1.5" data-test="month-exceptions-values">
-                  <li v-for="label in monthlyExceptionLabels" :key="label" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">{{ label }}</li>
+                  <li v-for="label in monthlyExceptionLabels" :key="label" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-600">{{ label }}</li>
                 </ul>
               </div>
               <button
@@ -1162,6 +1207,7 @@ onMounted(load)
                 </div>
                 <div class="space-y-3">
                   <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.insolvency_mode') }}<select v-model="monthEvidence.insolvency_mode" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="none">{{ t('payroll.enforcement.month_evidence.insolvency_none') }}</option><option value="alert_only">{{ t('payroll.enforcement.month_evidence.insolvency_alert') }}</option><option value="approved_standard">{{ t('payroll.enforcement.month_evidence.insolvency_standard') }}</option><option value="court_determined_amount">{{ t('payroll.enforcement.month_evidence.insolvency_court') }}</option></select></label>
+                  <p data-test="insolvency-mode-impact" class="rounded-md border border-warning-500/40 bg-warning-50 p-2 text-xs text-warning-600">{{ t(`payroll.enforcement.month_evidence.insolvency_impact.${monthEvidence.insolvency_mode}`) }}</p>
                   <label v-if="monthEvidence.insolvency_mode === 'court_determined_amount'" class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.court_amount_czk') }}<input v-model="courtAmountCzk" data-test="month-evidence-court-amount" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                   <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_decision_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_decision') }}</label>
                   <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_recipient_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_recipient') }}</label>
@@ -1222,7 +1268,7 @@ onMounted(load)
           <p v-else class="mt-3 text-sm text-neutral-500">{{ t('payroll.enforcement.no_claims') }}</p>
         </section>
 
-        <section class="rounded-lg border border-neutral-200 bg-surface p-4">
+        <section ref="timelineSection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
           <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.timeline') }}</h3>
           <ol v-if="detail.events.length" class="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2"><li v-for="event in detail.events" :key="event.id" class="min-w-0 border-l-2 border-payroll-500/30 pl-3 text-sm"><p class="font-medium text-neutral-800">{{ t(`payroll.enforcement.commands.${event.command_name}`) }}</p><p class="text-xs text-neutral-500">{{ event.created_at }}</p><p v-if="event.reason" class="mt-1 break-words text-neutral-600">{{ event.reason }}</p><RouterLink v-if="event.decision_document_id" class="mt-1 inline-flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700" :to="{ name: 'document-detail', params: { id: event.decision_document_id } }"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.enforcement.open_decision_document') }}</RouterLink></li></ol>
           <p v-else class="mt-3 text-sm text-neutral-500">{{ t('payroll.enforcement.no_events') }}</p>

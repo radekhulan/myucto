@@ -273,6 +273,40 @@ describe('EnforcementCases', () => {
     wrapper.unmount()
   })
 
+  it('nabídne navigační akci i pro neúplnou pohledávku a podklady', async () => {
+    const incompleteClaim = summary({ claim_count: 1 })
+    m.casesPage.mockResolvedValue(page([incompleteClaim]))
+    m.detail.mockResolvedValue({
+      ...detailOf(incompleteClaim),
+      claims: [{ ...verifiedClaim(), priority_date: null }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_claims.title')
+    expect(wrapper.get('[data-test="enforcement-next-step-action"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_claims.action')
+    wrapper.unmount()
+
+    const incompleteEvidence = summary({ claim_count: 1, evidence_complete: false })
+    m.casesPage.mockResolvedValue(page([incompleteEvidence]))
+    m.detail.mockResolvedValue({
+      ...detailOf(incompleteEvidence),
+      claims: [verifiedClaim()],
+    })
+    const evidenceWrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(evidenceWrapper)
+
+    expect(evidenceWrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_evidence.title')
+    expect(evidenceWrapper.get('[data-test="enforcement-next-step-action"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_evidence.action')
+    evidenceWrapper.unmount()
+  })
+
   it('schová méně časté stavové změny, ale ponechá je dostupné', async () => {
     const active = summary({
       status: 'remit',
@@ -291,6 +325,8 @@ describe('EnforcementCases', () => {
 
     expect(wrapper.get('[data-test="enforcement-next-step"]').text())
       .toContain('payroll.enforcement.next_steps.monthly_check.title')
+    expect(wrapper.get('[data-test="enforcement-next-step-action"]').text())
+      .toContain('payroll.enforcement.next_steps.monthly_check.action')
     expect(wrapper.find('[data-test="enforcement-state-actions"]').exists()).toBe(false)
 
     await wrapper.get('[data-test="enforcement-state-actions-toggle"]').trigger('click')
@@ -515,6 +551,8 @@ describe('EnforcementCases', () => {
       await wrapper.get('[data-test="month-exceptions-toggle"]').trigger('click')
       const exceptions = wrapper.get('[data-test="month-exceptions-panel"]')
       expect(exceptions.find('[data-test="month-evidence-multiple-payers"]').exists()).toBe(true)
+      expect(exceptions.get('[data-test="insolvency-mode-impact"]').text())
+        .toContain('payroll.enforcement.month_evidence.insolvency_impact.court_determined_amount')
       expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
         .toBe('123.45')
       await exceptions.find('[data-test="month-evidence-court-amount"]').setValue('150')

@@ -16,7 +16,8 @@ Je nutné oprávnění `payroll.enforcement` a podle případu `payroll.insolven
 4. Před uzavřením běhu projděte rozdělení srážek a zůstatky všech souběžných případů.
 5. Po úhradě aktualizujte stav; změnu pořadí nebo skončení proveďte podle doložené události.
 
-Detail případu vždy nahoře ukazuje **doporučený další krok**. Běžný postup tak
+Detail případu vždy nahoře ukazuje **doporučený další krok** a tlačítko vede
+přímo na část, kterou je nutné doplnit. Běžný postup tak
 vede od pohledávky přes ověření podkladů a zahájení srážení až k ověření
 příjemce a povolení odesílání. Méně časté změny stavu jsou pod volbou **Další
 stavové kroky**; jejich skrytí nemění právní kontroly ani dostupné možnosti.
@@ -29,6 +30,14 @@ volbou **Zkontrolovat výjimky** pouze při změně. Uložená výjimka je vidě
 souhrnu zavřené části, takže ji nelze přehlédnout. Stejně tak se seznam
 vyživovaných osob spravuje jen při vzniku, zániku nebo ověření nároku; v běžném
 měsíci se celý seznam znovu nevyplňuje.
+
+Volby insolvenčního režimu u každé možnosti popisují dopad na výpočet. Režim
+**Schválené oddlužení — srážet a deponovat** vypočte srážku, ale částku zatím
+nezařadí do automatické platební dávky; účetní ji odešle insolvenčnímu správci
+ručně a úhradu doloží. Volby **Pouze evidovat upozornění** a **Individuální
+částka určená soudem** vyvolají ruční kontrolu a samy částku nepoužijí ani
+neodešlou. Potvrzení příjemce v měsíčních podkladech nenahrazuje rozhodnutí ani
+ověřený platební účet.
 
 ## Stavy
 

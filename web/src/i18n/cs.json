@@ -4760,7 +4760,7 @@
             "month_evidence_saved": "Měsíční podklady byly uloženy.",
             "month_evidence_load_failed": "Měsíční podklady se nepodařilo načíst.",
             "transition_saved": "Stav případu byl změněn.",
-            "add_case": "Nový případ",
+            "add_case": "Nová exekuce nebo dohoda",
             "add_claim": "Přidat pohledávku",
             "employee": "Zaměstnanec",
             "select_employee": "Vyberte zaměstnance",
@@ -4894,13 +4894,19 @@
                 "protected_override_czk": "Soudem určená nezabavitelná částka (Kč)",
                 "protected_override_verified": "Určená nezabavitelná částka je ověřená",
                 "insolvency_mode": "Insolvenční režim",
-                "insolvency_none": "Bez schváleného oddlužení",
-                "insolvency_alert": "Pouze upozornění na insolvenci",
-                "insolvency_standard": "Schválené standardní oddlužení",
-                "insolvency_court": "Částka určená soudem",
+                "insolvency_none": "Oddlužení se tento měsíc neuplatní",
+                "insolvency_alert": "Pouze evidovat upozornění",
+                "insolvency_standard": "Schválené oddlužení — srážet a deponovat",
+                "insolvency_court": "Individuální částka určená soudem",
+                "insolvency_impact": {
+                    "none": "Bez insolvenční výjimky. Výpočet se řídí běžnými podklady zaměstnance.",
+                    "alert_only": "Upozornění se pouze eviduje. Výpočet vyžádá ruční kontrolu a žádnou insolvenční částku automaticky neodešle.",
+                    "approved_standard": "Srážka se vypočte podle režimu oddlužení, ale zatím zůstane v depozitu. Úhradu insolvenčnímu správci je nutné provést a doložit ručně.",
+                    "court_determined_amount": "Částka se pouze eviduje. Výpočet vyžádá ruční posouzení a automaticky ji nepoužije ani neodešle."
+                },
                 "court_amount_czk": "Částka určená soudem (Kč)",
                 "insolvency_decision": "Insolvenční rozhodnutí je ověřené",
-                "insolvency_recipient": "Insolvenční příjemce je ověřený"
+                "insolvency_recipient": "Příjemce byl zkontrolován podle podkladu (nenahrazuje platební účet ani rozhodnutí)"
             },
             "kinds": {
                 "enforcement": "Zákonná srážka / exekuce",
