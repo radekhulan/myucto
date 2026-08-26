@@ -4493,6 +4493,7 @@
         "status": {
             "disabled": "Inactive",
             "setup": "Setup in progress",
+            "qualification_required": "Test operation",
             "active": "Active",
             "suspended": "Suspended"
         },
@@ -4506,7 +4507,10 @@
             "disable_confirm": "Cancel payroll setup? No payroll data will be deleted.",
             "disabled": "Payroll setup has been cancelled.",
             "failed": "The payroll activation could not be saved.",
-            "conflict": "Another user changed the settings. The current state has been reloaded."
+            "conflict": "Another user changed the settings. The current state has been reloaded.",
+            "qualification_title": "Payroll is currently in test operation",
+            "qualification_description": "Calculations and test-environment filings remain available. Production filings and payment orders stay safely blocked until two approved parallel months, a correction run, backup recovery and the first production operation plan have been documented.",
+            "qualification_single_accountant": "One accountant can complete the check; the application does not require approval by a second user."
         },
         "dashboard": {
             "start_period": "Starting period",

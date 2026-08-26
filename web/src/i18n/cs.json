@@ -4493,6 +4493,7 @@
         "status": {
             "disabled": "Neaktivní",
             "setup": "Probíhá nastavení",
+            "qualification_required": "Testovací provoz",
             "active": "Aktivní",
             "suspended": "Pozastavený"
         },
@@ -4506,7 +4507,10 @@
             "disable_confirm": "Opravdu zrušit zahájení nastavení mezd? Mzdová data se nesmažou.",
             "disabled": "Zahájení nastavení mezd bylo zrušeno.",
             "failed": "Aktivaci mzdového modulu se nepodařilo uložit.",
-            "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav."
+            "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav.",
+            "qualification_title": "Mzdy jsou zatím v testovacím provozu",
+            "qualification_description": "Výpočty a podání do testovacího prostředí můžete používat. Ostrá podání a platební příkazy zůstanou bezpečně zablokované, dokud nebudou doloženy dva schválené paralelní měsíce, opravný běh, obnova ze zálohy a plán prvního ostrého provozu.",
+            "qualification_single_accountant": "Kontrolu může dokončit jedna účetní; aplikace nevyžaduje schválení druhým uživatelem."
         },
         "dashboard": {
             "start_period": "Počáteční období",
