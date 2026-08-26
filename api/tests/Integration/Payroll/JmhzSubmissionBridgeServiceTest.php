@@ -39,6 +39,7 @@ use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -221,6 +222,271 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $xml,
         );
         self::assertSame(hash('sha256', $xml), $result['artifact_sha256']);
+    }
+
+    #[DataProvider('annualSettlementPeriods')]
+    public function testFrozenAnnualSettlementEvidenceProducesReadyImmutableSubmission(
+        string $periodStart,
+        string $periodEnd,
+        string $requestStatus,
+        ?array $settlement,
+        array $expectedFragments,
+        array $unexpectedFragments,
+    ): void {
+        $payload = $this->payloadForPeriod($periodStart, $periodEnd);
+        $payload['people'][0]['annual_evidence'] = [
+            'tax_year' => 2025,
+            'request' => [
+                'id' => 701,
+                'row_version' => 1,
+                'status' => $requestStatus,
+                'requested_on' => $requestStatus === 'requested' ? '2026-02-10' : null,
+                'annual_claims' => 'none',
+                'evidence_sha256' => str_repeat('8', 64),
+            ],
+            'request_evidence' => [
+                'present' => true,
+                'proof' => 'verified_request_row_under_unique_key_lock',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'settlement' => $settlement,
+            'settlement_evidence' => [
+                'performed' => $settlement !== null,
+                'proof' => $settlement === null
+                    ? 'outcome_absent_under_unique_key_lock'
+                    : 'verified_annual_outcome_and_document_revision',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'withholding_certificate' => substr($periodStart, 5, 2) === '01'
+                ? [
+                    'revision_id' => 801,
+                    'snapshot_hash' => str_repeat('9', 64),
+                    'paid_income_minor_units' => 125_000,
+                    'withholding_tax_minor_units' => 18_000,
+                ]
+                : null,
+        ];
+
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: substr($periodStart, 0, 7)),
+            $payload,
+            periodStart: $periodStart,
+            periodEnd: $periodEnd,
+        );
+        self::assertNotContains(
+            'jmhz_scenario1_annual_fields_unsupported',
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+        self::assertSame('resolved', $resolution->status());
+
+        $bridge = $this->bridge(
+            $resolution,
+            '2027-01-05 11:30:00 Europe/Prague',
+        );
+        $created = $bridge->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        self::assertTrue($created['created']);
+        self::assertSame('ready', $created['status']);
+        $frozenBytes = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $created['artifact_id'],
+        );
+        foreach ($expectedFragments as $fragment) {
+            self::assertStringContainsString($fragment, $frozenBytes);
+        }
+        foreach ($unexpectedFragments as $fragment) {
+            self::assertStringNotContainsString($fragment, $frozenBytes);
+        }
+
+        $replayed = $bridge->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        self::assertFalse($replayed['created']);
+        self::assertSame('ready', $replayed['status']);
+        self::assertSame($created['submission_id'], $replayed['submission_id']);
+        self::assertSame($created['artifact_sha256'], $replayed['artifact_sha256']);
+        self::assertSame(
+            $frozenBytes,
+            $this->submissions->artifactBytes(
+                $this->supplierId,
+                $replayed['artifact_id'],
+            ),
+        );
+    }
+
+    /** @return iterable<string,array{string,string,string,?array<string,mixed>,list<string>,list<string>}> */
+    public static function annualSettlementPeriods(): iterable
+    {
+        yield 'leden: nepožádáno a neprovedeno' => [
+            '2026-01-01',
+            '2026-01-31',
+            'not_requested',
+            null,
+            [
+                '<form:prijemSrazkDanZvlSazba>1250</form:prijemSrazkDanZvlSazba>',
+                '<form:danSrazenaZvlSazba>180</form:danSrazenaZvlSazba>',
+                '<form:rocniZuctovaniZadost>false</form:rocniZuctovaniZadost>',
+                '<form:rocniZuctovaniProvedeno>false</form:rocniZuctovaniProvedeno>',
+            ],
+            ['<form:vysledekRocnihoZuctovani>'],
+        ];
+        yield 'únor: požádáno a dosud neprovedeno' => [
+            '2026-02-01',
+            '2026-02-28',
+            'requested',
+            null,
+            [
+                '<form:rocniZuctovaniZadost>true</form:rocniZuctovaniZadost>',
+                '<form:rocniZuctovaniProvedeno>false</form:rocniZuctovaniProvedeno>',
+            ],
+            [
+                '<form:prijemSrazkDanZvlSazba>',
+                '<form:vysledekRocnihoZuctovani>',
+            ],
+        ];
+        yield 'březen: požádáno, dosud neprovedeno' => [
+            '2026-03-01',
+            '2026-03-31',
+            'requested',
+            null,
+            ['<form:rocniZuctovaniProvedeno>false</form:rocniZuctovaniProvedeno>'],
+            [
+                '<form:rocniZuctovaniZadost>',
+                '<form:vysledekRocnihoZuctovani>',
+            ],
+        ];
+    }
+
+    public function testPerformedSettlementUsesCompleteAnnualSourcesAndSignedBonus(): void
+    {
+        $payload = $this->payloadForPeriod('2026-02-01', '2026-02-28');
+        $payload['people'][0]['annual_evidence'] = [
+            'tax_year' => 2025,
+            'request' => [
+                'id' => 701,
+                'row_version' => 1,
+                'status' => 'requested',
+                'requested_on' => '2026-02-10',
+                'annual_claims' => 'none',
+                'evidence_sha256' => str_repeat('8', 64),
+            ],
+            'request_evidence' => [
+                'present' => true,
+                'proof' => 'verified_request_row_under_unique_key_lock',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'settlement' => [
+                'revision_id' => 802,
+                'snapshot_hash' => str_repeat('a', 64),
+                'settled_on' => '2026-02-16',
+                'performed' => true,
+                'tax_difference_minor_units' => 12_300,
+                'bonus_difference_minor_units' => -2_300,
+                'settlement_difference_minor_units' => 10_000,
+                'credit_rows' => [],
+                'child_rows' => [],
+            ],
+            'settlement_evidence' => [
+                'performed' => true,
+                'proof' => 'verified_annual_outcome_and_document_revision',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'withholding_certificate' => null,
+        ];
+
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-02'),
+            $payload,
+            periodStart: '2026-02-01',
+            periodEnd: '2026-02-28',
+        );
+        self::assertSame('resolved', $resolution->status());
+        $codes = array_map(
+            static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+        self::assertNotContains('jmhz_annual_settlement_request_source_inconsistent', $codes);
+        self::assertNotContains('jmhz_annual_settlement_child_details_unsupported', $codes);
+        self::assertNotContains('jmhz_scenario1_annual_fields_unsupported', $codes);
+
+        $created = $this->bridge($resolution, '2026-03-05 Europe/Prague')->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $created['artifact_id'],
+        );
+        self::assertStringContainsString('<form:preplatekRok>100</form:preplatekRok>', $xml);
+        self::assertStringContainsString('<form:danPreplatekRok>123</form:danPreplatekRok>', $xml);
+        self::assertStringContainsString(
+            '<form:danBonusPreplatekRok>-23</form:danBonusPreplatekRok>',
+            $xml,
+        );
+
+        $payload['people'][0]['annual_evidence']['settlement']['child_rows'] = [[
+            'label' => '1. dítě',
+            'months' => 12,
+            'amount_minor_units' => 152_040_00,
+        ]];
+        $childResolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-02'),
+            $payload,
+            periodStart: '2026-02-01',
+            periodEnd: '2026-02-28',
+        );
+        self::assertSame('blocked', $childResolution->status());
+        self::assertContains(
+            'jmhz_annual_settlement_child_details_unsupported',
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+                $childResolution->blockers,
+            ),
+        );
+    }
+
+    public function testDecemberUsesSpecificSourceBlockersInsteadOfBlanketAnnualBlocker(): void
+    {
+        $payload = $this->payloadForPeriod('2026-12-01', '2026-12-31');
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-12'),
+            $payload,
+            periodStart: '2026-12-01',
+            periodEnd: '2026-12-31',
+        );
+
+        self::assertSame('blocked', $resolution->status());
+        $codes = array_map(
+            static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+        self::assertNotContains('jmhz_scenario1_annual_fields_unsupported', $codes);
+        self::assertContains('jmhz_december_collective_agreement_source_missing', $codes);
+        self::assertContains('jmhz_december_ownership_form_source_missing', $codes);
+        self::assertContains('jmhz_december_ozp_annual_source_missing', $codes);
     }
 
     public function testContentCorrectionFreezesFullAcceptedFormWithSameGuidAndReplaysImmutableArtifact(): void
@@ -876,6 +1142,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     private function bridge(
         ?JmhzScenario1Resolution $resolution = null,
+        string $now = '2026-08-05 11:30:00 Europe/Prague',
     ): JmhzSubmissionBridgeService {
         $documents = $this->createStub(JmhzScenario1DocumentService::class);
         $documents->method('resolve')->willReturn(
@@ -889,7 +1156,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             new JmhzSubmissionGuidFactory(),
             $this->submissionRepository,
             $this->submissions,
-            new MockClock('2026-08-05 11:30:00 Europe/Prague'),
+            new MockClock($now),
             $this->obligations,
         );
     }
@@ -1045,6 +1312,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         JmhzPvpojPreview $pvpoj,
         ?array $payload = null,
         ?int $officeId = null,
+        string $periodStart = self::PERIOD_START,
+        string $periodEnd = self::PERIOD_END,
     ): JmhzScenario1Resolution {
         $preparation = new JmhzVerifiedPreparationSnapshot(
             self::PREPARATION_ID,
@@ -1053,8 +1322,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::RUN_ID,
             301,
             1,
-            self::PERIOD_START,
-            self::PERIOD_END,
+            $periodStart,
+            $periodEnd,
             'scenario_1',
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
             str_repeat('1', 64),
@@ -1084,13 +1353,14 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         int $officeId = 4,
         string $variableSymbol = '1234567890',
         int $people = 1,
+        ?string $period = null,
     ): JmhzPvpojPreview {
         return new JmhzPvpojPreview(
             7,
             self::RUN_ID,
             301,
             1,
-            '2026-07',
+            $period ?? '2026-07',
             [
                 'office_id' => $officeId,
                 'code' => 'UC' . $officeId,
@@ -1295,6 +1565,25 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             'readiness_issue_codes' => [],
             'readiness_issues' => [],
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function payloadForPeriod(string $periodStart, string $periodEnd): array
+    {
+        $payload = $this->payload();
+        $payload['scope']['period_start'] = $periodStart;
+        $payload['scope']['period_end'] = $periodEnd;
+        $employment = &$payload['people'][0]['employments'][0];
+        $employment['eldp']['insurance_interval']['insurance_from'] = $periodStart;
+        $employment['eldp']['insurance_interval']['insurance_to'] = $periodEnd;
+        $employment['eldp']['eldp_sections'][0]['valid_from'] = $periodStart;
+        $employment['eldp']['eldp_sections'][0]['valid_to'] = $periodEnd;
+        $days = (int) (new \DateTimeImmutable($periodEnd))->format('d');
+        $employment['eldp']['eldp_sections'][0]['insurance_days'] = $days;
+        $employment['work_month']['jmhz_work_summary']['values']['evidence_days'] = $days;
+        unset($employment);
+
+        return $payload;
     }
 
     /** @return array<string,mixed> */

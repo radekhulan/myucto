@@ -184,7 +184,7 @@ final readonly class JmhzSubmissionBridgeService
             // se nesmí založit vůbec nic; výjimka vrátí transakci zpět.
             $controls = $this->controls->validate(
                 $result['xml'],
-                JmhzControlContext::today(schemaValidated: true),
+                new JmhzControlContext($this->localDate(), schemaValidated: true),
             );
             if (!$controls->submittable()) {
                 throw new JmhzXmlException(
@@ -519,6 +519,13 @@ final readonly class JmhzSubmissionBridgeService
         return \DateTimeImmutable::createFromInterface($this->clock->now())
             ->setTimezone(new \DateTimeZone('UTC'))
             ->format('Y-m-d\TH:i:s\Z');
+    }
+
+    private function localDate(): string
+    {
+        return \DateTimeImmutable::createFromInterface($this->clock->now())
+            ->setTimezone(new \DateTimeZone('Europe/Prague'))
+            ->format('Y-m-d');
     }
 
     private static function snapshotHash(

@@ -331,8 +331,9 @@ final class JmhzScenario1XmlSerializer
             (string) $this->int($totals['tax_bonus'] ?? null, '10035'),
         );
         $node->appendChild($monthly);
-        // `danUdajeRok` a `zamestnavatelUdajeRok` patří do prosincového podání;
-        // roční atributy resolver pro duben až listopad záměrně blokuje.
+        // `danUdajeRok` a `zamestnavatelUdajeRok` jsou v připnutém XSD celé
+        // volitelné bloky. Bez zmrazeného ročního zdroje se proto vynechají;
+        // nulové ani záporné právní skutečnosti se z absence zdroje neodhadují.
         // `specifickaSkutecnost` se neuvádí, protože IN13 je doložené `false`.
 
         return $node;
@@ -691,6 +692,105 @@ final class JmhzScenario1XmlSerializer
                 );
             }
             $node->appendChild($block);
+        }
+
+        $annual = $this->object($summary['annual'] ?? null);
+        if ($annual !== []) {
+            $annualNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rocniUhrny',
+            );
+            $withholding = $this->object($annual['withholding'] ?? null);
+            if ($withholding !== []) {
+                $this->text(
+                    $dom,
+                    $annualNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prijemSrazkDanZvlSazba',
+                    (string) $this->int($withholding['paid_income_czk'] ?? null, '10311'),
+                );
+                $this->text(
+                    $dom,
+                    $annualNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:danSrazenaZvlSazba',
+                    (string) $this->int(
+                        $withholding['withholding_tax_czk'] ?? null,
+                        '10312',
+                    ),
+                );
+            }
+            if (is_bool($annual['requested'] ?? null)) {
+                $this->text(
+                    $dom,
+                    $annualNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:rocniZuctovaniZadost',
+                    $annual['requested'] ? 'true' : 'false',
+                );
+            }
+            $performed = $this->bool(
+                $annual['performed'] ?? null,
+                '10320',
+            );
+            $this->text(
+                $dom,
+                $annualNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rocniZuctovaniProvedeno',
+                $performed ? 'true' : 'false',
+            );
+            if ($performed) {
+                $result = $this->object($annual['result'] ?? null);
+                $resultNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:vysledekRocnihoZuctovani',
+                );
+                foreach ([
+                    'form:preplatekRok' => ['settlement_difference_czk', '10321'],
+                    'form:danPreplatekRok' => ['tax_difference_czk', '10322'],
+                ] as $element => [$key, $attributeId]) {
+                    $this->text(
+                        $dom,
+                        $resultNode,
+                        JmhzSchemaCatalog::NS_FORM,
+                        $element,
+                        (string) $this->int($result[$key] ?? null, $attributeId),
+                    );
+                }
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:danBonusPreplatekRok',
+                    (string) $this->signedInt(
+                        $result['bonus_difference_czk'] ?? null,
+                        '10323',
+                    ),
+                );
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:uplatnenaSlevaNaPartnera',
+                    $this->bool($result['spouse_credit_claimed'] ?? null, '10420')
+                        ? 'true'
+                        : 'false',
+                );
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:uplatnenoZvyhodneniNaDeti',
+                    $this->bool($result['child_credit_claimed'] ?? null, '10454')
+                        ? 'true'
+                        : 'false',
+                );
+                $annualNode->appendChild($resultNode);
+            }
+            $node->appendChild($annualNode);
         }
 
         $net = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaCista');
@@ -1251,6 +1351,15 @@ final class JmhzScenario1XmlSerializer
     private function int(mixed $value, string $attributeId): int
     {
         if (!is_int($value) || $value < 0) {
+            $this->unresolved($attributeId);
+        }
+
+        return $value;
+    }
+
+    private function signedInt(mixed $value, string $attributeId): int
+    {
+        if (!is_int($value)) {
             $this->unresolved($attributeId);
         }
 

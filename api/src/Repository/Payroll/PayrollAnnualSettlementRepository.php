@@ -30,10 +30,12 @@ final class PayrollAnnualSettlementRepository
         int $supplierId,
         int $employeeId,
         int $taxYear,
+        bool $forUpdate = false,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
             'SELECT * FROM payroll_annual_settlement_requests
               WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?'
+            . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $statement->execute([$supplierId, $employeeId, $taxYear]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);

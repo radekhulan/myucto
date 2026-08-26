@@ -202,13 +202,13 @@ final class JmhzScenario1ControlEvaluator
     {
         return [
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 45, 50, 56, 57, 58,
-            60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
-            103, 109, 118, 121, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
+            60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
+            103, 109, 112, 118, 121, 124, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
             153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 204, 207, 208,
-            211, 216, 227, 232, 233, 235,
+            191, 192, 193, 211, 216, 227, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
-            296, 299, 300, 301, 303, 304, 306, 307, 309, 315, 328, 329, 330, 332,
+            296, 299, 300, 301, 303, 304, 306, 307, 309, 310, 315, 328, 329, 330, 332,
             335, 341, 342, 354, 355,
         ];
     }
@@ -335,6 +335,14 @@ final class JmhzScenario1ControlEvaluator
             138 => $this->shorterWorkingTimeRequiredForReason($projection),
             158 => $this->discountReasonFromCodebook($projection),
             188 => $this->employerDiscountOnlyOnOneEmployment($projection),
+            191 => $this->annualSettlementMonths($projection),
+            192 => $this->annualRequestMonths($projection),
+            193 => $this->januaryOnlyAnnualTotals($projection),
+            78 => $this->annualSettlementSum($projection),
+            79 => $this->annualSettlementResultRequired($projection),
+            112 => $this->annualChildDetailsRequired($projection),
+            124 => $this->annualSpouseDetailsRequired($projection),
+            310 => $this->annualResultForbiddenWhenNotPerformed($projection),
             207 => $this->employerDiscountBaseMatchesForms($projection),
             8 => $this->employerInsuranceRate($projection, '10024', '10023', 'source_row_3'),
             10 => $this->employerInsuranceRate($projection, '10026', '10025', 'source_row_4'),
@@ -2523,6 +2531,200 @@ final class JmhzScenario1ControlEvaluator
 
                 return "Atribut {$attributeId} = {$part} překračuje zúčtovaný"
                     . " příjem celkem {$total}.";
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualSettlementMonths(JmhzAttributeProjection $projection): array
+    {
+        $month = $projection->submission()->integer('10010');
+        if ($month === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        $annualIds = [
+            '10320', '10321', '10322', '10323', '10420', '10421', '10422',
+            '10423', '10424', '10425', '10426', '10430', '10454', '10455',
+            '10441', '10442', '10443', '10444', '10445', '10446', '10447',
+            '10448', '10449', '10450', '10451',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($month, $annualIds): ?string {
+                if ($month >= 1 && $month <= 3) {
+                    return $form->has('10320')
+                        ? null
+                        : 'Atribut 10320 musí být uveden v lednovém až březnovém podání.';
+                }
+                foreach ($annualIds as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return "Atribut {$attributeId} smí být uveden jen v lednovém až březnovém podání.";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualRequestMonths(JmhzAttributeProjection $projection): array
+    {
+        $month = $projection->submission()->integer('10010');
+        if ($month === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($month): ?string {
+                if ($month === 1 || $month === 2) {
+                    return $form->has('10319')
+                        ? null
+                        : 'Atribut 10319 musí být uveden v lednovém a únorovém podání.';
+                }
+
+                return $form->has('10319')
+                    ? 'Atribut 10319 smí být uveden jen v lednovém a únorovém podání.'
+                    : null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function januaryOnlyAnnualTotals(JmhzAttributeProjection $projection): array
+    {
+        $month = $projection->submission()->integer('10010');
+        if ($month === null || $month === 1) {
+            return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        foreach (['10313', '10317', '10316', '10318', '10311', '10312'] as $attributeId) {
+            if ($projection->has($attributeId)) {
+                return [JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_SUBMISSION,
+                    null,
+                    "Atribut {$attributeId} smí být uveden jen v lednovém podání.",
+                )];
+            }
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualSettlementSum(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                $total = $form->integer('10321');
+                $tax = $form->integer('10322');
+                $bonus = $form->integer('10323');
+                if ($total === null && $tax === null && $bonus === null) {
+                    return null;
+                }
+                if ($total === null || $tax === null || $bonus === null) {
+                    return 'Výsledek ročního zúčtování 10321–10323 není úplný.';
+                }
+
+                return $total === $tax + $bonus
+                    ? null
+                    : "Výsledek 10321 = {$total} není součtem 10322 + 10323 ({$tax} + {$bonus}).";
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualSettlementResultRequired(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10320') !== true) {
+                    return null;
+                }
+                foreach (['10321', '10322', '10323', '10420', '10454'] as $attributeId) {
+                    if (!$form->has($attributeId)) {
+                        return "Pro provedené roční zúčtování chybí atribut {$attributeId}.";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualChildDetailsRequired(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10454') !== true) {
+                    return null;
+                }
+                foreach (['10446', '10447', '10451'] as $attributeId) {
+                    if (!$form->has($attributeId)) {
+                        return "Pro roční zvýhodnění na dítě chybí atribut {$attributeId}.";
+                    }
+                }
+                if (!$form->has('10448') && !$form->has('10449')) {
+                    return 'Pro roční zvýhodnění na dítě chybí datum narození nebo rodné číslo.';
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualSpouseDetailsRequired(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10420') !== true) {
+                    return null;
+                }
+                foreach (['10421', '10422', '10425', '10426'] as $attributeId) {
+                    if (!$form->has($attributeId)) {
+                        return "Pro roční slevu na partnera chybí atribut {$attributeId}.";
+                    }
+                }
+                if (!$form->has('10423') && !$form->has('10424')) {
+                    return 'Pro roční slevu na partnera chybí datum narození nebo rodné číslo.';
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualResultForbiddenWhenNotPerformed(
+        JmhzAttributeProjection $projection,
+    ): array {
+        $resultIds = [
+            '10321', '10322', '10323', '10420', '10421', '10422', '10423',
+            '10424', '10425', '10426', '10430', '10539', '10540', '10541',
+            '10542', '10454', '10455', '10441', '10442', '10443', '10444',
+            '10445', '10446', '10447', '10448', '10449', '10450', '10451',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($resultIds): ?string {
+                if ($form->boolean('10320') !== false) {
+                    return null;
+                }
+                foreach ($resultIds as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return "Při neprovedeném zúčtování nesmí být uveden atribut {$attributeId}.";
+                    }
+                }
+
+                return null;
             },
         );
     }

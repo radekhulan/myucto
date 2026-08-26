@@ -16,7 +16,8 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V5_BUILDER_VERSION = 'jmhz-preparation-source.v5';
     public const PREVIOUS_V6_BUILDER_VERSION = 'jmhz-preparation-source.v6';
     public const PREVIOUS_V7_BUILDER_VERSION = 'jmhz-preparation-source.v7';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v8';
+    public const PREVIOUS_V8_BUILDER_VERSION = 'jmhz-preparation-source.v8';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v9';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -32,6 +33,8 @@ final class JmhzPreparationSnapshotBuilder
      *        {@see JmhzOrdinaryEvidenceBuilder::build()}). Revize přes dvě
      *        mzdové účtárny má vždy ≥2 vztahy, takže jediná evidence na revizi
      *        by víceúčtárenské podání znemožnila.
+     * @param array<int,array<string,mixed>>|null $annualEvidenceSources roční
+     *        skutečnosti podle `employee_id`, načtené ve stejné transakci
      */
     public function build(
         int $supplierId,
@@ -42,6 +45,7 @@ final class JmhzPreparationSnapshotBuilder
         array $sourceIssues = [],
         array $eldpSources = [],
         array $ordinaryEvidenceSources = [],
+        ?array $annualEvidenceSources = null,
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -104,9 +108,33 @@ final class JmhzPreparationSnapshotBuilder
         $sourceVersions = [];
         $seenEmployments = [];
         $usedOrdinaryEvidence = [];
+        $usedAnnualEvidence = [];
+        $annualEvidenceProvided = $annualEvidenceSources !== null;
+        $annualEvidenceSources ??= [];
         foreach ($this->rows($input['people'] ?? null, 'input.people') as $personIndex => $person) {
             $employee = $this->object($person['employee'] ?? null, "input.people.{$personIndex}.employee");
             $employeeId = $this->positiveInt($employee['id'] ?? null, 'employee.id');
+            $annualEvidence = $annualEvidenceSources[$employeeId] ?? null;
+            if (!$annualEvidenceProvided && $annualEvidence === null) {
+                $annualEvidence = [
+                    'tax_year' => (int) substr($periodStart, 0, 4) - 1,
+                    'request' => null,
+                    'request_evidence' => null,
+                    'settlement' => null,
+                    'settlement_evidence' => null,
+                    'withholding_certificate' => null,
+                ];
+            }
+            if (!is_array($annualEvidence)
+                || ($annualEvidence['tax_year'] ?? null)
+                    !== ((int) substr($periodStart, 0, 4) - 1)
+            ) {
+                $this->invalid(
+                    'jmhz_annual_evidence_scope_mismatch',
+                    'Roční evidence neodpovídá osobě a předchozímu zdaňovacímu období.',
+                );
+            }
+            $usedAnnualEvidence[$employeeId] = $annualEvidence;
             $personResult = $resultPeople[$employeeId] ?? null;
             if (!is_array($personResult)) {
                 $this->invalid(
@@ -436,6 +464,7 @@ final class JmhzPreparationSnapshotBuilder
             $normalizedPeople[] = [
                 'employee_id' => $employeeId,
                 'person_summary' => $personResult,
+                'annual_evidence' => $annualEvidence,
                 'employments' => $normalizedEmployments,
             ];
         }
@@ -457,6 +486,13 @@ final class JmhzPreparationSnapshotBuilder
                 'Ordinary evidence patri k pracovnimu vztahu mimo pripravovanou revizi.',
             );
         }
+        $foreignAnnualEvidence = array_diff_key($annualEvidenceSources, $usedAnnualEvidence);
+        if ($foreignAnnualEvidence !== []) {
+            $this->invalid(
+                'jmhz_annual_evidence_scope_mismatch',
+                'Roční evidence patří k osobě mimo připravovanou revizi.',
+            );
+        }
         ksort($usedOrdinaryEvidence, SORT_NUMERIC);
         $ordinaryPayloads = [];
         $ordinaryVersions = [];
@@ -467,6 +503,21 @@ final class JmhzPreparationSnapshotBuilder
                 'id' => $ordinary['id'] ?? null,
                 'source_manifest_sha256' => $ordinary['source_manifest_sha256'] ?? null,
                 'snapshot_fingerprint' => $ordinary['snapshot_fingerprint'] ?? null,
+            ];
+        }
+        $annualVersions = [];
+        foreach ($usedAnnualEvidence as $employeeId => $evidence) {
+            $annualVersions[] = [
+                'employee_id' => $employeeId,
+                'tax_year' => $evidence['tax_year'],
+                'request_id' => $evidence['request']['id'] ?? null,
+                'request_row_version' => $evidence['request']['row_version'] ?? null,
+                'settlement_revision_id' => $evidence['settlement']['revision_id'] ?? null,
+                'settlement_snapshot_hash' => $evidence['settlement']['snapshot_hash'] ?? null,
+                'withholding_revision_id' =>
+                    $evidence['withholding_certificate']['revision_id'] ?? null,
+                'withholding_snapshot_hash' =>
+                    $evidence['withholding_certificate']['snapshot_hash'] ?? null,
             ];
         }
         $registrations = $this->officeRegistrations(
@@ -520,10 +571,11 @@ final class JmhzPreparationSnapshotBuilder
             'people' => $normalizedPeople,
             'ordinary_evidence' => $ordinaryPayloads,
             'source_versions' => [
-                'office_id' => is_array($office) ? ($office['id'] ?? null) : null,
+                'office_id' => is_array($office) ? $office['id'] : null,
                 'office_ids' => array_column($registrations, 'id'),
                 'employments' => $sourceVersions,
                 'ordinary_evidence' => $ordinaryVersions,
+                'annual_evidence' => $annualVersions,
             ],
             'readiness_issue_codes' => array_column($issues, 'code'),
             'readiness_issues' => $issues,
@@ -769,9 +821,10 @@ final class JmhzPreparationSnapshotBuilder
             $payload['derived_interactions'] ?? null,
             'ordinary_evidence.derived_interactions',
         );
-        if (CanonicalJson::encode($actualInteractions) !== CanonicalJson::encode($expectedInteractions)
-            || CanonicalJson::encode($actualDerivedInteractions)
-                !== CanonicalJson::encode($expectedDerivedInteractions)
+        if (CanonicalJson::encode(['rows' => $actualInteractions])
+                !== CanonicalJson::encode(['rows' => $expectedInteractions])
+            || CanonicalJson::encode(['rows' => $actualDerivedInteractions])
+                !== CanonicalJson::encode(['rows' => $expectedDerivedInteractions])
         ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_interaction_mismatch',

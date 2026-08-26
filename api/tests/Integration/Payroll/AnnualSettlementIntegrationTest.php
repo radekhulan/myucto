@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\AnnualSettlement\AnnualTaxSettlementService;
 use MyInvoice\Service\Payroll\Document\AnnualSettlementSnapshotBuilder;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzAnnualEvidenceService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -63,6 +64,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
         $settlements = $container->get(PayrollAnnualSettlementRepository::class);
         $accumulators = $container->get(PayrollStatutoryAccumulatorRepository::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
+        $jmhzAnnualEvidence = $container->get(JmhzAnnualEvidenceService::class);
         self::assertInstanceOf(Connection::class, $connection);
         self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
         self::assertInstanceOf(AnnualSettlementSnapshotBuilder::class, $snapshots);
@@ -72,6 +74,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
             $accumulators,
         );
         self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        self::assertInstanceOf(JmhzAnnualEvidenceService::class, $jmhzAnnualEvidence);
         if (!$connection->hasTable('payroll_annual_settlement_outcomes')) {
             $this->markTestSkipped('Migrace ročního zúčtování neproběhla.');
         }
@@ -185,6 +188,30 @@ final class AnnualSettlementIntegrationTest extends TestCase
                 null,
             );
             self::assertTrue($stored['created']);
+
+            $frozenAnnual = $jmhzAnnualEvidence->snapshotsForPreparation(
+                $supplierId,
+                [$employeeId],
+                self::YEAR + 1,
+            )[$employeeId];
+            self::assertSame('requested', $frozenAnnual['request']['status']);
+            self::assertSame(
+                'verified_request_row_under_unique_key_lock',
+                $frozenAnnual['request_evidence']['proof'],
+            );
+            self::assertTrue($frozenAnnual['settlement_evidence']['performed']);
+            self::assertSame(
+                'verified_annual_outcome_and_document_revision',
+                $frozenAnnual['settlement_evidence']['proof'],
+            );
+            self::assertSame($revisionId, $frozenAnnual['settlement']['revision_id']);
+            self::assertTrue($frozenAnnual['settlement']['performed']);
+            self::assertSame(
+                $result->settlementDifferenceMinorUnits,
+                $frozenAnnual['settlement']['settlement_difference_minor_units'],
+            );
+            self::assertSame($preview['child_rows'], $frozenAnnual['settlement']['child_rows']);
+            self::assertNull($frozenAnnual['withholding_certificate']);
 
             // „Opakované spuštění nevytvoří druhý výsledek" — druhý zápis narazí
             // na unikátní klíč a vrátí ten původní řádek.

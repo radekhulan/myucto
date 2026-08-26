@@ -21,7 +21,8 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V5_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v5';
     private const PREVIOUS_V6_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v6';
     private const PREVIOUS_V7_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v7';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v8';
+    private const PREVIOUS_V8_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v8';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v9';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
@@ -29,7 +30,8 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V5_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v5';
     private const PREVIOUS_V6_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v6';
     private const PREVIOUS_V7_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v7';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v8';
+    private const PREVIOUS_V8_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v8';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v9';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -40,6 +42,7 @@ final readonly class JmhzPreparationSnapshotService
         private SecretEncryption $encryption,
         private JmhzEldpEvidenceSnapshotService $eldpEvidence,
         private JmhzOrdinaryEvidenceService $ordinaryEvidence,
+        private JmhzAnnualEvidenceService $annualEvidence,
     ) {}
 
     public function loadVerified(
@@ -221,6 +224,11 @@ final readonly class JmhzPreparationSnapshotService
                 $sourceRevisionId,
                 $createdBy,
             );
+            $annualEvidence = $this->annualEvidence->snapshotsForPreparation(
+                $supplierId,
+                $this->employeeIds($input),
+                (int) substr((string) $revision['period_start'], 0, 4),
+            );
             $snapshot = $this->builder->build(
                 $supplierId,
                 $environment,
@@ -230,6 +238,7 @@ final readonly class JmhzPreparationSnapshotService
                 $sourceIssues,
                 $eldpSources,
                 $ordinaryEvidence,
+                $annualEvidence,
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -661,6 +670,11 @@ final readonly class JmhzPreparationSnapshotService
                 'manifest_schema' => self::PREVIOUS_V7_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_V7_REQUEST_SCHEMA,
             ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V8_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V8_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V8_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V8_REQUEST_SCHEMA,
+            ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
                 'manifest_schema' => self::CURRENT_MANIFEST_SCHEMA,
@@ -671,6 +685,34 @@ final readonly class JmhzPreparationSnapshotService
                 'Verze uložené přípravy JMHZ není podporovaná.',
             ),
         };
+    }
+
+    /** @param array<string,mixed> $input
+     *  @return list<int>
+     */
+    private function employeeIds(array $input): array
+    {
+        $ids = [];
+        $people = $input['people'] ?? null;
+        if (!is_array($people) || !array_is_list($people)) {
+            throw new JmhzPreparationSnapshotException(
+                'jmhz_snapshot_invalid',
+                'Vstupní snapshot revize nemá platný seznam osob.',
+            );
+        }
+        foreach ($people as $person) {
+            $employee = is_array($person) ? ($person['employee'] ?? null) : null;
+            $employeeId = is_array($employee) ? ($employee['id'] ?? null) : null;
+            if (!is_int($employeeId) || $employeeId <= 0) {
+                throw new JmhzPreparationSnapshotException(
+                    'jmhz_snapshot_invalid',
+                    'Vstupní snapshot revize nemá platnou identitu osoby.',
+                );
+            }
+            $ids[] = $employeeId;
+        }
+
+        return array_values(array_unique($ids));
     }
 
     private function encryptionContext(int $supplierId, string $environment, int $revisionId, string $snapshotFingerprint, string $manifestHash, string $readinessHash): string
