@@ -40,7 +40,7 @@ use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 final readonly class JmhzDispatchService
 {
     public const CHANNEL = 'vrep_apep';
-    private const SUBMISSION_CLASS = 'CSSZ_JMHZ';
+    public const SUBMISSION_CLASS = 'CSSZ_JMHZ';
 
     public function __construct(
         private PayrollSubmissionTransportAttemptRepository $attempts,
@@ -78,6 +78,7 @@ final readonly class JmhzDispatchService
         string $variableSymbol,
         string $idempotencyKey,
         ?int $actorUserId,
+        string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzDispatchOutcome {
         // Bez předané datové věty se bere ta ZMRAZENÁ. Je to jediný dokument,
         // který se pod tímhle podáním smí odeslat — postavit XML znovu by
@@ -97,7 +98,7 @@ final readonly class JmhzDispatchService
         $sealed = (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))->seal(
             $payloadXml,
             $variableSymbol,
-            self::SUBMISSION_CLASS,
+            $submissionClass,
             $environment,
             $this->software,
             new JmhzDetachedSigner(),
@@ -115,7 +116,10 @@ final readonly class JmhzDispatchService
             self::CHANNEL,
             $this->attempts->nextAttemptNo($supplierId, $environment, $submissionId),
             $idempotencyKey,
-            $sealed->sha256(),
+            // Otisk patří zmrazenému úřednímu dokumentu, ne CMS obálce.
+            // Šifrování používá náhodu, takže dvě obálky týchž bajtů mají
+            // jiný hash a opakovaný idempotenční klíč by jinak falešně kolidoval.
+            hash('sha256', $payloadXml),
             $actorUserId,
         );
         if (($attempt['status'] ?? null) !== 'prepared') {
@@ -145,7 +149,7 @@ final readonly class JmhzDispatchService
         try {
             $acknowledgement = $this->acknowledgements->parse(
                 $response->body,
-                self::SUBMISSION_CLASS,
+                $submissionClass,
             );
             if ($acknowledgement === null) {
                 // Odpověď na podání, která není potvrzením, je buď rovnou
@@ -265,6 +269,7 @@ final readonly class JmhzDispatchService
         int $attemptId,
         string $variableSymbol,
         int $packageCount = 1,
+        string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzDispatchOutcome {
         $attempt = $this->requireAttempt($supplierId, $environment, $attemptId);
         $correlation = (string) ($attempt['correlation_reference'] ?? '');
@@ -280,10 +285,16 @@ final readonly class JmhzDispatchService
         // úspěšné, mlčící protistrana by automatiku nechala běžet donekonečna
         // a strop pokusů by nikdy nesepnul.
         try {
-            $response = $this->pollOnce($environment, $correlation, $variableSymbol, false);
+            $response = $this->pollOnce(
+                $environment,
+                $correlation,
+                $variableSymbol,
+                false,
+                $submissionClass,
+            );
             $acknowledgement = $this->acknowledgements->parse(
                 $response->body,
-                self::SUBMISSION_CLASS,
+                $submissionClass,
             );
         } catch (\Throwable $exception) {
             $this->recordPoll($attempt, null, $exception->getMessage());
@@ -300,6 +311,12 @@ final readonly class JmhzDispatchService
 
         try {
             $report = $this->protocols->parse($response->body, $packageCount, $correlation);
+            if (!hash_equals($submissionClass, $report->submissionClass)) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_class_mismatch',
+                    'Protokol ČSSZ patří jinému druhu podání.',
+                );
+            }
         } catch (\Throwable $exception) {
             // Odpověď, která není ani potvrzením, ani čitelným protokolem,
             // NENÍ výsledek. Pokus zůstává otevřený a důvod je v ledgeru —
@@ -382,6 +399,7 @@ final readonly class JmhzDispatchService
                 $correlation,
                 $declared,
                 $idempotencyKey,
+                $report->submissionClass,
                 $verifier,
             );
 
@@ -401,6 +419,7 @@ final readonly class JmhzDispatchService
                 $correlation,
                 $declared,
                 $idempotencyKey,
+                $report->submissionClass,
                 null,
             );
             // Bez pojmenovaného důvodu by v podání zůstalo jen obecné
@@ -430,6 +449,7 @@ final readonly class JmhzDispatchService
         string $correlation,
         string $declaredRemoteStatus,
         string $idempotencyKey,
+        string $submissionClass,
         ?JmhzReceiptVerifier $verifier,
     ): array {
         $submission = $submissions->get($supplierId, $submissionId);
@@ -442,7 +462,7 @@ final readonly class JmhzDispatchService
             $body,
             $correlation,
             $correlation,
-            self::SUBMISSION_CLASS,
+            $submissionClass,
             $declaredRemoteStatus,
             self::CHANNEL,
             $idempotencyKey,
@@ -500,6 +520,7 @@ final readonly class JmhzDispatchService
         string $environment,
         int $attemptId,
         string $variableSymbol,
+        string $submissionClass = self::SUBMISSION_CLASS,
     ): array {
         $attempt = $this->requireAttempt($supplierId, $environment, $attemptId);
         if (($attempt['closed_at'] ?? null) !== null) {
@@ -515,7 +536,13 @@ final readonly class JmhzDispatchService
         }
 
         try {
-            $this->pollOnce($environment, $correlation, $variableSymbol, true);
+            $this->pollOnce(
+                $environment,
+                $correlation,
+                $variableSymbol,
+                true,
+                $submissionClass,
+            );
         } catch (\Throwable $exception) {
             $this->recordCloseFailure($attempt, $exception->getMessage());
 
@@ -573,9 +600,10 @@ final readonly class JmhzDispatchService
         string $correlation,
         string $variableSymbol,
         bool $close,
+        string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzVrepPollResult {
         $request = (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))
-            ->pollRequest($correlation, $variableSymbol, self::SUBMISSION_CLASS, $close);
+            ->pollRequest($correlation, $variableSymbol, $submissionClass, $close);
 
         return $this->client($environment)->poll($correlation, $request);
     }

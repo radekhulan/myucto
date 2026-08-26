@@ -1,0 +1,107 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Unit\Payroll\Submission\Registration;
+
+use MyInvoice\Action\Payroll\PayrollRegistrationTransportAction;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTransportService;
+use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
+
+\DG\BypassFinals::allowPaths([
+    '*/api/src/Service/Payroll/PayrollModuleAccess.php',
+    '*/api/src/Service/Payroll/Submission/Registration/PayrollRegistrationTransportService.php',
+]);
+
+final class PayrollRegistrationTransportActionTest extends TestCase
+{
+    public function testBearerTokenCannotTriggerRegistrationTransport(): void
+    {
+        $transport = $this->createMock(PayrollRegistrationTransportService::class);
+        $transport->expects(self::never())->method('send');
+        $access = $this->createMock(PayrollModuleAccess::class);
+        $access->expects(self::never())->method('isEnabled');
+        $request = $this->request('bearer')
+            ->withHeader('Idempotency-Key', 'must-not-run');
+
+        $response = (new PayrollRegistrationTransportAction($transport, $access))->send(
+            $request,
+            new Response(),
+            ['submissionId' => '42'],
+        );
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('session_required', $this->json($response)['error']['code']);
+    }
+
+    public function testSessionWithoutIdempotencyKeyCannotTriggerTransport(): void
+    {
+        $transport = $this->createMock(PayrollRegistrationTransportService::class);
+        $transport->expects(self::never())->method('send');
+        $access = $this->createMock(PayrollModuleAccess::class);
+        $access->expects(self::once())->method('isEnabled')->with(11)->willReturn(true);
+
+        $response = (new PayrollRegistrationTransportAction($transport, $access))->send(
+            $this->request('session'),
+            new Response(),
+            ['submissionId' => '42'],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame('validation_failed', $this->json($response)['error']['code']);
+    }
+
+    public function testOneAccountantCanExplicitlyTriggerOneScopedSend(): void
+    {
+        $transport = $this->createMock(PayrollRegistrationTransportService::class);
+        $transport->expects(self::once())
+            ->method('send')
+            ->with(11, 'test', 42, 'accountant-click-1', 9)
+            ->willReturn([
+                'agenda_code' => 'PREZEC26',
+                'submission_class' => 'CSSZ_PREZEC',
+                'payload_sha256' => str_repeat('a', 64),
+                'attempt' => ['id' => 7, 'status' => 'awaiting_protocol'],
+                'acknowledgement' => null,
+                'settled' => false,
+            ]);
+        $access = $this->createMock(PayrollModuleAccess::class);
+        $access->expects(self::once())->method('isEnabled')->with(11)->willReturn(true);
+        $request = $this->request('session')
+            ->withHeader('Idempotency-Key', 'accountant-click-1')
+            ->withParsedBody(['environment' => 'test']);
+
+        $response = (new PayrollRegistrationTransportAction($transport, $access))->send(
+            $request,
+            new Response(),
+            ['submissionId' => '42'],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('PREZEC26', $this->json($response)['agenda_code']);
+        self::assertSame('private, no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    private function request(string $method): \Psr\Http\Message\ServerRequestInterface
+    {
+        return (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/payroll/submissions/registration-transport/42')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 11)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 9, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, $method);
+    }
+
+    /** @return array<string,mixed> */
+    private function json(\Psr\Http\Message\ResponseInterface $response): array
+    {
+        $decoded = json_decode((string) $response->getBody(), true);
+        self::assertIsArray($decoded);
+
+        return $decoded;
+    }
+}

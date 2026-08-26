@@ -121,6 +121,7 @@ use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
+use MyInvoice\Action\Payroll\PayrollRegistrationTransportAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRetentionAction;
@@ -1159,6 +1160,18 @@ final class Routes
             $g->post(
                 '/submissions/registration/{employmentId:[0-9]+}',
                 [PayrollRegistrationAction::class, 'prepare'],
+            );
+            $g->post(
+                '/submissions/registration-transport/{submissionId:[0-9]+}',
+                [PayrollRegistrationTransportAction::class, 'send'],
+            );
+            $g->post(
+                '/submissions/registration-transport/{attemptId:[0-9]+}/poll',
+                [PayrollRegistrationTransportAction::class, 'poll'],
+            );
+            $g->post(
+                '/submissions/registration-transport/{attemptId:[0-9]+}/close',
+                [PayrollRegistrationTransportAction::class, 'close'],
             );
             // Oznámení záměru uplatňovat slevu na pojistném (OZUSPOJ).
             // Vlastní podání s vlastní lhůtou: sleva podle § 7a bez doručeného

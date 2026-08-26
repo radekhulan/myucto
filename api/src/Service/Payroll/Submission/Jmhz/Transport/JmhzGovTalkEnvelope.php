@@ -36,8 +36,8 @@ final readonly class JmhzGovTalkEnvelope
     public const NS_CSSZ_ENVELOPE = 'http://www.cssz.cz/XMLSchema/envelope';
     public const ENVELOPE_VERSION = '2.0';
 
-    /** Doložené hodnoty `Class` z reálných protokolů ČSSZ. */
-    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC'];
+    /** Doložené hodnoty `Class` z oficiálního katalogu obálek ČSSZ. */
+    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC', 'CSSZ_PREZEC'];
     private const ENVIRONMENTS = ['test', 'production'];
     private const PAYLOAD_PLACEHOLDER = 'JMHZ-PAYLOAD-SLOT-2f0a1c';
 
@@ -242,7 +242,10 @@ final readonly class JmhzGovTalkEnvelope
         if ($class === 'CSSZ_JMHZ') {
             $this->assertJmhzPayload($payload, $symbol, $software);
         }
-        $exact = $this->payloadXml($payload);
+        // Podepisují a šifrují se přesně archivované bajty. Znovunačtení přes
+        // DOM slouží jen ke kontrole tvaru; jeho saveXML() by zahodilo XML
+        // deklaraci a sjednotilo konce řádků, takže by změnilo SHA-256 podání.
+        $exact = $bodyXml;
 
         $signature = $signer->sign($exact, $pfxBytes, $password);
         $sealedBody = ($encryption ?? new JmhzCsszEncryption())->seal($exact);

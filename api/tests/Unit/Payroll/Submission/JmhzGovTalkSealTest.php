@@ -92,10 +92,59 @@ final class JmhzGovTalkSealTest extends TestCase
             file_put_contents((string) $signatureFile, $signature);
             // Podpis je odpojený: obsah se předává zvlášť. Podepsané jsou
             // tytéž bajty, které serializér vydal, ne jejich přeformátování.
-            file_put_contents((string) $contentFile, $this->exactPayload($payload));
+            file_put_contents((string) $contentFile, $payload);
 
             // U odpojeného podpisu je vstupem OBSAH a podpis se předává zvlášť
             // jako `sigfile` — přesně tak, jak ho ověřuje protistrana.
+            self::assertTrue(openssl_cms_verify(
+                (string) $contentFile,
+                OPENSSL_CMS_BINARY | OPENSSL_CMS_DETACHED,
+                null,
+                [(string) $root],
+                null,
+                null,
+                null,
+                (string) $signatureFile,
+                OPENSSL_ENCODING_DER,
+            ));
+        } finally {
+            foreach ([$root, $signatureFile, $contentFile] as $file) {
+                if (is_string($file) && is_file($file)) {
+                    unlink($file);
+                }
+            }
+        }
+    }
+
+    /**
+     * PREZEC i REGZEC jsou samostatné doložené třídy GovTalk. Registrační
+     * artefakt se nesmí před podpisem znovu serializovat: i XML deklarace a
+     * konce řádků jsou součástí zmrazených bajtů a jejich SHA-256.
+     */
+    public function testPrezecSignatureVerifiesAgainstTheExactFrozenBytes(): void
+    {
+        $material = self::certificate();
+        $payload = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+            . '<PREZEC xmlns="http://schemas.cssz.cz/PREZEC/2026">'
+            . '<employees><employee act="9"><comp vs="1234567890"/></employee></employees>'
+            . '</PREZEC>';
+        $dom = $this->sealedDom($payload, $material, 'CSSZ_PREZEC');
+        $xpath = new DOMXPath($dom);
+        $xpath->registerNamespace('c', self::NS_CSSZ);
+        $signature = base64_decode(
+            $this->text($xpath, '//c:Header/c:Signature'),
+            true,
+        );
+        self::assertIsString($signature);
+
+        $root = tempnam(sys_get_temp_dir(), 'prezec-root-');
+        $signatureFile = tempnam(sys_get_temp_dir(), 'prezec-sig-');
+        $contentFile = tempnam(sys_get_temp_dir(), 'prezec-body-');
+        try {
+            file_put_contents((string) $root, $material['cert']);
+            file_put_contents((string) $signatureFile, $signature);
+            file_put_contents((string) $contentFile, $payload);
+
             self::assertTrue(openssl_cms_verify(
                 (string) $contentFile,
                 OPENSSL_CMS_BINARY | OPENSSL_CMS_DETACHED,
@@ -152,13 +201,14 @@ final class JmhzGovTalkSealTest extends TestCase
     private function sealedDocument(
         ?string $payload = null,
         ?array $material = null,
+        string $submissionClass = 'CSSZ_JMHZ',
     ): \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkDocument {
         $material ??= self::certificate();
 
         return (new JmhzGovTalkEnvelope(JmhzGovTalkRequestShape::documented()))->seal(
             $payload ?? JmhzTransportSample::payload(),
             JmhzTransportSample::VARIABLE_SYMBOL,
-            'CSSZ_JMHZ',
+            $submissionClass,
             'test',
             new JmhzSoftwareIdentification('MyUcto', '1.0'),
             new JmhzDetachedSigner(),
@@ -168,31 +218,26 @@ final class JmhzGovTalkSealTest extends TestCase
     }
 
     /** @param array{cert:string,pfx:string,password:string}|null $material */
-    private function sealed(?string $payload = null, ?array $material = null): string
+    private function sealed(
+        ?string $payload = null,
+        ?array $material = null,
+        string $submissionClass = 'CSSZ_JMHZ',
+    ): string
     {
-        return $this->sealedDocument($payload, $material)->unsignedXml;
+        return $this->sealedDocument($payload, $material, $submissionClass)->unsignedXml;
     }
 
     /** @param array{cert:string,pfx:string,password:string}|null $material */
-    private function sealedDom(?string $payload = null, ?array $material = null): DOMDocument
+    private function sealedDom(
+        ?string $payload = null,
+        ?array $material = null,
+        string $submissionClass = 'CSSZ_JMHZ',
+    ): DOMDocument
     {
         $dom = new DOMDocument();
-        self::assertTrue($dom->loadXML($this->sealed($payload, $material)));
+        self::assertTrue($dom->loadXML($this->sealed($payload, $material, $submissionClass)));
 
         return $dom;
-    }
-
-    /**
-     * Serializér obálky přebírá datovou větu beze změny formátování, ale bez
-     * XML deklarace. Ověřuje se proti témuž tvaru, jaký se podepisoval.
-     */
-    private function exactPayload(string $payload): string
-    {
-        $dom = new DOMDocument();
-        self::assertTrue($dom->loadXML($payload));
-        self::assertNotNull($dom->documentElement);
-
-        return (string) $dom->saveXML($dom->documentElement);
     }
 
     private function text(DOMXPath $xpath, string $expression): string

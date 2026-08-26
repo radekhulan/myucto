@@ -34,7 +34,7 @@ final readonly class JmhzProtocolParser
     private const QUALIFIER_ACCEPTED = 'response';
     private const QUALIFIER_REJECTED = 'error';
 
-    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC'];
+    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC', 'CSSZ_PREZEC'];
     private const ERROR_KINDS = ['prijem', 'zpracovani'];
     private const PART_SCOPES = [
         'global' => JmhzProtocolPartKind::General,

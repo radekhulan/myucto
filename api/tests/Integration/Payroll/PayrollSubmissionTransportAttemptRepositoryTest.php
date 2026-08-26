@@ -307,6 +307,54 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
     }
 
     /**
+     * Automatický sweep je JMHZ-specifický a nesmí registrační podání omylem
+     * dotazovat třídou CSSZ_JMHZ. PREZEC/REGZEC se po ručně spuštěném odeslání
+     * sledují jen přes svou explicitní transportní akci.
+     */
+    public function testJmhzDueQueuesExcludeRegistrationAttempts(): void
+    {
+        $pdo = $this->db->pdo();
+        $registrationSubmissionId = $this->createSubmission($pdo, 'registration');
+        $pdo->prepare(
+            'UPDATE payroll_obligations obligation
+               JOIN payroll_submissions submission
+                 ON submission.obligation_id = obligation.id
+                  SET obligation.agenda_code = "PREZEC26"
+                WHERE submission.id = ?',
+        )->execute([$registrationSubmissionId]);
+        $opened = $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $registrationSubmissionId,
+            self::CHANNEL,
+            1,
+            'registration-not-for-jmhz-sweep',
+            str_repeat('b', 64),
+            null,
+        );
+        $sent = $this->repository->markSent(
+            (int) $opened['id'],
+            'VREP-2026-08-REGISTRATION',
+            200,
+            (int) $opened['row_version'],
+            '2020-01-01 00:00:00',
+        );
+
+        self::assertNotContains(
+            $sent['id'],
+            array_column($this->repository->listDuePolls(50), 'id'),
+        );
+        $completed = $this->repository->markCompleted(
+            (int) $sent['id'],
+            (int) $sent['row_version'],
+        );
+        self::assertNotContains(
+            $completed['id'],
+            array_column($this->repository->listDueCloses(50, 8), 'id'),
+        );
+    }
+
+    /**
      * Transakce se uzavírá právě jednou. `closed_at` je jednorázové přiřazení,
      * takže druhý pokus není tichý no-op, ale hlasitá chyba — volající si musí
      * ověřit stav dřív, než začne posílat.

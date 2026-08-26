@@ -686,6 +686,10 @@ final class PayrollSubmissionTransportAttemptRepository
      * založené před migrací 1379 termín nemají a vynechat je by znamenalo, že
      * na ně automatika nikdy nesáhne.
      *
+     * Fronta je záměrně jen JMHZ: její worker čte JMHZ identitu a používá
+     * třídu CSSZ_JMHZ. Registrační PREZEC/REGZEC pokusy sdílejí ledger, ale
+     * dotaz na jejich výsledek spouští účetní explicitní transportní akcí.
+     *
      * @return list<array<string,mixed>>
      */
     public function listDuePolls(int $limit = 50): array
@@ -723,6 +727,21 @@ final class PayrollSubmissionTransportAttemptRepository
             'SELECT ' . self::COLUMNS . '
                FROM ' . self::TABLE . '
               WHERE ' . $condition . '
+                AND EXISTS (
+                    SELECT 1
+                      FROM payroll_submissions due_submission
+                      JOIN payroll_obligations due_obligation
+                        ON due_obligation.supplier_id = due_submission.supplier_id
+                       AND due_obligation.environment = due_submission.environment
+                       AND due_obligation.id = due_submission.obligation_id
+                     WHERE due_submission.supplier_id = '
+                        . self::TABLE . '.supplier_id
+                       AND due_submission.environment = '
+                        . self::TABLE . '.environment
+                       AND due_submission.id = '
+                        . self::TABLE . '.submission_id
+                       AND due_obligation.agenda_code IN ("JMHZ", "JMHZ25")
+                )
                 AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
               ORDER BY next_retry_at IS NOT NULL, next_retry_at, id
               LIMIT ' . $limit,
