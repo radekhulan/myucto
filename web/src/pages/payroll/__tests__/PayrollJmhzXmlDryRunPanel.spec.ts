@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   freeze: vi.fn(),
   dryRun: vi.fn(),
   offices: vi.fn(),
+  context: vi.fn(),
   canWrite: vi.fn(() => true),
 }))
 
@@ -18,6 +19,10 @@ vi.mock('@/api/payroll', () => ({
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
+}))
+
+vi.mock('@/api/payrollAbsences', () => ({
+  payrollAbsenceApi: { context: m.context },
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -44,6 +49,7 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
     m.freeze.mockResolvedValue({ id: 77, readiness_status: 'source_ready' })
+    m.context.mockResolvedValue([])
     m.offices.mockResolvedValue([{
       office_id: 4,
       code: 'UC4',
@@ -156,6 +162,24 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
   })
 
   it('blokovaný dokument vypíše důvody a nenabídne XML', async () => {
+    m.context.mockResolvedValue([
+      {
+        id: 12,
+        employee_id: 13,
+        code: 'DPP-13',
+        relation_type: 'dpp',
+        status: 'active',
+        full_name: 'Dana Testovací',
+      },
+      {
+        id: 14,
+        employee_id: 11,
+        code: 'HPP-11',
+        relation_type: 'employment',
+        status: 'active',
+        full_name: 'Adam Testovací',
+      },
+    ])
     m.dryRun.mockResolvedValue({
       status: 'blocked',
       preparation_id: 77,
@@ -207,6 +231,9 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(wrapper.findAll('[data-test="jmhz-dry-run-technical-detail"]')).toHaveLength(2)
     expect(wrapper.find('[data-test="jmhz-dry-run-remediation-list"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-test="router-link"]')).toHaveLength(2)
+    expect(wrapper.text()).toContain('Adam Testovací')
+    expect(wrapper.text()).toContain('Dana Testovací')
+    expect(wrapper.text()).not.toContain('jmhz_dry_run_actions.record')
     expect(wrapper.find('[data-test="jmhz-dry-run-remediation"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="router-link"]').attributes('data-to'))
       .toContain('payroll-people')

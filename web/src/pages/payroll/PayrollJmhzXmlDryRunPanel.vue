@@ -12,6 +12,10 @@ import {
   type PayrollJmhzXmlDryRunBlocker,
   type PayrollRun,
 } from '@/api/payroll'
+import {
+  payrollAbsenceApi,
+  type PayrollAbsenceEmployment,
+} from '@/api/payrollAbsences'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 
@@ -36,6 +40,8 @@ const states = ref<Record<number, DryRunState>>({})
  */
 const offices = ref<Record<number, PayrollJmhzPvpojOffice[]>>({})
 const selectedOffice = ref<Record<number, number | null>>({})
+const remediationEmployments = ref<PayrollAbsenceEmployment[]>([])
+const remediationContextRequested = ref(false)
 
 watch(() => props.runs, async runs => {
   const loaded: Record<number, PayrollJmhzPvpojOffice[]> = {}
@@ -85,6 +91,12 @@ async function ensureOffices(revision: number): Promise<void> {
   }
 }
 
+async function ensureRemediationContext(): Promise<void> {
+  if (remediationContextRequested.value) return
+  remediationContextRequested.value = true
+  remediationEmployments.value = await payrollAbsenceApi.context().catch(() => [])
+}
+
 function state(run: PayrollRun): DryRunState | null {
   const id = revisionId(run)
   return id === null ? null : states.value[id] ?? null
@@ -114,11 +126,17 @@ async function run(payrollRun: PayrollRun) {
       id,
       crypto.randomUUID(),
     )
-    states.value[id].result = await payrollApi.jmhzXmlDryRun(
+    const result = await payrollApi.jmhzXmlDryRun(
       preparation.id,
       'test',
       selectedOffice.value[id] ?? null,
     )
+    states.value[id].result = result
+    if (result.status === 'blocked'
+      && result.blockers.some(blocker => blocker.entity_id !== null)
+    ) {
+      await ensureRemediationContext()
+    }
   } catch (exception) {
     states.value[id].error = apiErrorMessage(
       exception,
@@ -261,6 +279,26 @@ function blockerGroupTarget(group: BlockerGroup): RouteLocationRaw | null {
 function entityIdPreview(entityIds: number[]): string {
   const visible = entityIds.slice(0, 10).join(', ')
   return entityIds.length > 10 ? `${visible}, …` : visible
+}
+
+function remediationLabel(
+  blocker: PayrollJmhzXmlDryRunBlocker,
+  entityId: number,
+  index: number,
+): string {
+  const employment = blocker.entity_type === 'employment'
+    ? remediationEmployments.value.find(item => item.id === entityId)
+    : ['person', 'employee'].includes(blocker.entity_type)
+      ? remediationEmployments.value.find(item => item.employee_id === entityId)
+      : undefined
+  if (employment !== undefined) {
+    return blocker.entity_type === 'employment'
+      ? `${employment.full_name} · ${employment.code}`
+      : employment.full_name
+  }
+  return t('payroll.submissions.overview.jmhz_dry_run_actions.record', {
+    number: index + 1,
+  })
 }
 
 interface ControlGroup {
@@ -566,9 +604,7 @@ async function copyXml(payrollRun: PayrollRun) {
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path :d="ICONS.edit" />
                       </svg>
-                      {{ t('payroll.submissions.overview.jmhz_dry_run_actions.record', {
-                        number: index + 1,
-                      }) }}
+                      {{ remediationLabel(group.blocker, entityId, index) }}
                     </RouterLink>
                   </div>
                 </details>
