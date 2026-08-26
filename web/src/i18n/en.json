@@ -4029,7 +4029,6 @@
                 "travel_expenses": "Travel expenses",
                 "automation": "Automation",
                 "automation_title": "Approval and automated steps",
-                "four_eyes": "Require four-eyes review",
                 "automatic_calculation": "Calculate automatically",
                 "automatic_posting": "Post automatically",
                 "automatic_payments": "Prepare payments automatically",
@@ -4086,10 +4085,6 @@
                     "travel_expense_policy": {
                         "ok": "The travel-expense policy is configured.",
                         "blocked": "Travel expenses require a completed policy."
-                    },
-                    "four_eyes": {
-                        "ok": "Four-eyes review has at least two active approvers.",
-                        "blocked": "Four-eyes review requires at least two active approvers."
                     },
                     "automatic_calculation": {
                         "ok": "Automatic calculation is allowed by policy.",

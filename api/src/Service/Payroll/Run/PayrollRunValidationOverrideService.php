@@ -35,19 +35,11 @@ use PDO;
  *
  * ─── ČTYŘI OČI: POLITIKA, NE BLOKACE ────────────────────────────────────────
  *
- * Výjimku SMÍ schválit i ten, kdo revizi počítal, a služba to jen zaznamená
- * (`four_eyes_met = false` v auditní události i v odpovědi API). Důvody:
- *
- *  • Dvě oči navíc už v cestě jsou. {@see PayrollRunWorkflow} tvrdě odmítne
- *    `review` i `approve` od uživatele, který revizi počítal. Výjimka tedy
- *    nikdy neputuje sama — než se z ní stanou peníze, musí přes ni projít
- *    kontrola a schválení jinou osobou. Přidat třetí tvrdou podmínku by
- *    hlídalo něco, co je už pohlídané, a stálo by to další osobu navíc.
- *  • Tvrdé čtyři oči přímo na overridu by u firmy s jediným mzdovým člověkem
- *    znamenaly, že varování nejde odklidit vůbec — tedy přesně ta past, kterou
- *    tahle změna odstraňuje, jen o patro výš.
- *  • Kód pro tenhle rozdíl už precedent má: {@see \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetEvidence::fourEyesMet()}
- *    — „čtyři oči jsou POLITIKA, ne tvrdá podmínka".
+ * Výjimku smí schválit i ten, kdo revizi počítal, kontroloval a následně
+ * schválí. {@see PayrollRunWorkflow} vyžaduje jednotlivé odborné kroky a
+ * neměnnou auditní stopu, nikoli druhého uživatele. Historické pole
+ * `four_eyes_met` zůstává jen kompatibilní auditní metadatou; nikdy neblokuje
+ * výjimku ani mzdový běh.
  *
  * ─── ODVOLATELNOST ──────────────────────────────────────────────────────────
  *

@@ -155,7 +155,6 @@ const knownCheckCodes = new Set([
   'effective_policy',
   'home_office_policy',
   'travel_expense_policy',
-  'four_eyes',
   'automatic_calculation',
   'automatic_posting',
   'automatic_payments',

@@ -4029,7 +4029,6 @@
                 "travel_expenses": "Cestovní náhrady",
                 "automation": "Automatizace",
                 "automation_title": "Schvalování a automatické kroky",
-                "four_eyes": "Vyžadovat kontrolu čtyř očí",
                 "automatic_calculation": "Automaticky vypočítat",
                 "automatic_posting": "Automaticky zaúčtovat",
                 "automatic_payments": "Automaticky připravit platby",
@@ -4086,10 +4085,6 @@
                     "travel_expense_policy": {
                         "ok": "Cestovní politika je nakonfigurovaná.",
                         "blocked": "Cestovní náhrady vyžadují dokončenou politiku."
-                    },
-                    "four_eyes": {
-                        "ok": "Kontrola čtyř očí má alespoň dva aktivní schvalovatele.",
-                        "blocked": "Kontrola čtyř očí vyžaduje alespoň dva aktivní schvalovatele."
                     },
                     "automatic_calculation": {
                         "ok": "Automatický výpočet je povolený politikou.",
