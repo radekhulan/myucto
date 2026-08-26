@@ -3646,7 +3646,7 @@
                     "revision": "Open payroll run",
                     "preparation": "Open payroll run",
                     "default": "Go to completion",
-                    "multiple": "Complete all {count} affected records",
+                    "multiple": "Open {count} affected records",
                     "record": "Open record {number}"
                 },
                 "jmhz_dry_run_action_codes": {

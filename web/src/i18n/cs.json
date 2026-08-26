@@ -3646,7 +3646,7 @@
                     "revision": "Otevřít mzdový běh",
                     "preparation": "Otevřít mzdový běh",
                     "default": "Přejít k doplnění",
-                    "multiple": "Doplnit všech {count} dotčených záznamů",
+                    "multiple": "Otevřít {count} dotčené záznamy",
                     "record": "Otevřít záznam {number}"
                 },
                 "jmhz_dry_run_action_codes": {
