@@ -806,7 +806,8 @@
             "reason_placeholder": "Např. novela zákona č. …/2027 Sb. účinná od 1. 1.",
             "read_only_hint": "Pravidla jsou společná pro všechny firmy, takže je smí měnit jen superadmin. Vidíte je jen ke čtení.",
             "storage_unavailable": "Úložiště úprav není dostupné — chybí migrace databáze. Platí ověřená sada z aplikace.",
-            "degraded": "Uložená úprava je nekonzistentní, takže výpočet běží na ověřené sadě z aplikace: {reason}",
+            "degraded": "Uložená úprava pravidel je nekonzistentní. Výpočet proto používá ověřená pravidla dodaná aplikací.",
+            "degraded_technical": "Technické údaje pro podporu",
             "version_count": "Verzí: {count}",
             "status": {
                 "ready": "Výpočet povolen",
@@ -1852,7 +1853,8 @@
             "batch_no_exits": "V období neskončil žádný pracovní vztah.",
             "batch_exit_archived": "potvrzení o zaměstnání vydáno",
             "batch_exit_pending": "potvrzení o zaměstnání chybí, podklady jsou připravené",
-            "batch_exit_blocked": "potvrzení o zaměstnání chybí a je blokované ({code})",
+            "batch_exit_blocked": "potvrzení o zaměstnání chybí a je blokované: {reason}",
+            "batch_exit_employee_unknown": "Pracovní vztah zaměstnance bez dostupného jména",
             "title": "Dokumenty a výstupy",
             "subtitle": "Výplatní pásky, potvrzení, mzdové listy a neměnné měsíční balíčky ze schválených mzdových revizí.",
             "period": "Období",
@@ -3188,7 +3190,7 @@
                     "working_pensioner_discount_evidence_unverified": "Evidence slevy pracujícího důchodce k měsíci zjištění není ověřená.",
                     "pension_insurance_period_invalid": "Interval důchodového pojištění nepatří do tohoto vztahu nebo se překrývá.",
                     "termination_assessment_incomplete": "Nebylo potvrzeno posouzení způsobu skončení vztahu.",
-                    "unknown": "Kontrola skončila kódem {code}. Doplňte podklady nebo kontaktujte správce.",
+                    "unknown": "Kontrolu se nepodařilo jednoznačně vyhodnotit. Doplňte podklady nebo kontaktujte správce.",
                     "employment_not_found": "Pracovní vztah nebyl nalezen.",
                     "employment_not_ended": "Pracovní vztah ještě nemá datum skončení.",
                     "employment_end_in_future": "Datum skončení pracovního vztahu je v budoucnosti.",
@@ -3856,7 +3858,8 @@
                     "fulfilled": "Splněno",
                     "overdue": "Po termínu",
                     "cancelled": "Zrušeno",
-                    "manual_review": "Ruční kontrola"
+                    "manual_review": "Ruční kontrola",
+                    "unknown": "Neznámý stav"
                 },
                 "channel": {
                     "manual_upload": "Ruční nahrání",
@@ -3864,8 +3867,65 @@
                     "vrep_apep": "VREP / APEP",
                     "pikr": "PIKR",
                     "health_portal": "Portál pojišťovny",
-                    "other": "Jiný kanál"
+                    "other": "Jiný kanál",
+                    "unknown": "Jiný způsob podání"
                 },
+                "submission_kind": {
+                    "regular": "Řádné podání",
+                    "correction": "Opravné podání",
+                    "cancellation": "Storno podání",
+                    "unknown": "Neznámý druh podání"
+                },
+                "artifact_kind": {
+                    "outbound_xml": "Odesílaná datová věta XML",
+                    "outbound_pdf": "Odesílaný formulář PDF",
+                    "outbound_zip": "Odesílaný balíček ZIP",
+                    "validation_protocol": "Protokol kontroly",
+                    "receipt_original": "Původní dodejka nebo protokol",
+                    "receipt_parsed": "Zpracovaný protokol",
+                    "manual_attachment": "Ručně přiložený soubor",
+                    "unknown": "Jiný archivovaný soubor"
+                },
+                "issue_severity": {
+                    "blocker": "Blokující chyba",
+                    "error": "Chyba",
+                    "warning": "Varování",
+                    "info": "Informace",
+                    "unknown": "Vyžaduje kontrolu"
+                },
+                "validation_stage": {
+                    "source": "Zdrojová data",
+                    "xsd": "Kontrola XML schématu",
+                    "catalog": "Kontrola proti číselníkům",
+                    "transport": "Odeslání",
+                    "remote": "Odpověď úřadu",
+                    "unknown": "Kontrola podání"
+                },
+                "verification_status": {
+                    "unverified": "Neověřený protokol",
+                    "trusted": "Ověřený protokol",
+                    "unknown": "Stav ověření není známý"
+                },
+                "issue_message": {
+                    "receipt_unverified": "Přijatý protokol se nepodařilo bezpečně ověřit.",
+                    "jmhz_protocol_untrusted": "Protokol ČSSZ se nepodařilo bezpečně ověřit.",
+                    "jmhz_xsd_validation_failed": "Datová věta JMHZ neprošla kontrolou XML schématu.",
+                    "zp_xsd_validation_failed": "Datová věta zdravotní pojišťovny neprošla kontrolou XML schématu.",
+                    "eldp_xsd_validation_failed": "Evidenční list neprošel kontrolou XML schématu.",
+                    "ozuspoj_xsd_validation_failed": "Oznámení záměru uplatňovat slevu neprošlo kontrolou XML schématu.",
+                    "regzel_xsd_validation_failed": "Registrační podání neprošlo kontrolou XML schématu.",
+                    "registration_xsd_validation_failed": "Registrační podání neprošlo kontrolou XML schématu.",
+                    "unknown": "Podání vyžaduje kontrolu. Podrobnosti pro podporu jsou dostupné níže."
+                },
+                "issue_remediation": {
+                    "source": "Opravte nebo doplňte zdrojové údaje agendy a podání připravte znovu.",
+                    "xsd": "Podání připravte znovu po kontrole vstupních údajů. Pokud problém trvá, předejte technické údaje podpoře.",
+                    "catalog": "Zkontrolujte hodnoty podle aktuálních číselníků a podání připravte znovu.",
+                    "transport": "Zkontrolujte nastavení odesílacího kanálu a akci zopakujte.",
+                    "remote": "Zkontrolujte protokol úřadu a podle výsledku připravte opravu nebo kontaktujte podporu.",
+                    "unknown": "Zkontrolujte podklady podání. Pokud příčina není zřejmá, předejte technické údaje podpoře."
+                },
+                "issue_technical": "Technické údaje pro podporu",
                 "jmhz_evidence_scope": "{name} · vztah č. {employment}",
                 "jmhz_evidence_scope_unnamed": "Pracovní vztah č. {employment}",
                 "jmhz_evidence_pending": "žádný vztah nevyžaduje pozornost | 1 vztah vyžaduje pozornost | {n} vztahy vyžadují pozornost | {n} vztahů vyžaduje pozornost",

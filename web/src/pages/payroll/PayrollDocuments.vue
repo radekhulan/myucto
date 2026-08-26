@@ -26,8 +26,10 @@ import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgenda
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const { t } = useI18n()
+const { employmentExitReadinessLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
@@ -404,8 +406,13 @@ function batchExitLabel(exit: PayrollDocumentBatchExit): string {
   if (certificate?.archived) return t('payroll.documents.batch_exit_archived')
   if (certificate?.available) return t('payroll.documents.batch_exit_pending')
   return t('payroll.documents.batch_exit_blocked', {
-    code: certificate?.readiness_code ?? '',
+    reason: employmentExitReadinessLabel(certificate?.readiness_code),
   })
+}
+
+function batchExitEmployeeLabel(exit: PayrollDocumentBatchExit): string {
+  return exit.employee_name?.trim()
+    || t('payroll.documents.batch_exit_employee_unknown')
 }
 
 async function download(item: PayrollDocument): Promise<void> {
@@ -542,7 +549,7 @@ onMounted(load)
       </p>
       <ul v-if="batchReport.employment_exits.length" class="mt-3 space-y-1 text-sm text-neutral-700">
         <li v-for="exit in batchReport.employment_exits" :key="exit.employment_id">
-          {{ exit.employee_name || exit.employment_id }} · {{ exit.end_date }} · {{ batchExitLabel(exit) }}
+          {{ batchExitEmployeeLabel(exit) }} · {{ exit.end_date }} · {{ batchExitLabel(exit) }}
         </li>
       </ul>
       <p v-else class="mt-3 text-sm text-neutral-600">

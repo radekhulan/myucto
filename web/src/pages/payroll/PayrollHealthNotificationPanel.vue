@@ -42,6 +42,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { formatDate } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
 import { appIsoDate } from '@/utils/date'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const DUTY_KINDS: HealthDutyKind[] = [
   'employment_start',
@@ -68,6 +69,7 @@ const COLUMNS: ColumnDef[] = [
 const PAGE_SIZE = 50
 
 const { t } = useI18n()
+const { submissionStatusLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const tbl = useTablePrefs('payroll-health-notifications', COLUMNS)
 
@@ -972,7 +974,7 @@ onMounted(() => {
         <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
           <div>
             <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.status') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ prepared.status }}</dd>
+            <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(prepared.status) }}</dd>
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.period') }}</dt>

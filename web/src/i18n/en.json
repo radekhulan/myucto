@@ -806,7 +806,8 @@
             "reason_placeholder": "E.g. amendment No. …/2027 Coll. effective 1 January",
             "read_only_hint": "The rules are shared by every company, so only a superadmin may change them. You have read-only access.",
             "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
-            "degraded": "The stored override is inconsistent, so the calculation runs on the verified built-in set: {reason}",
+            "degraded": "The stored rules override is inconsistent. The calculation therefore uses the verified rules supplied with the application.",
+            "degraded_technical": "Technical details for support",
             "version_count": "Versions: {count}",
             "status": {
                 "ready": "Calculation enabled",
@@ -1852,7 +1853,8 @@
             "batch_no_exits": "No employment ended in the period.",
             "batch_exit_archived": "employment certificate issued",
             "batch_exit_pending": "employment certificate missing, evidence is ready",
-            "batch_exit_blocked": "employment certificate missing and blocked ({code})",
+            "batch_exit_blocked": "employment certificate missing and blocked: {reason}",
+            "batch_exit_employee_unknown": "Employee relationship without an available name",
             "title": "Documents and outputs",
             "subtitle": "Payslips, certificates, payroll sheets and immutable monthly bundles from approved payroll revisions.",
             "period": "Period",
@@ -3188,7 +3190,7 @@
                     "working_pensioner_discount_evidence_unverified": "The working pensioner discount evidence for the month of determination is not verified.",
                     "pension_insurance_period_invalid": "The pension insurance interval does not belong to this relationship or overlaps.",
                     "termination_assessment_incomplete": "The assessment of how the employment ended was not confirmed.",
-                    "unknown": "The check ended with code {code}. Complete the evidence or contact an administrator.",
+                    "unknown": "The check could not be evaluated conclusively. Complete the evidence or contact an administrator.",
                     "employment_not_found": "The employment relationship was not found.",
                     "employment_not_ended": "The employment relationship has no end date yet.",
                     "employment_end_in_future": "The employment end date is in the future.",
@@ -3856,7 +3858,8 @@
                     "fulfilled": "Fulfilled",
                     "overdue": "Overdue",
                     "cancelled": "Cancelled",
-                    "manual_review": "Manual review"
+                    "manual_review": "Manual review",
+                    "unknown": "Unknown status"
                 },
                 "channel": {
                     "manual_upload": "Manual upload",
@@ -3864,8 +3867,65 @@
                     "vrep_apep": "VREP / APEP",
                     "pikr": "PIKR",
                     "health_portal": "Insurer portal",
-                    "other": "Other channel"
+                    "other": "Other channel",
+                    "unknown": "Other submission method"
                 },
+                "submission_kind": {
+                    "regular": "Regular submission",
+                    "correction": "Corrective submission",
+                    "cancellation": "Submission cancellation",
+                    "unknown": "Unknown submission kind"
+                },
+                "artifact_kind": {
+                    "outbound_xml": "Outbound XML data message",
+                    "outbound_pdf": "Outbound PDF form",
+                    "outbound_zip": "Outbound ZIP package",
+                    "validation_protocol": "Validation protocol",
+                    "receipt_original": "Original receipt or protocol",
+                    "receipt_parsed": "Processed protocol",
+                    "manual_attachment": "Manually attached file",
+                    "unknown": "Other archived file"
+                },
+                "issue_severity": {
+                    "blocker": "Blocking error",
+                    "error": "Error",
+                    "warning": "Warning",
+                    "info": "Information",
+                    "unknown": "Needs review"
+                },
+                "validation_stage": {
+                    "source": "Source data",
+                    "xsd": "XML schema validation",
+                    "catalog": "Codebook validation",
+                    "transport": "Submission transport",
+                    "remote": "Authority response",
+                    "unknown": "Submission check"
+                },
+                "verification_status": {
+                    "unverified": "Unverified protocol",
+                    "trusted": "Verified protocol",
+                    "unknown": "Verification status unknown"
+                },
+                "issue_message": {
+                    "receipt_unverified": "The received protocol could not be verified securely.",
+                    "jmhz_protocol_untrusted": "The CSSA protocol could not be verified securely.",
+                    "jmhz_xsd_validation_failed": "The JMHZ data message failed XML schema validation.",
+                    "zp_xsd_validation_failed": "The health insurance data message failed XML schema validation.",
+                    "eldp_xsd_validation_failed": "The pension insurance record sheet failed XML schema validation.",
+                    "ozuspoj_xsd_validation_failed": "The notice of intent to claim the contribution discount failed XML schema validation.",
+                    "regzel_xsd_validation_failed": "The registration submission failed XML schema validation.",
+                    "registration_xsd_validation_failed": "The registration submission failed XML schema validation.",
+                    "unknown": "The submission needs review. Support details are available below."
+                },
+                "issue_remediation": {
+                    "source": "Correct or complete the agenda source data, then prepare the submission again.",
+                    "xsd": "Prepare the submission again after checking its input data. If the issue persists, provide the technical details to support.",
+                    "catalog": "Check the values against the current codebooks, then prepare the submission again.",
+                    "transport": "Check the submission channel settings and retry the action.",
+                    "remote": "Review the authority protocol, then prepare a correction or contact support as appropriate.",
+                    "unknown": "Review the submission evidence. If the cause is unclear, provide the technical details to support."
+                },
+                "issue_technical": "Technical details for support",
                 "jmhz_evidence_scope": "{name} · employment no. {employment}",
                 "jmhz_evidence_scope_unnamed": "Employment no. {employment}",
                 "jmhz_evidence_pending": "no employment requires attention | 1 employment requires attention | {n} employments require attention",

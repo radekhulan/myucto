@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   generatePayrollSheet: vi.fn(),
   generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
+  generateDocumentBatch: vi.fn(),
   downloadPeriodExport: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('@/api/payroll', () => ({
     generatePayrollSheet: m.generatePayrollSheet,
     generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
+    generateDocumentBatch: m.generateDocumentBatch,
     downloadPeriodExport: m.downloadPeriodExport,
     downloadDocument: m.downloadDocument,
   },
@@ -53,7 +55,11 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
-      params ? `${key}:${JSON.stringify(params)}` : key,
+      key === 'payroll.people.exit_documents.blockers.weekly_hours_evidence_missing'
+        ? 'Chybí doložená týdenní pracovní doba.'
+        : params ? `${key}:${JSON.stringify(params)}` : key,
+    te: (key: string) => key
+      === 'payroll.people.exit_documents.blockers.weekly_hours_evidence_missing',
   }),
 }))
 
@@ -136,6 +142,30 @@ describe('PayrollDocuments', () => {
       file_sha256: 'b'.repeat(64),
       size_bytes: 9876,
     })
+    m.generateDocumentBatch.mockResolvedValue({
+      run_id: 11,
+      revision_id: 12,
+      period_start: '2026-07-01',
+      period_end: '2026-07-31',
+      complete: false,
+      payslips: { required: 1, archived: 1 },
+      employment_exits: [{
+        employment_id: 73,
+        employee_id: 31,
+        employee_name: null,
+        end_date: '2026-07-31',
+        relation_type: 'employment',
+        documents: {
+          employment_certificate: {
+            required: true,
+            archived: false,
+            document_id: null,
+            available: false,
+            readiness_code: 'weekly_hours_evidence_missing',
+          },
+        },
+      }],
+    })
     m.listAnnualDocuments.mockResolvedValue({
       year: 2026,
       items: [],
@@ -193,6 +223,20 @@ describe('PayrollDocuments', () => {
     expect(m.downloadDocument).toHaveBeenCalledWith(
       expect.objectContaining({ id: 21, mime_type: 'application/pdf' }),
     )
+  })
+
+  it('v dávkovém výsledku přeloží blokaci a nepoužije interní ID jako jméno', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="generate-document-batch"]').trigger('click')
+    await flushPromises()
+
+    const report = wrapper.get('[data-test="document-batch-report"]')
+    expect(report.text()).toContain('Chybí doložená týdenní pracovní doba.')
+    expect(report.text()).toContain('payroll.documents.batch_exit_employee_unknown')
+    expect(report.text()).not.toContain('weekly_hours_evidence_missing')
+    expect(report.text()).not.toContain('73')
   })
 
   it('exports monthly and annual archives without loading the employee list', async () => {

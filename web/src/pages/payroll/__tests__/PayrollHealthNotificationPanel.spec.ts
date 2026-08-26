@@ -616,6 +616,9 @@ describe('PayrollHealthNotificationPanel', () => {
     await prepareButton!.trigger('click')
     await flushPromises()
 
+    expect(wrapper.get('[data-test="health-prepare-result"]').text())
+      .toContain('payroll.submissions.overview.status.ready')
+
     const isdsButton = wrapper.get('[data-test="health-prepare-isds"]')
     expect(isdsButton.attributes('disabled')).toBeUndefined()
     await isdsButton.trigger('click')

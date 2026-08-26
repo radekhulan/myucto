@@ -24,13 +24,15 @@ import {
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const props = defineProps<{
   employment: PayrollEmployment
   canWrite: boolean
 }>()
 
-const { t, te } = useI18n()
+const { t } = useI18n()
+const { employmentExitReadinessLabel } = usePayrollLabels()
 const toast = useToast()
 const loading = ref(true)
 const generating = ref(false)
@@ -144,17 +146,6 @@ const canGenerate = computed(() =>
   && pensionPeriodsComplete.value
   && (!hasExistingCertificate.value || correctionReason.value.trim() !== ''),
 )
-
-function blockerLabel(
-  code: string | null | undefined,
-  params?: Record<string, unknown>,
-): string {
-  if (!code) return t('payroll.people.exit_documents.ready')
-  const key = `payroll.people.exit_documents.blockers.${code}`
-  return te(key)
-    ? t(key, params ?? {})
-    : t('payroll.people.exit_documents.blockers.unknown', { code })
-}
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -424,7 +415,7 @@ onMounted(() => void load())
           data-test="employment-certificate-blocker"
         >
           <p class="font-medium">{{ t('payroll.people.exit_documents.not_ready') }}</p>
-          <p class="mt-1 text-xs">{{ blockerLabel(employmentReadiness?.readiness_code) }}</p>
+          <p class="mt-1 text-xs">{{ employmentExitReadinessLabel(employmentReadiness?.readiness_code) }}</p>
         </div>
 
         <div
@@ -432,7 +423,7 @@ onMounted(() => void load())
           class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-800"
           role="status"
         >
-          {{ blockerLabel('dpp_sickness_evidence_not_ready') }}
+          {{ employmentExitReadinessLabel('dpp_sickness_evidence_not_ready') }}
         </div>
 
         <form
@@ -613,7 +604,7 @@ onMounted(() => void load())
         >
           <p class="text-sm font-medium">{{ t('payroll.people.exit_documents.average_unavailable') }}</p>
           <p class="mt-1 text-xs">
-            {{ blockerLabel(
+            {{ employmentExitReadinessLabel(
               averageReadiness?.readiness_code,
               { year: averageReadiness?.decisive_year, quarter: averageReadiness?.decisive_quarter },
             ) }}
@@ -749,7 +740,7 @@ onMounted(() => void load())
         >
           <p class="text-sm font-medium">{{ t('payroll.people.exit_documents.statement_unavailable') }}</p>
           <p class="mt-1 text-xs">
-            {{ blockerLabel(
+            {{ employmentExitReadinessLabel(
               statementReadiness?.readiness_code,
               { year: statementReadiness?.decisive_year, quarter: statementReadiness?.decisive_quarter },
             ) }}
