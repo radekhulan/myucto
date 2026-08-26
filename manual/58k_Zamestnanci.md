@@ -80,16 +80,26 @@ pojišťovně.
 
 Toolbar nad seznamem umožňuje hledání podle jména, přepnutí mezi aktivními,
 všemi a kartami vyžadujícími doplnění a rychlý přechod na měsíční zadání mezd.
+Hledání i stránkování probíhá nad celou firmou na serveru po 25 osobách, takže
+se stejným postupem pracujete s deseti i pěti sty zaměstnanci.
 
 Seznam ukazuje:
 
 - aktivní nebo neaktivní stav osoby;
-- zda její rozšířený mzdový profil vyžaduje doplnění;
+- co je nejbližší konkrétní krok k dokončení karty, například doplnění bydliště,
+  identifikátoru nebo pracovního vztahu;
 - počet a druh pracovních vztahů;
 - původní vztah převzatý z Mzdové rekapitulace.
 
-Tlačítkem **Upravit zaměstnance** otevřeš vztahy a zároveň jeden formulář
-**Běžné údaje zaměstnance**. Bez přepínání záložek v něm upravíš jméno
+Akce v řádku odpovídá tomuto kroku, například **Doplnit bydliště**; u hotové
+karty se jmenuje **Otevřít kartu**. Detail nejdřív ukáže čtecí souhrn běžných
+údajů. Citlivé hodnoty zůstávají maskované a odkryjí se jen samostatnou
+oprávněnou akcí. Editor se otevře až tlačítkem **Upravit**, takže pouhá kontrola
+karty nezobrazuje desítky vstupních polí. Technická verze záznamu se uživateli
+nezobrazuje, ale dál se interně posílá při ukládání a chrání před přepsáním
+souběžné změny.
+
+V editoru **Běžné údaje zaměstnance** bez přepínání záložek upravíš jméno
 a příjmení, rodné číslo, bydliště, e-mail, telefon, týdenní pracovní dobu
 a pravidelnou hrubou mzdu. Stát bydliště se vybírá ze společného číselníku
 zemí. Pokud je číselník dočasně nedostupný, formulář dovolí ručně zadat

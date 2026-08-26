@@ -2395,6 +2395,22 @@
                 "identifier": "rodné číslo (nebo EČP či VČP)",
                 "employment": "pracovní vztah"
             },
+            "next_step": {
+                "name": "Další krok: doplňte jméno a příjmení.",
+                "residence": "Další krok: doplňte bydliště.",
+                "contact": "Další krok: doplňte e-mail nebo telefon.",
+                "identifier": "Další krok: doplňte rodné číslo, EČP nebo VČP.",
+                "employment": "Další krok: založte pracovní vztah.",
+                "ready": "Karta je připravená.",
+                "action": {
+                    "name": "Doplnit jméno",
+                    "residence": "Doplnit bydliště",
+                    "contact": "Doplnit kontakt",
+                    "identifier": "Doplnit identifikátor",
+                    "employment": "Přidat pracovní vztah",
+                    "ready": "Otevřít kartu"
+                }
+            },
             "edit_person": "Upravit zaměstnance",
             "back_to_list": "Zpět na přehled",
             "employments_title": "Pracovní vztahy",

@@ -336,7 +336,27 @@ describe('PeopleList toolbar and shared employee creation', () => {
     }))
   })
 
-  it('opens the common editor first and keeps advanced history collapsed', async () => {
+  it('names the next setup step and gives each employee a matching CTA', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const incompleteRows = wrapper.findAll('[data-test="person-next-step-3"]')
+    expect(incompleteRows.length).toBeGreaterThan(0)
+    expect(incompleteRows[0]!.text())
+      .toContain('payroll.people.next_step.residence')
+
+    const incompleteActions = wrapper.findAll('[data-test="edit-employee-3"]')
+    expect(incompleteActions.length).toBeGreaterThan(0)
+    expect(incompleteActions[0]!.text())
+      .toContain('payroll.people.next_step.action.residence')
+
+    const readyActions = wrapper.findAll('[data-test="edit-employee-1"]')
+    expect(readyActions.length).toBeGreaterThan(0)
+    expect(readyActions[0]!.text())
+      .toContain('payroll.people.next_step.action.ready')
+  })
+
+  it('opens the reading summary first and keeps advanced editors collapsed', async () => {
     m.person.mockResolvedValue({
       ...person(1, 'Alfa Aktivní', true, false),
       employments: [],

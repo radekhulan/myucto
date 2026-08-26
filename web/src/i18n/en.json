@@ -2395,6 +2395,22 @@
                 "identifier": "birth number (or ECP/VCP)",
                 "employment": "employment relationship"
             },
+            "next_step": {
+                "name": "Next step: add the first and last name.",
+                "residence": "Next step: add the residential address.",
+                "contact": "Next step: add an email address or phone number.",
+                "identifier": "Next step: add the birth number, ECP or VCP.",
+                "employment": "Next step: create an employment relationship.",
+                "ready": "The employee card is ready.",
+                "action": {
+                    "name": "Add name",
+                    "residence": "Add address",
+                    "contact": "Add contact",
+                    "identifier": "Add identifier",
+                    "employment": "Add relationship",
+                    "ready": "Open card"
+                }
+            },
             "edit_person": "Edit employee",
             "back_to_list": "Back to the list",
             "employments_title": "Employment relationships",

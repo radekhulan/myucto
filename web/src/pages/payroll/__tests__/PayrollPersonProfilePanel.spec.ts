@@ -238,6 +238,12 @@ describe('PayrollPersonProfilePanel', () => {
     expect(wrapper.get<HTMLInputElement>('[data-test="bank-account-plaintext"]').element.value).toBe('')
   })
 
+  it('nezobrazuje uživateli technickou row_version', async () => {
+    const wrapper = await mountedPanel()
+
+    expect(wrapper.text()).not.toContain('payroll.people.profile.version')
+  })
+
   it('používá pro všechny adresy společný číselník států', async () => {
     const wrapper = await mountedPanel()
 

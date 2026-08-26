@@ -907,7 +907,7 @@ onMounted(load)
       {{ t('payroll.people.profile.load_failed') }}
     </div>
     <form v-else class="p-4 sm:p-6" @submit.prevent="save">
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         <label :class="labelClass">
           {{ t('payroll.people.profile.profile_status') }}
           <SearchableSelect
@@ -930,10 +930,6 @@ onMounted(load)
             accent="payroll"
           />
         </label>
-        <div class="rounded-lg bg-neutral-50 px-3 py-2">
-          <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.version') }}</span>
-          <p class="mt-1 text-sm font-medium text-neutral-800">{{ form.row_version }}</p>
-        </div>
       </div>
 
       <nav class="mb-5 mt-6 flex flex-wrap gap-1 border-b border-neutral-200" :aria-label="t('payroll.people.profile.tabs.label')">
