@@ -255,13 +255,17 @@ aktuální stav. Další odeslání přes ISDS i VREP zablokuje, aby účetní o
 nepodala tutéž datovou větu dvakrát. Pokračujte odkazem **Otevřít odchozí
 zprávy**, kde se dokončí přihlášení, odeslání a evidence doručenky.
 
-Ve **Stavu odeslání** nemusíte opisovat GUID. Zadejte číslo aktuální úplné
-přípravy a aplikace spojí neměnné odeslané XML s výsledky jednotlivých formulářů
-z přijatých podepsaných protokolů ČSSZ. Neověřený, neúplný nebo rozporný protokol
-opravu zablokuje. U přijatého formuláře nabídne **Opravit přijaté hodnoty** a
-odešle jeho úplné opravené tělo se zachovanou identitou. U odmítnutého,
-stornovaného nebo dosud chybějícího formuláře nabídne **Doplnit
-odmítnutý/chybějící formulář** a vytvoří novou identitu formuláře.
+Ve **Stavu odeslání** nemusíte opisovat GUID ani interní číslo přípravy.
+Aplikace nabídne jen úplné aktuální přípravy pro stejnou firmu, prostředí,
+období a mzdový běh; jedinou možnost vybere automaticky, z více možností vyberete
+ve vyhledávatelné nabídce. Potom spojí neměnné odeslané XML s výsledky
+jednotlivých formulářů z přijatých podepsaných protokolů ČSSZ. Neověřený,
+neúplný nebo rozporný protokol opravu zablokuje. Zaměstnance vybíráte primárně
+podle jména, identifikátory ČSSZ zůstávají zobrazené jako technická kontrolní
+stopa. U přijatého formuláře nabídne **Opravit přijaté hodnoty** a odešle jeho
+úplné opravené tělo se zachovanou identitou. U odmítnutého, stornovaného nebo
+dosud chybějícího formuláře nabídne **Doplnit odmítnutý/chybějící formulář** a
+vytvoří novou identitu formuláře.
 
 Vyberete jen vztahy, jejichž obsah chcete změnit, ale souhrn a PVPOJ se při
 dopadu kontrolují proti úplnému aktuálnímu setu všech osob firmy. Tím se

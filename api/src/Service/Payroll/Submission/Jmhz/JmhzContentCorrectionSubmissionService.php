@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -23,12 +25,75 @@ final readonly class JmhzContentCorrectionSubmissionService
         private JmhzSubmissionGuidFactory $guids,
         private JmhzEffectiveFormLedgerResolver $effective,
         private JmhzFrozenPayloadReader $frozen,
+        private JmhzPreparationSnapshotRepository $preparations,
+        private PayrollPeopleRepository $people,
         private PayrollSubmissionRepository $repository,
         private PayrollSubmissionService $submissions,
         private PayrollObligationService $obligations,
         private ClockInterface $clock,
         private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
+
+    /** @return array<string,mixed> */
+    public function preparationCandidates(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+        ?int $officeId = null,
+    ): array {
+        $this->regularRoot($supplierId, $environment, $regularSubmissionId);
+        $obligation = $this->repository->findObligationOfSubmission(
+            $supplierId,
+            $environment,
+            $regularSubmissionId,
+        ) ?? throw new \DomainException('K řádnému podání chybí evidovaná povinnost.');
+        if ($obligation['subject_type'] !== 'payroll_run'
+            || preg_match(
+                '/^payroll_run:([1-9][0-9]*)(?::office:([1-9][0-9]*))?$/D',
+                $obligation['subject_reference'],
+                $matches,
+            ) !== 1
+        ) {
+            throw new \DomainException('Řádné podání nemá jednoznačný mzdový běh.');
+        }
+        $runId = (int) $matches[1];
+        $obligationOfficeId = isset($matches[2]) ? (int) $matches[2] : null;
+        if ($officeId !== null && $obligationOfficeId !== null && $officeId !== $obligationOfficeId) {
+            throw new \DomainException('Zvolená mzdová účtárna neodpovídá řádnému podání.');
+        }
+        $effectiveOfficeId = $officeId ?? $obligationOfficeId;
+
+        $rows = [];
+        foreach ($this->preparations->listSourceReadyForCorrection(
+            $supplierId,
+            $environment,
+            $runId,
+            $obligation['period_start'],
+        ) as $preparation) {
+            try {
+                [, $document] = $this->context(
+                    $supplierId,
+                    $environment,
+                    $regularSubmissionId,
+                    $preparation['id'],
+                    $effectiveOfficeId,
+                );
+            } catch (\DomainException $exception) {
+                continue;
+            }
+            $rows[] = [
+                ...$preparation,
+                'document_sha256' => $document->sha256(),
+            ];
+        }
+
+        return [
+            'environment' => $environment,
+            'submission_id' => $regularSubmissionId,
+            'preparations' => $rows,
+            'auto_selected_preparation_id' => count($rows) === 1 ? $rows[0]['id'] : null,
+        ];
+    }
 
     /** @return array<string,mixed> */
     public function candidates(
@@ -52,12 +117,17 @@ final readonly class JmhzContentCorrectionSubmissionService
             $regularSubmissionId,
             array_keys($current),
         );
+        $names = $this->people->namesForTenant(
+            $supplierId,
+            array_values(array_unique(array_column($current, 'employee_id'))),
+        );
         $rows = [];
         foreach ($current as $externalId => $row) {
             $state = $set->forEmployment($externalId);
             $rows[] = [
                 'employment_external_identifier' => $externalId,
                 'person_external_identifier' => $row['person_external_identifier'],
+                'employee_name' => $names[$row['employee_id']] ?? null,
                 'effective_state' => $state->state,
                 'action' => $state->state === 'accepted'
                     ? 'correct_values'
@@ -275,7 +345,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         });
     }
 
-    /** @return array{JmhzScenario1Resolution,JmhzScenario1NormalizedDocument,JmhzFrozenSubmissionIdentity,array<string,array{employment_id:int,person_external_identifier:string}>} */
+    /** @return array{JmhzScenario1Resolution,JmhzScenario1NormalizedDocument,JmhzFrozenSubmissionIdentity,array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}>} */
     private function context(
         int $supplierId,
         string $environment,
@@ -288,17 +358,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         ) {
             throw new \InvalidArgumentException('Rozsah obsahové opravy JMHZ není platný.');
         }
-        $root = $this->repository->findSubmission($supplierId, $regularSubmissionId);
-        if ($root === null || $root['environment'] !== $environment
-            || $root['submission_kind'] !== 'regular' || $root['channel'] !== self::CHANNEL
-        ) {
-            throw new \DomainException('Řádné podání nebylo nalezeno ve stejné firmě a prostředí.');
-        }
-        if (!in_array($root['status'], ['accepted', 'partially_accepted'], true)) {
-            throw new \DomainException(
-                'Obsahovou opravu lze navázat jen na přijaté nebo částečně přijaté řádné podání.',
-            );
-        }
+        $this->regularRoot($supplierId, $environment, $regularSubmissionId);
         $resolution = $this->documents->resolve($supplierId, $environment, $preparationId, $officeId);
         if ($resolution->status() !== 'resolved') {
             throw new JmhzXmlException(
@@ -334,7 +394,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         return [$resolution, $document, $identity, self::currentForms($document)];
     }
 
-    /** @return array<string,array{employment_id:int,person_external_identifier:string}> */
+    /** @return array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}> */
     private static function currentForms(JmhzScenario1NormalizedDocument $document): array
     {
         $forms = [];
@@ -349,15 +409,18 @@ final readonly class JmhzContentCorrectionSubmissionService
             }
             $employment = $employments[0];
             $identity = is_array($employment['identity'] ?? null) ? $employment['identity'] : [];
+            $employeeId = $person['employee_id'] ?? null;
             $employmentId = $employment['employment_id'] ?? null;
             $externalId = $identity['employment_external_identifier'] ?? null;
             $personId = $identity['person_external_identifier'] ?? null;
-            if (!is_int($employmentId) || !is_string($externalId) || $externalId === ''
+            if (!is_int($employeeId) || !is_int($employmentId)
+                || !is_string($externalId) || $externalId === ''
                 || !is_string($personId) || $personId === '' || isset($forms[$externalId])
             ) {
                 throw new JmhzXmlException('jmhz_content_correction_current_set_invalid', 'Aktuální příprava obsahuje nejednoznačnou identitu formuláře.');
             }
             $forms[$externalId] = [
+                'employee_id' => $employeeId,
                 'employment_id' => $employmentId,
                 'person_external_identifier' => $personId,
             ];
@@ -367,7 +430,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         return $forms;
     }
 
-    /** @param array<string,array{employment_id:int,person_external_identifier:string}> $current */
+    /** @param array<string,array{employee_id:int,employment_id:int,person_external_identifier:string}> $current */
     private function assertWholeCompanyControls(
         JmhzScenario1Resolution $resolution,
         JmhzFrozenSubmissionIdentity $identity,
@@ -520,5 +583,31 @@ final readonly class JmhzContentCorrectionSubmissionService
         return \DateTimeImmutable::createFromInterface($this->clock->now())
             ->setTimezone(new \DateTimeZone('Europe/Prague'))
             ->format('Y-m-d');
+    }
+
+    /** @return array<string,mixed> */
+    private function regularRoot(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+    ): array {
+        if ($supplierId <= 0 || $regularSubmissionId <= 0
+            || !in_array($environment, ['test', 'production'], true)
+        ) {
+            throw new \InvalidArgumentException('Rozsah obsahové opravy JMHZ není platný.');
+        }
+        $root = $this->repository->findSubmission($supplierId, $regularSubmissionId);
+        if ($root === null || $root['environment'] !== $environment
+            || $root['submission_kind'] !== 'regular' || $root['channel'] !== self::CHANNEL
+        ) {
+            throw new \DomainException('Řádné podání nebylo nalezeno ve stejné firmě a prostředí.');
+        }
+        if (!in_array($root['status'], ['accepted', 'partially_accepted'], true)) {
+            throw new \DomainException(
+                'Obsahovou opravu lze navázat jen na přijaté nebo částečně přijaté řádné podání.',
+            );
+        }
+
+        return $root;
     }
 }

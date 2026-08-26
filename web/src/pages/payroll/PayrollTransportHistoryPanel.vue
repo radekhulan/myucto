@@ -34,6 +34,7 @@ import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollApi,
   type PayrollJmhzContentCorrectionForm,
+  type PayrollJmhzContentCorrectionPreparation,
   type PayrollJmhzImportedProtocol,
   type PayrollJmhzIsdsEnqueueResult,
   type PayrollJmhzProtocolError,
@@ -45,6 +46,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -80,9 +82,12 @@ const cancelPendingId = ref<number | null>(null)
 const correctingId = ref<number | null>(null)
 const correctionPendingId = ref<number | null>(null)
 const correctionLoadingId = ref<number | null>(null)
+const correctionPreparationLoadingId = ref<number | null>(null)
 const correctableComponents = ref<PayrollJmhzContentCorrectionForm[]>([])
+const correctionPreparations = ref<PayrollJmhzContentCorrectionPreparation[]>([])
 const selectedCorrectionGuids = ref<string[]>([])
-const correctionPreparationId = ref('')
+const correctionPreparationId = ref<number | null>(null)
+const correctionCandidatesLoaded = ref(false)
 const correctionQuery = ref('')
 const correctionImpactConfirmed = ref(false)
 const readyDispatchPending = ref<{ id: number; channel: 'isds' | 'vrep' } | null>(null)
@@ -173,6 +178,7 @@ const busy = computed(() =>
   || cancelPendingId.value !== null
   || correctionPendingId.value !== null
   || correctionLoadingId.value !== null
+  || correctionPreparationLoadingId.value !== null
   || readyDispatchPending.value !== null,
 )
 
@@ -250,6 +256,7 @@ const visibleCorrectionComponents = computed(() => {
   const rows = query === ''
     ? correctableComponents.value
     : correctableComponents.value.filter(component => [
+      component.employee_name ?? '',
       component.employment_external_identifier,
       component.person_external_identifier,
     ].some(value => value.toLocaleLowerCase().includes(query)))
@@ -258,13 +265,24 @@ const visibleCorrectionComponents = computed(() => {
     const leftHasError = protocolErrorComponentGuids.value.has(left.employment_external_identifier) ? 0 : 1
     const rightHasError = protocolErrorComponentGuids.value.has(right.employment_external_identifier) ? 0 : 1
     if (leftHasError !== rightHasError) return leftHasError - rightHasError
-    return left.employment_external_identifier.localeCompare(
-      right.employment_external_identifier,
+    return (left.employee_name ?? left.employment_external_identifier).localeCompare(
+      right.employee_name ?? right.employment_external_identifier,
       'cs',
       { numeric: true },
     )
   })
 })
+
+const correctionPreparationOptions = computed(() => correctionPreparations.value.map(preparation => ({
+  value: preparation.id,
+  label: t('payroll.submissions.transport.correction.preparation_option', {
+    revision: preparation.revision_no,
+    created: preparation.created_at,
+  }),
+  secondary: t('payroll.submissions.transport.correction.preparation_period', {
+    period: preparation.period_start,
+  }),
+})))
 
 watch(selectedCorrectionGuids, () => {
   correctionImpactConfirmed.value = false
@@ -622,23 +640,49 @@ function askToCancel(submissionId: number) {
   success.value = ''
 }
 
-function askToCorrect(submissionId: number) {
+async function askToCorrect(submissionId: number) {
   if (!canWrite.value || busy.value) return
   cancellingId.value = null
   correctingId.value = submissionId
   correctableComponents.value = []
+  correctionPreparations.value = []
   selectedCorrectionGuids.value = []
-  correctionPreparationId.value = ''
+  correctionPreparationId.value = null
+  correctionCandidatesLoaded.value = false
   correctionQuery.value = ''
   correctionImpactConfirmed.value = false
   actionError.value = ''
   success.value = ''
+  correctionPreparationLoadingId.value = submissionId
+  let autoSelected: number | null = null
+  try {
+    const result = await payrollApi.jmhzContentCorrectionPreparations(
+      submissionId,
+      environment.value,
+    )
+    if (correctingId.value !== submissionId) return
+    correctionPreparations.value = result.preparations
+    correctionPreparationId.value = result.auto_selected_preparation_id
+    autoSelected = result.auto_selected_preparation_id
+  } catch (exception: unknown) {
+    correctingId.value = null
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.preparation_load_failed'),
+    )
+  } finally {
+    correctionPreparationLoadingId.value = null
+  }
+  if (autoSelected !== null && correctingId.value === submissionId) {
+    await loadContentCorrectionCandidates(submissionId)
+  }
 }
 
 async function loadContentCorrectionCandidates(submissionId: number) {
-  const preparationId = Number(correctionPreparationId.value)
-  if (!Number.isInteger(preparationId) || preparationId <= 0 || busy.value) return
+  const preparationId = correctionPreparationId.value
+  if (preparationId === null || !Number.isInteger(preparationId) || preparationId <= 0 || busy.value) return
   correctionLoadingId.value = submissionId
+  correctionCandidatesLoaded.value = false
   try {
     const result = await payrollApi.jmhzContentCorrectionCandidates(
       submissionId,
@@ -646,6 +690,7 @@ async function loadContentCorrectionCandidates(submissionId: number) {
       environment.value,
     )
     correctableComponents.value = result.forms
+    correctionCandidatesLoaded.value = true
   } catch (exception: unknown) {
     correctingId.value = null
     actionError.value = apiErrorMessage(
@@ -660,10 +705,12 @@ async function loadContentCorrectionCandidates(submissionId: number) {
 function closeCorrection() {
   correctingId.value = null
   correctableComponents.value = []
+  correctionPreparations.value = []
   selectedCorrectionGuids.value = []
   correctionQuery.value = ''
   correctionImpactConfirmed.value = false
-  correctionPreparationId.value = ''
+  correctionPreparationId.value = null
+  correctionCandidatesLoaded.value = false
 }
 
 function selectProtocolErrors() {
@@ -678,8 +725,10 @@ async function confirmCorrection(submissionId: number) {
     || !correctionImpactConfirmed.value
   ) return
   const employmentIdentifiers = [...new Set(selectedCorrectionGuids.value)]
-  const preparationId = Number(correctionPreparationId.value)
-  if (employmentIdentifiers.length === 0 || !Number.isInteger(preparationId) || preparationId <= 0) return
+  const preparationId = correctionPreparationId.value
+  if (employmentIdentifiers.length === 0 || preparationId === null
+    || !Number.isInteger(preparationId) || preparationId <= 0
+  ) return
   correctionPendingId.value = submissionId
   actionError.value = ''
   success.value = ''
@@ -1230,29 +1279,57 @@ onMounted(loadVariableSymbols)
             <p class="mt-1 text-sm text-warning-800">
               {{ t('payroll.submissions.transport.correction.description') }}
             </p>
-            <div class="mt-4 flex flex-wrap items-end gap-3">
+            <div
+              v-if="correctionPreparationLoadingId === entry.group.submissionId"
+              data-test="transport-correct-preparation-loading"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-600"
+              role="status"
+            >
+              {{ t('payroll.submissions.transport.correction.preparation_loading') }}
+            </div>
+            <div
+              v-else-if="correctionPreparations.length === 0"
+              data-test="transport-correct-preparation-empty"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-700"
+            >
+              {{ t('payroll.submissions.transport.correction.preparation_empty') }}
+            </div>
+            <div
+              v-else-if="correctionPreparations.length > 1"
+              class="mt-4 flex flex-wrap items-end gap-3"
+            >
               <label class="min-w-64 flex-1 text-sm font-medium text-neutral-800">
                 {{ t('payroll.submissions.transport.correction.preparation_label') }}
-                <input
+                <SearchableSelect
                   v-model="correctionPreparationId"
-                  type="number"
-                  min="1"
-                  step="1"
-                  data-test="transport-correct-preparation"
-                  class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
+                  :options="correctionPreparationOptions"
+                  :clearable="false"
+                  accent="payroll"
+                  data-test="transport-correct-preparation-select"
+                  class="mt-1"
                   :placeholder="t('payroll.submissions.transport.correction.preparation_placeholder')"
-                >
+                  :no-results-label="t('payroll.submissions.transport.correction.preparation_no_results')"
+                />
               </label>
               <button
                 type="button"
                 :class="btnOutline('warning')"
-                :disabled="busy || !/^\d+$/.test(correctionPreparationId) || Number(correctionPreparationId) <= 0"
+                :disabled="busy || correctionPreparationId === null"
                 data-test="transport-correct-load"
                 @click="loadContentCorrectionCandidates(entry.group.submissionId)"
               >
                 {{ t('payroll.submissions.transport.correction.load') }}
               </button>
             </div>
+            <p
+              v-else
+              data-test="transport-correct-preparation-auto"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-3 text-sm text-neutral-700"
+            >
+              {{ t('payroll.submissions.transport.correction.preparation_auto', {
+                preparation: correctionPreparationOptions[0]?.label ?? '',
+              }) }}
+            </p>
             <div
               v-if="correctionLoadingId === entry.group.submissionId"
               data-test="transport-correct-loading"
@@ -1262,13 +1339,13 @@ onMounted(loadVariableSymbols)
               {{ t('payroll.submissions.transport.correction.loading') }}
             </div>
             <div
-              v-else-if="correctableComponents.length === 0"
+              v-else-if="correctionCandidatesLoaded && correctableComponents.length === 0"
               data-test="transport-correct-empty"
               class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-700"
             >
               {{ t('payroll.submissions.transport.correction.empty') }}
             </div>
-            <template v-else>
+            <template v-else-if="correctableComponents.length > 0">
               <div class="mt-4 flex flex-wrap items-end justify-between gap-3">
                 <label class="min-w-64 flex-1 text-sm font-medium text-neutral-800">
                   {{ t('payroll.submissions.transport.correction.search_label') }}
@@ -1329,9 +1406,8 @@ onMounted(loadVariableSymbols)
                   <span class="min-w-0 flex-1">
                     <span class="flex flex-wrap items-center gap-2">
                       <span class="text-sm font-medium text-neutral-900">
-                        {{ t('payroll.submissions.transport.correction.employment', {
-                          id: component.employment_external_identifier,
-                        }) }}
+                        {{ component.employee_name
+                          ?? t('payroll.submissions.transport.correction.employee_unknown') }}
                       </span>
                       <span
                         v-if="protocolErrorComponentGuids.has(component.employment_external_identifier)"
@@ -1344,8 +1420,9 @@ onMounted(loadVariableSymbols)
                       </span>
                     </span>
                     <span class="mt-0.5 block text-xs text-neutral-600">
-                      {{ t('payroll.submissions.transport.correction.person', {
-                        id: component.person_external_identifier,
+                      {{ t('payroll.submissions.transport.correction.technical_identity', {
+                        employment: component.employment_external_identifier,
+                        person: component.person_external_identifier,
                       }) }}
                     </span>
                   </span>
@@ -1379,6 +1456,7 @@ onMounted(loadVariableSymbols)
                 :data-test="`transport-correct-submit-${entry.group.submissionId}`"
                 :class="btnFilled('warning')"
                 :disabled="busy
+                  || correctionPreparationId === null
                   || selectedCorrectionGuids.length === 0
                   || !correctionImpactConfirmed"
                 @click="confirmCorrection(entry.group.submissionId)"

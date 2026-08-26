@@ -3395,10 +3395,27 @@ export interface PayrollJmhzCorrectableComponent {
 }
 
 export interface PayrollJmhzContentCorrectionForm {
+  employee_name: string | null
   person_external_identifier: string
   employment_external_identifier: string
   effective_state: 'accepted' | 'rejected' | 'cancelled' | 'missing'
   action: 'correct_values' | 'complete_form'
+}
+
+export interface PayrollJmhzContentCorrectionPreparation {
+  id: number
+  source_revision_id: number
+  revision_no: number
+  period_start: string
+  created_at: string
+  document_sha256: string
+}
+
+export interface PayrollJmhzContentCorrectionPreparations {
+  environment: PayrollJmhzTransportEnvironment
+  submission_id: number
+  preparations: PayrollJmhzContentCorrectionPreparation[]
+  auto_selected_preparation_id: number | null
 }
 
 export interface PayrollJmhzContentCorrectionCandidates {
@@ -4765,6 +4782,13 @@ export const payrollApi = {
   ) => api.post<PayrollJmhzCorrectiveSubmission>(
     `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
     { environment, form_guids: formGuids },
+  ).then(response => response.data),
+  jmhzContentCorrectionPreparations: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzContentCorrectionPreparations>(
+    `/payroll/submissions/${submissionId}/jmhz-content-correction-preparations`,
+    { params: { environment } },
   ).then(response => response.data),
   jmhzContentCorrectionCandidates: (
     submissionId: number,

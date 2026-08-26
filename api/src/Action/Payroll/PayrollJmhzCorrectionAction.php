@@ -39,6 +39,36 @@ final class PayrollJmhzCorrectionAction
     }
 
     /** @param array{submissionId:string} $args */
+    public function contentCorrectionPreparations(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null
+            || preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1
+        ) {
+            return $this->invalid($response, 'Podání nebo prostředí obsahové opravy nejsou platné.');
+        }
+        try {
+            $result = $this->contentCorrections->preparationCandidates(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $args['submissionId'],
+                $this->optionalPositiveInput($request, 'office_id'),
+            );
+        } catch (JmhzXmlException|\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array{submissionId:string} $args */
     public function contentCorrection(Request $request, Response $response, array $args): Response
     {
         if (($denied = $this->authorize($request, $response)) !== null) {

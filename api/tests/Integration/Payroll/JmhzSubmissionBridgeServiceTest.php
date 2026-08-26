@@ -8,6 +8,8 @@ use DOMDocument;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
@@ -20,6 +22,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
@@ -59,6 +62,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     private Connection $db;
     private Config $config;
+    private JmhzPreparationSnapshotRepository $preparations;
+    private PayrollPeopleRepository $people;
     private PayrollSubmissionRepository $submissionRepository;
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
@@ -77,6 +82,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         }
         $this->db = $db;
         $this->config = $config;
+        $this->preparations = $container->get(JmhzPreparationSnapshotRepository::class);
+        $this->people = $container->get(PayrollPeopleRepository::class);
         foreach ([
             'payroll_obligations',
             'payroll_submission_deadlines',
@@ -218,7 +225,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     public function testContentCorrectionFreezesFullAcceptedFormWithSameGuidAndReplaysImmutableArtifact(): void
     {
-        $original = $this->bridge()->bridge(
+        $resolution = $this->resolutionWithEmployeeName('Jana Syntetická');
+        $original = $this->bridge($resolution)->bridge(
             $this->supplierId,
             self::PREPARATION_ID,
             $this->registerObligation(),
@@ -232,7 +240,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         $formGuid = $this->firstFormGuid($originalXml);
         $this->acceptWithFormOutcome($original, $formGuid, 'accepted');
 
-        $service = $this->contentCorrections($this->resolution());
+        $service = $this->contentCorrections($resolution);
         $candidates = $service->candidates(
             $this->supplierId,
             self::ENVIRONMENT,
@@ -241,6 +249,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         );
         self::assertCount(1, $candidates['forms']);
         self::assertSame('correct_values', $candidates['forms'][0]['action']);
+        self::assertSame('Jana Syntetická', $candidates['forms'][0]['employee_name']);
         $employment = (string) $candidates['forms'][0]['employment_external_identifier'];
 
         $correction = $service->freeze(
@@ -347,6 +356,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             new JmhzSubmissionGuidFactory(),
             new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
             $frozen,
+            $this->preparations,
+            $this->people,
             $this->submissionRepository,
             $this->submissions,
             $this->obligations,
@@ -842,6 +853,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             new JmhzSubmissionGuidFactory(),
             new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
             $frozen,
+            $this->preparations,
+            $this->people,
             $this->submissionRepository,
             $this->submissions,
             $this->obligations,
@@ -916,6 +929,22 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     private function resolution(): JmhzScenario1Resolution
     {
         return $this->resolutionFor($this->pvpoj());
+    }
+
+    private function resolutionWithEmployeeName(string $employeeName): JmhzScenario1Resolution
+    {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees (supplier_id, full_name) VALUES (?, ?)',
+        );
+        $statement->execute([$this->supplierId, $employeeName]);
+        $employeeId = (int) $this->db->pdo()->lastInsertId();
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $payload['people'][0]['employee_id'] = $employeeId;
+
+        return new JmhzScenario1Resolution(
+            new JmhzScenario1NormalizedDocument($payload),
+            [],
+        );
     }
 
     /**
