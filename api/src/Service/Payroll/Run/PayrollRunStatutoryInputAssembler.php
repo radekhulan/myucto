@@ -41,6 +41,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialJurisdictionEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojDiscountEligibility;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentEvidence;
@@ -55,6 +56,7 @@ final class PayrollRunStatutoryInputAssembler
     private readonly HealthRelationshipKindMapper $healthKinds;
     private readonly EmploymentRelationshipKindMapper $taxKinds;
     private readonly OzuspojDiscountEligibility $discountEligibility;
+    private readonly PayrollRiskySavingsPolicy $riskySavingsPolicy;
 
     public function __construct(
         ?PayrollRunStatutoryComponentMapper $components = null,
@@ -69,6 +71,7 @@ final class PayrollRunStatutoryInputAssembler
         $this->taxKinds = $taxKinds ?? new EmploymentRelationshipKindMapper();
         $this->discountEligibility = $discountEligibility
             ?? new OzuspojDiscountEligibility(new OzuspojClaimDeadlinePolicy());
+        $this->riskySavingsPolicy = new PayrollRiskySavingsPolicy();
     }
 
     /** @param array<string,mixed> $snapshot */
@@ -504,6 +507,34 @@ final class PayrollRunStatutoryInputAssembler
         }
 
         [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($term);
+        $riskySavingsEvidence = $this->object(
+            $snapshot['risky_savings_evidence'] ?? null,
+        );
+        if ($riskySavingsEvidence !== null) {
+            if ($this->riskySavingsPolicy->issues(
+                $riskySavingsEvidence,
+                $periodStart,
+            ) !== []) {
+                $this->issue(
+                    'social_insurance',
+                    'risky_savings_evidence_invalid',
+                    $personReference,
+                    $relationshipReference,
+                );
+                $rateCategory = SocialEmployerRateCategory::Unverified;
+                $rateCategoryEvidence = null;
+            } elseif ($this->riskySavingsPolicy->obligationArises(
+                $riskySavingsEvidence,
+                $periodStart,
+            )) {
+                // § 5a odst. 3 zákona č. 589/1992 Sb.: vznikne-li za měsíc
+                // povinný 4% příspěvek, přednost má běžná sazba zaměstnavatele.
+                $rateCategory = SocialEmployerRateCategory::Ordinary;
+                // Běžná kategorie sama odkaz na kategorizaci nenese; původ
+                // přepnutí zůstává ve zmrazené evidenci povinného spoření.
+                $rateCategoryEvidence = null;
+            }
+        }
         [$discountEvidence, $discountReason, $discountEvidenceReference] =
             $this->socialPartTimeDiscount(
                 $term,

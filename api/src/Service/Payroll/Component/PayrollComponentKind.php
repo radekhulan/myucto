@@ -32,6 +32,7 @@ enum PayrollComponentKind: string
 
     public function isBenefit(): bool
     {
-        return str_starts_with($this->value, 'benefit_');
+        return str_starts_with($this->value, 'benefit_')
+            || $this === self::RISKY_SAVINGS;
     }
 }

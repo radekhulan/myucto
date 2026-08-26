@@ -27,6 +27,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReversalCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationConflictException;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -46,6 +47,7 @@ final class PayrollPaymentAction
         private readonly PayrollSocialInsuranceLiabilityMaterializer $socialInsurance,
         private readonly PayrollIncomeTaxLiabilityMaterializer $incomeTax,
         private readonly PayrollEnforcementLiabilityMaterializer $enforcement,
+        private readonly PayrollRiskySavingsLiabilityMaterializer $riskySavings,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly PayrollPaymentBatchBuilder $batchBuilder,
         private readonly PayrollPaymentExportService $exportService,
@@ -1101,6 +1103,11 @@ final class PayrollPaymentAction
                 $userId,
             ),
             'enforcement' => fn (): array => $this->enforcement->materialize(
+                $supplierId,
+                $revisionId,
+                $userId,
+            ),
+            'risky_savings' => fn (): array => $this->riskySavings->materialize(
                 $supplierId,
                 $revisionId,
                 $userId,

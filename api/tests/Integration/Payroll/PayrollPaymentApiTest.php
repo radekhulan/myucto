@@ -23,6 +23,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -256,6 +257,7 @@ final class PayrollPaymentApiTest extends TestCase
                 'social_insurance',
                 'income_tax',
                 'enforcement',
+                'risky_savings',
             ],
             array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
         );
@@ -470,6 +472,9 @@ final class PayrollPaymentApiTest extends TestCase
             ),
             $this->container->get(
                 PayrollEnforcementLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                PayrollRiskySavingsLiabilityMaterializer::class,
             ),
             $this->container->get(PayrollPersonAccountVerificationService::class),
             $this->container->get(PayrollPaymentBatchBuilder::class),

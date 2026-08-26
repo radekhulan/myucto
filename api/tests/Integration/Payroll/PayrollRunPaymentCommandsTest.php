@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterialize
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingPreview;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -756,6 +757,9 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             ),
             $this->emptyMaterializer(
                 PayrollEnforcementLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                PayrollRiskySavingsLiabilityMaterializer::class,
             ),
         );
     }

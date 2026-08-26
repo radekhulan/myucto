@@ -22,6 +22,7 @@ final class PayrollPaymentBatchBuilder
         'advance_tax',
         'withholding_tax',
         'enforcement',
+        'risky_savings',
     ];
 
     public function __construct(
@@ -538,6 +539,7 @@ final class PayrollPaymentBatchBuilder
                 'payroll-payment-social-insurance-source.v1',
                 'payroll-payment-income-tax-source.v1',
                 'payroll-payment-enforcement-source.v1',
+                'payroll-payment-risky-savings-source.v1',
             ], true)
             || ($source['recipient_reference'] ?? null)
                 !== $liability['recipient_reference']
@@ -574,6 +576,10 @@ final class PayrollPaymentBatchBuilder
             ],
             'enforcement' => [
                 'payroll-payment-enforcement-source.v1',
+                'other_recipient',
+            ],
+            'risky_savings' => [
+                'payroll-payment-risky-savings-source.v1',
                 'other_recipient',
             ],
             default => null,
@@ -978,6 +984,12 @@ final class PayrollPaymentBatchBuilder
                 'institution_code' => null,
                 'message' => 'Srazka ze mzdy',
             ],
+            'risky_savings' => [
+                'type' => 'other_recipient',
+                'reference_code' => '[A-Z0-9][A-Z0-9._-]{0,31}',
+                'institution_code' => null,
+                'message' => 'Povinne sporeni rizikova prace',
+            ],
             default => null,
         };
         if ($definition === null) {
@@ -1024,6 +1036,24 @@ final class PayrollPaymentBatchBuilder
         array $account,
         array $source,
     ): array {
+        if (($source['schema_reference'] ?? null)
+                === 'payroll-payment-risky-savings-source.v1'
+        ) {
+            return [
+                'variable_symbol' => $this->nullableTextValue(
+                    $source['variable_symbol'] ?? null,
+                    'variabilní symbol povinného spoření',
+                ),
+                'specific_symbol' => $this->nullableTextValue(
+                    $source['specific_symbol'] ?? null,
+                    'specifický symbol povinného spoření',
+                ),
+                'constant_symbol' => $this->nullableTextValue(
+                    $source['constant_symbol'] ?? null,
+                    'konstantní symbol povinného spoření',
+                ),
+            ];
+        }
         if ($institutionType !== 'social_security') {
             return [
                 'variable_symbol' => $this->nullableTextValue(

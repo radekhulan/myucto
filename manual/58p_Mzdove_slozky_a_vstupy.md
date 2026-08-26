@@ -66,3 +66,38 @@ výpočtu ani jiné navazující evidence. Před odstraněním se vždy zobrazí
 potvrzení. Jakmile byl záznam použit, aplikace smazání odmítne a vysvětlí, zda
 je potřeba ukončit jeho platnost nebo jej deaktivovat; již zpracovaná historie
 se nemaže.
+
+## Povinné spoření u rizikové práce
+
+Panel **Povinné spoření u rizikové práce** slouží pouze pro práce 3. kategorie,
+u nichž je rozhodným faktorem vibrace, chlad, teplo nebo dynamická fyzická
+zátěž velkými svalovými skupinami. Nestačí obecné označení vztahu jako
+rizikového. U každého dotčeného vztahu proto vyberte konkrétní zákonný faktor
+a za měsíc zadejte počet rozhodných osmin směny. Celá osmihodinová směna má
+osm osmin; u směny jiné délky se každá započatá hodina počítá jako jedna
+osmina. Povinnost vzniká od 24 osmin za měsíc.
+
+Nejdříve v **Mzdy → Nastavení mezd → Účty institucí** založte penzijní
+společnost jako jiného příjemce a ověřte její účet. Číslo účtu je v katalogu
+šifrované. Do schváleného měsíčního podkladu se připne identifikátor, verze,
+hash a maskovaná podoba účtu; pozdější změna katalogu tedy nezmění již
+zmrazený běh. V panelu dále uveďte identifikaci smlouvy nebo produktu a podle
+pokynů penzijní společnosti variabilní či specifický symbol a zprávu pro
+příjemce. Odkaz na podklad zůstává nepovinný.
+
+Datum **Právo uplatněno dne** určuje první měsíc nároku. Oznámí-li zaměstnanec
+údaje během aktuálního měsíce, nejde o chybu: aplikace uloží kontrolovatelný
+stav bez příspěvku a nárok začne až následující měsíc. Datum, kdy byl
+zaměstnanec informován, eviduje samostatnou informační povinnost. Chybějící
+datum výpočet 4 % nezmění, ale mzdový běh zobrazí srozumitelné varování.
+
+Podklady nejprve uložte jako koncept a po kontrole je schvalte. Schválený
+záznam se už nepřepisuje; oprava založí novou revizi a původní zůstane v
+auditní historii. Výpočet použije 4 % z nezastropovaného vyměřovacího základu,
+výsledek zaokrouhlí nahoru na celé koruny a stanoví splatnost na poslední den
+následujícího měsíce. Uhrazení potvrďte až podle skutečného bankovního pohybu.
+Po schválení mzdové revize aplikace vytvoří samostatný závazek **Povinné
+spoření u rizikové práce** v Mzdových příkazech. Odtud jej zařaďte do ABO
+nebo SEPA dávky stejně jako ostatní mzdové odvody. Za uhrazený se považuje až
+po spárování bankovní transakce nebo pokladního dokladu; v panelu podkladů se
+stav ručně nepřepíná.

@@ -267,6 +267,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Run\PayrollRunDeductionLedgerApprover::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsApprover::class,
+                    ),
                 ),
             \MyInvoice\Service\Payroll\Run\PayrollRunCommandService::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCommandService(

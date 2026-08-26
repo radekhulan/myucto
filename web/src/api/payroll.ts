@@ -1108,6 +1108,65 @@ export type PayrollComponentPayload = Omit<
   'id' | 'supplier_id' | 'row_version' | 'created_at' | 'updated_at'
 >
 
+export interface PayrollRiskySavingsItem {
+  id: number
+  employment_id: number
+  period_start: string
+  revision_no: number
+  risk_factor: PayrollRiskySavingsRiskFactor
+  work_category: 3
+  qualifying_shift_eighths: number
+  right_claimed_on: string
+  employee_informed_on: string | null
+  pension_company: string
+  institution_account_id: number
+  institution_account_masked: string | null
+  institution_account_row_version: number | null
+  institution_account_hash: string | null
+  payment_target_name: string | null
+  product_reference: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  payment_message: string | null
+  evidence_reference: string | null
+  status: 'draft' | 'approved'
+  row_version: number
+  full_name: string
+  employment_code: string
+  contribution_id: number | null
+  revision_id: number | null
+  assessment_base_minor: number | null
+  contribution_minor: number | null
+  payment_due_on: string | null
+  paid_on: string | null
+  contribution_status: 'approved' | 'paid' | null
+}
+
+export type PayrollRiskySavingsRiskFactor =
+  | 'vibration'
+  | 'cold'
+  | 'heat'
+  | 'dynamic_physical_load'
+
+export interface PayrollRiskySavingsEvidencePayload {
+  employment_id: number
+  period: string
+  source_evidence_id: number | null
+  row_version: number | null
+  risk_factor: PayrollRiskySavingsRiskFactor
+  qualifying_shift_eighths: number
+  right_claimed_on: string
+  employee_informed_on: string | null
+  pension_company: string
+  institution_account_id: number
+  product_reference: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  payment_message: string | null
+  evidence_reference: string | null
+  approve: boolean
+}
+
 export interface PayrollComponentJmhzTarget {
   attribute_id: string
   name: string
@@ -4542,6 +4601,18 @@ export const payrollApi = {
     api.get<{ components: PayrollComponent[] }>('/payroll/components', {
       params: effectiveOn ? { effective_on: effectiveOn } : undefined,
     }).then(response => response.data.components),
+  riskySavings: (period: string) =>
+    api.get<{
+      items: PayrollRiskySavingsItem[]
+      minimum_shift_eighths: number
+      rate_basis_points: number
+    }>('/payroll/risky-savings', { params: { period } })
+      .then(response => response.data),
+  saveRiskySavingsEvidence: (payload: PayrollRiskySavingsEvidencePayload) =>
+    api.put<{ evidence: PayrollRiskySavingsItem }>(
+      '/payroll/risky-savings/evidence',
+      payload,
+    ).then(response => response.data.evidence),
   createComponent: (payload: PayrollComponentPayload) =>
     api.post<{ component: PayrollComponent }>('/payroll/components', payload)
       .then(response => response.data.component),

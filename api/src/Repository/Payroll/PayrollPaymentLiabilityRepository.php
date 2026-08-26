@@ -255,6 +255,7 @@ final class PayrollPaymentLiabilityRepository
             'withholding_tax',
             'statutory_insurance',
             'enforcement',
+            'risky_savings',
         ], true)) {
             throw new \InvalidArgumentException(
                 'Druh institucionálního závazku není podporovaný.',

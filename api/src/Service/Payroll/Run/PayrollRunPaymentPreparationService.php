@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 
 /**
@@ -29,6 +30,7 @@ final class PayrollRunPaymentPreparationService
         'social_insurance' => 'sociálního pojištění',
         'income_tax' => 'daně ze závislé činnosti',
         'enforcement' => 'exekučních srážek',
+        'risky_savings' => 'povinného spoření u rizikové práce',
     ];
 
     public function __construct(
@@ -37,6 +39,7 @@ final class PayrollRunPaymentPreparationService
         private readonly PayrollSocialInsuranceLiabilityMaterializer $socialInsurance,
         private readonly PayrollIncomeTaxLiabilityMaterializer $incomeTax,
         private readonly PayrollEnforcementLiabilityMaterializer $enforcement,
+        private readonly PayrollRiskySavingsLiabilityMaterializer $riskySavings,
     ) {}
 
     /**
@@ -82,6 +85,11 @@ final class PayrollRunPaymentPreparationService
                 $actorUserId,
             ),
             'enforcement' => fn (): array => $this->enforcement->materialize(
+                $supplierId,
+                $revisionId,
+                $actorUserId,
+            ),
+            'risky_savings' => fn (): array => $this->riskySavings->materialize(
                 $supplierId,
                 $revisionId,
                 $actorUserId,

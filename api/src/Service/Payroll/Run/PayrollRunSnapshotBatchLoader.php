@@ -278,6 +278,57 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Měsíční podklady povinného spoření podle pracovního vztahu. Načítají se
+     * i koncepty: koncept musí běh zastavit, nesmí se tvářit jako nepoužitý.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function riskySavingsEvidence(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+    ): array {
+        return $this->single($this->fetch(
+              'SELECT evidence.id, evidence.period_start, evidence.revision_no,
+                      evidence.risk_factor, evidence.work_category,
+                      evidence.qualifying_shift_eighths,
+                      evidence.right_claimed_on, evidence.employee_informed_on,
+                      evidence.pension_company, evidence.institution_account_id,
+                      evidence.product_reference, evidence.variable_symbol,
+                      evidence.specific_symbol, evidence.payment_message,
+                      evidence.evidence_reference, evidence.status,
+                      evidence.row_version, evidence.approved_at,
+                      evidence.approved_by,
+                      evidence.institution_account_row_version,
+                      evidence.institution_account_hash,
+                      evidence.institution_account_masked,
+                      account.row_version AS current_institution_account_row_version,
+                      LOWER(HEX(account.bank_account_hash))
+                          AS current_institution_account_hash,
+                      evidence.employment_id AS ' . self::GROUP_KEY . '
+                 FROM payroll_risky_savings_evidence evidence
+            LEFT JOIN payroll_institution_accounts account
+                   ON account.supplier_id = evidence.supplier_id
+                  AND account.id = evidence.institution_account_id
+                WHERE evidence.supplier_id = ?
+                  AND evidence.employment_id IN (%s)
+                  AND evidence.period_start = ?
+                  AND evidence.revision_no = (
+                      SELECT MAX(selected.revision_no)
+                        FROM payroll_risky_savings_evidence selected
+                       WHERE selected.supplier_id = evidence.supplier_id
+                         AND selected.employment_id = evidence.employment_id
+                         AND selected.period_start = evidence.period_start
+                  )
+                ORDER BY evidence.employment_id, evidence.id',
+            [$supplierId],
+            $employmentIds,
+            [$periodStart],
+        ));
+    }
+
+    /**
      * Dimenze (středisko / zakázka / činnost) přiřazené pracovnímu vztahu.
      *
      * Do snapshotu vstupují kvůli `default_account_code`: ten určuje nákladový účet

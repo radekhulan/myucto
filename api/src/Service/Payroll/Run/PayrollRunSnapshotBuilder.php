@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
@@ -27,6 +28,7 @@ use PDO;
 final class PayrollRunSnapshotBuilder
 {
     private readonly PayrollRunSnapshotBatchLoader $batch;
+    private readonly PayrollRiskySavingsPolicy $riskySavingsPolicy;
 
     /**
      * `$rulesets` je POVINNÝ. Jako volitelný parametr s defaultem ho PHP-DI
@@ -49,6 +51,7 @@ final class PayrollRunSnapshotBuilder
         // konstruktoru, aby nepřibyl další volitelný parametr, který by PHP-DI
         // nevyplnilo a který by se pak tiše nahradil defaultem.
         $this->batch = new PayrollRunSnapshotBatchLoader($db);
+        $this->riskySavingsPolicy = new PayrollRiskySavingsPolicy();
     }
 
     public function build(
@@ -145,6 +148,11 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        $riskySavingsEvidenceRows = $this->batch->riskySavingsEvidence(
+            $supplierId,
+            $employmentIds,
+            $periodStart,
+        );
         $dimensionRows = $this->batch->employmentDimensions(
             $supplierId,
             $employmentIds,
@@ -256,6 +264,37 @@ final class PayrollRunSnapshotBuilder
                 );
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);
+            $riskySavingsEvidence = $this->riskySavingsEvidence(
+                $riskySavingsEvidenceRows[$employmentId] ?? null,
+            );
+            if ($riskySavingsEvidence !== null) {
+                foreach ($this->riskySavingsPolicy->issues(
+                    $riskySavingsEvidence,
+                    $periodStart,
+                ) as $issue) {
+                    $validations[] = new PayrollRunValidation(
+                        'blocker',
+                        $issue,
+                        'employment',
+                        $employmentId,
+                        $this->riskySavingsValidationMessage($issue),
+                        '/payroll/components',
+                    );
+                }
+                foreach ($this->riskySavingsPolicy->warnings(
+                    $riskySavingsEvidence,
+                    $periodStart,
+                ) as $warning) {
+                    $validations[] = new PayrollRunValidation(
+                        'warning',
+                        $warning,
+                        'employment',
+                        $employmentId,
+                        $this->riskySavingsValidationMessage($warning),
+                        '/payroll/components',
+                    );
+                }
+            }
             if ($inputs === []) {
                 // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
                 // složky je většinou chyba zadání, ale legitimní důvody existují
@@ -432,6 +471,7 @@ final class PayrollRunSnapshotBuilder
                 'time_month' => $timeMonth,
                 'absences' => $absences,
                 'inputs' => $inputs,
+                'risky_savings_evidence' => $riskySavingsEvidence,
                 'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? []),
             ];
         }
@@ -468,6 +508,77 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $manifestJson),
             $validations,
         );
+    }
+
+    /** @param array<string,mixed>|null $row */
+    private function riskySavingsEvidence(?array $row): ?array
+    {
+        if ($row === null) {
+            return null;
+        }
+        return [
+            'id' => (int) $row['id'],
+            'period_start' => (string) $row['period_start'],
+            'revision_no' => (int) $row['revision_no'],
+            'risk_factor' => (string) $row['risk_factor'],
+            'work_category' => (int) $row['work_category'],
+            'qualifying_shift_eighths' => (int) $row['qualifying_shift_eighths'],
+            'right_claimed_on' => (string) $row['right_claimed_on'],
+            'employee_informed_on' => $row['employee_informed_on'],
+            'pension_company' => (string) $row['pension_company'],
+            'institution_account_id' => $row['institution_account_id'] === null
+                ? null : (int) $row['institution_account_id'],
+            'institution_account_row_version' =>
+                $row['institution_account_row_version'] === null
+                    ? null : (int) $row['institution_account_row_version'],
+            'institution_account_hash' => $row['institution_account_hash'],
+            'institution_account_masked' => $row['institution_account_masked'],
+            'current_institution_account_row_version' =>
+                $row['current_institution_account_row_version'] === null
+                    ? null
+                    : (int) $row['current_institution_account_row_version'],
+            'current_institution_account_hash' =>
+                $row['current_institution_account_hash'],
+            'product_reference' => (string) $row['product_reference'],
+            'variable_symbol' => $row['variable_symbol'],
+            'specific_symbol' => $row['specific_symbol'],
+            'payment_message' => $row['payment_message'],
+            'evidence_reference' => $row['evidence_reference'],
+            'status' => (string) $row['status'],
+            'row_version' => (int) $row['row_version'],
+            'approved_at' => $row['approved_at'],
+            'approved_by' => $row['approved_by'] === null
+                ? null : (int) $row['approved_by'],
+        ];
+    }
+
+    private function riskySavingsValidationMessage(string $issue): string
+    {
+        return match ($issue) {
+            'risky_savings_evidence_not_approved' =>
+                'Evidence rozhodných směn pro povinné spoření není schválena.',
+            'risky_savings_shift_eighths_invalid' =>
+                'Rozsah rozhodných směn pro povinné spoření není platný.',
+            'risky_savings_claim_date_invalid' =>
+                'Chybí platný den, kdy zaměstnanec uplatnil právo na příspěvek.',
+            'risky_savings_claim_not_effective_for_period' =>
+                'Právo na příspěvek bylo uplatněno až v tomto období; nárok vzniká nejdříve následující měsíc.',
+            'risky_savings_risk_factor_invalid' =>
+                'Chybí zákonný rizikový faktor 3. kategorie pro povinné spoření.',
+            'risky_savings_work_category_invalid' =>
+                'Povinné spoření lze vypočítat jen pro doloženou práci 3. kategorie.',
+            'risky_savings_pension_company_missing' =>
+                'Chybí penzijní společnost pro povinné spoření.',
+            'risky_savings_product_reference_missing' =>
+                'Chybí identifikace produktu povinného spoření.',
+            'risky_savings_payment_target_invalid' =>
+                'Chybí platný ověřený účet penzijní společnosti pro povinné spoření.',
+            'risky_savings_payment_target_changed' =>
+                'Ověřený účet penzijní společnosti se po schválení podkladu změnil. Zkontrolujte účet a schvalte novou revizi evidence.',
+            'risky_savings_employee_not_informed' =>
+                'Není evidováno splnění informační povinnosti vůči zaměstnanci podle § 5 zákona č. 324/2025 Sb.',
+            default => 'Podklady povinného spoření vyžadují kontrolu.',
+        };
     }
 
     /**

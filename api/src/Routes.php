@@ -110,6 +110,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
 use MyInvoice\Action\Payroll\PayrollPeriodExportAction;
+use MyInvoice\Action\Payroll\PayrollRiskySavingsAction;
 use MyInvoice\Action\Payroll\PayrollPayoutRulesAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
@@ -730,6 +731,8 @@ final class Routes
             // Smazat jde jen NIKDY NEPOUŽITÁ verze složky; u použité zůstává
             // deaktivace a ukončení platnosti přes PUT výše.
             $g->delete('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'delete']);
+            $g->get('/risky-savings', [PayrollRiskySavingsAction::class, 'list']);
+            $g->put('/risky-savings/evidence', [PayrollRiskySavingsAction::class, 'save']);
             $g->get('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'list']);
             $g->post('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'create']);
             $g->get(

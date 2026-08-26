@@ -985,6 +985,7 @@
                 "insolvency": "Insolvency deduction",
                 "benefit": "Benefit",
                 "statutory_insurance": "Statutory insurance",
+                "risky_savings": "Mandatory savings for hazardous work",
                 "other": "Other liability"
             },
             "state": {
@@ -1571,6 +1572,51 @@
             "save_blocked_empty": "There is nothing to save for this period — no relation here has a payroll input.",
             "save_blocked_invalid": "Fix the fields marked in red. Saving is blocked while an invalid value remains in the table.",
             "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again."
+        },
+        "risky_savings": {
+            "title": "Mandatory savings for hazardous work",
+            "hint": "Record only selected category 3 work covered by Act No. 324/2025. The application calculates {rate}% from the evidenced assessment base and never infers eligibility from the generic hazardous-work flag.",
+            "threshold": "Entitlement from {eighths} shift eighths",
+            "employee": "Employee",
+            "employment": "Employment relationship",
+            "risk_factor_label": "Statutory risk factor (category 3)",
+            "risk_factor": {
+                "vibration": "Vibration",
+                "cold": "Cold",
+                "heat": "Heat",
+                "dynamic_physical_load": "Dynamic physical load involving large muscle groups"
+            },
+            "full_shifts": "Full eight-hour hazardous shifts",
+            "other_hours": "Started hours in shifts of another length",
+            "claimed_on": "Right claimed on",
+            "informed_on": "Employee informed on",
+            "informed_warning": "The date is missing. Calculation remains available, but the payroll run will warn about the outstanding information duty.",
+            "pension_company": "Pension company",
+            "payment_target": "Verified pension company account",
+            "payment_target_help": "The account is taken securely from the encrypted Payroll settings catalogue. Evidence and snapshots keep only its ID, version, hash and mask.",
+            "product_reference": "Product / contract reference",
+            "variable_symbol": "Variable symbol",
+            "specific_symbol": "Specific symbol (optional)",
+            "payment_message": "Payment message (optional)",
+            "evidence_reference": "Evidence reference (optional)",
+            "shift_help": "Qualifying extent: {eighths} shift eighths. For a shift other than 8 hours, every started hour counts as one eighth.",
+            "save_draft": "Save draft",
+            "save_approve": "Approve evidence",
+            "draft_saved": "The evidence draft was saved.",
+            "approved": "The evidence was approved and will enter the frozen payroll run.",
+            "load_failed": "Mandatory savings evidence could not be loaded.",
+            "save_failed": "Mandatory savings evidence could not be saved.",
+            "shifts": "Qualifying shifts",
+            "contribution": "Calculated contribution",
+            "status_label": "Status",
+            "actions": "Actions",
+            "due_on": "Due by {date}",
+            "payment_flow": "After the payroll revision is approved, a liability appears in Payroll payment orders. Payment is confirmed by matching a bank transaction or cash document, not by manually toggling a status.",
+            "status": {
+                "draft": "Evidence draft",
+                "approved": "Approved / awaiting calculation or payment",
+                "paid": "Paid"
+            }
         },
         "components": {
             "title": "Payroll components and inputs",

@@ -119,7 +119,11 @@ final class PayrollComponentDefaults
                 ['VZDELAVANI', 'Vzdělávání zaměstnance', 'benefit_education', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 ['REKREACE_VOLNY_CAS', 'Rekreace a volnočasový benefit', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_leisure', null],
                 ['ZDRAVOTNI_BENEFIT', 'Zdravotní benefit', 'benefit_health', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_health', null],
-                ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'monetary', 'regular', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                // Povinný příspěvek podle zákona č. 324/2025 Sb. je příspěvkem
+                // zaměstnavatele na produkt spoření na stáří. Výši nevytváří
+                // ruční mzdový vstup: runtime ji odvodí pouze ze schválené
+                // evidence rozhodných směn a zmrazeného vyměřovacího základu.
+                ['PRISPEVEK_RIZIKOVE_SPORENI', 'Povinný příspěvek na spoření u rizikové práce', 'risky_savings', 'non_monetary', 'regular', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'included', 'old_age_savings', 'benefit_basket'],
                 ['CESTOVNI_NAHRADA', 'Cestovní náhrada', 'travel_reimbursement', 'monetary', 'one_off', 'manual_review', 'excluded', 'excluded', 'excluded', 'excluded', 'manual_review', 'included', null, null],
                 // MZ-08-W07 — klasifikovaný rozpad vyúčtování pracovní cesty. Do zákonného
                 // limitu (§ 6 odst. 7 písm. a) ZDP) není náhrada předmětem daně, pojistného,

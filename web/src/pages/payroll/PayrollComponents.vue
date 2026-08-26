@@ -41,6 +41,7 @@ import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchS
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import PayrollRiskySavingsPanel from '@/components/payroll/PayrollRiskySavingsPanel.vue'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -1410,6 +1411,7 @@ onMounted(load)
       </section>
 
       <section v-if="activeTab === 'inputs'" class="space-y-4">
+        <PayrollRiskySavingsPanel :period="period" :employments="employments" />
         <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.inputs.title') }}</h2><p class="text-sm text-neutral-500">{{ t('payroll.components.inputs.hint') }}</p></div><button v-if="canWrite" :class="btnFilled('primary')" @click="openNewInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.inputs.add') }}</button></div>
         <p v-if="inputError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ inputError }}</p>
 

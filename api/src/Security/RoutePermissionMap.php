@@ -314,6 +314,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/components/(?:jmhz-targets|jmhz-mappings|[0-9]+/jmhz-mapping)$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/components/[0-9]+/jmhz-mapping$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/components(?:/[0-9]+)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/risky-savings$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/risky-savings/evidence$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/travel/trips(?:/[0-9]+/calculation)?$#', 'payroll', AccessLevel::READ],
         // Zrušení schválené cesty bere zpět schválení — proto stejné právo jako
         // schválit a vyúčtovat. Smazání KONCEPTU spadá pod `payroll.inputs.write`

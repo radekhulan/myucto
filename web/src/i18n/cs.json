@@ -985,6 +985,7 @@
                 "insolvency": "Insolvenční srážka",
                 "benefit": "Benefit",
                 "statutory_insurance": "Zákonné pojištění",
+                "risky_savings": "Povinné spoření u rizikové práce",
                 "other": "Ostatní závazek"
             },
             "state": {
@@ -1571,6 +1572,51 @@
             "save_blocked_empty": "Za toto období není co uložit — nejsou tu žádné vztahy se mzdovým vstupem.",
             "save_blocked_invalid": "Opravte červeně označená pole. Dokud v tabulce zůstane neplatná hodnota, uložit nejde.",
             "save_blocked_rows": "Některý řádek má blokující stav (uzamčený vstup nebo ukončený vztah). Vyřešte ho a zkuste uložit znovu."
+        },
+        "risky_savings": {
+            "title": "Povinné spoření u rizikové práce",
+            "hint": "Evidujte jen vybrané práce 3. kategorie podle zákona č. 324/2025 Sb. Aplikace z doloženého vyměřovacího základu vypočte {rate} %, nic neodvozuje z obecného označení rizikové práce.",
+            "threshold": "Nárok od {eighths} osmin směny",
+            "employee": "Zaměstnanec",
+            "employment": "Pracovní vztah",
+            "risk_factor_label": "Zákonný rizikový faktor (3. kategorie)",
+            "risk_factor": {
+                "vibration": "Vibrace",
+                "cold": "Chlad",
+                "heat": "Teplo",
+                "dynamic_physical_load": "Dynamická fyzická zátěž velkými svalovými skupinami"
+            },
+            "full_shifts": "Celé osmihodinové rizikové směny",
+            "other_hours": "Započaté hodiny u směn jiné délky",
+            "claimed_on": "Právo uplatněno dne",
+            "informed_on": "Zaměstnanec informován dne",
+            "informed_warning": "Datum zatím chybí. Výpočet to nezastaví, ale mzdový běh upozorní na nesplněnou informační povinnost.",
+            "pension_company": "Penzijní společnost",
+            "payment_target": "Ověřený účet penzijní společnosti",
+            "payment_target_help": "Účet se bezpečně přebírá ze šifrovaného katalogu Mzdy → Nastavení. V evidenci a snapshotu zůstane jen jeho ID, verze, hash a maska.",
+            "product_reference": "Identifikace produktu / smlouvy",
+            "variable_symbol": "Variabilní symbol",
+            "specific_symbol": "Specifický symbol (volitelný)",
+            "payment_message": "Zpráva pro příjemce (volitelná)",
+            "evidence_reference": "Odkaz na podklad (volitelný)",
+            "shift_help": "Rozhodný rozsah: {eighths} osmin směny. U směny jiné než 8 hodin se počítá každá započatá hodina jako jedna osmina.",
+            "save_draft": "Uložit koncept",
+            "save_approve": "Schválit podklady",
+            "draft_saved": "Koncept podkladů byl uložen.",
+            "approved": "Podklady byly schváleny a zahrnou se do zmrazeného mzdového běhu.",
+            "load_failed": "Podklady povinného spoření se nepodařilo načíst.",
+            "save_failed": "Podklady povinného spoření se nepodařilo uložit.",
+            "shifts": "Rozhodné směny",
+            "contribution": "Vypočtený příspěvek",
+            "status_label": "Stav",
+            "actions": "Akce",
+            "due_on": "Splatnost do {date}",
+            "payment_flow": "Po schválení mzdové revize vznikne závazek v Mzdových příkazech. Úhrada se potvrzuje spárováním bankovní transakce nebo pokladního dokladu, ne ručním přepnutím stavu.",
+            "status": {
+                "draft": "Koncept podkladů",
+                "approved": "Schváleno / čeká na výpočet či úhradu",
+                "paid": "Uhrazeno"
+            }
         },
         "components": {
             "title": "Mzdové složky a vstupy",
