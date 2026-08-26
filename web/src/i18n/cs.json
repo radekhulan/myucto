@@ -3394,9 +3394,9 @@
                     "unavailable": "Stornovat lze jen hlášení, které už bylo odeslané na ČSSZ."
                 },
                 "correction": {
-                    "action": "Částečná oprava (druh O)",
-                    "title": "Částečná oprava podání za období {period}",
-                    "description": "Druh O zneplatní u ČSSZ pouze vybrané součásti původního hlášení. Vyberte pracovní vztahy označené v protokolu jako chybné nebo odmítnuté; ostatní součásti zůstanou platné. Identifikátory jsou načtené ze zmrazeného podání, takže je neopisujete.",
+                    "action": "Stornovat vybrané vztahy",
+                    "title": "Storno vybraných vztahů za období {period}",
+                    "description": "Podání druhu O zneplatní u ČSSZ pouze vybrané součásti původního hlášení. Nejde o opravu hodnot: vybrané vztahy se stornují a opravené údaje se případně podají samostatně. Identifikátory načítá server ze zmrazeného podání.",
                     "loading": "Načítám pracovní vztahy ze zmrazeného podání…",
                     "empty": "Ve zmrazeném podání nejsou žádné pracovní vztahy, které by šlo částečně zneplatnit.",
                     "search_label": "Najít pracovní vztah",
@@ -3409,12 +3409,12 @@
                     "employment": "ID pracovního vztahu u ČSSZ: {id}",
                     "person": "Identifikátor osoby u ČSSZ: {id}",
                     "impact_confirmation": "Rozumím, že podání druhu O zneplatní pouze vybrané součásti. Zbývající součásti zůstanou u ČSSZ platné a případné opravené údaje musím podat následným krokem.",
-                    "confirm": "Připravit částečnou opravu",
+                    "confirm": "Připravit storno vybraných vztahů",
                     "cancel": "Nechat být",
-                    "frozen": "Částečná oprava je připravená jako podání č. {id}. Zkontrolujte ji a odešlete stejně jako řádné hlášení.",
-                    "already": "Stejná částečná oprava už byla připravená — je to podání č. {id}.",
+                    "frozen": "Storno vybraných vztahů je připravené jako podání č. {id}. Zkontrolujte je a odešlete stejně jako řádné hlášení.",
+                    "already": "Stejné storno vybraných vztahů už bylo připravené — je to podání č. {id}.",
                     "load_failed": "Pracovní vztahy původního podání se nepodařilo načíst.",
-                    "failed": "Částečnou opravu se nepodařilo připravit."
+                    "failed": "Storno vybraných vztahů se nepodařilo připravit."
                 }
             },
             "signing": {

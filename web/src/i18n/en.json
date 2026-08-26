@@ -3394,9 +3394,9 @@
                     "unavailable": "Only a report already sent to ČSSZ can be cancelled."
                 },
                 "correction": {
-                    "action": "Partial correction (type O)",
-                    "title": "Partial correction for {period}",
-                    "description": "A type O submission voids only the selected components of the original report at ČSSZ. Select employments identified as erroneous or rejected in the protocol; all other components remain valid. Identifiers come from the frozen submission, so nothing is retyped.",
+                    "action": "Cancel selected employments",
+                    "title": "Cancellation of selected employments for {period}",
+                    "description": "A type O submission voids only the selected components of the original report at ČSSZ. It does not correct values: selected employments are cancelled and corrected data is filed separately if needed. The server reads identifiers from the frozen submission.",
                     "loading": "Loading employments from the frozen submission…",
                     "empty": "The frozen submission contains no employments that can be partially voided.",
                     "search_label": "Find an employment",
@@ -3409,12 +3409,12 @@
                     "employment": "ČSSZ employment ID: {id}",
                     "person": "ČSSZ person identifier: {id}",
                     "impact_confirmation": "I understand that a type O submission voids only the selected components. The remaining components stay valid at ČSSZ and any corrected data must be filed in a subsequent step.",
-                    "confirm": "Prepare partial correction",
+                    "confirm": "Prepare selected-employment cancellation",
                     "cancel": "Leave it",
-                    "frozen": "The partial correction is prepared as submission no. {id}. Review it and send it the same way as a regular report.",
-                    "already": "The same partial correction already exists — it is submission no. {id}.",
+                    "frozen": "The selected-employment cancellation is prepared as submission no. {id}. Review it and send it the same way as a regular report.",
+                    "already": "The same selected-employment cancellation already exists — it is submission no. {id}.",
                     "load_failed": "The employments from the original submission could not be loaded.",
-                    "failed": "The partial correction could not be prepared."
+                    "failed": "The selected-employment cancellation could not be prepared."
                 }
             },
             "signing": {

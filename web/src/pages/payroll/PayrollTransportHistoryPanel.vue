@@ -639,11 +639,8 @@ async function confirmCorrection(submissionId: number) {
     || selectedCorrectionGuids.value.length === 0
     || !correctionImpactConfirmed.value
   ) return
-  const selected = new Set(selectedCorrectionGuids.value)
-  const components = correctableComponents.value.filter(
-    component => selected.has(component.form_guid),
-  )
-  if (components.length === 0) return
+  const formGuids = [...new Set(selectedCorrectionGuids.value)]
+  if (formGuids.length === 0) return
   correctionPendingId.value = submissionId
   actionError.value = ''
   success.value = ''
@@ -651,7 +648,7 @@ async function confirmCorrection(submissionId: number) {
     const result = await payrollApi.cancelJmhzSubmissionComponents(
       submissionId,
       environment.value,
-      components,
+      formGuids,
     )
     closeCorrection()
     await load()

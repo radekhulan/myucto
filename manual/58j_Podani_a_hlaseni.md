@@ -229,29 +229,29 @@ zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
 vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
 zrušeno v termínu), položka automaticky zmizí jako vyřešená.
 
-## Oprava a storno JMHZ
+## Storno a následná oprava JMHZ
 
-Opravné podání a storno JMHZ jsou podporované, ale nevznikají přepsáním
-původního XML. V **Stavu odeslání** otevřete způsobilé předchozí podání a
-zvolte řízenou opravnou akci. **Připravit storno** zruší celé hlášení za
-období; podporovaný opravný tok může zrušit také vybrané součásti podle
-konkrétních pracovněprávních vztahů. Aplikace vytvoří nový neměnný artefakt
-s vlastní identitou a vazbou na původní podání.
+Storno JMHZ nevzniká přepsáním původního XML. V **Stavu odeslání** otevřete
+způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** zruší
+celé hlášení za období. **Stornovat vybrané vztahy** vytvoří podání druhu O,
+které zneplatní pouze vybrané součásti podle konkrétních pracovněprávních
+vztahů. Tato druhá akce sama neopravuje jejich hodnoty. Aplikace vytvoří nový
+neměnný artefakt s vlastní identitou a vazbou na původní podání.
 
-Příprava storna ani opravy sama nic neodešle. Nový artefakt odešlete stejným
-kanálem jako řádné JMHZ a samostatně sledujte jeho protokol až do přijetí.
-Opakování stejné přípravy je idempotentní a vrací již vytvořený výsledek.
+Příprava storna sama nic neodešle. Nový artefakt odešlete stejným kanálem jako
+řádné JMHZ a samostatně sledujte jeho protokol až do přijetí. Opakování stejné
+přípravy vrací již vytvořený výsledek, i když tlačítko použijete později znovu.
 
 Ve **Stavu odeslání** nemusíte opisovat GUID ani identifikátory osoby a vztahu.
-Akce **Částečná oprava (druh O)** se nabídne až po konečném protokolu. Aplikace
-načte součásti přímo ze zmrazeného řádného XML; ve větším seznamu je můžete
-vyhledat podle identifikátoru vztahu nebo osoby. Pokud jste protokol právě
-dotáhli na stejné obrazovce, vztahy s konkrétní chybou se zvýrazní a lze je
-vybrat společným tlačítkem. Před přípravou musíte potvrdit, že druh O zneplatní
-jen vybrané součásti, ostatní ponechá u ČSSZ platné a případné opravené údaje
-se podávají následným krokem. Samostatně platí, že první řádné JMHZ lze sestavit
-i z aktuální schválené opravné mzdové revize; druh podání určuje návaznost na
-dříve odeslané JMHZ, ne název zdrojové mzdové revize.
+Akce **Stornovat vybrané vztahy** se nabídne až po konečném protokolu. Aplikace
+načte součásti přímo ze zmrazeného řádného XML; prohlížeč posílá serveru jen
+vybrané GUIDy a zákonné identifikátory znovu doplní server z neměnného originálu.
+Ve větším seznamu můžete hledat podle identifikátoru vztahu nebo osoby. Nelze
+vybrat všechny součásti — pokud nemá žádná zůstat platná, použijte storno celého
+podání. U částečně přijatého hlášení se akce odemkne až po doložení výsledku
+jednotlivých formulářů z úplného protokolu ČSSZ. Plné sestavení opravného
+hlášení s novými hodnotami z opravné mzdové revize tato obrazovka zatím
+nenabízí; nepovažujte storno vybraných vztahů za dokončenou opravu údajů.
 
 ## Evidenční list důchodového pojištění
 

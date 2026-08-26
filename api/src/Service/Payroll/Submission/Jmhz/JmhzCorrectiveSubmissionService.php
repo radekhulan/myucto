@@ -52,7 +52,8 @@ final readonly class JmhzCorrectiveSubmissionService
         private JmhzCancellationXmlSerializer $cancellations = new JmhzCancellationXmlSerializer(),
         private JmhzComponentCancellationXmlSerializer $componentCancellations
             = new JmhzComponentCancellationXmlSerializer(),
-    ) {}
+    ) {
+    }
 
     /**
      * Storno celého podání (typ „S") — za rozhodné období se ruší VŠECHNO, co
@@ -86,7 +87,7 @@ final readonly class JmhzCorrectiveSubmissionService
      * Opravné podání (typ „O"), které stornuje jmenované součásti — konkrétní
      * pracovněprávní vztahy se zneplatňují a zbytek hlášení zůstává platný.
      *
-     * @param list<JmhzComponentCancellation> $components
+     * @param list<string> $formGuids GUIDy vybrané ze zmrazeného řádného podání
      * @return array{
      *   submission_id:int,part_id:int,artifact_id:int,status:string,
      *   row_version:int,environment:string,artifact_sha256:string,
@@ -98,10 +99,10 @@ final readonly class JmhzCorrectiveSubmissionService
         int $supplierId,
         string $environment,
         int $originalSubmissionId,
-        array $components,
+        array $formGuids,
         ?int $createdBy = null,
     ): array {
-        if ($components === []) {
+        if ($formGuids === []) {
             throw new JmhzXmlException(
                 'jmhz_amendment_without_components',
                 'Opravné podání bez jediné součásti neopravuje nic.',
@@ -114,7 +115,7 @@ final readonly class JmhzCorrectiveSubmissionService
             $originalSubmissionId,
             'correction',
             'oprava',
-            $components,
+            $formGuids,
             $createdBy,
         );
     }
@@ -136,10 +137,10 @@ final readonly class JmhzCorrectiveSubmissionService
             $environment,
             $originalSubmissionId,
         );
-        if (!in_array($original['status'], ['accepted', 'partially_accepted'], true)) {
+        if ($original['status'] !== 'accepted') {
             throw new \DomainException(
-                'Opravné podání lze připravit až po přijetí nebo částečném'
-                    . ' přijetí řádného hlášení ČSSZ.',
+                'Vztahy lze stornovat až po úplném přijetí řádného hlášení.'
+                    . ' U částečného výsledku nejdříve načtěte úplný protokol ČSSZ.',
             );
         }
 
@@ -151,7 +152,7 @@ final readonly class JmhzCorrectiveSubmissionService
     }
 
     /**
-     * @param list<JmhzComponentCancellation> $components
+     * @param list<string> $requestedFormGuids
      * @return array{
      *   submission_id:int,part_id:int,artifact_id:int,status:string,
      *   row_version:int,environment:string,artifact_sha256:string,
@@ -165,7 +166,7 @@ final readonly class JmhzCorrectiveSubmissionService
         int $originalSubmissionId,
         string $submissionKind,
         string $referencePrefix,
-        array $components,
+        array $requestedFormGuids,
         ?int $createdBy,
     ): array {
         if ($supplierId <= 0 || $originalSubmissionId <= 0) {
@@ -173,82 +174,114 @@ final readonly class JmhzCorrectiveSubmissionService
                 'Rozsah opravného podání JMHZ není platný.',
             );
         }
-        $original = $this->requireOriginal($supplierId, $environment, $originalSubmissionId);
-        $obligation = $this->repository->findObligationOfSubmission(
-            $supplierId,
-            $environment,
-            $originalSubmissionId,
-        );
-        if ($obligation === null) {
-            throw new JmhzXmlException(
-                'jmhz_submission_obligation_required',
-                'K původnímu podání chybí evidovaná povinnost, takže se na ně'
-                    . ' nedá navázat storno ani oprava.',
-            );
-        }
-        $identity = $this->frozen->identity($supplierId, $environment, $originalSubmissionId);
-
-        // Zadání se ověřuje PŘED transakcí — hlavně lhůta. Zmrazit storno po
-        // lhůtě by znamenalo vyrobit dokument, který ČSSZ jen odmítne, a přitom
-        // pod ním nechat záznam podání.
-        $request = JmhzCancellationRequest::create(
-            $identity->submissionGuid,
-            $identity->variableSymbol,
-            $identity->year,
-            $identity->month,
-            $this->deadlines,
-            $this->localDate(),
-            $submissionKind === 'cancellation',
-        );
-        $envelope = JmhzSubmissionEnvelope::createForExistingSubmission(
-            $identity->submissionGuid,
-            [],
-            $this->filledAt(),
-            self::PRODUCT_NAME,
-            EpoEnvelope::appVersion() ?? '0',
-        );
-        $xml = $components === []
-            ? $this->cancellations->serialize($request, $envelope)
-            : $this->componentCancellations->serialize($request, $components, $envelope);
-
-        $snapshotHash = self::snapshotHash(
-            $supplierId,
-            $environment,
-            $originalSubmissionId,
-            $submissionKind,
-            $xml,
-        );
-        $keys = self::idempotencyKeys($submissionKind, $snapshotHash);
-        // Platforma vyžaduje, aby druh podání odpovídal druhu povinnosti —
-        // storno tedy nemůže viset pod povinností řádného hlášení. Vlastní
-        // povinnost je i správně věcně: má vlastní lhůtu a vlastní stav, takže
-        // ji inbox podání sleduje odděleně od původního hlášení.
-        $correctiveObligationId = $this->correctiveObligation(
-            $supplierId,
-            $environment,
-            $obligation,
-            $submissionKind,
-            $originalSubmissionId,
-            $createdBy,
-        );
-
         return $this->repository->transaction(function () use (
             $supplierId,
             $environment,
             $originalSubmissionId,
-            $obligation,
-            $correctiveObligationId,
-            $identity,
             $submissionKind,
             $referencePrefix,
-            $snapshotHash,
-            $keys,
-            $xml,
+            $requestedFormGuids,
             $createdBy,
         ): array {
             if (!$this->repository->lockSupplier($supplierId)) {
                 throw new \DomainException('Firma JMHZ podání nebyla nalezena.');
             }
+            $formGuids = $submissionKind === 'correction'
+                ? self::canonicalFormGuids($requestedFormGuids)
+                : [];
+            $snapshotHash = self::snapshotHash(
+                $supplierId,
+                $environment,
+                $originalSubmissionId,
+                $submissionKind,
+                $formGuids,
+            );
+            $keys = self::idempotencyKeys($submissionKind, $snapshotHash);
+            $original = $this->requireOriginal($supplierId, $environment, $originalSubmissionId);
+            $identity = $this->frozen->identity($supplierId, $environment, $originalSubmissionId);
+            $existing = $this->repository->findSubmissionByIdempotencyForUpdate(
+                $supplierId,
+                hash('sha256', $keys['submission'], true),
+                $environment,
+            );
+            if ($existing !== null) {
+                return $this->replayed(
+                    $supplierId,
+                    $environment,
+                    $existing,
+                    $keys['artifact'],
+                    $identity,
+                    $originalSubmissionId,
+                );
+            }
+            if (!in_array($original['status'], ['accepted', 'partially_accepted'], true)) {
+                throw new \DomainException(
+                    'Storno nebo opravu lze připravit až po konečném přijetí'
+                        . ' řádného hlášení ČSSZ.',
+                );
+            }
+            if ($submissionKind === 'correction' && $original['status'] !== 'accepted') {
+                throw new \DomainException(
+                    'U částečně přijatého hlášení zatím nelze bezpečně určit platné'
+                        . ' vztahy. Nejdříve načtěte úplný protokol ČSSZ.',
+                );
+            }
+            $components = $submissionKind === 'correction'
+                ? $this->resolveFrozenComponents(
+                    $supplierId,
+                    $environment,
+                    $originalSubmissionId,
+                    $formGuids,
+                )
+                : [];
+            $obligation = $this->repository->findObligationOfSubmission(
+                $supplierId,
+                $environment,
+                $originalSubmissionId,
+            );
+            if ($obligation === null) {
+                throw new JmhzXmlException(
+                    'jmhz_submission_obligation_required',
+                    'K původnímu podání chybí evidovaná povinnost, takže se na ně'
+                        . ' nedá navázat storno ani oprava.',
+                );
+            }
+            // Zadání se ověřuje uvnitř stejné zamčené transakce jako zmrazení.
+            // Storno po lhůtě by ČSSZ odmítla; souběžné částečné storno zase nesmí
+            // obejít kontrolu, že v řádném hlášení zůstane aspoň jedna platná část.
+            $request = JmhzCancellationRequest::create(
+                $identity->submissionGuid,
+                $identity->variableSymbol,
+                $identity->year,
+                $identity->month,
+                $this->deadlines,
+                $this->localDate(),
+                $submissionKind === 'cancellation',
+            );
+            $envelope = JmhzSubmissionEnvelope::createForExistingSubmission(
+                $identity->submissionGuid,
+                [],
+                $this->filledAt(),
+                self::PRODUCT_NAME,
+                EpoEnvelope::appVersion() ?? '0',
+            );
+            $xml = $components === []
+                ? $this->cancellations->serialize($request, $envelope)
+                : $this->componentCancellations->serialize($request, $components, $envelope);
+
+            // Platforma vyžaduje, aby druh podání odpovídal druhu povinnosti —
+            // storno tedy nemůže viset pod povinností řádného hlášení. Vlastní
+            // povinnost je i správně věcně: má vlastní lhůtu a vlastní stav, takže
+            // ji inbox podání sleduje odděleně od původního hlášení.
+            $correctiveObligationId = $this->correctiveObligation(
+                $supplierId,
+                $environment,
+                $obligation,
+                $submissionKind,
+                $originalSubmissionId,
+                $createdBy,
+            );
+
             $submission = $this->submissions->prepare(
                 $supplierId,
                 $correctiveObligationId,
@@ -481,24 +514,139 @@ final readonly class JmhzCorrectiveSubmissionService
     }
 
     /**
+     * Klient posílá jen GUIDy. Zákonné identifikátory se vždy znovu načtou ze
+     * zmrazeného řádného XML, aby je nešlo podvrhnout nebo omylem přepsat.
+     *
+     * @param list<string> $requestedFormGuids
+     * @return list<JmhzComponentCancellation>
+     */
+    private function resolveFrozenComponents(
+        int $supplierId,
+        string $environment,
+        int $originalSubmissionId,
+        array $requestedFormGuids,
+    ): array {
+        if ($requestedFormGuids === []) {
+            throw new JmhzXmlException(
+                'jmhz_amendment_without_components',
+                'Vyberte alespoň jeden pracovněprávní vztah, který se má stornovat.',
+            );
+        }
+        $normalized = array_fill_keys($requestedFormGuids, true);
+
+        $frozen = $this->frozen->components(
+            $supplierId,
+            $environment,
+            $originalSubmissionId,
+        );
+        $byGuid = [];
+        foreach ($frozen as $component) {
+            $byGuid[strtoupper($component['form_guid'])] = $component;
+        }
+        foreach ($this->repository->resolvedCorrectionsForRoot(
+            $supplierId,
+            $environment,
+            $originalSubmissionId,
+        ) as $correction) {
+            if ($correction['status'] !== 'accepted') {
+                throw new \DomainException(
+                    'Předchozí oprava byla přijata jen částečně. Nejdříve načtěte'
+                        . ' úplný protokol ČSSZ a vyřešte její jednotlivé formuláře.',
+                );
+            }
+            foreach ($this->frozen->formGuids(
+                $supplierId,
+                $environment,
+                $correction['id'],
+            ) as $cancelledGuid) {
+                unset($byGuid[$cancelledGuid]);
+            }
+        }
+        foreach (array_keys($normalized) as $guid) {
+            if (isset($byGuid[$guid])) {
+                continue;
+            }
+            throw new JmhzXmlException(
+                'jmhz_cancellation_component_not_frozen',
+                'Vybraný pracovní vztah není mezi dosud platnými součástmi původního podání.',
+            );
+        }
+        if (count($normalized) >= count($byGuid)) {
+            throw new JmhzXmlException(
+                'jmhz_cancellation_would_leave_no_valid_form',
+                'Vybráním všech vztahů by v hlášení nic nezůstalo; použijte storno celého podání.',
+            );
+        }
+
+        $guids = array_keys($normalized);
+        sort($guids, SORT_STRING);
+        $resolved = [];
+        foreach ($guids as $guid) {
+            $source = $byGuid[$guid];
+            $resolved[] = JmhzComponentCancellation::create(
+                $source['form_guid'],
+                $source['person_external_identifier'],
+                $source['employment_external_identifier'],
+            );
+        }
+
+        return $resolved;
+    }
+
+    /** @param list<string> $formGuids @return list<string> */
+    private static function canonicalFormGuids(array $formGuids): array
+    {
+        if ($formGuids === []) {
+            throw new JmhzXmlException(
+                'jmhz_amendment_without_components',
+                'Vyberte alespoň jeden pracovněprávní vztah, který se má stornovat.',
+            );
+        }
+        $normalized = [];
+        foreach ($formGuids as $formGuid) {
+            if (!is_string($formGuid) || trim($formGuid) === '') {
+                throw new JmhzXmlException(
+                    'jmhz_cancellation_component_invalid',
+                    'Vybraný formulář pracovního vztahu nemá platný identifikátor.',
+                );
+            }
+            $guid = strtoupper(trim($formGuid));
+            if (isset($normalized[$guid])) {
+                throw new JmhzXmlException(
+                    'jmhz_cancellation_component_duplicate',
+                    'Tentýž pracovní vztah je ke stornu vybraný vícekrát.',
+                );
+            }
+            $normalized[$guid] = true;
+        }
+        $guids = array_keys($normalized);
+        sort($guids, SORT_STRING);
+
+        return $guids;
+    }
+
+    /**
      * Otisk zdroje. Řádné podání ho má z mzdové revize; storno žádnou revizi
      * nemá, takže se počítá z toho, co ho jednoznačně určuje — a hlavně z jeho
-     * VÝSLEDNÉHO XML, aby dvě různá opravná podání nikdy nesplynula v jedno.
+     * kanonického výběru. Čas vyplnění do něj nepatří: opakované kliknutí i po
+     * několika sekundách musí vrátit původní neměnný artefakt.
+     *
+     * @param list<string> $formGuids
      */
     private static function snapshotHash(
         int $supplierId,
         string $environment,
         int $originalSubmissionId,
         string $submissionKind,
-        string $xml,
+        array $formGuids,
     ): string {
         return hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'payroll-jmhz-corrective-submission.v1',
+            'schema_reference' => 'payroll-jmhz-corrective-submission.v2',
             'supplier_id' => $supplierId,
             'environment' => $environment,
             'corrects_submission_id' => $originalSubmissionId,
             'submission_kind' => $submissionKind,
-            'payload_sha256' => hash('sha256', $xml),
+            'form_guids' => $formGuids,
         ]));
     }
 

@@ -8,7 +8,6 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellation;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -34,7 +33,8 @@ final class PayrollJmhzCorrectionAction
     public function __construct(
         private readonly JmhzCorrectiveSubmissionService $corrections,
         private readonly PayrollModuleAccess $access,
-    ) {}
+    ) {
+    }
 
     /** @param array{submissionId:string} $args */
     public function cancel(Request $request, Response $response, array $args): Response
@@ -80,44 +80,36 @@ final class PayrollJmhzCorrectionAction
     public function cancelComponents(Request $request, Response $response, array $args): Response
     {
         $body = (array) ($request->getParsedBody() ?? []);
-        $rows = $body['components'] ?? null;
+        $rows = $body['form_guids'] ?? null;
         if (!is_array($rows) || $rows === []) {
             return $this->invalid(
                 $response,
                 'Vyberte alespoň jeden pracovněprávní vztah, který se má stornovat.',
             );
         }
-        $components = [];
+        $formGuids = [];
         foreach (array_values($rows) as $index => $row) {
-            if (!is_array($row)) {
+            if (!is_string($row) || trim($row) === '') {
                 return $this->invalid(
                     $response,
-                    'Položka č. ' . ($index + 1) . ' stornovaných součástí nemá platný tvar.',
+                    'Položka č. ' . ($index + 1) . ' nemá platný identifikátor formuláře.',
                 );
             }
-            try {
-                $components[] = JmhzComponentCancellation::create(
-                    (string) ($row['form_guid'] ?? ''),
-                    (string) ($row['person_external_identifier'] ?? ''),
-                    (string) ($row['employment_external_identifier'] ?? ''),
-                );
-            } catch (JmhzXmlException $exception) {
-                return $this->invalid($response, $exception->getMessage());
-            }
+            $formGuids[] = trim($row);
         }
 
-        return $this->run($request, $response, $args, $components);
+        return $this->run($request, $response, $args, $formGuids);
     }
 
     /**
      * @param array{submissionId:string} $args
-     * @param list<JmhzComponentCancellation>|null $components
+     * @param list<string>|null $formGuids
      */
     private function run(
         Request $request,
         Response $response,
         array $args,
-        ?array $components,
+        ?array $formGuids,
     ): Response {
         if (($denied = $this->authorize($request, $response)) !== null) {
             return $denied;
@@ -133,7 +125,7 @@ final class PayrollJmhzCorrectionAction
         $submissionId = (int) $args['submissionId'];
 
         try {
-            $result = $components === null
+            $result = $formGuids === null
                 ? $this->corrections->cancelSubmission(
                     $supplierId,
                     $environment,
@@ -144,7 +136,7 @@ final class PayrollJmhzCorrectionAction
                     $supplierId,
                     $environment,
                     $submissionId,
-                    $components,
+                    $formGuids,
                     $this->userId($request),
                 );
         } catch (JmhzXmlException $exception) {

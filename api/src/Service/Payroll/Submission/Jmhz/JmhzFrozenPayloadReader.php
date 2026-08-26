@@ -27,7 +27,8 @@ final readonly class JmhzFrozenPayloadReader
     public function __construct(
         private PayrollSubmissionRepository $repository,
         private PayrollSubmissionService $submissions,
-    ) {}
+    ) {
+    }
 
     public function bytes(int $supplierId, string $environment, int $submissionId): string
     {
@@ -126,6 +127,52 @@ final readonly class JmhzFrozenPayloadReader
         }
 
         return $components;
+    }
+
+    /** @return list<string> */
+    public function formGuids(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $dom = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $loaded = $dom->loadXML(
+                $this->bytes($supplierId, $environment, $submissionId),
+                LIBXML_NONET | LIBXML_NOBLANKS,
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        if (!$loaded) {
+            throw new JmhzXmlException(
+                'jmhz_submission_frozen_payload_invalid',
+                'Zmrazenou datovou větu podání nelze přečíst.',
+            );
+        }
+
+        $xpath = new DOMXPath($dom);
+        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $nodes = $xpath->query(
+            '/p:jmhz/p:formulareOsob/p:formularOsoby/p:hlavicka/p:idFormulare',
+        );
+        if ($nodes === false) {
+            throw new JmhzXmlException(
+                'jmhz_submission_components_unreadable',
+                'Součásti zmrazeného podání nelze načíst.',
+            );
+        }
+        $guids = [];
+        foreach ($nodes as $node) {
+            $guid = strtoupper(trim($node->textContent));
+            if ($guid !== '') {
+                $guids[] = $guid;
+            }
+        }
+
+        return array_values(array_unique($guids));
     }
 
     private static function value(

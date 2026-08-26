@@ -18,9 +18,10 @@ platby, dokumenty a podání.
 
 Přehled schopností rozlišuje **Podporováno**, **Ruční kontrola** a
 **Nepodporováno**. Chybějící pravidlo se nikdy nenahrazuje hodnotou z jiného
-roku ani odhadem. JMHZ opravné a stornovací podání je podporované řízeným
-workflow nad dřívějším způsobilým podáním; podrobnosti jsou v kapitole
-[Podání a hlášení](58j_Podani_a_hlaseni.md#oprava-a-storno-jmhz).
+roku ani odhadem. JMHZ podporuje řízené storno celého podání a storno vybraných
+vztahů; úplnou opravu hodnot nelze zaměňovat za zneplatnění součásti.
+Podrobnosti jsou v kapitole
+[Podání a hlášení](58j_Podani_a_hlaseni.md#storno-a-nasledna-oprava-jmhz).
 
 ## Doporučený pracovní tok
 

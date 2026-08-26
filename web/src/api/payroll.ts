@@ -4679,14 +4679,10 @@ export const payrollApi = {
   cancelJmhzSubmissionComponents: (
     submissionId: number,
     environment: PayrollJmhzTransportEnvironment,
-    components: Array<{
-      form_guid: string
-      person_external_identifier: string
-      employment_external_identifier: string
-    }>,
+    formGuids: string[],
   ) => api.post<PayrollJmhzCorrectiveSubmission>(
     `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
-    { environment, components },
+    { environment, form_guids: formGuids },
   ).then(response => response.data),
   /** Protokoly načtené ze souboru, od nejnovějšího období. */
   jmhzImportedProtocols: (

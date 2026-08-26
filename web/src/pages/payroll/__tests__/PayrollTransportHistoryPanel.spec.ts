@@ -840,7 +840,7 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.cancelJmhzSubmissionComponents).toHaveBeenCalledWith(
       70,
       'production',
-      [components[1]],
+      [components[1]!.form_guid],
     )
     expect(wrapper.get('[data-test="transport-success"]').text())
       .toContain('payroll.submissions.transport.correction.frozen 92')

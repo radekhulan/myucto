@@ -87,7 +87,9 @@ final class PayrollSubmissionRepository
 
     private int $savepointSequence = 0;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(private readonly Connection $db)
+    {
+    }
 
     /**
      * @template T
@@ -839,6 +841,36 @@ final class PayrollSubmissionRepository
             : self::submissionRow(
                 self::associativeRow($row, 'mzdové podání'),
             );
+    }
+
+    /** @return list<array{id:int,status:string}> */
+    public function resolvedCorrectionsForRoot(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, status
+               FROM payroll_submissions
+              WHERE supplier_id = ? AND environment = ?
+                AND corrects_submission_id = ?
+                AND submission_kind = \'correction\'
+                AND status IN (\'accepted\', \'partially_accepted\')
+              ORDER BY id
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $environment, $regularSubmissionId]);
+
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'návazné opravné podání');
+            $rows[] = [
+                'id' => self::integer($row, 'id'),
+                'status' => self::string($row, 'status'),
+            ];
+        }
+
+        return $rows;
     }
 
     public function insertSubmission(

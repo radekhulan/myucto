@@ -9,10 +9,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellation;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -44,6 +44,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private const ENVIRONMENT = 'test';
     private const SUBMISSION_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE';
     private const FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF';
+    private const SECOND_FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0';
     private const VARIABLE_SYMBOL = '9990000001';
 
     private Connection $db;
@@ -52,6 +53,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private PayrollSubmissionService $submissions;
     private JmhzCorrectiveSubmissionService $corrections;
     private PayrollSubmissionTransportAttemptRepository $attempts;
+    private MockClock $clock;
     private int $supplierId;
     private int $month;
     private int $year;
@@ -77,22 +79,22 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
 
         $this->repository = new PayrollSubmissionRepository($connection);
         $submissionDay = $today->modify('first day of next month')->modify('+1 day');
-        $clock = new MockClock(
+        $this->clock = new MockClock(
             $submissionDay->format('Y-m-d') . ' 10:00:00 Europe/Prague',
         );
-        $this->obligations = new PayrollObligationService($this->repository, $clock);
+        $this->obligations = new PayrollObligationService($this->repository, $this->clock);
         $this->submissions = new PayrollSubmissionService(
             $this->repository,
             new PayrollSubmissionStateMachine(),
             $encryption,
-            $clock,
+            $this->clock,
         );
         $this->corrections = new JmhzCorrectiveSubmissionService(
             $this->repository,
             $this->submissions,
             $this->obligations,
             new JmhzFrozenPayloadReader($this->repository, $this->submissions),
-            $clock,
+            $this->clock,
         );
         $this->attempts = new PayrollSubmissionTransportAttemptRepository($connection);
         if (!$this->attempts->isAvailable()) {
@@ -145,11 +147,18 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     {
         $original = $this->acceptedRegularSubmission();
 
-        self::assertSame([[
-            'form_guid' => self::FORM_GUID,
-            'person_external_identifier' => '1234567890',
-            'employment_external_identifier' => '987654321',
-        ]], $this->corrections->correctableComponents(
+        self::assertSame([
+            [
+                'form_guid' => self::FORM_GUID,
+                'person_external_identifier' => '1234567890',
+                'employment_external_identifier' => '987654321',
+            ],
+            [
+                'form_guid' => self::SECOND_FORM_GUID,
+                'person_external_identifier' => '1234567891',
+                'employment_external_identifier' => '987654322',
+            ],
+        ], $this->corrections->correctableComponents(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
@@ -161,7 +170,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         $original = $this->regularSubmissionInStatus('submitted');
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('až po přijetí');
+        $this->expectExceptionMessage('úplném přijetí');
         $this->corrections->correctableComponents(
             $this->supplierId,
             self::ENVIRONMENT,
@@ -182,7 +191,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(self::FORM_GUID, '1234567890', '987654321')],
+            [self::FORM_GUID],
         );
 
         self::assertTrue($amendment['created']);
@@ -210,6 +219,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             self::ENVIRONMENT,
             $original['id'],
         );
+        $this->clock->modify('+1 second');
         $second = $this->corrections->cancelSubmission(
             $this->supplierId,
             self::ENVIRONMENT,
@@ -220,6 +230,54 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertFalse($second['created']);
         self::assertSame($first['submission_id'], $second['submission_id']);
         self::assertSame($first['artifact_id'], $second['artifact_id']);
+        self::assertSame($first['artifact_sha256'], $second['artifact_sha256']);
+    }
+
+    public function testComponentCancellationRejectsUnknownOrAllFrozenForms(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+
+        try {
+            $this->corrections->cancelComponents(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                $original['id'],
+                ['AAAABBBB-1111-7222-8333-CCCCDDDDFFFF'],
+            );
+            self::fail('Cizí GUID formuláře nesmí projít.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_cancellation_component_not_frozen', $exception->validationCode);
+        }
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('storno celého podání');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID, self::SECOND_FORM_GUID],
+        );
+    }
+
+    public function testRepeatedComponentCancellationIsStableAcrossTimeAndOrder(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $first = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+        $this->clock->modify('+2 seconds');
+        $second = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+
+        self::assertFalse($second['created']);
+        self::assertSame($first['submission_id'], $second['submission_id']);
         self::assertSame($first['artifact_sha256'], $second['artifact_sha256']);
     }
 
@@ -289,7 +347,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(self::FORM_GUID, '1234567890', '987654321')],
+            [self::FORM_GUID],
         );
     }
 
@@ -301,19 +359,18 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         yield 'rejected has no valid regular root' => ['rejected'];
     }
 
-    public function testPartiallyAcceptedRegularSubmissionCanBeCorrected(): void
+    public function testPartiallyAcceptedRegularSubmissionWaitsForFormOutcomes(): void
     {
         $original = $this->regularSubmissionInStatus('partially_accepted');
 
-        $correction = $this->corrections->cancelComponents(
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('úplný protokol ČSSZ');
+        $this->corrections->cancelComponents(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(self::FORM_GUID, '1234567890', '987654321')],
+            [self::FORM_GUID],
         );
-
-        self::assertTrue($correction['created']);
-        self::assertSame('correction', $correction['submission_kind']);
     }
 
     public function testRejectedRegularSubmissionIsReplacedByANewUnlinkedRegular(): void
@@ -332,14 +389,14 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertNull($stored['corrects_submission_id']);
     }
 
-    public function testAcceptedCorrectionKeepsRegularRootEligibleForSecondCorrection(): void
+    public function testAcceptedCorrectionCannotBeFollowedByCancellingLastRemainingForm(): void
     {
         $original = $this->acceptedRegularSubmission();
         $first = $this->corrections->cancelComponents(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(self::FORM_GUID, '1234567890', '987654321')],
+            [self::FORM_GUID],
         );
         $this->acceptPreparedSubmission(
             $first['submission_id'],
@@ -353,20 +410,23 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertIsArray($storedRoot);
         self::assertSame('accepted', $storedRoot['status']);
 
-        $second = $this->corrections->cancelComponents(
+        $replay = $this->corrections->cancelComponents(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(
-                'AAAABBBB-1111-4222-8333-CCCCDDDDEEF0',
-                '1234567891',
-                '987654322',
-            )],
+            [self::FORM_GUID],
         );
+        self::assertFalse($replay['created']);
+        self::assertSame($first['submission_id'], $replay['submission_id']);
 
-        self::assertTrue($second['created']);
-        self::assertNotSame($first['submission_id'], $second['submission_id']);
-        self::assertSame($original['id'], $second['corrects_submission_id']);
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('storno celého podání');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::SECOND_FORM_GUID],
+        );
     }
 
     public function testCorrectionCanReferenceCanonicalNonV7Guids(): void
@@ -378,11 +438,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(
-                'AAAABBBB-1111-4222-8333-CCCCDDDDEEEF',
-                '1234567890',
-                '987654321',
-            )],
+            [self::FORM_GUID],
         );
 
         $xml = $this->submissions->artifactBytes(
@@ -417,8 +473,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private function regularSubmissionInStatus(
         string $status,
         string $submissionGuid = self::SUBMISSION_GUID,
-    ): array
-    {
+    ): array {
         $submission = $this->regularSubmission($submissionGuid);
         $submittedState = $this->submissions->transition(
             $this->supplierId,
@@ -489,7 +544,9 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private function trustedVerifier(string $status): PayrollReceiptVerifierInterface
     {
         return new class ($status) implements PayrollReceiptVerifierInterface {
-            public function __construct(private readonly string $status) {}
+            public function __construct(private readonly string $status)
+            {
+            }
 
             public function verify(
                 string $bytes,
@@ -615,6 +672,13 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             . '</hlavicka><form:bezPriznaku><form:identifikace>'
             . '<form:ikMpsv>1234567890</form:ikMpsv>'
             . '<form:idPpv>987654321</form:idPpv>'
+            . '</form:identifikace></form:bezPriznaku>'
+            . '</formularOsoby><formularOsoby><hlavicka>'
+            . '<idFormulare>' . self::SECOND_FORM_GUID . '</idFormulare>'
+            . '<typFormulare>R</typFormulare>'
+            . '</hlavicka><form:bezPriznaku><form:identifikace>'
+            . '<form:ikMpsv>1234567891</form:ikMpsv>'
+            . '<form:idPpv>987654322</form:idPpv>'
             . '</form:identifikace></form:bezPriznaku>'
             . '</formularOsoby></formulareOsob></jmhz>';
     }
