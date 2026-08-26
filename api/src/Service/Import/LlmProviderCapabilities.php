@@ -27,10 +27,10 @@ final readonly class LlmProviderCapabilities
         'claude-haiku-4-5',
         'claude-sonnet-5',
         'claude-sonnet-4-6',
-        'claude-fable-5',
         'claude-opus-5',
         'claude-opus-4-8',
         'claude-opus-4-7',
+        'claude-fable-5',
     ];
 
     public const OPENAI_DEFAULT_MODEL = 'gpt-5.4-mini';
@@ -49,6 +49,24 @@ final readonly class LlmProviderCapabilities
         'gpt-5-mini',
         'gpt-4.1-mini',
         'gpt-4o-mini',
+    ];
+
+    /**
+     * Žebříčky eskalace — tier tokeny od NEJSLABŠÍHO po NEJSILNĚJŠÍ.
+     * {@see strongerModel()} z nich odvodí další stupeň, když extrakce neprojde.
+     * Anthropic jde haiku → sonnet → opus → fable: fable je NEJSILNĚJŠÍ stupeň,
+     * ne levný tier — z fable se už neeskaluje nikam.
+     * `null` = stupeň „model bez tier tokenu" (u OpenAI plný model proti mini/nano).
+     * Token se matchuje na podřetězec; když model sedí na víc tokenů
+     * (gemini-3.5-flash-lite), platí ten NEJSLABŠÍ — jinak by se lite tvářil jako flash.
+     *
+     * @var array<string, list<string|null>>
+     */
+    private const ESCALATION_LADDERS = [
+        'anthropic'    => ['haiku', 'sonnet', 'opus', 'fable'],
+        'openai'       => ['nano', 'mini', null],
+        'azure_openai' => ['nano', 'mini', null],
+        'gemini'       => ['lite', 'flash', 'pro'],
     ];
 
     /** gemini-2.5-flash vyřazen — provider ho novým účtům vrací 404 s odkazem na 3.6-flash. */
@@ -165,23 +183,74 @@ final readonly class LlmProviderCapabilities
     }
 
     /**
-     * Provider-specifický upgrade na silnější model (haiku/fable→sonnet, mini/nano→full,
-     * flash/lite→pro). Vrací null, když upgrade nedává smysl (už je na silném modelu,
-     * provider upgrade nemá, nebo current je null). Upgrade zůstává ve STEJNÉM
-     * regionu — router ho vynucuje přes ResidencyPolicy (§3.5).
+     * Další stupeň na žebříčku {@see ESCALATION_LADDERS} — co použít, když extrakce
+     * na aktuálním modelu neprojde. Anthropic jde haiku → sonnet → opus → fable,
+     * OpenAI/Azure nano → mini → plný model, Gemini lite → flash → pro.
+     *
+     * Přeskočí stupeň, který v tenantově whitelistu nemá žádný model, takže eskalace
+     * nespadne jen proto, že prostřední tier chybí. Vrací null, když upgrade nedává
+     * smysl (už je na vrcholu žebříčku, model mimo žebříček, provider žebříček nemá,
+     * nebo current je null). Upgrade zůstává ve STEJNÉM regionu — router ho vynucuje
+     * přes ResidencyPolicy (§3.5).
      */
     public function strongerModel(?string $current): ?string
     {
         if ($current === null) {
             return null;
         }
-        return match ($this->id) {
-            'anthropic'    => self::hasAnyToken($current, ['haiku', 'fable']) ? $this->firstModelContaining('sonnet') : null,
-            'openai'       => self::hasAnyToken($current, ['mini', 'nano']) ? $this->firstStrongModel(['mini', 'nano']) : null,
-            'azure_openai' => self::hasAnyToken($current, ['mini', 'nano']) ? $this->firstStrongModel(['mini', 'nano']) : null,
-            'gemini'       => self::hasAnyToken($current, ['flash', 'lite']) ? $this->firstModelContaining('pro') : null,
-            default        => null,
-        };
+        $ladder = self::ESCALATION_LADDERS[$this->id] ?? null;
+        if ($ladder === null) {
+            return null;
+        }
+        $tier = self::tierIndex($current, $ladder);
+        if ($tier === null) {
+            return null;
+        }
+        for ($i = $tier + 1, $n = count($ladder); $i < $n; $i++) {
+            $candidate = $this->firstModelInTier($ladder, $i);
+            if ($candidate !== null) {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Index stupně, na kterém model stojí. Při shodě na víc tokenů vyhrává NEJSLABŠÍ
+     * (gemini-3.5-flash-lite je lite, ne flash). `null` slot ve žebříčku chytá všechno,
+     * co nenese žádný token — tam patří třeba plný gpt-5.6-sol.
+     *
+     * @param list<string|null> $ladder
+     */
+    private static function tierIndex(string $model, array $ladder): ?int
+    {
+        $fallback = null;
+        foreach ($ladder as $i => $token) {
+            if ($token === null) {
+                $fallback = $i;
+                continue;
+            }
+            if (str_contains($model, $token)) {
+                return $i;
+            }
+        }
+        return $fallback;
+    }
+
+    /**
+     * První model whitelistu, který patří právě do daného stupně. Whitelist je seřazený
+     * nejnovějším napřed, takže v rámci stupně padne volba na aktuální generaci.
+     *
+     * @param list<string|null> $ladder
+     */
+    private function firstModelInTier(array $ladder, int $tier): ?string
+    {
+        foreach ($this->models as $m) {
+            if (self::tierIndex($m, $ladder) === $tier) {
+                return $m;
+            }
+        }
+        return null;
     }
 
     /**
@@ -204,41 +273,6 @@ final readonly class LlmProviderCapabilities
                 : null,
             default => $key === '' ? 'api_key je povinné.' : null,
         };
-    }
-
-    private function firstModelContaining(string $needle): ?string
-    {
-        foreach ($this->models as $m) {
-            if (str_contains($m, $needle)) {
-                return $m;
-            }
-        }
-        return null;
-    }
-
-    /** @param list<string> $tokens */
-    private static function hasAnyToken(string $model, array $tokens): bool
-    {
-        foreach ($tokens as $t) {
-            if (str_contains($model, $t)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * První model whitelistu, který nenese ANI JEDEN ze slabých tokenů (mini/nano).
-     * @param list<string> $weakTokens
-     */
-    private function firstStrongModel(array $weakTokens): ?string
-    {
-        foreach ($this->models as $m) {
-            if (!self::hasAnyToken($m, $weakTokens)) {
-                return $m;
-            }
-        }
-        return null;
     }
 
     /**

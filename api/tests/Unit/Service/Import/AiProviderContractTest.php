@@ -262,25 +262,49 @@ final class AiProviderContractTest extends TestCase
     }
 
     /**
-     * Escalace „slabý model → silnější" (haiku→sonnet a obdoby) musí přežít každý
-     * bump whitelistu — když extrakce neprojde, router na tomhle stojí. Cíl musí být
-     * jiný model, který je zároveň ve whitelistu, a silný model už neeskaluje.
+     * Žebříček eskalace anthropic je haiku → sonnet → opus → fable. Fable je VRCHOL,
+     * ne levný tier — dřívější token heuristika ho posílala zpátky na sonnet.
+     * Test jde celý řetěz krok po kroku a hlídá, že končí a nezacyklí se.
+     */
+    public function testStrongerModel_anthropicLadderEndsAtFable(): void
+    {
+        $caps = LlmProviderCapabilities::anthropic();
+
+        self::assertSame('claude-sonnet-5', $caps->strongerModel('claude-haiku-4-5'));
+        self::assertSame('claude-opus-5', $caps->strongerModel('claude-sonnet-5'));
+        self::assertSame('claude-opus-5', $caps->strongerModel('claude-sonnet-4-6'));
+        self::assertSame('claude-fable-5', $caps->strongerModel('claude-opus-5'));
+        self::assertSame('claude-fable-5', $caps->strongerModel('claude-opus-4-7'));
+        // Vrchol žebříčku — dál už není kam.
+        self::assertNull($caps->strongerModel('claude-fable-5'));
+        self::assertNull($caps->strongerModel(null));
+
+        // Celý řetěz z defaultu doběhne na vrchol a nezacyklí se.
+        $seen  = [];
+        $model = LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
+        while ($model !== null) {
+            self::assertNotContains($model, $seen, 'eskalace se zacyklila');
+            self::assertContains($model, $caps->models);
+            $seen[] = $model;
+            $model  = $caps->strongerModel($model);
+        }
+        self::assertSame(
+            ['claude-haiku-4-5', 'claude-sonnet-5', 'claude-opus-5', 'claude-fable-5'],
+            $seen,
+        );
+    }
+
+    /**
+     * Escalace „slabý model → silnější" musí přežít každý bump whitelistu — když
+     * extrakce neprojde, router na tomhle stojí. Cíl musí být jiný model, který je
+     * zároveň ve whitelistu, a model na vrcholu žebříčku už neeskaluje.
      */
     public function testStrongerModel_escalationChainSurvivesWhitelistBumps(): void
     {
-        $anthropic = LlmProviderCapabilities::anthropic();
-        foreach (['claude-haiku-4-5', 'claude-fable-5'] as $weak) {
-            $up = $anthropic->strongerModel($weak);
-            self::assertNotNull($up, "anthropic $weak neeskaluje");
-            self::assertNotSame($weak, $up);
-            self::assertContains($up, $anthropic->models);
-            self::assertStringContainsString('sonnet', $up);
-        }
-        self::assertNull($anthropic->strongerModel('claude-opus-5'));
-        self::assertNull($anthropic->strongerModel(null));
-
         $openai = LlmProviderCapabilities::openai(null, null);
-        foreach (['gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-4o-mini'] as $weak) {
+        // nano → mini → plný model.
+        self::assertSame('gpt-5.4-mini', $openai->strongerModel('gpt-5.4-nano'));
+        foreach (['gpt-5.4-mini', 'gpt-4o-mini'] as $weak) {
             $up = $openai->strongerModel($weak);
             self::assertNotNull($up, "openai $weak neeskaluje");
             self::assertContains($up, $openai->models);
@@ -292,7 +316,9 @@ final class AiProviderContractTest extends TestCase
         self::assertNotNull($openai->strongerModel(LlmProviderCapabilities::OPENAI_DEFAULT_MODEL));
 
         $gemini = LlmProviderCapabilities::gemini(null);
-        foreach (['gemini-3.7-flash', 'gemini-3.5-flash-lite'] as $weak) {
+        // flash-lite nesmí spadnout do tieru flash — jinak by eskaloval sám na sebe.
+        self::assertSame('gemini-3.7-flash', $gemini->strongerModel('gemini-3.5-flash-lite'));
+        foreach (['gemini-3.7-flash', 'gemini-3.5-flash'] as $weak) {
             $up = $gemini->strongerModel($weak);
             self::assertNotNull($up, "gemini $weak neeskaluje");
             self::assertContains($up, $gemini->models);
@@ -300,6 +326,9 @@ final class AiProviderContractTest extends TestCase
         }
         self::assertNull($gemini->strongerModel('gemini-2.5-pro'));
         self::assertNotNull($gemini->strongerModel(LlmProviderCapabilities::GEMINI_DEFAULT_MODEL));
+
+        // Model mimo žebříček providera neeskaluje (fail-closed, žádný náhodný upgrade).
+        self::assertNull($gemini->strongerModel('gemini-nesmysl-x'));
     }
 
     /**
