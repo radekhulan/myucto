@@ -1389,6 +1389,8 @@ export interface PayrollQuickInputRow {
   relation_type: PayrollRelationType
   effective_status: PayrollEmploymentStatus
   suspended_in_month: boolean
+  /** Lehký příznak pro přehled; úplné absence se vracejí jen kartám stránky. */
+  away_in_month?: boolean
   base_amount_minor: number
   base_managed_elsewhere: boolean
   base_conflict: boolean
@@ -1424,6 +1426,37 @@ export interface PayrollQuickInputMonth {
   items: PayrollQuickInputRow[]
   /** Počet vztahů v měsíci; `items` je jen aktuální stránka. */
   total: number
+}
+
+export type PayrollEmployeeCardStatusFilter = 'active' | 'away' | 'attention' | 'all'
+
+export interface PayrollEmployeeCardAbsence {
+  id: number
+  employment_id: number
+  absence_type: string
+  date_from: string
+  date_to: string
+  status: 'requested' | 'approved'
+}
+
+export interface PayrollEmployeeCardRow extends PayrollQuickInputRow {
+  absences: PayrollEmployeeCardAbsence[]
+}
+
+export interface PayrollEmployeeCardMonth {
+  period: string
+  items: PayrollEmployeeCardRow[]
+  /** Počet vztahů odpovídajících serverovému filtru. */
+  total: number
+  /** Všechny osoby firmy, včetně těch bez účinného vztahu v měsíci. */
+  company_headcount: number
+  /** Souhrn celého měsíce, nikoli jen zobrazené stránky nebo filtru. */
+  summary: {
+    people: number
+    gross_preview_minor: number
+    away: number
+    attention: number
+  }
 }
 
 export interface PayrollQuickInputSavePayload {
@@ -4701,6 +4734,19 @@ export const payrollApi = {
         ...(employmentId ? { employment_id: employmentId } : {}),
       },
     }).then(response => response.data.month),
+  employeeCards: (
+    period: string,
+    page: PayrollPageParams,
+    filters: { search: string, status: PayrollEmployeeCardStatusFilter },
+  ) => api.get<{ month: PayrollEmployeeCardMonth }>('/payroll/quick-inputs', {
+    params: {
+      period,
+      view: 'cards',
+      ...pageParams(page),
+      search: filters.search,
+      status: filters.status,
+    },
+  }).then(response => response.data.month),
   /**
    * Zúžení se posílá i při ukládání — odpověď je táž stránka, ze které se
    * plní formulář, a ta musí zůstat zúžená.

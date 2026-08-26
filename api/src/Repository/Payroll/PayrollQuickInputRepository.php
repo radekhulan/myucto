@@ -21,6 +21,8 @@ final class PayrollQuickInputRepository
 
     public const LIST_DEFAULT_LIMIT = 50;
 
+    public const CARD_PAGE_LIMIT = 25;
+
     private const BASE_CODE = 'MZDA_MESICNI';
     private const OVERTIME_CODE = 'PREMIE_PRIPLATKY';
     private const BONUS_CODE = 'ODMENA';
@@ -55,6 +57,130 @@ final class PayrollQuickInputRepository
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
         }
         return $this->collect($supplierId, $period, null, $limit, $offset, $employmentId);
+    }
+
+    /**
+     * Stránka karet pro mzdový přehled.
+     *
+     * Výpočet rychlých vstupů zůstává jediným zdrojem částek i blokátorů. Celý
+     * měsíc se projde po omezených dávkách, aby souhrn nelhal jen podle první
+     * stránky; do odpovědi se ale vrátí nejvýš 25 karet. Úplné záznamy absencí
+     * se dotáhnou až pro vztahy výsledné stránky.
+     *
+     * @return array{
+     *   period:string,items:list<array<string,mixed>>,total:int,company_headcount:int,
+     *   summary:array{people:int,gross_preview_minor:int,away:int,attention:int}
+     * }
+     */
+    public function employeeCards(
+        int $supplierId,
+        string $period,
+        int $limit = self::CARD_PAGE_LIMIT,
+        int $offset = 0,
+        string $search = '',
+        string $status = 'active',
+    ): array {
+        if (!in_array($status, ['active', 'away', 'attention', 'all'], true)) {
+            throw new \InvalidArgumentException('Neplatný filtr stavu zaměstnanců.');
+        }
+        $limit = max(1, min(self::CARD_PAGE_LIMIT, $limit));
+        $offset = max(0, $offset);
+
+        $all = [];
+        $cursor = 0;
+        do {
+            $batch = $this->collect(
+                $supplierId,
+                $period,
+                null,
+                self::LIST_MAX_LIMIT,
+                $cursor,
+            );
+            array_push($all, ...$batch['items']);
+            $cursor += count($batch['items']);
+        } while ($cursor < $batch['total'] && $batch['items'] !== []);
+
+        $people = [];
+        $awayPeople = [];
+        $attentionPeople = [];
+        $gross = 0;
+        foreach ($all as $item) {
+            $employeeId = PayrollTimeValue::int($item['employee_id'] ?? null, 'employee_id');
+            $people[$employeeId] = true;
+            $gross += PayrollTimeValue::int(
+                $item['gross_preview_minor'] ?? null,
+                'gross_preview_minor',
+            );
+            if (($item['away_in_month'] ?? false) === true) {
+                $awayPeople[$employeeId] = true;
+            }
+            if (self::cardNeedsAttention($item)) {
+                $attentionPeople[$employeeId] = true;
+            }
+        }
+
+        $needle = self::normalizedSearch($search);
+        $filtered = array_values(array_filter(
+            $all,
+            static function (array $item) use ($needle, $status): bool {
+                if ($needle !== '') {
+                    $haystack = self::normalizedSearch(
+                        PayrollTimeValue::string($item['full_name'] ?? null, 'full_name')
+                        . ' '
+                        . PayrollTimeValue::string(
+                            $item['employment_code'] ?? null,
+                            'employment_code',
+                        ),
+                    );
+                    if (!str_contains($haystack, $needle)) {
+                        return false;
+                    }
+                }
+
+                return match ($status) {
+                    'active' => ($item['effective_status'] ?? null) === 'active'
+                        && ($item['suspended_in_month'] ?? false) !== true,
+                    'away' => ($item['away_in_month'] ?? false) === true,
+                    'attention' => self::cardNeedsAttention($item),
+                    'all' => true,
+                };
+            },
+        ));
+
+        $items = array_slice($filtered, $offset, $limit);
+        $absenceByEmployment = $this->cardAbsences(
+            $supplierId,
+            $period . '-01',
+            (new \DateTimeImmutable($period . '-01'))->modify('last day of this month')->format('Y-m-d'),
+            array_map(
+                static fn (array $item): int => PayrollTimeValue::int(
+                    $item['employment_id'] ?? null,
+                    'employment_id',
+                ),
+                $items,
+            ),
+        );
+        foreach ($items as &$item) {
+            $employmentId = PayrollTimeValue::int(
+                $item['employment_id'] ?? null,
+                'employment_id',
+            );
+            $item['absences'] = $absenceByEmployment[$employmentId] ?? [];
+        }
+        unset($item);
+
+        return [
+            'period' => $period,
+            'items' => $items,
+            'total' => count($filtered),
+            'company_headcount' => $this->companyHeadcount($supplierId),
+            'summary' => [
+                'people' => count($people),
+                'gross_preview_minor' => $gross,
+                'away' => count($awayPeople),
+                'attention' => count($attentionPeople),
+            ],
+        ];
     }
 
     /**
@@ -141,6 +267,15 @@ final class PayrollQuickInputRepository
                     employment.row_version AS employment_row_version,
                     employment.effective_status, employment.suspended_in_month,
                     employee.full_name,
+                    EXISTS (
+                        SELECT 1
+                          FROM payroll_absences absence
+                         WHERE absence.supplier_id = employment.supplier_id
+                           AND absence.employment_id = employment.id
+                           AND absence.status IN ("requested", "approved")
+                           AND absence.date_from <= ?
+                           AND absence.date_to >= ?
+                    ) AS away_in_month,
                     (
                         SELECT identifier.value_masked
                           FROM payroll_person_identifiers identifier
@@ -195,6 +330,8 @@ final class PayrollQuickInputRepository
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodStart,
             $year,
             $quarter,
             $periodEnd,
@@ -820,6 +957,10 @@ final class PayrollQuickInputRepository
             'relation_type' => $relationType,
             'effective_status' => $effectiveStatus,
             'suspended_in_month' => $suspendedInMonth,
+            'away_in_month' => PayrollTimeValue::int(
+                $employment['away_in_month'] ?? null,
+                'away_in_month',
+            ) === 1,
             'base_amount_minor' => $base,
             'base_managed_elsewhere' => $managed['base'],
             'base_conflict' => $conflicts['base'],
@@ -847,6 +988,85 @@ final class PayrollQuickInputRepository
             'inputs' => $quick,
             'blockers' => array_values(array_unique($blockers)),
         ];
+    }
+
+    /** @param array<string,mixed> $item */
+    private static function cardNeedsAttention(array $item): bool
+    {
+        return ($item['blockers'] ?? []) !== []
+            || ($item['base_conflict'] ?? false) === true
+            || ($item['overtime_conflict'] ?? false) === true
+            || ($item['bonus_conflict'] ?? false) === true
+            || ($item['base_requires_entry'] ?? false) === true;
+    }
+
+    private static function normalizedSearch(string $value): string
+    {
+        $value = mb_strtolower(trim($value), 'UTF-8');
+        $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value);
+        if (is_string($ascii)) {
+            $value = $ascii;
+        }
+        $value = preg_replace('/[^a-z0-9]+/i', ' ', $value) ?? $value;
+
+        return trim($value);
+    }
+
+    /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    private function cardAbsences(
+        int $supplierId,
+        string $periodStart,
+        string $periodEnd,
+        array $employmentIds,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, employment_id, absence_type, date_from, date_to, status
+               FROM payroll_absences
+              WHERE supplier_id = ?
+                AND status IN ("requested", "approved")
+                AND date_from <= ? AND date_to >= ?
+                AND employment_id IN ('
+            . implode(',', array_fill(0, count($employmentIds), '?'))
+            . ')
+              ORDER BY employment_id, date_from, id'
+        );
+        $stmt->execute([$supplierId, $periodEnd, $periodStart, ...$employmentIds]);
+        $result = [];
+        foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'card_absences') as $row) {
+            $employmentId = PayrollTimeValue::int(
+                $row['employment_id'] ?? null,
+                'employment_id',
+            );
+            $result[$employmentId][] = [
+                'id' => PayrollTimeValue::int($row['id'] ?? null, 'id'),
+                'employment_id' => $employmentId,
+                'absence_type' => PayrollTimeValue::string(
+                    $row['absence_type'] ?? null,
+                    'absence_type',
+                ),
+                'date_from' => PayrollTimeValue::string($row['date_from'] ?? null, 'date_from'),
+                'date_to' => PayrollTimeValue::string($row['date_to'] ?? null, 'date_to'),
+                'status' => PayrollTimeValue::string($row['status'] ?? null, 'status'),
+            ];
+        }
+
+        return $result;
+    }
+
+    private function companyHeadcount(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_employees WHERE supplier_id = ?',
+        );
+        $stmt->execute([$supplierId]);
+
+        return (int) $stmt->fetchColumn();
     }
 
     private function lockEffectiveEmployment(
