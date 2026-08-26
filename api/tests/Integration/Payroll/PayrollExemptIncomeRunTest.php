@@ -345,8 +345,9 @@ final class PayrollExemptIncomeRunTest extends TestCase
     }
 
     /**
-     * Běh přes všechny stavy až do schválené revize. Kontrolu i schválení dělá
-     * JINÝ uživatel než kalkulátor — čtyři oči jsou tvrdé pravidlo workflow.
+     * Běh přes všechny stavy až do schválené revize. Tento test používá druhého
+     * syntetického uživatele jen jako jednu z dovolených auditních variant;
+     * běžný tok může dokončit také jedna oprávněná účetní.
      *
      * @return array{result:array<string,mixed>,run_status:string}
      */

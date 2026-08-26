@@ -2,23 +2,23 @@
 
 ## Účel
 
-Koše benefitů seskupují poskytovaná plnění a sledují jejich čerpání a mzdové zacházení v určeném období.
+Koše benefitů jsou čtecím zákonným přehledem, který seskupuje schválená plnění a ukazuje jejich čerpání a mzdové zacházení v určeném období. Zákonné koše se nezakládají ručně; plnění do nich zařadí klasifikace použité mzdové složky.
 
 ## Předpoklady a oprávnění
 
-Musí existovat zaměstnanec, vztah a nastavená příslušná mzdová složka. Připravte interní pravidlo benefitu, období, limit a podklad čerpání. Daňový režim ověřte pro rozhodné období.
+Musí existovat zaměstnanec, vztah a schválený mzdový vstup se složkou zařazenou do příslušného zákonného koše. Zákonné limity načítá aplikace z účinného rulesetu; vlastní firemní strop lze nastavit u mzdové složky.
 
 ## Krokový postup
 
-1. Otevřete **Mzdy → Koše benefitů** a založte nebo vyberte koš.
-2. Nastavte období, limit, druh plnění a vazbu na mzdovou složku.
-3. Přiřaďte oprávněné zaměstnance a evidujte jednotlivá čerpání.
-4. Zkontrolujte zbývající limit a daňové či pojistné zacházení.
-5. Před během porovnejte souhrn koše se zdrojovými doklady.
+1. V katalogu mzdových složek ověřte zákonné zařazení benefitu a případný vlastní firemní limit.
+2. Benefit zadejte zaměstnanci jako mzdový vstup a schvalte jeho podklad.
+3. Otevřete **Mzdy → Koše benefitů** a vyberte rok nebo měsíc, koš a zaměstnance.
+4. Zkontrolujte vyčerpanou, osvobozenou a nadlimitní částku i případné upozornění na neúplný podklad.
+5. Před mzdovým během porovnejte souhrn se zdrojovými doklady; přehled sám nic nepřepočítává ani nezapisuje.
 
 ## Stavy
 
-Koš může být připravený, aktivní, vyčerpaný nebo uzavřený. Čerpání může být rozpracované či započtené do období. Uzavření koše neuzavírá mzdový běh.
+Přehled rozlišuje stav v limitu, blížící se limitu, nad limitem a neúplný podklad. Částky čte ze schválených zmrazených vstupů; změna filtru ani otevření přehledu nemění mzdový běh.
 
 ## Kontroly a bezpečnost
 

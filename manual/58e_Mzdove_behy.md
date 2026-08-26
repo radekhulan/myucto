@@ -22,7 +22,7 @@ Návrh je měnitelný, vypočtený návrh čeká na kontrolu a uzavřený běh j
 
 ## Kontroly a bezpečnost
 
-Kontrolujte hrubou a čistou mzdu, daň, pojistné, náhrady, srážky a náklad zaměstnavatele. Ověřte počet osob a souběhy. Před uzavřením doporučujeme kontrolu druhou osobou. Výpočet v aplikaci nenahrazuje odborné posouzení nepodporovaného případu.
+Kontrolujte hrubou a čistou mzdu, daň, pojistné, náhrady, srážky a náklad zaměstnavatele. Ověřte počet osob a souběhy. Celý postup může dokončit jedna účetní s příslušným oprávněním; případná interní kontrola další osobou je dobrovolným pravidlem firmy. Výpočet v aplikaci nenahrazuje odborné posouzení nepodporovaného případu.
 
 ## Časté chyby
 
@@ -42,8 +42,10 @@ Po uzavření zkontrolujte [shodu účtování](58f_Shoda_uctovani_mezd.md), př
 V **Mzdy → Mzdové běhy** založíš zpracování konkrétního měsíce. K období se
 zadává také skutečné datum výplaty; podle něj se vybírají účinná pravidla
 srážek. Jeden běh prochází řízenými kroky **Uzamknout vstupy → Vypočítat →
-Zkontrolovat → Schválit**. Výpočet a kontrolu musí provést různí uživatelé a
-schválení vyžaduje samostatné oprávnění.
+Zkontrolovat → Schválit**. Všechny kroky může provést jedna účetní, pokud má
+mzdové oprávnění. Jednotlivé změny a potvrzení zůstávají v auditní stopě, takže
+firma může dobrovolně zapojit další kontrolu bez toho, aby byl běžný tok
+blokován pravidlem čtyř očí.
 
 Skutečně prázdný technický běh lze tlačítkem **Smazat prázdný běh** odstranit
 i po jeho zrušení. Tlačítko se zobrazí pouze tehdy, když běh nemá žádnou revizi,
