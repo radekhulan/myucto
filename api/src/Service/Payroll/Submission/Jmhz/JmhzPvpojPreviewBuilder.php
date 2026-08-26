@@ -41,7 +41,6 @@ final class JmhzPvpojPreviewBuilder
      * @param array{
      *   revision:array<string,mixed>,
      *   statutory_result:array<string,mixed>,
-     *   social_liabilities:list<array<string,mixed>>,
      *   offices:list<array<string,mixed>>
      * } $source
      * @param int|null $officeId účtárna, za kterou se podává; `null` uspěje jen
@@ -60,11 +59,6 @@ final class JmhzPvpojPreviewBuilder
             $source['statutory_result'],
             'statutory_result',
         );
-        $liabilities = $this->rows(
-            $source['social_liabilities'],
-            'social_liabilities',
-        );
-
         $revisionId = $this->positiveInt($revision['id'] ?? null, 'revision.id');
         $runId = $this->positiveInt($revision['run_id'] ?? null, 'revision.run_id');
         $revisionNo = $this->positiveInt(
@@ -287,16 +281,6 @@ final class JmhzPvpojPreviewBuilder
             );
         }
 
-        $liability = $this->assertLiability(
-            $liabilities,
-            $office,
-            $revisionId,
-            $runId,
-            $revisionNo,
-            $rootHash,
-            $share,
-        );
-
         $pvpoj = [
             'pojistne' => $this->employerCategoryBlocks(
                 $root,
@@ -377,8 +361,6 @@ final class JmhzPvpojPreviewBuilder
                 'statutory_result_hash' => $rootHash,
                 'ruleset_id' => $rulesetId,
                 'ruleset_hash' => $rulesetHash,
-                'social_liability_id' => $liability['id'],
-                'social_liability_hash' => $liability['source_snapshot_hash'],
             ],
             $pvpoj,
             $reconciled['people'],
@@ -1187,126 +1169,6 @@ final class JmhzPvpojPreviewBuilder
         }
     }
 
-    /**
-     * Závazek ČSSZ TÉTO účtárny.
-     *
-     * Závazky vznikají per registrace s referencí `social-insurance:office:{id}`,
-     * takže se přehled páruje na referenci — nikoli na „jediný závazek revize",
-     * což u běhu přes víc účtáren platit přestalo.
-     *
-     * @param list<array<string,mixed>> $liabilities
-     * @param array{office_id:int,code:string,name:string,variable_symbol:string} $office
-     * @param array<string,mixed> $share
-     * @return array{id:int,source_snapshot_hash:string}
-     */
-    private function assertLiability(
-        array $liabilities,
-        array $office,
-        int $revisionId,
-        int $runId,
-        int $revisionNo,
-        string $rootHash,
-        array $share,
-    ): array {
-        $employeeContribution = $share['employee_minor'];
-        $employerContribution = $share['employer_minor'];
-        $payable = $share['amount_minor'];
-        $reference = "social-insurance:office:{$office['office_id']}";
-        $matching = array_values(array_filter(
-            $liabilities,
-            static fn (array $row): bool =>
-                ($row['liability_reference'] ?? null) === $reference,
-        ));
-        if (count($matching) !== 1) {
-            $this->invalid(
-                'jmhz_social_liability_missing',
-                "PVPOJ preview vyžaduje právě jeden závazek ČSSZ účtárny"
-                . " office:{$office['office_id']} v aktuální revizi.",
-            );
-        }
-        $liability = $matching[0];
-        $sourceJson = $this->nonEmptyString(
-            $liability['source_snapshot_json'] ?? null,
-            'liability.source_snapshot_json',
-        );
-        $sourceHash = $this->hash(
-            $liability['source_snapshot_hash'] ?? null,
-            'liability.source_snapshot_hash',
-        );
-        $snapshot = $this->canonicalObject(
-            $sourceJson,
-            $sourceHash,
-            'zdroje závazku ČSSZ',
-        );
-        if (($liability['currency_code'] ?? null) !== 'CZK'
-            || ($snapshot['schema_reference'] ?? null)
-                !== 'payroll-payment-social-insurance-source.v1'
-            || ($snapshot['revision_id'] ?? null) !== $revisionId
-            || ($snapshot['run_id'] ?? null) !== $runId
-            || ($snapshot['revision_no'] ?? null) !== $revisionNo
-            || ($snapshot['statutory_result_hash'] ?? null) !== $rootHash
-            || ($snapshot['logical_reference'] ?? null)
-                !== ($liability['liability_reference'] ?? null)
-            || ($snapshot['recipient_reference'] ?? null)
-                !== ($liability['recipient_reference'] ?? null)
-            || ($snapshot['employee_contribution_minor'] ?? null)
-                !== $employeeContribution
-            || ($snapshot['employer_contribution_minor'] ?? null)
-                !== $employerContribution
-            || ($snapshot['target_amount_minor'] ?? null) !== $payable
-            || ($snapshot['payroll_office_id'] ?? null) !== $office['office_id']
-        ) {
-            $this->invalid(
-                'jmhz_social_liability_mismatch',
-                'Závazek ČSSZ neodpovídá sociálnímu výsledku a PVPOJ.',
-            );
-        }
-        /*
-         * Variabilní symbol účtárny se od zmaterializování závazku mohl změnit.
-         * Přehled a platba by pak šly pod jinou registraci — a to je přesně ten
-         * rozdíl, který se v podání zpětně nedohledá.
-         */
-        $snapshotSymbol = $snapshot['variable_symbol'] ?? null;
-        if ($snapshotSymbol !== null
-            && $snapshotSymbol !== $office['variable_symbol']
-        ) {
-            $this->invalid(
-                'jmhz_social_liability_mismatch',
-                'Variabilní symbol mzdové účtárny se liší od variabilního symbolu závazku ČSSZ.',
-            );
-        }
-        $prior = $this->signedMinor(
-            $snapshot['prior_signed_minor'] ?? null,
-            'liability.prior_signed_minor',
-        );
-        $delta = $this->signedMinor(
-            $snapshot['delta_signed_minor'] ?? null,
-            'liability.delta_signed_minor',
-        );
-        if ($delta === PHP_INT_MIN) {
-            $this->invalid(
-                'jmhz_social_liability_mismatch',
-                'Rozdílový závazek ČSSZ je mimo podporovaný číselný rozsah.',
-            );
-        }
-        if ($this->addSigned($prior, $delta) !== $payable
-            || $delta === 0
-            || ($liability['amount_minor'] ?? null) !== abs($delta)
-            || ($liability['direction'] ?? null)
-                !== ($delta > 0 ? 'outgoing' : 'incoming')
-        ) {
-            $this->invalid(
-                'jmhz_social_liability_mismatch',
-                'Rozdílový závazek ČSSZ nenavazuje na cílové pojistné.',
-            );
-        }
-
-        return [
-            'id' => $this->positiveInt($liability['id'] ?? null, 'liability.id'),
-            'source_snapshot_hash' => $sourceHash,
-        ];
-    }
-
     /** @return array<string,mixed> */
     private function canonicalObject(
         string $json,
@@ -1437,18 +1299,6 @@ final class JmhzPvpojPreviewBuilder
         return $value;
     }
 
-    private function signedMinor(mixed $value, string $field): int
-    {
-        if (!is_int($value)) {
-            $this->invalid(
-                'jmhz_source_invalid',
-                "{$field} musí být celé číslo.",
-            );
-        }
-
-        return $value;
-    }
-
     private function hash(mixed $value, string $field): string
     {
         if (!is_string($value) || preg_match('/^[0-9a-f]{64}$/D', $value) !== 1) {
@@ -1525,20 +1375,6 @@ final class JmhzPvpojPreviewBuilder
             $this->invalid(
                 'jmhz_amount_overflow',
                 'Součet PVPOJ přetekl.',
-            );
-        }
-
-        return $left + $right;
-    }
-
-    private function addSigned(int $left, int $right): int
-    {
-        if (($right > 0 && $left > PHP_INT_MAX - $right)
-            || ($right < 0 && $left < PHP_INT_MIN - $right)
-        ) {
-            $this->invalid(
-                'jmhz_amount_overflow',
-                'Rozdílový součet závazku ČSSZ přetekl.',
             );
         }
 

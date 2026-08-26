@@ -15,7 +15,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Zmrazení měsíčního hlášení do odesílatelné podoby.
  *
- * Rozdíl proti nácviku není v datech, ale v tom, co po sobě nechá. Nácvik
+ * Rozdíl proti testu není v datech, ale v tom, co po sobě nechá. Test
  * generuje GUIDy při každém běhu nové a nezakládá nic; tady se GUIDy zmrazí
  * JEDNOU, výsledné XML se uloží jako artefakt a vznikne záznam podání, na který
  * se pak váže odeslání i protokol. Duplicitu přijatého podání u ČSSZ nelze
@@ -46,8 +46,10 @@ final class PayrollJmhzSubmissionFreezeAction
             return $this->invalid($response, 'Prostředí musí být test nebo production.');
         }
         $obligationId = $body['obligation_id'] ?? null;
-        if (!is_int($obligationId) && !(is_string($obligationId)
-            && preg_match('/^[1-9][0-9]*$/D', $obligationId) === 1)
+        if ($obligationId !== null
+            && !is_int($obligationId)
+            && !(is_string($obligationId)
+                && preg_match('/^[1-9][0-9]*$/D', $obligationId) === 1)
         ) {
             return $this->invalid($response, 'obligation_id musí být kladné celé číslo.');
         }
@@ -63,7 +65,7 @@ final class PayrollJmhzSubmissionFreezeAction
             $result = $this->bridge->bridge(
                 $this->currentSupplierId($request),
                 $this->preparationId($args),
-                (int) $obligationId,
+                $obligationId === null ? null : (int) $obligationId,
                 $environment,
                 $this->userId($request),
                 $officeId,

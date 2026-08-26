@@ -128,7 +128,9 @@ U schválených běhů může záložka JMHZ nabídnout také **Kontrolní náhl
 PVPOJ**. Zobrazuje vyměřovací základ, pojistné k úhradě, počet zahrnutých osob
 a identifikaci připnutého XSD; stejný deterministický kontrolní JSON lze stáhnout.
 Náhled vznikne pouze tehdy, když souhlasí neměnný vstup revize, vypočtené
-sociální pojištění, vztahové i osobní součty a odpovídající závazek ČSSZ.
+sociální pojištění a vztahové i osobní součty. Bankovní účet ČSSZ ani připravený
+platební závazek nejsou podmínkou hlášení: platba je navazující samostatný tok
+a její chybějící účet nesmí blokovat zákonné podání.
 Viditelné označení **Pouze kontrolní náhled** znamená, že nejde o úplné XML
 JMHZ, připravené podání ani důkaz odeslání nebo přijetí.
 
@@ -153,7 +155,9 @@ období, včetně posunu na nejbližší pracovní den.
 
 Panel **Zmrazení a odeslání JMHZ** navazuje až na schválenou revizi, úplné
 právní evidence a úspěšné kontroly. Pro každou registraci u OSSZ pracuje se
-samostatnou povinností a variabilním symbolem. Před odesláním neměnně uloží
+samostatnou povinností a variabilním symbolem. Povinnost i zákonnou lhůtu při
+prvním zmrazení založí automaticky z ověřené revize; účetní ji nemusí předem
+vytvářet v jiné agendě. Před odesláním neměnně uloží
 přesné XML a jeho otisk; další kliknutí proto nevytvoří jiné podání pod stejnou
 identitou. Ostré podání je zablokované do začátku zákonné lhůty, testovací
 prostředí lze použít k bezpečnému testu celého toku.

@@ -16,7 +16,6 @@ use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
-use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
@@ -245,17 +244,6 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame($approved->revision['reviewed_by'], $approved->revision['approved_by']);
 
         $revisionId = (int) $approved->revision['id'];
-        $socialLiabilities = $this->container->get(PayrollSocialInsuranceLiabilityMaterializer::class);
-        if (!$socialLiabilities instanceof PayrollSocialInsuranceLiabilityMaterializer) {
-            throw new \RuntimeException('Materializace závazku ČSSZ není dostupná.');
-        }
-        $socialLiabilityResult = $socialLiabilities->materialize(
-            $this->supplierId,
-            $revisionId,
-            $this->actors[0],
-        );
-        self::assertSame(1, $socialLiabilityResult['created_count']);
-
         $response = $this->healthOverview->index(
             $this->request('GET', "/api/payroll/submissions/health-overviews/{$revisionId}"),
             new Response(),

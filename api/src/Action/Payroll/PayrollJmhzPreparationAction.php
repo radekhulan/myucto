@@ -15,7 +15,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * Zmrazení zdrojů měsíčního hlášení nad schválenou mzdovou revizí. Vzniká tím
- * immutable preparation snapshot, na který teprve navazuje nácvik XML.
+ * immutable preparation snapshot, na který teprve navazuje test XML.
  *
  * Není to podání ani nic, co by šlo ven — snapshot je jen důkaz, z jakých
  * přesně dat by hlášení vzniklo. Opakované volání se stejným klíčem vrací

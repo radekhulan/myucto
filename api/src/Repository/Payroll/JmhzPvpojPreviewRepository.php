@@ -18,7 +18,6 @@ final class JmhzPvpojPreviewRepository
      * @return array{
      *   revision:array<string,mixed>,
      *   statutory_result:array<string,mixed>,
-     *   social_liabilities:list<array<string,mixed>>,
      *   offices:list<array<string,mixed>>
      * }|null
      */
@@ -56,62 +55,6 @@ final class JmhzPvpojPreviewRepository
         );
         if ($statutory === null) {
             return null;
-        }
-
-        $liabilityStatement = $this->db->pdo()->prepare(
-            'SELECT id, liability_reference, direction,
-                    recipient_reference, currency_code, amount_minor,
-                    previous_liability_id, source_snapshot_json,
-                    source_snapshot_hash
-               FROM payroll_payment_liabilities
-              WHERE supplier_id = ?
-                AND revision_id = ?
-                AND liability_kind = "social_insurance"
-              ORDER BY id',
-        );
-        $liabilityStatement->execute([$supplierId, $revisionId]);
-        $liabilities = [];
-        foreach ($liabilityStatement->fetchAll(PDO::FETCH_ASSOC) as $liability) {
-            if (!is_array($liability)) {
-                throw new \UnexpectedValueException(
-                    'Databáze vrátila neplatný závazek ČSSZ.',
-                );
-            }
-            $liabilities[] = [
-                'id' => $this->dbPositiveInt($liability['id'] ?? null, 'liability.id'),
-                'liability_reference' => $this->dbString(
-                    $liability['liability_reference'] ?? null,
-                    'liability.liability_reference',
-                ),
-                'direction' => $this->dbString(
-                    $liability['direction'] ?? null,
-                    'liability.direction',
-                ),
-                'recipient_reference' => $this->dbString(
-                    $liability['recipient_reference'] ?? null,
-                    'liability.recipient_reference',
-                ),
-                'currency_code' => $this->dbString(
-                    $liability['currency_code'] ?? null,
-                    'liability.currency_code',
-                ),
-                'amount_minor' => $this->dbPositiveInt(
-                    $liability['amount_minor'] ?? null,
-                    'liability.amount_minor',
-                ),
-                'previous_liability_id' => $this->dbNullablePositiveInt(
-                    $liability['previous_liability_id'] ?? null,
-                    'liability.previous_liability_id',
-                ),
-                'source_snapshot_json' => $this->dbString(
-                    $liability['source_snapshot_json'] ?? null,
-                    'liability.source_snapshot_json',
-                ),
-                'source_snapshot_hash' => $this->dbHash(
-                    $liability['source_snapshot_hash'] ?? null,
-                    'liability.source_snapshot_hash',
-                ),
-            ];
         }
 
         /*
@@ -182,7 +125,6 @@ final class JmhzPvpojPreviewRepository
                 ),
             ],
             'statutory_result' => $statutory,
-            'social_liabilities' => $liabilities,
             'offices' => $offices,
         ];
     }
@@ -200,11 +142,6 @@ final class JmhzPvpojPreviewRepository
         throw new \UnexpectedValueException(
             "Databázové pole {$field} není kladné celé číslo.",
         );
-    }
-
-    private function dbNullablePositiveInt(mixed $value, string $field): ?int
-    {
-        return $value === null ? null : $this->dbPositiveInt($value, $field);
     }
 
     private function dbString(mixed $value, string $field): string

@@ -314,8 +314,6 @@ function setup() {
       statutory_result_hash: 'b'.repeat(64),
       ruleset_id: 'cz-social-2026',
       ruleset_hash: 'c'.repeat(64),
-      social_liability_id: 91,
-      social_liability_hash: 'd'.repeat(64),
     },
     pvpoj: {
       pojistne: {

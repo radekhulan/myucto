@@ -1849,8 +1849,6 @@ export interface PayrollJmhzPvpojPreview {
     statutory_result_hash: string
     ruleset_id: string
     ruleset_hash: string
-    social_liability_id: number
-    social_liability_hash: string
   }
   pvpoj: {
     pojistne: {
@@ -3843,14 +3841,14 @@ export const payrollApi = {
   ).then(response => response.data),
   freezeJmhzSubmission: (
     preparationId: number,
-    obligationId: number,
+    obligationId: number | null,
     environment: PayrollJmhzTransportEnvironment,
     officeId?: number | null,
   ) => api.post<PayrollJmhzFrozenSubmission>(
     `/payroll/submissions/jmhz-freeze/${preparationId}`,
     {
       environment,
-      obligation_id: obligationId,
+      ...(obligationId == null ? {} : { obligation_id: obligationId }),
       ...(officeId == null ? {} : { office: officeId }),
     },
   ).then(response => response.data),

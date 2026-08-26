@@ -423,12 +423,13 @@ final class JmhzScenario1DocumentResolver
         /*
          * Variabilní symbol REGISTRACE, za kterou se podává.
          *
-         * Přednost má přehled o výši pojistného: jeho variabilní symbol je
-         * jediný, který se ověřuje proti závazku ČSSZ (viz
-         * `JmhzPvpojPreviewBuilder::assertLiability()`), takže hlášení a platba
-         * jdou prokazatelně pod tutéž registraci. Neresolvovaná registrace
-         * variabilní symbol NEDOSTANE — bez ní není za co podat a doplnit ho
-         * z libovolného přehledu by znamenalo vykázat lidi pod cizím číslem.
+         * Přednost má přehled o výši pojistného, protože jeho variabilní symbol
+         * patří přesně registraci vybrané ze zmrazené účtárny. Platební účet
+         * ČSSZ není zákonným vstupem JMHZ a může se nastavit až při přípravě
+         * plateb; sestavení hlášení proto na platebním závazku nezávisí.
+         * Neresolvovaná registrace variabilní symbol NEDOSTANE — bez ní není za
+         * co podat a doplnit ho z libovolného přehledu by znamenalo vykázat
+         * lidi pod cizím číslem.
          */
         $variableSymbol = $registration['variable_symbol'];
         if ($pvpojPayload !== null && $registration['id'] !== null) {

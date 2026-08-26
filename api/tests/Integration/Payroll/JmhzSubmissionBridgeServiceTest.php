@@ -210,6 +210,37 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertSame(hash('sha256', $xml), $result['artifact_sha256']);
     }
 
+    public function testRegistersMissingRegularObligationDuringFreeze(): void
+    {
+        $result = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+
+        self::assertTrue($result['created']);
+        self::assertSame('ready', $result['status']);
+        self::assertSame(1, $this->countRows('payroll_obligations'));
+        $obligation = $this->row(
+            'SELECT agenda_code, subject_type, subject_reference,
+                    period_start, period_end, obligation_kind,
+                    preferred_channel, status
+               FROM payroll_obligations
+              WHERE supplier_id = ?',
+            [$this->supplierId],
+        );
+        self::assertSame(JmhzSubmissionBridgeService::AGENDA_CODE, $obligation['agenda_code']);
+        self::assertSame('payroll_run', $obligation['subject_type']);
+        self::assertSame('payroll_run:' . self::RUN_ID, $obligation['subject_reference']);
+        self::assertSame(self::PERIOD_START, $obligation['period_start']);
+        self::assertSame(self::PERIOD_END, $obligation['period_end']);
+        self::assertSame('regular', $obligation['obligation_kind']);
+        self::assertSame('vrep_apep', $obligation['preferred_channel']);
+        self::assertSame('prepared', $obligation['status']);
+    }
+
     /**
      * Jádro celé vrstvy. Opakované volání nesmí XML postavit znovu — nové GUIDy
      * by pod tímtéž podáním vyrobily jiný dokument a duplicitu přijatého podání
@@ -338,6 +369,22 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::assertSame(
                 'jmhz_submission_preparation_blocked',
                 $exception->validationCode,
+            );
+            self::assertStringContainsString(
+                'Není doloženo prohlášení poplatníka.',
+                $exception->getMessage(),
+            );
+            self::assertStringContainsString(
+                'Mzdy → Zaměstnanci',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'jmhz_taxpayer_declaration_unresolved',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'person 11',
+                $exception->getMessage(),
             );
         }
 
@@ -545,6 +592,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->submissionRepository,
             $this->submissions,
             new MockClock('2026-08-05 11:30:00 Europe/Prague'),
+            $this->obligations,
         );
     }
 
@@ -564,6 +612,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->submissionRepository,
             $this->submissions,
             new MockClock('2026-08-05 11:30:00 Europe/Prague'),
+            $this->obligations,
         );
     }
 

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Report\EpoEnvelope;
 use Psr\Clock\ClockInterface;
@@ -20,14 +21,14 @@ use Psr\Clock\ClockInterface;
  * 1. **Kanál je `vrep_apep`, ne ruční nahrání.** Není to jen štítek: ledger
  *    pokusů má databázový trigger vyžadující shodu kanálu pokusu s kanálem
  *    podání, takže špatná hodnota tady udělá z podání něco, co se nedá odeslat.
- * 2. **GUIDy vznikají právě jednou.** Nácvik je generuje při každém běhu nové —
- *    proto je jen nácvik. Tady se vygenerují, zapíšou do XML a to XML se uloží
+ * 2. **GUIDy vznikají právě jednou.** Test je generuje při každém běhu nové —
+ *    proto je jen testem. Tady se vygenerují, zapíšou do XML a to XML se uloží
  *    jako artefakt; artefakt JE zmrazená pravda, žádná další tabulka na GUIDy
  *    není potřeba. Idempotentní opakování proto XML NESMÍ stavět znovu: nové
  *    GUIDy by pod stejným podáním tiše vyrobily jiný dokument a duplicitu
  *    přijatého podání nelze u ČSSZ vzít zpět.
  * 3. **Co by ČSSZ zamítla, se nezmrazí.** Běží tu tentýž katalog kontrol jako
- *    v nácviku; nepřipravené podání skončí výjimkou a NEZALOŽÍ SE NIC. Zmrazit
+ *    v testu; nepřipravené podání skončí výjimkou a NEZALOŽÍ SE NIC. Zmrazit
  *    vědomě vadné podání znamená jen odsunout zamítnutí blíž ke lhůtě.
  */
 final readonly class JmhzSubmissionBridgeService
@@ -46,6 +47,8 @@ final readonly class JmhzSubmissionBridgeService
         private PayrollSubmissionRepository $submissionRepository,
         private PayrollSubmissionService $submissions,
         private ClockInterface $clock,
+        private PayrollObligationService $obligations,
+        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
 
     /**
@@ -59,14 +62,14 @@ final readonly class JmhzSubmissionBridgeService
     public function bridge(
         int $supplierId,
         int $preparationId,
-        int $obligationId,
+        ?int $obligationId,
         string $environment,
         ?int $createdBy = null,
         ?int $officeId = null,
     ): array {
         if ($supplierId <= 0
             || $preparationId <= 0
-            || $obligationId <= 0
+            || ($obligationId !== null && $obligationId <= 0)
             || ($createdBy !== null && $createdBy <= 0)
             || ($officeId !== null && $officeId <= 0)
         ) {
@@ -88,13 +91,23 @@ final readonly class JmhzSubmissionBridgeService
             throw new JmhzXmlException(
                 'jmhz_submission_preparation_blocked',
                 'Příprava JMHZ není úplná, podání se nezakládá: '
-                    . self::describeBlockers($resolution->blockers),
+                    . JmhzBlockerExplainer::describe($resolution->blockers),
             );
         }
         $document = $resolution->requireResolvedDocument();
         $snapshotHash = self::snapshotHash($document);
         $runId = self::runId($document);
         $periodStart = self::periodStart($document);
+        $obligationId ??= $this->registerRegularObligation(
+            $supplierId,
+            $preparationId,
+            $environment,
+            $createdBy,
+            $officeId,
+            $snapshotHash,
+            $runId,
+            $periodStart,
+        );
         $keys = self::idempotencyKeys(
             $supplierId,
             $environment,
@@ -255,6 +268,55 @@ final readonly class JmhzSubmissionBridgeService
         }
 
         return "jmhz_preparation:{$preparationId}";
+    }
+
+    private function registerRegularObligation(
+        int $supplierId,
+        int $preparationId,
+        string $environment,
+        ?int $createdBy,
+        ?int $officeId,
+        string $snapshotHash,
+        int $runId,
+        string $periodStart,
+    ): int {
+        $period = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if (!$period instanceof \DateTimeImmutable
+            || $period->format('Y-m-d') !== $periodStart
+        ) {
+            throw new JmhzXmlException(
+                'jmhz_submission_period_missing',
+                'Dokument JMHZ nenese platné vykazované období.',
+            );
+        }
+        $window = $this->deadlines->forPeriod($periodStart);
+        $officeKey = $officeId === null ? 'all' : (string) $officeId;
+        $registered = $this->obligations->register(
+            $supplierId,
+            self::AGENDA_CODE,
+            self::SUBJECT_TYPE,
+            self::runReference($runId, $officeId),
+            $periodStart,
+            $period->modify('last day of this month')->format('Y-m-d'),
+            'regular',
+            self::CHANNEL,
+            self::SOURCE_EVENT_TYPE,
+            self::sourceEventReference($preparationId),
+            $snapshotHash,
+            $window->earliestSubmissionOn,
+            $window->dueOn,
+            $window->calendarBasis,
+            $window->rulesetId,
+            $window->rulesetHash,
+            "jmhz25-regular-obligation:{$supplierId}:{$environment}:"
+                . "{$preparationId}:{$officeKey}:{$snapshotHash}",
+            $createdBy,
+            $createdBy,
+            null,
+            $environment,
+        );
+
+        return (int) $registered['id'];
     }
 
     /**
@@ -562,22 +624,6 @@ final readonly class JmhzSubmissionBridgeService
             'submission' => "jmhz25-submission:{$fingerprint}",
             'artifact' => "jmhz25-artifact:{$fingerprint}",
         ];
-    }
-
-    /** @param list<JmhzScenario1Blocker> $blockers */
-    private static function describeBlockers(array $blockers): string
-    {
-        if ($blockers === []) {
-            return 'důvod neuveden';
-        }
-
-        return implode(', ', array_map(
-            static fn (JmhzScenario1Blocker $blocker): string
-                => $blocker->entityId === null
-                    ? $blocker->code
-                    : "{$blocker->code} ({$blocker->entityType} {$blocker->entityId})",
-            $blockers,
-        ));
     }
 
     private static function describeControls(
