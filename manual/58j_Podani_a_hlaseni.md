@@ -57,7 +57,7 @@ možnému účinku doručení a spuštění lhůt.
 
 ## Návaznosti
 
-Identifikátory nastavte v [Nastavení mezd](58o_Nastaveni_mezd.md) a obecné ISDS konfiguraci v [kapitole 73](73_Nastaveni.md#7317-datova-schranka). Zdrojová data pocházejí z [mzdového běhu](58e_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](58r_Retencni_lhuty.md).
+Identifikátory nastavte v [Nastavení mezd](58o_Nastaveni_mezd.md). Firemní přístupy, ruční inbox a odchozí zprávy popisuje kapitola [Datová schránka](73a_Datova_schranka.md), globální registraci pro odesílání správcem systému pak [Odesílací brána ISDS](73b_Odesilaci_brana_ISDS.md). Zdrojová data pocházejí z [mzdového běhu](58e_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](58r_Retencni_lhuty.md).
 
 
 
@@ -236,12 +236,25 @@ Záložky zdravotních pojišťoven oddělují dvě povinnosti:
   sestaví a zmrazí pouze formát doložený pro vybranou pojišťovnu. Připravený
   soubor není odeslaný.
 
-Aktuální matice podporovaných příloh je záměrně uzavřená: ČPZP (205), OZP
-(207) a RBP (213) používají XML, ZPŠ (209) PDF a ZP MV ČR (211) PDF do
-31. 12. 2026 a XML od 1. 1. 2027. U VZP (111) a VoZP (201) aplikace bez
-doloženého formátu ISDS přílohy nic neodhaduje. Dostupný soubor stáhněte a
-podejte ověřeným ručním kanálem. Tato matice popisuje technický formát
-přílohy, nikoli obecné právní schválení kanálu.
+Formát připravené přílohy se řídí pojišťovnou a obdobím:
+
+| Kód | Pojišťovna | Formát připravený pro ISDS |
+|---|---|---|
+| 111 | VZP ČR | strojově čitelné PDF |
+| 201 | VoZP ČR | strojově čitelné PDF |
+| 205 | ČPZP | XML podle zveřejněného schématu |
+| 207 | OZP | XML podle zveřejněného schématu |
+| 209 | ZPŠ | strojově čitelné PDF |
+| 211 | ZP MV ČR | PDF do 30. 6. 2026, od 1. 7. 2026 nový XML formát |
+| 213 | RBP | XML podle zveřejněného schématu |
+
+ZP MV ČR přijímá ve druhém pololetí 2026 přechodně také PDF; MyÚčto od
+1. 7. 2026 volí novější XML. RBP připouští XML i vytěžitelné PDF a MyÚčto
+volí XML. U VZP a VoZP je XDP šablona pomůcka pro hromadné vyplnění PDF,
+nikoli soubor, který by se přikládal k datové zprávě. XSD se rovněž
+neodesílá: slouží jen jako schéma, proti kterému aplikace kontroluje XML.
+Tato matice popisuje formát zvolený aplikací pro ISDS, nikoli neveřejná
+portálová nebo B2B rozhraní pojišťoven.
 
 Pokud panel u PPZ nabídne **Odeslat přes ISDS**, adresát musí pocházet ze
 stejného centrálního katalogu pojišťoven jako sestavení souboru. Akci vždy

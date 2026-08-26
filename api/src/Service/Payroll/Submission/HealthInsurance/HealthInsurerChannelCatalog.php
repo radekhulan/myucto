@@ -167,7 +167,8 @@ final class HealthInsurerChannelCatalog
                 undocumentedReasonCode: self::REASON_B2B_NOT_PUBLISHED,
                 note: 'ZP MV přijímá přes datovou schránku PDF a od '
                     . '1. 7. 2026 také nový XML formát. MyÚčto od tohoto '
-                    . 'data volí XML; PDF zůstalo jen pro první pololetí.',
+                    . 'data volí XML. Pojišťovna přechodně přijímá PDF až '
+                    . 'do 31. 12. 2026, aplikace ale používá nový formát.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '213',
