@@ -121,6 +121,20 @@ lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, 
 má vlastní záložku; podrobnosti jsou v oddílu
 [Podání zdravotním pojišťovnám](#podani-zdravotnim-pojistovnam).
 
+#### Odeslání registrace přes VREP
+
+Po přípravě registrace zůstává na kartě pracovního vztahu přesně zmrazené XML.
+Vyberte **Test** nebo **Produkci** ještě před přípravou a pak stiskněte
+**Odeslat do testu** nebo **Odeslat do produkce**. Každé stisknutí založí jeden
+doložitelný pokus; aplikace jej sama neopakuje ani se sama neptá na stav.
+
+Po převzetí bránou klikněte ručně na **Zjistit výsledek**. Potvrzení o převzetí
+není přijetí registrace — rozhoduje až protokol ČSSZ. Až je protokol načtený,
+stiskněte **Uzavřít**, aby se dokončila transakce u brány. Neuzavírejte přenos
+během čekání na protokol, jinak by nebylo možné výsledek bezpečně načíst.
+Testovací a produkční pokusy jsou oddělené; pracovní vztah není přihlášený,
+dokud přijetí nepotvrdí ČSSZ.
+
 Záložka **Ostatní** je záchytná. Zobrazí evidované povinnosti, jejichž agendu
 aplikace nezná — typicky zadané ručně nebo importované. Nic se
 tak neztratí z dohledu; přípravu ani odeslání pro ně aplikace nenabízí.

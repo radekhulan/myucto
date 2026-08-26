@@ -2254,6 +2254,23 @@ export interface PayrollRegistrationSubmission {
   deadline: PayrollRegistrationDeadline
 }
 
+/** Ručně spuštěný VREP přenos jedné zmrazené PREZEC/REGZEC registrace. */
+export interface PayrollRegistrationTransportResult {
+  agenda_code: PayrollRegistrationAgenda
+  submission_class: 'CSSZ_PREZEC' | 'CSSZ_REGZEC'
+  payload_sha256: string
+  attempt: PayrollJmhzTransportAttempt
+  acknowledgement: PayrollJmhzTransportAcknowledgement | null
+  /** `true` až po načtení protokolu o zpracování z ČSSZ. */
+  settled: boolean
+}
+
+export interface PayrollRegistrationTransportStatus {
+  agenda_code: PayrollRegistrationAgenda
+  submission_class: 'CSSZ_PREZEC' | 'CSSZ_REGZEC'
+  attempt: PayrollJmhzTransportAttempt | null
+}
+
 export interface PayrollRegzelProfile {
   supplier_id: number
   social_enterprise: boolean
@@ -4090,6 +4107,44 @@ export const payrollApi = {
     environment: 'test' | 'production' = 'test',
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
+    { environment },
+  ).then(response => response.data),
+  sendEmploymentRegistrationTransport: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    idempotencyKey: string,
+  ) => api.post<PayrollRegistrationTransportResult>(
+    `/payroll/submissions/registration-transport/${submissionId}`,
+    { environment },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
+  employmentRegistrationTransportStatus: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollRegistrationTransportStatus>(
+    `/payroll/submissions/registration-transport/${submissionId}`,
+    { params: { environment } },
+  ).then(response => response.data),
+  /**
+   * Ruční dotaz na výsledek PREZEC/REGZEC. Registrace nemají automatický poll;
+   * každé síťové volání vyvolá účetní z detailu pracovního vztahu.
+   */
+  pollEmploymentRegistrationTransportAttempt: (
+    attemptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzTransportPoll>(
+    `/payroll/submissions/registration-transport/${attemptId}/poll`,
+    { environment },
+  ).then(response => response.data),
+  closeEmploymentRegistrationTransportAttempt: (
+    attemptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<{
+    closed: boolean
+    already_closed: boolean
+    attempt: PayrollJmhzTransportAttempt
+  }>(
+    `/payroll/submissions/registration-transport/${attemptId}/close`,
     { environment },
   ).then(response => response.data),
   downloadJmhzPvpojPreview: async (
