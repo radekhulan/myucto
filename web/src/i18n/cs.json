@@ -4566,6 +4566,17 @@
             "case_deleted": "Omylem založený případ byl smazán.",
             "delete_case": "Smazat omylem založený případ",
             "delete_confirm": "Opravdu smazat tento případ bez pohledávky a dalších návazností? Tuto akci nelze vrátit zpět.",
+            "delete_blocked": {
+                "claim_exists": "Případ už obsahuje pohledávku. Zachovejte jeho historii a případ zastavte nebo uzavřete standardním krokem.",
+                "event_exists": "Případ už má právně významnou změnu stavu. Zachovejte jeho historii a použijte zastavení nebo uzavření.",
+                "document_exists": "Případ už je propojený s rozhodnutím nebo dokladem. Zachovejte jeho historii a použijte zastavení nebo uzavření.",
+                "allocation_exists": "Případ už vstoupil do výpočtu mzdy. Smazat jej nelze; zastavte nebo uzavřete jej standardním krokem.",
+                "ledger_exists": "Případ už obsahuje pohyb sražené částky. Smazat jej nelze; zastavte nebo uzavřete jej standardním krokem.",
+                "payment_footprint_exists": "Z případu už vznikl platební závazek nebo navazující platba. Smazat jej nelze; uzavřete jej standardním krokem.",
+                "case_started": "Smazat lze jen případ ve stavu Přijato — čeká na ověření. Tento případ zachovejte v historii a případně jej zastavte.",
+                "concurrent_footprint_exists": "Případ mezitím získal právní, mzdovou nebo platební návaznost. Obnovte detail a případ zastavte nebo uzavřete.",
+                "other": "Případ už má právní, mzdovou nebo platební návaznost. Smazat jej nelze; zastavte nebo uzavřete jej standardním krokem."
+            },
             "claim_created": "Pohledávka byla přidána.",
             "dependant_created": "Vyživovaná osoba byla přidána.",
             "evidence_saved": "Stav ověření podkladů byl uložen.",

@@ -20,6 +20,19 @@ Je nutné oprávnění `payroll.enforcement` a podle případu `payroll.insolven
 
 Případ může být evidovaný, aktivní, pozastavený, čekající v pořadí, doplacený nebo ukončený. Samotné vložení rozhodnutí nezaručuje srážku v uzavřeném běhu; rozhodují účinnost, pořadí a disponibilní částka.
 
+## Oprava omylem založeného případu
+
+Prázdný případ ve stavu **Přijato — čeká na ověření** můžete v nabídce
+akcí detailu smazat. Aplikace před smazáním znovu ověří, že k případu
+není uložena pohledávka, rozhodnutí ani jiný dokument, změna stavu,
+alokace ve výsledku výpočtu, pohyb srážky, platební závazek nebo platba. Smazání je
+nevratné a vyžaduje potvrzení.
+
+Jakmile případ začal mít právní, mzdovou nebo platební historii, smazat jej
+nelze. Aplikace uvede konkrétní důvod; případ zastavte nebo uzavřete standardním
+stavovým krokem. Tím zůstane zachováno, podle jakého podkladu a v jakém období
+se postupovalo.
+
 ## Kontroly a bezpečnost
 
 Použijte nejvyšší míru omezení přístupu. Ověřte pravidla účinná v měsíci, pořadí doručení, přednostní charakter, nezabavitelnou částku a souběh. Citlivé listiny neukládejte do veřejných odkazů a neměňte historické rozhodné datum bez auditní stopy.

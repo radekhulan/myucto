@@ -4566,6 +4566,17 @@
             "case_deleted": "The accidentally created case was deleted.",
             "delete_case": "Delete accidentally created case",
             "delete_confirm": "Delete this case with no claim or downstream records? This action cannot be undone.",
+            "delete_blocked": {
+                "claim_exists": "The case already contains a claim. Keep its history and stop or close the case through the standard workflow.",
+                "event_exists": "The case already has a legally significant status change. Keep its history and use the stop or close workflow.",
+                "document_exists": "The case is already linked to a decision or document. Keep its history and use the stop or close workflow.",
+                "allocation_exists": "The case has already entered a payroll calculation. It cannot be deleted; stop or close it through the standard workflow.",
+                "ledger_exists": "The case already contains a deduction movement. It cannot be deleted; stop or close it through the standard workflow.",
+                "payment_footprint_exists": "The case has already created a payment liability or a downstream payment. It cannot be deleted; close it through the standard workflow.",
+                "case_started": "Only a case in Received — awaiting verification can be deleted. Keep this case in the history and stop it if needed.",
+                "concurrent_footprint_exists": "The case gained a legal, payroll or payment link in the meantime. Refresh the detail and stop or close the case.",
+                "other": "The case already has a legal, payroll or payment link. It cannot be deleted; stop or close it through the standard workflow."
+            },
             "claim_created": "The claim was added.",
             "dependant_created": "The dependant was added.",
             "evidence_saved": "The evidence verification state was saved.",

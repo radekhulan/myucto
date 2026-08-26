@@ -237,6 +237,38 @@ describe('EnforcementCases', () => {
     wrapper.unmount()
   })
 
+  it('localizes the reason why a used case can no longer be deleted', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0, row_version: 3 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    m.deleteCase.mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            code: 'enforcement_case_delete_blocked',
+            message: 'Případ nelze smazat, protože už vstoupil do výpočtu.',
+            blocker: 'allocation_exists',
+            suggestion: 'stop',
+          },
+        },
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const action = wrapper.findComponent({ name: 'ActionBar' })
+      .props('actions').find((item: any) => item.key === 'delete')
+    await action.run()
+    await flushPromises()
+
+    expect(m.error).toHaveBeenCalledWith(
+      'payroll.enforcement.delete_blocked.allocation_exists',
+    )
+    wrapper.unmount()
+  })
+
   /*
    * Server strop drží tvrdě. Kdyby si stránka řekla o „všechno", dostala by
    * prvních padesát případů a o zbytku by mlčela — firma se šedesáti exekucemi

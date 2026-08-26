@@ -191,6 +191,16 @@ const reasonCommands = new Set<EnforcementCaseCommand>([
   'defer_hold',
   'stop',
 ])
+const deleteBlockerTranslations: Record<string, string> = {
+  claim_exists: 'payroll.enforcement.delete_blocked.claim_exists',
+  event_exists: 'payroll.enforcement.delete_blocked.event_exists',
+  document_exists: 'payroll.enforcement.delete_blocked.document_exists',
+  allocation_exists: 'payroll.enforcement.delete_blocked.allocation_exists',
+  ledger_exists: 'payroll.enforcement.delete_blocked.ledger_exists',
+  payment_footprint_exists: 'payroll.enforcement.delete_blocked.payment_footprint_exists',
+  case_started: 'payroll.enforcement.delete_blocked.case_started',
+  concurrent_footprint_exists: 'payroll.enforcement.delete_blocked.concurrent_footprint_exists',
+}
 let documentSearchTimer: ReturnType<typeof setTimeout> | null = null
 let detailRequestSequence = 0
 let documentRequestSequence = 0
@@ -489,13 +499,18 @@ function updateSummary(updated: EnforcementCaseDetail) {
 }
 
 async function handleMutationError(error: any) {
-  if (error?.response?.data?.error?.code === 'row_version_conflict' && expandedId.value) {
+  const apiError = error?.response?.data?.error
+  if (apiError?.code === 'row_version_conflict' && expandedId.value) {
     const refreshed = await payrollEnforcementApi.detail(expandedId.value)
     detail.value = refreshed
     updateSummary(refreshed)
     toast.warning(t('payroll.enforcement.conflict'))
+  } else if (apiError?.code === 'enforcement_case_delete_blocked') {
+    const translation = deleteBlockerTranslations[String(apiError.blocker ?? '')]
+      ?? 'payroll.enforcement.delete_blocked.other'
+    toast.error(t(translation))
   } else {
-    toast.error(error?.response?.data?.error?.message || t('payroll.enforcement.save_failed'))
+    toast.error(apiError?.message || t('payroll.enforcement.save_failed'))
   }
 }
 
