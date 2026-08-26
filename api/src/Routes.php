@@ -97,6 +97,7 @@ use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
+use MyInvoice\Action\Payroll\PayrollJmhzIdentityAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
@@ -950,6 +951,14 @@ final class Routes
             $g->get(
                 '/jmhz/municipalities',
                 [PayrollEmploymentAction::class, 'jmhzMunicipalities'],
+            );
+            $g->get(
+                '/jmhz/identities/{employmentId:[0-9]+}',
+                [PayrollJmhzIdentityAction::class, 'show'],
+            );
+            $g->put(
+                '/jmhz/identities/{employmentId:[0-9]+}',
+                [PayrollJmhzIdentityAction::class, 'put'],
             );
             // Našeptávač klasifikace zaměstnání ČSÚ — hledání běží na serveru,
             // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).

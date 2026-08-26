@@ -1099,6 +1099,7 @@ onMounted(async () => {
           :key="employment.id"
           :employment="employment"
           :can-write="auth.canWrite('payroll.employment.write')"
+          :can-write-person="auth.canWrite('payroll.person.write')"
           :can-read-documents="auth.canRead('payroll.documents')"
           :can-write-documents="auth.canWrite('payroll.documents')"
           :payroll-start-period="payrollStartPeriod"

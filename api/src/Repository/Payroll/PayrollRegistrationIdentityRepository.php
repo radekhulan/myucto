@@ -168,7 +168,35 @@ final class PayrollRegistrationIdentityRepository
 
     /**
      * @return array{
-     *   employee_id:int,start_date:string,end_date:?string
+     *   employee_id:int,start_date:?string,end_date:?string
+     * }|null
+     */
+    public function employment(
+        int $supplierId,
+        int $employmentId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employee_id, start_date, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $employmentId]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
+            'start_date' => $this->nullableString($row, 'start_date'),
+            'end_date' => $this->nullableString($row, 'end_date'),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   employee_id:int,start_date:?string,end_date:?string
      * }|null
      */
     public function lockEmployment(
@@ -190,7 +218,7 @@ final class PayrollRegistrationIdentityRepository
 
         return [
             'employee_id' => $this->positiveInt($row, 'employee_id'),
-            'start_date' => $this->string($row, 'start_date'),
+            'start_date' => $this->nullableString($row, 'start_date'),
             'end_date' => $this->nullableString($row, 'end_date'),
         ];
     }

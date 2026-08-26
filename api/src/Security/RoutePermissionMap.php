@@ -175,6 +175,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/jmhz/employment-evidence-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/municipalities$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],

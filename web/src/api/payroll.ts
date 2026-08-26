@@ -1560,6 +1560,33 @@ export interface PayrollEmployerSettingsPayload {
 
 export type PayrollRegzelEnvironment = 'production' | 'test'
 
+export interface PayrollJmhzExternalIdentifierStatus {
+  id: number
+  value_masked: string
+  valid_from: string
+  valid_to: string | null
+  source_kind: 'trusted_receipt' | 'verified_manual_import'
+  row_version: number
+}
+
+export interface PayrollJmhzIdentityStatus {
+  employee_id: number
+  employment_id: number
+  environment: PayrollRegzelEnvironment
+  on_date: string
+  person_external_identifier: PayrollJmhzExternalIdentifierStatus | null
+  employment_external_identifier: PayrollJmhzExternalIdentifierStatus | null
+}
+
+export interface PayrollJmhzIdentityPayload {
+  environment: PayrollRegzelEnvironment
+  person_external_identifier?: string | null
+  employment_external_identifier?: string | null
+  valid_from: string
+  source_reference?: string | null
+  evidence_confirmed: true
+}
+
 export type PayrollSubmissionObligationStatus =
   | 'open'
   | 'prepared'
@@ -3827,6 +3854,21 @@ export const payrollApi = {
     api.get<PayrollJmhzOrdinaryEvidenceState>(
       `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}`,
     ).then(response => response.data),
+  jmhzIdentity: (
+    employmentId: number,
+    environment: PayrollRegzelEnvironment,
+    onDate: string,
+  ) => api.get<{ identity: PayrollJmhzIdentityStatus }>(
+    `/payroll/jmhz/identities/${employmentId}`,
+    { params: { environment, on_date: onDate } },
+  ).then(response => response.data.identity),
+  saveJmhzIdentity: (
+    employmentId: number,
+    payload: PayrollJmhzIdentityPayload,
+  ) => api.put<{ assigned: Record<string, unknown> }>(
+    `/payroll/jmhz/identities/${employmentId}`,
+    payload,
+  ).then(response => response.data.assigned),
   confirmJmhzOrdinaryEvidence: (
     revisionId: number,
     employmentId: number,

@@ -24,6 +24,7 @@ import { useToast } from '@/composables/useToast'
 import EmploymentAgendaPanel from './EmploymentAgendaPanel.vue'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
+import EmploymentJmhzIdentityPanel from './EmploymentJmhzIdentityPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
 import PayrollOpeningBalancesPanel from './PayrollOpeningBalancesPanel.vue'
 import {
@@ -38,6 +39,7 @@ import {
 const props = defineProps<{
   employment: PayrollEmployment
   canWrite: boolean
+  canWritePerson?: boolean
   canReadDocuments?: boolean
   canWriteDocuments?: boolean
   // Období, od kterého firma vede mzdy v MyÚčtu (`payroll_module_state.start_period`).
@@ -935,6 +937,14 @@ const actions = computed<ActionItem[]>(() => [
     <EmploymentRegistrationPanel
       :employment-id="employment.id"
       :can-write="canWrite"
+    />
+
+    <EmploymentJmhzIdentityPanel
+      :employment-id="employment.id"
+      :start-date="employment.start_date"
+      :end-date="employment.end_date"
+      :can-write-employment="canWrite"
+      :can-write-person="canWritePerson === true"
     />
 
     <EmploymentDimensionsPanel

@@ -269,7 +269,8 @@ describe('EmploymentCard', () => {
 
     expect(wrapper.text()).toContain('payroll.people.timeline_title')
     expect(wrapper.text()).toContain('payroll.people.checklist.employment_contract')
-    expect(wrapper.find('input[type="date"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="jmhz-identity-on-date"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="jmhz-identity-form"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('payroll.people.transition.preregistered')
   })
 

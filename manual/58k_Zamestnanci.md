@@ -343,6 +343,35 @@ a odměnu za výkon funkce. V aktivním workflow může být právě jeden vztah
 jako primární. Každý souběh má vlastní kód, stav, historii a budoucí registrační
 identitu.
 
+### OIČ / IK MPSV a ID PPV pro JMHZ
+
+Po přidělení identifikátorů ČSSZ otevřete na kartě konkrétního pracovního vztahu
+sbalenou sekci **Identifikátory JMHZ od ČSSZ**. Sekce se načte až po otevření,
+takže ani firma se stovkami zaměstnanců neposílá zbytečně stovky dotazů.
+
+Rozlišujte, komu údaj patří:
+
+- **OIČ / IK MPSV** identifikuje osobu a použije se u jejích pracovních vztahů;
+- **ID PPV** identifikuje právě jeden pracovní vztah. Souběžný HPP a DPP téže
+  osoby proto mají stejný osobní identifikátor, ale každý vlastní ID PPV.
+
+Identifikátory pro **Testovací prostředí** a **Produkci** jsou oddělené. Před
+uložením vždy zkontrolujte zvolené prostředí, datum platnosti a oba údaje podle
+protokolu ČSSZ. Přepnutí prostředí rozepsané hodnoty zahodí, aby se testovací
+identifikátor omylem neuložil do produkce. Odkaz na zdroj je nepovinná interní
+poznámka; uložení neblokuje. Povinné je pouze výslovné potvrzení, že jste údaje
+ověřili v podkladu ČSSZ.
+
+Po uložení aplikace zobrazuje jen masky a otevřené hodnoty už do formuláře
+nevrací. Již platný identifikátor nelze tiše přepsat jinou hodnotou. Pokud ČSSZ
+identifikátor opravila nebo změnila, nejprve ověřte datum účinnosti a navazující
+protokol; nesprávnou hodnotu neobcházejte založením druhé osobní karty.
+
+Pro zobrazení stačí právo číst mzdy. Uložení mění údaj osoby i pracovního
+vztahu, a proto vyžaduje současně oprávnění spravovat zaměstnance i pracovní
+vztahy. Nejde o pravidlo čtyř očí: uživatel s oběma oprávněními provede celý
+krok sám.
+
 ## Checklist a časová osa
 
 Detail ukazuje povinnosti nástupu, změny a skončení. Patří sem smlouva nebo
