@@ -71,14 +71,14 @@ final class AnthropicClient implements LlmGatewayInterface
         }
         return [
             'api_key'       => $key,
-            'default_model' => (string) ($row['anthropic_default_model'] ?? 'claude-haiku-4-5'),
+            'default_model' => (string) ($row['anthropic_default_model'] ?? LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL),
         ];
     }
 
     public function setCredentials(int $supplierId, string $apiKey, ?string $defaultModel = null): void
     {
         $enc = $apiKey === '' ? null : $this->crypto->encrypt($apiKey);
-        $model = $defaultModel ?: 'claude-haiku-4-5';
+        $model = $defaultModel ?: LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
         $this->db->pdo()->prepare(
             'UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?
               WHERE id = ?'

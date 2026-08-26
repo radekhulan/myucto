@@ -15,14 +15,52 @@ namespace MyInvoice\Service\Import;
  */
 final readonly class LlmProviderCapabilities
 {
-    public const GEMINI_DEFAULT_MODEL = 'gemini-3.6-flash';
+    /**
+     * Whitelisty modelů. Pořadí je VÝZNAMOVÉ — {@see strongerModel()} bere PRVNÍ
+     * vyhovující model odshora, takže nejnovější/nejsilnější patří nahoru. Starší
+     * generace se drží kvůli tenantům, kteří na nich mají zaparkovaný default.
+     * Ověřeno proti reálným katalogům providerů 2026-08-26
+     * (private/scripts/probe_llm_models.php + probe_llm_models_call.php).
+     */
+    public const ANTHROPIC_DEFAULT_MODEL = 'claude-haiku-4-5';
+    public const ANTHROPIC_MODELS = [
+        'claude-haiku-4-5',
+        'claude-sonnet-5',
+        'claude-sonnet-4-6',
+        'claude-fable-5',
+        'claude-opus-5',
+        'claude-opus-4-8',
+        'claude-opus-4-7',
+    ];
+
+    public const OPENAI_DEFAULT_MODEL = 'gpt-5.4-mini';
+    public const OPENAI_MODELS = [
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
+        'gpt-5.5',
+        'gpt-5.4',
+        'gpt-5.1',
+        'gpt-5',
+        'gpt-4.1',
+        'gpt-4o',
+        'gpt-5.4-mini',
+        'gpt-5.4-nano',
+        'gpt-5-mini',
+        'gpt-4.1-mini',
+        'gpt-4o-mini',
+    ];
+
+    /** gemini-2.5-flash vyřazen — provider ho novým účtům vrací 404 s odkazem na 3.6-flash. */
+    public const GEMINI_DEFAULT_MODEL = 'gemini-3.7-flash';
     public const GEMINI_MODELS = [
+        'gemini-3.7-flash',
         'gemini-3.6-flash',
         'gemini-3.5-flash',
         'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
         'gemini-3.1-pro-preview',
         'gemini-2.5-pro',
-        'gemini-2.5-flash',
     ];
 
     public function __construct(
@@ -39,18 +77,18 @@ final readonly class LlmProviderCapabilities
     ) {}
 
     /**
-     * Anthropic Claude descriptor. Whitelist modelů je držen v SYNCU s
-     * {@see \MyInvoice\Action\Admin\Import\AiProviderCredentialsAction} allowlistem.
-     * Model ID ověřeny proti reálnému katalogu Anthropic (haiku-4-5 / sonnet-4-6 /
-     * opus-4-7 jsou aktivní).
+     * Anthropic Claude descriptor. Whitelist modelů drží {@see ANTHROPIC_MODELS} —
+     * {@see \MyInvoice\Action\Admin\Import\AnthropicCredentialsAction} i
+     * {@see \MyInvoice\Action\Admin\Import\AiProviderCredentialsAction} z něj čtou,
+     * takže se allowlisty nemohou rozejít.
      */
     public static function anthropic(string $dataRegion = 'us'): self
     {
         return new self(
             id: 'anthropic',
             label: 'Anthropic Claude',
-            models: ['claude-haiku-4-5', 'claude-sonnet-4-6', 'claude-opus-4-7'],
-            defaultModel: 'claude-haiku-4-5',
+            models: self::ANTHROPIC_MODELS,
+            defaultModel: self::ANTHROPIC_DEFAULT_MODEL,
             maxPdfBytes: 32 * 1024 * 1024,
             dataRegion: $dataRegion,
             residencyLabel: $dataRegion === 'eu' ? 'EU (Anthropic)' : 'US (Anthropic)',
@@ -94,8 +132,8 @@ final readonly class LlmProviderCapabilities
         return new self(
             id: 'openai',
             label: 'OpenAI',
-            models: ['gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'],
-            defaultModel: ($defaultModel !== null && $defaultModel !== '') ? $defaultModel : 'gpt-4o-mini',
+            models: self::OPENAI_MODELS,
+            defaultModel: ($defaultModel !== null && $defaultModel !== '') ? $defaultModel : self::OPENAI_DEFAULT_MODEL,
             maxPdfBytes: 20 * 1024 * 1024,
             dataRegion: $region,
             residencyLabel: $region === 'eu' ? 'EU (OpenAI)' : 'US (OpenAI)',
@@ -127,8 +165,8 @@ final readonly class LlmProviderCapabilities
     }
 
     /**
-     * Provider-specifický upgrade na silnější model (haiku→sonnet, mini→full,
-     * flash→pro). Vrací null, když upgrade nedává smysl (už je na silném modelu,
+     * Provider-specifický upgrade na silnější model (haiku/fable→sonnet, mini/nano→full,
+     * flash/lite→pro). Vrací null, když upgrade nedává smysl (už je na silném modelu,
      * provider upgrade nemá, nebo current je null). Upgrade zůstává ve STEJNÉM
      * regionu — router ho vynucuje přes ResidencyPolicy (§3.5).
      */
@@ -138,10 +176,10 @@ final readonly class LlmProviderCapabilities
             return null;
         }
         return match ($this->id) {
-            'anthropic'    => str_contains($current, 'haiku') ? $this->firstModelContaining('sonnet') : null,
-            'openai'       => str_contains($current, 'mini') ? $this->firstModelNotContaining('mini') : null,
-            'azure_openai' => str_contains($current, 'mini') ? $this->firstModelNotContaining('mini') : null,
-            'gemini'       => str_contains($current, 'flash') ? $this->firstModelContaining('pro') : null,
+            'anthropic'    => self::hasAnyToken($current, ['haiku', 'fable']) ? $this->firstModelContaining('sonnet') : null,
+            'openai'       => self::hasAnyToken($current, ['mini', 'nano']) ? $this->firstStrongModel(['mini', 'nano']) : null,
+            'azure_openai' => self::hasAnyToken($current, ['mini', 'nano']) ? $this->firstStrongModel(['mini', 'nano']) : null,
+            'gemini'       => self::hasAnyToken($current, ['flash', 'lite']) ? $this->firstModelContaining('pro') : null,
             default        => null,
         };
     }
@@ -178,10 +216,25 @@ final readonly class LlmProviderCapabilities
         return null;
     }
 
-    private function firstModelNotContaining(string $needle): ?string
+    /** @param list<string> $tokens */
+    private static function hasAnyToken(string $model, array $tokens): bool
+    {
+        foreach ($tokens as $t) {
+            if (str_contains($model, $t)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * První model whitelistu, který nenese ANI JEDEN ze slabých tokenů (mini/nano).
+     * @param list<string> $weakTokens
+     */
+    private function firstStrongModel(array $weakTokens): ?string
     {
         foreach ($this->models as $m) {
-            if (!str_contains($m, $needle)) {
+            if (!self::hasAnyToken($m, $weakTokens)) {
                 return $m;
             }
         }

@@ -24,7 +24,8 @@ use Psr\Http\Message\UploadedFileInterface;
  * single-shot operace trvá 10-30s, OK pro user-blocking UX).
  *
  * Body: multipart form-data, field "pdf" = soubor.
- * Optional ?model=claude-haiku-4-5|claude-sonnet-4-6|claude-opus-4-7 (override per request).
+ * Optional ?model=<id z whitelistu provideru> (override per request) — whitelist drží
+ * LlmProviderCapabilities (ANTHROPIC_MODELS / OPENAI_MODELS / GEMINI_MODELS).
  */
 final class AiExtractPdfAction
 {

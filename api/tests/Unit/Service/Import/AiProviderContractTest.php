@@ -235,19 +235,94 @@ final class AiProviderContractTest extends TestCase
         self::assertArrayHasKey('expense_kind', $schema['properties']['items']['items']['properties']);
         self::assertSame(16384, $payload['generationConfig']['maxOutputTokens']);
         self::assertSame('low', $payload['generationConfig']['thinkingConfig']['thinkingLevel']);
-        self::assertStringContainsString('/models/gemini-3.6-flash:generateContent', (string) $history[0]['request']->getUri());
+        self::assertStringContainsString(
+            '/models/' . LlmProviderCapabilities::GEMINI_DEFAULT_MODEL . ':generateContent',
+            (string) $history[0]['request']->getUri(),
+        );
     }
 
     public function testGeminiCapabilities_useCurrentStableDefault(): void
     {
         $caps = LlmProviderCapabilities::gemini(null);
 
-        self::assertSame('gemini-3.6-flash', $caps->defaultModel);
-        self::assertContains('gemini-3.6-flash', $caps->models);
+        self::assertSame(LlmProviderCapabilities::GEMINI_DEFAULT_MODEL, $caps->defaultModel);
+        self::assertContains(LlmProviderCapabilities::GEMINI_DEFAULT_MODEL, $caps->models);
+        // Modely, které provider už novým účtům nevydá (404), do whitelistu nepatří.
         self::assertNotContains('gemini-2.0-flash', $caps->models);
+        self::assertNotContains('gemini-2.5-flash', $caps->models);
+        // Neznámý / vyřazený uložený model spadne zpět na aktuální default.
         self::assertSame(
-            'gemini-3.6-flash',
+            LlmProviderCapabilities::GEMINI_DEFAULT_MODEL,
             LlmProviderCapabilities::gemini('gemini-3-flash')->defaultModel,
+        );
+        self::assertSame(
+            LlmProviderCapabilities::GEMINI_DEFAULT_MODEL,
+            LlmProviderCapabilities::gemini('gemini-2.5-flash')->defaultModel,
+        );
+    }
+
+    /**
+     * Escalace „slabý model → silnější" (haiku→sonnet a obdoby) musí přežít každý
+     * bump whitelistu — když extrakce neprojde, router na tomhle stojí. Cíl musí být
+     * jiný model, který je zároveň ve whitelistu, a silný model už neeskaluje.
+     */
+    public function testStrongerModel_escalationChainSurvivesWhitelistBumps(): void
+    {
+        $anthropic = LlmProviderCapabilities::anthropic();
+        foreach (['claude-haiku-4-5', 'claude-fable-5'] as $weak) {
+            $up = $anthropic->strongerModel($weak);
+            self::assertNotNull($up, "anthropic $weak neeskaluje");
+            self::assertNotSame($weak, $up);
+            self::assertContains($up, $anthropic->models);
+            self::assertStringContainsString('sonnet', $up);
+        }
+        self::assertNull($anthropic->strongerModel('claude-opus-5'));
+        self::assertNull($anthropic->strongerModel(null));
+
+        $openai = LlmProviderCapabilities::openai(null, null);
+        foreach (['gpt-5.4-mini', 'gpt-5.4-nano', 'gpt-4o-mini'] as $weak) {
+            $up = $openai->strongerModel($weak);
+            self::assertNotNull($up, "openai $weak neeskaluje");
+            self::assertContains($up, $openai->models);
+            self::assertStringNotContainsString('mini', $up);
+            self::assertStringNotContainsString('nano', $up);
+        }
+        self::assertNull($openai->strongerModel('gpt-5.6-sol'));
+        // Default OpenAI modelu musí být levný tier, aby escalace vůbec měla kam jít.
+        self::assertNotNull($openai->strongerModel(LlmProviderCapabilities::OPENAI_DEFAULT_MODEL));
+
+        $gemini = LlmProviderCapabilities::gemini(null);
+        foreach (['gemini-3.7-flash', 'gemini-3.5-flash-lite'] as $weak) {
+            $up = $gemini->strongerModel($weak);
+            self::assertNotNull($up, "gemini $weak neeskaluje");
+            self::assertContains($up, $gemini->models);
+            self::assertStringContainsString('pro', $up);
+        }
+        self::assertNull($gemini->strongerModel('gemini-2.5-pro'));
+        self::assertNotNull($gemini->strongerModel(LlmProviderCapabilities::GEMINI_DEFAULT_MODEL));
+    }
+
+    /**
+     * Allowlist v credentials akci a whitelist v capabilities nesmí dřív nezaležely
+     * na sobě divergovat — dnes oba čtou týž zdroj pravdy.
+     */
+    public function testAnthropicAllowlist_isSingleSourceOfTruth(): void
+    {
+        self::assertSame(
+            LlmProviderCapabilities::ANTHROPIC_MODELS,
+            LlmProviderCapabilities::anthropic()->models,
+        );
+        self::assertContains(
+            LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL,
+            LlmProviderCapabilities::ANTHROPIC_MODELS,
+        );
+        self::assertContains(
+            LlmProviderCapabilities::OPENAI_DEFAULT_MODEL,
+            LlmProviderCapabilities::OPENAI_MODELS,
+        );
+        self::assertContains(
+            LlmProviderCapabilities::GEMINI_DEFAULT_MODEL,
+            LlmProviderCapabilities::GEMINI_MODELS,
         );
     }
 

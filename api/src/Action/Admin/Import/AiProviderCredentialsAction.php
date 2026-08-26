@@ -212,7 +212,7 @@ final class AiProviderCredentialsAction
             return Json::error($response, 'validation_failed', 'Neplatný provider.', 400);
         }
         match ($provider) {
-            'anthropic'    => $this->anthropic->setCredentials($supplierId, '', 'claude-haiku-4-5'),
+            'anthropic'    => $this->anthropic->setCredentials($supplierId, '', LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL),
             'azure_openai' => $this->azure->clearCredentials($supplierId),
             'openai'       => $this->openai->clearCredentials($supplierId),
             'gemini'       => $this->gemini->clearCredentials($supplierId),
@@ -283,7 +283,7 @@ final class AiProviderCredentialsAction
     {
         switch ($provider) {
             case 'anthropic':
-                $model = trim((string) ($body['default_model'] ?? '')) ?: 'claude-haiku-4-5';
+                $model = trim((string) ($body['default_model'] ?? '')) ?: LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
                 $this->anthropic->setCredentials($supplierId, $apiKey, $model);
                 break;
             case 'azure_openai':
@@ -329,7 +329,7 @@ final class AiProviderCredentialsAction
                 $params = [];
                 if (array_key_exists('default_model', $body)) {
                     $sets[] = 'openai_default_model = ?';
-                    $params[] = trim((string) $body['default_model']) ?: 'gpt-4o-mini';
+                    $params[] = trim((string) $body['default_model']) ?: LlmProviderCapabilities::OPENAI_DEFAULT_MODEL;
                 }
                 if (array_key_exists('base_url', $body)) {
                     $baseUrl = trim((string) $body['base_url']);

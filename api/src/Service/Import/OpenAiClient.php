@@ -60,7 +60,8 @@ final class OpenAiClient implements LlmGatewayInterface
         }
         return [
             'api_key'       => $key,
-            'default_model' => (string) ($row['openai_default_model'] ?? 'gpt-4o-mini') ?: 'gpt-4o-mini',
+            'default_model' => (string) ($row['openai_default_model'] ?? LlmProviderCapabilities::OPENAI_DEFAULT_MODEL)
+                ?: LlmProviderCapabilities::OPENAI_DEFAULT_MODEL,
             'base_url'      => (string) ($row['openai_base_url'] ?? '') ?: self::DEFAULT_BASE_URL,
         ];
     }
@@ -72,7 +73,7 @@ final class OpenAiClient implements LlmGatewayInterface
             'UPDATE supplier SET openai_api_key_enc = ?, openai_default_model = ?, openai_base_url = ? WHERE id = ?'
         )->execute([
             $enc,
-            $defaultModel !== null && $defaultModel !== '' ? $defaultModel : 'gpt-4o-mini',
+            $defaultModel !== null && $defaultModel !== '' ? $defaultModel : LlmProviderCapabilities::OPENAI_DEFAULT_MODEL,
             $baseUrl !== null && $baseUrl !== '' ? $baseUrl : null,
             $supplierId,
         ]);

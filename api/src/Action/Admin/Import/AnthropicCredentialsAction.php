@@ -12,6 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\AnthropicClient;
+use MyInvoice\Service\Import\LlmProviderCapabilities;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -21,15 +22,13 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * PUT    /api/admin/imports/anthropic/credentials  — set + test
  * DELETE /api/admin/imports/anthropic/credentials  — remove
  *
- * BYOK — uživatel platí Anthropicu sám. Default model claude-haiku-4-5.
+ * BYOK — uživatel platí Anthropicu sám. Default model = LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL.
  */
 final class AnthropicCredentialsAction
 {
-    private const ALLOWED_MODELS = [
-        'claude-haiku-4-5',
-        'claude-sonnet-4-6',
-        'claude-opus-4-7',
-    ];
+    /** Jediný zdroj pravdy je {@see LlmProviderCapabilities::ANTHROPIC_MODELS}. */
+    private const ALLOWED_MODELS = LlmProviderCapabilities::ANTHROPIC_MODELS;
+    private const DEFAULT_MODEL  = LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
 
     public function __construct(
         private readonly AnthropicClient $anthropic,
@@ -52,7 +51,7 @@ final class AnthropicCredentialsAction
 
         return Json::ok($response, [
             'configured'        => $creds !== null,
-            'default_model'     => $creds['default_model'] ?? 'claude-haiku-4-5',
+            'default_model'     => $creds['default_model'] ?? self::DEFAULT_MODEL,
             'extractions_count' => $count,
             'allowed_models'    => self::ALLOWED_MODELS,
         ]);
@@ -66,7 +65,7 @@ final class AnthropicCredentialsAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $apiKey = (string) ($body['api_key'] ?? '');
-        $model  = (string) ($body['default_model'] ?? 'claude-haiku-4-5');
+        $model  = (string) ($body['default_model'] ?? self::DEFAULT_MODEL);
 
         if (!in_array($model, self::ALLOWED_MODELS, true)) {
             return Json::error($response, 'validation_failed', 'Neplatný model.', 400);
@@ -116,7 +115,7 @@ final class AnthropicCredentialsAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'settings.ai_provider', AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         $supplierId = SupplierGuard::currentId($request);
-        $this->anthropic->setCredentials($supplierId, '', 'claude-haiku-4-5');
+        $this->anthropic->setCredentials($supplierId, '', self::DEFAULT_MODEL);
         $userId = (int) ($user['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('import.anthropic_credentials_removed', $userId, 'supplier', $supplierId, null,
