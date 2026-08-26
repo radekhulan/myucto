@@ -1837,7 +1837,23 @@
             "tabs_label": "Payroll document type",
             "tabs": {
                 "monthly": "Monthly outputs",
-                "annual": "Annual documents"
+                "annual": "Annual documents",
+                "archive": "Payroll archive"
+            },
+            "period_export": {
+                "title": "Monthly and annual payroll archive",
+                "description": "Download one verifiable ZIP containing payroll snapshots and already archived documents, submissions and protocols for the entire company. No employee list is loaded or selected for this export.",
+                "security_hint": "The archive is built exclusively from approved or superseded frozen revisions. It contains a manifest and SHA-256 checksums; passwords, access tokens, certificates, private keys and arbitrary manual attachments are never included.",
+                "monthly_title": "Single-month archive",
+                "monthly_hint": "Includes every approved revision for the selected month across payroll offices, including correction chains.",
+                "annual_title": "Full-year archive",
+                "annual_hint": "Includes approved payroll months and available immutable annual snapshots and documents.",
+                "download_monthly": "Create and download monthly ZIP",
+                "download_annual": "Create and download annual ZIP",
+                "preparing": "Preparing secure ZIP…",
+                "downloaded": "Archive {filename} was created and handed to your browser.",
+                "failed": "The payroll archive could not be created or downloaded.",
+                "permission_required": "You need payroll document write permission to create an archive."
             },
             "select_employee": "Employee",
             "select_employee_placeholder": "Select an employee…",

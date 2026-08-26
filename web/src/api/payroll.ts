@@ -2536,6 +2536,18 @@ export interface PayrollAnnualDocumentList {
   offset: number
 }
 
+export type PayrollPeriodExportScope = 'monthly' | 'annual'
+
+export interface PayrollPeriodExport {
+  id: number
+  scope: PayrollPeriodExportScope
+  period_start: string
+  period_end: string
+  file_sha256: string
+  size_bytes: number
+  suggested_filename: string
+}
+
 /* ── Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP) ─────────────── */
 
 /** Požádal poplatník o roční zúčtování? `unknown` NENÍ „nepožádal". */
@@ -4234,6 +4246,42 @@ export const payrollApi = {
       {},
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
+  downloadPeriodExport: async (
+    scope: PayrollPeriodExportScope,
+    period: string | number,
+  ): Promise<PayrollPeriodExport> => {
+    const exported = await api.post<PayrollPeriodExport>(
+      `/payroll/exports/${scope}/${period}`,
+      {},
+    ).then(response => response.data)
+    const grant = await api.post<{
+      grant_id: number
+      export_id: number
+      token: string
+      expires_at: string
+    }>(
+      `/payroll/exports/${exported.id}/download-grants`,
+      { ttl_seconds: 120 },
+    ).then(response => response.data)
+    const response = await api.post<Blob>(
+      '/payroll/exports/download',
+      { token: grant.token },
+      { responseType: 'blob' },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = exported.suggested_filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+
+    return exported
+  },
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(
       `/payroll/employments/${employmentId}/documents/exit`,

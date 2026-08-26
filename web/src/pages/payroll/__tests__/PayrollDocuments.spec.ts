@@ -10,6 +10,7 @@ const m = vi.hoisted(() => ({
   generatePayrollSheet: vi.fn(),
   generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
+  downloadPeriodExport: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api/payroll', () => ({
     generatePayrollSheet: m.generatePayrollSheet,
     generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
+    downloadPeriodExport: m.downloadPeriodExport,
     downloadDocument: m.downloadDocument,
   },
 }))
@@ -81,6 +83,7 @@ function deferred<T>(): {
 describe('PayrollDocuments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.listDocuments.mockResolvedValue({
       period: '2026-07',
       revisions: [{
@@ -152,6 +155,15 @@ describe('PayrollDocuments', () => {
       document_kind: 'taxable_income_advance_certificate',
     })
     m.downloadDocument.mockResolvedValue(undefined)
+    m.downloadPeriodExport.mockResolvedValue({
+      id: 91,
+      scope: 'monthly',
+      period_start: '2026-07-01',
+      period_end: '2026-07-31',
+      file_sha256: 'e'.repeat(64),
+      size_bytes: 12345,
+      suggested_filename: 'mzdy-2026-07-abcdef123456.zip',
+    })
   })
 
   it('renders responsive document cards and a desktop table without exposing hashes as names', async () => {
@@ -181,6 +193,50 @@ describe('PayrollDocuments', () => {
     expect(m.downloadDocument).toHaveBeenCalledWith(
       expect.objectContaining({ id: 21, mime_type: 'application/pdf' }),
     )
+  })
+
+  it('exports monthly and annual archives without loading the employee list', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const archiveTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.archive')
+    expect(archiveTab).toBeDefined()
+    await archiveTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="period-export-panel"]').exists()).toBe(true)
+    expect(m.peopleOptions).not.toHaveBeenCalled()
+    expect(m.listAnnualDocuments).not.toHaveBeenCalled()
+
+    await wrapper.get<HTMLInputElement>('[data-test="period-export-month"]')
+      .setValue('2026-08')
+    await wrapper.get('[data-test="download-monthly-period-export"]')
+      .trigger('click')
+    await flushPromises()
+    expect(m.downloadPeriodExport).toHaveBeenCalledWith('monthly', '2026-08')
+
+    await wrapper.get<HTMLInputElement>('[data-test="period-export-year"]')
+      .setValue('2025')
+    await wrapper.get('[data-test="download-annual-period-export"]')
+      .trigger('click')
+    await flushPromises()
+    expect(m.downloadPeriodExport).toHaveBeenCalledWith('annual', 2025)
+    expect(m.toastSuccess).toHaveBeenCalledWith(expect.stringContaining(
+      'mzdy-2026-07-abcdef123456.zip',
+    ))
+  })
+
+  it('opens the archive directly without loading document or employee lists', async () => {
+    m.routeQuery = { tab: 'archive' }
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="period-export-panel"]').exists()).toBe(true)
+    expect(m.listDocuments).not.toHaveBeenCalled()
+    expect(m.listAnnualDocuments).not.toHaveBeenCalled()
+    expect(m.peopleOptions).not.toHaveBeenCalled()
   })
 
   it('ignores an older period response that arrives after a newer request', async () => {

@@ -8,6 +8,7 @@ import {
   type PayrollDocumentBatchExit,
   type PayrollDocumentBatchReport,
   type PayrollDocumentList,
+  type PayrollPeriodExportScope,
   type PayrollPersonOption,
   type PayrollTaxCertificateKind,
   type PayrollTaxCertificateGenerationPayload,
@@ -42,7 +43,11 @@ const year = ref(Number(period.value.slice(0, 4)))
  * vypsat", a přebít jeho význam by změnilo chování i bez odkazu.
  */
 const requestedTab = payrollQueryValue(route.query, 'tab')
-const activeTab = ref<'monthly' | 'annual'>(requestedTab === 'annual' ? 'annual' : 'monthly')
+const activeTab = ref<'monthly' | 'annual' | 'archive'>(
+  requestedTab === 'annual' || requestedTab === 'archive'
+    ? requestedTab
+    : 'monthly',
+)
 const focusPersonId = ref<number | null>(payrollQueryId(route.query, 'person'))
 const data = ref<PayrollDocumentList | null>(null)
 const annualItems = ref<PayrollDocument[]>([])
@@ -57,6 +62,7 @@ const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
 const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
 const correctionReason = ref('')
 const downloadingId = ref<number | null>(null)
+const exportingScope = ref<PayrollPeriodExportScope | null>(null)
 let loadSequence = 0
 
 const COLUMNS: ColumnDef[] = [
@@ -97,7 +103,11 @@ const canGenerate = computed(() =>
 // dokument z druhé strany se tiše neprojevil a `total` v pageru mluvilo o celém
 // období, ne o tom, co tabulka ukazuje.
 const visibleItems = computed(() =>
-  activeTab.value === 'monthly' ? data.value?.items ?? [] : annualItems.value)
+  activeTab.value === 'monthly'
+    ? data.value?.items ?? []
+    : activeTab.value === 'annual'
+      ? annualItems.value
+      : [])
 const focusName = computed(() => {
   const id = focusPersonId.value
   if (id === null) return null
@@ -109,7 +119,10 @@ const focusName = computed(() => {
  * člověk tu nic nemá", i když je zúžení jen slepé (cizí osoba, zestaralý odkaz).
  */
 const focusMissing = computed(() =>
-  focusPersonId.value !== null && !loading.value && visibleItems.value.length === 0)
+  activeTab.value !== 'archive'
+  && focusPersonId.value !== null
+  && !loading.value
+  && visibleItems.value.length === 0)
 function clearFocus(): void {
   focusPersonId.value = null
   const query = { ...route.query }
@@ -242,7 +255,7 @@ async function load(): Promise<void> {
   loading.value = true
   if (requestedTab === 'monthly') {
     data.value = null
-  } else {
+  } else if (requestedTab === 'annual') {
     annualItems.value = []
   }
   try {
@@ -264,7 +277,7 @@ async function load(): Promise<void> {
       if (focusPersonId.value !== null && people.value.length === 0) {
         people.value = await payrollApi.peopleOptions().catch(() => people.value)
       }
-    } else {
+    } else if (requestedTab === 'annual') {
       const [loaded, loadedPeople] = await Promise.all([
         payrollApi.listAnnualDocuments(requestedYear, page, focusPersonId.value ?? undefined),
         people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions(),
@@ -286,6 +299,27 @@ async function load(): Promise<void> {
     if (sequence === loadSequence) {
       loading.value = false
     }
+  }
+}
+
+async function downloadPeriodExport(scope: PayrollPeriodExportScope): Promise<void> {
+  if (exportingScope.value !== null || !auth.canWrite('payroll.documents')) return
+  exportingScope.value = scope
+  try {
+    const exported = await payrollApi.downloadPeriodExport(
+      scope,
+      scope === 'monthly' ? period.value : year.value,
+    )
+    toast.success(t('payroll.documents.period_export.downloaded', {
+      filename: exported.suggested_filename,
+    }))
+  } catch (error) {
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.documents.period_export.failed'),
+    ))
+  } finally {
+    exportingScope.value = null
   }
 }
 
@@ -412,7 +446,7 @@ onMounted(load)
             @change="reload"
           >
         </label>
-        <label v-else class="block">
+        <label v-else-if="activeTab === 'annual'" class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.documents.year') }}</span>
           <input
             v-model.number="year"
@@ -423,7 +457,13 @@ onMounted(load)
             @change="reload"
           >
         </label>
-        <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load">
+        <button
+          v-if="activeTab !== 'archive'"
+          type="button"
+          :class="btnOutline('neutral')"
+          :disabled="loading"
+          @click="load"
+        >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path :d="ICONS.cycle" />
           </svg>
@@ -511,20 +551,20 @@ onMounted(load)
     </section>
 
     <PayrollFocusNotice
-      v-if="focusMissing"
+      v-if="activeTab !== 'archive' && focusMissing"
       :name="String(focusPersonId)"
       missing
       @clear="clearFocus"
     />
     <PayrollFocusNotice
-      v-else-if="focusName"
+      v-else-if="activeTab !== 'archive' && focusName"
       :name="focusName"
       @clear="clearFocus"
     />
 
     <nav class="flex gap-1 overflow-x-auto border-b border-neutral-200" :aria-label="t('payroll.documents.tabs_label')">
       <button
-        v-for="tab in (['monthly', 'annual'] as const)"
+        v-for="tab in (['monthly', 'annual', 'archive'] as const)"
         :key="tab"
         type="button"
         :class="[
@@ -538,6 +578,109 @@ onMounted(load)
         {{ t(`payroll.documents.tabs.${tab}`) }}
       </button>
     </nav>
+
+    <section
+      v-if="activeTab === 'archive'"
+      data-test="period-export-panel"
+      class="rounded-xl border border-payroll-500/20 bg-surface p-5 shadow-sm"
+    >
+      <div class="flex items-start gap-3">
+        <svg class="mt-0.5 h-5 w-5 shrink-0 text-payroll-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path :d="ICONS.archive" />
+        </svg>
+        <div class="max-w-4xl">
+          <h2 class="font-semibold text-neutral-900">
+            {{ t('payroll.documents.period_export.title') }}
+          </h2>
+          <p class="mt-1 text-sm text-neutral-600">
+            {{ t('payroll.documents.period_export.description') }}
+          </p>
+          <p class="mt-2 text-xs text-neutral-500">
+            {{ t('payroll.documents.period_export.security_hint') }}
+          </p>
+        </div>
+      </div>
+
+      <div class="mt-5 grid gap-4 lg:grid-cols-2">
+        <article class="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+          <h3 class="font-medium text-neutral-900">
+            {{ t('payroll.documents.period_export.monthly_title') }}
+          </h3>
+          <p class="mt-1 text-sm text-neutral-600">
+            {{ t('payroll.documents.period_export.monthly_hint') }}
+          </p>
+          <div class="mt-4 flex flex-wrap items-end gap-3">
+            <label class="block min-w-44 flex-1">
+              <span class="form-label">{{ t('payroll.documents.period') }}</span>
+              <input
+                v-model="period"
+                data-test="period-export-month"
+                type="month"
+                min="2024-01"
+                class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 focus:border-payroll-500 focus:ring-payroll-500/20"
+              >
+            </label>
+            <button
+              type="button"
+              data-test="download-monthly-period-export"
+              :class="btnFilled('primary')"
+              :disabled="exportingScope !== null || !auth.canWrite('payroll.documents')"
+              @click="downloadPeriodExport('monthly')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.download" />
+              </svg>
+              {{ t(exportingScope === 'monthly'
+                ? 'payroll.documents.period_export.preparing'
+                : 'payroll.documents.period_export.download_monthly') }}
+            </button>
+          </div>
+        </article>
+
+        <article class="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+          <h3 class="font-medium text-neutral-900">
+            {{ t('payroll.documents.period_export.annual_title') }}
+          </h3>
+          <p class="mt-1 text-sm text-neutral-600">
+            {{ t('payroll.documents.period_export.annual_hint') }}
+          </p>
+          <div class="mt-4 flex flex-wrap items-end gap-3">
+            <label class="block min-w-44 flex-1">
+              <span class="form-label">{{ t('payroll.documents.year') }}</span>
+              <input
+                v-model.number="year"
+                data-test="period-export-year"
+                type="number"
+                min="2000"
+                max="2199"
+                class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 focus:border-payroll-500 focus:ring-payroll-500/20"
+              >
+            </label>
+            <button
+              type="button"
+              data-test="download-annual-period-export"
+              :class="btnFilled('primary')"
+              :disabled="exportingScope !== null || !auth.canWrite('payroll.documents')"
+              @click="downloadPeriodExport('annual')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.download" />
+              </svg>
+              {{ t(exportingScope === 'annual'
+                ? 'payroll.documents.period_export.preparing'
+                : 'payroll.documents.period_export.download_annual') }}
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <p
+        v-if="!auth.canWrite('payroll.documents')"
+        class="mt-4 text-sm text-warning-700"
+      >
+        {{ t('payroll.documents.period_export.permission_required') }}
+      </p>
+    </section>
 
     <section
       v-if="activeTab === 'annual' && auth.canWrite('payroll.documents')"
@@ -629,12 +772,12 @@ onMounted(load)
       </div>
     </section>
 
-    <div v-if="loading" class="space-y-3">
+    <div v-if="activeTab !== 'archive' && loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-20 animate-pulse rounded-xl bg-neutral-100" />
     </div>
 
     <section
-      v-else-if="!visibleItems.length"
+      v-else-if="activeTab !== 'archive' && !visibleItems.length"
       class="rounded-xl border border-dashed border-neutral-300 bg-surface px-5 py-12 text-center"
     >
       <svg class="mx-auto h-10 w-10 text-neutral-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -644,7 +787,7 @@ onMounted(load)
       <p class="mx-auto mt-1 max-w-xl text-sm text-neutral-500">{{ t('payroll.documents.empty_description') }}</p>
     </section>
 
-    <template v-else>
+    <template v-else-if="activeTab !== 'archive'">
       <section data-test="documents-table" class="hidden overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
         <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
           <ColumnPicker class="hidden md:block" :ctrl="tbl" />

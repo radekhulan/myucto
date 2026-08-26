@@ -104,6 +104,47 @@ právě ty dokumenty, které už byly k revizi archivovány, a strojově čiteln
 manifest s jejich otisky. Doplníš-li později další dokument, vznikne nová
 revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.
 
+## Měsíční a roční archiv mezd
+
+Záložka **Archiv mezd** vytváří souhrnný ZIP za celou firmu. Není to export
+jednoho zaměstnance a kvůli jeho sestavení se nenačítá ani nevybírá seznam
+zaměstnanců. Hodí se pro pravidelnou měsíční zálohu mzdové uzávěrky, předání
+kontrolovatelných podkladů a roční archivaci.
+
+1. Otevřete **Mzdy → Dokumenty a výstupy → Archiv mezd**.
+2. Pro měsíční archiv vyberte měsíc, pro roční archiv rok.
+3. Stiskněte **Vytvořit a stáhnout měsíční ZIP** nebo **Vytvořit a stáhnout
+   roční ZIP**. Příprava větší firmy může chvíli trvat; tlačítko po dobu práce
+   nelze spustit podruhé.
+4. Stažený soubor uložte do firemního zabezpečeného úložiště. Obsahuje osobní
+   a mzdové údaje a musí mít stejnou ochranu jako výplatní pásky.
+5. Při dlouhodobé archivaci ověřte `CHECKSUMS.txt` proti souborům v ZIPu a
+   `manifest.json`, který popisuje období, zdrojové revize, velikosti a SHA-256
+   otisky.
+
+Archiv vychází jen ze schválených nebo pozdější revizí nahrazených zmrazených
+mzdových zdrojů. Měsíční ZIP zahrne všechny takové revize vybraného měsíce ve
+všech mzdových účtárnách, nikoli jen poslední opravu. Roční ZIP zahrne totéž za
+celý rok a navíc dostupné neměnné roční snapshoty a jejich zdrojové vazby.
+Přidají se již archivované mzdové dokumenty, datové věty a validační nebo
+doručovací artefakty podání a protokoly JMHZ, u kterých je bezpečně doložené
+období. Každý binární soubor se před zařazením znovu ověří uloženou velikostí
+a SHA-256 otiskem.
+
+Do archivu se záměrně nezařazují dnešní editovatelné karty zaměstnanců,
+proměnlivý provozní stav podání, protokoly bez doloženého období ani libovolné
+ručně přidané přílohy podání. Nikdy se neexportují hesla, komunikační kódy,
+přístupové tokeny, certifikáty nebo soukromé klíče. Roční citlivý snapshot se
+před zařazením dešifruje pouze v paměti a ověří klíčovaným otiskem; databázový
+šifrovaný blob se do ZIPu nekopíruje.
+
+Vytvořený ZIP je v serverovém archivu uložen šifrovaně a odděleně pro právě
+zvolenou firmu. Prohlížeč nejprve vytvoří archiv, potom získá krátkodobé
+jednorázové oprávnění a teprve nakonec soubor stáhne. Oprávnění je svázané s
+přihlášeným uživatelem i firmou, neposílá se v adrese a po prvním použití už
+neplatí. Pokud za období není žádná schválená mzdová revize nebo nesouhlasí
+integrita zdroje, aplikace ZIP nevytvoří a zobrazí důvod.
+
 > [!WARNING]
 > Výplatní pásky vznikají automaticky při schválení; mzdový list a obě daňová
 > potvrzení vytvoříš v záložce Roční dokumenty. Potvrzení při skončení vytváříš

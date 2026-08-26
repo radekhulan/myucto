@@ -109,6 +109,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
+use MyInvoice\Action\Payroll\PayrollPeriodExportAction;
 use MyInvoice\Action\Payroll\PayrollPayoutRulesAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
@@ -878,6 +879,22 @@ final class Routes
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
+            $g->post(
+                '/exports/monthly/{period:[0-9]{4}-[0-9]{2}}',
+                [PayrollPeriodExportAction::class, 'createMonthly'],
+            );
+            $g->post(
+                '/exports/annual/{year:[0-9]{4}}',
+                [PayrollPeriodExportAction::class, 'createAnnual'],
+            );
+            $g->post(
+                '/exports/{exportId:[0-9]+}/download-grants',
+                [PayrollPeriodExportAction::class, 'grant'],
+            );
+            $g->post(
+                '/exports/download',
+                [PayrollPeriodExportAction::class, 'download'],
+            );
             $g->post(
                 '/people/{employeeId:[0-9]+}/documents/payroll-sheet/{year:[0-9]{4}}',
                 [PayrollDocumentAction::class, 'generatePayrollSheet'],

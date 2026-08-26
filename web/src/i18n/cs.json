@@ -1837,7 +1837,23 @@
             "tabs_label": "Typ mzdových dokumentů",
             "tabs": {
                 "monthly": "Měsíční výstupy",
-                "annual": "Roční dokumenty"
+                "annual": "Roční dokumenty",
+                "archive": "Archiv mezd"
+            },
+            "period_export": {
+                "title": "Měsíční a roční archiv mezd",
+                "description": "Stáhněte jeden kontrolovatelný ZIP se mzdovými snapshoty, již archivovanými dokumenty, podáními a protokoly za celou firmu. Seznam zaměstnanců se kvůli exportu nenačítá ani nevybírá.",
+                "security_hint": "Archiv vzniká výhradně ze schválených nebo nahrazených zmrazených revizí. Obsahuje manifest a SHA-256 otisky; hesla, přístupové tokeny, certifikáty, soukromé klíče ani libovolné ruční přílohy se do něj nezařadí.",
+                "monthly_title": "Archiv jednoho měsíce",
+                "monthly_hint": "Zahrne všechny schválené revize vybraného měsíce napříč mzdovými účtárnami, včetně opravných návazností.",
+                "annual_title": "Archiv celého roku",
+                "annual_hint": "Zahrne schválené měsíce roku a dostupné neměnné roční snapshoty a dokumenty.",
+                "download_monthly": "Vytvořit a stáhnout měsíční ZIP",
+                "download_annual": "Vytvořit a stáhnout roční ZIP",
+                "preparing": "Připravuji bezpečný ZIP…",
+                "downloaded": "Archiv {filename} byl vytvořen a předán ke stažení.",
+                "failed": "Archiv mezd se nepodařilo vytvořit nebo stáhnout.",
+                "permission_required": "K vytvoření archivu potřebujete právo zapisovat mzdové dokumenty."
             },
             "select_employee": "Zaměstnanec",
             "select_employee_placeholder": "Vyberte zaměstnance…",
