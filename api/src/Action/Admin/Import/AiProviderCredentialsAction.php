@@ -14,6 +14,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Import\AnthropicClient;
 use MyInvoice\Service\Import\AzureOpenAiClient;
 use MyInvoice\Service\Import\GeminiClient;
+use MyInvoice\Service\Import\InvoiceExtractionPrompt;
 use MyInvoice\Service\Import\LlmProviderCapabilities;
 use MyInvoice\Service\Import\LlmGatewayInterface;
 use MyInvoice\Service\Import\OpenAiClient;
@@ -104,10 +105,16 @@ final class AiProviderCredentialsAction
             }
         }
 
+        $tuning = $this->tuning($supplierId);
+
         return Json::ok($response, [
             'ai_provider'              => $sel['ai_provider'],
             'ai_data_region'           => $sel['ai_data_region'],
             'ai_eu_residency_required' => $sel['ai_eu_residency_required'],
+            'ai_extraction_notes'      => $tuning['ai_extraction_notes'],
+            'ai_effort'                => $tuning['ai_effort'],
+            'ai_efforts'               => LlmProviderCapabilities::EFFORTS,
+            'ai_extraction_notes_max'  => InvoiceExtractionPrompt::TENANT_NOTES_MAX,
             'providers'                => $providers,
         ]);
     }
@@ -466,6 +473,90 @@ final class AiProviderCredentialsAction
             'azure_openai' => (int) ($row['azure_extractions_count'] ?? 0),
             'openai'       => (int) ($row['openai_extractions_count'] ?? 0),
             'gemini'       => (int) ($row['gemini_extractions_count'] ?? 0),
+        ];
+    }
+
+    /**
+     * PUT /api/admin/imports/ai/tuning — dvě per-tenant páčky na ladění extrakce:
+     * volné poznámky do promptu a volba rychle/přesně. Žádné secrety, takže žádný
+     * testConnection ani dotyk `*_enc` sloupců.
+     *
+     * Updatuje POUZE pole skutečně přítomná v requestu, aby dílčí PATCH nesmazal to
+     * druhé.
+     */
+    public function updateTuning(Request $request, Response $response): Response
+    {
+        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        $supplierId = SupplierGuard::currentId($request);
+        $user   = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
+        $body   = (array) ($request->getParsedBody() ?? []);
+
+        $sets   = [];
+        $params = [];
+
+        if (array_key_exists('ai_extraction_notes', $body)) {
+            $notes = trim((string) $body['ai_extraction_notes']);
+            if (mb_strlen($notes) > InvoiceExtractionPrompt::TENANT_NOTES_MAX) {
+                return Json::error(
+                    $response,
+                    'validation_failed',
+                    'Poznámky k extrakci mohou mít nejvýš ' . InvoiceExtractionPrompt::TENANT_NOTES_MAX . ' znaků.',
+                    422,
+                );
+            }
+            $sets[]   = 'ai_extraction_notes = ?';
+            $params[] = $notes !== '' ? $notes : null;
+        }
+
+        if (array_key_exists('ai_effort', $body)) {
+            $effort = trim((string) $body['ai_effort']);
+            if (!in_array($effort, LlmProviderCapabilities::EFFORTS, true)) {
+                return Json::error($response, 'validation_failed', 'Neplatná míra uvažování AI.', 422);
+            }
+            $sets[]   = 'ai_effort = ?';
+            $params[] = $effort;
+        }
+
+        if ($sets === []) {
+            return Json::error($response, 'validation_failed', 'Nebylo co uložit.', 400);
+        }
+
+        $params[] = $supplierId;
+        $this->db->pdo()->prepare('UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
+
+        $this->logger->log(
+            'import.ai_tuning_changed',
+            $userId,
+            'supplier',
+            $supplierId,
+            // Text poznámek se do auditu NEукládá (může nést obchodní detaily), jen že se změnil.
+            ['fields' => array_keys(array_intersect_key($body, ['ai_extraction_notes' => 1, 'ai_effort' => 1]))],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+        );
+
+        return Json::ok($response, $this->tuning($supplierId) + ['saved' => true]);
+    }
+
+    /** @return array{ai_extraction_notes:string, ai_effort:string} */
+    private function tuning(int $supplierId): array
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT ai_extraction_notes, ai_effort FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        } catch (\Throwable) {
+            // Kód napřed proti nezmigrované DB by jinak shodil celý status(), a ten FE
+            // polyká do prázdné obrazovky — radši vrať výchozí hodnoty.
+            $row = [];
+        }
+        $effort = (string) ($row['ai_effort'] ?? LlmProviderCapabilities::EFFORT_DEFAULT);
+        return [
+            'ai_extraction_notes' => (string) ($row['ai_extraction_notes'] ?? ''),
+            'ai_effort'           => in_array($effort, LlmProviderCapabilities::EFFORTS, true)
+                ? $effort
+                : LlmProviderCapabilities::EFFORT_DEFAULT,
         ];
     }
 

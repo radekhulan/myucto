@@ -214,6 +214,8 @@ final class OpenAiClient implements LlmGatewayInterface
             'max_completion_tokens' => $maxTokens,
             'response_format'       => $responseFormat,
         ];
+        $payload += LlmProviderCapabilities::openai($creds['base_url'] ?? null, $creds['default_model'] ?? null)
+            ->effortPayload((string) $payload['model'], $this->tenantEffort($supplierId));
 
         try {
             ['code' => $code, 'body' => $body] = $this->post($creds, $payload);
@@ -230,6 +232,25 @@ final class OpenAiClient implements LlmGatewayInterface
             return ['ok' => false, 'error' => 'Prázdná odpověď od OpenAI'];
         }
         return ['ok' => true, 'text' => $text, 'model' => $body['model'] ?? $payload['model'], 'usage' => self::mapUsage($body['usage'] ?? null)];
+    }
+
+    /**
+     * Zvolená míra uvažování tenanta ({@see LlmProviderCapabilities::EFFORTS}).
+     * Fail-safe: cokoliv nečekaného (chybějící sloupec, DB error) znamená `default`,
+     * tedy neposílat providerovi nic navíc.
+     */
+    private function tenantEffort(int $supplierId): string
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT ai_effort FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $v = (string) $stmt->fetchColumn();
+        } catch (\Throwable) {
+            return LlmProviderCapabilities::EFFORT_DEFAULT;
+        }
+        return in_array($v, LlmProviderCapabilities::EFFORTS, true)
+            ? $v
+            : LlmProviderCapabilities::EFFORT_DEFAULT;
     }
 
     /**

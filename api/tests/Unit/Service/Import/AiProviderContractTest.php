@@ -332,6 +332,101 @@ final class AiProviderContractTest extends TestCase
     }
 
     /**
+     * Volba rychle/přesně se překládá na provider-nativní knob a hlavně se NEPOSÍLÁ
+     * modelům, které ho neumí — tam je to tvrdá 400, ne degradace. Matice ověřena
+     * živě proti API (private/scripts/probe_llm_effort.php).
+     */
+    public function testEffortPayload_onlyForModelsThatSupportIt(): void
+    {
+        $anthropic = LlmProviderCapabilities::anthropic();
+        // haiku effort parametr nezná.
+        self::assertSame([], $anthropic->effortPayload('claude-haiku-4-5', LlmProviderCapabilities::EFFORT_ACCURATE));
+        self::assertSame(
+            ['output_config' => ['effort' => 'high']],
+            $anthropic->effortPayload('claude-sonnet-5', LlmProviderCapabilities::EFFORT_ACCURATE),
+        );
+        self::assertSame(
+            ['output_config' => ['effort' => 'low']],
+            $anthropic->effortPayload('claude-opus-4-7', LlmProviderCapabilities::EFFORT_FAST),
+        );
+
+        $openai = LlmProviderCapabilities::openai(null, null);
+        self::assertSame(
+            ['reasoning_effort' => 'high'],
+            $openai->effortPayload('gpt-5.6-sol', LlmProviderCapabilities::EFFORT_ACCURATE),
+        );
+        self::assertSame(
+            ['reasoning_effort' => 'low'],
+            $openai->effortPayload('gpt-5.4-mini', LlmProviderCapabilities::EFFORT_FAST),
+        );
+        self::assertSame(['reasoning_effort' => 'low'], $openai->effortPayload('o3-mini', LlmProviderCapabilities::EFFORT_FAST));
+        // gpt-4.x hlásí „Unrecognized request argument" — nesmí ho dostat.
+        foreach (['gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini'] as $legacy) {
+            self::assertSame([], $openai->effortPayload($legacy, LlmProviderCapabilities::EFFORT_ACCURATE), $legacy);
+        }
+
+        $gemini = LlmProviderCapabilities::gemini(null);
+        self::assertSame(
+            ['thinkingConfig' => ['thinkingLevel' => 'high']],
+            $gemini->effortPayload('gemini-3.7-flash', LlmProviderCapabilities::EFFORT_ACCURATE),
+        );
+        // gemini-2.5 zná jen starší thinkingBudget.
+        self::assertSame(
+            ['thinkingConfig' => ['thinkingBudget' => 8192]],
+            $gemini->effortPayload('gemini-2.5-pro', LlmProviderCapabilities::EFFORT_ACCURATE),
+        );
+        // Azure deployment může nést cokoliv → fail-safe mlčíme.
+        self::assertSame([], LlmProviderCapabilities::azureOpenai('https://x.openai.azure.com', 'gpt-5')
+            ->effortPayload('gpt-5', LlmProviderCapabilities::EFFORT_ACCURATE));
+    }
+
+    /**
+     * `default` znamená „chovej se jako před zavedením volby" — žádnému providerovi
+     * se nesmí poslat nic navíc. Totéž pro nesmyslnou hodnotu (fail-safe).
+     */
+    public function testEffortPayload_defaultSendsNothingAnywhere(): void
+    {
+        $all = [
+            LlmProviderCapabilities::anthropic(),
+            LlmProviderCapabilities::openai(null, null),
+            LlmProviderCapabilities::gemini(null),
+            LlmProviderCapabilities::azureOpenai('https://x.openai.azure.com', 'dep'),
+        ];
+        foreach ($all as $caps) {
+            foreach (['claude-sonnet-5', 'gpt-5.6-sol', 'gemini-3.7-flash', 'dep'] as $model) {
+                self::assertSame([], $caps->effortPayload($model, LlmProviderCapabilities::EFFORT_DEFAULT), "$caps->id/$model default");
+                self::assertSame([], $caps->effortPayload($model, 'nesmysl'), "$caps->id/$model nesmysl");
+            }
+        }
+    }
+
+    /**
+     * Poznámky účtárny jdou do promptu jako DATA v oddělené sekci, ne jako pravidla,
+     * a jsou useknuté na strop — jinak by šlo prompt utopit nebo přebít schéma.
+     */
+    public function testTenantNotes_isolatedSectionAndCapped(): void
+    {
+        self::assertSame('', InvoiceExtractionPrompt::tenantNotes(null));
+        self::assertSame('', InvoiceExtractionPrompt::tenantNotes('   '));
+        self::assertSame('', InvoiceExtractionPrompt::tenantNotes(123));
+
+        $block = InvoiceExtractionPrompt::tenantNotes('ACME píše VS do pole Reference.');
+        self::assertStringContainsString('ACME píše VS do pole Reference.', $block);
+        // Sekce musí sama říct, že nepřebíjí pravidla výše.
+        self::assertStringContainsString('NE pravidla', $block);
+        self::assertStringContainsString('platí pravidla výše', $block);
+
+        // Vyplň znakem, který hlavička sekce sama neobsahuje, jinak by se počítala i ona.
+        $long = str_repeat('ü', InvoiceExtractionPrompt::TENANT_NOTES_MAX + 500);
+        $capped = InvoiceExtractionPrompt::tenantNotes($long);
+        self::assertSame(
+            InvoiceExtractionPrompt::TENANT_NOTES_MAX,
+            mb_substr_count($capped, 'ü'),
+            'poznámky se musí useknout na strop',
+        );
+    }
+
+    /**
      * Allowlist v credentials akci a whitelist v capabilities nesmí dřív nezaležely
      * na sobě divergovat — dnes oba čtou týž zdroj pravdy.
      */

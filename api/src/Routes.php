@@ -1807,6 +1807,8 @@ final class Routes
         $app->delete ('/api/admin/imports/ai/credentials',        [AiProviderCredentialsAction::class, 'delete']);
         // TestConnection bez změny uložených creds (admin-only; default 403 fallback).
         $app->post   ('/api/admin/imports/ai/credentials/test',   [AiProviderCredentialsAction::class, 'test']);
+        // Ladění extrakce (poznámky do promptu + rychle/přesně). Žádné secrety.
+        $app->put    ('/api/admin/imports/ai/tuning',             [AiProviderCredentialsAction::class, 'updateTuning']);
 
         // Anthropic Claude AI extraction (fáze 2c) — BYOK + synchronní PDF extract.
         // /anthropic/credentials zůstává jako back-compat alias (F7 §3.8).

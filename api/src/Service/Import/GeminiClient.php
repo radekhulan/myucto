@@ -221,6 +221,12 @@ final class GeminiClient implements LlmGatewayInterface
         } elseif (str_starts_with($model, 'gemini-2.5-')) {
             $generationConfig['thinkingConfig'] = ['thinkingBudget' => 1024];
         }
+        // Volba tenanta rychle/přesně přebije výchozí thinkingConfig výše.
+        $generationConfig = array_replace(
+            $generationConfig,
+            LlmProviderCapabilities::gemini($creds['default_model'] ?? null)
+                ->effortPayload($model, $this->tenantEffort($supplierId)),
+        );
         if ($responseSchema !== null) {
             $generationConfig['responseSchema'] = $responseSchema;
         }
@@ -275,6 +281,26 @@ final class GeminiClient implements LlmGatewayInterface
      * @param array<string,mixed> $payload
      * @return array{code:int, body:array<string,mixed>|null}
      */
+
+    /**
+     * Zvolená míra uvažování tenanta ({@see LlmProviderCapabilities::EFFORTS}).
+     * Fail-safe: cokoliv nečekaného (chybějící sloupec, DB error) znamená `default`,
+     * tedy neposílat providerovi nic navíc.
+     */
+    private function tenantEffort(int $supplierId): string
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT ai_effort FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $v = (string) $stmt->fetchColumn();
+        } catch (\Throwable) {
+            return LlmProviderCapabilities::EFFORT_DEFAULT;
+        }
+        return in_array($v, LlmProviderCapabilities::EFFORTS, true)
+            ? $v
+            : LlmProviderCapabilities::EFFORT_DEFAULT;
+    }
+
     private function post(string $model, string $apiKey, array $payload): array
     {
         $url = self::BASE_URL . '/models/' . rawurlencode($model) . ':generateContent';

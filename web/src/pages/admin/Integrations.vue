@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { integrationsApi,
   type IdokladCredentialsStatus, type FakturoidCredentialsStatus,
   type ImportJob,
-  type AiProvider, type AiDataRegion, type AiCredentialsResponse, type AiCredentialsPayload } from '@/api/integrations'
+  type AiProvider, type AiDataRegion, type AiCredentialsResponse, type AiCredentialsPayload,
+  type AiEffort } from '@/api/integrations'
 import { settingsApi, type AiAssistSettings, type AiAssistScope } from '@/api/settings'
 import { useRoute } from 'vue-router'
 import { useToast } from '@/composables/useToast'
@@ -291,6 +292,16 @@ const credForm = reactive({
   base_url: '',                                     // openai
 })
 const credShowKey = ref(false)
+// Ladění extrakce (per tenant, ne per provider) — poznámky do promptu + rychle/přesně.
+const aiNotes = ref('')
+const aiEffort = ref<AiEffort>('default')
+const aiTuningSaving = ref(false)
+const aiTuningMsg = ref<{ ok: boolean; text: string } | null>(null)
+const aiNotesMax = computed(() => aiCreds.value?.ai_extraction_notes_max ?? 2000)
+const aiEffortOptions = computed<AiEffort[]>(() => aiCreds.value?.ai_efforts ?? ['default', 'fast', 'accurate'])
+const aiTuningDirty = computed(() =>
+  aiNotes.value !== (aiCreds.value?.ai_extraction_notes ?? '')
+  || aiEffort.value !== (aiCreds.value?.ai_effort ?? 'default'))
 const credSaving = ref(false)
 const credTesting = ref(false)
 const credTestMsg = ref<{ ok: boolean; text: string } | null>(null)
@@ -322,10 +333,36 @@ async function loadAiCreds() {
     aiProvider.value = aiCreds.value.ai_provider
     aiRegion.value = aiCreds.value.ai_data_region
     aiEuRequired.value = aiCreds.value.ai_eu_residency_required
+    aiNotes.value = aiCreds.value.ai_extraction_notes ?? ''
+    aiEffort.value = aiCreds.value.ai_effort ?? 'default'
+    aiTuningMsg.value = null
     syncCredForm()
   } catch {
     // Backend brána ještě nemusí být nasazená — degradujeme defenzivně (UI zůstane prázdné).
     aiCreds.value = null
+  }
+}
+
+async function saveAiTuning() {
+  if (aiTuningSaving.value) return
+  aiTuningSaving.value = true
+  aiTuningMsg.value = null
+  try {
+    const r = await integrationsApi.setAiTuning({
+      ai_extraction_notes: aiNotes.value,
+      ai_effort: aiEffort.value,
+    })
+    if (aiCreds.value) {
+      aiCreds.value.ai_extraction_notes = r.ai_extraction_notes
+      aiCreds.value.ai_effort = r.ai_effort
+    }
+    aiNotes.value = r.ai_extraction_notes
+    aiEffort.value = r.ai_effort
+    aiTuningMsg.value = { ok: true, text: t('common.saved') }
+  } catch (e: any) {
+    aiTuningMsg.value = { ok: false, text: e?.response?.data?.message ?? t('common.save_failed') }
+  } finally {
+    aiTuningSaving.value = false
   }
 }
 
@@ -1029,6 +1066,39 @@ onMounted(() => {
           <div v-if="credTestMsg" class="mt-3 rounded-md px-3 py-2 text-sm"
                :class="credTestMsg.ok ? 'bg-success-50 text-success-600 border border-success-500/40' : 'bg-danger-50 text-danger-500 border border-danger-500/40'">
             {{ credTestMsg.text }}
+          </div>
+
+          <!-- Ladění extrakce — platí pro tenanta napříč providery, ne jen pro vybraného. -->
+          <div v-if="aiCreds" class="mt-4 pt-4 border-t border-neutral-100 space-y-4">
+            <div>
+              <label class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.effort') }}</label>
+              <select v-model="aiEffort" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                <option v-for="e in aiEffortOptions" :key="e" :value="e">{{ t(`aiGateway.effort_${e}`) }}</option>
+              </select>
+              <p class="mt-1 text-xs text-neutral-500">{{ t('aiGateway.effort_hint') }}</p>
+            </div>
+
+            <div>
+              <label class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.notes') }}</label>
+              <textarea v-model="aiNotes" rows="4" :maxlength="aiNotesMax"
+                        :placeholder="t('aiGateway.notes_placeholder')"
+                        class="w-full px-3 py-2 border border-neutral-300 rounded-md bg-surface text-sm"></textarea>
+              <div class="mt-1 flex items-start justify-between gap-3">
+                <p class="text-xs text-neutral-500">{{ t('aiGateway.notes_hint') }}</p>
+                <span class="text-xs text-neutral-400 shrink-0">{{ aiNotes.length }} / {{ aiNotesMax }}</span>
+              </div>
+            </div>
+
+            <div v-if="aiTuningMsg" class="rounded-md px-3 py-2 text-sm"
+                 :class="aiTuningMsg.ok ? 'bg-success-50 text-success-600 border border-success-500/40' : 'bg-danger-50 text-danger-500 border border-danger-500/40'">
+              {{ aiTuningMsg.text }}
+            </div>
+
+            <div class="flex justify-end">
+              <button type="button" :class="btnOutline('primary')" :disabled="aiTuningSaving || !aiTuningDirty" @click="saveAiTuning">
+                {{ aiTuningSaving ? t('common.loading') : t('aiGateway.save_tuning') }}
+              </button>
+            </div>
           </div>
 
           <div class="flex items-center justify-between gap-2 mt-4 pt-4 border-t border-neutral-100">

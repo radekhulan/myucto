@@ -122,11 +122,30 @@ export interface AiProviderInfo {
   base_url?: string | null       // openai (EU: eu.api.openai.com)
 }
 
+/** Míra uvažování AI. `default` = neposílat providerovi nic navíc. */
+export type AiEffort = 'default' | 'fast' | 'accurate'
+
 export interface AiCredentialsResponse {
   ai_provider: AiProvider
   ai_data_region: AiDataRegion
   ai_eu_residency_required: boolean
+  /** Volné poznámky firmy připojené k system promptu extrakce. */
+  ai_extraction_notes: string
+  ai_effort: AiEffort
+  ai_efforts: AiEffort[]
+  ai_extraction_notes_max: number
   providers: Record<AiProvider, AiProviderInfo>
+}
+
+export interface AiTuningPayload {
+  ai_extraction_notes?: string
+  ai_effort?: AiEffort
+}
+
+export interface AiTuningResult {
+  saved: boolean
+  ai_extraction_notes: string
+  ai_effort: AiEffort
 }
 
 export interface AiCredentialsPayload {
@@ -227,6 +246,8 @@ export const integrationsApi = {
     api.put<AiCredentialsUpdateResult>('/admin/imports/ai/credentials', payload).then(r => r.data),
   deleteAiCredentials: (provider: AiProvider) =>
     api.delete<{ ok: boolean }>('/admin/imports/ai/credentials', { params: { provider } }).then(r => r.data),
+  setAiTuning: (payload: AiTuningPayload) =>
+    api.put<AiTuningResult>('/admin/imports/ai/tuning', payload).then(r => r.data),
   testAiConnection: (provider: AiProvider) =>
     api.post<AiCredentialsUpdateResult>('/admin/imports/ai/credentials/test', { provider }).then(r => r.data),
   extractPdfAi: (file: File, model?: string, importBatchId?: string) => {

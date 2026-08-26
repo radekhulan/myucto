@@ -615,7 +615,7 @@ EOT;
                         ],
                     ],
                 ]],
-            ], $creds['api_key']);
+            ], $creds['api_key'], $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -714,7 +714,7 @@ EOT;
                         ['type' => 'text', 'text' => 'Vytáhni jednotlivé transakce tankování z detailního výpisu podle JSON schema. Odpověz JEN JSON.'],
                     ],
                 ]],
-            ], $creds['api_key']);
+            ], $creds['api_key'], $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -807,7 +807,7 @@ EOT;
                         ],
                     ],
                 ]],
-            ], $creds['api_key']);
+            ], $creds['api_key'], $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -900,7 +900,7 @@ EOT;
                         ],
                     ],
                 ]],
-            ], $creds['api_key']);
+            ], $creds['api_key'], $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -946,15 +946,19 @@ EOT;
     {
         try {
             $stmt = $this->db->pdo()->prepare(
-                'SELECT company_name, ic, dic FROM supplier WHERE id = ?'
+                'SELECT company_name, ic, dic, ai_extraction_notes FROM supplier WHERE id = ?'
             );
             $stmt->execute([$supplierId]);
             $t = $stmt->fetch(\PDO::FETCH_ASSOC);
         } catch (\Throwable) {
             return '';
         }
-        if ($t === false || empty($t['company_name']) && empty($t['ic'])) {
+        if ($t === false) {
             return '';
+        }
+        $notes = InvoiceExtractionPrompt::tenantNotes($t['ai_extraction_notes'] ?? null);
+        if (empty($t['company_name']) && empty($t['ic'])) {
+            return $notes;
         }
         $name = (string) ($t['company_name'] ?? '');
         $ic   = (string) ($t['ic'] ?? '');
@@ -978,7 +982,26 @@ EOT;
             . "  pozná podle shody s firmou z tohoto kontextu, dodavatel je vždy ta DRUHÁ strana.\n"
             . "- Pokud bys vrátil tuto firmu jako vendor, znamená to že jsi špatně přečetl PDF — importér to detekuje a fakturu zamítne.\n\n",
             $tenantHint,
-        );
+        ) . $notes;
+    }
+
+    /**
+     * Zvolená míra uvažování tenanta ({@see LlmProviderCapabilities::EFFORTS}).
+     * Fail-safe: cokoliv nečekaného (chybějící sloupec, DB error) znamená `default`,
+     * tedy neposílat providerovi nic navíc.
+     */
+    private function tenantEffort(int $supplierId): string
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT ai_effort FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $v = (string) $stmt->fetchColumn();
+        } catch (\Throwable) {
+            return LlmProviderCapabilities::EFFORT_DEFAULT;
+        }
+        return in_array($v, LlmProviderCapabilities::EFFORTS, true)
+            ? $v
+            : LlmProviderCapabilities::EFFORT_DEFAULT;
     }
 
     private function authHeaders(string $apiKey): array
@@ -1000,8 +1023,12 @@ EOT;
      * @param array<string,mixed> $payload
      * @return array{code:int, body:array<string,mixed>|null}
      */
-    private function postWithRetry(array $payload, string $apiKey): array
+    private function postWithRetry(array $payload, string $apiKey, ?int $supplierId = null): array
     {
+        if ($supplierId !== null) {
+            $payload += LlmProviderCapabilities::anthropic()
+                ->effortPayload((string) ($payload['model'] ?? ''), $this->tenantEffort($supplierId));
+        }
         $this->applyThrottle();
         $attempt = 0;
         while (true) {

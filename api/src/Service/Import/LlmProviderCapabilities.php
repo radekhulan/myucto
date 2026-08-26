@@ -52,6 +52,15 @@ final readonly class LlmProviderCapabilities
     ];
 
     /**
+     * Volba „rychle vs. přesně" (per tenant, sloupec `supplier.ai_effort`).
+     * `default` = neposílat providerovi nic navíc, tedy chování před zavedením volby.
+     */
+    public const EFFORT_DEFAULT  = 'default';
+    public const EFFORT_FAST     = 'fast';
+    public const EFFORT_ACCURATE = 'accurate';
+    public const EFFORTS = [self::EFFORT_DEFAULT, self::EFFORT_FAST, self::EFFORT_ACCURATE];
+
+    /**
      * Žebříčky eskalace — tier tokeny od NEJSLABŠÍHO po NEJSILNĚJŠÍ.
      * {@see strongerModel()} z nich odvodí další stupeň, když extrakce neprojde.
      * Anthropic jde haiku → sonnet → opus → fable: fable je NEJSILNĚJŠÍ stupeň,
@@ -213,6 +222,63 @@ final readonly class LlmProviderCapabilities
             }
         }
         return null;
+    }
+
+    /**
+     * Přeloží volbu rychle/přesně na provider-nativní fragment payloadu. Vrací prázdné
+     * pole, když se nemá poslat nic — buď je volba `default`, nebo daný model knob
+     * neumí. To druhé je podstatné: poslat ho modelu, který ho nezná, je tvrdá 400,
+     * ne degradace. Ověřeno živě 2026-08-26 (private/scripts/probe_llm_effort.php):
+     *
+     *   - anthropic  `output_config.effort` — umí celý whitelist KROMĚ claude-haiku-4-5
+     *                (ten hlásí „does not support the effort parameter").
+     *   - openai     `reasoning_effort` — jen gpt-5 a novější plus řada o*; gpt-4.x
+     *                hlásí „Unrecognized request argument".
+     *   - gemini     `thinkingConfig` — u gemini-3.x `thinkingLevel`, u gemini-2.5
+     *                `thinkingBudget` (starší API tvar). POZOR: fragment patří dovnitř
+     *                `generationConfig`, ne do kořene payloadu.
+     *   - azure      nic — deployment může nést libovolný model a rozpoznat ho z názvu
+     *                spolehlivě nejde, takže fail-safe mlčíme.
+     *
+     * @return array<string,mixed>
+     */
+    public function effortPayload(string $model, string $effort): array
+    {
+        if ($effort === self::EFFORT_DEFAULT || !in_array($effort, self::EFFORTS, true)) {
+            return [];
+        }
+        $accurate = $effort === self::EFFORT_ACCURATE;
+
+        return match ($this->id) {
+            'anthropic' => str_contains($model, 'haiku')
+                ? []
+                : ['output_config' => ['effort' => $accurate ? 'high' : 'low']],
+            'openai' => self::openaiSupportsReasoningEffort($model)
+                ? ['reasoning_effort' => $accurate ? 'high' : 'low']
+                : [],
+            'gemini' => match (true) {
+                str_starts_with($model, 'gemini-2.5-') => ['thinkingConfig' => ['thinkingBudget' => $accurate ? 8192 : 512]],
+                str_starts_with($model, 'gemini-')     => ['thinkingConfig' => ['thinkingLevel' => $accurate ? 'high' : 'low']],
+                default                                => [],
+            },
+            default => [],
+        };
+    }
+
+    /**
+     * gpt-5 a novější (včetně pojmenovaných variant jako gpt-5.6-sol) a řada o1/o3/o4
+     * `reasoning_effort` berou; gpt-4.x ne. Verze se porovnává číselně, aby budoucí
+     * gpt-6 nespadlo na tom, že nezačíná „gpt-5".
+     */
+    private static function openaiSupportsReasoningEffort(string $model): bool
+    {
+        if (preg_match('/^o[1-9]/', $model) === 1) {
+            return true;
+        }
+        if (preg_match('/^gpt-(\d+)(?:\.(\d+))?/', $model, $m) !== 1) {
+            return false;
+        }
+        return (int) $m[1] >= 5;
     }
 
     /**

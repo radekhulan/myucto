@@ -15412,6 +15412,15 @@
         }
     },
     "aiGateway": {
+        "effort": "AI reasoning effort",
+        "effort_default": "Default (per model)",
+        "effort_fast": "Fast and cheap",
+        "effort_accurate": "Accurate (more reasoning)",
+        "effort_hint": "More accurate means slower and more expensive. Models without the knob ignore it.",
+        "notes": "Extraction notes",
+        "notes_placeholder": "E.g.: Vendor ACME puts the variable symbol in the Reference field. Invoices from Ireland carry no VAT.",
+        "notes_hint": "Free text for the AI — what the model cannot know about your invoices. Never overrides extraction rules.",
+        "save_tuning": "Save tuning",
         "settings_title": "AI extraction gateway settings",
         "provider_label": "AI provider",
         "provider": {

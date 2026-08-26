@@ -15412,6 +15412,15 @@
         }
     },
     "aiGateway": {
+        "effort": "Míra uvažování AI",
+        "effort_default": "Výchozí (podle modelu)",
+        "effort_fast": "Rychle a levně",
+        "effort_accurate": "Přesně (víc uvažování)",
+        "effort_hint": "Přesněji znamená pomalejší a dražší extrakci. Modely, které volbu neumí, ji ignorují.",
+        "notes": "Poznámky k extrakci",
+        "notes_placeholder": "Např.: Dodavatel ACME píše variabilní symbol do pole Reference. Faktury z Irska jsou bez DPH.",
+        "notes_hint": "Volný text pro AI — co model nemá odkud vědět o vašich fakturách. Nikdy nepřebije pravidla extrakce.",
+        "save_tuning": "Uložit ladění",
         "settings_title": "Nastavení AI extrakční brány",
         "provider_label": "Poskytovatel AI",
         "provider": {
