@@ -1201,6 +1201,10 @@ final class Routes
                 '/submissions/{submissionId:[0-9]+}/jmhz-cancel',
                 [PayrollJmhzCorrectionAction::class, 'cancel'],
             );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/jmhz-cancel-components',
+                [PayrollJmhzCorrectionAction::class, 'components'],
+            );
             $g->post(
                 '/submissions/{submissionId:[0-9]+}/jmhz-cancel-components',
                 [PayrollJmhzCorrectionAction::class, 'cancelComponents'],

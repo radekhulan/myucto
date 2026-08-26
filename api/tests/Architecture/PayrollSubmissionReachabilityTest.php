@@ -29,7 +29,7 @@ final class PayrollSubmissionReachabilityTest extends TestCase
      *
      * Nález je sám o sobě výsledek: tahle vada není jen v registraci. Celý
      * REGZEL most (příprava doplňujících údajů zaměstnavatele) je hotový
-     * a nikdy se nespustí, stejně jako storna JMHZ.
+     * a nikdy se nespustí.
      *
      * @var array<string,string>
      */
@@ -39,11 +39,6 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         'MyInvoice\Service\Payroll\Submission\Regzel\RegzelSubmissionBridgeService' => 'most REGZEL do MZ-19 nemá Action',
         'MyInvoice\Service\Payroll\Submission\Regzel\RegzelSubmissionPayload' => 'používá jen mrtvý most REGZEL',
         'MyInvoice\Service\Payroll\Submission\Regzel\RegzelSubmissionPayloadAssembler' => 'používá jen mrtvý most REGZEL',
-        // JMHZ storna a opravy (MZ-22 W8): serializéry hotové, workflow ne.
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCancellationRequest' => 'storno JMHZ nemá workflow',
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCancellationXmlSerializer' => 'storno JMHZ nemá workflow',
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellation' => 'storno složky JMHZ nemá workflow',
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellationXmlSerializer' => 'storno složky JMHZ nemá workflow',
         // Ověřování proti oficiálním příkladům ČSSZ: nástroj kvality, který
         // se zatím pouští jen z testů.
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOfficialExampleClassification' => 'ověřování oficiálních příkladů běží jen v testech',
@@ -54,8 +49,6 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver' => 'nahrazeno JmhzScenario1DocumentService',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution' => 'nahrazeno JmhzScenario1DocumentService',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer' => 'volá se přes JmhzScenario1XmlValidator',
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionFlagMatrix' => 'matice příznaků čeká na opravné podání',
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidPolicy' => 'politika GUIDů čeká na opravné podání',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzZeroReportProfile' => 'nulové hlášení nemá workflow',
         // Registrace staví snapshot přímo builderem: tahle služba váže
         // snapshot na revizi mzdového běhu, která u přihlášky před nástupem

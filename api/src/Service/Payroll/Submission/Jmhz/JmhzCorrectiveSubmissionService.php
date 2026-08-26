@@ -120,6 +120,37 @@ final readonly class JmhzCorrectiveSubmissionService
     }
 
     /**
+     * @return list<array{
+     *   form_guid:string,
+     *   person_external_identifier:string,
+     *   employment_external_identifier:string
+     * }>
+     */
+    public function correctableComponents(
+        int $supplierId,
+        string $environment,
+        int $originalSubmissionId,
+    ): array {
+        $original = $this->requireOriginal(
+            $supplierId,
+            $environment,
+            $originalSubmissionId,
+        );
+        if (!in_array($original['status'], ['accepted', 'partially_accepted'], true)) {
+            throw new \DomainException(
+                'Opravné podání lze připravit až po přijetí nebo částečném'
+                    . ' přijetí řádného hlášení ČSSZ.',
+            );
+        }
+
+        return $this->frozen->components(
+            $supplierId,
+            $environment,
+            $originalSubmissionId,
+        );
+    }
+
+    /**
      * @param list<JmhzComponentCancellation> $components
      * @return array{
      *   submission_id:int,part_id:int,artifact_id:int,status:string,

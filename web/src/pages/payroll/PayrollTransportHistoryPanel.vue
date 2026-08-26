@@ -31,6 +31,7 @@ import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
+  type PayrollJmhzCorrectableComponent,
   type PayrollJmhzImportedProtocol,
   type PayrollJmhzProtocolError,
   type PayrollJmhzTransportAttempt,
@@ -69,6 +70,11 @@ const copiedId = ref<number | null>(null)
 /** Podání, u kterého uživatel právě potvrzuje storno. Storno je nevratné. */
 const cancellingId = ref<number | null>(null)
 const cancelPendingId = ref<number | null>(null)
+const correctingId = ref<number | null>(null)
+const correctionPendingId = ref<number | null>(null)
+const correctionLoadingId = ref<number | null>(null)
+const correctableComponents = ref<PayrollJmhzCorrectableComponent[]>([])
+const selectedCorrectionGuids = ref<string[]>([])
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
@@ -151,7 +157,9 @@ const busy = computed(() =>
   || importing.value
   || pollingId.value !== null
   || closingId.value !== null
-  || cancelPendingId.value !== null,
+  || cancelPendingId.value !== null
+  || correctionPendingId.value !== null
+  || correctionLoadingId.value !== null,
 )
 
 const variableSymbolValid = computed(() =>
@@ -447,6 +455,8 @@ async function importProtocol(event: Event) {
 
 async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   if (next === environment.value || busy.value) return
+  cancellingId.value = null
+  closeCorrection()
   environment.value = next
   polls.value = {}
   // Jiné prostředí = jiné seznamy, takže stránky musí zpět na začátek.
@@ -497,9 +507,75 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
 
 function askToCancel(submissionId: number) {
   if (busy.value) return
+  correctingId.value = null
+  correctableComponents.value = []
+  selectedCorrectionGuids.value = []
   cancellingId.value = submissionId
   actionError.value = ''
   success.value = ''
+}
+
+async function askToCorrect(submissionId: number) {
+  if (!canWrite.value || busy.value) return
+  cancellingId.value = null
+  correctingId.value = submissionId
+  correctionLoadingId.value = submissionId
+  correctableComponents.value = []
+  selectedCorrectionGuids.value = []
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.jmhzCorrectableComponents(
+      submissionId,
+      environment.value,
+    )
+    correctableComponents.value = result.components
+  } catch (exception: unknown) {
+    correctingId.value = null
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.load_failed'),
+    )
+  } finally {
+    correctionLoadingId.value = null
+  }
+}
+
+function closeCorrection() {
+  correctingId.value = null
+  correctableComponents.value = []
+  selectedCorrectionGuids.value = []
+}
+
+async function confirmCorrection(submissionId: number) {
+  if (!canWrite.value || busy.value || selectedCorrectionGuids.value.length === 0) return
+  const selected = new Set(selectedCorrectionGuids.value)
+  const components = correctableComponents.value.filter(
+    component => selected.has(component.form_guid),
+  )
+  if (components.length === 0) return
+  correctionPendingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.cancelJmhzSubmissionComponents(
+      submissionId,
+      environment.value,
+      components,
+    )
+    closeCorrection()
+    await load()
+    success.value = result.created
+      ? t('payroll.submissions.transport.correction.frozen', { id: result.submission_id })
+      : t('payroll.submissions.transport.correction.already', { id: result.submission_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.failed'),
+    )
+  } finally {
+    correctionPendingId.value = null
+  }
 }
 
 /**
@@ -783,6 +859,19 @@ onMounted(loadVariableSymbols)
                 }) }}
               </span>
               <button
+                v-if="canCancel(entry.group) && correctingId !== entry.group.submissionId"
+                type="button"
+                :data-test="`transport-correct-${entry.group.submissionId}`"
+                :class="btnOutlineSm('warning')"
+                :disabled="busy"
+                @click="askToCorrect(entry.group.submissionId)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.edit" />
+                </svg>
+                {{ t('payroll.submissions.transport.correction.action') }}
+              </button>
+              <button
                 v-if="canCancel(entry.group) && cancellingId !== entry.group.submissionId"
                 type="button"
                 :data-test="`transport-cancel-${entry.group.submissionId}`"
@@ -794,6 +883,68 @@ onMounted(loadVariableSymbols)
                   <path :d="ICONS.x" />
                 </svg>
                 {{ t('payroll.submissions.transport.storno.action') }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="correctingId === entry.group.submissionId"
+            :data-test="`transport-correct-form-${entry.group.submissionId}`"
+            class="border-b border-warning-500/30 bg-warning-50 p-4 sm:p-6"
+          >
+            <p class="text-sm font-semibold text-warning-800">
+              {{ t('payroll.submissions.transport.correction.title', {
+                period: periodLabel(entry.group),
+              }) }}
+            </p>
+            <p class="mt-1 text-sm text-warning-800">
+              {{ t('payroll.submissions.transport.correction.description') }}
+            </p>
+            <div class="mt-4 space-y-2">
+              <label
+                v-for="component in correctableComponents"
+                :key="component.form_guid"
+                :data-test="`transport-correct-component-${component.form_guid}`"
+                class="flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-surface p-3"
+              >
+                <input
+                  v-model="selectedCorrectionGuids"
+                  type="checkbox"
+                  :value="component.form_guid"
+                  class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                >
+                <span>
+                  <span class="block text-sm font-medium text-neutral-900">
+                    {{ t('payroll.submissions.transport.correction.employment', {
+                      id: component.employment_external_identifier,
+                    }) }}
+                  </span>
+                  <span class="mt-0.5 block text-xs text-neutral-600">
+                    {{ t('payroll.submissions.transport.correction.person', {
+                      id: component.person_external_identifier,
+                    }) }}
+                  </span>
+                </span>
+              </label>
+            </div>
+            <div class="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                :data-test="`transport-correct-submit-${entry.group.submissionId}`"
+                :class="btnFilled('warning')"
+                :disabled="busy || selectedCorrectionGuids.length === 0"
+                @click="confirmCorrection(entry.group.submissionId)"
+              >
+                {{ t('payroll.submissions.transport.correction.confirm') }}
+              </button>
+              <button
+                type="button"
+                :data-test="`transport-correct-abort-${entry.group.submissionId}`"
+                :class="btnOutline('neutral')"
+                :disabled="busy"
+                @click="closeCorrection"
+              >
+                {{ t('payroll.submissions.transport.correction.cancel') }}
               </button>
             </div>
           </div>

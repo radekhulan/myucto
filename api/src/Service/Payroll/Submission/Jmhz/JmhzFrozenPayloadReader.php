@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use DOMDocument;
+use DOMElement;
+use DOMXPath;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 
@@ -52,5 +55,93 @@ final readonly class JmhzFrozenPayloadReader
         return JmhzFrozenSubmissionIdentity::read(
             $this->bytes($supplierId, $environment, $submissionId),
         );
+    }
+
+    /**
+     * Součásti přesně tak, jak byly zmrazené v řádném podání. UI z nich
+     * sestaví výběr pro opravné podání, takže účetní nikdy neopisuje GUID ani
+     * zákonné identifikátory ručně.
+     *
+     * @return list<array{
+     *   form_guid:string,
+     *   person_external_identifier:string,
+     *   employment_external_identifier:string
+     * }>
+     */
+    public function components(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $dom = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $loaded = $dom->loadXML(
+                $this->bytes($supplierId, $environment, $submissionId),
+                LIBXML_NONET | LIBXML_NOBLANKS,
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        if (!$loaded) {
+            throw new JmhzXmlException(
+                'jmhz_submission_frozen_payload_invalid',
+                'Zmrazenou datovou větu podání nelze přečíst.',
+            );
+        }
+
+        $xpath = new DOMXPath($dom);
+        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $xpath->registerNamespace('f', JmhzSchemaCatalog::NS_FORM);
+        $forms = $xpath->query('/p:jmhz/p:formulareOsob/p:formularOsoby');
+        if ($forms === false) {
+            throw new JmhzXmlException(
+                'jmhz_submission_components_unreadable',
+                'Součásti zmrazeného podání nelze načíst.',
+            );
+        }
+
+        $components = [];
+        foreach ($forms as $form) {
+            if (!$form instanceof DOMElement) {
+                continue;
+            }
+            $component = JmhzComponentCancellation::create(
+                self::value($xpath, './p:hlavicka/p:idFormulare', $form),
+                self::value($xpath, './/f:identifikace/f:ikMpsv', $form),
+                self::value($xpath, './/f:identifikace/f:idPpv', $form),
+            );
+            $components[] = [
+                'form_guid' => $component->formGuid,
+                'person_external_identifier' => $component->personExternalIdentifier,
+                'employment_external_identifier' => $component->employmentExternalIdentifier,
+            ];
+        }
+        if ($components === []) {
+            throw new JmhzXmlException(
+                'jmhz_submission_components_missing',
+                'Řádné podání neobsahuje žádný pracovní vztah, který by šel opravit.',
+            );
+        }
+
+        return $components;
+    }
+
+    private static function value(
+        DOMXPath $xpath,
+        string $query,
+        DOMElement $context,
+    ): string {
+        $nodes = $xpath->query($query, $context);
+        $value = $nodes === false ? '' : trim((string) $nodes->item(0)?->textContent);
+        if ($value === '') {
+            throw new JmhzXmlException(
+                'jmhz_submission_component_identity_missing',
+                'Ve zmrazeném podání chybí identifikace pracovního vztahu.',
+            );
+        }
+
+        return $value;
     }
 }

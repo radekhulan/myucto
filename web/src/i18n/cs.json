@@ -3344,6 +3344,19 @@
                     "already": "Storno k tomuhle hlášení už bylo připravené — je to podání č. {id}.",
                     "failed": "Storno se nepodařilo připravit.",
                     "unavailable": "Stornovat lze jen hlášení, které už bylo odeslané na ČSSZ."
+                },
+                "correction": {
+                    "action": "Opravit vybrané vztahy",
+                    "title": "Opravné podání za období {period}",
+                    "description": "Vyberte jen pracovní vztahy, jejichž dříve podaná součást se má zneplatnit. Identifikátory jsou načtené přímo ze zmrazeného řádného podání; nic neopisujete. Nové podání se pouze připraví a potom je musíte samostatně odeslat.",
+                    "employment": "Pracovní vztah ID PPV {id}",
+                    "person": "Osoba IK MPSV {id}",
+                    "confirm": "Připravit opravné podání",
+                    "cancel": "Nechat být",
+                    "frozen": "Opravné podání je připravené jako podání č. {id}. Odešlete ho stejně jako řádné hlášení.",
+                    "already": "Stejné opravné podání už bylo připravené — je to podání č. {id}.",
+                    "load_failed": "Pracovní vztahy původního podání se nepodařilo načíst.",
+                    "failed": "Opravné podání se nepodařilo připravit."
                 }
             },
             "signing": {
@@ -3594,7 +3607,6 @@
                     "component_jmhz_manual_review": "Zařazení mzdové složky do JMHZ vyžaduje ruční kontrolu.",
                     "component_jmhz_treatment_invalid": "Mzdová složka má neplatné nastavení pro JMHZ.",
                     "jmhz_average_hourly_earning_missing": "Chybí ověřený průměrný hodinový výdělek.",
-                    "jmhz_correction_revision_unsupported": "JMHZ zatím nelze sestavit z opravné mzdové revize. Použijte poslední schválenou běžnou revizi.",
                     "jmhz_identity_incomplete": "Chybí některý povinný identifikační údaj zaměstnance.",
                     "jmhz_identity_oic_missing": "Chybí ověřený identifikátor pojištěnce pro ČSSZ.",
                     "jmhz_scenario_activity_code_missing": "Chybí kód druhu činnosti pro JMHZ.",

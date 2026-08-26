@@ -43,6 +43,40 @@ final class PayrollJmhzCorrectionAction
     }
 
     /** @param array{submissionId:string} $args */
+    public function components(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null) {
+            return $this->invalid($response, 'Prostředí musí být test nebo production.');
+        }
+        if (preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1) {
+            return $this->invalid($response, 'submissionId musí být kladné celé číslo.');
+        }
+        $submissionId = (int) $args['submissionId'];
+        try {
+            $components = $this->corrections->correctableComponents(
+                $this->currentSupplierId($request),
+                $environment,
+                $submissionId,
+            );
+        } catch (JmhzXmlException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, [
+            'environment' => $environment,
+            'submission_id' => $submissionId,
+            'components' => $components,
+        ])->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array{submissionId:string} $args */
     public function cancelComponents(Request $request, Response $response, array $args): Response
     {
         $body = (array) ($request->getParsedBody() ?? []);
@@ -146,8 +180,8 @@ final class PayrollJmhzCorrectionAction
 
     private function authorize(Request $request, Response $response): ?Response
     {
-        // Storno je nevratné a jménem firmy: token se dá odcizit a nemá druhý
-        // faktor, takže sem se smí jen z přihlášené relace.
+        // Storno i příprava opravy jednají jménem firmy. Token se dá odcizit
+        // a nemá druhý faktor, takže sem se smí jen z přihlášené relace.
         if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'bearer') {
             return Json::error(
                 $response,

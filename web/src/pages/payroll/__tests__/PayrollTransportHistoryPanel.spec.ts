@@ -6,6 +6,8 @@ const m = vi.hoisted(() => ({
   pollJmhzTransportAttempt: vi.fn(),
   closeJmhzTransportAttempt: vi.fn(),
   cancelJmhzSubmission: vi.fn(),
+  jmhzCorrectableComponents: vi.fn(),
+  cancelJmhzSubmissionComponents: vi.fn(),
   jmhzImportedProtocols: vi.fn(),
   jmhzImportedProtocolErrors: vi.fn(),
   importJmhzProtocol: vi.fn(),
@@ -20,6 +22,8 @@ vi.mock('@/api/payroll', () => ({
     pollJmhzTransportAttempt: m.pollJmhzTransportAttempt,
     closeJmhzTransportAttempt: m.closeJmhzTransportAttempt,
     cancelJmhzSubmission: m.cancelJmhzSubmission,
+    jmhzCorrectableComponents: m.jmhzCorrectableComponents,
+    cancelJmhzSubmissionComponents: m.cancelJmhzSubmissionComponents,
     jmhzImportedProtocols: m.jmhzImportedProtocols,
     jmhzImportedProtocolErrors: m.jmhzImportedProtocolErrors,
     importJmhzProtocol: m.importJmhzProtocol,
@@ -773,6 +777,63 @@ describe('PayrollTransportHistoryPanel', () => {
       .toContain('payroll.submissions.transport.storno.frozen 91')
   })
 
+  it('opravné podání vybírá vztahy ze zmrazeného XML bez opisování identifikátorů', async () => {
+    const components = [{
+      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF',
+      person_external_identifier: '1234567890',
+      employment_external_identifier: '987654321',
+    }, {
+      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
+      person_external_identifier: '1234567891',
+      employment_external_identifier: '987654322',
+    }]
+    m.jmhzCorrectableComponents.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      components,
+    })
+    m.cancelJmhzSubmissionComponents.mockResolvedValue({
+      submission_id: 92,
+      part_id: 1,
+      artifact_id: 2,
+      status: 'ready',
+      row_version: 3,
+      environment: 'production',
+      artifact_sha256: 'e'.repeat(64),
+      created: true,
+      submission_kind: 'correction',
+      corrects_submission_id: 70,
+      submission_guid: '0195AAAA-1111-7222-8333-BBBBCCCCDDDD',
+      variable_symbol: '1234567890',
+      month: 7,
+      year: 2026,
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await flushPromises()
+    expect(m.jmhzCorrectableComponents).toHaveBeenCalledWith(70, 'production')
+    expect(wrapper.get('[data-test="transport-correct-form-70"]').text())
+      .toContain('payroll.submissions.transport.correction.employment 987654322')
+
+    const second = wrapper.get(
+      '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEF0"] input',
+    )
+    await second.setValue(true)
+    await wrapper.get('[data-test="transport-correct-submit-70"]').trigger('click')
+    await flushPromises()
+
+    expect(m.cancelJmhzSubmissionComponents).toHaveBeenCalledWith(
+      70,
+      'production',
+      [components[1]],
+    )
+    expect(wrapper.get('[data-test="transport-success"]').text())
+      .toContain('payroll.submissions.transport.correction.frozen 92')
+  })
+
   it('v režimu jen pro čtení storno vůbec nenabídne', async () => {
     m.canWrite.mockReturnValue(false)
 
@@ -780,6 +841,7 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="transport-cancel-70"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(false)
   })
 
   /**

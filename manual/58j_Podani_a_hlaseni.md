@@ -219,10 +219,12 @@ Příprava storna ani opravy sama nic neodešle. Nový artefakt odešlete stejn�
 kanálem jako řádné JMHZ a samostatně sledujte jeho protokol až do přijetí.
 Opakování stejné přípravy je idempotentní a vrací již vytvořený výsledek.
 
-Nezaměňujte dvě odlišné situace: opravné nebo stornovací **podání JMHZ** nad
-dřívějším podáním je podporované; nové řádné JMHZ se však nesestavuje z opravné
-mzdové revize, pokud obrazovka výslovně požaduje poslední schválenou běžnou
-revizi.
+Ve **Stavu odeslání** nemusíte opisovat GUID ani identifikátory osoby a vztahu.
+Po volbě **Opravit vybrané vztahy** aplikace načte součásti přímo ze zmrazeného
+řádného XML a účetní jen zaškrtne vztahy, které se mají zneplatnit. Samostatně
+platí, že první řádné JMHZ lze sestavit i z aktuální schválené opravné mzdové
+revize; druh podání určuje návaznost na dříve odeslané JMHZ, ne název zdrojové
+mzdové revize.
 
 ## Podání zdravotním pojišťovnám
 

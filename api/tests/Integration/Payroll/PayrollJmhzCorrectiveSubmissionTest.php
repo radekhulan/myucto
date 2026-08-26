@@ -141,6 +141,34 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertStringNotContainsString('formulareOsob', $xml);
     }
 
+    public function testCorrectableComponentsComeFromFrozenRegularPayload(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+
+        self::assertSame([[
+            'form_guid' => self::FORM_GUID,
+            'person_external_identifier' => '1234567890',
+            'employment_external_identifier' => '987654321',
+        ]], $this->corrections->correctableComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+        ));
+    }
+
+    public function testCorrectableComponentsWaitForFinalCsszResult(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('až po přijetí');
+        $this->corrections->correctableComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+        );
+    }
+
     /**
      * Opravné podání stornující jmenované součásti: typ podání O, součást typu
      * S a jen její hlavička — datová část by tvrdila, že se něco vykazuje,
@@ -572,14 +600,23 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private function frozenPayload(string $submissionGuid = self::SUBMISSION_GUID): string
     {
         return '<?xml version="1.0" encoding="UTF-8"?>'
-            . '<jmhz xmlns="' . JmhzSchemaCatalog::NS_PODANI . '" verze="1.4.3.4">'
+            . '<jmhz xmlns="' . JmhzSchemaCatalog::NS_PODANI . '"'
+            . ' xmlns:form="' . JmhzSchemaCatalog::NS_FORM . '" verze="1.4.3.4">'
             . '<hlavicka>'
             . '<idPodani>' . $submissionGuid . '</idPodani>'
             . '<typPodani>R</typPodani>'
             . '<variabilniSymbol>' . self::VARIABLE_SYMBOL . '</variabilniSymbol>'
             . '<mesic>' . $this->month . '</mesic>'
             . '<rok>' . $this->year . '</rok>'
-            . '</hlavicka></jmhz>';
+            . '</hlavicka>'
+            . '<formulareOsob><formularOsoby><hlavicka>'
+            . '<idFormulare>' . self::FORM_GUID . '</idFormulare>'
+            . '<typFormulare>R</typFormulare>'
+            . '</hlavicka><form:bezPriznaku><form:identifikace>'
+            . '<form:ikMpsv>1234567890</form:ikMpsv>'
+            . '<form:idPpv>987654321</form:idPpv>'
+            . '</form:identifikace></form:bezPriznaku>'
+            . '</formularOsoby></formulareOsob></jmhz>';
     }
 
     private function headerValue(string $xml, string $element): string

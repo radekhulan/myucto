@@ -3320,6 +3320,12 @@ export interface PayrollJmhzCorrectiveSubmission {
   year: number
 }
 
+export interface PayrollJmhzCorrectableComponent {
+  form_guid: string
+  person_external_identifier: string
+  employment_external_identifier: string
+}
+
 export interface PayrollJmhzTransportHistory {
   environment: PayrollJmhzTransportEnvironment
   attempts: PayrollJmhzTransportAttempt[]
@@ -4578,6 +4584,18 @@ export const payrollApi = {
   ) => api.post<PayrollJmhzCorrectiveSubmission>(
     `/payroll/submissions/${submissionId}/jmhz-cancel`,
     { environment },
+  ).then(response => response.data),
+  /** Vztahy načtené ze zmrazeného řádného XML; zákonné identifikátory se neopisují ručně. */
+  jmhzCorrectableComponents: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<{
+    environment: PayrollJmhzTransportEnvironment
+    submission_id: number
+    components: PayrollJmhzCorrectableComponent[]
+  }>(
+    `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
+    { params: { environment } },
   ).then(response => response.data),
   /** Opravné podání, které stornuje jen vyjmenované pracovněprávní vztahy. */
   cancelJmhzSubmissionComponents: (
