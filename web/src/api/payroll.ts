@@ -4381,6 +4381,11 @@ export const payrollApi = {
       ...payload,
       row_version: rowVersion,
     }).then(response => response.data.component),
+  deleteComponent: (id: number, rowVersion: number) =>
+    api.delete<{ deleted: true; cascade: PayrollDeleteCascade }>(
+      `/payroll/components/${id}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data.cascade),
   componentJmhzTargets: () =>
     api.get<{
       package_key: string
@@ -4427,6 +4432,11 @@ export const payrollApi = {
       ...payload,
       row_version: rowVersion,
     }).then(response => response.data.recurring_component),
+  deleteRecurringComponent: (id: number, rowVersion: number) =>
+    api.delete<{ deleted: true; cascade: PayrollDeleteCascade }>(
+      `/payroll/recurring-components/${id}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data.cascade),
   materializeRecurringComponents: (period: string) =>
     api.post<{ materialization: PayrollRecurringMaterialization }>(
       '/payroll/recurring-components/materialize',

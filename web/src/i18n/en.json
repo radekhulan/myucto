@@ -1566,7 +1566,11 @@
                 "add": "New component",
                 "new": "New payroll component",
                 "edit": "Edit component version",
-                "saved": "The payroll component was saved."
+                "saved": "The payroll component was saved.",
+                "delete": "Delete",
+                "delete_confirm": "Really delete the unused payroll component “{name}”? If it has already been used in payroll, the application safely refuses the deletion.",
+                "deleted": "The unused payroll component was deleted.",
+                "delete_failed": "The payroll component cannot be deleted. If it has already been used, end its validity or deactivate it."
             },
             "jmhz": {
                 "title": "Map component to JMHZ",
@@ -1600,6 +1604,10 @@
                 "new": "New recurring assignment",
                 "edit": "Edit recurring assignment",
                 "saved": "The recurring assignment was saved.",
+                "delete": "Delete",
+                "delete_confirm": "Really delete the unused “{component}” assignment for {employee}? If it has already created a monthly input, the application safely refuses the deletion.",
+                "deleted": "The unused recurring assignment was deleted.",
+                "delete_failed": "The recurring assignment cannot be deleted. If it has already created a payroll input, end its validity or deactivate it.",
                 "materialize": "Create monthly inputs",
                 "materialized": "Created {created_count}, already existed {replayed_count}, manual review {manual_review_count}.",
                 "materialize_failed": "The recurring assignments could not be materialized."

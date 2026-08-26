@@ -16,6 +16,8 @@ const m = vi.hoisted(() => ({
   componentJmhzMappings: vi.fn(),
   saveComponentJmhzMapping: vi.fn(),
   removeComponentJmhzMapping: vi.fn(),
+  deleteComponent: vi.fn(),
+  deleteRecurringComponent: vi.fn(),
   createComponent: vi.fn(),
   createRecurringComponent: vi.fn(),
   createInput: vi.fn(),
@@ -48,12 +50,14 @@ vi.mock('@/api/payroll', () => ({
     componentJmhzMappings: m.componentJmhzMappings,
     saveComponentJmhzMapping: m.saveComponentJmhzMapping,
     removeComponentJmhzMapping: m.removeComponentJmhzMapping,
+    deleteComponent: m.deleteComponent,
     previewInputImport: m.previewInputImport,
     applyInputImport: m.applyInputImport,
     createComponent: m.createComponent,
     updateComponent: vi.fn(),
     createRecurringComponent: m.createRecurringComponent,
     updateRecurringComponent: vi.fn(),
+    deleteRecurringComponent: m.deleteRecurringComponent,
     materializeRecurringComponents: vi.fn(),
     previewInput: m.previewInput,
     createInput: m.createInput,
@@ -248,6 +252,8 @@ describe('PayrollComponents', () => {
       },
     })
     m.removeComponentJmhzMapping.mockResolvedValue(undefined)
+    m.deleteComponent.mockResolvedValue({ jmhz_mapping: 0 })
+    m.deleteRecurringComponent.mockResolvedValue({})
     m.previewInputImport.mockResolvedValue({
       format: 'csv',
       source_name: 'synthetic.csv',
@@ -558,6 +564,71 @@ describe('PayrollComponents', () => {
 
     expect(m.saveComponentJmhzMapping).toHaveBeenCalledWith(5, '10330', null)
     expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.jmhz.saved')
+    wrapper.unmount()
+  })
+
+  it('smaže dosud nepoužitou mzdovou složku po potvrzení', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.catalog')!
+      .trigger('click')
+
+    await wrapper.findAll('[data-testid="payroll-component-delete"]')[0].trigger('click')
+    await flushPromises()
+
+    expect(m.deleteComponent).toHaveBeenCalledWith(5, 1)
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.catalog.deleted')
+    expect(wrapper.text()).not.toContain('Syntetická odměna')
+    wrapper.unmount()
+  })
+
+  it('smaže předpis jen přes bezpečný backendový guard', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    m.recurringComponents
+      .mockResolvedValueOnce({
+        recurring_components: [{
+          id: 31,
+          employee_id: 8,
+          employment_id: 12,
+          employee_name: 'Syntetická osoba',
+          employment_code: 'SYN-HPP',
+          component_id: 5,
+          component_name: 'Syntetická odměna',
+          component_code: 'SYN_BONUS',
+          calculation_kind: 'fixed_amount',
+          amount_minor: 25000,
+          rate_basis_points: null,
+          valid_from: '2026-01-01',
+          valid_to: null,
+          allocation_rule: 'full_month',
+          maximum_amount_minor: null,
+          note: null,
+          is_active: true,
+          row_version: 2,
+        }],
+        total: 1,
+        limit: 25,
+        offset: 0,
+      })
+      .mockResolvedValueOnce({
+        recurring_components: [],
+        total: 0,
+        limit: 25,
+        offset: 0,
+      })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.recurring')!
+      .trigger('click')
+
+    await wrapper.findAll('[data-testid="payroll-recurring-delete"]')[0].trigger('click')
+    await flushPromises()
+
+    expect(m.deleteRecurringComponent).toHaveBeenCalledWith(31, 2)
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.recurring.deleted')
     wrapper.unmount()
   })
 

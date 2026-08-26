@@ -1566,7 +1566,11 @@
                 "add": "Nová složka",
                 "new": "Nová mzdová složka",
                 "edit": "Upravit verzi složky",
-                "saved": "Mzdová složka byla uložena."
+                "saved": "Mzdová složka byla uložena.",
+                "delete": "Smazat",
+                "delete_confirm": "Opravdu smazat nepoužitou mzdovou složku „{name}“? Pokud už byla použita ve mzdách, aplikace smazání bezpečně odmítne.",
+                "deleted": "Nepoužitá mzdová složka byla smazána.",
+                "delete_failed": "Mzdovou složku nelze smazat. Pokud už byla použita, ukončete její platnost nebo ji deaktivujte."
             },
             "jmhz": {
                 "title": "Mapování složky do JMHZ",
@@ -1600,6 +1604,10 @@
                 "new": "Nový pravidelný předpis",
                 "edit": "Upravit pravidelný předpis",
                 "saved": "Pravidelný předpis byl uložen.",
+                "delete": "Smazat",
+                "delete_confirm": "Opravdu smazat nepoužitý předpis „{component}“ pro zaměstnance {employee}? Pokud už vytvořil měsíční vstup, aplikace smazání bezpečně odmítne.",
+                "deleted": "Nepoužitý pravidelný předpis byl smazán.",
+                "delete_failed": "Pravidelný předpis nelze smazat. Pokud už vytvořil mzdový vstup, ukončete jeho platnost nebo jej deaktivujte.",
                 "materialize": "Převést do měsíce",
                 "materialized": "Vytvořeno {created_count}, již existovalo {replayed_count}, ruční kontrola {manual_review_count}.",
                 "materialize_failed": "Pravidelné předpisy se nepodařilo převést do měsíce."

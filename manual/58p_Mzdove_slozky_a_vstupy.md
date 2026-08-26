@@ -59,3 +59,10 @@ Každá složka samostatně určuje dopad do daně, sociálního a zdravotního
 pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
 účetnictví. Schválený vstup si uloží neměnný snapshot této klasifikace; pozdější
 změna katalogu proto nepřepíše již zpracované období.
+
+Omylem založenou vlastní složku nebo pravidelný předpis lze tlačítkem
+**Smazat** odstranit, dokud ještě nevstoupily do žádného mzdového vstupu,
+výpočtu ani jiné navazující evidence. Před odstraněním se vždy zobrazí
+potvrzení. Jakmile byl záznam použit, aplikace smazání odmítne a vysvětlí, zda
+je potřeba ukončit jeho platnost nebo jej deaktivovat; již zpracovaná historie
+se nemaže.
