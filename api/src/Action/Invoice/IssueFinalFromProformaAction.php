@@ -64,6 +64,15 @@ final class IssueFinalFromProformaAction
         $advance = isset($body['advance_paid_amount']) && $body['advance_paid_amount'] !== null && $body['advance_paid_amount'] !== ''
             ? (float) $body['advance_paid_amount']
             : null;
+        // Celková cena zakázky — proforma bývá jen dílčí akontace, takže kopie jejích
+        // položek popisuje jen rozsah zálohy. Zadaná hodnota doplní rozdílový řádek
+        // (issue #39); prázdná zachovává dosavadní chování.
+        $finalTotal = isset($body['final_total']) && $body['final_total'] !== null && $body['final_total'] !== ''
+            ? (float) $body['final_total']
+            : null;
+        if ($finalTotal !== null && $finalTotal <= 0) {
+            return Json::error($response, 'invalid_amount', 'Celková cena zakázky musí být kladná.', 400);
+        }
 
         // H1 (Epic F6): finální draft vzniká s tax_date (creator: COALESCE(tax_date, dnes),
         // issue_date = CURDATE()) — efektivní refDate v uzavřeném období by založilo
@@ -78,7 +87,7 @@ final class IssueFinalFromProformaAction
         $userId = (int) ($user['id'] ?? 0);
 
         try {
-            $finalId = $this->creator->create($proformaId, $userId, $taxDate, $dueDate, $advance);
+            $finalId = $this->creator->create($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal);
         } catch (\Throwable $e) {
             return Json::error($response, 'create_failed', $e->getMessage(), 500);
         }

@@ -49,6 +49,12 @@ final class FinalFromProformaCreator
      * @param string|null $taxDate     YYYY-MM-DD; default = dnes
      * @param string|null $dueDate     YYYY-MM-DD; default = dnes
      * @param float|null  $advance     Výše odečtu zálohy; default = total_with_vat proformy
+     * @param float|null  $finalTotal  Celková cena zakázky ve stejném základu, v jakém
+     *                                 jsou ceny proformy (netto / brutto podle
+     *                                 `prices_include_vat`). Je-li vyšší než součet
+     *                                 zkopírovaných položek, doplní se rozdílový řádek —
+     *                                 viz {@see self::appendRemainder()}. null = jen
+     *                                 rozsah proformy (dosavadní chování).
      * @return int  ID nového draftu (nebo již existující final faktury)
      */
     public function create(
@@ -57,10 +63,11 @@ final class FinalFromProformaCreator
         ?string $taxDate = null,
         ?string $dueDate = null,
         ?float $advance = null,
+        ?float $finalTotal = null,
     ): int {
         return $this->cycleLock->synchronized(
             $proformaId,
-            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance),
+            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal),
         );
     }
 
@@ -70,6 +77,7 @@ final class FinalFromProformaCreator
         ?string $taxDate,
         ?string $dueDate,
         ?float $advance,
+        ?float $finalTotal = null,
     ): int {
         $proforma = $this->repo->find($proformaId);
         if ($proforma === null) {
@@ -250,6 +258,26 @@ final class FinalFromProformaCreator
                 $maxOrder = max($maxOrder, (int) $item['order_index']);
             }
 
+            // Doplatek zakázky: proforma bývá jen DÍLČÍ akontace (70 000 Kč ze zakázky
+            // za 100 000 Kč). Kopie jejích položek proto popisuje jen rozsah zálohy —
+            // po odečtu § 37a by vyúčtování vyšlo na nulu a zbytek by uživatel dopisoval
+            // ručně (issue #39). Zadá-li celkovou cenu, doplní se rozdílový řádek.
+            //
+            // Částka se ZÁMĚRNĚ nebere z `projects.budget_total`: ten se v reportu
+            // ziskovosti porovnává s NÁKLADY, je to tedy nákladový rozpočet, ne sjednaná
+            // cena. Odvodit fakturovanou částku z rozpočtu nákladů by bylo tiše špatně.
+            if ($finalTotal !== null) {
+                $maxOrder = $this->appendRemainder(
+                    $itemStmt,
+                    $finalId,
+                    (array) $proforma['items'],
+                    $finalTotal,
+                    !empty($proforma['prices_include_vat']),
+                    ($proforma['language'] ?? 'cs') === 'en',
+                    $maxOrder,
+                );
+            }
+
             // Záporné odpočtové řádky za vystavené daňové doklady k platbám (§ 37a):
             // v režimu cen s DPH jde do unit_price brutto dokladu (DPH shora si dopočte
             // InvoiceMath), v režimu netto jde základ (DPH zdola z rozdílu základů —
@@ -300,5 +328,68 @@ final class FinalFromProformaCreator
 
         $this->calc->recompute($finalId);
         return $finalId;
+    }
+
+    /**
+     * Doplní řádek na rozdíl mezi celkovou cenou zakázky a rozsahem zkopírované proformy.
+     *
+     * Sazbu bere z NEJVĚTŠÍHO řádku proformy, ne z prvního: u vícesazbové zálohy je
+     * dominantní sazba jediný odhad, který dává smysl, a uživatel ho stejně vidí
+     * v konceptu a může ho přepsat. Řádek se proto i výslovně pojmenuje, aby bylo
+     * poznat, že jde o dopočet, ne o položku opsanou z proformy.
+     *
+     * Rozdíl <= 0 (zadaná cena nepřevyšuje zálohu) je legitimní stav, ne chyba —
+     * neděláme nic a vyúčtování zůstane v rozsahu proformy.
+     *
+     * @param  array<array-key,array<string,mixed>> $items  položky proformy
+     * @return int  nový nejvyšší order_index
+     */
+    private function appendRemainder(
+        \PDOStatement $itemStmt,
+        int $finalId,
+        array $items,
+        float $finalTotal,
+        bool $grossMode,
+        bool $isEn,
+        int $maxOrder,
+    ): int {
+        $covered = 0.0;
+        $dominant = null;
+        $dominantAmount = -1.0;
+        foreach ($items as $item) {
+            $amount = (float) ($grossMode ? ($item['total_with_vat'] ?? 0) : ($item['total_without_vat'] ?? 0));
+            $covered += $amount;
+            if ($amount > $dominantAmount) {
+                $dominantAmount = $amount;
+                $dominant = $item;
+            }
+        }
+
+        $remainder = round($finalTotal - $covered, 2);
+        if ($remainder <= 0.0 || $dominant === null) {
+            return $maxOrder;
+        }
+
+        $itemStmt->execute([
+            $finalId,
+            $isEn ? 'Remaining scope of the contract' : 'Doplatek zakázky',
+            1,
+            $isEn ? 'pcs' : 'ks',
+            $remainder,
+            $dominant['vat_rate_id'],
+            $dominant['vat_rate_snapshot'],
+            ++$maxOrder,
+            'standard',
+            // Dopočtený řádek není konkrétní zboží ani majetek — bez vazeb.
+            null,
+            null,
+            null,
+            null,
+            // OSS profil dědí po dominantním řádku: zbytek téže zakázky patří do téže
+            // evidence jako to, co už bylo fakturováno zálohou.
+            ...$this->ossCarry->values($dominant),
+        ]);
+
+        return $maxOrder;
     }
 }

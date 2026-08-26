@@ -1102,14 +1102,15 @@ final class SettingsAction
         // „Vést mzdy" (migrace 1187, opt-in od 1290) — stejný vzor jako sklad níž:
         // chybějící hodnota znamená vypnuto, ne zapnuto.
         $row['payroll_enabled']          = (bool) ($row['payroll_enabled'] ?? false);
-        // Doklad po úhradě proformy (issue #39, migrace 1565). Chybějící hodnota =
-        // nedoběhlá migrace; fallback drží dnešní chování a hlavně nenechá FE select
-        // bez vybrané položky (vykreslil by se prázdný a uložil by prázdnou hodnotu).
+        // Doklad po úhradě proformy (issue #39, migrace 1565 + 1567). Chybějící hodnota
+        // = nedoběhlá migrace; fallback drží VÝCHOZÍ režim (daňový doklad k přijaté
+        // platbě) a hlavně nenechá FE select bez vybrané položky — ten by se vykreslil
+        // prázdný a uložil prázdnou hodnotu.
         $row['proforma_payment_document'] = in_array(
             $row['proforma_payment_document'] ?? null,
             ProformaPaymentDocuments::modes(),
             true,
-        ) ? (string) $row['proforma_payment_document'] : ProformaPaymentDocuments::MODE_FINAL_ON_FULL_PAYMENT;
+        ) ? (string) $row['proforma_payment_document'] : ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT;
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
         $row['stock_auto_issue']         = (bool) ($row['stock_auto_issue'] ?? true);

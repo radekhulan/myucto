@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Crm;
 use MyInvoice\Infrastructure\Cache\EntityCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
+use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
 use MyInvoice\Service\License\LicenseService;
@@ -1208,6 +1209,65 @@ final class CrmAggregationService
                 'link'     => '/purchase-invoices?status=draft',
                 'count'    => $purchaseDraftCount,
             ];
+        }
+
+        // 3b'. Uhrazené zálohy čekající na doklad — JEN v ručním režimu (issue #39,
+        // migrace 1566). V ostatních režimech koncept vzniká sám a v seznamu dokladů
+        // je vidět, takže by tahle položka jen duplikovala to, co už uživatel má.
+        //
+        // Tohle NENÍ kosmetika: § 28 ZDPH dává na vystavení daňového dokladu k přijaté
+        // platbě 15 dnů ode dne přijetí úplaty. Bez konceptu v seznamu nemá ruční režim
+        // nic, co by na běžící lhůtu upozornilo — platba by zapadla do výpisu a lhůta
+        // by uplynula potichu. Proto je severity odstupňovaná podle STÁŘÍ nejstarší
+        // nevyřízené platby, ne podle počtu: jedna zapomenutá dva týdny je horší než
+        // pět včerejších.
+        if (ProformaPaymentDocuments::modeForSupplier($pdo, $supplierId) === ProformaPaymentDocuments::MODE_MANUAL) {
+            $stmt = $pdo->prepare(
+                "SELECT i.id, MIN(p.paid_on) AS oldest_payment
+                   FROM invoices i
+                   JOIN invoice_payments p ON p.invoice_id = i.id
+                  WHERE i.supplier_id = ?
+                    AND i.invoice_type = 'proforma'
+                    AND i.status <> 'cancelled'
+                    AND NOT EXISTS (SELECT 1 FROM invoices ch
+                                     WHERE ch.parent_invoice_id = i.id
+                                       AND ch.invoice_type IN ('invoice', 'tax_document')
+                                       AND ch.status <> 'cancelled')
+                  GROUP BY i.id"
+            );
+            $stmt->execute([$supplierId]);
+            $awaiting = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            $awaitingIds = array_map(static fn (array $r): int => (int) $r['id'], $awaiting);
+            $awaitingIds = $this->filterByDismissal($awaitingIds, $dismissals, 'proforma_awaiting_document');
+            $awaitingCount = count($awaitingIds);
+            if ($awaitingCount > 0) {
+                $keep = array_flip($awaitingIds);
+                $oldestDays = 0;
+                foreach ($awaiting as $row) {
+                    if (!isset($keep[(int) $row['id']]) || empty($row['oldest_payment'])) {
+                        continue;
+                    }
+                    $paidOn = \DateTimeImmutable::createFromFormat('!Y-m-d', (string) $row['oldest_payment']);
+                    if ($paidOn === false) {
+                        continue;
+                    }
+                    $oldestDays = max($oldestDays, (int) $paidOn->diff($nowDt)->days);
+                }
+                $items[] = [
+                    'type'     => 'proforma_awaiting_document',
+                    // 15 dnů je zákonná lhůta; nad 10 dnů je nejvyšší čas, po lhůtě je zle.
+                    'severity' => $oldestDays > 15 ? 'high' : ($oldestDays > 10 ? 'medium' : 'low'),
+                    'title'    => 'Vystav doklad k přijaté záloze',
+                    'hint'     => sprintf(
+                        '%d %s bez dokladu%s',
+                        $awaitingCount,
+                        $awaitingCount === 1 ? 'uhrazená záloha' : ($awaitingCount < 5 ? 'uhrazené zálohy' : 'uhrazených záloh'),
+                        $oldestDays > 0 ? sprintf(', nejstarší %d dnů (lhůta 15)', $oldestDays) : '',
+                    ),
+                    'link'     => '/invoices?type=proforma&paid=1',
+                    'count'    => $awaitingCount,
+                ];
+            }
         }
 
         // 3c. Zbývá zaúčtovat — vystavené (FV) + přijaté (PF) doklady bez zaúčtování

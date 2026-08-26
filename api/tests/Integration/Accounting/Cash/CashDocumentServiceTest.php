@@ -326,8 +326,16 @@ final class CashDocumentServiceTest extends TestCase
         self::assertSame('paid', $inv['status']);
     }
 
+    /**
+     * Pokladní cesta musí zakládat TÉŽE doklady jako banka — proto se režim firmy
+     * nastavuje výslovně: test hlídá shodu obou cest, ne to, co je zrovna výchozí.
+     * Výchozí hodnota je od migrace 1567 `always_tax_document` (§ 20a + § 28), takže
+     * pro větev s vyúčtovací fakturou se musí přepnout.
+     */
     public function testCashProformaPaymentCreatesSameDraftDocumentsAsBank(): void
     {
+        $this->db->pdo()->prepare('UPDATE supplier SET proforma_payment_document = ? WHERE id = ?')
+            ->execute([\MyInvoice\Service\Invoice\ProformaPaymentDocuments::MODE_FINAL_ON_FULL_PAYMENT, $this->supplierId]);
         $reg = $this->makeRegister();
         $client = $this->client('Odběratel zálohy s.r.o.', true, false);
         $proformaId = $this->proforma('PRO-2099-EP8', $client, 12100.00);

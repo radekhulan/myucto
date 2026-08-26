@@ -909,8 +909,9 @@ function vatCollisionLabel(c: VatStatusCollision): string {
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.proforma_payment_document') }}</label>
             <select v-model="supplier.proforma_payment_document"
                     class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
-              <option value="final_on_full_payment">{{ t('settings.proforma_payment_document_final') }}</option>
               <option value="always_tax_document">{{ t('settings.proforma_payment_document_tax') }}</option>
+              <option value="final_on_full_payment">{{ t('settings.proforma_payment_document_final') }}</option>
+              <option value="manual">{{ t('settings.proforma_payment_document_manual') }}</option>
             </select>
             <p class="text-xs text-neutral-500 mt-1">{{ t('settings.proforma_payment_document_hint') }}</p>
           </div>

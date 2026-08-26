@@ -49,11 +49,21 @@ final class ProformaPaymentDocuments
     public const MODE_FINAL_ON_FULL_PAYMENT = 'final_on_full_payment';
     /** I doplacená proforma zakládá daňový doklad k přijaté platbě — zakázková výroba. */
     public const MODE_ALWAYS_TAX_DOCUMENT = 'always_tax_document';
+    /**
+     * Nezakládat nic, doklad vystaví uživatel sám (migrace 1566).
+     *
+     * Ruční akce existují obě, takže tenhle režim nenechá díru ve funkčnosti —
+     * nechává ale díru v POZORNOSTI: bez konceptu v seznamu není nic, co by
+     * připomnělo, že § 28 dává na vystavení daňového dokladu k přijaté platbě
+     * 15 dnů. Proto ho drží v páru položka `proforma_awaiting_document`
+     * v denním přehledu úkolů; bez ní by to byla tichá past.
+     */
+    public const MODE_MANUAL = 'manual';
 
     /** @return list<string> */
     public static function modes(): array
     {
-        return [self::MODE_FINAL_ON_FULL_PAYMENT, self::MODE_ALWAYS_TAX_DOCUMENT];
+        return [self::MODE_FINAL_ON_FULL_PAYMENT, self::MODE_ALWAYS_TAX_DOCUMENT, self::MODE_MANUAL];
     }
 
     /**
@@ -64,6 +74,20 @@ final class ProformaPaymentDocuments
      * Chybějící sloupec (nedoběhlá migrace 1565) i neznámá hodnota → null → dnešní
      * chování. Tichá změna toho, jaké doklady firmě vznikají, je horší než odklad.
      */
+    /** Režim firmy přímo podle jejího id (přehled úkolů nemá po ruce doklad). */
+    public static function modeForSupplier(\PDO $pdo, int $supplierId): ?string
+    {
+        try {
+            $stmt = $pdo->prepare('SELECT proforma_payment_document FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $mode = $stmt->fetchColumn();
+        } catch (\PDOException) {
+            return null;
+        }
+
+        return is_string($mode) && in_array($mode, self::modes(), true) ? $mode : null;
+    }
+
     public static function modeForInvoice(\PDO $pdo, int $invoiceId): ?string
     {
         try {
@@ -114,10 +138,19 @@ final class ProformaPaymentDocuments
         if ($mode === null && $pdo !== null) {
             $mode = self::modeForInvoice($pdo, $invoiceId);
         }
+        // Ruční režim: doklad vystaví uživatel sám. Že se na to nesmí zapomenout,
+        // hlídá položka `proforma_awaiting_document` v denním přehledu úkolů.
+        if ($mode === self::MODE_MANUAL) {
+            return $result;
+        }
 
-        // Neznámý režim se chová jako dosud — chybějící migrace ani starý snapshot
-        // nesmí firmě tiše změnit, jaké doklady jí vznikají.
-        if ($becamePaid && $mode !== self::MODE_ALWAYS_TAX_DOCUMENT) {
+        // Vyúčtovací faktura rovnou po úhradě jen na VÝSLOVNOU volbu firmy. Neznámý
+        // režim (nedoběhlá migrace, starý snapshot) padá na daňový doklad k přijaté
+        // platbě, protože ten je správně bez podmínek: § 20a odst. 2 váže povinnost
+        // přiznat daň na den přijetí úplaty a § 28 odst. 1 písm. d) na tentýž den
+        // váže povinnost vystavit doklad. Vyúčtování s DUZP = den platby sedí jen
+        // tehdy, když plnění opravdu nastalo týž den — což systém neví.
+        if ($becamePaid && $mode === self::MODE_FINAL_ON_FULL_PAYMENT) {
             // DUZP finálního dokladu = den přijetí platby, ne dnešek: daň z úplaty
             // musí spadnout do období, ve kterém úplata skutečně přišla.
             $result['final_draft_id'] = $finalCreator->create($invoiceId, $userId, $documentDate);

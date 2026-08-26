@@ -752,7 +752,7 @@ final class CashDocumentService
                 isset($res['payment_id']) ? (int) $res['payment_id'] : null,
                 $userId ?? 0,
                 (string) $doc['issue_date'],
-                $pdo,
+                $this->db->pdo(),
             );
         } elseif ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
             $pfId = (int) $doc['purchase_invoice_id'];
