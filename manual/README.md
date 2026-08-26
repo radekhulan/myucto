@@ -54,7 +54,7 @@ php tools/exportManualToPdf.php
 1. Vytvoř `manual/NN_Nazev.md` (NN = pořadové dvojcifré číslo).
 2. Přidej řádek do `manual/INDEX.md` ve správné grupě (### Instalace a start /
    ### Grafy / ### Prodej / ### Nákup / ### Peníze / ### Dokumenty /
-   ### Sklad / ### Daně / ### Účetnictví / ### Nástroje /
+   ### Sklad / ### Daně / ### Účetnictví / ### Mzdy / ### Nástroje /
    ### Daňová evidence / ### Firma / ### Systém).
 3. Spusť `php tools/generateManualHtml.php`. PDF vytvoř jen při sestavení vydání
    nebo na výslovnou žádost.
