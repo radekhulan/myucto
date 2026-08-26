@@ -1165,6 +1165,10 @@ final class Routes
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
                 [PayrollRegistrationTransportAction::class, 'send'],
             );
+            $g->get(
+                '/submissions/registration-transport/{submissionId:[0-9]+}',
+                [PayrollRegistrationTransportAction::class, 'status'],
+            );
             $g->post(
                 '/submissions/registration-transport/{attemptId:[0-9]+}/poll',
                 [PayrollRegistrationTransportAction::class, 'poll'],

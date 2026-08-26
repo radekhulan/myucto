@@ -326,6 +326,37 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
     }
 
+    public function testStatusReturnsTheLatestAttemptWithoutContactingCssz(): void
+    {
+        $attempts = $this->createMock(PayrollSubmissionTransportAttemptRepository::class);
+        $attempts->expects(self::once())
+            ->method('listForSubmission')
+            ->with(self::SUPPLIER, 'test', self::SUBMISSION)
+            ->willReturn([
+                self::attemptRow() + ['attempt_no' => 1],
+                array_replace(self::attemptRow(), [
+                    'id' => 6,
+                    'attempt_no' => 2,
+                    'status' => 'completed',
+                ]),
+            ]);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('poll');
+        $dispatch->expects(self::never())->method('send');
+
+        $result = (new PayrollRegistrationTransportService(
+            $this->repository('PREZEC26', 'accepted'),
+            $attempts,
+            $this->createStub(JmhzFrozenPayloadReader::class),
+            $dispatch,
+        ))->status(self::SUPPLIER, 'test', self::SUBMISSION);
+
+        self::assertSame('PREZEC26', $result['agenda_code']);
+        self::assertSame('CSSZ_PREZEC', $result['submission_class']);
+        self::assertSame(6, $result['attempt']['id']);
+        self::assertSame('completed', $result['attempt']['status']);
+    }
+
     private function repository(
         string $agenda,
         string $status = 'ready',

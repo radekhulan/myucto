@@ -87,6 +87,34 @@ final class PayrollRegistrationTransportActionTest extends TestCase
         self::assertSame('private, no-store', $response->getHeaderLine('Cache-Control'));
     }
 
+    public function testSessionCanResumeTheLatestAttemptWithoutPollingCssz(): void
+    {
+        $transport = $this->createMock(PayrollRegistrationTransportService::class);
+        $transport->expects(self::once())
+            ->method('status')
+            ->with(11, 'test', 42)
+            ->willReturn([
+                'agenda_code' => 'PREZEC26',
+                'submission_class' => 'CSSZ_PREZEC',
+                'attempt' => ['id' => 7, 'status' => 'awaiting_protocol'],
+            ]);
+        $access = $this->createMock(PayrollModuleAccess::class);
+        $access->expects(self::once())->method('isEnabled')->with(11)->willReturn(true);
+        $request = $this->request('session')
+            ->withMethod('GET')
+            ->withQueryParams(['environment' => 'test']);
+
+        $response = (new PayrollRegistrationTransportAction($transport, $access))->status(
+            $request,
+            new Response(),
+            ['submissionId' => '42'],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(7, $this->json($response)['attempt']['id']);
+        self::assertSame('private, no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
     private function request(string $method): \Psr\Http\Message\ServerRequestInterface
     {
         return (new ServerRequestFactory())

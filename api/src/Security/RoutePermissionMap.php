@@ -247,6 +247,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+/poll$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+/close$#', 'payroll.submissions', AccessLevel::WRITE],
         // Záměr uplatňovat slevu na pojistném (OZUSPOJ). Zápis výsledku od ČSSZ

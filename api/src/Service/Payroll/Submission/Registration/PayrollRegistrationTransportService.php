@@ -94,6 +94,27 @@ final readonly class PayrollRegistrationTransportService
         return $this->result($outcome, $context['agenda_code'], $payload);
     }
 
+    /** @return array{agenda_code:string,submission_class:string,attempt:?array<string,mixed>} */
+    public function status(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $context = $this->context($supplierId, $environment, $submissionId, []);
+        $history = $this->attempts->listForSubmission(
+            $supplierId,
+            $environment,
+            $submissionId,
+        );
+        $attempt = $history === [] ? null : $history[array_key_last($history)];
+
+        return [
+            'agenda_code' => $context['agenda_code'],
+            'submission_class' => self::DOCUMENTS[$context['agenda_code']]['class'],
+            'attempt' => $attempt,
+        ];
+    }
+
     public function poll(
         int $supplierId,
         string $environment,

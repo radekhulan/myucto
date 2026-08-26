@@ -46,6 +46,21 @@ final class PayrollRegistrationTransportAction
             ));
     }
 
+    /** @param array{submissionId:string} $args */
+    public function status(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+
+        return $this->run($request, $response, fn (string $environment): array =>
+            $this->transport->status(
+                $this->currentSupplierId($request),
+                $environment,
+                $this->id($args, 'submissionId'),
+            ));
+    }
+
     /** @param array{attemptId:string} $args */
     public function poll(Request $request, Response $response, array $args): Response
     {
