@@ -1734,6 +1734,7 @@
                 "active": "Active",
                 "status": "Status",
                 "actions": "Actions",
+                "employee": "Employee",
                 "employment": "Employment",
                 "component": "Payroll component",
                 "calculation": "Calculation",
@@ -16284,6 +16285,7 @@
             "edit": "Edit business trip"
         },
         "form": {
+            "employee": "Employee",
             "employment": "Employment relation",
             "select": "Select an employment relation",
             "settlement_period": "Settlement period",
@@ -16375,6 +16377,7 @@
             "no_employments_message": "Absences, average earnings and the leave ledger are all tracked per employment. Create an employee and their employment in People, then come back here.",
             "no_employments_cta": "Go to People"
         },
+        "employee": "Employee",
         "employment": "Employment",
         "from": "From",
         "to": "To",

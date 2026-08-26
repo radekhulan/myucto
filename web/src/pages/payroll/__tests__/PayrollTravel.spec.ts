@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
@@ -64,6 +64,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PayrollTravel from '@/pages/payroll/PayrollTravel.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 function trip(overrides: Record<string, unknown> = {}) {
   return {
@@ -178,6 +179,37 @@ describe('PayrollTravel', () => {
     expect(m.preview).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-test="travel-preview"]').exists()).toBe(true)
     expect(wrapper.findAll('[data-test="travel-save"]')).toHaveLength(1)
+  })
+
+  it('filters employment relations by the employee selected in the editor', async () => {
+    m.context.mockResolvedValue([
+      { id: 5, employee_id: 3, code: 'SYN-TRV-1', relation_type: 'employment', status: 'active', full_name: 'Syntetická cestující' },
+      { id: 6, employee_id: 3, code: 'SYN-TRV-2', relation_type: 'dpp', status: 'active', full_name: 'Syntetická cestující' },
+      { id: 7, employee_id: 4, code: 'SYN-OTHER', relation_type: 'dpc', status: 'active', full_name: 'Jiná cestující' },
+    ])
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    await wrapper.find('[data-test="travel-new"]').trigger('click')
+    wrapper.findComponent(PayrollPersonSearchSelect)
+      .vm.$emit('update:modelValue', 3)
+    await flushPromises()
+
+    const employment = wrapper.findComponent('[data-test="travel-employment"]') as VueWrapper<any>
+    expect(employment.props('options')).toHaveLength(2)
+    expect(employment.props('options')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 5 }),
+      expect.objectContaining({ value: 6 }),
+    ]))
+
+    wrapper.findComponent(PayrollPersonSearchSelect)
+      .vm.$emit('update:modelValue', 4)
+    await flushPromises()
+
+    expect(employment.props('options')).toEqual([
+      expect.objectContaining({ value: 7 }),
+    ])
+    expect(employment.props('modelValue')).toBe(7)
   })
 
   it('shows the exact server message inline when saving fails', async () => {

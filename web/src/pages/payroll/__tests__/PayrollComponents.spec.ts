@@ -739,6 +739,44 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('filters monthly input employments by the selected employee', async () => {
+    m.absenceContext.mockResolvedValue([
+      {
+        id: 12,
+        employee_id: 8,
+        code: 'SYN-HPP',
+        relation_type: 'employment',
+        status: 'active',
+        full_name: 'Syntetická osoba',
+      },
+      {
+        id: 13,
+        employee_id: 9,
+        code: 'SYN-DPP',
+        relation_type: 'work_performance_agreement',
+        status: 'active',
+        full_name: 'Druhá osoba',
+      },
+    ])
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+
+    await wrapper.get('[data-test="payroll-input-person"] input').trigger('focus')
+    await wrapper.findAll('[role="option"]')
+      .find(option => option.text().includes('Druhá osoba'))!
+      .trigger('click')
+    await wrapper.get('[data-test="payroll-input-employment"] input').trigger('focus')
+
+    const relationships = wrapper.findAll('[role="option"]').map(option => option.text())
+    expect(relationships.some(label => label.includes('SYN-DPP'))).toBe(true)
+    expect(relationships.some(label => label.includes('SYN-HPP'))).toBe(false)
+    wrapper.unmount()
+  })
+
   // Roční koš osvobození je bez náhledu past: účetní zjistí překročení až
   // tehdy, když z prosincového benefitu vyskočí daň a pojistné. Náhled proto
   // musí ukázat vyčerpání koše i rozpad na osvobozenou a zdanitelnou část.

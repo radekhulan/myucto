@@ -37,6 +37,7 @@ import PayrollFileDropzone, {
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
@@ -190,6 +191,7 @@ const takenComponentCodes = computed(() => components.value
   .map(item => item.code))
 const recurringEditorOpen = ref(false)
 const editingRecurring = ref<PayrollRecurringComponent | null>(null)
+const recurringEmployeeId = ref<number | null>(null)
 const recurringForm = ref<RecurringForm>(newRecurringForm())
 const inputEditorOpen = ref(false)
 const editingInput = ref<PayrollInput | null>(null)
@@ -213,11 +215,25 @@ const activeRegularComponents = computed(() =>
 const activeOneOffComponents = computed(() =>
   components.value.filter(component => component.is_active && component.frequency_kind === 'one_off'),
 )
-const employmentOptions = computed(() => employments.value.map(item => ({
-  value: item.employment_id,
-  label: employmentLabel(item),
-  secondary: item.code,
-})))
+const personOptions = computed(() => Array.from(
+  new Map(employments.value.map(item => [item.employee_id, {
+    value: item.employee_id,
+    label: item.full_name,
+  }])).values(),
+))
+function employmentOptionsFor(employeeId: number | null) {
+  return employments.value
+    .filter(item => item.employee_id === employeeId)
+    .map(item => ({
+      value: item.employment_id,
+      label: relationLabel(item.relation_type),
+      secondary: item.code,
+    }))
+}
+const recurringEmploymentOptions = computed(() =>
+  employmentOptionsFor(recurringEmployeeId.value))
+const inputEmploymentOptions = computed(() =>
+  employmentOptionsFor(inputForm.value.employee_id))
 const regularComponentOptions = computed(() => activeRegularComponents.value.map(item => ({
   value: item.id,
   label: item.name,
@@ -458,10 +474,6 @@ function relationLabel(type: string): string {
   return t(`payroll.people.relations.${type}`)
 }
 
-function employmentLabel(option: PayrollEmploymentOption): string {
-  return `${option.full_name} · ${relationLabel(option.relation_type)}`
-}
-
 function selectedEmploymentChanged(target: InputForm | RecurringForm) {
   if (!('employee_id' in target)) return
   const selected = employments.value.find(item => item.employment_id === target.employment_id)
@@ -471,6 +483,23 @@ function selectedEmploymentChanged(target: InputForm | RecurringForm) {
 function selectInputEmployment(value: number | null) {
   inputForm.value.employment_id = value
   selectedEmploymentChanged(inputForm.value)
+}
+
+function selectRecurringEmployee(value: number | null) {
+  recurringEmployeeId.value = value
+  const available = employments.value.filter(item => item.employee_id === value)
+  if (!available.some(item => item.employment_id === recurringForm.value.employment_id)) {
+    recurringForm.value.employment_id = available[0]?.employment_id ?? null
+  }
+}
+
+function selectInputEmployee(value: number | null) {
+  inputForm.value.employee_id = value
+  const available = employments.value.filter(item => item.employee_id === value)
+  if (!available.some(item => item.employment_id === inputForm.value.employment_id)) {
+    inputForm.value.employment_id = available[0]?.employment_id ?? null
+  }
+  inputPreview.value = null
 }
 
 function setInclusionTreatment(
@@ -770,12 +799,16 @@ async function deleteComponent(component: PayrollComponent) {
 function openNewRecurring() {
   editingRecurring.value = null
   recurringForm.value = newRecurringForm()
+  recurringEmployeeId.value = employments.value.find(
+    item => item.employment_id === recurringForm.value.employment_id,
+  )?.employee_id ?? null
   recurringError.value = ''
   recurringEditorOpen.value = true
 }
 
 function editRecurring(item: PayrollRecurringComponent) {
   editingRecurring.value = item
+  recurringEmployeeId.value = item.employee_id
   recurringForm.value = {
     employment_id: item.employment_id,
     component_id: item.component_id,
@@ -1346,7 +1379,8 @@ onMounted(load)
         <section v-if="recurringEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><h3 class="font-semibold text-neutral-900">{{ t(editingRecurring ? 'payroll.components.recurring.edit' : 'payroll.components.recurring.new') }}</h3><button :class="btnOutline('neutral')" @click="recurringEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="recurringForm.employment_id" :options="employmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.employment_id = $event" /></label>
+            <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="recurringEmployeeId" data-test="payroll-recurring-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" @update:model-value="selectRecurringEmployee" /></div>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="recurringForm.employment_id" data-test="payroll-recurring-employment" :options="recurringEmploymentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.employment_id = $event" /></label>
             <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="recurringForm.component_id" :options="regularComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.component_id = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.calculation') }}</span><SearchableSelect data-testid="payroll-recurring-calculation" :model-value="recurringForm.calculation_kind" :options="calculationKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.calculation_kind = $event ?? 'fixed_amount'" /></label>
             <label v-if="recurringForm.calculation_kind === 'fixed_amount'" class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="recurringForm.amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
@@ -1382,7 +1416,8 @@ onMounted(load)
         <section v-if="inputEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold text-neutral-900">{{ t(editingInput ? 'payroll.components.inputs.edit' : 'payroll.components.inputs.new') }}</h3><p class="mt-1 text-xs text-neutral-600">{{ t('payroll.components.inputs.preview_hint') }}</p></div><button :class="btnOutline('neutral')" @click="inputEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" :options="employmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
+            <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="inputForm.employee_id" data-test="payroll-input-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" @update:model-value="selectInputEmployee" /></div>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" data-test="payroll-input-employment" :options="inputEmploymentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
             <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="inputForm.component_id" :options="oneOffComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="inputForm.component_id = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="inputForm.amount" data-testid="payroll-input-amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.quantity') }}</span><input v-model="inputForm.quantity" data-testid="payroll-input-quantity" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>

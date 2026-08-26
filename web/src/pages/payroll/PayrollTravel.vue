@@ -11,6 +11,7 @@ import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
 import { payrollWallTimeToIso } from './payrollTime'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
@@ -127,10 +128,19 @@ const form = reactive({
 const items = ref<ItemForm[]>([])
 const meals = ref<MealForm[]>([])
 
-const employmentOptions = computed(() => employments.value.map(item => ({
-  value: item.id,
-  label: `${item.full_name} · ${item.code}`,
-})))
+const personOptions = computed(() => Array.from(
+  new Map(employments.value.map(item => [item.employee_id, {
+    value: item.employee_id,
+    label: item.full_name,
+  }])).values(),
+))
+const employmentOptions = computed(() => employments.value
+  .filter(item => item.employee_id === form.employee_id)
+  .map(item => ({
+    value: item.id,
+    label: t(`payroll.people.relations.${item.relation_type}`),
+    secondary: item.code,
+  })))
 
 /**
  * Zúžení na jeden vztah z odkazu na kartě zaměstnance (`?employment=12`).
@@ -374,6 +384,14 @@ function selectEmployment(id: number | null) {
   form.employment_id = id
   const found = employments.value.find(item => item.id === id)
   form.employee_id = found ? found.employee_id : null
+}
+
+function selectEmployee(id: number | null) {
+  form.employee_id = id
+  const available = employments.value.filter(item => item.employee_id === id)
+  if (!available.some(item => item.id === form.employment_id)) {
+    form.employment_id = available[0]?.id ?? null
+  }
 }
 
 /**
@@ -753,11 +771,23 @@ onMounted(load)
 
       <div class="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <div>
+          <span :class="labelClass">{{ t('payroll_travel.form.employee') }}</span>
+          <PayrollPersonSearchSelect
+            :model-value="form.employee_id"
+            data-test="travel-person"
+            :candidates="personOptions"
+            :label="t('payroll_travel.form.employee')"
+            :clearable="false"
+            @update:model-value="selectEmployee"
+          />
+        </div>
+        <div>
           <span :class="labelClass">{{ t('payroll_travel.form.employment') }}</span>
           <SearchableSelect
             :model-value="form.employment_id"
             :options="employmentOptions"
             accent="payroll"
+            data-test="travel-employment"
             :placeholder="t('payroll_travel.form.select')"
             :aria-label="t('payroll_travel.form.employment')"
             @update:model-value="value => selectEmployment(value as number | null)"

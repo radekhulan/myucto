@@ -26,10 +26,10 @@ import {
 import {
   payrollApi,
   type PayrollEmployment,
-  type PayrollPersonOption,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
@@ -40,7 +40,6 @@ const loading = ref(true)
 const busyId = ref<number | null>(null)
 const creating = ref(false)
 const items = ref<PayrollDiscountIntent[]>([])
-const people = ref<PayrollPersonOption[]>([])
 const employments = ref<PayrollEmployment[]>([])
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
@@ -57,8 +56,6 @@ const error = ref('')
 const success = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const personOptions = computed(() =>
-  people.value.map(person => ({ value: person.id, label: person.full_name })))
 const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
@@ -109,14 +106,6 @@ async function load(): Promise<void> {
     error.value = message(cause, t('payroll.discountIntents.errors.loadFailed'))
   } finally {
     loading.value = false
-  }
-}
-
-async function loadPeople(): Promise<void> {
-  try {
-    people.value = await payrollApi.peopleOptions()
-  } catch (cause) {
-    error.value = message(cause, t('payroll.discountIntents.errors.loadFailed'))
   }
 }
 
@@ -343,11 +332,14 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
 watch(personId, value => {
   if (value !== null) {
     void loadEmployments(value)
+  } else {
+    employments.value = []
+    employmentId.value = null
   }
 })
 watch(environment, () => void load())
 onMounted(async () => {
-  await Promise.all([load(), loadPeople()])
+  await load()
 })
 </script>
 
@@ -399,12 +391,17 @@ onMounted(async () => {
 
     <div class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <label class="block text-sm">
+        <div class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.discountIntents.person') }}
           </span>
-          <SearchableSelect v-model="personId" :options="personOptions" />
-        </label>
+          <PayrollPersonSearchSelect
+            v-model="personId"
+            data-test="discount-intent-person"
+            :label="t('payroll.discountIntents.person')"
+            :clearable="false"
+          />
+        </div>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.discountIntents.employment') }}

@@ -1734,6 +1734,7 @@
                 "active": "Aktivní",
                 "status": "Stav",
                 "actions": "Akce",
+                "employee": "Zaměstnanec",
                 "employment": "Pracovní vztah",
                 "component": "Mzdová složka",
                 "calculation": "Způsob výpočtu",
@@ -16284,6 +16285,7 @@
             "edit": "Úprava pracovní cesty"
         },
         "form": {
+            "employee": "Zaměstnanec",
             "employment": "Pracovní vztah",
             "select": "Vyber pracovní vztah",
             "settlement_period": "Období vyúčtování",
@@ -16375,6 +16377,7 @@
             "no_employments_message": "Nepřítomnosti, průměrný výdělek i ledger dovolené se vedou k pracovnímu vztahu. Založte zaměstnance a jeho pracovní vztah v evidenci osob a vraťte se sem.",
             "no_employments_cta": "Přejít na evidenci osob"
         },
+        "employee": "Zaměstnanec",
         "employment": "Pracovní vztah",
         "from": "Od",
         "to": "Do",

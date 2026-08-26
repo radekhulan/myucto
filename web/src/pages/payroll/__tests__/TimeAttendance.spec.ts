@@ -150,6 +150,32 @@ describe('TimeAttendance', () => {
     expect(wrapper.text()).not.toContain('Syntetická osoba A')
   })
 
+  it('uses a keyboard-searchable employment selector in the editor', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [
+        row(12, 'Syntetická osoba A'),
+        row(13, 'Syntetická osoba B'),
+      ],
+      total: 2,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.add')
+    await add!.trigger('click')
+
+    const selector = wrapper.get('[data-test="payroll-time-employment"]')
+    expect(selector.find('[role="combobox"]').exists()).toBe(true)
+    expect(selector.find('select').exists()).toBe(false)
+    await selector.get('[role="combobox"]').setValue('osoba B')
+
+    expect(selector.findAll('[role="option"]')).toHaveLength(1)
+    expect(selector.text()).toContain('Syntetická osoba B')
+  })
+
   /** Zúžení „jen nedokončené" mění obsah, takže musí vrátit stránku na začátek. */
   it('returns to the first page when the incomplete filter changes', async () => {
     m.timeMonth.mockResolvedValue({

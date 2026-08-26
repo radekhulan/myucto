@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -60,6 +61,7 @@ const currentAbsencePage = computed(() => Math.floor(absenceOffset.value / absen
 const averages = ref<AverageSnapshot[]>([])
 const leaveEntries = ref<LeaveEntry[]>([])
 const leaveBalance = ref(0)
+const selectedEmployeeId = ref<number | null>(null)
 const selectedEmploymentId = ref<number | null>(null)
 const filterFrom = ref(monthStart)
 const filterTo = ref(monthEnd)
@@ -130,11 +132,19 @@ const approvedAverages = computed(() => averages.value.filter(item => item.statu
  * ovládacích prvků se vykreslí rozcestník do evidence osob.
  */
 const hasNoEmployments = computed(() => !loading.value && !loadFailed.value && employments.value.length === 0)
-const employmentOptions = computed(() => employments.value.map(item => ({
-  value: item.id,
-  label: `${item.full_name} · ${item.code}`,
-  secondary: t(`payroll.people.relations.${item.relation_type}`),
-})))
+const personOptions = computed(() => Array.from(
+  new Map(employments.value.map(item => [item.employee_id, {
+    value: item.employee_id,
+    label: item.full_name,
+  }])).values(),
+))
+const employmentOptions = computed(() => employments.value
+  .filter(item => item.employee_id === selectedEmployeeId.value)
+  .map(item => ({
+    value: item.id,
+    label: t(`payroll.people.relations.${item.relation_type}`),
+    secondary: item.code,
+  })))
 const absenceTypeOptions = computed(() => absenceTypes.map(type => ({
   value: type,
   label: t(`payroll_absence.types.${type}`),
@@ -272,7 +282,12 @@ async function loadContext() {
   const requestedTab = preselectedTab()
   if (requestedTab !== null) tab.value = requestedTab
   if (employments.value.length === 0 || selectedEmploymentId.value !== null) return
-  selectedEmploymentId.value = preselectedEmploymentId() ?? employments.value[0].id
+  const requestedEmploymentId = preselectedEmploymentId()
+  const selectedEmployment = employments.value.find(
+    item => item.id === requestedEmploymentId,
+  ) ?? employments.value[0]
+  selectedEmployeeId.value = selectedEmployment.employee_id
+  selectedEmploymentId.value = selectedEmployment.id
   const type = preselectedAbsenceType()
   if (type !== null) {
     absenceForm.absence_type = type
@@ -501,6 +516,12 @@ function minutes(value: number) {
   return `${sign}${Math.floor(absolute / 60)}:${String(absolute % 60).padStart(2, '0')}`
 }
 
+watch(selectedEmployeeId, employeeId => {
+  const available = employments.value.filter(item => item.employee_id === employeeId)
+  if (!available.some(item => item.id === selectedEmploymentId.value)) {
+    selectedEmploymentId.value = available[0]?.id ?? null
+  }
+})
 watch(selectedEmploymentId, () => {
   absenceForm.average_snapshot_id = null
   absenceError.value = ''
@@ -576,13 +597,24 @@ onMounted(async () => {
     <template v-else>
     <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
       <div class="grid gap-4 md:grid-cols-4">
-        <div class="md:col-span-2">
+        <div>
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.employee') }}</span>
+          <PayrollPersonSearchSelect
+            v-model="selectedEmployeeId"
+            data-test="absence-person"
+            :candidates="personOptions"
+            :label="t('payroll_absence.employee')"
+            :clearable="false"
+          />
+        </div>
+        <div>
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.employment') }}</span>
           <SearchableSelect
             v-model="selectedEmploymentId"
             :options="employmentOptions"
             :clearable="false"
             accent="payroll"
+            data-test="absence-employment"
             :aria-label="t('payroll_absence.employment')"
           />
         </div>
@@ -642,6 +674,7 @@ onMounted(async () => {
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.type') }}</span>
             <SearchableSelect
               v-model="absenceForm.absence_type"
+              data-test="absence-type"
               :options="absenceTypeOptions"
               :clearable="false"
               accent="payroll"
@@ -660,6 +693,7 @@ onMounted(async () => {
             <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_absence.absences.average') }}</span>
             <SearchableSelect
               v-model="absenceForm.average_snapshot_id"
+              data-test="absence-average"
               :options="averageOptions"
               :placeholder="t('payroll_absence.select')"
               accent="payroll"

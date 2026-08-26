@@ -7,7 +7,7 @@
  * záměr, ne rozestavěnost: datová věta odesílaného ELDP není v připnuté
  * oficiální sadě, takže odeslat by stejně nešlo bez ověřeného schématu.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
@@ -15,19 +15,17 @@ import {
   type PayrollEldpPrepared,
   type PayrollEldpStatement,
   type PayrollEmployment,
-  type PayrollPersonOption,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 
-const loading = ref(true)
 const preparing = ref(false)
-const people = ref<PayrollPersonOption[]>([])
 const employments = ref<PayrollEmployment[]>([])
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
@@ -47,8 +45,6 @@ const error = ref('')
 const success = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const personOptions = computed(() =>
-  people.value.map(person => ({ value: person.id, label: person.full_name })))
 const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
@@ -79,18 +75,6 @@ const canPrepare = computed(() =>
   && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
   && note.value.trim().length >= 5
   && note.value.trim().length <= 500)
-
-async function loadPeople(): Promise<void> {
-  loading.value = true
-  error.value = ''
-  try {
-    people.value = await payrollApi.peopleOptions()
-  } catch {
-    error.value = t('payroll.eldp.errors.loadFailed')
-  } finally {
-    loading.value = false
-  }
-}
 
 async function loadEmployments(id: number): Promise<void> {
   employments.value = []
@@ -167,6 +151,9 @@ async function prepare(): Promise<void> {
 watch(personId, value => {
   if (value !== null) {
     void loadEmployments(value)
+  } else {
+    employments.value = []
+    employmentId.value = null
   }
 })
 watch([employmentId, year, environment], () => {
@@ -184,7 +171,6 @@ watch(requestedByAuthority, value => {
     ].join('-')
   }
 })
-onMounted(loadPeople)
 </script>
 
 <template>
@@ -224,16 +210,19 @@ onMounted(loadPeople)
       {{ success }}
     </div>
 
-    <div v-if="loading" class="h-48 animate-pulse rounded-xl bg-neutral-100" />
-
-    <div v-else class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
+    <div class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
       <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block text-sm">
+        <div class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.eldp.person') }}
           </span>
-          <SearchableSelect v-model="personId" :options="personOptions" />
-        </label>
+          <PayrollPersonSearchSelect
+            v-model="personId"
+            data-test="eldp-person"
+            :label="t('payroll.eldp.person')"
+            :clearable="false"
+          />
+        </div>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.eldp.employment') }}

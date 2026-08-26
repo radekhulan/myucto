@@ -20,6 +20,7 @@ import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
 import Modal from '@/components/ui/Modal.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import {
@@ -141,6 +142,11 @@ const selected = computed(() =>
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
 const visibleItems = computed(() => overview.value?.items ?? [])
+const employmentOptions = computed(() => visibleItems.value.map(item => ({
+  value: item.employment.id,
+  label: item.employment.full_name,
+  secondary: `${relationLabel(item.employment.relation_type)} · ${item.employment.code}`,
+})))
 const focusMissing = computed(() =>
   focusEmploymentId.value !== null
   && overview.value !== null
@@ -958,11 +964,14 @@ onMounted(load)
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.employment') }}</span>
-          <select v-model="employmentId" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
-            <option v-for="item in overview?.items" :key="item.employment.id" :value="item.employment.id">
-              {{ item.employment.full_name }} · {{ relationLabel(item.employment.relation_type) }} ({{ item.employment.code }})
-            </option>
-          </select>
+          <SearchableSelect
+            v-model="employmentId"
+            :options="employmentOptions"
+            :clearable="false"
+            accent="payroll"
+            data-test="payroll-time-employment"
+            :aria-label="t('payroll.time.editor.employment')"
+          />
         </label>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.type') }}</span>

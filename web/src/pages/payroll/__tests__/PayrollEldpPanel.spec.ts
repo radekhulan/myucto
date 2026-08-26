@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
-  peopleOptions: vi.fn(),
+  peoplePage: vi.fn(),
   person: vi.fn(),
   eldpStatement: vi.fn(),
   prepareEldp: vi.fn(),
@@ -11,7 +11,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
-    peopleOptions: m.peopleOptions,
+    peoplePage: m.peoplePage,
     person: m.person,
     eldpStatement: m.eldpStatement,
     prepareEldp: m.prepareEldp,
@@ -35,14 +35,21 @@ vi.mock('@/components/ui/SearchableSelect.vue', () => ({
   },
 }))
 
+vi.mock('@/components/payroll/PayrollPersonSearchSelect.vue', () => ({
+  default: {
+    name: 'PayrollPersonSearchSelect',
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+    template: '<select data-test="person-search" role="combobox" />',
+  },
+}))
+
 import PayrollEldpPanel from '../PayrollEldpPanel.vue'
 
 function setup(): void {
   vi.clearAllMocks()
   m.canWrite = true
-  m.peopleOptions.mockResolvedValue([
-    { id: 11, full_name: 'Syntetická osoba', is_active: true, needs_setup: false },
-  ])
+  m.peoplePage.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
   m.person.mockResolvedValue({
     id: 11,
     employments: [{
@@ -157,9 +164,10 @@ async function fillConfirmation(
   wrapper: ReturnType<typeof mount>,
 ): Promise<void> {
   const selects = wrapper.findAllComponents({ name: 'SearchableSelect' })
-  selects[0]!.vm.$emit('update:modelValue', 11)
+  wrapper.findComponent({ name: 'PayrollPersonSearchSelect' })
+    .vm.$emit('update:modelValue', 11)
   await flushPromises()
-  selects[1]!.vm.$emit('update:modelValue', 101)
+  selects[0]!.vm.$emit('update:modelValue', 101)
   await flushPromises()
   await wrapper.get('[data-test="eldp-excluded-confirm"]').setValue(true)
   await wrapper.get('[data-test="eldp-deducted-confirm"]').setValue(true)
