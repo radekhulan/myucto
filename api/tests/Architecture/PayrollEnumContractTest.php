@@ -72,6 +72,8 @@ final class PayrollEnumContractTest extends TestCase
      */
     private const UNION_DOMAIN = [
         // Mzdový běh
+        'payroll.ts::PayrollPeriodExportScope'
+            => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři

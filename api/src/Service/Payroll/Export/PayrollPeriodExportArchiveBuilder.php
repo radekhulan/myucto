@@ -31,7 +31,10 @@ final class PayrollPeriodExportArchiveBuilder
         $periodStart = $payrollData['period_start'] ?? null;
         $periodEnd = $payrollData['period_end'] ?? null;
         $revisions = $payrollData['revisions'] ?? null;
-        if (!in_array($scope, ['monthly', 'annual'], true)
+        $scopeValue = is_string($scope)
+            ? PayrollPeriodExportScope::tryFrom($scope)
+            : null;
+        if ($scopeValue === null
             || !is_string($periodStart)
             || !is_string($periodEnd)
             || !$this->validDate($periodStart)
@@ -121,7 +124,7 @@ final class PayrollPeriodExportArchiveBuilder
 
         $bytes = $this->zip($archiveEntries);
         $hash = hash('sha256', $bytes);
-        $period = $scope === 'monthly'
+        $period = $scopeValue === PayrollPeriodExportScope::Monthly
             ? substr($periodStart, 0, 7)
             : substr($periodStart, 0, 4);
 

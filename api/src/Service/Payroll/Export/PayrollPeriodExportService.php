@@ -50,7 +50,7 @@ final class PayrollPeriodExportService
 
         return $this->create(
             $supplierId,
-            'monthly',
+            PayrollPeriodExportScope::Monthly,
             $periodStart,
             $periodEnd,
             $userId,
@@ -71,7 +71,7 @@ final class PayrollPeriodExportService
 
         return $this->create(
             $supplierId,
-            'annual',
+            PayrollPeriodExportScope::Annual,
             sprintf('%04d-01-01', $year),
             sprintf('%04d-12-31', $year),
             $userId,
@@ -249,7 +249,7 @@ final class PayrollPeriodExportService
     /** @return array{id:int,export_scope:string,period_start:string,period_end:string,file_sha256:string,size_bytes:int,storage_key:string,suggested_filename:string,source_manifest_hash:string,manifest_json:string,mime_type:string,created_at:string} */
     private function create(
         int $supplierId,
-        string $scope,
+        PayrollPeriodExportScope $scope,
         string $periodStart,
         string $periodEnd,
         int $userId,
@@ -262,7 +262,7 @@ final class PayrollPeriodExportService
 
         $source = $this->repository->source(
             $supplierId,
-            $scope,
+            $scope->value,
             $periodStart,
             $periodEnd,
         );
@@ -442,7 +442,7 @@ final class PayrollPeriodExportService
         // odstraní GC, zatímco smazání by mohlo rozbít již zapsaný cizí export.
         $record = $this->repository->insertOrGet([
             'supplier_id' => $supplierId,
-            'export_scope' => $scope,
+            'export_scope' => $scope->value,
             'period_start' => $periodStart,
             'period_end' => $periodEnd,
             'source_manifest_hash' => $archive['source_manifest_hash'],
