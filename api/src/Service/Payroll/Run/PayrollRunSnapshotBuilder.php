@@ -148,11 +148,6 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
-        $riskySavingsEvidenceRows = $this->batch->riskySavingsEvidence(
-            $supplierId,
-            $employmentIds,
-            $periodStart,
-        );
         $dimensionRows = $this->batch->employmentDimensions(
             $supplierId,
             $employmentIds,
@@ -264,9 +259,7 @@ final class PayrollRunSnapshotBuilder
                 );
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);
-            $riskySavingsEvidence = $this->riskySavingsEvidence(
-                $riskySavingsEvidenceRows[$employmentId] ?? null,
-            );
+            $riskySavingsEvidence = $this->riskySavingsEvidence($row);
             if ($riskySavingsEvidence !== null) {
                 foreach ($this->riskySavingsPolicy->issues(
                     $riskySavingsEvidence,
@@ -510,45 +503,59 @@ final class PayrollRunSnapshotBuilder
         );
     }
 
-    /** @param array<string,mixed>|null $row */
-    private function riskySavingsEvidence(?array $row): ?array
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>|null
+     */
+    private function riskySavingsEvidence(array $row): ?array
     {
-        if ($row === null) {
+        if ($row['risky_savings_id'] === null) {
             return null;
         }
         return [
-            'id' => (int) $row['id'],
-            'period_start' => (string) $row['period_start'],
-            'revision_no' => (int) $row['revision_no'],
-            'risk_factor' => (string) $row['risk_factor'],
-            'work_category' => (int) $row['work_category'],
-            'qualifying_shift_eighths' => (int) $row['qualifying_shift_eighths'],
-            'right_claimed_on' => (string) $row['right_claimed_on'],
-            'employee_informed_on' => $row['employee_informed_on'],
-            'pension_company' => (string) $row['pension_company'],
-            'institution_account_id' => $row['institution_account_id'] === null
-                ? null : (int) $row['institution_account_id'],
-            'institution_account_row_version' =>
-                $row['institution_account_row_version'] === null
-                    ? null : (int) $row['institution_account_row_version'],
-            'institution_account_hash' => $row['institution_account_hash'],
-            'institution_account_masked' => $row['institution_account_masked'],
-            'current_institution_account_row_version' =>
-                $row['current_institution_account_row_version'] === null
+            'id' => (int) $row['risky_savings_id'],
+            'period_start' => (string) $row['risky_savings_period_start'],
+            'revision_no' => (int) $row['risky_savings_revision_no'],
+            'risk_factor' => (string) $row['risky_savings_risk_factor'],
+            'work_category' => (int) $row['risky_savings_work_category'],
+            'qualifying_shift_eighths' =>
+                (int) $row['risky_savings_qualifying_shift_eighths'],
+            'right_claimed_on' =>
+                (string) $row['risky_savings_right_claimed_on'],
+            'employee_informed_on' =>
+                $row['risky_savings_employee_informed_on'],
+            'pension_company' =>
+                (string) $row['risky_savings_pension_company'],
+            'institution_account_id' =>
+                $row['risky_savings_institution_account_id'] === null
                     ? null
-                    : (int) $row['current_institution_account_row_version'],
+                    : (int) $row['risky_savings_institution_account_id'],
+            'institution_account_row_version' =>
+                $row['risky_savings_institution_account_row_version'] === null
+                    ? null
+                    : (int) $row['risky_savings_institution_account_row_version'],
+            'institution_account_hash' =>
+                $row['risky_savings_institution_account_hash'],
+            'institution_account_masked' =>
+                $row['risky_savings_institution_account_masked'],
+            'current_institution_account_row_version' =>
+                $row['risky_savings_current_account_row_version'] === null
+                    ? null
+                    : (int) $row['risky_savings_current_account_row_version'],
             'current_institution_account_hash' =>
-                $row['current_institution_account_hash'],
-            'product_reference' => (string) $row['product_reference'],
-            'variable_symbol' => $row['variable_symbol'],
-            'specific_symbol' => $row['specific_symbol'],
-            'payment_message' => $row['payment_message'],
-            'evidence_reference' => $row['evidence_reference'],
-            'status' => (string) $row['status'],
-            'row_version' => (int) $row['row_version'],
-            'approved_at' => $row['approved_at'],
-            'approved_by' => $row['approved_by'] === null
-                ? null : (int) $row['approved_by'],
+                $row['risky_savings_current_account_hash'],
+            'product_reference' =>
+                (string) $row['risky_savings_product_reference'],
+            'variable_symbol' => $row['risky_savings_variable_symbol'],
+            'specific_symbol' => $row['risky_savings_specific_symbol'],
+            'payment_message' => $row['risky_savings_payment_message'],
+            'evidence_reference' => $row['risky_savings_evidence_reference'],
+            'status' => (string) $row['risky_savings_status'],
+            'row_version' => (int) $row['risky_savings_row_version'],
+            'approved_at' => $row['risky_savings_approved_at'],
+            'approved_by' => $row['risky_savings_approved_by'] === null
+                ? null
+                : (int) $row['risky_savings_approved_by'],
         ];
     }
 
@@ -781,7 +788,46 @@ final class PayrollRunSnapshotBuilder
                     average.status AS average_earning_status,
                     average.ruleset_id AS average_earning_ruleset_id,
                     average.ruleset_hash AS average_earning_ruleset_hash,
-                    HEX(average.input_hash) AS average_earning_input_hash
+                    HEX(average.input_hash) AS average_earning_input_hash,
+                    risky_savings.id AS risky_savings_id,
+                    risky_savings.period_start AS risky_savings_period_start,
+                    risky_savings.revision_no AS risky_savings_revision_no,
+                    risky_savings.risk_factor AS risky_savings_risk_factor,
+                    risky_savings.work_category AS risky_savings_work_category,
+                    risky_savings.qualifying_shift_eighths
+                        AS risky_savings_qualifying_shift_eighths,
+                    risky_savings.right_claimed_on
+                        AS risky_savings_right_claimed_on,
+                    risky_savings.employee_informed_on
+                        AS risky_savings_employee_informed_on,
+                    risky_savings.pension_company
+                        AS risky_savings_pension_company,
+                    risky_savings.institution_account_id
+                        AS risky_savings_institution_account_id,
+                    risky_savings.institution_account_row_version
+                        AS risky_savings_institution_account_row_version,
+                    risky_savings.institution_account_hash
+                        AS risky_savings_institution_account_hash,
+                    risky_savings.institution_account_masked
+                        AS risky_savings_institution_account_masked,
+                    risky_savings_account.row_version
+                        AS risky_savings_current_account_row_version,
+                    LOWER(HEX(risky_savings_account.bank_account_hash))
+                        AS risky_savings_current_account_hash,
+                    risky_savings.product_reference
+                        AS risky_savings_product_reference,
+                    risky_savings.variable_symbol
+                        AS risky_savings_variable_symbol,
+                    risky_savings.specific_symbol
+                        AS risky_savings_specific_symbol,
+                    risky_savings.payment_message
+                        AS risky_savings_payment_message,
+                    risky_savings.evidence_reference
+                        AS risky_savings_evidence_reference,
+                    risky_savings.status AS risky_savings_status,
+                    risky_savings.row_version AS risky_savings_row_version,
+                    risky_savings.approved_at AS risky_savings_approved_at,
+                    risky_savings.approved_by AS risky_savings_approved_by
                FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
@@ -840,6 +886,25 @@ final class PayrollRunSnapshotBuilder
                               selected_average.id DESC
                      LIMIT 1
                 )
+          LEFT JOIN payroll_risky_savings_evidence risky_savings
+                 ON risky_savings.supplier_id = employment.supplier_id
+                AND risky_savings.employment_id = employment.id
+                AND risky_savings.period_start = ?
+                AND risky_savings.revision_no = (
+                    SELECT MAX(selected_risky_savings.revision_no)
+                      FROM payroll_risky_savings_evidence selected_risky_savings
+                     WHERE selected_risky_savings.supplier_id =
+                           risky_savings.supplier_id
+                       AND selected_risky_savings.employment_id =
+                           risky_savings.employment_id
+                       AND selected_risky_savings.period_start =
+                           risky_savings.period_start
+                )
+          LEFT JOIN payroll_institution_accounts risky_savings_account
+                 ON risky_savings_account.supplier_id =
+                    risky_savings.supplier_id
+                AND risky_savings_account.id =
+                    risky_savings.institution_account_id
               WHERE employment.effective_status IS NOT NULL
                 AND employment.effective_status NOT IN ("archived", "no_show")
                 AND COALESCE(
@@ -875,6 +940,7 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
             $periodEnd,
             $periodEnd,
+            $periodStart,
             $periodStart,
             $periodStart,
             $periodStart,
