@@ -162,11 +162,6 @@ final class PayrollPeriodExportArchiveBuilder
                 throw new \RuntimeException('Export mezd nelze vytvořit.');
             }
             $opened = true;
-            if (DIRECTORY_SEPARATOR !== '\\' && !@chmod($path, 0600)) {
-                throw new \RuntimeException(
-                    'Dočasný export mezd nelze bezpečně zabezpečit.',
-                );
-            }
             foreach ($entries as $name => $bytes) {
                 if (!$zip->addFromString($name, $bytes)
                     || !$zip->setMtimeName($name, self::ZIP_TIMESTAMP)
@@ -186,6 +181,16 @@ final class PayrollPeriodExportArchiveBuilder
                 throw new \RuntimeException('Export mezd nelze dokončit.');
             }
             $opened = false;
+            // Zúžení práv AŽ TADY: `ZipArchive::open()` s CREATE soubor na disk nepoloží,
+            // ten vznikne teprve při `close()`. Dřívější chmod tedy sahal na neexistující
+            // cestu, vracel false a shodil každý export na Linuxu; na Windows se celá větev
+            // přeskakuje, takže se na to lokálním během testů nepřišlo. Okno mezi close()
+            // a chmod() kryje adresář založený s 0750 a náhodné jméno souboru.
+            if (DIRECTORY_SEPARATOR !== '\\' && !@chmod($path, 0600)) {
+                throw new \RuntimeException(
+                    'Dočasný export mezd nelze bezpečně zabezpečit.',
+                );
+            }
             $bytes = file_get_contents($path);
             if (!is_string($bytes) || $bytes === '') {
                 throw new \RuntimeException('Export mezd nelze načíst.');
