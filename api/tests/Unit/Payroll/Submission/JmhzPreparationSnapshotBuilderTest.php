@@ -77,6 +77,28 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertFalse($snapshot->readiness()['official_submission_supported']);
     }
 
+    public function testMandatoryEarningsVectorContainsZerosWithoutArtificialInputs(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(),
+            [],
+            [],
+        );
+
+        self::assertSame(
+            [
+                '10328' => 0,
+                '10329' => 0,
+                '10330' => 0,
+                '10331' => 0,
+            ],
+            $snapshot->payload['people'][0]['employments'][0]
+                ['earnings_by_attribute_minor'],
+        );
+    }
+
     public function testCurrentApprovedCorrectionRevisionCanBeTheSourceOfFirstRegularSubmission(): void
     {
         $source = $this->source();

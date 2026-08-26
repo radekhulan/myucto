@@ -312,18 +312,12 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $this->assignJmhzIdentity($person);
 
         $baseComponentId = $this->componentId('MZDA_MESICNI_FLOW');
-        $regularBonusId = $this->createComponent('ODMENA_PRAVIDELNA_JMHZ_FLOW', 'bonus', 'one_off');
-        $irregularBonusId = $this->componentId('ODMENA_FLOW');
         $mappings = $this->container->get(PayrollComponentJmhzMappingRepository::class);
         if (!$mappings instanceof PayrollComponentJmhzMappingRepository) {
             throw new \RuntimeException('Mapování mzdových složek JMHZ není dostupné.');
         }
         $mappings->put($this->supplierId, $baseComponentId, '10329', null, $this->actors[0]);
-        $mappings->put($this->supplierId, $regularBonusId, '10330', null, $this->actors[0]);
-        $mappings->put($this->supplierId, $irregularBonusId, '10331', null, $this->actors[0]);
         $this->createApprovedInput($person, $baseComponentId, 4_200_000, 'jmhz-base');
-        $this->createApprovedInput($person, $regularBonusId, 0, 'jmhz-regular-bonus');
-        $this->createApprovedInput($person, $irregularBonusId, 0, 'jmhz-irregular-bonus');
 
         $run = $this->runs->createRun(
             $this->supplierId,

@@ -233,7 +233,12 @@ final class JmhzPreparationSnapshotBuilder
                     $usedOrdinaryEvidence[$employmentId] = $ordinary;
                 }
                 $componentMappings = [];
-                $earnings = [];
+                $earnings = [
+                    '10328' => 0,
+                    '10329' => 0,
+                    '10330' => 0,
+                    '10331' => 0,
+                ];
                 foreach ($this->rows($entry['inputs'] ?? null, 'employment.inputs') as $inputRow) {
                     $component = $this->object($inputRow['component'] ?? null, 'input.component');
                     $componentId = $this->positiveInt($component['component_id'] ?? null, 'component.component_id');
