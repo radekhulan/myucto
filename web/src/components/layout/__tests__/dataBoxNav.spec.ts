@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+const workspaceRoutes = readFileSync(
+  resolve(process.cwd(), 'src/router/workspaceRoutes.ts'),
+  'utf8',
+)
+
 const appLayout = readFileSync(
   resolve(process.cwd(), 'src/components/layout/AppLayout.vue'),
   'utf8',
@@ -30,5 +35,9 @@ describe('navigace datové schránky', () => {
   it('mizí spolu s vypnutými mzdami — schránka slouží mzdovým podáním', () => {
     expect(appLayout).toContain("...(payrollEnabled ? [{ to: '/admin/databox'")
     expect(appLayout).toContain("if (payrollEnabled && auth.canWrite('settings.signing'))")
+    // Skrytá položka v menu nestačí — bez guardu na routě by se na stránku dalo
+    // dostat přímou adresou. `requiresPayroll` řeší router/index.ts stejně jako
+    // u skladu a mzdových stránek.
+    expect(workspaceRoutes).toContain("name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: { requiresPayroll: true }")
   })
 })
