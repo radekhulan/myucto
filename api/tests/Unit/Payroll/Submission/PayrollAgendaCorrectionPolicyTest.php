@@ -99,5 +99,13 @@ final class PayrollAgendaCorrectionPolicyTest extends TestCase
             'EPO_DPH',
             'correction',
         ));
+        self::assertTrue(PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'cancellation',
+        ));
+        self::assertFalse(PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'correction',
+        ));
     }
 }

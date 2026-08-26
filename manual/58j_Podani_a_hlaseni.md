@@ -247,6 +247,10 @@ přihlášení a potvrzení odeslání. Samostatně potom sledujte protokol až 
 přijetí. Opakování stejné přípravy vrací již vytvořený výsledek, i když
 tlačítko použijete později znovu.
 
+Přijetím storna celého hlášení se jako nahrazené označí řádné hlášení i všechny
+jeho dříve přijaté dílčí opravy. Historie tak dál ukazuje celý řetězec, ale za
+platné už nepovažuje žádnou jeho zrušenou část.
+
 Jakmile už pro podání existuje odchozí zpráva ISDS, přehled ukáže její číslo a
 aktuální stav. Další odeslání přes ISDS i VREP zablokuje, aby účetní omylem
 nepodala tutéž datovou větu dvakrát. Pokračujte odkazem **Otevřít odchozí

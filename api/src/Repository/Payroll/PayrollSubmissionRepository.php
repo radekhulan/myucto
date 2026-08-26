@@ -843,14 +843,14 @@ final class PayrollSubmissionRepository
             );
     }
 
-    /** @return list<array{id:int,status:string}> */
+    /** @return list<array{id:int,status:string,row_version:int}> */
     public function resolvedCorrectionsForRoot(
         int $supplierId,
         string $environment,
         int $regularSubmissionId,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, status
+            'SELECT id, status, row_version
                FROM payroll_submissions
               WHERE supplier_id = ? AND environment = ?
                 AND corrects_submission_id = ?
@@ -867,6 +867,7 @@ final class PayrollSubmissionRepository
             $rows[] = [
                 'id' => self::integer($row, 'id'),
                 'status' => self::string($row, 'status'),
+                'row_version' => self::integer($row, 'row_version'),
             ];
         }
 

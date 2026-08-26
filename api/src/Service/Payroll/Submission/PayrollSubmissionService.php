@@ -839,6 +839,17 @@ final class PayrollSubmissionService
                     (string) $obligation['agenda_code'],
                     (string) $submission['submission_kind'],
                 )) {
+                    $supersedesCorrectionChain = PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+                            (string) $obligation['agenda_code'],
+                            (string) $submission['submission_kind'],
+                        );
+                    $correctionChain = $supersedesCorrectionChain
+                        ? $this->repository->resolvedCorrectionsForRoot(
+                            $supplierId,
+                            $submission['environment'],
+                            $predecessor['id'],
+                        )
+                        : [];
                     $this->repository->updateSubmissionStatus(
                         $supplierId,
                         $predecessor['id'],
@@ -848,6 +859,21 @@ final class PayrollSubmissionService
                         null,
                         $now,
                     );
+                    foreach ($correctionChain as $correction) {
+                        $this->stateMachine->assertTransition(
+                            $correction['status'],
+                            'superseded',
+                        );
+                        $this->repository->updateSubmissionStatus(
+                            $supplierId,
+                            $correction['id'],
+                            $correction['row_version'],
+                            'superseded',
+                            null,
+                            null,
+                            $now,
+                        );
+                    }
                 }
             }
 

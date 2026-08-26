@@ -429,6 +429,52 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         );
     }
 
+    public function testAcceptedWholeCancellationSupersedesTheEntireCorrectionChain(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $correction = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+        $this->acceptPreparedSubmission(
+            $correction['submission_id'],
+            'VREP-CORRECTION-CHAIN-0001',
+        );
+        $cancellation = $this->corrections->cancelSubmission(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+        );
+        $this->acceptPreparedSubmission(
+            $cancellation['submission_id'],
+            'VREP-CANCELLATION-CHAIN-0001',
+        );
+
+        self::assertSame(
+            'superseded',
+            $this->repository->findSubmission(
+                $this->supplierId,
+                $original['id'],
+            )['status'] ?? null,
+        );
+        self::assertSame(
+            'superseded',
+            $this->repository->findSubmission(
+                $this->supplierId,
+                $correction['submission_id'],
+            )['status'] ?? null,
+        );
+        self::assertSame(
+            'accepted',
+            $this->repository->findSubmission(
+                $this->supplierId,
+                $cancellation['submission_id'],
+            )['status'] ?? null,
+        );
+    }
+
     public function testCorrectionCanReferenceCanonicalNonV7Guids(): void
     {
         $regularGuid = 'AAAABBBB-1111-4222-8333-CCCCDDDDEEEE';

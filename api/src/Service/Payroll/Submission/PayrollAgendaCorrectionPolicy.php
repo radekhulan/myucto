@@ -114,4 +114,15 @@ final class PayrollAgendaCorrectionPolicy
     ): bool {
         return $agendaCode !== 'JMHZ25' || $submissionKind !== 'correction';
     }
+
+    /**
+     * Přijaté celé storno JMHZ ruší výsledek za celé období, tedy i všechny
+     * dříve přijaté dílčí opravy navázané na stejný řádný kořen.
+     */
+    public static function supersedesCorrectionChainOnAcceptance(
+        string $agendaCode,
+        string $submissionKind,
+    ): bool {
+        return $agendaCode === 'JMHZ25' && $submissionKind === 'cancellation';
+    }
 }
