@@ -8,6 +8,7 @@
  *  - Sekvenčně přečísluje na 01..NN, přeskočí 99 (FAQ zůstává na konci).
  *  - Headings `# N. Title`, `## N.X.Y …` i in-text `§ N.X` se přepíší na nová čísla.
  *  - Anchory `(file.md#NNN-...)` se přepíší (chapter prefix v anchor slugu).
+ *  - Apply se zablokuje, pokud by rozbil písmennou rodinu nebo vytvořil kolizi čísla.
  *
  * Použití:
  *   php tools/renumberManual.php           — DRY RUN, vypíše plánované změny
@@ -55,6 +56,36 @@ foreach ($files as $f) {
         'old_label'  => $h1Label,
         'new_label'  => ltrim($newPrefix, '0') ?: '0',
     ];
+}
+
+// Safety guard: stabilní písmenné rodiny (např. 58a–58s) nesmějí být tiše
+// rozbaleny na samostatná čísla a rezervované číslo 99 nesmí dostat další kapitola.
+// Dry run problém ukáže, --apply skončí dřív, než se dotkne jediného souboru.
+$guardProblems = [];
+$flattenedFamilies = [];
+$targetsByPrefix = [];
+foreach ($map as $old => $info) {
+    if (preg_match('/^\d+[a-z]+$/i', $info['old_prefix']) && $info['old_prefix'] !== $info['new_prefix']) {
+        $flattenedFamilies[] = $info['old_prefix'];
+    }
+    $targetsByPrefix[$info['new_prefix']][] = $old;
+}
+if ($flattenedFamilies !== []) {
+    $guardProblems[] = 'písmenné kapitoly by ztratily stabilní příponu: ' . implode(', ', $flattenedFamilies);
+}
+foreach ($targetsByPrefix as $prefix => $owners) {
+    if (count($owners) > 1) {
+        $guardProblems[] = "cílové číslo $prefix má více kapitol: " . implode(', ', $owners);
+    }
+}
+if ($guardProblems !== []) {
+    $message = "BEZPEČNOSTNÍ BLOKACE PŘEČÍSLOVÁNÍ:\n- "
+        . implode("\n- ", $guardProblems)
+        . "\nNástroj nic nezměnil. Stabilní písmenné rodiny je nutné zachovat a cílová čísla musí být jednoznačná.\n\n";
+    fwrite(STDERR, $message);
+    if (!$dryRun) {
+        exit(2);
+    }
 }
 
 echo ($dryRun ? "DRY RUN (no files modified). Use --apply to commit.\n" : "APPLY MODE — files will be renamed and edited.\n") . "\n";

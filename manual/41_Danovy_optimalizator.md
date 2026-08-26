@@ -67,7 +67,7 @@ Proto se může lišit od DPFO například takto:
 - DPFO krátí některé odpočty podle měsíců a provádí zákonná zaokrouhlení na stokoruny
   a celé koruny; optimalizátor pracuje průběžně s desetinnými částkami,
 - finální pojistné respektuje podrobnější měsíční data a přesto má omezení popsaná
-  v kapitole [Pojistné OSVČ](38_Dan_z_prijmu.md#pojistne-osv-dulezita-omezeni),
+v kapitole [Pojistné OSVČ](38_Dan_z_prijmu.md#pojistne-osvc-dulezita-omezeni),
 - paušální daň má i nečíselné podmínky vstupu, které samotné porovnání nákladů neověří.
 
 ## Jak výsledek používat

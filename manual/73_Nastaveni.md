@@ -795,7 +795,7 @@ jedinečný.
 
 **Cesta: `Systém → Sazby a číselníky`**. Stránka sdružuje systémové
 číselníky **Sazby DPH**, **Klasifikace DPH**, **Země** a **Jednotky**.
-Sazby, země a jednotky popisuje [§ 73.1](#731-iselniky); pro výkazy je
+Sazby, země a jednotky popisuje [§ 73.1](#731-ciselniky); pro výkazy je
 zásadní také následující klasifikace DPH.
 
 ### Klasifikace DPH
@@ -930,56 +930,12 @@ pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí v�
 
 ## 73.17 Datová schránka
 
-**Cesta: `Firma → Datová schránka`.** Stránka vždy pracuje s právě zvolenou
-firmou a sdružuje její firemní certifikát,
-odchozí frontu podání, ručně načítanou příchozí schránku, doručenky a výzvy
-k odstranění vad. Stav dopravy (**připraveno, odesláno, doručeno**) se vždy
-zobrazuje odděleně od výsledku zpracování (**přijato, odmítnuto, neznámé**).
-Doručenka datové zprávy sama neprokazuje přijetí podání úřadem.
+**Firma → Datová schránka** (`/admin/databox`) spravuje přístupy, příchozí
+zprávy, příjemce, výzvy a odchozí podání právě vybrané firmy. Přehled všech
+přihlašovacích metod, ručního inboxu a odeslání najdete v samostatné kapitole
+[Datová schránka](73a_Datova_schranka.md).
 
-Na kartě **Přístup** jsou oddělené dvě cesty. Doporučené interaktivní odeslání
-přes odesílací bránu připraví zprávu jako koncept přímo v ISDS. Před odchodem MyÚčto
-zobrazí instrukci k přihlášení; přihlašovací údaje se zadávají pouze na stránce
-ISDS, MyÚčto je nevidí ani neukládá. Metodu vybírá ISDS podle konkrétního účtu —
-zahrnuje jméno a heslo, Mobilní klíč eGovernmentu (PIN nebo heslo aplikace a
-potvrzení v klíči), Identitu občana, SMS, uživatelský certifikát nebo bezpečnostní
-kód podle nastavení účtu. Zpráva se neodešle pouhým přesměrováním:
-uživatel musí připravený koncept v ISDS vědomě schválit.
-
-Příchozí zprávy se načítají přímým rozhraním ISDS nezávisle na odesílací bráně.
-Při každém ručním načtení si uživatel zvolí jednu ze čtyř metod:
-
-- **Mobilní klíč eGovernmentu** — zadá uživatelské jméno a komunikační kód
-  (heslo pro externí aplikaci) a konkrétní relaci potvrdí v Mobilním klíči;
-- **jméno a heslo** — použijí se pouze pro jeden synchronní požadavek;
-- **SMS** — nejprve zadá jméno a heslo, potom dokončí právě zahájenou relaci
-  jednorázovým SMS kódem;
-- **firemní certifikát** — uložený šifrovaně pouze u aktuální firmy.
-
-Jednorázové heslo a SMS kód se trvale neukládají. U Mobilního klíče lze
-uživatelské jméno a komunikační kód volitelně uložit jako šifrovaný profil
-oddělený podle firmy, uživatele a prostředí; profil lze znovu odstranit.
-Krátkodobá relace Mobilního klíče platí jen pro právě zahájené načtení a po něm
-se aplikace z ISDS odhlásí. Doporučení provozního řádu pro aplikace třetích
-stran samo o sobě neurčuje právní vhodnost metody pro konkrétní organizaci.
-Absence firemního certifikátu neblokuje jednorázové interaktivní metody.
-
-Globální registraci odesílací brány v **Systém → Odesílací brána ISDS** a její
-komerční certifikát spravuje pouze
-provozní superadmin. Mzdová účetní ani správce firmy tyto tajné údaje nevidí;
-pro odeslání dostanou jen bezpečnou informaci, zda je brána pro zvolené
-prostředí dostupná. Jako návratovou adresu registrace použij hodnotu zobrazenou
-v aplikaci; směřuje na autentizovanou stránku `/isds-gateway/callback`, aby se
-z ISDS mohla bezpečně vrátit i mzdová role bez práva spravovat globální
-certifikát brány.
-
-Příchozí schránka se **nevybírá automaticky ani plánovanou úlohou**. Nové zprávy
-se načtou jen po kliknutí uživatele na **Vyzvednout nové zprávy**, zvolení metody
-přihlášení a samostatném potvrzení upozornění. Je to záměrná pojistka: vyzvednutí
-zprávy může být právně rozhodným doručením a spustit navazující lhůty.
-Automatické stahování nelze v nastavení zapnout. U Mobilního klíče se po této
-akci automaticky kontroluje pouze stav právě vyžádaného potvrzení; nejde o
-opakované ani plánované vybírání schránky.
-
-Použití datové schránky pro mzdová hlášení, stav konceptu, doručenky a věcné
-přijetí popisuje kapitola [Podání a hlášení](58j_Podani_a_hlaseni.md).
+Globální registraci externí aplikace spravuje provozovatel v **Systém →
+Odesílací brána ISDS** (`/admin/isds-gateway`); popisuje ji kapitola
+[Odesílací brána ISDS](73b_Odesilaci_brana_ISDS.md). Mzdové formuláře a jejich
+věcný stav popisuje kapitola [Podání a hlášení](58j_Podani_a_hlaseni.md).

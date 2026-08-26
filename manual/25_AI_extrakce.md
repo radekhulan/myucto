@@ -131,7 +131,7 @@ bez DPH), doklad automaticky daňově připraví:
 - Do dokladu se zapíše **informační varování** s rekapitulací, co se nastavilo
   — zkontroluj hlavně zboží vs. služba a případně změň kód (23 ↔ 24).
 
-Detail daňové logiky viz [§ 23.2.7](23_Prijate_faktury.md#2327-reverse-charge-z-eu--porizeni-zbozi-vs-sluzba).
+Detail daňové logiky viz [§ 23.2.7](23_Prijate_faktury.md#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 
 ## 25.7 Multi-provider AI brána (výběr poskytovatele)
 

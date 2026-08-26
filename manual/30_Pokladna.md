@@ -261,7 +261,7 @@ nejdřív navazující doklad, teprve pak pokladní doklad; hláška uvede jeho 
 
 Pokladní doklad nemusí vzniknout jen tady. Zvolíš-li v editoru
 [vydané](15_Faktura_editor.md#1527-zpusob-uhrady-a-platba-hotove) nebo
-[přijaté faktury](23_Prijate_faktury.md#2329-zpusob-uhrady-a-platba-hotove-z-pokladny)
+[přijaté faktury](23_Prijate_faktury.md#23210-zpusob-uhrady-a-platba-hotove-z-pokladny)
 způsob úhrady **Hotově** a k tomu **pokladnu**, systém při vystavení (resp.
 uložení či přijetí) sám vystaví a zaúčtuje PPD nebo VPD s účelem *Úhrada faktury*
 — přesně takový, jaký bys tady vyplnil/a ručně. Faktura se tím stane uhrazenou.

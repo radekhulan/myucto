@@ -569,7 +569,7 @@ našeptávač, který hledá napříč vydanými i přijatými fakturami, poklad
 a bankovními pohyby (podle čísla dokladu, variabilního symbolu nebo názvu partnera).
 K vazbě lze připsat **poznámku**, proč spolu doklady souvisejí.
 
-Vazbu jde založit i rovnou při zakládání [ručního zápisu](#454-ruční-zápis) — sekce
+Vazbu jde založit i rovnou při zakládání [ručního zápisu](#454-rucni-zapis) — sekce
 Vazba na doklad je i ve formuláři nového zápisu a uloží se jedním krokem se zápisem.
 Při akci **Kopírovat jako nový** se vazby zkopírují spolu s řádky.
 

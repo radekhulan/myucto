@@ -6,7 +6,7 @@ Kapitola popisuje modul **Účetní období** a **uzávěrkový průvodce** pro 
 v **podvojném účetnictví** (menu se zobrazuje jen firmám v tomto účetním režimu —
 u daňové evidence se místo něj zobrazuje daňový deník příjmů a výdajů). Archiv
 účetnictví je samostatně popsán v kapitole
-[Nástroje](69_Ucetni_nastroje.md#696-archiv-ucetnictvi).
+[Nástroje](69_Ucetni_nastroje.md#696-obnovitelny-archiv-v-kompletnim-exportu).
 
 > [!NOTE]
 > Uzávěrka je vícekrokový proces s auditní stopou — vazba na §17 odst. 7, §35 a
@@ -353,7 +353,7 @@ přeskočené). Po potvrzení v dialogu se zaúčtuje uzávěrkový zápis:
 - **rozvahové účty** se uzavřou přes **702 — Konečný účet rozvažný**,
 - vypočte se **výsledek hospodaření** a období přejde do stavu **Uzavřené**.
 
-Doklad dostane číslo z řady **UZ** (viz [§ 68.5](#685-iselne-rady-dokladu-uzaverky)).
+Doklad dostane číslo z řady **UZ** (viz [§ 68.5](#685-ciselne-rady-dokladu-uzaverky)).
 Po dokončení kroku panel zobrazí zjištěný **výsledek hospodaření**, **číslo dokladu**
 a odkaz **„Zobrazit uzávěrkové zápisy v deníku"**. Dokud závěrka není schválená,
 administrátor může krok tlačítkem **„Vzít zpět uzavření knih"** zrušit — uzávěrkové
@@ -368,7 +368,7 @@ rozvažný** a převede výsledek hospodaření na účet **431**. Doklad dostan
 řady **OT**.
 
 Pokud je v nastavení uzávěrky zapnutá volba **„Storno přecenění saldokonta k 1. dni
-nového období"** (viz [§ 68.5](#685-iselne-rady-dokladu-uzaverky)), zaúčtuje se
+nového období"** (viz [§ 68.5](#685-ciselne-rady-dokladu-uzaverky)), zaúčtuje se
 zároveň zrcadlový storno zápis kurzových rozdílů z kroku 3 — doklad z řady **KR**; v
 panelu se pak zobrazí hláška „Bylo zaúčtováno storno přecenění saldokonta k 1. dni
 období." Administrátor může i tento krok tlačítkem **„Vzít zpět otevření roku"**
@@ -377,7 +377,7 @@ zrušit.
 ## 68.4 Interní kontrola, schválení závěrky a znovuotevření
 
 Jakmile je krok *Uzavření knih* hotový, období je ve stavu **Uzavřené** a je možné
-kroky ještě revidovat (revert) nebo období znovuotevřít (viz [§ 68.1](#681-cetni-obdobi-prehled-a-stavy)).
+kroky ještě revidovat (revert) nebo období znovuotevřít (viz [§ 68.1](#681-ucetni-obdobi-prehled-a-stavy)).
 
 Aplikace rozlišuje **dva různé** koncepty, které je nutné nezaměňovat:
 
@@ -513,7 +513,7 @@ vyžaduje `reports.export:write`.
 > inventurní zápisy, bankovní potvrzení ani jiné podklady. Přiznání k dani je jen
 > **vygenerovaná** sestava (XML nese vlastní varování) — **skutečné podání dokládá až
 > importovaný podaný soubor**, ne balíček (viz křížová kontrola **K9 — rekonciliace
-> přiznání** v [§ 68.7.1](#6871-kontrolni-mapa-k1-k10-a-jeji-interpretace)). Případné
+> přiznání** v [§ 68.7.1](#6871-kontrolni-mapa-k1k10-a-jeji-interpretace)). Případné
 > chybějící/přeskočené sestavy jsou vypsané jako **upozornění** v README balíčku a
 > v logu úlohy. Na rozdíl od Archivu účetnictví nejde o úplnou technickou zálohu ani
 > prostředek obnovy firmy.

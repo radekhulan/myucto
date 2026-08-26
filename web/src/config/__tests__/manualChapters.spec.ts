@@ -33,6 +33,9 @@ describe('contextual manual for application menu', () => {
     ['/reports/vat-coefficient', '36_Vykazy_DPH'],
     ['/reports/s46', '36_Vykazy_DPH'],
     ['/hosting', '79_Licence_a_aktivace'],
+    ['/admin/databox', '73a_Datova_schranka'],
+    ['/admin/isds-gateway', '73b_Odesilaci_brana_ISDS'],
+    ['/isds-gateway/callback', '73b_Odesilaci_brana_ISDS'],
   ])('uses the subject-specific chapter for %s', (path, chapter) => {
     expect(manualChapter(path)).toBe(chapter)
   })

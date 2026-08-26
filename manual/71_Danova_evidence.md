@@ -160,7 +160,7 @@ chybějící kurz může zablokovat výpočet a nesmí se nahrazovat odhadem 1:1
 > [!TIP]
 > Klasifikace pokladních dokladů se odvozuje automaticky ze zvoleného **Účelu
 > dokladu** při vystavení PPD/VPD (Prodej, Nákup, Úhrada faktury, Převod,
-> Ostatní — viz [§ 30.3.2 Účel dokladu](30_Pokladna.md#3032-cel-dokladu)).
+> Ostatní — viz [§ 30.3.2 Účel dokladu](30_Pokladna.md#3032-ucel-dokladu)).
 > Chceš-li tedy ovlivnit, kam pohyb v peněžním deníku spadne, uprav účel na
 > pokladním dokladu nebo daňové příznaky (uznatelnost, osvobození) na faktuře.
 
@@ -245,7 +245,7 @@ U tabulky závazků je nad seznamem poznámka, že **přijaté faktury se eviduj
 celek** — částečně uhrazená přijatá faktura se v přehledu zobrazuje v plné zbývající
 výši, dokud není označena jako zcela zaplacená (v souladu s tím, jak Pokladna
 i Platební příkazy vyžadují u přijatých faktur úhradu celé částky najednou, viz
-[§ 26](26_Platebni_prikazy.md) a [§ 30.3.2](30_Pokladna.md#3032-cel-dokladu)).
+[§ 26](26_Platebni_prikazy.md) a [§ 30.3.2](30_Pokladna.md#3032-ucel-dokladu)).
 
 Export **PDF** / **XLSX** vpravo nahoře vygeneruje sestavu (`pohledavky-zavazky.pdf`
 / `.xlsx`) se stavem k okamžiku exportu — bez datumového filtru (sestava vždy

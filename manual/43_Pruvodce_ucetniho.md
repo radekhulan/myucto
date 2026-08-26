@@ -104,7 +104,7 @@ krokem:
    zaúčtování ročních odpisů, viz i [§ 49](59_Majetek.md#596-hromadne-zauctovani-odpisu-roku).
 3. [Kurzové rozdíly](68_Uzaverka.md#6823-krok-3-kurzove-rozdily) — přecenění
    cizoměnových zůstatků k rozvahovému dni.
-4. [Dohadné položky a časové rozlišení](68_Uzaverka.md#6824-kroky-4-5-dohadne-polozky-a-casove-rozliseni),
+4. [Dohadné položky a časové rozlišení](68_Uzaverka.md#6824-kroky-45-dohadne-polozky-a-casove-rozliseni),
    včetně návrhů předplacených nákladů a zvolené politiky drobného majetku.
 5. [Opravné položky k pohledávkám](68_Uzaverka.md#6825-krok-opravne-polozky-k-pohledavkam) —
    navazuje na saldokonto ze [§ 43.3](#433-mesicni-cyklus).

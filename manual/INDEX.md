@@ -140,6 +140,8 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 
 72. [Více dodavatelů](72_Multi_supplier.md)
 73. [Nastavení](73_Nastaveni.md)
+73a. [Datová schránka](73a_Datova_schranka.md)
+73b. [Odesílací brána ISDS](73b_Odesilaci_brana_ISDS.md)
 74. [Elektronické podpisy](74_Elektronicke_podpisy.md)
 
 ### Systém

@@ -71,7 +71,7 @@ V hlavičce konceptu je pole **Číslo faktury** (resp. „Číslo zálohové fa
 > znovu pod jiným číslem.
 
 Šablonu pro automatické generování nastavuješ v **Systém → Dodavatelé →
-[tvůj dodavatel] → Číslování faktur** — viz [§ 72.5.3](72_Multi_supplier.md#7253-islovani-faktur).
+[tvůj dodavatel] → Číslování faktur** — viz [§ 72.5.3](72_Multi_supplier.md#7253-cislovani-faktur).
 
 ### 15.2.6 Ceny „s DPH" vs „bez DPH" (brutto / netto režim)
 
@@ -116,7 +116,7 @@ Po zvolení „Hotově" se pod polem objeví výběr **Pokladna**:
 
 - Výchozí volba je **„Nepoužít pokladnu"** — faktura se jen vytiskne s poznámkou
   „hotově" a o úhradu se postaráš jinde. Vyrovnání se nespustí.
-- Nabízejí se **jen korunové pokladny** ([§ 30.1](30_Pokladna.md#301-iselnik-pokladen)).
+- Nabízejí se **jen korunové pokladny** ([§ 30.1](30_Pokladna.md#301-ciselnik-pokladen)).
   Valutová pokladna v seznamu není vůbec.
 - Nemá-li firma žádnou korunovou pokladnu, pod polem se zobrazí hláška
   **„Nemáte založenou žádnou korunovou pokladnu — doklad zůstane neuhrazený."**
@@ -164,7 +164,7 @@ nikdy nedotkne**, ani když je navázaný na tutéž fakturu.
 
 | Případ | Chování |
 |---|---|
-| **Zálohová (proforma) faktura**, storno faktura, platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasuj hotově přímo v [Pokladně](30_Pokladna.md#3032-cel-dokladu). |
+| **Zálohová (proforma) faktura**, storno faktura, platební kalendář | Výběr pokladny se vůbec nezobrazí. Úhrada zálohy totiž zakládá navazující finální doklad nebo daňový doklad k platbě, a ten by pozdější zrušení volby neumělo vzít zpět. Zálohu inkasuj hotově přímo v [Pokladně](30_Pokladna.md#3032-ucel-dokladu). |
 | **Pravidelné (opakované) fakturace** | Šablona pole „Pokladna" nemá — vygenerovaná faktura sice zdědí způsob úhrady „Hotově", ale pokladnu ne, takže **žádný doklad nevznikne a faktura zůstane neuhrazená**. Totéž platí pro finální fakturu vystavenou ze zálohy. |
 | **Cizoměnová faktura** | Vyrovnání se přeskočí („Cizoměnový doklad z pokladny hradit nelze."). |
 | **Valutová pokladna** | Nenabízí se. |

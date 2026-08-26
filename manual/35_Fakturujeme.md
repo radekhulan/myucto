@@ -224,7 +224,7 @@ vystaví jako koncept automaticky (bankovní párování) nebo na klik:
 
 **Daňový doklad k platbě se nevystavuje** u neplátce, u plnění v přenesené
 daňové povinnosti (u RC se záloha nedaní — daň vzniká až k DUZP plnění) a
-[v režimu OSS](40_OSS.md#407-ctovani-oss-dane) (daň se přiznává ke dni přijetí
+[v režimu OSS](40_OSS.md#407-uctovani-oss-dane) (daň se přiznává ke dni přijetí
 úplaty přímo v OSS přiznání). Podrobně
 [§ 16.1.2](16_Faktura_PDF.md#zalohova-faktura-danovy-doklad-k-prijate-platbe) a
 [§ 15.8](15_Faktura_editor.md#158-zalohova-faktura-danovy-doklad).
@@ -290,7 +290,7 @@ směrnice 2006/112/ES". EU plnění se současně vykáže v
 > [!NOTE]
 > RC checkbox je v editoru skrytý, když je dodavatel **neplátce DPH** — neplátce
 > RC vystavit nemůže (nemá DPH co přenášet). Výjimkou je **identifikovaná osoba**
-> ([§ 35.1.4](#3514-identifikovana-osoba-6g-6l-zdph)), které se RC u EU klienta
+> ([§ 35.1.4](#3514-identifikovana-osoba-6g6l-zdph)), které se RC u EU klienta
 > s DIČ zapne automaticky.
 
 RC doklad v cizí měně má vlastní pravidla přepočtu pro výkazy — viz
