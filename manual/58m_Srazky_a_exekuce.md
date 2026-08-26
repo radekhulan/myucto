@@ -16,6 +16,20 @@ Je nutné oprávnění `payroll.enforcement` a podle případu `payroll.insolven
 4. Před uzavřením běhu projděte rozdělení srážek a zůstatky všech souběžných případů.
 5. Po úhradě aktualizujte stav; změnu pořadí nebo skončení proveďte podle doložené události.
 
+Detail případu vždy nahoře ukazuje **doporučený další krok**. Běžný postup tak
+vede od pohledávky přes ověření podkladů a zahájení srážení až k ověření
+příjemce a povolení odesílání. Méně časté změny stavu jsou pod volbou **Další
+stavové kroky**; jejich skrytí nemění právní kontroly ani dostupné možnosti.
+Použijte je pouze tehdy, když odpovídají doloženému rozhodnutí.
+
+V měsíčních podkladech je běžná kontrola oddělená od výjimek. Rejstřík
+pohledávek a právě uplatněné nároky zkontrolujete přímo. Souběh plátců,
+důchodovou podmínku, soudem určenou nezabavitelnou částku a insolvenci otevřete
+volbou **Zkontrolovat výjimky** pouze při změně. Uložená výjimka je vidět už v
+souhrnu zavřené části, takže ji nelze přehlédnout. Stejně tak se seznam
+vyživovaných osob spravuje jen při vzniku, zániku nebo ověření nároku; v běžném
+měsíci se celý seznam znovu nevyplňuje.
+
 ## Stavy
 
 Případ může být evidovaný, aktivní, pozastavený, čekající v pořadí, doplacený nebo ukončený. Samotné vložení rozhodnutí nezaručuje srážku v uzavřeném běhu; rozhodují účinnost, pořadí a disponibilní částka.

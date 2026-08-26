@@ -4740,6 +4740,57 @@
             "empty_title": "Žádné případy srážek",
             "empty_description": "Nový případ založte až po přijetí a bezpečném uložení právního podkladu.",
             "case_number": "Interní případ #{id}",
+            "next_step": "Doporučený další krok",
+            "show_other_actions": "Další stavové kroky",
+            "hide_other_actions": "Skrýt další stavové kroky",
+            "other_actions_hint": "Tyto kroky použijte jen tehdy, když odpovídají doloženému rozhodnutí. Aplikace jejich právní podmínky nadále kontroluje.",
+            "next_steps": {
+                "add_claim": {
+                    "title": "Doplňte první pohledávku",
+                    "hint": "Bez částky, druhu a pořadí pohledávky nelze případ ověřit ani zařadit do výpočtu.",
+                    "action": "Přidat pohledávku"
+                },
+                "verify_claims": {
+                    "title": "Dokončete ověření pohledávek",
+                    "hint": "U každé neúplné pohledávky zkontrolujte právní titul, doručení, pořadí a splatnost. Neověřená pohledávka do srážení nevstoupí.",
+                    "action": "Otevřít pohledávky"
+                },
+                "verify_evidence": {
+                    "title": "Ověřte podklady případu",
+                    "hint": "V části Ověření podkladů potvrďte úplnost listin. Příjemce lze ověřit později; do té doby se sražené peníze bezpečně deponují.",
+                    "action": "Ověřit podklady"
+                },
+                "start_withholding": {
+                    "title": "Zahajte srážení",
+                    "hint": "Pohledávky i podklady jsou připravené. Vyberte ověřené rozhodnutí; do povolení příjemce zůstanou částky v depozitu.",
+                    "action": "Zahájit srážení"
+                },
+                "verify_recipient": {
+                    "title": "Ověřte příjemce a jeho účet",
+                    "hint": "Srážky už probíhají, ale peníze zůstávají v depozitu. Vyberte účet z katalogu a potvrďte ověření příjemce.",
+                    "action": "Ověřit příjemce"
+                },
+                "authorize_remittance": {
+                    "title": "Povolte odesílání příjemci",
+                    "hint": "Příjemce i účet jsou ověřené. Povolení doložte rozhodnutím; teprve potom vzniknou závazky k odeslání.",
+                    "action": "Povolit odesílání"
+                },
+                "monthly_check": {
+                    "title": "Případ je připravený pro měsíční mzdu",
+                    "hint": "V běžném měsíci zkontrolujte jen údaje, které aplikace níže označí jako relevantní. Soudní a insolvenční výjimky otevírejte pouze při změně.",
+                    "action": "Zkontrolovat měsíc"
+                },
+                "resume_when_ready": {
+                    "title": "Případ je odložený",
+                    "hint": "Až nastane doložený důvod pokračovat, zvolte v dalších stavových krocích obnovení s deponováním nebo odesíláním.",
+                    "action": "Obnovit případ"
+                },
+                "closed": {
+                    "title": "Případ je uzavřený",
+                    "hint": "Historie, pohyby a doložená rozhodnutí zůstávají dostupné pro kontrolu. Do uzavřeného případu se už měsíční údaje nedoplňují.",
+                    "action": "Zobrazit historii"
+                }
+            },
             "evidence_title": "Ověření podkladů",
             "evidence_hint": "Aktivace a odesílání jsou blokované, dokud nejsou příslušné skutečnosti ověřené.",
             "evidence_complete": "Podklady jsou úplné a ověřené",
@@ -4766,8 +4817,22 @@
             "no_ledger": "Pohyby vzniknou po výpočtu mzdového období.",
             "month_evidence_title": "Měsíční podklady výpočtu",
             "month_evidence_hint": "Podklady jsou verzované po zaměstnanci a období; bez úplného ověření výpočet skončí ruční kontrolou.",
+            "monthly_routine_title": "Běžná měsíční kontrola",
+            "monthly_routine_hint": "Potvrďte jen položky, které se v tomto měsíci skutečně uplatní. Co není relevantní, aplikace sama vypne a vysvětlí.",
+            "monthly_exceptions": {
+                "title": "Soudní, insolvenční a další výjimky",
+                "summary_active": "V tomto období jsou uložené zvláštní údaje. Rozbalte je před uložením a zkontrolujte.",
+                "summary_empty": "Bez zvláštních údajů. Tuto část otevírejte jen při souběhu plátců, důchodu, insolvenci nebo rozhodnutí soudu.",
+                "show": "Zkontrolovat výjimky",
+                "hide": "Skrýt výjimky",
+                "hint": "Změna těchto údajů ovlivňuje nezabavitelnou částku nebo režim oddlužení. Vyplňujte je pouze podle doložené skutečnosti."
+            },
             "period": "Období",
             "dependants_title": "Vyživované osoby",
+            "dependants_summary": "Evidováno osob: {count}. Běžný měsíc jejich seznam znovu nevyžaduje.",
+            "manage_dependants": "Spravovat osoby",
+            "hide_dependants": "Skrýt osoby",
+            "dependants_hint": "Seznam měňte jen při vzniku, zániku nebo ověření nároku. Platnost se použije automaticky v odpovídajících měsících.",
             "dependant_type": "Druh osoby",
             "valid_from": "Platí od",
             "valid_to": "Platí do",

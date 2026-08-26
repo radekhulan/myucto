@@ -133,6 +133,26 @@ function detailOf(item: EnforcementCaseSummary): EnforcementCaseDetail {
   }
 }
 
+function verifiedClaim(): EnforcementCaseDetail['claims'][number] {
+  return {
+    id: 51,
+    case_id: 11,
+    legal_basis: 'statutory',
+    category: 'non_priority',
+    outstanding_minor_units: 250_000,
+    maintenance_weight_minor_units: null,
+    priority_date: '2026-05-01',
+    order_issued_on: '2026-05-01',
+    legal_title_verified: true,
+    order_or_notice_delivered: true,
+    priority_classification_verified: true,
+    agreement_verified: false,
+    due_monetary_claim_verified: true,
+    is_active: true,
+    row_version: 1,
+  }
+}
+
 function monthEvidenceOf(
   overrides: Partial<EnforcementMonthEvidence> = {},
 ): EnforcementMonthEvidence {
@@ -234,6 +254,50 @@ describe('EnforcementCases', () => {
     expect(m.deleteCase).toHaveBeenCalledWith(11, 3)
     expect(m.success).toHaveBeenCalledWith('payroll.enforcement.case_deleted')
     expect(wrapper.find('[data-test="enforcement-detail-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('vede nový prázdný případ jediným srozumitelným dalším krokem', async () => {
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.add_claim.title')
+    await wrapper.get('[data-test="enforcement-next-step-action"]').trigger('click')
+
+    expect(wrapper.find('[data-test="enforcement-claim-form"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('schová méně časté stavové změny, ale ponechá je dostupné', async () => {
+    const active = summary({
+      status: 'remit',
+      evidence_complete: true,
+      recipient_verified: true,
+    })
+    m.casesPage.mockResolvedValue(page([active]))
+    m.detail.mockResolvedValue({
+      ...detailOf(active),
+      claims: [verifiedClaim()],
+      recipient_institution_id: 9,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.monthly_check.title')
+    expect(wrapper.find('[data-test="enforcement-state-actions"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="enforcement-state-actions-toggle"]').trigger('click')
+    expect(wrapper.get('[data-test="enforcement-state-actions"]').text())
+      .toContain('payroll.enforcement.commands.defer_no_withholding')
+    expect(wrapper.get('[data-test="enforcement-state-actions"]').text())
+      .toContain('payroll.enforcement.commands.stop')
     wrapper.unmount()
   })
 
@@ -426,6 +490,43 @@ describe('EnforcementCases', () => {
    * nerozhoduje, jen nesmí pobízet k potvrzení, které nic nedokládá.
    */
   describe('rozsah měsíční evidence', () => {
+    it('oddělí běžnou měsíční kontrolu od výjimek a správy vyživovaných osob', async () => {
+      m.monthEvidence.mockResolvedValue(monthEvidenceOf({
+        has_multiple_payers: true,
+        insolvency_mode: 'court_determined_amount',
+        court_determined_amount_minor_units: 12_345,
+      }))
+      m.dependants.mockResolvedValue([dependantOf()])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(wrapper.find('[data-test="month-evidence-claim_register"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="month-exceptions-panel"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="dependants-panel"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="month-exceptions-summary"]').text())
+        .toContain('payroll.enforcement.monthly_exceptions.summary_active')
+      expect(wrapper.get('[data-test="month-exceptions-values"]').text())
+        .toContain('payroll.enforcement.month_evidence.insolvency_court')
+      expect(wrapper.get('[data-test="dependants-summary"]').text())
+        .toContain('payroll.enforcement.dependants_summary')
+
+      await wrapper.get('[data-test="month-exceptions-toggle"]').trigger('click')
+      const exceptions = wrapper.get('[data-test="month-exceptions-panel"]')
+      expect(exceptions.find('[data-test="month-evidence-multiple-payers"]').exists()).toBe(true)
+      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
+        .toBe('123.45')
+      await exceptions.find('[data-test="month-evidence-court-amount"]').setValue('150')
+      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
+        .toBe('150')
+
+      await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
+      expect(wrapper.get('[data-test="dependants-panel"]').text())
+        .toContain('payroll.enforcement.dependant_kind.dependant')
+      wrapper.unmount()
+    })
+
     it('greys out all three confirmations for a person without a live case', async () => {
       const wrapper = mountPage()
       await flushPromises()

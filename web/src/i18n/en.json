@@ -4740,6 +4740,57 @@
             "empty_title": "No deduction cases",
             "empty_description": "Create a case only after the legal document has been received and stored securely.",
             "case_number": "Internal case #{id}",
+            "next_step": "Recommended next step",
+            "show_other_actions": "Other status actions",
+            "hide_other_actions": "Hide other status actions",
+            "other_actions_hint": "Use these actions only when they match a documented decision. The application continues to enforce their legal prerequisites.",
+            "next_steps": {
+                "add_claim": {
+                    "title": "Add the first claim",
+                    "hint": "The case cannot be verified or included in the calculation until the claim amount, category and priority are recorded.",
+                    "action": "Add claim"
+                },
+                "verify_claims": {
+                    "title": "Complete claim verification",
+                    "hint": "For every incomplete claim, verify its legal basis, delivery, priority and maturity. An unverified claim does not enter withholding.",
+                    "action": "Open claims"
+                },
+                "verify_evidence": {
+                    "title": "Verify the case evidence",
+                    "hint": "Confirm the documents are complete in Evidence verification. The recipient may be verified later; until then withheld funds remain safely on hold.",
+                    "action": "Verify evidence"
+                },
+                "start_withholding": {
+                    "title": "Start withholding",
+                    "hint": "The claims and evidence are ready. Select a verified decision; funds remain on hold until the recipient is authorized.",
+                    "action": "Start withholding"
+                },
+                "verify_recipient": {
+                    "title": "Verify the recipient and account",
+                    "hint": "Withholding is active, but funds remain on hold. Select an account from the catalogue and confirm the recipient verification.",
+                    "action": "Verify recipient"
+                },
+                "authorize_remittance": {
+                    "title": "Authorize remittance to the recipient",
+                    "hint": "The recipient and account are verified. Support the authorization with a decision; only then are payment liabilities created.",
+                    "action": "Authorize remittance"
+                },
+                "monthly_check": {
+                    "title": "The case is ready for monthly payroll",
+                    "hint": "In an ordinary month, check only the details marked as relevant below. Open court and insolvency exceptions only when something changes.",
+                    "action": "Check month"
+                },
+                "resume_when_ready": {
+                    "title": "The case is deferred",
+                    "hint": "Once a documented reason to continue occurs, use the other status actions to resume holding or remittance.",
+                    "action": "Resume case"
+                },
+                "closed": {
+                    "title": "The case is closed",
+                    "hint": "The history, movements and supporting decisions remain available for review. No monthly details are added to a closed case.",
+                    "action": "Show history"
+                }
+            },
             "evidence_title": "Evidence verification",
             "evidence_hint": "Activation and remittance stay blocked until the required facts are verified.",
             "evidence_complete": "Evidence is complete and verified",
@@ -4766,8 +4817,22 @@
             "no_ledger": "Movements are created by the payroll period calculation.",
             "month_evidence_title": "Monthly calculation evidence",
             "month_evidence_hint": "Evidence is versioned by employee and period; incomplete verification forces manual review.",
+            "monthly_routine_title": "Ordinary monthly check",
+            "monthly_routine_hint": "Confirm only the items that actually apply in this month. The application disables irrelevant items and explains why.",
+            "monthly_exceptions": {
+                "title": "Court, insolvency and other exceptions",
+                "summary_active": "Special details are stored for this period. Expand and review them before saving.",
+                "summary_empty": "No special details. Open this section only for multiple payers, pension, insolvency or a court decision.",
+                "show": "Review exceptions",
+                "hide": "Hide exceptions",
+                "hint": "These details change the protected amount or debt-relief mode. Enter them only when supported by evidence."
+            },
             "period": "Period",
             "dependants_title": "Dependants",
+            "dependants_summary": "Recorded persons: {count}. An ordinary month does not ask for their list again.",
+            "manage_dependants": "Manage persons",
+            "hide_dependants": "Hide persons",
+            "dependants_hint": "Change the list only when eligibility starts, ends or is verified. Its validity is applied automatically to the corresponding months.",
             "dependant_type": "Person type",
             "valid_from": "Valid from",
             "valid_to": "Valid to",

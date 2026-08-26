@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { documentsApi, type DocItem } from '@/api/documents'
@@ -72,6 +72,10 @@ const detail = ref<EnforcementCaseDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const showCreate = ref(false)
 const showClaim = ref(false)
+const showStateActions = ref(false)
+const showMonthlyExceptions = ref(false)
+const showDependants = ref(false)
+const claimsSection = ref<HTMLElement | null>(null)
 const pendingCommand = ref<EnforcementCaseCommand | null>(null)
 const transitionReason = ref('')
 const documentQuery = ref('')
@@ -222,6 +226,100 @@ const canDeleteUnusedCase = computed(() => {
     && current.ledger.length === 0
 })
 
+type NextStep = {
+  key: 'add_claim' | 'verify_claims' | 'verify_evidence' | 'start_withholding'
+    | 'verify_recipient' | 'authorize_remittance' | 'monthly_check' | 'resume_when_ready'
+    | 'closed'
+  action: 'claim' | EnforcementCaseCommand | null
+}
+
+const nextStep = computed<NextStep>(() => {
+  const current = detail.value
+  if (!current) return { key: 'closed', action: null }
+  if (current.status === 'paid' || current.status === 'stopped') {
+    return { key: 'closed', action: null }
+  }
+  if (current.claims.length === 0) return { key: 'add_claim', action: 'claim' }
+  if (current.claims.some(claim => !claimVerified(claim))) {
+    return { key: 'verify_claims', action: null }
+  }
+  if (!current.evidence_complete) return { key: 'verify_evidence', action: null }
+  if (current.status === 'received') {
+    return { key: 'start_withholding', action: 'mark_final' }
+  }
+  if (current.status === 'withhold_and_hold') {
+    if (!current.recipient_verified || current.recipient_institution_id === null) {
+      return { key: 'verify_recipient', action: null }
+    }
+    return { key: 'authorize_remittance', action: 'authorize_remittance' }
+  }
+  if (current.status === 'remit') return { key: 'monthly_check', action: null }
+  return { key: 'resume_when_ready', action: null }
+})
+
+const recommendedCommand = computed<EnforcementCaseCommand | null>(() => {
+  const action = nextStep.value.action
+  return action !== null && action !== 'claim' ? action : null
+})
+
+const otherStateCommands = computed(() => {
+  const current = detail.value
+  if (!current) return []
+  return (commandByStatus[current.status] || [])
+    .filter(command => command !== recommendedCommand.value)
+})
+
+const hasMonthlyExceptions = computed(() => {
+  const evidence = monthEvidence.value
+  return evidence !== null && (
+    evidence.has_multiple_payers
+    || evidence.pension_evidence !== 'unknown'
+    || evidence.protected_amount_override_minor_units !== null
+    || evidence.protected_amount_override_verified
+    || evidence.insolvency_mode !== 'none'
+    || evidence.insolvency_decision_verified
+    || evidence.insolvency_recipient_verified
+    || evidence.court_determined_amount_minor_units !== null
+  )
+})
+
+const monthlyExceptionLabels = computed(() => {
+  const evidence = monthEvidence.value
+  if (!evidence) return []
+  const labels: string[] = []
+  if (evidence.has_multiple_payers) {
+    labels.push(t('payroll.enforcement.month_evidence.multiple_payers'))
+  }
+  if (evidence.pension_evidence !== 'unknown') {
+    const suffix = evidence.pension_evidence === 'verified' ? 'receives' : 'none'
+    labels.push(t(`payroll.enforcement.month_evidence.pension_${suffix}`))
+  }
+  if (evidence.protected_amount_override_minor_units !== null) {
+    labels.push(`${t('payroll.enforcement.month_evidence.protected_override_czk')}: ${money(evidence.protected_amount_override_minor_units)}`)
+  }
+  if (evidence.insolvency_mode !== 'none') {
+    const suffix = evidence.insolvency_mode === 'alert_only'
+      ? 'alert'
+      : evidence.insolvency_mode === 'approved_standard' ? 'standard' : 'court'
+    labels.push(t(`payroll.enforcement.month_evidence.insolvency_${suffix}`))
+  }
+  if (evidence.court_determined_amount_minor_units !== null) {
+    labels.push(`${t('payroll.enforcement.month_evidence.court_amount_czk')}: ${money(evidence.court_determined_amount_minor_units)}`)
+  }
+  return labels
+})
+
+async function executeNextStep() {
+  const action = nextStep.value.action
+  if (action === 'claim') {
+    showClaim.value = true
+    await nextTick()
+    claimsSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    return
+  }
+  if (action) await openTransition(action)
+}
+
 const detailActions = computed<ActionItem[]>(() => [{
   key: 'delete',
   label: t('payroll.enforcement.delete_case'),
@@ -325,6 +423,9 @@ function collapseDetail() {
   ++detailRequestSequence
   closeTransition()
   showClaim.value = false
+  showStateActions.value = false
+  showMonthlyExceptions.value = false
+  showDependants.value = false
   expandedId.value = null
   detail.value = null
   monthEvidence.value = null
@@ -348,6 +449,9 @@ async function selectCase(item: EnforcementCaseSummary) {
   const sequence = ++detailRequestSequence
   closeTransition()
   showClaim.value = false
+  showStateActions.value = false
+  showMonthlyExceptions.value = false
+  showDependants.value = false
   newClaim.value = emptyClaim()
   claimAmountCzk.value = ''
   maintenanceWeightCzk.value = ''
@@ -844,13 +948,65 @@ onMounted(load)
             <div class="flex flex-wrap items-center gap-2"><h2 class="text-lg font-semibold text-neutral-900">{{ detail.full_name }}</h2><span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(detail.status)">{{ t(`payroll.enforcement.status.${detail.status}`) }}</span></div>
             <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.case_number', { id: detail.id }) }} · {{ detail.effective_from }}</p>
           </div>
-          <div v-if="canWrite" class="flex flex-wrap gap-2">
-            <button v-for="command in (commandByStatus[detail.status] || [])" :key="command" :class="commandVariant(command)" :disabled="saving || (documentCommands.has(command) && !canReadDocuments)" :title="documentCommands.has(command) && !canReadDocuments ? t('payroll.enforcement.document_permission_required') : undefined" @click="openTransition(command)">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="command === 'stop' ? ICONS.x : ICONS.cycle" /></svg>{{ t(`payroll.enforcement.commands.${command}`) }}
-            </button>
-            <ActionBar :actions="detailActions" />
-          </div>
+          <ActionBar v-if="canWrite" :actions="detailActions" />
         </div>
+
+        <section
+          data-test="enforcement-next-step"
+          class="rounded-lg border border-primary-500/30 bg-primary-50 p-4"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-4">
+            <div class="max-w-3xl">
+              <p class="text-xs font-semibold uppercase tracking-wide text-primary-700">{{ t('payroll.enforcement.next_step') }}</p>
+              <h3 class="mt-1 font-semibold text-neutral-900">{{ t(`payroll.enforcement.next_steps.${nextStep.key}.title`) }}</h3>
+              <p class="mt-1 text-sm text-neutral-600">{{ t(`payroll.enforcement.next_steps.${nextStep.key}.hint`) }}</p>
+            </div>
+            <button
+              v-if="canWrite && nextStep.action"
+              data-test="enforcement-next-step-action"
+              :class="btnFilled('primary')"
+              :disabled="saving || (recommendedCommand !== null && documentCommands.has(recommendedCommand) && !canReadDocuments)"
+              :title="recommendedCommand !== null && documentCommands.has(recommendedCommand) && !canReadDocuments ? t('payroll.enforcement.document_permission_required') : undefined"
+              @click="executeNextStep"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="nextStep.action === 'claim' ? ICONS.plus : ICONS.play" /></svg>
+              {{ t(`payroll.enforcement.next_steps.${nextStep.key}.action`) }}
+            </button>
+          </div>
+          <p
+            v-if="recommendedCommand !== null && documentCommands.has(recommendedCommand) && !canReadDocuments"
+            :class="[BTN_DISABLED_NOTE, 'mt-2']"
+          >
+            {{ t('payroll.enforcement.document_permission_required') }}
+          </p>
+          <div v-if="canWrite && otherStateCommands.length" class="mt-4 border-t border-primary-500/20 pt-3">
+            <button
+              type="button"
+              data-test="enforcement-state-actions-toggle"
+              :class="btnOutlineSm('neutral')"
+              :aria-expanded="showStateActions"
+              @click="showStateActions = !showStateActions"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+              {{ t(showStateActions ? 'payroll.enforcement.hide_other_actions' : 'payroll.enforcement.show_other_actions') }}
+            </button>
+            <div v-if="showStateActions" class="mt-3 flex flex-wrap gap-2" data-test="enforcement-state-actions">
+              <button
+                v-for="command in otherStateCommands"
+                :key="command"
+                :class="commandVariant(command)"
+                :disabled="saving || (documentCommands.has(command) && !canReadDocuments)"
+                :title="documentCommands.has(command) && !canReadDocuments ? t('payroll.enforcement.document_permission_required') : undefined"
+                @click="openTransition(command)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="command === 'stop' ? ICONS.x : ICONS.cycle" /></svg>
+                {{ t(`payroll.enforcement.commands.${command}`) }}
+              </button>
+            </div>
+            <p v-if="showStateActions" class="mt-2 text-xs text-neutral-500">{{ t('payroll.enforcement.other_actions_hint') }}</p>
+            <p v-if="showStateActions && !canReadDocuments" :class="[BTN_DISABLED_NOTE, 'mt-2']">{{ t('payroll.enforcement.document_permission_required') }}</p>
+          </div>
+        </section>
 
         <form v-if="pendingCommand" class="rounded-lg border border-payroll-500/30 bg-surface p-4 shadow-sm" @submit.prevent="transition()">
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -936,22 +1092,25 @@ onMounted(load)
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.month_evidence_title') }}</h3>
-              <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.month_evidence_hint') }}</p>
+              <p class="mt-1 max-w-3xl text-xs text-neutral-500">{{ t('payroll.enforcement.month_evidence_hint') }}</p>
             </div>
             <div class="flex flex-wrap items-end gap-2">
               <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.period') }}<input v-model="evidencePeriod" type="month" class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <button :class="btnOutline('success')" :disabled="saving" @click="saveMonthEvidence"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
+              <button :class="btnOutline('success')" :disabled="saving" @click="saveMonthEvidence"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button>
             </div>
           </div>
-          <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            <!--
-              Rozsah zrcadlí GarnishmentCalculator::evidenceScope(). Potvrzení,
-              které v tomto měsíci nic nedokládá, se zešedne a vypne — pobízet
-              k němu znamenalo u firmy o tisíci lidech 12 000 zápisů ročně.
-            -->
-            <div class="space-y-2 text-sm">
+
+          <div class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+            <h4 class="font-medium text-neutral-900">{{ t('payroll.enforcement.monthly_routine_title') }}</h4>
+            <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.monthly_routine_hint') }}</p>
+            <div class="mt-3 grid grid-cols-1 gap-2 text-sm lg:grid-cols-3">
+              <!--
+                Rozsah zrcadlí GarnishmentCalculator::evidenceScope(). Potvrzení,
+                které v tomto měsíci nic nedokládá, se zešedne a vypne — pobízet
+                k němu znamenalo u firmy o tisíci lidech 12 000 zápisů ročně.
+              -->
               <div v-for="row in MONTH_EVIDENCE_ROWS" :key="row.key">
-                <label class="flex items-center gap-2" :class="evidenceActionable(monthEvidenceScope?.[row.key]) ? '' : 'text-neutral-400'">
+                <label class="flex items-center gap-2" :class="evidenceActionable(monthEvidenceScope?.[row.key]) ? 'text-neutral-700' : 'text-neutral-400'">
                   <input
                     v-model="monthEvidence[row.field]"
                     :disabled="!evidenceActionable(monthEvidenceScope?.[row.key])"
@@ -965,42 +1124,91 @@ onMounted(load)
                   {{ evidenceScopeNote(row.key) }}
                 </p>
               </div>
-              <label class="flex items-center gap-2"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="month-evidence-multiple-payers">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
-            </div>
-            <div class="space-y-3">
-              <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.pension') }}<select v-model="monthEvidence.pension_evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="value in pensionEvidenceValues" :key="value" :value="value">{{ t(`payroll.enforcement.month_evidence.pension_${value === 'verified' ? 'receives' : value}`) }}</option></select></label>
-              <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.protected_override_czk') }}<input v-model="protectedOverrideCzk" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <label class="flex items-center gap-2 text-sm"><input v-model="monthEvidence.protected_amount_override_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.protected_override_verified') }}</label>
-            </div>
-            <div class="space-y-3">
-              <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.insolvency_mode') }}<select v-model="monthEvidence.insolvency_mode" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="none">{{ t('payroll.enforcement.month_evidence.insolvency_none') }}</option><option value="alert_only">{{ t('payroll.enforcement.month_evidence.insolvency_alert') }}</option><option value="approved_standard">{{ t('payroll.enforcement.month_evidence.insolvency_standard') }}</option><option value="court_determined_amount">{{ t('payroll.enforcement.month_evidence.insolvency_court') }}</option></select></label>
-              <label v-if="monthEvidence.insolvency_mode === 'court_determined_amount'" class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.court_amount_czk') }}<input v-model="courtAmountCzk" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <label class="flex items-center gap-2 text-sm"><input v-model="monthEvidence.insolvency_decision_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_decision') }}</label>
-              <label class="flex items-center gap-2 text-sm"><input v-model="monthEvidence.insolvency_recipient_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_recipient') }}</label>
             </div>
           </div>
 
-          <div class="mt-5 border-t border-neutral-200 pt-4">
-            <h4 class="font-medium text-neutral-900">{{ t('payroll.enforcement.dependants_title') }}</h4>
-            <div v-if="dependants.length" class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
-              <div v-for="dependant in dependants" :key="dependant.id" class="rounded-md border border-neutral-200 p-3 text-sm">
-                <div class="flex flex-wrap justify-between gap-2"><span class="font-medium">{{ t(`payroll.enforcement.dependant_kind.${dependant.dependant_kind}`) }}</span><span :class="dependant.eligibility_verified ? 'text-success-600' : 'text-warning-600'">{{ t(dependant.eligibility_verified ? 'payroll.enforcement.verified' : 'payroll.enforcement.incomplete') }}</span></div>
-                <p class="mt-1 text-xs text-neutral-500">{{ dependant.valid_from }} – {{ dependant.valid_to || '∞' }}</p>
+          <div class="mt-3 rounded-lg border border-neutral-200 bg-surface">
+            <div class="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div>
+                <h4 class="font-medium text-neutral-900">{{ t('payroll.enforcement.monthly_exceptions.title') }}</h4>
+                <p data-test="month-exceptions-summary" class="mt-1 text-xs" :class="hasMonthlyExceptions ? 'text-warning-700' : 'text-neutral-500'">
+                  {{ t(hasMonthlyExceptions ? 'payroll.enforcement.monthly_exceptions.summary_active' : 'payroll.enforcement.monthly_exceptions.summary_empty') }}
+                </p>
+                <ul v-if="monthlyExceptionLabels.length" class="mt-2 flex flex-wrap gap-1.5" data-test="month-exceptions-values">
+                  <li v-for="label in monthlyExceptionLabels" :key="label" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">{{ label }}</li>
+                </ul>
+              </div>
+              <button
+                type="button"
+                data-test="month-exceptions-toggle"
+                :class="btnOutline('neutral')"
+                :aria-expanded="showMonthlyExceptions"
+                @click="showMonthlyExceptions = !showMonthlyExceptions"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>
+                {{ t(showMonthlyExceptions ? 'payroll.enforcement.monthly_exceptions.hide' : 'payroll.enforcement.monthly_exceptions.show') }}
+              </button>
+            </div>
+            <div v-if="showMonthlyExceptions" data-test="month-exceptions-panel" class="border-t border-neutral-200 p-4">
+              <p class="mb-4 text-xs text-neutral-500">{{ t('payroll.enforcement.monthly_exceptions.hint') }}</p>
+              <div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                <div class="space-y-3">
+                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.has_multiple_payers" type="checkbox" class="rounded border-neutral-300 text-payroll-600" data-test="month-evidence-multiple-payers">{{ t('payroll.enforcement.month_evidence.multiple_payers') }}</label>
+                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.pension') }}<select v-model="monthEvidence.pension_evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="value in pensionEvidenceValues" :key="value" :value="value">{{ t(`payroll.enforcement.month_evidence.pension_${value === 'verified' ? 'receives' : value}`) }}</option></select></label>
+                </div>
+                <div class="space-y-3">
+                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.protected_override_czk') }}<input v-model="protectedOverrideCzk" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.protected_amount_override_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.protected_override_verified') }}</label>
+                </div>
+                <div class="space-y-3">
+                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.insolvency_mode') }}<select v-model="monthEvidence.insolvency_mode" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="none">{{ t('payroll.enforcement.month_evidence.insolvency_none') }}</option><option value="alert_only">{{ t('payroll.enforcement.month_evidence.insolvency_alert') }}</option><option value="approved_standard">{{ t('payroll.enforcement.month_evidence.insolvency_standard') }}</option><option value="court_determined_amount">{{ t('payroll.enforcement.month_evidence.insolvency_court') }}</option></select></label>
+                  <label v-if="monthEvidence.insolvency_mode === 'court_determined_amount'" class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.court_amount_czk') }}<input v-model="courtAmountCzk" data-test="month-evidence-court-amount" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_decision_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_decision') }}</label>
+                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_recipient_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_recipient') }}</label>
+                </div>
               </div>
             </div>
-            <form class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="addDependant">
-              <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.dependant_type') }}<select v-model="newDependant.dependant_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="dependant">{{ t('payroll.enforcement.dependant_kind.dependant') }}</option><option value="spouse_partner">{{ t('payroll.enforcement.dependant_kind.spouse_partner') }}</option></select></label>
-              <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_from') }}<input v-model="newDependant.valid_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_to') }}<input v-model="newDependant.valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-              <div class="space-y-2 pt-5 text-sm"><label class="flex items-center gap-2"><input v-model="newDependant.eligibility_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.eligible_verified') }}</label><label class="flex items-center gap-2"><input v-model="newDependant.excluded_for_maintenance" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.excluded_for_maintenance') }}</label></div>
-              <div class="flex items-end justify-end"><button type="submit" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.enforcement.add_dependant') }}</button></div>
-            </form>
+          </div>
+
+          <div class="mt-3 rounded-lg border border-neutral-200 bg-surface">
+            <div class="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div>
+                <h4 class="font-medium text-neutral-900">{{ t('payroll.enforcement.dependants_title') }}</h4>
+                <p data-test="dependants-summary" class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.dependants_summary', { count: dependants.length }) }}</p>
+              </div>
+              <button
+                type="button"
+                data-test="dependants-toggle"
+                :class="btnOutline('neutral')"
+                :aria-expanded="showDependants"
+                @click="showDependants = !showDependants"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+                {{ t(showDependants ? 'payroll.enforcement.hide_dependants' : 'payroll.enforcement.manage_dependants') }}
+              </button>
+            </div>
+            <div v-if="showDependants" data-test="dependants-panel" class="border-t border-neutral-200 p-4">
+              <p class="text-xs text-neutral-500">{{ t('payroll.enforcement.dependants_hint') }}</p>
+              <div v-if="dependants.length" class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                <div v-for="dependant in dependants" :key="dependant.id" class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm">
+                  <div class="flex flex-wrap justify-between gap-2"><span class="font-medium text-neutral-900">{{ t(`payroll.enforcement.dependant_kind.${dependant.dependant_kind}`) }}</span><span :class="dependant.eligibility_verified ? 'text-success-600' : 'text-warning-600'">{{ t(dependant.eligibility_verified ? 'payroll.enforcement.verified' : 'payroll.enforcement.incomplete') }}</span></div>
+                  <p class="mt-1 text-xs text-neutral-500">{{ dependant.valid_from }} – {{ dependant.valid_to || '∞' }}</p>
+                </div>
+              </div>
+              <form class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="addDependant">
+                <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.dependant_type') }}<select v-model="newDependant.dependant_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="dependant">{{ t('payroll.enforcement.dependant_kind.dependant') }}</option><option value="spouse_partner">{{ t('payroll.enforcement.dependant_kind.spouse_partner') }}</option></select></label>
+                <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_from') }}<input v-model="newDependant.valid_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+                <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_to') }}<input v-model="newDependant.valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+                <div class="space-y-2 pt-5 text-sm"><label class="flex items-center gap-2 text-neutral-700"><input v-model="newDependant.eligibility_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.eligible_verified') }}</label><label class="flex items-center gap-2 text-neutral-700"><input v-model="newDependant.excluded_for_maintenance" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.excluded_for_maintenance') }}</label></div>
+                <div class="flex items-end justify-end"><button type="submit" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.enforcement.add_dependant') }}</button></div>
+              </form>
+            </div>
           </div>
         </section>
 
-        <section class="rounded-lg border border-neutral-200 bg-surface p-4">
+        <section ref="claimsSection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
           <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.claims') }}</h3><button v-if="canWrite && detail.status === 'received'" :class="btnFilled('primary')" @click="showClaim = !showClaim"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.enforcement.add_claim') }}</button></div>
-          <form v-if="showClaim" class="mt-4 grid grid-cols-1 gap-3 rounded-lg bg-neutral-50 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="addClaim">
+          <form v-if="showClaim" data-test="enforcement-claim-form" class="mt-4 grid grid-cols-1 gap-3 rounded-lg bg-neutral-50 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="addClaim">
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.claim_category') }}<select v-model="newClaim.category" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="category in claimCategories" :key="category" :value="category">{{ t(`payroll.enforcement.categories.${category}`) }}</option></select></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.outstanding_czk') }}<input v-model="claimAmountCzk" required inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.priority_date') }}<input v-model="newClaim.priority_date" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
