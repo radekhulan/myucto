@@ -37,7 +37,7 @@ use MyInvoice\Service\Signing\PersonalCertificateVaultService;
  * Produkční pokus tedy skončí výjimkou — což je správně: odeslat ostré hlášení
  * na hádaný cíl znamená, že lhůta uplyne bez povšimnutí.
  */
-final readonly class JmhzDispatchService
+readonly class JmhzDispatchService
 {
     public const CHANNEL = 'vrep_apep';
     public const SUBMISSION_CLASS = 'CSSZ_JMHZ';

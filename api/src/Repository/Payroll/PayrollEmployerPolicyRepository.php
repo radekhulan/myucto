@@ -393,7 +393,9 @@ final class PayrollEmployerPolicyRepository
             self::requiredString($data, 'balance_rounding_mode'),
             self::requiredString($data, 'home_office_policy'),
             self::requiredString($data, 'travel_expense_policy'),
-            self::requiredInt($data, 'leave_entitlement_weeks'),
+            array_key_exists('leave_entitlement_weeks', $data)
+                ? self::requiredInt($data, 'leave_entitlement_weeks')
+                : 4,
             (int) self::requiredBool($data, 'four_eyes_required'),
             (int) self::requiredBool($data, 'automatic_calculation_enabled'),
             (int) self::requiredBool($data, 'automatic_posting_enabled'),

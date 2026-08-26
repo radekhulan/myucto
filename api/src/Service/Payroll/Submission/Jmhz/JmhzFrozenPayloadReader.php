@@ -22,7 +22,7 @@ use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
  * `artifactBytes()` sám ověřuje délku i SHA-256 proti archivu, takže odsud
  * nevyjde nic jiného než přesně to, co se kdysi zmrazilo.
  */
-final readonly class JmhzFrozenPayloadReader
+readonly class JmhzFrozenPayloadReader
 {
     public function __construct(
         private PayrollSubmissionRepository $repository,

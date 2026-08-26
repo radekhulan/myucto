@@ -121,6 +121,7 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_enforcement_dependants',
                 'payroll_enforcement_month_results',
                 'payroll_enforcement_person_month_evidence',
+                'payroll_insolvency_payment_instructions',
             ],
             'code' => 'payroll_employee_has_enforcement',
             'message' => 'Na zaměstnance je vedená exekuce nebo insolvence. '

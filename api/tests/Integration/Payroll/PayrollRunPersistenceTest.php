@@ -1290,21 +1290,34 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testProductionPipelineBlocksApprovalUntilRulesetIsActive(): void
     {
-        $run = $this->productionService->createRun(
+        $approvedPosting = $this->createStub(
+            PayrollApprovedRevisionPostingService::class,
+        );
+        $approvedPosting->method('post')->willReturn([]);
+        $productionService = new PayrollRunCommandService(
+            $this->db,
+            $this->runs,
+            $this->container->get(PayrollRunSnapshotBuilder::class),
+            $this->container->get(PayrollRunCalculationPipeline::class),
+            $this->container->get(PayrollRunWorkflow::class),
+            $this->container->get(PayrollPeriodOwnershipService::class),
+            $approvedPosting,
+        );
+        $run = $productionService->createRun(
             $this->supplierId,
             '2026-06-01',
             '2026-07-15',
             null,
             $this->actors[0],
         );
-        $locked = $this->productionService->lockInputs(
+        $locked = $productionService->lockInputs(
             $this->supplierId,
             (int) $run['id'],
             (int) $run['row_version'],
             'production-ruleset-lock',
             $this->actors[0],
         );
-        $calculated = $this->productionService->calculate(
+        $calculated = $productionService->calculate(
             $this->supplierId,
             (int) $run['id'],
             (int) $locked->run['row_version'],
@@ -1327,7 +1340,7 @@ final class PayrollRunPersistenceTest extends TestCase
             ),
         );
 
-        $reviewed = $this->productionService->review(
+        $reviewed = $productionService->review(
             $this->supplierId,
             (int) $run['id'],
             (int) $calculated->run['row_version'],
@@ -1337,7 +1350,7 @@ final class PayrollRunPersistenceTest extends TestCase
 
         $this->expectException(\DomainException::class);
         $this->expectExceptionMessage('blokující validace');
-        $this->productionService->approve(
+        $productionService->approve(
             $this->supplierId,
             (int) $run['id'],
             (int) $reviewed->run['row_version'],
@@ -1392,11 +1405,21 @@ final class PayrollRunPersistenceTest extends TestCase
             'runtime-enforcement-lock',
             $this->actors[0],
         );
-        $this->db->pdo()->prepare(
-            'UPDATE payroll_enforcement_claims
-                SET outstanding_minor_units = 0
-              WHERE supplier_id = ? AND case_id = ?'
-        )->execute([$this->supplierId, $caseId]);
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_enforcement_claims
+                    SET outstanding_minor_units = 0
+                  WHERE supplier_id = ? AND case_id = ?'
+            )->execute([$this->supplierId, $caseId]);
+            self::fail(
+                'Pohledávku použitou ve zmrazeném vstupu nesmí jít změnit.',
+            );
+        } catch (PDOException $exception) {
+            self::assertStringContainsString(
+                'retained footprint',
+                $exception->getMessage(),
+            );
+        }
         $calculated = $this->service->calculate(
             $this->supplierId,
             (int) $run['id'],

@@ -102,6 +102,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
+        'payroll.ts::PayrollRiskySavingsRiskFactor'
+            => 'enum:MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRiskFactor',
+        'payroll.ts::PayrollEmployeeCardStatusFilter'
+            => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::CARD_STATUS_FILTERS',
         // Proč rozklad pojistného není k dispozici. Každý důvod má na obrazovce
         // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
         'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>

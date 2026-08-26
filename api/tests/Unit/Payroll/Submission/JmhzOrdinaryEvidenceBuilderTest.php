@@ -317,7 +317,10 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
             'insolvency' => [
                 'court_determined_amount_minor_units' => null,
                 'decision_verified' => false,
+                'employment_id' => null,
                 'mode' => 'none',
+                'payment_instruction_hash' => null,
+                'payment_instruction_id' => null,
                 'recipient_verified' => false,
             ],
             'pension_evidence' => 'unknown',
@@ -379,7 +382,10 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
                         'insolvency' => [
                             'court_determined_amount_minor_units' => null,
                             'decision_verified' => false,
+                            'employment_id' => null,
                             'mode' => 'none',
+                            'payment_instruction_hash' => null,
+                            'payment_instruction_id' => null,
                             'recipient_verified' => false,
                         ],
                         'payment_date' => '2026-08-15',

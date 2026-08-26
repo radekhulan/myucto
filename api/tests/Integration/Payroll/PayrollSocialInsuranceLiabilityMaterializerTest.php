@@ -72,6 +72,11 @@ final class PayrollSocialInsuranceLiabilityMaterializerTest extends TestCase
             $sourceSupplierId,
         );
         $this->actorId = $this->createActor($pdo);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->actorId]);
         $this->payerCurrencyId = $this->createPayerCurrency($pdo);
         $pdo->prepare(
             'UPDATE supplier

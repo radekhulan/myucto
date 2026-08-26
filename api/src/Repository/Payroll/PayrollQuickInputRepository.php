@@ -23,6 +23,8 @@ final class PayrollQuickInputRepository
 
     public const CARD_PAGE_LIMIT = 25;
 
+    public const CARD_STATUS_FILTERS = ['active', 'away', 'attention', 'all'];
+
     private const BASE_CODE = 'MZDA_MESICNI';
     private const OVERTIME_CODE = 'PREMIE_PRIPLATKY';
     private const BONUS_CODE = 'ODMENA';
@@ -80,7 +82,7 @@ final class PayrollQuickInputRepository
         string $search = '',
         string $status = 'active',
     ): array {
-        if (!in_array($status, ['active', 'away', 'attention', 'all'], true)) {
+        if (!in_array($status, self::CARD_STATUS_FILTERS, true)) {
             throw new \InvalidArgumentException('Neplatný filtr stavu zaměstnanců.');
         }
         $limit = max(1, min(self::CARD_PAGE_LIMIT, $limit));
