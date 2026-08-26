@@ -290,6 +290,20 @@ $ICON_DARK  = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-
     backdrop.addEventListener('click', () => setOpen(false));
 })();
 
+// ── Aktivní kapitola musí být po otevření vidět v levém obsahu ──
+(function () {
+    const nav = document.querySelector('#sidebar > nav');
+    const active = nav && nav.querySelector('.nav-item.active');
+    if (!nav || !active) return;
+    requestAnimationFrame(() => {
+        const navBox = nav.getBoundingClientRect();
+        const activeBox = active.getBoundingClientRect();
+        const top = nav.scrollTop + activeBox.top - navBox.top
+            - (nav.clientHeight - activeBox.height) / 2;
+        nav.scrollTop = Math.max(0, top);
+    });
+})();
+
 // ── Světlé screenshoty → kandidáti na dark inverzi ──
 // Změř průměrný jas (canvas 32×32, same-origin /manual/img/); světlé obrázky
 // dostanou .img-auto-dark — samotný filtr aplikuje CSS jen pod .dark, takže
