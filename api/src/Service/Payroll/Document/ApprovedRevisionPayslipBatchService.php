@@ -12,19 +12,11 @@ use PDO;
 /**
  * Výplatní pásky schválené revize — celá dávka, nebo nic.
  *
- * Vykreslení PDF běží UVNITŘ transakce, a je to záměr, ne opomenutí. Dávka je
- * jeden účetní úkon: půlka lidí s páskou a půlka bez ní je horší stav než dávka,
- * která spadla celá, protože pásky jsou neměnné doklady a částečnou sadu už nejde
- * jen tak dogenerovat — každá páska nese otisk zdroje a čas vydání. Proto se
- * revize zamkne `FOR UPDATE` (jeden řádek, ne celý zaměstnavatel), soubory se
- * odkládají do `PayrollDocumentStorageScope` a při chybě je úklid smete spolu
- * s rollbackem. Volající navíc dávku běžně vkládá do vlastní transakce mzdového
- * běhu (odtud SAVEPOINT), takže atomicita je součástí schválení běhu.
- *
- * Cenou je doba transakce úměrná počtu osob. Kdyby to jednou vadilo, správný
- * postup NENÍ transakci rozdělit, ale vykreslit PDF dopředu a dovnitř transakce
- * pustit jen zápisy — s tím, že se pak musí po zamčení revize znovu ověřit otisk
- * zdroje, protože dnes ho `prepareAll()` kontroluje až pod zámkem.
+ * Nákladné vykreslení všech PDF proběhne před otevřením vlastní transakce nebo
+ * SAVEPOINTu. Krátká zapisovací transakce potom znovu zamkne tenantovou revizi
+ * i výsledky osob, ověří jejich úplný kanonický otisk a teprve pak atomicky
+ * archivuje celou sadu. Změna zdroje během vykreslování proto nevydá zastaralé
+ * pásky a chyba zápisu nikdy nezanechá jen část databázové dávky ani osiřelé PDF.
  */
 final class ApprovedRevisionPayslipBatchService
 {
@@ -47,10 +39,56 @@ final class ApprovedRevisionPayslipBatchService
         ?int $actorUserId,
         ?PayrollDocumentStorageScope $storageScope = null,
     ): array {
+        return $this->archivePrepared(
+            $this->prepare($supplierId, $runId, $revisionId),
+            $actorUserId,
+            $storageScope,
+        );
+    }
+
+    public function prepare(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+    ): PreparedApprovedRevisionPayslipBatch {
         if ($supplierId <= 0 || $runId <= 0 || $revisionId <= 0) {
             throw new \InvalidArgumentException('Identita dávky výplatních pásek není platná.');
         }
 
+        $source = $this->sources->source($supplierId, $runId, $revisionId);
+        if ($source === null) {
+            throw new \DomainException(
+                'Výplatní pásky lze připravit pouze ze zkontrolované mzdové revize.',
+            );
+        }
+        $prepared = $this->prepareAll($source, $revisionId);
+        $items = [];
+        foreach ($prepared as $item) {
+            $items[] = [
+                'employee_id' => $item['employee_id'],
+                'source_hash' => $item['source_hash'],
+                'artifact' => $this->documents->renderPayslip($item['document']),
+            ];
+        }
+
+        return new PreparedApprovedRevisionPayslipBatch(
+            $supplierId,
+            $runId,
+            $revisionId,
+            $this->sourceFingerprint($source),
+            $items,
+        );
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function archivePrepared(
+        PreparedApprovedRevisionPayslipBatch $prepared,
+        ?int $actorUserId,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        $supplierId = $prepared->supplierId;
+        $runId = $prepared->runId;
+        $revisionId = $prepared->revisionId;
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -59,24 +97,39 @@ final class ApprovedRevisionPayslipBatchService
             $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
         }
         $ownsStorageScope = $storageScope === null;
-        $storageScope ??= $this->beginStorageScope();
 
         try {
-            $source = $this->sources->lockSource($supplierId, $runId, $revisionId);
-            if ($source === null) {
+            $storageScope ??= $this->beginStorageScope();
+            $lockedSource = $this->sources->lockSource(
+                $supplierId,
+                $runId,
+                $revisionId,
+            );
+            if ($lockedSource === null) {
                 throw new \DomainException(
                     'Výplatní pásky lze vytvořit pouze ze schválené mzdové revize.',
                 );
             }
-            $prepared = $this->prepareAll($source, $revisionId);
+            if (!hash_equals(
+                $prepared->sourceFingerprint,
+                $this->sourceFingerprint($lockedSource),
+            )) {
+                throw new \DomainException(
+                    'Zdroj výplatních pásek se během vykreslování změnil. Spusťte dávku znovu.',
+                );
+            }
+            $this->assertPreparedUnchanged(
+                $prepared->items,
+                $this->prepareAll($lockedSource, $revisionId),
+            );
             $result = [];
-            foreach ($prepared as $item) {
-                $result[] = $this->documents->generatePayslip(
+            foreach ($prepared->items as $item) {
+                $result[] = $this->documents->archivePayslip(
                     $supplierId,
                     $runId,
                     $revisionId,
                     $item['employee_id'],
-                    $item['document'],
+                    $item['artifact'],
                     $this->idempotencyKey(
                         $supplierId,
                         $runId,
@@ -100,7 +153,7 @@ final class ApprovedRevisionPayslipBatchService
             return $result;
         } catch (\Throwable $exception) {
             $this->rollback($pdo, $ownsTransaction);
-            if ($ownsStorageScope) {
+            if ($ownsStorageScope && $storageScope !== null) {
                 try {
                     $this->cleanupStorageScope($supplierId, $storageScope);
                 } catch (\Throwable $cleanupException) {
@@ -253,6 +306,55 @@ final class ApprovedRevisionPayslipBatchService
             $sourceHash,
             PayslipPdfRenderer::VERSION,
         ]));
+    }
+
+    /**
+     * @param array{
+     *   period_start:string,
+     *   result_snapshot_json:string,
+     *   result_snapshot_hash:string,
+     *   people:list<array<string,mixed>>
+     * } $source
+     */
+    private function sourceFingerprint(array $source): string
+    {
+        return hash('sha256', CanonicalJson::encode($source));
+    }
+
+    /**
+     * @param list<array{
+     *   employee_id:int,
+     *   source_hash:string,
+     *   artifact:PayrollArtifact
+     * }> $prepared
+     * @param list<array{
+     *   employee_id:int,
+     *   source_hash:string,
+     *   document:PayslipDocumentData
+     * }> $locked
+     */
+    private function assertPreparedUnchanged(array $prepared, array $locked): void
+    {
+        if (count($prepared) !== count($locked)) {
+            throw new \DomainException(
+                'Seznam osob výplatních pásek se během vykreslování změnil.',
+            );
+        }
+        foreach ($prepared as $index => $item) {
+            $lockedItem = $locked[$index];
+            if (
+                $item['employee_id'] !== $lockedItem['employee_id']
+                || !hash_equals($item['source_hash'], $lockedItem['source_hash'])
+                || !hash_equals(
+                    $lockedItem['source_hash'],
+                    $item['artifact']->sourceSnapshotHash,
+                )
+            ) {
+                throw new \DomainException(
+                    'Podklady výplatní pásky se během vykreslování změnily.',
+                );
+            }
+        }
     }
 
     private function assertHash(string $hash, string $context): void

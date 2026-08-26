@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
+use MyInvoice\Service\Payroll\Document\PreparedApprovedRevisionPayslipBatch;
 use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -438,6 +439,41 @@ final class PayrollRunCommandService
 
         $pdo = $this->db->pdo();
         $nestedTransaction = $pdo->inTransaction();
+        $preparedPayslips = null;
+        if ($command === PayrollRunCommand::APPROVE
+            && $this->approvedPayslips !== null
+        ) {
+            if ($nestedTransaction) {
+                throw new \DomainException(
+                    'Schválení s generováním výplatních pásek musí proběhnout v samostatné databázové transakci.',
+                );
+            }
+            if ($this->runs->commandReceipt(
+                $supplierId,
+                $keyHashBinary,
+            ) === null) {
+                $runForRendering = $this->runs->find($supplierId, $runId);
+                if ($runForRendering === null) {
+                    throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
+                }
+                $currentVersion = (int) $runForRendering['row_version'];
+                if ($currentVersion !== $expectedVersion) {
+                    throw new PayrollRunConflictException($currentVersion);
+                }
+                $revisionForRendering = $this->runs->currentRevision(
+                    $supplierId,
+                    $runId,
+                );
+                if ($revisionForRendering === null) {
+                    throw new \DomainException('Mzdový běh nemá revizi.');
+                }
+                $preparedPayslips = $this->approvedPayslips->prepare(
+                    $supplierId,
+                    $runId,
+                    (int) $revisionForRendering['id'],
+                );
+            }
+        }
         if ($nestedTransaction) {
             $pdo->exec('SAVEPOINT ' . self::COMMAND_SAVEPOINT);
         } else {
@@ -663,11 +699,6 @@ final class PayrollRunCommandService
                 if ($revision === null) {
                     throw new \DomainException('Mzdový běh nemá revizi.');
                 }
-                if ($nestedTransaction && $this->approvedPayslips !== null) {
-                    throw new \DomainException(
-                        'Schválení s generováním výplatních pásek musí proběhnout v samostatné databázové transakci.',
-                    );
-                }
                 $payslipStorageScope = $this->approvedPayslips
                     ?->beginStorageScope();
                 $resultSnapshot = self::snapshotObject(
@@ -710,13 +741,20 @@ final class PayrollRunCommandService
                     $resultSnapshot,
                     $actorUserId,
                 );
-                $this->approvedPayslips?->generate(
-                    $supplierId,
-                    $runId,
-                    (int) $revision['id'],
-                    $actorUserId,
-                    $payslipStorageScope,
-                );
+                if ($this->approvedPayslips !== null) {
+                    if (!$preparedPayslips
+                        instanceof PreparedApprovedRevisionPayslipBatch
+                    ) {
+                        throw new \LogicException(
+                            'Výplatní pásky nebyly připraveny před schvalovací transakcí.',
+                        );
+                    }
+                    $this->approvedPayslips->archivePrepared(
+                        $preparedPayslips,
+                        $actorUserId,
+                        $payslipStorageScope,
+                    );
+                }
                 // Druhá spoušť aktivace modulu: schválený mzdový běh je důkaz,
                 // že nastavení je fakticky hotové. Idempotentní — druhé
                 // schválení už stav nemění.
