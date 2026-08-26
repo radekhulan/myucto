@@ -327,14 +327,18 @@ final class EldpAnnualStatementBuilder
             }
             $revisionNo = $revision['revision_no'] ?? null;
             if (($revision['status'] ?? null) !== 'approved'
-                || ($revision['revision_kind'] ?? null) !== 'regular'
+                || !in_array(
+                    $revision['revision_kind'] ?? null,
+                    ['regular', 'correction'],
+                    true,
+                )
                 || !is_int($revisionNo)
                 || ($revision['current_revision_no'] ?? null) !== $revisionNo
             ) {
                 $label = self::monthLabel($periodStart);
                 $blockers[] = [
                     'code' => 'eldp_revision_not_current_approved',
-                    'message' => "Revize za {$label} není aktuální schválená řádná revize.",
+                    'message' => "Revize za {$label} není aktuální schválená revize.",
                     'detail' => ['period_start' => $periodStart],
                 ];
                 continue;

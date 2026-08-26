@@ -69,6 +69,19 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         );
     }
 
+    public function testCurrentApprovedCorrectiveRevisionIsAcceptedAsSource(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[7]['revision_no'] = 2;
+        $revisions[7]['current_revision_no'] = 2;
+        $revisions[7]['revision_kind'] = 'correction';
+
+        $statement = $this->build($revisions);
+
+        self::assertSame(408, $statement->payload['source_revisions'][7]['revision_id']);
+        self::assertSame('2025-08-01', $statement->payload['source_revisions'][7]['period_start']);
+    }
+
     public function testExcludedDaysAreTraceableToTheAbsenceTheyComeFrom(): void
     {
         $revisions = $this->wholeYear(2025);

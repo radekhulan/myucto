@@ -122,6 +122,14 @@ final class EldpStatementServiceTest extends TestCase
         self::assertSame(1, (int) $row['obligations']);
     }
 
+    public function testPreparationUsesCurrentApprovedCorrectiveRevision(): void
+    {
+        $result = $this->prepare();
+
+        self::assertTrue($result['created']);
+        self::assertSame(51, $result['insurance_days']);
+    }
+
     public function testStoredStatementIsEncryptedAndReadableOnlyThroughTheService(): void
     {
         $result = $this->prepare();
@@ -231,6 +239,7 @@ final class EldpStatementServiceTest extends TestCase
                 $periodStart,
                 $paymentDate,
                 $absences,
+                $periodStart === '2025-11-01' ? 'correction' : 'regular',
             );
         }
 
@@ -245,6 +254,7 @@ final class EldpStatementServiceTest extends TestCase
         string $periodStart,
         string $paymentDate,
         array $absences,
+        string $revisionKind,
     ): void {
         $pdo->prepare(
             'INSERT INTO payroll_runs
@@ -312,11 +322,12 @@ final class EldpStatementServiceTest extends TestCase
                  schema_version, ruleset_manifest_hash, input_snapshot_json,
                  input_snapshot_hash, result_snapshot_json, result_snapshot_hash,
                  idempotency_key_hash, approved_at)
-             VALUES (?, ?, 1, "regular", "approved", "payroll-run-input.v2",
+             VALUES (?, ?, 1, ?, "approved", "payroll-run-input.v2",
                      ?, ?, ?, ?, ?, ?, NOW())',
         )->execute([
             $this->supplierId,
             $runId,
+            $revisionKind,
             str_repeat('a', 64),
             $inputJson,
             hash('sha256', $inputJson),
