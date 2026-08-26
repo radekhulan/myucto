@@ -26,7 +26,7 @@
  * aplikace nezná datovou větu, nemůže se doptat na stav ani uzavřít transakci,
  * a tvářit se, že ano, by bylo horší než ho neukázat.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -75,6 +75,8 @@ const correctionPendingId = ref<number | null>(null)
 const correctionLoadingId = ref<number | null>(null)
 const correctableComponents = ref<PayrollJmhzCorrectableComponent[]>([])
 const selectedCorrectionGuids = ref<string[]>([])
+const correctionQuery = ref('')
+const correctionImpactConfirmed = ref(false)
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
@@ -198,6 +200,60 @@ const groups = computed<AttemptGroup[]>(() => {
   return ordered
 })
 
+const correctionGroup = computed(() =>
+  groups.value.find(group => group.submissionId === correctingId.value) ?? null,
+)
+
+function protocolErrorMatchesComponent(
+  error: PayrollJmhzProtocolError,
+  component: PayrollJmhzCorrectableComponent,
+): boolean {
+  if (error.form_guid) return error.form_guid === component.form_guid
+  if (error.id_ppv) return error.id_ppv === component.employment_external_identifier
+  if (error.ik_mpsv) return error.ik_mpsv === component.person_external_identifier
+  return false
+}
+
+const protocolErrorComponentGuids = computed(() => {
+  const matched = new Set<string>()
+  const group = correctionGroup.value
+  if (!group) return matched
+
+  const errors = group.attempts.flatMap(attempt => polls.value[attempt.id]?.report?.errors ?? [])
+  for (const component of correctableComponents.value) {
+    if (errors.some(error => protocolErrorMatchesComponent(error, component))) {
+      matched.add(component.form_guid)
+    }
+  }
+  return matched
+})
+
+const visibleCorrectionComponents = computed(() => {
+  const query = correctionQuery.value.trim().toLocaleLowerCase()
+  const rows = query === ''
+    ? correctableComponents.value
+    : correctableComponents.value.filter(component => [
+      component.employment_external_identifier,
+      component.person_external_identifier,
+      component.form_guid,
+    ].some(value => value.toLocaleLowerCase().includes(query)))
+
+  return [...rows].sort((left, right) => {
+    const leftHasError = protocolErrorComponentGuids.value.has(left.form_guid) ? 0 : 1
+    const rightHasError = protocolErrorComponentGuids.value.has(right.form_guid) ? 0 : 1
+    if (leftHasError !== rightHasError) return leftHasError - rightHasError
+    return left.employment_external_identifier.localeCompare(
+      right.employment_external_identifier,
+      'cs',
+      { numeric: true },
+    )
+  })
+})
+
+watch(selectedCorrectionGuids, () => {
+  correctionImpactConfirmed.value = false
+}, { deep: true })
+
 type TimelineEntry =
   | { source: 'app'; key: string; sortKey: string; group: AttemptGroup }
   | { source: 'imported'; key: string; sortKey: string; protocol: PayrollJmhzImportedProtocol }
@@ -298,6 +354,27 @@ function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
  */
 function canCancel(group: AttemptGroup): boolean {
   return canWrite.value && group.attempts.some(attempt => attempt.sent_at !== null)
+}
+
+/**
+ * Druh O smí navázat až na konečný protokol. Samotné převzetí zprávy branou
+ * nic neříká o tom, které součásti ČSSZ přijala, a výběr před výsledkem by byl
+ * jen odhad. Definitivní způsobilost ještě ověří server nad stavem podání.
+ */
+function canCorrect(group: AttemptGroup): boolean {
+  if (!canWrite.value || !group.attempts.some(attempt => attempt.status === 'completed')) {
+    return false
+  }
+  const latestKnownReport = group.attempts
+    .map(attempt => polls.value[attempt.id]?.report)
+    .find(report => report !== null && report !== undefined)
+  if (!latestKnownReport) return true
+
+  return [
+    'ProcessedAndComplete',
+    'ContainsPassableErrors',
+    'PartiallyAccepted',
+  ].includes(latestKnownReport.status)
 }
 
 /**
@@ -507,9 +584,7 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
 
 function askToCancel(submissionId: number) {
   if (busy.value) return
-  correctingId.value = null
-  correctableComponents.value = []
-  selectedCorrectionGuids.value = []
+  closeCorrection()
   cancellingId.value = submissionId
   actionError.value = ''
   success.value = ''
@@ -522,6 +597,8 @@ async function askToCorrect(submissionId: number) {
   correctionLoadingId.value = submissionId
   correctableComponents.value = []
   selectedCorrectionGuids.value = []
+  correctionQuery.value = ''
+  correctionImpactConfirmed.value = false
   actionError.value = ''
   success.value = ''
   try {
@@ -545,10 +622,21 @@ function closeCorrection() {
   correctingId.value = null
   correctableComponents.value = []
   selectedCorrectionGuids.value = []
+  correctionQuery.value = ''
+  correctionImpactConfirmed.value = false
+}
+
+function selectProtocolErrors() {
+  selectedCorrectionGuids.value = [...protocolErrorComponentGuids.value]
 }
 
 async function confirmCorrection(submissionId: number) {
-  if (!canWrite.value || busy.value || selectedCorrectionGuids.value.length === 0) return
+  if (
+    !canWrite.value
+    || busy.value
+    || selectedCorrectionGuids.value.length === 0
+    || !correctionImpactConfirmed.value
+  ) return
   const selected = new Set(selectedCorrectionGuids.value)
   const components = correctableComponents.value.filter(
     component => selected.has(component.form_guid),
@@ -859,7 +947,7 @@ onMounted(loadVariableSymbols)
                 }) }}
               </span>
               <button
-                v-if="canCancel(entry.group) && correctingId !== entry.group.submissionId"
+                v-if="canCorrect(entry.group) && correctingId !== entry.group.submissionId"
                 type="button"
                 :data-test="`transport-correct-${entry.group.submissionId}`"
                 :class="btnOutlineSm('warning')"
@@ -900,39 +988,131 @@ onMounted(loadVariableSymbols)
             <p class="mt-1 text-sm text-warning-800">
               {{ t('payroll.submissions.transport.correction.description') }}
             </p>
-            <div class="mt-4 space-y-2">
+            <div
+              v-if="correctionLoadingId === entry.group.submissionId"
+              data-test="transport-correct-loading"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-600"
+              role="status"
+            >
+              {{ t('payroll.submissions.transport.correction.loading') }}
+            </div>
+            <div
+              v-else-if="correctableComponents.length === 0"
+              data-test="transport-correct-empty"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-700"
+            >
+              {{ t('payroll.submissions.transport.correction.empty') }}
+            </div>
+            <template v-else>
+              <div class="mt-4 flex flex-wrap items-end justify-between gap-3">
+                <label class="min-w-64 flex-1 text-sm font-medium text-neutral-800">
+                  {{ t('payroll.submissions.transport.correction.search_label') }}
+                  <input
+                    v-model="correctionQuery"
+                    type="search"
+                    autocomplete="off"
+                    data-test="transport-correct-search"
+                    class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
+                    :placeholder="t('payroll.submissions.transport.correction.search_placeholder')"
+                  >
+                </label>
+                <p class="pb-2 text-xs text-neutral-600" data-test="transport-correct-count">
+                  {{ t('payroll.submissions.transport.correction.selection_count', {
+                    selected: selectedCorrectionGuids.length,
+                    total: correctableComponents.length,
+                  }) }}
+                </p>
+              </div>
+
+              <div
+                v-if="protocolErrorComponentGuids.size > 0"
+                data-test="transport-correct-protocol-hint"
+                class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3"
+              >
+                <p class="text-sm text-danger-700">
+                  {{ t('payroll.submissions.transport.correction.protocol_errors', {
+                    count: protocolErrorComponentGuids.size,
+                  }) }}
+                </p>
+                <button
+                  type="button"
+                  :class="btnOutlineSm('danger')"
+                  :disabled="busy"
+                  data-test="transport-correct-select-errors"
+                  @click="selectProtocolErrors"
+                >
+                  {{ t('payroll.submissions.transport.correction.select_errors') }}
+                </button>
+              </div>
+
+              <div
+                v-if="visibleCorrectionComponents.length > 0"
+                class="mt-3 max-h-96 space-y-2 overflow-y-auto pr-1"
+              >
+                <label
+                  v-for="component in visibleCorrectionComponents"
+                  :key="component.form_guid"
+                  :data-test="`transport-correct-component-${component.form_guid}`"
+                  class="flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-surface p-3"
+                >
+                  <input
+                    v-model="selectedCorrectionGuids"
+                    type="checkbox"
+                    :value="component.form_guid"
+                    class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                  >
+                  <span class="min-w-0 flex-1">
+                    <span class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-medium text-neutral-900">
+                        {{ t('payroll.submissions.transport.correction.employment', {
+                          id: component.employment_external_identifier,
+                        }) }}
+                      </span>
+                      <span
+                        v-if="protocolErrorComponentGuids.has(component.form_guid)"
+                        class="rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700"
+                      >
+                        {{ t('payroll.submissions.transport.correction.flagged_by_protocol') }}
+                      </span>
+                    </span>
+                    <span class="mt-0.5 block text-xs text-neutral-600">
+                      {{ t('payroll.submissions.transport.correction.person', {
+                        id: component.person_external_identifier,
+                      }) }}
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <p
+                v-else
+                data-test="transport-correct-no-results"
+                class="mt-3 rounded-lg border border-neutral-200 bg-surface p-4 text-sm text-neutral-600"
+              >
+                {{ t('payroll.submissions.transport.correction.no_results') }}
+              </p>
+
               <label
-                v-for="component in correctableComponents"
-                :key="component.form_guid"
-                :data-test="`transport-correct-component-${component.form_guid}`"
-                class="flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-surface p-3"
+                class="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/40 bg-surface p-4"
               >
                 <input
-                  v-model="selectedCorrectionGuids"
+                  v-model="correctionImpactConfirmed"
                   type="checkbox"
-                  :value="component.form_guid"
+                  data-test="transport-correct-impact"
                   class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
                 >
-                <span>
-                  <span class="block text-sm font-medium text-neutral-900">
-                    {{ t('payroll.submissions.transport.correction.employment', {
-                      id: component.employment_external_identifier,
-                    }) }}
-                  </span>
-                  <span class="mt-0.5 block text-xs text-neutral-600">
-                    {{ t('payroll.submissions.transport.correction.person', {
-                      id: component.person_external_identifier,
-                    }) }}
-                  </span>
+                <span class="text-sm text-neutral-800">
+                  {{ t('payroll.submissions.transport.correction.impact_confirmation') }}
                 </span>
               </label>
-            </div>
-            <div class="mt-4 flex flex-wrap gap-2">
+            </template>
+            <div class="mt-4 flex flex-wrap gap-2 border-t border-warning-500/30 pt-4">
               <button
                 type="button"
                 :data-test="`transport-correct-submit-${entry.group.submissionId}`"
                 :class="btnFilled('warning')"
-                :disabled="busy || selectedCorrectionGuids.length === 0"
+                :disabled="busy
+                  || selectedCorrectionGuids.length === 0
+                  || !correctionImpactConfirmed"
                 @click="confirmCorrection(entry.group.submissionId)"
               >
                 {{ t('payroll.submissions.transport.correction.confirm') }}

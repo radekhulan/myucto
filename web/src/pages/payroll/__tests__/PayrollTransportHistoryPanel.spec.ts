@@ -808,6 +808,13 @@ describe('PayrollTransportHistoryPanel', () => {
       month: 7,
       year: 2026,
     })
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      })],
+    })
 
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
@@ -822,6 +829,11 @@ describe('PayrollTransportHistoryPanel', () => {
       '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEF0"] input',
     )
     await second.setValue(true)
+    const submit = wrapper.get('[data-test="transport-correct-submit-70"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    expect(m.cancelJmhzSubmissionComponents).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="transport-correct-impact"]').setValue(true)
     await wrapper.get('[data-test="transport-correct-submit-70"]').trigger('click')
     await flushPromises()
 
@@ -832,6 +844,134 @@ describe('PayrollTransportHistoryPanel', () => {
     )
     expect(wrapper.get('[data-test="transport-success"]').text())
       .toContain('payroll.submissions.transport.correction.frozen 92')
+  })
+
+  it('částečnou opravu nabídne až po konečném protokolu', async () => {
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(false)
+
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      })],
+    })
+    await wrapper.get('[data-test="transport-reload"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(true)
+  })
+
+  it('během načítání součástí neukáže zavádějící prázdný stav', async () => {
+    type EmptyComponents = {
+      environment: 'production'
+      submission_id: number
+      components: []
+    }
+    let resolveComponents: ((value: EmptyComponents) => void) | undefined
+    m.jmhzCorrectableComponents.mockReturnValue(new Promise<EmptyComponents>(resolve => {
+      resolveComponents = resolve
+    }))
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      })],
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+
+    expect(wrapper.find('[data-test="transport-correct-loading"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="transport-correct-empty"]').exists()).toBe(false)
+
+    resolveComponents?.({ environment: 'production', submission_id: 70, components: [] })
+    await flushPromises()
+    expect(wrapper.find('[data-test="transport-correct-loading"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="transport-correct-empty"]').exists()).toBe(true)
+  })
+
+  it('zcela odmítnuté podání nenabízí jako základ částečné opravy', async () => {
+    m.pollJmhzTransportAttempt.mockResolvedValue({
+      attempt: attempt({
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      }),
+      acknowledgement: null,
+      settled: true,
+      report: { status: 'Rejected', errors: [] },
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-poll-1"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(false)
+  })
+
+  it('umí vybrat konkrétní chybnou součást z protokolu a hledat ve vztazích', async () => {
+    const components = [{
+      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF',
+      person_external_identifier: '1234567891',
+      employment_external_identifier: '987654321',
+    }, {
+      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
+      person_external_identifier: '1234567891',
+      employment_external_identifier: '987654322',
+    }]
+    m.jmhzCorrectableComponents.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      components,
+    })
+    m.pollJmhzTransportAttempt.mockResolvedValue({
+      attempt: attempt({
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      }),
+      acknowledgement: null,
+      settled: true,
+      report: {
+        status: 'PartiallyAccepted',
+        errors: [{
+          code: 40118,
+          message: 'Chybná hodnota.',
+          origin: 'cjmhz',
+          control_id: 118,
+          form_guid: components[1]!.form_guid,
+          ik_mpsv: components[1]!.person_external_identifier,
+          id_ppv: components[1]!.employment_external_identifier,
+          control: null,
+        }],
+      },
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-poll-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="transport-correct-protocol-hint"]').text())
+      .toContain('payroll.submissions.transport.correction.protocol_errors 1')
+    await wrapper.get('[data-test="transport-correct-select-errors"]').trigger('click')
+    expect(wrapper.get('[data-test="transport-correct-count"]').text())
+      .toContain('payroll.submissions.transport.correction.selection_count 1 2')
+
+    await wrapper.get('[data-test="transport-correct-search"]').setValue('987654322')
+    expect(wrapper.find(
+      '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEEF"]',
+    ).exists()).toBe(false)
+    expect(wrapper.find(
+      '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEF0"]',
+    ).exists()).toBe(true)
   })
 
   it('v režimu jen pro čtení storno vůbec nenabídne', async () => {

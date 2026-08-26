@@ -224,11 +224,15 @@ kanálem jako řádné JMHZ a samostatně sledujte jeho protokol až do přijet�
 Opakování stejné přípravy je idempotentní a vrací již vytvořený výsledek.
 
 Ve **Stavu odeslání** nemusíte opisovat GUID ani identifikátory osoby a vztahu.
-Po volbě **Opravit vybrané vztahy** aplikace načte součásti přímo ze zmrazeného
-řádného XML a účetní jen zaškrtne vztahy, které se mají zneplatnit. Samostatně
-platí, že první řádné JMHZ lze sestavit i z aktuální schválené opravné mzdové
-revize; druh podání určuje návaznost na dříve odeslané JMHZ, ne název zdrojové
-mzdové revize.
+Akce **Částečná oprava (druh O)** se nabídne až po konečném protokolu. Aplikace
+načte součásti přímo ze zmrazeného řádného XML; ve větším seznamu je můžete
+vyhledat podle identifikátoru vztahu nebo osoby. Pokud jste protokol právě
+dotáhli na stejné obrazovce, vztahy s konkrétní chybou se zvýrazní a lze je
+vybrat společným tlačítkem. Před přípravou musíte potvrdit, že druh O zneplatní
+jen vybrané součásti, ostatní ponechá u ČSSZ platné a případné opravené údaje
+se podávají následným krokem. Samostatně platí, že první řádné JMHZ lze sestavit
+i z aktuální schválené opravné mzdové revize; druh podání určuje návaznost na
+dříve odeslané JMHZ, ne název zdrojové mzdové revize.
 
 ## Podání zdravotním pojišťovnám
 

@@ -3354,17 +3354,27 @@
                     "unavailable": "Only a report already sent to ČSSZ can be cancelled."
                 },
                 "correction": {
-                    "action": "Correct selected employments",
-                    "title": "Corrective submission for {period}",
-                    "description": "Select only the employments whose previously filed component must be voided. Identifiers are loaded directly from the frozen regular submission; nothing is retyped. The new submission is only prepared and must then be sent separately.",
-                    "employment": "Employment ID PPV {id}",
-                    "person": "Person IK MPSV {id}",
-                    "confirm": "Prepare corrective submission",
+                    "action": "Partial correction (type O)",
+                    "title": "Partial correction for {period}",
+                    "description": "A type O submission voids only the selected components of the original report at ČSSZ. Select employments identified as erroneous or rejected in the protocol; all other components remain valid. Identifiers come from the frozen submission, so nothing is retyped.",
+                    "loading": "Loading employments from the frozen submission…",
+                    "empty": "The frozen submission contains no employments that can be partially voided.",
+                    "search_label": "Find an employment",
+                    "search_placeholder": "Employment, person or form ID",
+                    "selection_count": "Selected {selected} of {total}",
+                    "protocol_errors": "The last displayed protocol identified {count} employments with a specific error.",
+                    "select_errors": "Select those flagged by the protocol",
+                    "flagged_by_protocol": "Protocol error",
+                    "no_results": "No employment matches this search.",
+                    "employment": "ČSSZ employment ID: {id}",
+                    "person": "ČSSZ person identifier: {id}",
+                    "impact_confirmation": "I understand that a type O submission voids only the selected components. The remaining components stay valid at ČSSZ and any corrected data must be filed in a subsequent step.",
+                    "confirm": "Prepare partial correction",
                     "cancel": "Leave it",
-                    "frozen": "The corrective submission is prepared as submission no. {id}. Send it the same way as a regular report.",
-                    "already": "The same corrective submission already exists — it is submission no. {id}.",
+                    "frozen": "The partial correction is prepared as submission no. {id}. Review it and send it the same way as a regular report.",
+                    "already": "The same partial correction already exists — it is submission no. {id}.",
                     "load_failed": "The employments from the original submission could not be loaded.",
-                    "failed": "The corrective submission could not be prepared."
+                    "failed": "The partial correction could not be prepared."
                 }
             },
             "signing": {
