@@ -804,6 +804,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             'balance_rounding_mode' => 'exact_minor_units',
             'home_office_policy' => 'not_used',
             'travel_expense_policy' => 'not_used',
+            'leave_entitlement_weeks' => 4,
             'four_eyes_required' => false,
             'automatic_calculation_enabled' => true,
             'automatic_posting_enabled' => false,

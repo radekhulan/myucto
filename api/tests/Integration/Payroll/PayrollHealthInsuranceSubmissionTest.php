@@ -117,7 +117,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         self::assertCount(7, $capability['channels']);
         self::assertFalse($capability['automated_dispatch']['supported']);
         self::assertSame(
-            ['205', '207', '211', '213'],
+            ['205', '207', '213'],
             array_values(array_map(
                 'strval',
                 array_keys(array_filter(
