@@ -1163,6 +1163,8 @@
             "save_failed": "Payroll run could not be created.",
             "command_done": "Payroll run status was changed.",
             "command_failed": "Payroll run command failed.",
+            "payments_unsettled": "The run has not actually been paid in full yet. Under Payroll payment orders and settlement, match every amount to a bank transaction or posted cash document and resolve any refunds or reversals.",
+            "incoming_refund_unresolved": "The run contains an unresolved incoming correction refund. It cannot be added to an outgoing payment batch, and the current workflow cannot yet link it to the payroll liability without such a batch. The run therefore remains open; do not create a false outgoing payment.",
             "empty": "No payroll run for the selected period",
             "empty_hint": "Check the inputs and create the first run using the button above.",
             "run_label": "Payroll for {period}",

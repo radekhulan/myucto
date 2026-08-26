@@ -441,7 +441,15 @@ async function submitCommand(
       })
     }
   } catch (error: any) {
-    const message = error?.response?.data?.error?.message || t('payroll.runs.command_failed')
+    const failure = error?.response?.data?.error
+    const paymentFailureKey = failure?.code === 'payroll_payments_unsettled'
+      ? 'payroll.runs.payments_unsettled'
+      : failure?.code === 'payroll_incoming_refund_unresolved'
+        ? 'payroll.runs.incoming_refund_unresolved'
+        : null
+    const message = command === 'mark_paid' && paymentFailureKey !== null
+      ? t(paymentFailureKey)
+      : failure?.message || t('payroll.runs.command_failed')
     if (pendingCommand.value) commandError.value = message
     // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
     // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle

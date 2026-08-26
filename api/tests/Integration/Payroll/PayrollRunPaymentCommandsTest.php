@@ -214,7 +214,14 @@ final class PayrollRunPaymentCommandsTest extends TestCase
 
         // Nepokrytý zbytek musí `mark_paid` zablokovat i s vyčíslením.
         $first = $liabilities[0];
-        $this->allocate($first['id'], $first['amount_minor'] - 1_500);
+        $firstAllocationId = $this->allocate(
+            $first['id'],
+            $first['amount_minor'] - 1_500,
+        );
+        $this->settleAllocation(
+            $firstAllocationId,
+            $first['amount_minor'] - 1_500,
+        );
         try {
             $service->markPaid(
                 $this->supplierId,
@@ -236,9 +243,17 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             (string) $this->runs->find($this->supplierId, $runId)['status'],
         );
 
-        $this->allocate($first['id'], 1_500);
+        $remainderAllocationId = $this->allocate($first['id'], 1_500);
+        $this->settleAllocation($remainderAllocationId, 1_500);
         foreach (array_slice($liabilities, 1) as $liability) {
-            $this->allocate($liability['id'], $liability['amount_minor']);
+            $allocationId = $this->allocate(
+                $liability['id'],
+                $liability['amount_minor'],
+            );
+            $this->settleAllocation(
+                $allocationId,
+                $liability['amount_minor'],
+            );
         }
 
         $paid = $service->markPaid(
@@ -915,7 +930,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
      * brána příkazu `mark_paid` nad ledgerem, ne generování platebního souboru
      * (to má vlastní testy).
      */
-    private function allocate(int $liabilityId, int $amountMinor): void
+    private function allocate(int $liabilityId, int $amountMinor): int
     {
         $pdo = $this->db->pdo();
         $reference = 'synthetic-' . bin2hex(random_bytes(6));
@@ -964,6 +979,58 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $liabilityId,
             $amountMinor,
             hash('sha256', "synthetic-allocation-key:{$reference}"),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function settleAllocation(int $allocationId, int $amountMinor): void
+    {
+        $pdo = $this->db->pdo();
+        $reference = 'synthetic-settlement-' . bin2hex(random_bytes(6));
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number, bank_code,
+                 currency, statement_date, source)
+             VALUES (?, ?, ?, "1000000005", "0100", "CZK",
+                     "2026-07-31", "gpc")',
+        )->execute([
+            $this->supplierId,
+            "{$reference}.gpc",
+            hash('sha256', "synthetic-statement:{$reference}"),
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $amount = sprintf(
+            '-%d.%02d',
+            intdiv($amountMinor, 100),
+            $amountMinor % 100,
+        );
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, "2026-07-15", ?, "CZK", ?, ?)',
+        )->execute([
+            $statementId,
+            $amount,
+            "Syntetická úhrada {$reference}",
+            hash('sha256', "synthetic-transaction:{$reference}"),
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id,
+                 idempotency_key_hash, matched_by)
+             VALUES (?, ?, "matched", ?, ?, ?, UNHEX(?), ?)',
+        )->execute([
+            $this->supplierId,
+            $allocationId,
+            $amountMinor,
+            $statementId,
+            $transactionId,
+            hash('sha256', "synthetic-match:{$reference}"),
+            $this->actors[2],
         ]);
     }
 

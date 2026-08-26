@@ -1017,7 +1017,8 @@ final class PayrollRunCommandService
             );
         }
         if ($coverage['uncovered'] !== []) {
-            throw new \DomainException(
+            throw new PayrollRunPaymentsUnsettledException(
+                $coverage,
                 $this->paymentSettlement->blockingReason($coverage),
             );
         }
@@ -1027,7 +1028,7 @@ final class PayrollRunCommandService
             [
                 'liability_count' => $coverage['liability_count'],
                 'batch_count' => $coverage['batch_count'],
-                'settled_minor' => $coverage['allocated_minor'],
+                'settled_minor' => $coverage['settled_minor'],
             ],
         );
     }

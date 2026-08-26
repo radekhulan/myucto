@@ -89,6 +89,9 @@ závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost
 částku a odvozený stav. Záporný rozdíl institucionálního odvodu se zobrazí jako
 příchozí opravný závazek, ale nelze jej vložit do odchozí bankovní dávky;
 vratku je nutné doložit příchozím bankovním nebo pokladním dokladem.
+Aktuální agenda zatím neumí takový příchozí doklad připojit k mzdovému
+závazku bez platební dávky. Běh s příchozí opravnou vratkou proto
+zůstane otevřený; nevytvářejte kvůli jeho uzavření falešnou odchozí dávku.
 
 Na kartě **Co zaplatit** vybereš připravené závazky; karta **Mzdové příkazy**
 ukazuje už vytvořené dávky. Aplikace podle

@@ -209,6 +209,60 @@ describe('PayrollRuns', () => {
       .toContain('nemá nastavené výplatní pravidlo')
   })
 
+  it('lokalizuje blokaci skutečné úhrady místo české serverové věty', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'payment_ready',
+      can_delete: false,
+      available_commands: ['mark_paid'],
+    })])
+    m.commandRun.mockRejectedValue({
+      response: {
+        status: 422,
+        data: {
+          error: {
+            code: 'payroll_payments_unsettled',
+            message: 'Mzdový běh nelze označit za uhrazený.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-mark_paid"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
+      .toBe('payroll.runs.payments_unsettled')
+  })
+
+  it('odliší nepodporovanou příchozí opravnou vratku', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'payment_ready',
+      can_delete: false,
+      available_commands: ['mark_paid'],
+    })])
+    m.commandRun.mockRejectedValue({
+      response: {
+        status: 422,
+        data: {
+          error: {
+            code: 'payroll_incoming_refund_unresolved',
+            message: 'Mzdový běh nelze označit za uhrazený.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-mark_paid"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
+      .toBe('payroll.runs.incoming_refund_unresolved')
+  })
+
   it('po přípravě plateb otevře mzdové příkazy ve správném období', async () => {
     m.runs.mockResolvedValue([run({
       status: 'posted',
