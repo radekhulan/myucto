@@ -12,10 +12,87 @@ use PDO;
 
 final readonly class PayrollInsolvencyPaymentInstructionService
 {
+    private const VERIFIED_SOURCE_KINDS = [
+        'official_registry',
+        'official_document',
+        'institution_notice',
+        'user_verified',
+    ];
+
     public function __construct(
         private Connection $db,
         private DocumentRepository $documents,
     ) {}
+
+    /**
+     * @return array{
+     *   employments:list<array<string,mixed>>,
+     *   recipient_accounts:list<array<string,mixed>>
+     * }
+     */
+    public function options(
+        int $supplierId,
+        int $employeeId,
+        string $periodStart,
+    ): array {
+        $periodEnd = (new \DateTimeImmutable($periodStart))
+            ->modify('last day of this month')
+            ->format('Y-m-d');
+        $employmentStatement = $this->db->pdo()->prepare(
+            'SELECT id, code, relation_type, status, start_date,
+                    actual_start_date, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ?
+                AND status IN ("active", "ended")
+                AND COALESCE(actual_start_date, start_date, "1900-01-01") <= ?
+                AND (end_date IS NULL OR end_date >= ?)
+              ORDER BY is_primary DESC,
+                       COALESCE(actual_start_date, start_date, "1900-01-01"),
+                       id',
+        );
+        $employmentStatement->execute([
+            $supplierId,
+            $employeeId,
+            $periodEnd,
+            $periodStart,
+        ]);
+
+        $accountStatement = $this->db->pdo()->prepare(
+            'SELECT account.id, account.institution_id,
+                    institution.institution_code, account.institution_name,
+                    account.bank_account_masked, account.currency_code,
+                    account.variable_symbol, account.specific_symbol,
+                    account.constant_symbol, account.valid_from,
+                    account.valid_to, account.source_kind,
+                    account.source_reference, account.verified_on,
+                    account.row_version
+               FROM payroll_institution_accounts account
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE account.supplier_id = ?
+                AND institution.institution_type = "other_recipient"
+                AND account.currency_code = "CZK"
+                AND account.source_kind IN (
+                    "official_registry", "official_document",
+                    "institution_notice", "user_verified"
+                )
+                AND account.verified_by IS NOT NULL
+                AND account.verified_by > 0
+                AND account.valid_from <= ?
+                AND (account.valid_to IS NULL OR account.valid_to >= ?)
+              ORDER BY account.institution_name, institution.institution_code,
+                       account.id',
+        );
+        $accountStatement->execute([$supplierId, $periodEnd, $periodStart]);
+
+        return [
+            'employments' => array_values($employmentStatement->fetchAll(PDO::FETCH_ASSOC)),
+            'recipient_accounts' => array_values(
+                $accountStatement->fetchAll(PDO::FETCH_ASSOC),
+            ),
+        ];
+    }
 
     /**
      * @param array<string,mixed> $data
@@ -94,12 +171,11 @@ final readonly class PayrollInsolvencyPaymentInstructionService
         if (!is_array($account)
             || ($account['institution_type'] ?? null) !== 'other_recipient'
             || ($account['currency_code'] ?? null) !== 'CZK'
-            || !in_array($account['source_kind'] ?? null, [
-                'official_registry',
-                'official_document',
-                'institution_notice',
-                'user_verified',
-            ], true)
+            || !in_array(
+                $account['source_kind'] ?? null,
+                self::VERIFIED_SOURCE_KINDS,
+                true,
+            )
             || (int) ($account['verified_by'] ?? 0) <= 0
         ) {
             throw new \DomainException(

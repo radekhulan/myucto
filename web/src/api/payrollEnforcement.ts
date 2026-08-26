@@ -177,8 +177,46 @@ export interface EnforcementMonthEvidence {
   insolvency_mode: 'none' | 'alert_only' | 'approved_standard' | 'court_determined_amount'
   insolvency_decision_verified: boolean
   insolvency_recipient_verified: boolean
+  insolvency_payment_instruction_id: number | null
+  insolvency_employment_id: number | null
+  insolvency_institution_account_id: number | null
+  insolvency_decision_document_id: number | null
+  insolvency_payment_instruction_hash: string | null
   court_determined_amount_minor_units: number | null
   row_version: number | null
+}
+
+export interface InsolvencyEmploymentOption {
+  id: number
+  code: string
+  relation_type: string
+  status: 'active' | 'ended'
+  start_date: string | null
+  actual_start_date: string | null
+  end_date: string | null
+}
+
+export interface InsolvencyRecipientAccountOption {
+  id: number
+  institution_id: number
+  institution_code: string
+  institution_name: string
+  bank_account_masked: string
+  currency_code: 'CZK'
+  variable_symbol: string | null
+  specific_symbol: string | null
+  constant_symbol: string | null
+  valid_from: string
+  valid_to: string | null
+  source_kind: string
+  source_reference: string
+  verified_on: string
+  row_version: number
+}
+
+export interface InsolvencyOptions {
+  employments: InsolvencyEmploymentOption[]
+  recipient_accounts: InsolvencyRecipientAccountOption[]
 }
 
 export interface EnforcementDependant {
@@ -280,6 +318,28 @@ export const payrollEnforcementApi = {
     api.put<{ evidence: EnforcementMonthEvidence }>(
       `/payroll/enforcement/people/${employeeId}/month/${period}/evidence`,
       payload,
+    ).then(response => response.data.evidence),
+  insolvencyOptions: (employeeId: number, period: string) =>
+    api.get<InsolvencyOptions>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/options`,
+    ).then(response => response.data),
+  insolvencyEvidence: (employeeId: number, period: string) =>
+    api.get<{ evidence: EnforcementMonthEvidence }>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/evidence`,
+    ).then(response => response.data.evidence),
+  saveInsolvencyEvidence: (
+    employeeId: number,
+    period: string,
+    payload: Omit<EnforcementMonthEvidence, 'id' | 'employee_id' | 'period_start'>,
+  ) =>
+    api.put<{ evidence: EnforcementMonthEvidence }>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/evidence`,
+      payload,
+    ).then(response => response.data.evidence),
+  cancelInsolvency: (employeeId: number, period: string, rowVersion: number) =>
+    api.post<{ evidence: EnforcementMonthEvidence }>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/commands/cancel`,
+      { row_version: rowVersion },
     ).then(response => response.data.evidence),
   dependants: (employeeId: number) =>
     api.get<{ dependants: EnforcementDependant[] }>(

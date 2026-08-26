@@ -774,6 +774,22 @@ final class Routes
                 '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
                 [PayrollEnforcementAction::class, 'monthEvidence'],
             );
+            $g->get(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/options',
+                [PayrollEnforcementAction::class, 'insolvencyOptions'],
+            );
+            $g->get(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'monthEvidence'],
+            );
+            $g->put(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'saveMonthEvidence'],
+            );
+            $g->post(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/commands/cancel',
+                [PayrollEnforcementAction::class, 'cancelInsolvency'],
+            );
             $g->post(
                 '/enforcement/people/{employeeId:[0-9]+}/dependants',
                 [PayrollEnforcementAction::class, 'addDependant'],

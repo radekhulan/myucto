@@ -117,6 +117,18 @@ describe('router guard vynuceného nastavení MFA', () => {
 
     expect(result).toEqual({ name: 'home' })
   })
+
+  it('oddlužení vyžaduje zároveň oprávnění k exekucím', async () => {
+    const auth = signIn()
+    auth.permissions = {
+      'payroll.insolvency': 1,
+      'payroll.enforcement': 0,
+    }
+
+    const result = await authorizationGuard(resolveTarget({ name: 'payroll-insolvency' }))
+
+    expect(result).toEqual({ name: 'home' })
+  })
 })
 
 describe('oddělení klientské a interní domény', () => {

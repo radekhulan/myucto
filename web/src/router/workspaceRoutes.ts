@@ -84,6 +84,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'payroll/travel', name: 'payroll-travel', component: () => import('@/pages/payroll/PayrollTravel.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/deduction-agreements', name: 'payroll-deduction-agreements', component: () => import('@/pages/payroll/DeductionAgreements.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/enforcement', name: 'payroll-enforcement', component: () => import('@/pages/payroll/EnforcementCases.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/insolvency', name: 'payroll-insolvency', component: () => import('@/pages/payroll/PayrollInsolvency.vue'), meta: { requiresSupplier: true, requiresPayroll: true, additionalPermissions: ['payroll.enforcement'] } },
       { path: 'payroll/documents', name: 'payroll-documents', component: () => import('@/pages/payroll/PayrollDocuments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Roční zúčtování (§ 38ch ZDP) je vlastní agenda, ne záložka dokumentů:
       // z devadesáti procent je to evidence podkladů a rozhodnutí, jestli

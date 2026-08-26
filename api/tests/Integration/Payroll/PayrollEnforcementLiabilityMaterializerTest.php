@@ -332,6 +332,115 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         ]);
     }
 
+    public function testApprovedInsolvencyRequiresExplicitCancellation(): void
+    {
+        $approved = $this->saveApprovedInsolvencyEvidence();
+        $payload = $this->approvedInsolvencyPayload();
+        $payload['insolvency_mode'] = 'none';
+        $payload['insolvency_decision_verified'] = false;
+        $payload['insolvency_recipient_verified'] = false;
+        unset(
+            $payload['insolvency_employment_id'],
+            $payload['insolvency_institution_account_id'],
+            $payload['insolvency_decision_document_id'],
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('výslovným zrušením');
+        $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            (int) $approved['row_version'],
+        );
+    }
+
+    public function testUnusedInsolvencyTargetCanChangeAndThenBeCancelledExplicitly(): void
+    {
+        $approved = $this->saveApprovedInsolvencyEvidence();
+        $oldInstructionId = (int) $approved['insolvency_payment_instruction_id'];
+        $replacementDocumentId = $this->createDecisionDocument(
+            $this->supplierId,
+            'replacement-before-use',
+        );
+        $payload = $this->approvedInsolvencyPayload();
+        $payload['insolvency_decision_document_id'] = $replacementDocumentId;
+        $changed = $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            (int) $approved['row_version'],
+        );
+        self::assertNotSame(
+            $oldInstructionId,
+            (int) $changed['insolvency_payment_instruction_id'],
+        );
+
+        $cancelled = $this->enforcement->cancelInsolvency(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            (int) $changed['row_version'],
+            $this->actorId,
+        );
+        self::assertSame('none', $cancelled['insolvency_mode']);
+        self::assertNull($cancelled['insolvency_payment_instruction_id']);
+        self::assertFalse($cancelled['insolvency_decision_verified']);
+        self::assertFalse($cancelled['insolvency_recipient_verified']);
+    }
+
+    public function testUsedInsolvencyInstructionCannotChangeOrBeCancelled(): void
+    {
+        $approved = $this->saveApprovedInsolvencyEvidence();
+        $instruction = $this->enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            self::PAYMENT_DATE,
+        )->insolvency;
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeInsolvencyMonthResult(
+            $revisionId,
+            $instruction,
+            200_00,
+            'synthetic-used-insolvency-instruction',
+        );
+
+        try {
+            $this->enforcement->cancelInsolvency(
+                $this->supplierId,
+                $this->employeeId,
+                self::PERIOD,
+                (int) $approved['row_version'],
+                $this->actorId,
+            );
+            self::fail('Použitý pokyn oddlužení se nesmí zrušit změnou evidence.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString('opravnou revizi', $exception->getMessage());
+        }
+
+        $replacementDocumentId = $this->createDecisionDocument(
+            $this->supplierId,
+            'replacement-after-use',
+        );
+        $payload = $this->approvedInsolvencyPayload();
+        $payload['insolvency_decision_document_id'] = $replacementDocumentId;
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('opravnou revizi');
+        $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            (int) $approved['row_version'],
+        );
+    }
+
     public function testInsolvencyTargetSelectionAndChangedAccountFailClosed(): void
     {
         $foreignDocument = $this->createDecisionDocument(

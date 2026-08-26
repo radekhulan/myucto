@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\ActivityLogger;
@@ -44,6 +45,7 @@ final class PayrollEnforcementApiTest extends TestCase
     private Connection $db;
     private PayrollEnforcementAction $action;
     private PayrollEnforcementRepository $repository;
+    private PayrollInstitutionAccountRepository $institutionAccounts;
     private EnforcementCaseLifecycle $lifecycle;
     private PayrollModuleAccess $access;
     private IpMatcher $ipMatcher;
@@ -63,6 +65,7 @@ final class PayrollEnforcementApiTest extends TestCase
         $db = $container->get(Connection::class);
         $action = $container->get(PayrollEnforcementAction::class);
         $repository = $container->get(PayrollEnforcementRepository::class);
+        $institutionAccounts = $container->get(PayrollInstitutionAccountRepository::class);
         $lifecycle = $container->get(EnforcementCaseLifecycle::class);
         $access = $container->get(PayrollModuleAccess::class);
         $ipMatcher = $container->get(IpMatcher::class);
@@ -71,6 +74,7 @@ final class PayrollEnforcementApiTest extends TestCase
             !$db instanceof Connection
             || !$action instanceof PayrollEnforcementAction
             || !$repository instanceof PayrollEnforcementRepository
+            || !$institutionAccounts instanceof PayrollInstitutionAccountRepository
             || !$lifecycle instanceof EnforcementCaseLifecycle
             || !$access instanceof PayrollModuleAccess
             || !$ipMatcher instanceof IpMatcher
@@ -84,6 +88,7 @@ final class PayrollEnforcementApiTest extends TestCase
         }
         $this->action = $action;
         $this->repository = $repository;
+        $this->institutionAccounts = $institutionAccounts;
         $this->lifecycle = $lifecycle;
         $this->access = $access;
         $this->ipMatcher = $ipMatcher;
@@ -881,6 +886,195 @@ final class PayrollEnforcementApiTest extends TestCase
 
         self::assertSame(403, $response->getStatusCode());
         self::assertSame('forbidden', $this->errorCode($response));
+    }
+
+    public function testInsolvencyOptionsAreTenantEffectiveVerifiedAndPermissionScoped(): void
+    {
+        $ownEmploymentId = $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'OWN-ACTIVE',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'OWN-EXPIRED',
+            'ended',
+            '2025-01-01',
+            '2025-12-31',
+        );
+        $this->employment(
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            'FOREIGN-ACTIVE',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $ownAccount = $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-OWN',
+            'institution_name' => 'Syntetický insolvenční správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-options-own',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+        $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-EXPIRED',
+            'institution_name' => 'Syntetický bývalý správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => null,
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2025-01-01',
+            'valid_to' => '2025-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-options-expired',
+            'verified_on' => '2025-01-02',
+        ], $this->userId);
+        $this->institutionAccounts->create($this->otherSupplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-FOREIGN',
+            'institution_name' => 'Syntetický cizí správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => null,
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-options-foreign',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+
+        $response = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/options",
+            ),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame([$ownEmploymentId], array_column($body['employments'], 'id'));
+        self::assertSame([(int) $ownAccount['id']], array_column($body['recipient_accounts'], 'id'));
+
+        $withoutInsolvency = new EffectiveRole(
+            94,
+            'Syntetická role bez insolvence',
+            'staff',
+            true,
+            ['payroll.enforcement' => 2],
+        );
+        $forbidden = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/options",
+            )->withAttribute('auth.effective_role', $withoutInsolvency),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+
+        $foreignPerson = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->otherEmployeeId}/month/2026-06/options",
+            ),
+            new Response(),
+            ['employeeId' => (string) $this->otherEmployeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(422, $foreignPerson->getStatusCode());
+    }
+
+    public function testInsolvencyCancellationIsExplicitAndReloadsByRowVersion(): void
+    {
+        $employmentId = $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'CANCEL-ACTIVE',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $account = $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-CANCEL',
+            'institution_name' => 'Syntetický správce pro zrušení',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-cancel',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+        $documentId = $this->document($this->supplierId, str_repeat('c', 64));
+        $saved = $this->action->saveMonthEvidence(
+            $this->request(
+                'PUT',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/evidence",
+            )->withParsedBody([
+                'claim_register_evidence_complete' => false,
+                'dependants_evidence_complete' => false,
+                'spouse_evidence_complete' => false,
+                'pension_evidence' => 'unknown',
+                'has_multiple_payers' => false,
+                'protected_amount_override_minor_units' => null,
+                'protected_amount_override_verified' => false,
+                'insolvency_mode' => 'approved_standard',
+                'insolvency_decision_verified' => true,
+                'insolvency_recipient_verified' => true,
+                'insolvency_employment_id' => $employmentId,
+                'insolvency_institution_account_id' => (int) $account['id'],
+                'insolvency_decision_document_id' => $documentId,
+                'court_determined_amount_minor_units' => null,
+                'row_version' => null,
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $rowVersion = (int) ($this->json($saved)['evidence']['row_version'] ?? 0);
+
+        $cancelled = $this->action->cancelInsolvency(
+            $this->request(
+                'POST',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/commands/cancel",
+            )->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+        self::assertSame('none', $this->json($cancelled)['evidence']['insolvency_mode']);
+
+        $stale = $this->action->cancelInsolvency(
+            $this->request(
+                'POST',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/commands/cancel",
+            )->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->errorCode($stale));
     }
 
     public function testAddingDependantRequiresInsolvencyPermission(): void
@@ -1824,6 +2018,32 @@ final class PayrollEnforcementApiTest extends TestCase
              VALUES (?, ?, "employee", "hpp", 1, 1, 0, 42000, 0, 1)'
         );
         $stmt->execute([$supplierId, $name]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function employment(
+        int $supplierId,
+        int $employeeId,
+        string $code,
+        string $status,
+        ?string $startDate,
+        ?string $endDate,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, end_date, is_primary)
+             VALUES (?, ?, ?, "employment", ?, ?, ?, ?, 0)',
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $code,
+            $status,
+            $startDate,
+            $startDate,
+            $endDate,
+        ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

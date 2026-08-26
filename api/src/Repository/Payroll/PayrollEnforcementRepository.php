@@ -775,13 +775,30 @@ final class PayrollEnforcementRepository implements
         }
         try {
             $versionStmt = $pdo->prepare(
-                'SELECT row_version
+                'SELECT row_version, insolvency_mode,
+                        insolvency_payment_instruction_id
                    FROM payroll_enforcement_person_month_evidence
                   WHERE supplier_id = ? AND employee_id = ? AND period_start = ?
                   FOR UPDATE'
             );
             $versionStmt->execute([$supplierId, $employeeId, $periodStart]);
-            $currentVersion = $versionStmt->fetchColumn();
+            $currentRowValue = $versionStmt->fetch(PDO::FETCH_ASSOC);
+            $currentRow = is_array($currentRowValue) ? $currentRowValue : null;
+            $currentVersion = $currentRow === null
+                ? false
+                : PayrollTimeValue::int($currentRow['row_version'] ?? null, 'row_version');
+            $currentInsolvencyMode = $currentRow['insolvency_mode'] ?? null;
+            $currentInstructionId = self::nullableIntValue(
+                $currentRow['insolvency_payment_instruction_id'] ?? null,
+            );
+            if ($currentInsolvencyMode === InsolvencyMode::ApprovedStandard->value
+                && $insolvency !== InsolvencyMode::ApprovedStandard
+            ) {
+                throw new \DomainException(
+                    'Schválené standardní oddlužení lze ukončit jen '
+                    . 'výslovným zrušením před použitím platebního pokynu.',
+                );
+            }
             $instruction = null;
             if ($insolvency === InsolvencyMode::ApprovedStandard) {
                 if (!self::boolValue($data, 'insolvency_decision_verified')
@@ -795,6 +812,22 @@ final class PayrollEnforcementRepository implements
                 if ($userId === null || $userId <= 0) {
                     throw new \DomainException(
                         'Platební pokyn oddlužení musí vytvořit konkrétní uživatel.',
+                    );
+                }
+                $requestedInstructionId = self::nullablePositiveInt(
+                    $data,
+                    'insolvency_payment_instruction_id',
+                );
+                if ($currentInstructionId !== null
+                    && $requestedInstructionId !== $currentInstructionId
+                    && $this->insolvencyInstructionWasUsed(
+                        $supplierId,
+                        $currentInstructionId,
+                    )
+                ) {
+                    throw new \DomainException(
+                        'Použitý platební pokyn oddlužení nelze změnit ani zrušit '
+                        . 'v měsíční evidenci; použijte opravnou revizi.',
                     );
                 }
                 $instruction = $this->insolvencyInstructions->resolve(
@@ -884,6 +917,97 @@ final class PayrollEnforcementRepository implements
     }
 
     /** @return array<string,mixed> */
+    public function cancelInsolvency(
+        int $supplierId,
+        int $employeeId,
+        string $period,
+        int $expectedVersion,
+        ?int $userId,
+    ): array {
+        $periodStart = self::periodStart($period);
+        $this->assertEmployee($supplierId, $employeeId);
+        if ($expectedVersion <= 0) {
+            throw new \InvalidArgumentException('row_version musí být kladné celé číslo.');
+        }
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $statement = $pdo->prepare(
+                'SELECT row_version, insolvency_mode,
+                        insolvency_payment_instruction_id
+                   FROM payroll_enforcement_person_month_evidence
+                  WHERE supplier_id = ? AND employee_id = ? AND period_start = ?
+                  FOR UPDATE',
+            );
+            $statement->execute([$supplierId, $employeeId, $periodStart]);
+            $rowValue = $statement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($rowValue)) {
+                throw new \DomainException(
+                    'Pro tento měsíc není schválené oddlužení ke zrušení.',
+                );
+            }
+            $row = PayrollTimeValue::row($rowValue, 'insolvency_evidence');
+            $currentVersion = PayrollTimeValue::int(
+                $row['row_version'] ?? null,
+                'row_version',
+            );
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            $instructionId = self::nullableIntValue(
+                $row['insolvency_payment_instruction_id'] ?? null,
+            );
+            if (($row['insolvency_mode'] ?? null)
+                    !== InsolvencyMode::ApprovedStandard->value
+                || $instructionId === null
+            ) {
+                throw new \DomainException(
+                    'Pro tento měsíc není schválené oddlužení ke zrušení.',
+                );
+            }
+            if ($this->insolvencyInstructionWasUsed($supplierId, $instructionId)) {
+                throw new \DomainException(
+                    'Použitý platební pokyn oddlužení nelze změnit ani zrušit '
+                    . 'v měsíční evidenci; použijte opravnou revizi.',
+                );
+            }
+            $update = $pdo->prepare(
+                'UPDATE payroll_enforcement_person_month_evidence
+                    SET insolvency_mode = "none",
+                        insolvency_decision_verified = 0,
+                        insolvency_recipient_verified = 0,
+                        insolvency_payment_instruction_id = NULL,
+                        court_determined_amount_minor_units = NULL,
+                        updated_by = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND employee_id = ? AND period_start = ?
+                    AND row_version = ?',
+            );
+            $update->execute([
+                $userId,
+                $supplierId,
+                $employeeId,
+                $periodStart,
+                $currentVersion,
+            ]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            self::rollbackOwned($pdo, $ownsTransaction);
+            throw $e;
+        }
+
+        return $this->monthEvidenceRow($supplierId, $employeeId, $periodStart)
+            ?? throw new \RuntimeException('Oddlužení nebylo po zrušení nalezeno.');
+    }
+
+    /** @return array<string,mixed> */
     public function monthEvidence(
         int $supplierId,
         int $employeeId,
@@ -913,6 +1037,25 @@ final class PayrollEnforcementRepository implements
             'court_determined_amount_minor_units' => null,
             'row_version' => null,
         ];
+    }
+
+    /**
+     * @return array{
+     *   employments:list<array<string,mixed>>,
+     *   recipient_accounts:list<array<string,mixed>>
+     * }
+     */
+    public function insolvencyOptions(
+        int $supplierId,
+        int $employeeId,
+        string $period,
+    ): array {
+        $this->assertEmployee($supplierId, $employeeId);
+        return $this->insolvencyInstructions->options(
+            $supplierId,
+            $employeeId,
+            self::periodStart($period),
+        );
     }
 
     /** @return list<array<string,mixed>> */
@@ -2421,6 +2564,20 @@ final class PayrollEnforcementRepository implements
         }
 
         return false;
+    }
+
+    private function insolvencyInstructionWasUsed(
+        int $supplierId,
+        int $instructionId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_enforcement_month_results
+              WHERE supplier_id = ? AND insolvency_payment_instruction_id = ?
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $instructionId]);
+        return $statement->fetchColumn() !== false;
     }
 
     /** @param array<string,mixed> $data */

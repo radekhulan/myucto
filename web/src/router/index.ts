@@ -22,6 +22,7 @@ import {
 declare module 'vue-router' {
   interface RouteMeta {
     permission?: PermissionKey
+    additionalPermissions?: PermissionKey[]
     access?: AccessLevel
     superadminOnly?: boolean
     requiresSupplier?: boolean
@@ -105,6 +106,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-travel': ['payroll'],
   'payroll-deduction-agreements': ['payroll'],
   'payroll-enforcement': ['payroll.enforcement'],
+  'payroll-insolvency': ['payroll.insolvency'],
   'payroll-documents': ['payroll.documents'],
   'payroll-annual-settlement': ['payroll.documents'],
   'payroll-submissions': ['payroll.submissions'],
@@ -388,7 +390,13 @@ export async function authorizationGuard(
   }
 
   const permissionMeta = [...to.matched].reverse().find(r => r.meta.permission)?.meta
-  if (permissionMeta?.permission && !auth.can(permissionMeta.permission, permissionMeta.access ?? 'read')) {
+  const additionalPermissionDenied = to.matched.some(record =>
+    record.meta.additionalPermissions?.some(permission => !auth.can(permission, 'read')),
+  )
+  if ((permissionMeta?.permission
+      && !auth.can(permissionMeta.permission, permissionMeta.access ?? 'read'))
+    || additionalPermissionDenied
+  ) {
     const demoCreateRoute = auth.isDemo && typeof to.name === 'string' && demoCreateRouteNames.has(to.name)
     const demoReadOnlyRoute = auth.isDemo && typeof to.name === 'string' && demoReadOnlyRouteNames.has(to.name)
     if (!demoCreateRoute && !demoReadOnlyRoute) return denyFallback(to.name, auth)

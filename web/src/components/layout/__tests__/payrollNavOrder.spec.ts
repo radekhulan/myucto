@@ -92,13 +92,17 @@ describe('mzdové menu', () => {
     expect(appLayout).toContain("t('nav.payroll_rulesets')")
   })
 
+  it('zobrazuje oddlužení jen s právem k oddlužení i exekucím', () => {
+    expect(appLayout).toContain("permission: 'payroll.insolvency' as PermissionKey, additionalPermissions: ['payroll.enforcement']")
+  })
+
   it('nezapomíná žádnou dosavadní mzdovou položku', () => {
     const menu = payrollNavItems().map(item => item.to)
     for (const path of [
       '/payroll', '/payroll/runs', '/payroll/payments', '/payroll/posting-reconciliation',
       '/payroll/people', '/payroll/quick-inputs', '/payroll/components', '/payroll/time',
       '/payroll/absences', '/payroll/travel', '/payroll/deduction-agreements',
-      '/payroll/enforcement', '/payroll/documents', '/payroll/submissions', '/payroll/settings',
+      '/payroll/enforcement', '/payroll/insolvency', '/payroll/documents', '/payroll/submissions', '/payroll/settings',
     ]) {
       expect(menu, `z menu zmizelo ${path}`).toContain(path)
     }

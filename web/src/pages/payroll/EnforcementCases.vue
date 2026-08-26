@@ -125,7 +125,6 @@ const dependants = ref<EnforcementDependant[]>([])
 const personCases = ref<EnforcementCaseSummary[]>([])
 const personCasesComplete = ref(false)
 const protectedOverrideCzk = ref('')
-const courtAmountCzk = ref('')
 const newDependant = ref<{
   dependant_kind: 'dependant' | 'spouse_partner'
   valid_from: string
@@ -549,9 +548,6 @@ async function loadMonthlyEvidence(employeeId: number, sequence = detailRequestS
     protectedOverrideCzk.value = evidence.protected_amount_override_minor_units === null
       ? ''
       : String(evidence.protected_amount_override_minor_units / 100)
-    courtAmountCzk.value = evidence.court_determined_amount_minor_units === null
-      ? ''
-      : String(evidence.court_determined_amount_minor_units / 100)
     dependants.value = loadedDependants
   } catch {
     if (sequence === detailRequestSequence) {
@@ -724,10 +720,6 @@ async function saveMonthEvidence() {
     } = evidence
     payload.protected_amount_override_minor_units = minorUnits(
       protectedOverrideCzk.value,
-      false,
-    )
-    payload.court_determined_amount_minor_units = minorUnits(
-      courtAmountCzk.value,
       false,
     )
     monthEvidence.value = await payrollEnforcementApi.saveMonthEvidence(
@@ -1301,12 +1293,13 @@ onMounted(load)
                   <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.protected_override_czk') }}<input v-model="protectedOverrideCzk" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                   <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.protected_amount_override_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.protected_override_verified') }}</label>
                 </div>
-                <div class="space-y-3">
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.insolvency_mode') }}<select v-model="monthEvidence.insolvency_mode" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="none">{{ t('payroll.enforcement.month_evidence.insolvency_none') }}</option><option value="alert_only">{{ t('payroll.enforcement.month_evidence.insolvency_alert') }}</option><option value="approved_standard">{{ t('payroll.enforcement.month_evidence.insolvency_standard') }}</option><option value="court_determined_amount">{{ t('payroll.enforcement.month_evidence.insolvency_court') }}</option></select></label>
-                  <p data-test="insolvency-mode-impact" class="rounded-md border border-warning-500/40 bg-warning-50 p-2 text-xs text-warning-600">{{ t(`payroll.enforcement.month_evidence.insolvency_impact.${monthEvidence.insolvency_mode}`) }}</p>
-                  <label v-if="monthEvidence.insolvency_mode === 'court_determined_amount'" class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.court_amount_czk') }}<input v-model="courtAmountCzk" data-test="month-evidence-court-amount" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_decision_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_decision') }}</label>
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_recipient_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_recipient') }}</label>
+                <div class="space-y-3 rounded-md border border-payroll-200 bg-payroll-50 p-3">
+                  <p class="text-sm font-medium text-neutral-900">{{ t('payroll.enforcement.insolvency_workspace_title') }}</p>
+                  <p class="text-xs text-neutral-600">{{ t('payroll.enforcement.insolvency_workspace_hint') }}</p>
+                  <RouterLink :to="`/payroll/insolvency?person=${detail?.employee_id}&period=${evidencePeriod}`" :class="btnOutline('primary')" data-test="open-insolvency-workspace">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+                    {{ t('payroll.enforcement.open_insolvency_workspace') }}
+                  </RouterLink>
                 </div>
               </div>
             </div>

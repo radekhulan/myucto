@@ -174,6 +174,11 @@ function monthEvidenceOf(
     insolvency_mode: 'none',
     insolvency_decision_verified: false,
     insolvency_recipient_verified: false,
+    insolvency_payment_instruction_id: null,
+    insolvency_employment_id: null,
+    insolvency_institution_account_id: null,
+    insolvency_decision_document_id: null,
+    insolvency_payment_instruction_hash: null,
     court_determined_amount_minor_units: null,
     row_version: 1,
     ...overrides,
@@ -604,15 +609,13 @@ describe('EnforcementCases', () => {
         .toContain('payroll.enforcement.dependants_summary')
 
       await wrapper.get('[data-test="month-exceptions-toggle"]').trigger('click')
+      await wrapper.get('input[type="month"]').setValue('2025-12')
+      await flushPromises()
       const exceptions = wrapper.get('[data-test="month-exceptions-panel"]')
       expect(exceptions.find('[data-test="month-evidence-multiple-payers"]').exists()).toBe(true)
-      expect(exceptions.get('[data-test="insolvency-mode-impact"]').text())
-        .toContain('payroll.enforcement.month_evidence.insolvency_impact.court_determined_amount')
-      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
-        .toBe('123.45')
-      await exceptions.find('[data-test="month-evidence-court-amount"]').setValue('150')
-      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
-        .toBe('150')
+      expect(exceptions.find('[data-test="insolvency-mode-impact"]').exists()).toBe(false)
+      expect(exceptions.get('[data-test="open-insolvency-workspace"]').attributes('to'))
+        .toBe('/payroll/insolvency?person=3&period=2025-12')
 
       await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
       expect(wrapper.get('[data-test="dependants-panel"]').text())
