@@ -51,3 +51,8 @@ který ještě nebyl zaúčtován (vypnuté automatické zaúčtování, čekaj�
 nebo firma vedoucí daňovou evidenci), stránka označí jako nezaúčtovaný —
 nejde o rozdíl. Stránka je čistě informační a nic nezapisuje ani do deníku,
 ani do mzdové revize.
+
+Do hrubých mezd se při porovnání započítají také nákladové účty převzaté ze
+zmrazené dimenze nebo z výslovné předkontace mzdové složky. Nemusí proto jít
+jen o syntetiky 521, 522 a 523. Opravná revize zachová v klasifikaci i původní
+účet, aby jeho storno a přesun na nový účet skončily ve stejné mzdové kategorii.

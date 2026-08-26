@@ -448,6 +448,78 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         self::assertSame([], $dimensions);
     }
 
+    /** Pozdější změna číselníku nesmí změnit už sestavený historický snapshot. */
+    public function testDimensionAccountChangeAffectsOnlyNewSnapshots(): void
+    {
+        $this->seed(1);
+        $employmentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $dimensionId = $this->seedDimension('cost_center', 'VYROBA', '521.100');
+        $this->assignDimension($employmentId, $dimensionId);
+
+        $frozen = $this->build();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_dimensions
+                SET default_account_code = "521.200", row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $dimensionId]);
+        $current = $this->build();
+
+        self::assertSame(
+            '521.100',
+            $frozen->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertSame(
+            '521.200',
+            $current->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertNotSame($frozen->hash, $current->hash);
+        self::assertSame(hash('sha256', $frozen->json), $frozen->hash);
+    }
+
+    /** Stejný kód dimenze ve dvou firmách se nikdy nesmí promíchat. */
+    public function testDimensionSnapshotIsTenantScoped(): void
+    {
+        $this->seed(1);
+        $firstEmploymentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $firstDimensionId = $this->seedDimension('cost_center', 'SPOLECNY', '521.100');
+        $this->assignDimension($firstEmploymentId, $firstDimensionId);
+        $first = $this->build();
+
+        $this->newTenant();
+        $this->seed(1);
+        $secondEmploymentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $secondDimensionId = $this->seedDimension('cost_center', 'SPOLECNY', '521.900');
+        $this->assignDimension($secondEmploymentId, $secondDimensionId);
+        $second = $this->build();
+
+        self::assertSame(
+            '521.100',
+            $first->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertSame(
+            '521.900',
+            $second->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertNotSame($first->data['supplier_id'], $second->data['supplier_id']);
+    }
+
     private function seedDimension(string $type, string $code, ?string $account): int
     {
         $stmt = $this->db->pdo()->prepare(

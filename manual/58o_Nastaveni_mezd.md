@@ -113,6 +113,16 @@ smazat běžně. Konkrétní přiřazení střediska, zakázky nebo činnosti pr
 vztahu se vede přímo na kartě daného vztahu v seznamu zaměstnanců, opět
 s vlastním obdobím účinnosti a bez souběhu dvou dimenzí stejného typu.
 
+Výchozí účet dimenze mění pouze nákladovou stranu hrubé mzdy. Použije se jen
+tehdy, když mzdová složka nemá vlastní výslovnou předkontaci; konkrétní účet
+složky má vždy přednost. Pokud má vztah účet na více dimenzích, rozhoduje v
+pevném pořadí středisko, zakázka a činnost. Účinné přiřazení i účet se při
+uzamčení vstupů uloží do snapshotu revize. Pozdější změna číselníku proto
+nezmění schválený měsíc a projeví se až v nově sestaveném snapshotu.
+Jako nákladový účet nepoužívejte účty vyhrazené pro pojistné, daň, srážky nebo
+čistou mzdu (například 524, 336, 342, 379, 331 a 366); aplikace takovou kolizní
+předkontaci odmítne, aby se jedna částka nevykázala ve dvou kategoriích.
+
 Kontrola připravenosti se spouští k vybranému dni. Ukazuje každý ověřený
 předpoklad i přesný blokující nedostatek. Kontrolují se jen funkce, které firma
 skutečně zapnula; zapnutá automatizace, JMHZ nebo bezpečné doručení však bez
