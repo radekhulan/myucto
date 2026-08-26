@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzEldpEvidenceSnapshotRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -19,6 +20,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
         private JmhzEldpEvidenceBuilder $builder,
         private PayrollSensitiveData $sensitiveData,
         private SecretEncryption $encryption,
+        private ActivityLogger $logger,
     ) {}
 
     /**
@@ -33,6 +35,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
         array $confirmation,
         string $idempotencyKey,
         ?int $createdBy,
+        string $sourceKind = 'explicit_confirmation',
     ): array {
         if ($supplierId <= 0 || $sourceRevisionId <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException('Firma, revize a pracovní vztah musí být kladná čísla.');
@@ -42,6 +45,9 @@ final readonly class JmhzEldpEvidenceSnapshotService
         }
         if ($createdBy === null || $createdBy <= 0) {
             throw new \InvalidArgumentException('Uživatel potvrzení ELDP musí být kladné číslo.');
+        }
+        if (!in_array($sourceKind, ['explicit_confirmation', 'derived_from_frozen_payroll_sources'], true)) {
+            throw new \InvalidArgumentException('Zdroj potvrzení ELDP není platný.');
         }
         $idempotencyKey = trim($idempotencyKey);
         if ($idempotencyKey === '' || strlen($idempotencyKey) > 190) {
@@ -65,6 +71,7 @@ final readonly class JmhzEldpEvidenceSnapshotService
             $idempotencyHash,
             $confirmationFingerprint,
             $createdBy,
+            $sourceKind,
         ): array {
             $source = $this->repository->lockSource($supplierId, $sourceRevisionId);
             if ($source === null) {
@@ -183,6 +190,22 @@ final readonly class JmhzEldpEvidenceSnapshotService
                 'created_by' => $createdBy,
             ]);
             $this->repository->bindClaim($supplierId, $environment, $idempotencyHash, $id);
+            $this->logger->log(
+                'payroll.jmhz_eldp_evidence.frozen',
+                $createdBy,
+                'payroll_jmhz_eldp_evidence_snapshots',
+                $id,
+                [
+                    'environment' => $environment,
+                    'source_revision_id' => $sourceRevisionId,
+                    'employment_id' => $employmentId,
+                    'source_kind' => $sourceKind,
+                    'source_manifest_sha256' => $manifestHash,
+                ],
+                null,
+                null,
+                $supplierId,
+            );
             $stored = $this->repository->find($supplierId, $environment, $id);
             if ($stored === null) {
                 throw new \RuntimeException('Uložené ELDP nelze načíst.');
@@ -190,6 +213,62 @@ final readonly class JmhzEldpEvidenceSnapshotService
             $this->verifyStored($stored);
             return $this->result($stored, true);
         });
+    }
+
+    /**
+     * @return array{snapshot:array<string,mixed>|null,issue_code:string|null}
+     */
+    public function ensureForPreparation(
+        int $supplierId,
+        string $environment,
+        int $sourceRevisionId,
+        int $employmentId,
+        ?int $createdBy,
+    ): array {
+        $existing = $this->snapshotForPreparation(
+            $supplierId,
+            $environment,
+            $sourceRevisionId,
+            $employmentId,
+        );
+        if ($existing !== null || $createdBy === null) {
+            return ['snapshot' => $existing, 'issue_code' => null];
+        }
+
+        $source = $this->repository->lockSource($supplierId, $sourceRevisionId);
+        if ($source === null) {
+            return ['snapshot' => null, 'issue_code' => 'jmhz_eldp_revision_not_found'];
+        }
+        try {
+            $confirmation = $this->builder->deriveOrdinaryConfirmation(
+                $supplierId,
+                $employmentId,
+                $source,
+            );
+        } catch (JmhzEldpEvidenceException $exception) {
+            return ['snapshot' => null, 'issue_code' => $exception->validationCode];
+        }
+
+        $this->freeze(
+            $supplierId,
+            $sourceRevisionId,
+            $employmentId,
+            $environment,
+            $confirmation,
+            "jmhz-eldp-derived-v1:{$sourceRevisionId}:{$employmentId}",
+            $createdBy,
+            'derived_from_frozen_payroll_sources',
+        );
+
+        return [
+            'snapshot' => $this->snapshotForPreparation(
+                $supplierId,
+                $environment,
+                $sourceRevisionId,
+                $employmentId,
+            ),
+            'issue_code' => null,
+        ];
     }
 
     /** @return array<string,mixed>|null */

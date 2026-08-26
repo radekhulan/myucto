@@ -21,6 +21,72 @@ final class JmhzEldpEvidenceBuilder
     private ?array $specManifest = null;
 
     /**
+     * Odvodí potvrzení pouze pro běžný bezabsenční řez. Výsledný kandidát vždy
+     * projde stejnou úplnou validací jako ručně dodané potvrzení.
+     *
+     * @param array<string,mixed> $source
+     * @return array<string,mixed>
+     */
+    public function deriveOrdinaryConfirmation(
+        int $supplierId,
+        int $employmentId,
+        array $source,
+    ): array {
+        $revision = $this->object($source['revision'] ?? null, 'revision');
+        $periodStart = $this->date($revision['period_start'] ?? null, 'revision.period_start');
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $input = $this->canonicalSnapshot(
+            $revision['input_snapshot_json'] ?? null,
+            $revision['input_snapshot_hash'] ?? null,
+            'input',
+        );
+        $result = $this->canonicalSnapshot(
+            $revision['result_snapshot_json'] ?? null,
+            $revision['result_snapshot_hash'] ?? null,
+            'result',
+        );
+        [$employeeId, $entry] = $this->findEmployment($input, $employmentId);
+        $employment = $this->object($entry['employment'] ?? null, 'employment');
+        $term = $this->object($entry['term'] ?? null, 'term');
+        $employmentFrom = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
+        if (!is_string($employmentFrom)) {
+            $this->invalid('jmhz_eldp_interval_outside_employment', 'Pracovní vztah nemá zmrazené datum nástupu.');
+        }
+        $employmentTo = $employment['end_date'] ?? null;
+        $insuranceFrom = max($periodStart, $employmentFrom);
+        $insuranceTo = is_string($employmentTo) ? min($periodEnd, $employmentTo) : $periodEnd;
+        if ($insuranceFrom > $insuranceTo) {
+            $this->invalid('jmhz_eldp_interval_invalid', 'Pracovní vztah nemá ve vykazovaném měsíci platný interval ELDP.');
+        }
+        $activityCode = $term['activity_code'] ?? null;
+        if (!is_string($activityCode)) {
+            $this->invalid('jmhz_eldp_ordinary_activity_unsupported', 'Pracovní vztah nemá zmrazený druh činnosti pro ELDP.');
+        }
+        $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
+        $assessmentBaseMinor = $this->nonNegativeInt(
+            $relationship['assessment_base_minor_units'] ?? null,
+            'assessment_base_minor_units',
+        );
+        $insuranceDays = (new \DateTimeImmutable($insuranceFrom))
+            ->diff(new \DateTimeImmutable($insuranceTo))->days + 1;
+        $confirmation = [
+            'insurance_from' => $insuranceFrom,
+            'insurance_to' => $insuranceTo,
+            'valid_from' => $insuranceFrom,
+            'valid_to' => $insuranceTo,
+            'insurance_days' => $insuranceDays,
+            'code' => $activityCode . '++',
+            'assessment_base_czk' => intdiv($assessmentBaseMinor, 100),
+            'in03_active' => false,
+            'in04_active' => false,
+            'confirmation_note' => '',
+        ];
+
+        $this->build($supplierId, $employmentId, $source, $confirmation);
+        return $confirmation;
+    }
+
+    /**
      * @param array<string,mixed> $source
      * @param array<string,mixed> $confirmation
      */

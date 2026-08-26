@@ -179,13 +179,15 @@ final class JmhzPreparationSnapshotBuilder
                     : null;
                 $eldp = $eldpSources[$employmentId] ?? null;
                 if (!is_array($eldp)) {
-                    $issues[] = $this->issue('jmhz_eldp_evidence_missing', 'employment', $employmentId, [
-                        '10240', '10241', '10242', '10245', '10354', '10355',
-                        '10356', '10357', '10358', '10359', '10360', '10362',
-                        '10536', '10366', '10375', '10462', '10463', '10464',
-                        '10465', '10466', '10468', '10469', '10473', '10474',
-                        '10475',
-                    ]);
+                    if (!$this->hasSpecificEldpIssue($sourceIssues, $employmentId)) {
+                        $issues[] = $this->issue('jmhz_eldp_evidence_missing', 'employment', $employmentId, [
+                            '10240', '10241', '10242', '10245', '10354', '10355',
+                            '10356', '10357', '10358', '10359', '10360', '10362',
+                            '10536', '10366', '10375', '10462', '10463', '10464',
+                            '10465', '10466', '10468', '10469', '10473', '10474',
+                            '10475',
+                        ]);
+                    }
                     $eldp = null;
                 } else {
                     $this->assertEldpSource(
@@ -1309,6 +1311,24 @@ final class JmhzPreparationSnapshotBuilder
     {
         sort($attributeIds, SORT_STRING);
         return ['code' => $code, 'entity_type' => $entityType, 'entity_id' => $entityId, 'attribute_ids' => $attributeIds];
+    }
+
+    /**
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $sourceIssues
+     */
+    private function hasSpecificEldpIssue(array $sourceIssues, int $employmentId): bool
+    {
+        foreach ($sourceIssues as $issue) {
+            if ($issue['entity_type'] === 'employment'
+                && $issue['entity_id'] === $employmentId
+                && str_starts_with($issue['code'], 'jmhz_eldp_')
+                && $issue['code'] !== 'jmhz_eldp_evidence_missing'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

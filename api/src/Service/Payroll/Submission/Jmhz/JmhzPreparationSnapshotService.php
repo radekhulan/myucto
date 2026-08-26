@@ -214,6 +214,7 @@ final readonly class JmhzPreparationSnapshotService
                 $sourceRevisionId,
                 $periodEnd,
                 $input,
+                $createdBy,
             );
             $ordinaryEvidence = $this->ordinaryEvidence->snapshotsForPreparation(
                 $supplierId,
@@ -326,7 +327,14 @@ final readonly class JmhzPreparationSnapshotService
      * @param array<string,mixed> $input
      * @return array{array<int,array<string,mixed>>,array<int,array<string,mixed>>,list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>,array<int,array<string,mixed>>}
      */
-    private function supplements(int $supplierId, string $environment, int $sourceRevisionId, string $periodEnd, array $input): array
+    private function supplements(
+        int $supplierId,
+        string $environment,
+        int $sourceRevisionId,
+        string $periodEnd,
+        array $input,
+        ?int $createdBy,
+    ): array
     {
         $identities = [];
         $mappings = [];
@@ -357,14 +365,30 @@ final readonly class JmhzPreparationSnapshotService
                     ? $employment['id']
                     : 0;
                 if ($employeeId > 0 && $employmentId > 0) {
-                    $eldp = $this->eldpEvidence->snapshotForPreparation(
+                    $eldpState = $this->eldpEvidence->ensureForPreparation(
                         $supplierId,
                         $environment,
                         $sourceRevisionId,
                         $employmentId,
+                        $createdBy,
                     );
+                    $eldp = $eldpState['snapshot'];
                     if ($eldp !== null) {
                         $eldpSources[$employmentId] = $eldp;
+                    }
+                    if (is_string($eldpState['issue_code'])) {
+                        $issues[] = [
+                            'code' => $eldpState['issue_code'],
+                            'entity_type' => 'employment',
+                            'entity_id' => $employmentId,
+                            'attribute_ids' => [
+                                '10240', '10241', '10242', '10245', '10354',
+                                '10355', '10356', '10357', '10358', '10359',
+                                '10360', '10362', '10536', '10366', '10375',
+                                '10462', '10463', '10464', '10465', '10466',
+                                '10468', '10469', '10473', '10474', '10475',
+                            ],
+                        ];
                     }
                     try {
                         $identity = $this->identities->sensitiveSnapshotSourceAt(

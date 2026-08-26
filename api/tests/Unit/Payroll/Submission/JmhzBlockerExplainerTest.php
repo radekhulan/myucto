@@ -51,4 +51,26 @@ final class JmhzBlockerExplainerTest extends TestCase
             $message,
         );
     }
+
+    public function testExplainsWhyAbsenceCannotUseAutomaticEldpEvidence(): void
+    {
+        $message = JmhzBlockerExplainer::describe([
+            new JmhzScenario1Blocker(
+                'jmhz_eldp_absences_unsupported',
+                'employment',
+                10228,
+            ),
+            new JmhzScenario1Blocker(
+                'jmhz_eldp_evidence_missing',
+                'employment',
+                10228,
+            ),
+        ]);
+
+        self::assertStringContainsString('Měsíc obsahuje absenci', $message);
+        self::assertStringContainsString('Mzdy → Pracovní doba', $message);
+        self::assertStringContainsString('zpracujte jej individuálně', $message);
+        self::assertStringNotContainsString('10228', $message);
+        self::assertStringNotContainsString('Evidenční list DP', $message);
+    }
 }
