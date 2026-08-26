@@ -134,13 +134,20 @@ function setup() {
     }],
   })
   m.profile.mockResolvedValue({
-    supplier_id: 1,
-    social_enterprise: false,
-    employment_agency: false,
-    protected_labor_market: false,
-    evidence_confirmed_at: '2026-08-04 12:00:00',
-    row_version: 1,
-    updated_at: '2026-08-04 12:00:00',
+    suggested_tax_office_workplace_code: null,
+    profile: {
+      supplier_id: 1,
+      social_enterprise: false,
+      employment_agency: false,
+      protected_labor_market: false,
+      tax_office_code: '3000',
+      tax_office_workplace_code: '3001',
+      payer_reference_number: null,
+      is_complete: true,
+      evidence_confirmed_at: '2026-08-04 12:00:00',
+      row_version: 1,
+      updated_at: '2026-08-04 12:00:00',
+    },
   })
   m.snapshots.mockResolvedValue({
     environment: 'production',

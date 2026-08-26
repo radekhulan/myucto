@@ -64,10 +64,18 @@ Identifikátory nastavte v [Nastavení mezd](58o_Nastaveni_mezd.md). Firemní p�
 ## Podrobný tok podání
 
 V **Mzdy → Nastavení mezd → Podání** nejprve potvrď evidenční profil pro
-REGZEL. Samostatně se eviduje, zda je zaměstnavatel sociálním podnikem,
+REGZEL. Zadej čtyřmístný kód finančního úřadu `kodFU` z číselníku finanční
+správy a čtyřmístný kód jeho územního pracoviště `kodPracovisteFU`. Kód
+pracoviště smí zůstat prázdný jen u Specializovaného finančního úřadu
+(`kodFU` 4000). Nejde o
+tříčíselný kód EPO, například 451; aplikace tyto dva číselníky záměrně
+neslučuje. Pokud správce daně firmě přidělil vlastní číslo plátce (VČP),
+zadej jeho devět číslic začínajících `6`. VČP není registrační číslo
+zaměstnavatele ani desetimístný variabilní symbol ČSSZ; bez skutečného
+přidělení zůstává prázdné. Samostatně se eviduje, zda je zaměstnavatel sociálním podnikem,
 agenturou práce nebo zaměstnavatelem na chráněném trhu práce. Potvrzení se
 vztahuje i na nezaškrtnuté hodnoty; při každém uložení je proto nutné znovu
-výslovně potvrdit, že byly všechny tři údaje ověřeny.
+výslovně potvrdit, že byly ověřeny kódy, případné VČP i všechny tři příznaky.
 
 V **Mzdy → Podání a hlášení** lze připravit doplňující údaje zaměstnavatele
 `REGZELDOPL25` podle lokálně připnutého oficiálního XSD. Vyber produkční nebo testovací prostředí a

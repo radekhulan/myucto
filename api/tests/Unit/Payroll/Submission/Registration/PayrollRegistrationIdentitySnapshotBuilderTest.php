@@ -147,7 +147,9 @@ final class PayrollRegistrationIdentitySnapshotBuilderTest extends TestCase
             'birth_number' => '12345A789',
             'ecp' => '12345678',
             'vcp' => '012345678',
+            'vcp_other_prefix' => '123456789',
         ] as $type => $invalid) {
+            $type = $type === 'vcp_other_prefix' ? 'vcp' : $type;
             $source = $this->source();
             $source['identifiers']['foreign_tax_identifier'] = null;
             unset($source['identifier_sources']['foreign_tax_identifier']);

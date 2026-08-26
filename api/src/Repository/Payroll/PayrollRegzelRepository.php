@@ -71,7 +71,9 @@ final class PayrollRegzelRepository
     /**
      * @return array{
      *   supplier_id:int,social_enterprise:bool,employment_agency:bool,
-     *   protected_labor_market:bool,evidence_confirmed_by:int,
+     *   protected_labor_market:bool,tax_office_code:?string,
+     *   tax_office_workplace_code:?string,payer_reference_number:?string,
+     *   evidence_confirmed_by:int,
      *   evidence_confirmed_at:string,row_version:int,updated_at:string
      * }|null
      */
@@ -79,7 +81,9 @@ final class PayrollRegzelRepository
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT supplier_id, social_enterprise, employment_agency,
-                    protected_labor_market, evidence_confirmed_by,
+                    protected_labor_market, tax_office_code,
+                    tax_office_workplace_code, payer_reference_number,
+                    evidence_confirmed_by,
                     evidence_confirmed_at, row_version, updated_at
                FROM payroll_regzel_employer_profiles
               WHERE supplier_id = ?',
@@ -98,6 +102,12 @@ final class PayrollRegzelRepository
                 self::requiredBool($row, 'employment_agency'),
             'protected_labor_market' =>
                 self::requiredBool($row, 'protected_labor_market'),
+            'tax_office_code' =>
+                self::nullableString($row, 'tax_office_code'),
+            'tax_office_workplace_code' =>
+                self::nullableString($row, 'tax_office_workplace_code'),
+            'payer_reference_number' =>
+                self::nullableString($row, 'payer_reference_number'),
             'evidence_confirmed_by' =>
                 self::requiredInt($row, 'evidence_confirmed_by'),
             'evidence_confirmed_at' =>
@@ -110,7 +120,9 @@ final class PayrollRegzelRepository
     /**
      * @return array{
      *   supplier_id:int,social_enterprise:bool,employment_agency:bool,
-     *   protected_labor_market:bool,evidence_confirmed_by:int,
+     *   protected_labor_market:bool,tax_office_code:string,
+     *   tax_office_workplace_code:?string,payer_reference_number:?string,
+     *   evidence_confirmed_by:int,
      *   evidence_confirmed_at:string,row_version:int,updated_at:string
      * }
      */
@@ -119,6 +131,9 @@ final class PayrollRegzelRepository
         bool $socialEnterprise,
         bool $employmentAgency,
         bool $protectedLaborMarket,
+        string $taxOfficeCode,
+        ?string $taxOfficeWorkplaceCode,
+        ?string $payerReferenceNumber,
         int $confirmedBy,
         int $expectedVersion,
     ): array {
@@ -130,14 +145,19 @@ final class PayrollRegzelRepository
             $statement = $this->db->pdo()->prepare(
                 'INSERT INTO payroll_regzel_employer_profiles
                     (supplier_id, social_enterprise, employment_agency,
-                     protected_labor_market, evidence_confirmed_by)
-                 VALUES (?, ?, ?, ?, ?)',
+                     protected_labor_market, tax_office_code,
+                     tax_office_workplace_code, payer_reference_number,
+                     evidence_confirmed_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             );
             $statement->execute([
                 $supplierId,
                 $socialEnterprise ? 1 : 0,
                 $employmentAgency ? 1 : 0,
                 $protectedLaborMarket ? 1 : 0,
+                $taxOfficeCode,
+                $taxOfficeWorkplaceCode,
+                $payerReferenceNumber,
                 $confirmedBy,
             ]);
         } else {
@@ -146,6 +166,9 @@ final class PayrollRegzelRepository
                     SET social_enterprise = ?,
                         employment_agency = ?,
                         protected_labor_market = ?,
+                        tax_office_code = ?,
+                        tax_office_workplace_code = ?,
+                        payer_reference_number = ?,
                         evidence_confirmed_by = ?,
                         evidence_confirmed_at = CURRENT_TIMESTAMP,
                         row_version = row_version + 1
@@ -155,6 +178,9 @@ final class PayrollRegzelRepository
                 $socialEnterprise ? 1 : 0,
                 $employmentAgency ? 1 : 0,
                 $protectedLaborMarket ? 1 : 0,
+                $taxOfficeCode,
+                $taxOfficeWorkplaceCode,
+                $payerReferenceNumber,
                 $confirmedBy,
                 $supplierId,
                 $expectedVersion,
@@ -170,11 +196,21 @@ final class PayrollRegzelRepository
             ?? throw new \RuntimeException('REGZEL profil se nepodařilo načíst.');
     }
 
+    public function taxOfficeWorkplaceSuggestion(int $supplierId): ?string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT workplace_code FROM supplier WHERE id = ?',
+        );
+        $statement->execute([$supplierId]);
+        $value = $statement->fetchColumn();
+        return $value === false || $value === null ? null : (string) $value;
+    }
+
     /**
      * @return array{
      *   supplier_id:int,supplier_updated_at:string,
-     *   financial_office_code:?string,workplace_code:?string,
-     *   data_box_id:?string,employer_registration_number:?string,
+     *   regzel_tax_office_code:?string,regzel_tax_office_workplace_code:?string,
+     *   regzel_payer_reference_number:?string,data_box_id:?string,
      *   social_security_office_code:?string,
      *   employer_settings_row_version:int,office_id:int,
      *   social_security_variable_symbol:?string,office_is_active:bool,
@@ -188,11 +224,13 @@ final class PayrollRegzelRepository
         $statement = $this->db->pdo()->prepare(
             'SELECT supplier.id AS supplier_id,
                     supplier.updated_at AS supplier_updated_at,
-                    supplier.financial_office_code,
-                    supplier.workplace_code,
                     supplier.data_box_id,
-                    settings.employer_registration_number,
                     settings.social_security_office_code,
+                    profile.tax_office_code AS regzel_tax_office_code,
+                    profile.tax_office_workplace_code
+                        AS regzel_tax_office_workplace_code,
+                    profile.payer_reference_number
+                        AS regzel_payer_reference_number,
                     settings.row_version AS employer_settings_row_version,
                     office.id AS office_id,
                     office.social_security_variable_symbol,
@@ -222,13 +260,13 @@ final class PayrollRegzelRepository
             'supplier_id' => self::requiredInt($row, 'supplier_id'),
             'supplier_updated_at' =>
                 self::requiredString($row, 'supplier_updated_at'),
-            'financial_office_code' =>
-                self::nullableString($row, 'financial_office_code'),
-            'workplace_code' =>
-                self::nullableString($row, 'workplace_code'),
+            'regzel_tax_office_code' =>
+                self::nullableString($row, 'regzel_tax_office_code'),
+            'regzel_tax_office_workplace_code' =>
+                self::nullableString($row, 'regzel_tax_office_workplace_code'),
             'data_box_id' => self::nullableString($row, 'data_box_id'),
-            'employer_registration_number' =>
-                self::nullableString($row, 'employer_registration_number'),
+            'regzel_payer_reference_number' =>
+                self::nullableString($row, 'regzel_payer_reference_number'),
             'social_security_office_code' =>
                 self::nullableString($row, 'social_security_office_code'),
             'employer_settings_row_version' =>

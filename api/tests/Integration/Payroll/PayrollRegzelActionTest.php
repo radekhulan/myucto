@@ -55,8 +55,7 @@ final class PayrollRegzelActionTest extends TestCase
         $pdo->prepare(
             'UPDATE supplier
                 SET payroll_enabled = 1,
-                    financial_office_code = "2001",
-                    workplace_code = "2002",
+                    workplace_code = "3001",
                     data_box_id = "abc1234"
               WHERE id IN (?, ?)',
         )->execute([$this->supplierId, $this->otherSupplierId]);
@@ -91,7 +90,9 @@ final class PayrollRegzelActionTest extends TestCase
             new Response(),
         );
         self::assertSame(200, $missing->getStatusCode());
-        self::assertNull($this->json($missing)['profile']);
+        $missingData = $this->json($missing);
+        self::assertNull($missingData['profile']);
+        self::assertSame('3001', $missingData['suggested_tax_office_workplace_code']);
 
         $unconfirmed = $this->action->saveProfile(
             $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
@@ -99,6 +100,8 @@ final class PayrollRegzelActionTest extends TestCase
                 'social_enterprise' => false,
                 'employment_agency' => true,
                 'protected_labor_market' => false,
+                'tax_office_code' => '2000',
+                'tax_office_workplace_code' => '2002',
                 'evidence_confirmed' => false,
             ]),
             new Response(),
@@ -109,18 +112,96 @@ final class PayrollRegzelActionTest extends TestCase
             $this->json($unconfirmed)['error']['code'],
         );
 
+        $epoCode = $this->action->saveProfile(
+            $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
+                'row_version' => 0,
+                'social_enterprise' => false,
+                'employment_agency' => true,
+                'protected_labor_market' => false,
+                'tax_office_code' => '451',
+                'tax_office_workplace_code' => null,
+                'evidence_confirmed' => true,
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $epoCode->getStatusCode());
+        self::assertSame('regzel_tax_office_invalid', $this->json($epoCode)['error']['code']);
+
+        $missingWorkplace = $this->action->saveProfile(
+            $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
+                'row_version' => 0,
+                'social_enterprise' => false,
+                'employment_agency' => true,
+                'protected_labor_market' => false,
+                'tax_office_code' => '2000',
+                'tax_office_workplace_code' => null,
+                'evidence_confirmed' => true,
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $missingWorkplace->getStatusCode());
+        self::assertSame(
+            'regzel_tax_office_workplace_required',
+            $this->json($missingWorkplace)['error']['code'],
+        );
+
+        $mismatchedWorkplace = $this->action->saveProfile(
+            $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
+                'row_version' => 0,
+                'social_enterprise' => false,
+                'employment_agency' => true,
+                'protected_labor_market' => false,
+                'tax_office_code' => '2300',
+                'tax_office_workplace_code' => '3001',
+                'evidence_confirmed' => true,
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $mismatchedWorkplace->getStatusCode());
+        self::assertSame(
+            'regzel_tax_office_workplace_mismatch',
+            $this->json($mismatchedWorkplace)['error']['code'],
+        );
+
+        $invalidPayerReference = $this->action->saveProfile(
+            $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
+                'row_version' => 0,
+                'social_enterprise' => false,
+                'employment_agency' => true,
+                'protected_labor_market' => false,
+                'tax_office_code' => '2000',
+                'tax_office_workplace_code' => '2002',
+                'payer_reference_number' => '123456789',
+                'evidence_confirmed' => true,
+            ]),
+            new Response(),
+        );
+        self::assertSame(422, $invalidPayerReference->getStatusCode());
+        self::assertSame(
+            'regzel_payer_reference_invalid',
+            $this->json($invalidPayerReference)['error']['code'],
+        );
+
         $saved = $this->action->saveProfile(
             $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
                 'row_version' => 0,
                 'social_enterprise' => false,
                 'employment_agency' => true,
                 'protected_labor_market' => false,
+                'tax_office_code' => '2000',
+                'tax_office_workplace_code' => '2002',
+                'payer_reference_number' => '612345678',
                 'evidence_confirmed' => true,
             ]),
             new Response(),
         );
         self::assertSame(200, $saved->getStatusCode());
-        self::assertSame(1, $this->json($saved)['profile']['row_version']);
+        $savedProfile = $this->json($saved)['profile'];
+        self::assertSame(1, $savedProfile['row_version']);
+        self::assertSame('2000', $savedProfile['tax_office_code']);
+        self::assertSame('2002', $savedProfile['tax_office_workplace_code']);
+        self::assertSame('612345678', $savedProfile['payer_reference_number']);
+        self::assertTrue($savedProfile['is_complete']);
 
         $conflict = $this->action->saveProfile(
             $this->request('PUT', '/api/payroll/submissions/regzel/profile', [
@@ -128,6 +209,8 @@ final class PayrollRegzelActionTest extends TestCase
                 'social_enterprise' => true,
                 'employment_agency' => false,
                 'protected_labor_market' => false,
+                'tax_office_code' => '2000',
+                'tax_office_workplace_code' => '2002',
                 'evidence_confirmed' => true,
             ]),
             new Response(),
@@ -225,6 +308,8 @@ final class PayrollRegzelActionTest extends TestCase
                     'social_enterprise' => false,
                     'employment_agency' => false,
                     'protected_labor_market' => false,
+                    'tax_office_code' => '2000',
+                    'tax_office_workplace_code' => '2002',
                     'evidence_confirmed' => true,
                 ],
                 null,
@@ -276,6 +361,8 @@ final class PayrollRegzelActionTest extends TestCase
                 'social_enterprise' => true,
                 'employment_agency' => false,
                 'protected_labor_market' => true,
+                'tax_office_code' => '2000',
+                'tax_office_workplace_code' => '2002',
                 'evidence_confirmed' => true,
             ]),
             new Response(),

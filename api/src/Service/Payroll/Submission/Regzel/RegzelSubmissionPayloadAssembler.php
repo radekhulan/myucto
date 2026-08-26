@@ -42,8 +42,10 @@ final readonly class RegzelSubmissionPayloadAssembler
         }
         if ($snapshot['document_type'] !== 'REGZELDOPL25'
             || $snapshot['interaction_code'] !== 'supplemental_information'
-            || $snapshot['mapping_version']
-                !== RegzelPayloadSnapshot::MAPPING_VERSION
+            || !in_array($snapshot['mapping_version'], [
+                RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION,
+                RegzelPayloadSnapshot::MAPPING_VERSION,
+            ], true)
             || $snapshot['xsd_version'] !== RegzelPayloadSnapshot::XSD_VERSION
         ) {
             throw new \DomainException(

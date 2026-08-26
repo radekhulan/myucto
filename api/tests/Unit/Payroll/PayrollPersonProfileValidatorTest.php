@@ -324,6 +324,7 @@ final class PayrollPersonProfileValidatorTest extends TestCase
             ['identifier_type' => 'birth_number', 'value' => '1234567890'],
             ['identifier_type' => 'birth_number', 'value' => '0041010002'],
             ['identifier_type' => 'ecp', 'value' => '12345678'],
+            ['identifier_type' => 'vcp', 'value' => '123456789'],
             ['identifier_type' => 'vcp', 'value' => '1234567890'],
             ['identifier_type' => 'foreign_tax_identifier', 'value' => 'bez-zeme'],
         ] as $identifier) {

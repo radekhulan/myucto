@@ -658,7 +658,7 @@ final class PayrollPersonProfileValidator
         return match ($type) {
             'birth_number' => $this->normalizeBirthNumber($compact),
             'ecp' => $this->numericIdentifier($compact, 'EČP', 9, 10),
-            'vcp' => $this->numericIdentifier($compact, 'VČP', 9, 9),
+            'vcp' => PayrollVcp::normalize($compact),
             'foreign_tax_identifier' => $this->foreignTaxIdentifier($compact),
             default => throw new \InvalidArgumentException('Typ identifikátoru není podporovaný.'),
         };

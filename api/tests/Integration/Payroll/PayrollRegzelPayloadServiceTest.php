@@ -10,8 +10,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRegzelRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Regzel\EmployerRegistrationService;
+use MyInvoice\Service\Payroll\Submission\Regzel\RegzelPayloadSnapshot;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelPayloadSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Regzel\RegzelSubmissionPayloadAssembler;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelValidationException;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelXmlGenerator;
 use MyInvoice\Service\Payroll\Submission\Regzel\RegzelXmlValidator;
@@ -28,6 +30,7 @@ final class PayrollRegzelPayloadServiceTest extends TestCase
     private PayrollRegzelRepository $repository;
     private RegzelPayloadSnapshotBuilder $builder;
     private EmployerRegistrationService $service;
+    private SecretEncryption $encryption;
     private int $supplierId;
     private int $foreignSupplierId;
     private int $officeId;
@@ -39,12 +42,13 @@ final class PayrollRegzelPayloadServiceTest extends TestCase
         $this->db = $container->get(Connection::class);
         $this->repository = new PayrollRegzelRepository($this->db);
         $this->builder = new RegzelPayloadSnapshotBuilder($this->repository);
+        $this->encryption = new SecretEncryption($container->get(Config::class));
         $this->service = new EmployerRegistrationService(
             $this->repository,
             $this->builder,
             new RegzelXmlGenerator(),
             new RegzelXmlValidator(new RegzelSchemaCatalog()),
-            new SecretEncryption($container->get(Config::class)),
+            $this->encryption,
         );
 
         $pdo = $this->db->pdo();
@@ -66,8 +70,8 @@ final class PayrollRegzelPayloadServiceTest extends TestCase
         $pdo->prepare(
             'UPDATE supplier
                 SET company_name = "Syntetický REGZEL zaměstnavatel",
-                    financial_office_code = "2001",
-                    workplace_code = "2002",
+                    financial_office_code = "451",
+                    workplace_code = "3001",
                     data_box_id = "abc1234"
               WHERE id = ?',
         )->execute([$this->supplierId]);
@@ -82,13 +86,15 @@ final class PayrollRegzelPayloadServiceTest extends TestCase
                 (supplier_id, default_office_id,
                  employer_registration_number,
                  social_security_office_code)
-             VALUES (?, ?, "123456789", "110")',
+             VALUES (?, ?, "1234567890", "110")',
         )->execute([$this->supplierId, $this->officeId]);
         $pdo->prepare(
             'INSERT INTO payroll_regzel_employer_profiles
                 (supplier_id, social_enterprise, employment_agency,
-                 protected_labor_market, evidence_confirmed_by)
-             VALUES (?, 1, 0, 1, ?)',
+                 protected_labor_market, tax_office_code,
+                 tax_office_workplace_code, payer_reference_number,
+                 evidence_confirmed_by)
+             VALUES (?, 1, 0, 1, "3000", "3002", "612345678", ?)',
         )->execute([$this->supplierId, $this->userId]);
     }
 
@@ -124,6 +130,18 @@ final class PayrollRegzelPayloadServiceTest extends TestCase
         self::assertFalse($replayed['created']);
         self::assertSame($prepared['id'], $replayed['id']);
         self::assertSame($prepared['xml'], $replayed['xml']);
+        self::assertStringContainsString('<kodFU>3000</kodFU>', $prepared['xml']);
+        self::assertStringContainsString(
+            '<kodPracovisteFU>3002</kodPracovisteFU>',
+            $prepared['xml'],
+        );
+        self::assertStringNotContainsString('<kodFU>451</kodFU>', $prepared['xml']);
+        self::assertStringNotContainsString(
+            '<kodPracovisteFU>3001</kodPracovisteFU>',
+            $prepared['xml'],
+        );
+        self::assertStringContainsString('<vcp>612345678</vcp>', $prepared['xml']);
+        self::assertStringNotContainsString('<vcp>123456789</vcp>', $prepared['xml']);
         self::assertSame(hash('sha256', $prepared['xml']), $prepared['xml_sha256']);
         self::assertSame(
             $this->builder->buildSupplementalInformation(
@@ -187,6 +205,124 @@ final class PayrollRegzelPayloadServiceTest extends TestCase
                 $exception->getMessage(),
             );
         }
+    }
+
+    public function testEncryptedSnapshotMustMatchStoredMappingMetadata(): void
+    {
+        $snapshot = $this->builder->buildSupplementalInformation(
+            $this->supplierId,
+            $this->officeId,
+            'production',
+        );
+        $json = $snapshot->canonicalJson();
+        $sourceHash = hash('sha256', $json);
+        $xml = (new RegzelXmlGenerator())->generate($snapshot);
+        $id = $this->repository->insertSnapshot([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'production',
+            'office_id' => $this->officeId,
+            'document_type' => 'REGZELDOPL25',
+            'interaction_code' => 'supplemental_information',
+            'mapping_version' => 'regzeldopl25-map-1',
+            'xsd_version' => '1.2',
+            'source_manifest_json' => '{}',
+            'snapshot_ciphertext' => $this->encryption->encryptFor(
+                $json,
+                implode('|', [
+                    'payroll-regzel-snapshot.v1',
+                    (string) $this->supplierId,
+                    'production',
+                    'REGZELDOPL25',
+                    $sourceHash,
+                ]),
+            ),
+            'source_snapshot_hash' => $sourceHash,
+            'xml_sha256' => hash('sha256', $xml),
+            'xml_byte_size' => strlen($xml),
+            'request_fingerprint' => hash('sha256', 'metadata-mismatch'),
+            'idempotency_key_hash' => hash('sha256', 'metadata-mismatch'),
+            'created_by' => $this->userId,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('neodpovídá archivním metadatům');
+        $this->service->snapshotXml($this->supplierId, $id, 'production');
+    }
+
+    public function testEncryptedLegacySnapshotReplaysThroughDownloadAndAssembler(): void
+    {
+        $current = $this->builder->buildSupplementalInformation(
+            $this->supplierId,
+            $this->officeId,
+            'production',
+        );
+        $snapshot = new RegzelPayloadSnapshot(
+            supplierId: $current->supplierId,
+            officeId: $current->officeId,
+            environment: $current->environment,
+            interaction: $current->interaction,
+            csszWorkplaceCode: $current->csszWorkplaceCode,
+            taxOfficeCode: '2001',
+            taxOfficeWorkplaceCode: null,
+            socialSecurityVariableSymbol: $current->socialSecurityVariableSymbol,
+            payerReferenceNumber: '123456789',
+            notificationDataBoxId: $current->notificationDataBoxId,
+            socialEnterprise: $current->socialEnterprise,
+            employmentAgency: $current->employmentAgency,
+            protectedLaborMarket: $current->protectedLaborMarket,
+            employerSettingsRowVersion: $current->employerSettingsRowVersion,
+            officeRowVersion: $current->officeRowVersion,
+            profileRowVersion: $current->profileRowVersion,
+            supplierUpdatedAt: $current->supplierUpdatedAt,
+            schemaReference: RegzelPayloadSnapshot::LEGACY_SCHEMA_REFERENCE,
+            mappingVersion: RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION,
+        );
+        $json = $snapshot->canonicalJson();
+        $sourceHash = hash('sha256', $json);
+        $xml = (new RegzelXmlGenerator())->generate($snapshot);
+        $id = $this->repository->insertSnapshot([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'production',
+            'office_id' => $this->officeId,
+            'document_type' => 'REGZELDOPL25',
+            'interaction_code' => 'supplemental_information',
+            'mapping_version' => RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION,
+            'xsd_version' => RegzelPayloadSnapshot::XSD_VERSION,
+            'source_manifest_json' => '{}',
+            'snapshot_ciphertext' => $this->encryption->encryptFor(
+                $json,
+                implode('|', [
+                    'payroll-regzel-snapshot.v1',
+                    (string) $this->supplierId,
+                    'production',
+                    'REGZELDOPL25',
+                    $sourceHash,
+                ]),
+            ),
+            'source_snapshot_hash' => $sourceHash,
+            'xml_sha256' => hash('sha256', $xml),
+            'xml_byte_size' => strlen($xml),
+            'request_fingerprint' => hash('sha256', 'legacy-replay'),
+            'idempotency_key_hash' => hash('sha256', 'legacy-replay'),
+            'created_by' => $this->userId,
+        ]);
+
+        $download = $this->service->snapshotXml(
+            $this->supplierId,
+            $id,
+            'production',
+        );
+        self::assertSame($xml, $download['xml']);
+        self::assertStringContainsString('<kodFU>2001</kodFU>', $download['xml']);
+        self::assertStringNotContainsString('<kodPracovisteFU>', $download['xml']);
+        self::assertStringContainsString('<vcp>123456789</vcp>', $download['xml']);
+
+        $payload = (new RegzelSubmissionPayloadAssembler(
+            $this->repository,
+            $this->service,
+        ))->assemble($this->supplierId, $id, 'production');
+        self::assertSame(RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION, $payload->mappingVersion);
+        self::assertSame($xml, $payload->xml);
     }
 
     public function testProductionAndTestVariableSymbolsAreFailClosedAndSeparated(): void

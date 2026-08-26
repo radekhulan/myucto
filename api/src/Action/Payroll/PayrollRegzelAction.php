@@ -34,8 +34,14 @@ final class PayrollRegzelAction
             return $this->guardFailure($error);
         }
 
+        $supplierId = $this->currentSupplierId($request);
+        $profile = $this->service->profile($supplierId);
         return Json::ok($response, [
-            'profile' => $this->service->profile($this->currentSupplierId($request)),
+            'profile' => $profile,
+            'suggested_tax_office_workplace_code' =>
+                ($profile['is_complete'] ?? false)
+                    ? null
+                    : $this->service->taxOfficeWorkplaceSuggestion($supplierId),
             'supported' => [
                 'document_type' => 'REGZELDOPL25',
                 'xsd_version' => '1.2',
@@ -59,6 +65,9 @@ final class PayrollRegzelAction
                 $this->bool($body, 'social_enterprise'),
                 $this->bool($body, 'employment_agency'),
                 $this->bool($body, 'protected_labor_market'),
+                $body['tax_office_code'] ?? null,
+                $body['tax_office_workplace_code'] ?? null,
+                $body['payer_reference_number'] ?? null,
                 $this->bool($body, 'evidence_confirmed'),
             );
         } catch (RegzelValidationException $exception) {
@@ -90,7 +99,10 @@ final class PayrollRegzelAction
             'payroll.regzel.profile_confirmed',
             'payroll_regzel_employer_profiles',
             $this->currentSupplierId($request),
-            ['row_version' => $profile['row_version']],
+            [
+                'row_version' => $profile['row_version'],
+                'is_complete' => $profile['is_complete'],
+            ],
         );
 
         return Json::ok($response, ['profile' => $profile]);

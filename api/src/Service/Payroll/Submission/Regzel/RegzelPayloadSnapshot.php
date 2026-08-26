@@ -8,8 +8,10 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final readonly class RegzelPayloadSnapshot
 {
-    public const SCHEMA_REFERENCE = 'payroll-regzeldopl25-payload.v1';
-    public const MAPPING_VERSION = 'regzeldopl25-map-1';
+    public const LEGACY_SCHEMA_REFERENCE = 'payroll-regzeldopl25-payload.v1';
+    public const LEGACY_MAPPING_VERSION = 'regzeldopl25-map-1';
+    public const SCHEMA_REFERENCE = 'payroll-regzeldopl25-payload.v2';
+    public const MAPPING_VERSION = 'regzeldopl25-map-2';
     public const XSD_VERSION = '1.2';
 
     public function __construct(
@@ -30,14 +32,16 @@ final readonly class RegzelPayloadSnapshot
         public int $officeRowVersion,
         public int $profileRowVersion,
         public string $supplierUpdatedAt,
+        public string $schemaReference = self::SCHEMA_REFERENCE,
+        public string $mappingVersion = self::MAPPING_VERSION,
     ) {}
 
     /** @return array<string,mixed> */
     public function toArray(): array
     {
         return [
-            'schema_reference' => self::SCHEMA_REFERENCE,
-            'mapping_version' => self::MAPPING_VERSION,
+            'schema_reference' => $this->schemaReference,
+            'mapping_version' => $this->mappingVersion,
             'xsd_version' => self::XSD_VERSION,
             'supplier_id' => $this->supplierId,
             'office_id' => $this->officeId,

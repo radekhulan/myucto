@@ -39,6 +39,25 @@ final class RegzelPayloadGeneratorTest extends TestCase
         }
     }
 
+    public function testLegacyMappingKeepsItsExactVendorVersion(): void
+    {
+        $snapshot = self::snapshot(
+            schemaReference: RegzelPayloadSnapshot::LEGACY_SCHEMA_REFERENCE,
+            mappingVersion: RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION,
+            payerReferenceNumber: '123456789',
+            taxOfficeCode: '2001',
+            taxOfficeWorkplaceCode: null,
+        );
+        $xml = (new RegzelXmlGenerator())->generate($snapshot);
+        self::assertStringContainsString(
+            'productVersion="regzeldopl25-map-1"',
+            $xml,
+        );
+        (new RegzelXmlValidator(new RegzelSchemaCatalog()))
+            ->validate($snapshot, $xml);
+        self::assertStringContainsString('<vcp>123456789</vcp>', $xml);
+    }
+
     public function testUnsupportedEmployerRegistrationFailsClosed(): void
     {
         try {
@@ -49,7 +68,14 @@ final class RegzelPayloadGeneratorTest extends TestCase
         }
     }
 
-    private static function snapshot(string $environment = 'production'): RegzelPayloadSnapshot
+    private static function snapshot(
+        string $environment = 'production',
+        string $schemaReference = RegzelPayloadSnapshot::SCHEMA_REFERENCE,
+        string $mappingVersion = RegzelPayloadSnapshot::MAPPING_VERSION,
+        string $payerReferenceNumber = '612345678',
+        string $taxOfficeCode = '2000',
+        ?string $taxOfficeWorkplaceCode = '2002',
+    ): RegzelPayloadSnapshot
     {
         return new RegzelPayloadSnapshot(
             supplierId: 11,
@@ -57,10 +83,10 @@ final class RegzelPayloadGeneratorTest extends TestCase
             environment: $environment,
             interaction: 'supplemental_information',
             csszWorkplaceCode: '110',
-            taxOfficeCode: '2001',
-            taxOfficeWorkplaceCode: '2002',
+            taxOfficeCode: $taxOfficeCode,
+            taxOfficeWorkplaceCode: $taxOfficeWorkplaceCode,
             socialSecurityVariableSymbol: '1234567890',
-            payerReferenceNumber: '123456789',
+            payerReferenceNumber: $payerReferenceNumber,
             notificationDataBoxId: 'abc1234',
             socialEnterprise: true,
             employmentAgency: false,
@@ -69,6 +95,8 @@ final class RegzelPayloadGeneratorTest extends TestCase
             officeRowVersion: 7,
             profileRowVersion: 2,
             supplierUpdatedAt: '2026-08-04 00:00:00',
+            schemaReference: $schemaReference,
+            mappingVersion: $mappingVersion,
         );
     }
 
@@ -77,16 +105,16 @@ final class RegzelPayloadGeneratorTest extends TestCase
         return <<<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
 <REGZELDOPL xmlns="http://schemas.cssz.cz/REGZELDOPL/2025" version="1.2" partialAccept="N">
-  <VENDOR productName="MyÚčto.cz" productVersion="regzeldopl25-map-1"/>
+  <VENDOR productName="MyÚčto.cz" productVersion="regzeldopl25-map-2"/>
   <formular>
     <hlavicka>
       <kodPracovisteCSSZ>110</kodPracovisteCSSZ>
-      <kodFU>2001</kodFU>
+      <kodFU>2000</kodFU>
       <kodPracovisteFU>2002</kodPracovisteFU>
     </hlavicka>
     <zamestnavatel>
       <vs>1234567890</vs>
-      <vcp>123456789</vcp>
+      <vcp>612345678</vcp>
       <datovaSchranka>abc1234</datovaSchranka>
       <doplnInformace>
         <socialniPodnik>true</socialniPodnik>

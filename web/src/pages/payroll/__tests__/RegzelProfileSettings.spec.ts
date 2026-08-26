@@ -22,7 +22,10 @@ import RegzelProfileSettings from '@/pages/payroll/RegzelProfileSettings.vue'
 describe('RegzelProfileSettings', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    m.profile.mockResolvedValue(null)
+    m.profile.mockResolvedValue({
+      profile: null,
+      suggested_tax_office_workplace_code: '3001',
+    })
   })
 
   it('vyžaduje explicitní potvrzení evidence a uloží všechny tři příznaky', async () => {
@@ -31,6 +34,10 @@ describe('RegzelProfileSettings', () => {
       social_enterprise: true,
       employment_agency: false,
       protected_labor_market: true,
+      tax_office_code: '3000',
+      tax_office_workplace_code: '3001',
+      payer_reference_number: '612345678',
+      is_complete: true,
       evidence_confirmed_at: '2026-08-04 12:00:00',
       row_version: 1,
       updated_at: '2026-08-04 12:00:00',
@@ -40,6 +47,9 @@ describe('RegzelProfileSettings', () => {
     })
     await flushPromises()
 
+    await wrapper.get('[data-test="regzel-tax-office-code"]').setValue('3000')
+    await wrapper.get('[data-test="regzel-use-workplace-suggestion"]').trigger('click')
+    await wrapper.get('[data-test="regzel-payer-reference-number"]').setValue('612345678')
     await wrapper.get('[data-test="social-enterprise"]').setValue(true)
     await wrapper.get('[data-test="protected-labor-market"]').setValue(true)
     await wrapper.get('[data-test="regzel-profile-save"]').trigger('click')
@@ -57,6 +67,9 @@ describe('RegzelProfileSettings', () => {
       social_enterprise: true,
       employment_agency: false,
       protected_labor_market: true,
+      tax_office_code: '3000',
+      tax_office_workplace_code: '3001',
+      payer_reference_number: '612345678',
       evidence_confirmed: true,
     })
     expect(wrapper.text()).toContain('payroll.regzel.profile.confirmed_at')
@@ -71,6 +84,9 @@ describe('RegzelProfileSettings', () => {
     })
     await flushPromises()
 
+    await wrapper.get('[data-test="regzel-tax-office-code"]').setValue('3000')
+    await wrapper.get('[data-test="regzel-tax-office-workplace-code"]').setValue('3001')
+    await wrapper.get('[data-test="regzel-payer-reference-number"]').setValue('')
     await wrapper.get('[data-test="regzel-profile-confirmation"]').setValue(true)
     await wrapper.get('[data-test="regzel-profile-save"]').trigger('click')
     await flushPromises()
@@ -78,5 +94,39 @@ describe('RegzelProfileSettings', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain(
       'Profil mezitím změnila Jana.',
     )
+  })
+
+  it('vyžaduje pracoviště u běžného úřadu, ale ne u specializovaného', async () => {
+    m.saveProfile.mockResolvedValue({
+      supplier_id: 1,
+      social_enterprise: false,
+      employment_agency: false,
+      protected_labor_market: false,
+      tax_office_code: '4000',
+      tax_office_workplace_code: null,
+      payer_reference_number: null,
+      is_complete: true,
+      evidence_confirmed_at: '2026-08-04 12:00:00',
+      row_version: 1,
+      updated_at: '2026-08-04 12:00:00',
+    })
+    const wrapper = mount(RegzelProfileSettings, { props: { canWrite: true } })
+    await flushPromises()
+
+    await wrapper.get('[data-test="regzel-tax-office-code"]').setValue('3000')
+    await wrapper.get('[data-test="regzel-profile-confirmation"]').setValue(true)
+    await wrapper.get('[data-test="regzel-profile-save"]').trigger('click')
+    expect(m.saveProfile).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toContain(
+      'payroll.regzel.profile.tax_office_workplace_code_required',
+    )
+
+    await wrapper.get('[data-test="regzel-tax-office-code"]').setValue('4000')
+    await wrapper.get('[data-test="regzel-profile-save"]').trigger('click')
+    await flushPromises()
+    expect(m.saveProfile).toHaveBeenCalledWith(expect.objectContaining({
+      tax_office_code: '4000',
+      tax_office_workplace_code: null,
+    }))
   })
 })

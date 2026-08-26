@@ -2139,6 +2139,10 @@ export interface PayrollRegzelProfile {
   social_enterprise: boolean
   employment_agency: boolean
   protected_labor_market: boolean
+  tax_office_code: string | null
+  tax_office_workplace_code: string | null
+  payer_reference_number: string | null
+  is_complete: boolean
   evidence_confirmed_at: string
   row_version: number
   updated_at: string
@@ -2149,7 +2153,15 @@ export interface PayrollRegzelProfilePayload {
   social_enterprise: boolean
   employment_agency: boolean
   protected_labor_market: boolean
+  tax_office_code: string
+  tax_office_workplace_code: string | null
+  payer_reference_number: string | null
   evidence_confirmed: boolean
+}
+
+export interface PayrollRegzelProfileResponse {
+  profile: PayrollRegzelProfile | null
+  suggested_tax_office_workplace_code: string | null
 }
 
 /**
@@ -3954,8 +3966,8 @@ export const payrollApi = {
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
   regzelProfile: () =>
-    api.get<{ profile: PayrollRegzelProfile | null }>('/payroll/submissions/regzel/profile')
-      .then(response => response.data.profile),
+    api.get<PayrollRegzelProfileResponse>('/payroll/submissions/regzel/profile')
+      .then(response => response.data),
   saveRegzelProfile: (payload: PayrollRegzelProfilePayload) =>
     api.put<{ profile: PayrollRegzelProfile }>('/payroll/submissions/regzel/profile', payload)
       .then(response => response.data.profile),

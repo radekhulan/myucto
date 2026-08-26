@@ -54,6 +54,15 @@ instituce. Pole
 **Registrační číslo zaměstnavatele** slouží pro evidenci a podání; není
 variabilním symbolem platby.
 
+V záložce **Podání** se potvrzuje samostatný profil REGZEL. Obsahuje
+čtyřmístný `kodFU`, povinný `kodPracovisteFU` (kromě Specializovaného
+finančního úřadu s kódem 4000), případné devítimístné VČP
+začínající `6` a evidenční příznaky
+zaměstnavatele. Kód pracoviště může aplikace nabídnout z daňového nastavení
+firmy, ale použije jej až po výslovném potvrzení; `kodFU` nikdy neodvozuje.
+VČP vyplň pouze tehdy, pokud je firmě skutečně přidělil správce daně; nejde
+o registrační číslo zaměstnavatele ani o variabilní symbol ČSSZ.
+
 V části **Platební účty institucí** se evidují účty ČSSZ, finančního úřadu,
 zdravotních pojišťoven, zákonného pojištění a dalších příjemců. Pro každý účet
 vyber typ instituce a ulož zaměstnavatelský variabilní symbol, měnu, období

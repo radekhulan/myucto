@@ -150,12 +150,12 @@ async function load() {
   error.value = ''
   success.value = ''
   try {
-    const [employerSettings, regzelProfile] = await Promise.all([
+    const [employerSettings, regzelProfileResponse] = await Promise.all([
       payrollApi.employerSettings(),
       payrollApi.regzelProfile(),
     ])
     settings.value = employerSettings
-    profile.value = regzelProfile
+    profile.value = regzelProfileResponse.profile
     officeId.value = employerSettings.offices.find(office => office.is_active)?.id ?? null
     await loadSnapshots()
   } catch (exception: unknown) {
@@ -179,7 +179,7 @@ async function prepare() {
     error.value = t('payroll.regzel.prepare.confirmation_required')
     return
   }
-  if (!profile.value) {
+  if (!profile.value?.is_complete) {
     error.value = t('payroll.regzel.prepare.profile_required')
     return
   }
@@ -398,7 +398,7 @@ onMounted(loadInboxBadge)
         </div>
 
         <div
-          v-if="!profile"
+          v-if="!profile?.is_complete"
           class="mt-5 rounded-lg border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"
         >
           {{ t('payroll.regzel.prepare.profile_required') }}
@@ -466,7 +466,7 @@ onMounted(loadInboxBadge)
             type="button"
             data-test="regzel-prepare"
             :class="btnFilled('primary')"
-            :disabled="preparing || !profile || officeId === null"
+            :disabled="preparing || !profile?.is_complete || officeId === null"
             @click="prepare"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

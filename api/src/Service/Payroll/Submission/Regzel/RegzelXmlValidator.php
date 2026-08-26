@@ -49,6 +49,20 @@ final readonly class RegzelXmlValidator
 
     public function validateSnapshot(RegzelPayloadSnapshot $snapshot): void
     {
+        $supportedMappings = [
+            RegzelPayloadSnapshot::LEGACY_SCHEMA_REFERENCE =>
+                RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION,
+            RegzelPayloadSnapshot::SCHEMA_REFERENCE =>
+                RegzelPayloadSnapshot::MAPPING_VERSION,
+        ];
+        if (($supportedMappings[$snapshot->schemaReference] ?? null)
+            !== $snapshot->mappingVersion
+        ) {
+            $this->invalid(
+                'regzel_mapping_unsupported',
+                'REGZEL snapshot používá nepodporovanou verzi mapování.',
+            );
+        }
         if ($snapshot->supplierId <= 0 || $snapshot->officeId <= 0) {
             $this->invalid('regzel_source_scope_invalid', 'Firma nebo účtárna není platná.');
         }
@@ -62,14 +76,19 @@ final readonly class RegzelXmlValidator
         ) {
             $this->invalid('regzel_cssz_workplace_invalid', 'Kód pracoviště ČSSZ není platný.');
         }
-        $this->validateTaxOfficeCode(
-            $snapshot->taxOfficeCode,
-            'regzel_tax_office_invalid',
-        );
-        if ($snapshot->taxOfficeWorkplaceCode !== null) {
-            $this->validateTaxOfficeCode(
+        if ($snapshot->mappingVersion === RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION) {
+            $this->validateLegacyTaxOfficeCode($snapshot->taxOfficeCode);
+            if ($snapshot->taxOfficeWorkplaceCode !== null) {
+                $this->validateLegacyTaxOfficeCode($snapshot->taxOfficeWorkplaceCode);
+            }
+        } else {
+            $taxOfficeCode = RegzelTaxOfficeCode::required($snapshot->taxOfficeCode);
+            $taxOfficeWorkplaceCode = RegzelTaxOfficeCode::optional(
                 $snapshot->taxOfficeWorkplaceCode,
-                'regzel_tax_office_workplace_invalid',
+            );
+            RegzelTaxOfficeCode::validatePair(
+                $taxOfficeCode,
+                $taxOfficeWorkplaceCode,
             );
         }
         if (!preg_match('/^[0-9]{10}$/', $snapshot->socialSecurityVariableSymbol)) {
@@ -94,12 +113,14 @@ final readonly class RegzelXmlValidator
                 'Fiktivní testovací VS nesmí být použit v produkčním REGZEL.',
             );
         }
-        if ($snapshot->payerReferenceNumber !== null
-            && !preg_match('/^[1-9][0-9]{8}$/', $snapshot->payerReferenceNumber)
-        ) {
+        $payerReferenceValid = $snapshot->payerReferenceNumber === null
+            || ($snapshot->mappingVersion === RegzelPayloadSnapshot::LEGACY_MAPPING_VERSION
+                ? preg_match('/^[1-9][0-9]{8}$/D', $snapshot->payerReferenceNumber) === 1
+                : RegzelPayerReferenceNumber::isValid($snapshot->payerReferenceNumber));
+        if (!$payerReferenceValid) {
             $this->invalid(
                 'regzel_payer_reference_invalid',
-                'Vlastní číslo plátce musí mít devět číslic a nesmí začínat nulou.',
+                'Vlastní číslo plátce REGZEL nemá platný formát pro verzi archivovaného mapování.',
             );
         }
         if ($snapshot->notificationDataBoxId !== null
@@ -122,13 +143,13 @@ final readonly class RegzelXmlValidator
         }
     }
 
-    private function validateTaxOfficeCode(string $code, string $errorCode): void
+    private function validateLegacyTaxOfficeCode(string $code): void
     {
-        if (!preg_match('/^[2-7][0-9]{3}$/', $code)
-            || (int) $code < 2000
-            || (int) $code > 7000
-        ) {
-            $this->invalid($errorCode, 'Kód finančního úřadu není platný pro REGZEL.');
+        if (preg_match('/^(?:[2-6][0-9]{3}|7000)$/D', $code) !== 1) {
+            $this->invalid(
+                'regzel_tax_office_invalid',
+                'Kód finančního úřadu není platný pro archivované mapování REGZEL.',
+            );
         }
     }
 
