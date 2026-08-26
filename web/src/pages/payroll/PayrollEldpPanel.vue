@@ -36,6 +36,7 @@ const environment = ref<PayrollRegzelEnvironment>('production')
 const excludedDaysConfirmed = ref(false)
 const deductedDaysNone = ref(false)
 const requestedByAuthority = ref(false)
+const authorityRequestReceivedOn = ref('')
 const note = ref('')
 const statement = ref<PayrollEldpStatement | null>(null)
 const prepared = ref<PayrollEldpPrepared | null>(null)
@@ -73,6 +74,7 @@ const canPrepare = computed(() =>
   && employmentId.value !== null
   && excludedDaysConfirmed.value
   && deductedDaysNone.value
+  && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
   && note.value.trim().length >= 5
   && note.value.trim().length <= 500)
 
@@ -135,6 +137,9 @@ async function prepare(): Promise<void> {
       excluded_days_confirmed: excludedDaysConfirmed.value,
       deducted_days_none: deductedDaysNone.value,
       requested_by_authority: requestedByAuthority.value,
+      authority_request_received_on: requestedByAuthority.value
+        ? authorityRequestReceivedOn.value
+        : null,
       note: note.value.trim(),
       idempotency_key: `eldp:${environment.value}:${employmentId.value}:${year.value}`,
     })
@@ -166,6 +171,16 @@ watch([employmentId, year, environment], () => {
   prepared.value = null
   blockers.value = []
   void loadStatement()
+})
+watch(requestedByAuthority, value => {
+  if (value && authorityRequestReceivedOn.value === '') {
+    const today = new Date()
+    authorityRequestReceivedOn.value = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-')
+  }
 })
 onMounted(loadPeople)
 </script>
@@ -264,6 +279,20 @@ onMounted(loadPeople)
             data-test="eldp-authority-request"
           >
           <span>{{ t('payroll.eldp.requestedByAuthority') }}</span>
+        </label>
+        <label v-if="requestedByAuthority" class="block max-w-sm text-sm">
+          <span class="mb-1 block font-medium text-neutral-700">
+            {{ t('payroll.eldp.authorityRequestReceivedOn') }}
+          </span>
+          <input
+            v-model="authorityRequestReceivedOn"
+            type="date"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            data-test="eldp-authority-request-date"
+          >
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.eldp.authorityRequestReceivedOnHint') }}
+          </span>
         </label>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">

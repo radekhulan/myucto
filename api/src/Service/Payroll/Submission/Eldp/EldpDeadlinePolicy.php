@@ -57,8 +57,9 @@ use MyInvoice\Service\Report\CzechWorkingDays;
  *
  * - za roky **před 1. 1. 2026** stávajícím způsobem,
  * - při **skončení účasti zaměstnance před 1. 4. 2026**,
- * - **na výzvu ČSSZ/ÚSSZ** za celý rok 2026 nebo když z nahlášených údajů
- *   ELDP sestavit nelze,
+ * - **na výzvu ČSSZ/ÚSSZ** s údaji za rok 2026 nebo když z nahlášených údajů
+ *   ELDP sestavit nelze; při výzvě v průběhu roku se list uzavírá posledním
+ *   měsícem, za který už zaměstnavatel zúčtoval příjem,
  * - u příslušníků ozbrojených sil (ti se předkládají MV/MO, ne ČSSZ —
  *   tuhle větev modul nepodporuje).
  */
@@ -66,11 +67,14 @@ final class EldpDeadlinePolicy
 {
     public const ANNUAL_RULESET = 'cz-eldp-deadlines.annual.v1';
     public const TERMINATION_RULESET = 'cz-eldp-deadlines.termination.v1';
+    public const AUTHORITY_REQUEST_RULESET =
+        'cz-eldp-deadlines.authority-request.v1';
 
     private const SOURCES = [
         'law' => '582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 až 4',
         'law_wording' => 've znění účinném do 31. 12. 2025; použije se podle '
             . 'čl. V bodu 1 zák. č. 360/2025 Sb.',
+        'authority_request_transition' => 'čl. V bod 8 zák. č. 360/2025 Sb.',
         'pension_law' => '155/1995 Sb., § 16 odst. 4 písm. a) a j)',
         'cssz_document' => 'ČSSZ — Evidenční listy důchodového pojištění',
         'jmhz_rules' =>
@@ -135,6 +139,26 @@ final class EldpDeadlinePolicy
                 . 'skončí-li účast na důchodovém pojištění před 31. prosincem, zapisují '
                 . 'se údaje do evidenčního listu do jednoho měsíce po konečném '
                 . 'vyúčtování příjmů, nejpozději do 31. ledna následujícího roku.',
+        );
+    }
+
+    /**
+     * Evidenční list vyžádaný ČSSZ/ÚSSZ za rok 2026.
+     */
+    public function forAuthorityRequest(string $requestReceivedOn): EldpDeadlineWindow
+    {
+        $received = self::date($requestReceivedOn, 'Datum doručení výzvy');
+        $dueOn = $received->modify('+8 days')->format('Y-m-d');
+
+        return $this->window(
+            $received->format('Y-m-d'),
+            $dueOn,
+            self::AUTHORITY_REQUEST_RULESET,
+            'authority_request_within_8_days',
+            'annual',
+            'Čl. V bod 8 zákona č. 360/2025 Sb. — evidenční list s údaji '
+                . 'za rok 2026 vyžádaný ČSSZ/ÚSSZ se předkládá do 8 dnů ode dne '
+                . 'obdržení výzvy.',
         );
     }
 

@@ -647,6 +647,8 @@ final readonly class EldpStatementService
             'excluded_days_confirmed' => $confirmation['excluded_days_confirmed'] ?? null,
             'deducted_days_none' => $confirmation['deducted_days_none'] ?? null,
             'requested_by_authority' => $confirmation['requested_by_authority'] ?? null,
+            'authority_request_received_on' =>
+                $confirmation['authority_request_received_on'] ?? null,
             'note' => is_string($confirmation['note'] ?? null)
                 ? trim($confirmation['note'])
                 : null,

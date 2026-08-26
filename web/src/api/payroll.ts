@@ -3947,6 +3947,7 @@ export const payrollApi = {
     excluded_days_confirmed: boolean
     deducted_days_none: boolean
     requested_by_authority: boolean
+    authority_request_received_on: string | null
     note: string
     idempotency_key: string
   }) =>

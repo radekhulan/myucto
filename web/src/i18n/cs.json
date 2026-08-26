@@ -3770,6 +3770,8 @@
             "confirmExcluded": "Potvrzuji vyloučené doby odvozené z evidovaných absencí.",
             "confirmDeducted": "Potvrzuji, že za vykazované období nejsou žádné odečítané doby po dosažení důchodového věku.",
             "requestedByAuthority": "Evidenční list se sestavuje na výzvu ČSSZ/ÚSSZ.",
+            "authorityRequestReceivedOn": "Datum doručení výzvy",
+            "authorityRequestReceivedOnHint": "Od tohoto dne běží osmidenní lhůta. Při výzvě během roku list skončí posledním měsícem, za který už byla schválena mzda; budoucí měsíce nevyžaduje.",
             "noSendNotice": "Příprava končí ve stavu připraveno. Odeslání spouští člověk ve Stavu odeslání; datová věta odesílaného ELDP zatím není v připnuté oficiální sadě.",
             "preparedCreated": "Evidenční list byl sestaven a podání je připravené k odeslání.",
             "preparedReplayed": "Evidenční list už byl sestaven dřív; opakování nevytvořilo druhé podání.",

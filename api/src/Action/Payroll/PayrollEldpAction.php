@@ -67,10 +67,12 @@ final class PayrollEldpAction
                 'submission_schema_available' => false,
                 'stops_at_status' => 'prepared',
                 'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 '
-                    . 'až 4, ve znění účinném do 31. 12. 2025',
+                    . 'až 4, ve znění účinném do 31. 12. 2025, a čl. V bod 8 '
+                    . 'zákona č. 360/2025 Sb.',
                 'deadline_rulesets' => [
                     EldpDeadlinePolicy::ANNUAL_RULESET,
                     EldpDeadlinePolicy::TERMINATION_RULESET,
+                    EldpDeadlinePolicy::AUTHORITY_REQUEST_RULESET,
                 ],
             ],
         ]);
@@ -97,6 +99,8 @@ final class PayrollEldpAction
                         $this->bool($body, 'deducted_days_none'),
                     'requested_by_authority' =>
                         $this->bool($body, 'requested_by_authority'),
+                    'authority_request_received_on' =>
+                        $this->nullableString($body, 'authority_request_received_on'),
                     'note' => $this->string($body, 'note'),
                 ],
                 $this->string($body, 'idempotency_key'),
@@ -237,6 +241,19 @@ final class PayrollEldpAction
     {
         if (!array_key_exists($key, $body) || !is_string($body[$key])) {
             throw new \InvalidArgumentException($key . ' musí být text.');
+        }
+
+        return $body[$key];
+    }
+
+    /** @param array<string,mixed> $body */
+    private function nullableString(array $body, string $key): ?string
+    {
+        if (!array_key_exists($key, $body) || $body[$key] === null) {
+            return null;
+        }
+        if (!is_string($body[$key])) {
+            throw new \InvalidArgumentException($key . ' musí být text nebo null.');
         }
 
         return $body[$key];

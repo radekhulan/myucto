@@ -132,6 +132,25 @@ describe('PayrollEldpPanel', () => {
     expect(wrapper.get('[data-test="eldp-success"]').text())
       .toContain('payroll.eldp.preparedCreated')
   })
+
+  it('u výzvy vyžádá datum doručení a předá je serveru', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+    await wrapper.get('[data-test="eldp-authority-request"]').setValue(true)
+    await flushPromises()
+
+    const date = wrapper.get('[data-test="eldp-authority-request-date"]')
+    await date.setValue('2026-08-25')
+    await wrapper.get('[data-test="eldp-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareEldp).toHaveBeenCalledWith(expect.objectContaining({
+      requested_by_authority: true,
+      authority_request_received_on: '2026-08-25',
+    }))
+  })
 })
 
 async function fillConfirmation(

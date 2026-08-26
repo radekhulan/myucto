@@ -3770,6 +3770,8 @@
             "confirmExcluded": "I confirm the excluded periods derived from the recorded absences.",
             "confirmDeducted": "I confirm there are no deductible periods after retirement age in the reported period.",
             "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
+            "authorityRequestReceivedOn": "Request received on",
+            "authorityRequestReceivedOnHint": "The eight-day deadline starts on this date. For a request made during the year, the sheet ends with the last month whose payroll has already been approved; future months are not required.",
             "noSendNotice": "Preparation stops at the prepared state. A person triggers sending from Submission status; the outgoing ELDP data message is not part of the pinned official schema set yet.",
             "preparedCreated": "The record sheet was built and the submission is ready to be sent.",
             "preparedReplayed": "The record sheet already existed; repeating did not create a second submission.",

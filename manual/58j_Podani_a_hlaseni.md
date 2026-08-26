@@ -245,6 +245,22 @@ se podávají následným krokem. Samostatně platí, že první řádné JMHZ l
 i z aktuální schválené opravné mzdové revize; druh podání určuje návaznost na
 dříve odeslané JMHZ, ne název zdrojové mzdové revize.
 
+## Evidenční list důchodového pojištění
+
+Samostatný ELDP se od roku 2026 běžně nesestavuje: ČSSZ jej vytváří z JMHZ.
+V aplikaci jej připravte jen pro starší roky, při přechodném skončení účasti
+před 1. dubnem 2026 nebo na výzvu ČSSZ/ÚSSZ. U výzvy zaškrtněte příslušné
+potvrzení a zadejte skutečné datum jejího doručení; od tohoto dne běží lhůta
+osmi dnů.
+
+Přijde-li výzva ještě v průběhu vykazovaného roku a pracovní vztah trvá,
+aplikace sestaví list jen do posledního měsíce, za který existuje aktuální
+schválená mzdová revize. To odpovídá metodice ČSSZ: do údaje **Do** patří
+poslední den měsíce, za který byl zaměstnanci naposledy zúčtován příjem.
+Budoucí měsíce se nevyžadují. Chybí-li ale některá revize uvnitř takto
+vymezeného období, příprava zůstane zablokovaná, protože by nebylo možné
+doložit souvislou dobu pojištění ani vyměřovací základ.
+
 ## Podání zdravotním pojišťovnám
 
 Záložky zdravotních pojišťoven oddělují dvě povinnosti:
