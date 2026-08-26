@@ -142,6 +142,7 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPersonAddressType'    => 'db:payroll_person_addresses.address_type',
         'payroll.ts::PayrollPersonContactType'    => 'db:payroll_person_contacts.contact_type',
         'payroll.ts::PayrollPersonIdentifierType' => 'db:payroll_person_identifiers.identifier_type',
+        'payroll.ts::PayrollPersonSex'            => 'db:payroll_person_identity_history.sex',
         'payroll.ts::PayrollPayoutMethod'         => 'db:payroll_employee_profiles.payout_method',
         'payroll.ts::PayrollSecureDeliveryChannel' => 'db:payroll_employee_profiles.secure_delivery_channel',
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
