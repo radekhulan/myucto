@@ -3336,6 +3336,17 @@
                     "isds_queued": "Podání bylo připravené v odchozí frontě ISDS jako zpráva č. {id}.",
                     "isds_already_queued": "Podání už v odchozí frontě ISDS je jako zpráva č. {id}; druhá zpráva nevznikla.",
                     "outbox": "Odchozí zpráva ISDS č. {id} je připravená. K odeslání je ještě potřeba Vaše přihlášení a potvrzení.",
+                    "existing_outbox": "Toto podání už je v odchozí frontě ISDS jako zpráva č. {id} — stav: {state}. Další odeslání je zablokované, aby nevznikla duplicita.",
+                    "open_outbox": "Otevřít odchozí zprávy",
+                    "outbox_state": {
+                        "ready": "připraveno",
+                        "sending": "probíhá odeslání",
+                        "send_uncertain": "výsledek odeslání je nutné ověřit",
+                        "sent": "odesláno",
+                        "delivered": "doručeno",
+                        "failed": "odeslání selhalo",
+                        "cancelled": "zrušeno"
+                    },
                     "continue_isds": "Přihlásit se a odeslat",
                     "gateway_start_failed": "Zpráva je bezpečně uložená v odchozí frontě, ale přihlášení do ISDS se nepodařilo zahájit. Otevřete odchozí podání a zkuste přihlášení znovu.",
                     "dispatch_failed": "Připravené podání se nepodařilo předat k odeslání."

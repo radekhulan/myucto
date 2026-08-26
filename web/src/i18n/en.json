@@ -3336,6 +3336,17 @@
                     "isds_queued": "The submission was prepared in the ISDS outbox as message no. {id}.",
                     "isds_already_queued": "The submission is already in the ISDS outbox as message no. {id}; no duplicate message was created.",
                     "outbox": "ISDS outgoing message no. {id} is prepared. Your sign-in and confirmation are still required before sending.",
+                    "existing_outbox": "This submission is already in the ISDS outbox as message no. {id} — status: {state}. Another dispatch is blocked to prevent a duplicate.",
+                    "open_outbox": "Open outgoing messages",
+                    "outbox_state": {
+                        "ready": "ready",
+                        "sending": "sending",
+                        "send_uncertain": "dispatch result needs verification",
+                        "sent": "sent",
+                        "delivered": "delivered",
+                        "failed": "dispatch failed",
+                        "cancelled": "cancelled"
+                    },
                     "continue_isds": "Sign in and send",
                     "gateway_start_failed": "The message is safely stored in the outbox, but ISDS sign-in could not be started. Open outgoing submissions and try signing in again.",
                     "dispatch_failed": "The prepared submission could not be handed over for dispatch."

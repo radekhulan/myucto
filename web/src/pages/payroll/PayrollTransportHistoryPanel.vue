@@ -737,6 +737,7 @@ async function dispatchReady(
   if (
     !canWrite.value
     || busy.value
+    || submission.outbox_id !== null
     || (channel === 'vrep' && !variableSymbolValid.value)
   ) return
 
@@ -1055,7 +1056,7 @@ onMounted(loadVariableSymbols)
                   type="button"
                   :data-test="`transport-ready-vrep-${submission.submission_id}`"
                   :class="btnOutline('neutral')"
-                  :disabled="busy || !variableSymbolValid"
+                  :disabled="busy || !variableSymbolValid || submission.outbox_id !== null"
                   @click="dispatchReady(submission, 'vrep')"
                 >
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1070,7 +1071,7 @@ onMounted(loadVariableSymbols)
                   type="button"
                   :data-test="`transport-ready-isds-${submission.submission_id}`"
                   :class="btnFilled('primary')"
-                  :disabled="busy"
+                  :disabled="busy || submission.outbox_id !== null"
                   @click="dispatchReady(submission, 'isds')"
                 >
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1086,6 +1087,28 @@ onMounted(loadVariableSymbols)
             <p class="mt-3 text-xs text-neutral-600">
               {{ t('payroll.submissions.transport.ready.user_action_note') }}
             </p>
+            <div
+              v-if="submission.outbox_id !== null
+                && !readyIsdsResults[submission.submission_id]"
+              class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-info-500/30 bg-info-50 p-3 text-sm text-neutral-700"
+              :data-test="`transport-ready-existing-outbox-${submission.submission_id}`"
+            >
+              <p>
+                {{ t('payroll.submissions.transport.ready.existing_outbox', {
+                  id: submission.outbox_id,
+                  state: t(`payroll.submissions.transport.ready.outbox_state.${submission.outbox_dispatch_state ?? 'ready'}`),
+                }) }}
+              </p>
+              <a
+                href="/admin/databox?tab=outbox"
+                :class="btnOutline('neutral')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.send" />
+                </svg>
+                {{ t('payroll.submissions.transport.ready.open_outbox') }}
+              </a>
+            </div>
             <div
               v-if="readyIsdsResults[submission.submission_id]"
               class="mt-3 rounded-lg border border-payroll-500/30 bg-surface p-3 text-sm text-neutral-700"

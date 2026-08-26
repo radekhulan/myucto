@@ -3399,6 +3399,10 @@ export interface PayrollJmhzReadySubmission {
   period_start: string
   period_end: string
   created_at: string
+  outbox_id: number | null
+  outbox_dispatch_state: string | null
+  outbox_acceptance_state: string | null
+  outbox_external_message_id: string | null
 }
 
 /** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */

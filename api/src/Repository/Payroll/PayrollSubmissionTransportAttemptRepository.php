@@ -261,7 +261,8 @@ final class PayrollSubmissionTransportAttemptRepository
      * @return list<array{
      *   submission_id:int,submission_kind:string,submission_status:string,
      *   corrects_submission_id:?int,period_start:string,period_end:string,
-     *   created_at:string
+     *   created_at:string,outbox_id:?int,outbox_dispatch_state:?string,
+     *   outbox_acceptance_state:?string,outbox_external_message_id:?string
      * }>
      */
     public function listReadyJmhzSubmissions(
@@ -280,7 +281,11 @@ final class PayrollSubmissionTransportAttemptRepository
                     submission.status AS submission_status,
                     submission.corrects_submission_id,
                     obligation.period_start, obligation.period_end,
-                    submission.created_at
+                    submission.created_at,
+                    outbox.id AS outbox_id,
+                    outbox.dispatch_state AS outbox_dispatch_state,
+                    outbox.acceptance_state AS outbox_acceptance_state,
+                    outbox.external_message_id AS outbox_external_message_id
                FROM payroll_submissions submission
                JOIN payroll_obligations obligation
                  ON obligation.supplier_id = submission.supplier_id
@@ -290,6 +295,21 @@ final class PayrollSubmissionTransportAttemptRepository
                  ON attempt.supplier_id = submission.supplier_id
                 AND attempt.environment = submission.environment
                 AND attempt.submission_id = submission.id
+               LEFT JOIN submission_outbox outbox
+                 ON outbox.id = (
+                    SELECT MAX(candidate.id)
+                      FROM submission_outbox candidate
+                      JOIN payroll_submission_artifacts queued_artifact
+                        ON queued_artifact.supplier_id = candidate.supplier_id
+                       AND queued_artifact.environment = candidate.environment
+                       AND queued_artifact.id = candidate.artifact_id
+                       AND queued_artifact.submission_id = submission.id
+                     WHERE candidate.supplier_id = submission.supplier_id
+                       AND candidate.environment = submission.environment
+                       AND candidate.channel = "isds"
+                       AND candidate.agenda_code = obligation.agenda_code
+                       AND candidate.artifact_kind = "payroll_submission"
+                 )
               WHERE submission.supplier_id = ?
                 AND submission.environment = ?
                 AND submission.status = "ready"
@@ -318,6 +338,18 @@ final class PayrollSubmissionTransportAttemptRepository
                 'period_start' => (string) $row['period_start'],
                 'period_end' => (string) $row['period_end'],
                 'created_at' => (string) $row['created_at'],
+                'outbox_id' => $row['outbox_id'] === null
+                    ? null
+                    : (int) $row['outbox_id'],
+                'outbox_dispatch_state' => $row['outbox_dispatch_state'] === null
+                    ? null
+                    : (string) $row['outbox_dispatch_state'],
+                'outbox_acceptance_state' => $row['outbox_acceptance_state'] === null
+                    ? null
+                    : (string) $row['outbox_acceptance_state'],
+                'outbox_external_message_id' => $row['outbox_external_message_id'] === null
+                    ? null
+                    : (string) $row['outbox_external_message_id'],
             ];
         }
 

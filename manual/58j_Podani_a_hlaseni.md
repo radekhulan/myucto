@@ -247,6 +247,11 @@ přihlášení a potvrzení odeslání. Samostatně potom sledujte protokol až 
 přijetí. Opakování stejné přípravy vrací již vytvořený výsledek, i když
 tlačítko použijete později znovu.
 
+Jakmile už pro podání existuje odchozí zpráva ISDS, přehled ukáže její číslo a
+aktuální stav. Další odeslání přes ISDS i VREP zablokuje, aby účetní omylem
+nepodala tutéž datovou větu dvakrát. Pokračujte odkazem **Otevřít odchozí
+zprávy**, kde se dokončí přihlášení, odeslání a evidence doručenky.
+
 Ve **Stavu odeslání** nemusíte opisovat GUID ani identifikátory osoby a vztahu.
 Akce **Stornovat vybrané vztahy** se nabídne až po konečném protokolu. Aplikace
 načte součásti přímo ze zmrazeného řádného XML; prohlížeč posílá serveru jen

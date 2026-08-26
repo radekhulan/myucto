@@ -203,6 +203,10 @@ describe('PayrollTransportHistoryPanel', () => {
         period_start: '2026-07-01',
         period_end: '2026-07-31',
         created_at: '2026-08-26 07:00:00',
+        outbox_id: null,
+        outbox_dispatch_state: null,
+        outbox_acceptance_state: null,
+        outbox_external_message_id: null,
       }],
     })
     const wrapper = mount(PayrollTransportHistoryPanel)
@@ -231,6 +235,10 @@ describe('PayrollTransportHistoryPanel', () => {
         period_start: '2026-07-01',
         period_end: '2026-07-31',
         created_at: '2026-08-26 07:00:00',
+        outbox_id: null,
+        outbox_dispatch_state: null,
+        outbox_acceptance_state: null,
+        outbox_external_message_id: null,
       }],
     })
     const wrapper = mount(PayrollTransportHistoryPanel)
@@ -261,6 +269,10 @@ describe('PayrollTransportHistoryPanel', () => {
         period_start: '2026-07-01',
         period_end: '2026-07-31',
         created_at: '2026-08-26 07:00:00',
+        outbox_id: null,
+        outbox_dispatch_state: null,
+        outbox_acceptance_state: null,
+        outbox_external_message_id: null,
       }],
     })
     const wrapper = mount(PayrollTransportHistoryPanel)
@@ -271,6 +283,36 @@ describe('PayrollTransportHistoryPanel', () => {
 
     expect(m.gatewayStartPayroll).toHaveBeenCalledWith(77)
     expect(wrapper.find('[data-test="transport-ready-gateway-91"]').exists()).toBe(true)
+  })
+
+  it('podání už vložené do ISDS fronty nenabídne k duplicitnímu odeslání', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [],
+      ready_submissions: [{
+        submission_id: 91,
+        submission_kind: 'cancellation',
+        submission_status: 'ready',
+        corrects_submission_id: 70,
+        period_start: '2026-07-01',
+        period_end: '2026-07-31',
+        created_at: '2026-08-26 07:00:00',
+        outbox_id: 77,
+        outbox_dispatch_state: 'ready',
+        outbox_acceptance_state: 'unknown',
+        outbox_external_message_id: null,
+      }],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect((wrapper.get('[data-test="transport-ready-isds-91"]').element as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect((wrapper.get('[data-test="transport-ready-vrep-91"]').element as HTMLButtonElement).disabled)
+      .toBe(true)
+    expect(wrapper.get('[data-test="transport-ready-existing-outbox-91"]').text()).toContain('77')
+    expect(m.enqueueJmhzIsds).not.toHaveBeenCalled()
+    expect(m.sendJmhzTransport).not.toHaveBeenCalled()
   })
 
   it('převzetí neoznačí jako přijaté a uzavření u něj vůbec nenabídne', async () => {

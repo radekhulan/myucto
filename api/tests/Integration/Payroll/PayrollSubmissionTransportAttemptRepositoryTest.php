@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -540,6 +541,46 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         self::assertSame('cancellation', $ready[0]['submission_kind']);
         self::assertSame($this->submissionId, $ready[0]['corrects_submission_id']);
         self::assertSame('2026-07-01', $ready[0]['period_start']);
+        self::assertNull($ready[0]['outbox_id']);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_submission_artifacts
+                (supplier_id, environment, submission_id, artifact_kind,
+                 direction, mime_type, content_ciphertext, byte_size,
+                 artifact_sha256, channel, idempotency_key_hash)
+             VALUES (?, ?, ?, "outbound_xml", "outbound", "application/xml",
+                     "enc:v2:test", 1, ?, "isds", ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $correctiveId,
+            str_repeat('d', 64),
+            hash('sha256', "corrective-artifact:{$this->supplierId}", true),
+        ]);
+        $artifactId = (int) $pdo->lastInsertId();
+        $queued = (new SubmissionOutboxRepository($this->db))->enqueue([
+            'supplier_id' => $this->supplierId,
+            'environment' => self::ENVIRONMENT,
+            'channel' => 'isds',
+            'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+            'recipient_id' => null,
+            'recipient_box_id' => '9tsaf6s',
+            'subject' => 'Syntetické storno JMHZ',
+            'artifact_kind' => 'payroll_submission',
+            'artifact_id' => $artifactId,
+            'artifact_filename' => 'synthetic-jmhz.xml',
+            'artifact_sha256' => str_repeat('d', 64),
+            'correlation_reference' => 'TEST-JMHZ-READY-OUTBOX-' . $correctiveId,
+            'created_by' => null,
+        ], 'ready-corrective-outbox-' . $correctiveId);
+
+        $queuedReady = $this->repository->listReadyJmhzSubmissions(
+            $this->supplierId,
+            self::ENVIRONMENT,
+        );
+        self::assertCount(1, $queuedReady);
+        self::assertSame((int) $queued['row']['id'], $queuedReady[0]['outbox_id']);
+        self::assertSame('ready', $queuedReady[0]['outbox_dispatch_state']);
 
         $this->repository->open(
             $this->supplierId,
