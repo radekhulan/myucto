@@ -3376,7 +3376,7 @@
                     "corrects": "navazuje na podání č. {id}",
                     "kind": {
                         "regular": "Řádné hlášení",
-                        "correction": "Storno vybraných vztahů",
+                        "correction": "Opravné hlášení",
                         "cancellation": "Storno celého hlášení"
                     },
                     "send_isds": "Odeslat přes ISDS",
@@ -3478,13 +3478,16 @@
                     "unavailable": "Stornovat lze jen hlášení, které už bylo odeslané na ČSSZ."
                 },
                 "correction": {
-                    "action": "Stornovat vybrané vztahy",
-                    "title": "Storno vybraných vztahů za období {period}",
-                    "description": "Podání druhu O zneplatní u ČSSZ pouze vybrané součásti původního hlášení. Nejde o opravu hodnot: vybrané vztahy se stornují a opravené údaje se případně podají samostatně. Identifikátory načítá server ze zmrazeného podání.",
-                    "loading": "Načítám pracovní vztahy ze zmrazeného podání…",
-                    "empty": "Ve zmrazeném podání nejsou žádné pracovní vztahy, které by šlo částečně zneplatnit.",
+                    "action": "Opravit hodnoty hlášení",
+                    "title": "Obsahová oprava za období {period}",
+                    "description": "Vyberte aktuální úplnou přípravu po opravě mzdových údajů. Přijatý formulář se odešle celý znovu se zachovanou identitou; odmítnutý nebo chybějící formulář se doplní jako nový. Souhrn a PVPOJ se vždy kontrolují za všechny osoby firmy.",
+                    "preparation_label": "Číslo aktuální přípravy JMHZ",
+                    "preparation_placeholder": "Např. 125",
+                    "load": "Načíst výsledky formulářů",
+                    "loading": "Ověřuji podepsané protokoly a skládám účinný stav formulářů…",
+                    "empty": "Zadejte aktuální přípravu a načtěte výsledky formulářů.",
                     "search_label": "Najít pracovní vztah",
-                    "search_placeholder": "ID vztahu, osoby nebo formuláře",
+                    "search_placeholder": "ID vztahu nebo osoby",
                     "selection_count": "Vybráno {selected} z {total}",
                     "protocol_errors": "Poslední zobrazený protokol označil {count} pracovních vztahů konkrétní chybou.",
                     "select_errors": "Vybrat označené protokolem",
@@ -3492,13 +3495,17 @@
                     "no_results": "Tomuto hledání neodpovídá žádný pracovní vztah.",
                     "employment": "ID pracovního vztahu u ČSSZ: {id}",
                     "person": "Identifikátor osoby u ČSSZ: {id}",
-                    "impact_confirmation": "Rozumím, že podání druhu O zneplatní pouze vybrané součásti. Zbývající součásti zůstanou u ČSSZ platné a případné opravené údaje musím podat následným krokem.",
-                    "confirm": "Připravit storno vybraných vztahů",
+                    "action_kind": {
+                        "correct_values": "Opravit přijaté hodnoty",
+                        "complete_form": "Doplnit odmítnutý/chybějící formulář"
+                    },
+                    "impact_confirmation": "Potvrzuji, že aktuální příprava obsahuje úplné opravené údaje. Aplikace zmrazí celé vybrané formuláře a při dopadu také souhrn a PVPOJ za všechny osoby; odeslání provedu samostatnou výslovnou akcí.",
+                    "confirm": "Připravit obsahovou opravu",
                     "cancel": "Nechat být",
-                    "frozen": "Storno vybraných vztahů je připravené jako podání č. {id}. Zkontrolujte je a odešlete stejně jako řádné hlášení.",
-                    "already": "Stejné storno vybraných vztahů už bylo připravené — je to podání č. {id}.",
-                    "load_failed": "Pracovní vztahy původního podání se nepodařilo načíst.",
-                    "failed": "Storno vybraných vztahů se nepodařilo připravit."
+                    "frozen": "Obsahová oprava je připravená jako podání č. {id}. Zkontrolujte ji a odešlete samostatnou akcí.",
+                    "already": "Stejná obsahová oprava už byla zmrazená — je to podání č. {id}.",
+                    "load_failed": "Účinný stav formulářů se nepodařilo autoritativně načíst.",
+                    "failed": "Obsahovou opravu se nepodařilo připravit."
                 }
             },
             "signing": {

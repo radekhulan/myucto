@@ -60,6 +60,13 @@ final class JmhzDeadlinePolicy
         return $this->forPeriod($periodStart)->rulesetId !== self::TRANSITION_RULESET;
     }
 
+    public function lastCorrectionOn(string $periodStart): string
+    {
+        $dueYear = (int) substr($this->forPeriod($periodStart)->dueOn, 0, 4);
+
+        return sprintf('%04d-12-31', $dueYear + 10);
+    }
+
     private function window(
         string $earliestSubmissionOn,
         string $dueOn,

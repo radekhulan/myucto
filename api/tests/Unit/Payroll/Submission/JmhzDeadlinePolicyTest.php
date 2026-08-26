@@ -55,6 +55,12 @@ final class JmhzDeadlinePolicyTest extends TestCase
         self::assertSame('business_days', $may->calendarBasis);
     }
 
+    public function testCorrectionDeadlineUsesTheYearInWhichTheReportWasDue(): void
+    {
+        self::assertSame('2036-12-31', $this->policy->lastCorrectionOn('2026-11-01'));
+        self::assertSame('2037-12-31', $this->policy->lastCorrectionOn('2026-12-01'));
+    }
+
     public function testRulesetHashIsStableAndDifferentByWindow(): void
     {
         $transition = $this->policy->forPeriod('2026-03-01');

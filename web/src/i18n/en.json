@@ -3376,7 +3376,7 @@
                     "corrects": "follows submission no. {id}",
                     "kind": {
                         "regular": "Regular report",
-                        "correction": "Selected-employment cancellation",
+                        "correction": "Amended report",
                         "cancellation": "Whole-report cancellation"
                     },
                     "send_isds": "Send via ISDS",
@@ -3478,13 +3478,16 @@
                     "unavailable": "Only a report already sent to ČSSZ can be cancelled."
                 },
                 "correction": {
-                    "action": "Cancel selected employments",
-                    "title": "Cancellation of selected employments for {period}",
-                    "description": "A type O submission voids only the selected components of the original report at ČSSZ. It does not correct values: selected employments are cancelled and corrected data is filed separately if needed. The server reads identifiers from the frozen submission.",
-                    "loading": "Loading employments from the frozen submission…",
-                    "empty": "The frozen submission contains no employments that can be partially voided.",
+                    "action": "Correct reported values",
+                    "title": "Content correction for {period}",
+                    "description": "Select the current complete preparation after correcting payroll data. An accepted form is filed again in full with the same identity; a rejected or missing form is added as a new form. Summary and PVPOJ are always checked for everyone in the company.",
+                    "preparation_label": "Current JMHZ preparation number",
+                    "preparation_placeholder": "For example 125",
+                    "load": "Load form results",
+                    "loading": "Verifying signed protocols and resolving the effective form state…",
+                    "empty": "Enter the current preparation and load form results.",
                     "search_label": "Find an employment",
-                    "search_placeholder": "Employment, person or form ID",
+                    "search_placeholder": "Employment or person ID",
                     "selection_count": "Selected {selected} of {total}",
                     "protocol_errors": "The last displayed protocol identified {count} employments with a specific error.",
                     "select_errors": "Select those flagged by the protocol",
@@ -3492,13 +3495,17 @@
                     "no_results": "No employment matches this search.",
                     "employment": "ČSSZ employment ID: {id}",
                     "person": "ČSSZ person identifier: {id}",
-                    "impact_confirmation": "I understand that a type O submission voids only the selected components. The remaining components stay valid at ČSSZ and any corrected data must be filed in a subsequent step.",
-                    "confirm": "Prepare selected-employment cancellation",
+                    "action_kind": {
+                        "correct_values": "Correct accepted values",
+                        "complete_form": "Complete rejected/missing form"
+                    },
+                    "impact_confirmation": "I confirm that the current preparation contains complete corrected data. The application will freeze each selected form in full and, when affected, the summary and PVPOJ for everyone; sending remains a separate explicit action.",
+                    "confirm": "Prepare content correction",
                     "cancel": "Leave it",
-                    "frozen": "The selected-employment cancellation is prepared as submission no. {id}. Review it and send it the same way as a regular report.",
-                    "already": "The same selected-employment cancellation already exists — it is submission no. {id}.",
-                    "load_failed": "The employments from the original submission could not be loaded.",
-                    "failed": "The selected-employment cancellation could not be prepared."
+                    "frozen": "The content correction is prepared as submission no. {id}. Review it and send it with a separate action.",
+                    "already": "The same content correction was already frozen — it is submission no. {id}.",
+                    "load_failed": "The effective form state could not be resolved authoritatively.",
+                    "failed": "The content correction could not be prepared."
                 }
             },
             "signing": {

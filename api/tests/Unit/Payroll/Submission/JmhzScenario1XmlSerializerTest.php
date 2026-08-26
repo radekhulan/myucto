@@ -4,9 +4,17 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionForm;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionPlan;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
@@ -15,6 +23,202 @@ use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1XmlSerializerTest extends TestCase
 {
+    public function testAcceptedFormCorrectionKeepsBothGuidsAndEmitsCompleteBody(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            $this->resolution(),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+            ]),
+        );
+
+        self::assertStringContainsString(
+            '<idPodani>AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB</idPodani>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<typPodani>O</typPodani>', $result['xml']);
+        self::assertStringContainsString(
+            '<idFormulare>CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD</idFormulare>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<typFormulare>O</typFormulare>', $result['xml']);
+        self::assertStringContainsString('<form:bezPriznaku', $result['xml']);
+        self::assertStringContainsString('<form:zuctovanoCelkem>1000</form:zuctovanoCelkem>', $result['xml']);
+        self::assertStringContainsString('<so:souhrn>', $result['xml']);
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $result['xml']);
+        self::assertStringContainsString('<formularePocetVBaliku>3</formularePocetVBaliku>', $result['xml']);
+    }
+
+    public function testContentCorrectionHasNoLocalBlockingControlCoverageGap(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            $this->resolution(),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+            ]),
+        );
+
+        $report = JmhzScenario1ControlValidator::create()->validate(
+            $result['xml'],
+            new JmhzControlContext('2026-08-26', schemaValidated: true),
+        );
+
+        self::assertSame([], array_map(
+            static fn (JmhzControlFinding $finding): int => $finding->controlId,
+            $report->coverageGaps(),
+        ));
+        self::assertTrue($report->submittable());
+    }
+
+    public function testRejectedFormIsResubmittedAsRWithNewGuidAndCompleteBody(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            $this->resolution(),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => '019A0000-0000-7000-8000-000000000001'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::replaceRejected(
+                    101,
+                    affectsSummary: false,
+                    affectsPvpoj: false,
+                ),
+            ]),
+        );
+
+        self::assertStringContainsString('<typPodani>O</typPodani>', $result['xml']);
+        self::assertStringContainsString(
+            '<idFormulare>019A0000-0000-7000-8000-000000000001</idFormulare>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<typFormulare>R</typFormulare>', $result['xml']);
+        self::assertStringContainsString('<form:bezPriznaku', $result['xml']);
+        self::assertStringNotContainsString('<so:souhrn>', $result['xml']);
+        self::assertStringNotContainsString('<pvpoj:PVPOJ>', $result['xml']);
+        self::assertStringContainsString('<formularePocetVBaliku>1</formularePocetVBaliku>', $result['xml']);
+    }
+
+    public function testCorrectionHeaderRefusesMoreThan1502Components(): void
+    {
+        $method = new \ReflectionMethod(JmhzScenario1XmlSerializer::class, 'correctionHeader');
+
+        try {
+            $method->invoke(
+                new JmhzScenario1XmlSerializer(),
+                new \DOMDocument('1.0', 'UTF-8'),
+                $this->resolution()->requireResolvedDocument()->payload,
+                JmhzSubmissionEnvelope::createForExistingSubmission(
+                    'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                    [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                    '2026-08-26T09:30:00Z',
+                    'MyÚčto.cz',
+                    '5.6.0',
+                ),
+                1503,
+            );
+            self::fail('Opravný balík nad 1502 součástí musí být odmítnut.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_xml_form_limit_exceeded', $exception->validationCode);
+        }
+    }
+
+    public function testCorrectionAggregatesComeFromTheWholePreparationNotSelectedForms(): void
+    {
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $secondPerson = $payload['people'][0];
+        $secondPerson['employee_id'] = 12;
+        $secondPerson['employments'][0]['employment_id'] = 102;
+        $payload['people'][] = $secondPerson;
+        $payload['employer']['summary_totals']['advance_tax_after_credits'] = 999;
+        $payload['employer']['pvpoj']['values']['pojistne']['pojistneCelkem'] = 888;
+        $resolution = new JmhzScenario1Resolution(
+            new JmhzScenario1NormalizedDocument($payload),
+            [],
+        );
+
+        $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            $resolution,
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => 'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: true,
+                    affectsPvpoj: true,
+                ),
+            ]),
+        );
+
+        self::assertSame(1, substr_count($result['xml'], '<formularOsoby'));
+        self::assertStringContainsString(
+            '<so:danZalohaPoSleve>999</so:danZalohaPoSleve>',
+            $result['xml'],
+        );
+        self::assertStringContainsString(
+            '<pvpoj:pojistneCelkem>888</pvpoj:pojistneCelkem>',
+            $result['xml'],
+        );
+    }
+
+    public function testAcceptedCorrectionRefusesAChangedFormGuid(): void
+    {
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('původní GUID');
+
+        (new JmhzScenario1XmlValidator())->dryRunCorrection(
+            $this->resolution(),
+            JmhzSubmissionEnvelope::createForExistingSubmission(
+                'AAAAAAAA-1111-2222-8333-BBBBBBBBBBBB',
+                [101 => 'EEEEEEEE-7777-8888-8999-FFFFFFFFFFFF'],
+                '2026-08-26T09:30:00Z',
+                'MyÚčto.cz',
+                '5.6.0',
+            ),
+            JmhzContentCorrectionPlan::create([
+                JmhzContentCorrectionForm::amendAccepted(
+                    101,
+                    'CCCCCCCC-4444-5555-8666-DDDDDDDDDDDD',
+                    affectsSummary: false,
+                    affectsPvpoj: false,
+                ),
+            ]),
+        );
+    }
+
     public function testResolvedProfileProducesByteStableXmlValidAgainstPinnedSchema(): void
     {
         $result = (new JmhzScenario1XmlValidator())->dryRun(

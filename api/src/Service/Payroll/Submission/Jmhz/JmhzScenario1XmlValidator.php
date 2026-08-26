@@ -50,6 +50,42 @@ final readonly class JmhzScenario1XmlValidator
         ];
     }
 
+    /** @return array{xml:string,sha256:string,schema:array<string,string>} */
+    public function dryRunCorrection(
+        JmhzScenario1Resolution $resolution,
+        JmhzSubmissionEnvelope $envelope,
+        JmhzContentCorrectionPlan $plan,
+    ): array {
+        if ($resolution->status() !== 'resolved' || $resolution->blockers !== []) {
+            throw new JmhzXmlException(
+                'jmhz_xml_resolution_blocked',
+                'Blokovaný dokument nelze serializovat do obsahové opravy.',
+            );
+        }
+        $document = $resolution->requireResolvedDocument();
+        $xml = $this->serializer->serializeCorrection($document, $envelope, $plan);
+        $repeated = $this->serializer->serializeCorrection($document, $envelope, $plan);
+        if (!hash_equals(hash('sha256', $repeated), hash('sha256', $xml))) {
+            throw new JmhzXmlException(
+                'jmhz_xml_not_byte_stable',
+                'Serializace téže obsahové opravy nevrátila shodné bajty.',
+            );
+        }
+        $schema = $this->schemas->entryPoint();
+        $this->assertSchemaValid($xml, $schema['path']);
+
+        return [
+            'xml' => $xml,
+            'sha256' => hash('sha256', $xml),
+            'schema' => [
+                'package_key' => $schema['package_key'],
+                'data_version' => $schema['data_version'],
+                'bundle_sha256' => $schema['bundle_sha256'],
+                'document_sha256' => $document->sha256(),
+            ],
+        ];
+    }
+
     private function assertByteStable(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,

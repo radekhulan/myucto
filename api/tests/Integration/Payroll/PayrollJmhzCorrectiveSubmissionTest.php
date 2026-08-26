@@ -10,6 +10,8 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormStateResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
@@ -18,6 +20,7 @@ use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -52,6 +55,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
     private JmhzCorrectiveSubmissionService $corrections;
+    private JmhzEffectiveFormLedgerResolver $effectiveForms;
     private PayrollSubmissionTransportAttemptRepository $attempts;
     private MockClock $clock;
     private int $supplierId;
@@ -89,12 +93,18 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $encryption,
             $this->clock,
         );
+        $frozen = new JmhzFrozenPayloadReader($this->repository, $this->submissions);
         $this->corrections = new JmhzCorrectiveSubmissionService(
             $this->repository,
             $this->submissions,
             $this->obligations,
-            new JmhzFrozenPayloadReader($this->repository, $this->submissions),
+            $frozen,
             $this->clock,
+        );
+        $this->effectiveForms = new JmhzEffectiveFormLedgerResolver(
+            $this->repository,
+            $frozen,
+            new JmhzEffectiveFormStateResolver(),
         );
         $this->attempts = new PayrollSubmissionTransportAttemptRepository($connection);
         if (!$this->attempts->isAvailable()) {
@@ -509,6 +519,146 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertSame($regularGuid, $this->headerValue($xml, 'idPodani'));
     }
 
+    public function testEffectiveFormLedgerUsesSignedOutcomesAndKeepsTenantAndEnvironmentBoundaries(): void
+    {
+        $original = $this->regularSubmissionInStatus(
+            'submitted',
+            self::SUBMISSION_GUID,
+        );
+        $acknowledgement = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<trusted-vrep-acknowledgement/>',
+            'receipt:effective-state-ack',
+            'VREP-ORIGINAL-0001',
+            'VREP_ACK',
+            'processing',
+            self::CHANNEL,
+            'receipt-effective-state-ack',
+            null,
+            $this->trustedVerifier('processing'),
+        );
+        $receipt = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $acknowledgement['submission_row_version'],
+            null,
+            '<signed-jmhz-protocol/>',
+            'receipt:effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'partially_accepted',
+            self::CHANNEL,
+            'receipt-effective-state',
+            null,
+            $this->trustedFormVerifier(),
+        );
+        self::assertSame('partially_accepted', $receipt['submission_status']);
+
+        $set = $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321', '987654322', '987654323'],
+        );
+        self::assertSame('accepted', $set->forEmployment('987654321')->state);
+        self::assertSame(self::FORM_GUID, $set->forEmployment('987654321')->formGuid);
+        self::assertSame('rejected', $set->forEmployment('987654322')->state);
+        self::assertNull($set->forEmployment('987654322')->formGuid);
+        self::assertSame('missing', $set->forEmployment('987654323')->state);
+
+        foreach ([
+            [$this->supplierId + 999999, self::ENVIRONMENT],
+            [$this->supplierId, 'production'],
+        ] as [$supplierId, $environment]) {
+            try {
+                $this->effectiveForms->resolve(
+                    $supplierId,
+                    $environment,
+                    $original['id'],
+                    ['987654321'],
+                );
+                self::fail('Cizí tenant nebo prostředí nesmí zpřístupnit efektivní stav.');
+            } catch (JmhzXmlException $exception) {
+                self::assertSame('jmhz_effective_state_root_invalid', $exception->validationCode);
+            }
+        }
+    }
+
+    public function testEffectiveFormLedgerFailsClosedForUnverifiedProtocol(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+        $receipt = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<unverified-jmhz-protocol/>',
+            'receipt:unverified-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'accepted',
+            self::CHANNEL,
+            'receipt-unverified-effective-state',
+        );
+        self::assertFalse($receipt['trusted']);
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('podepsaným protokolem');
+        $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321'],
+        );
+    }
+
+    public function testEffectiveFormLedgerFailsClosedForConflictingSignedProtocols(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+        $accepted = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<accepted-jmhz-protocol/>',
+            'receipt:accepted-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'accepted',
+            self::CHANNEL,
+            'receipt-accepted-effective-state',
+            null,
+            $this->trustedVerifier('accepted'),
+        );
+        $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $accepted['submission_row_version'],
+            null,
+            '<rejected-jmhz-protocol/>',
+            'receipt:rejected-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'rejected',
+            self::CHANNEL,
+            'receipt-rejected-effective-state',
+            null,
+            $this->trustedVerifier('rejected'),
+        );
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('rozporný konečný stav');
+        $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321'],
+        );
+    }
+
     /** @return array{id:int,row_version:int} */
     private function submittedRegularSubmission(): array
     {
@@ -618,6 +768,46 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
                 return new PayrollVerifiedReceipt(
                     $this->status,
                     $expectedCorrelationReference,
+                );
+            }
+        };
+    }
+
+    private function trustedFormVerifier(): PayrollReceiptVerifierInterface
+    {
+        return new class implements PayrollReceiptVerifierInterface {
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    'partially_accepted',
+                    $expectedCorrelationReference,
+                    [],
+                    [
+                        new PayrollVerifiedReceiptFormOutcome(
+                            'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF',
+                            null,
+                            1,
+                            'ProcessedAndComplete',
+                            'accepted',
+                            '1234567890',
+                            '987654321',
+                            [],
+                        ),
+                        new PayrollVerifiedReceiptFormOutcome(
+                            'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
+                            null,
+                            3,
+                            'Rejected',
+                            'rejected',
+                            '1234567891',
+                            '987654322',
+                            [],
+                        ),
+                    ],
                 );
             }
         };

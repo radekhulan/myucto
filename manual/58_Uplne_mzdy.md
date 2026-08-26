@@ -184,10 +184,11 @@ nepodporované roční odpočty nebo výstupní potvrzení závislé na chyběj�
 ověřeném přepočtu zpracujte ručně nebo s mzdovým specialistou. Chybějící
 právní skutečnost nenahrazujte podobným polem.
 
-JMHZ podporuje řízené storno celého podání a storno vybraných vztahů. Úplnou
-opravu hodnot nelze zaměňovat za zneplatnění součásti. Podrobnosti jsou v
+JMHZ podporuje řízené storno celého podání i obsahovou opravu vybraných
+formulářů z nové úplné přípravy. Přijatý formulář se opravuje se zachovanou
+identitou, odmítnutý nebo chybějící se doplní jako nový. Podrobnosti jsou v
 kapitole
-[Podání a hlášení](58j_Podani_a_hlaseni.md#storno-a-nasledna-oprava-jmhz).
+[Podání a hlášení](58j_Podani_a_hlaseni.md#storno-a-obsahova-oprava-jmhz).
 
 ## Kapitoly
 

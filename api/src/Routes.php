@@ -1236,6 +1236,14 @@ final class Routes
                 [PayrollJmhzCorrectionAction::class, 'cancelComponents'],
             );
             $g->get(
+                '/submissions/{submissionId:[0-9]+}/jmhz-content-correction',
+                [PayrollJmhzCorrectionAction::class, 'contentCorrection'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-content-correction',
+                [PayrollJmhzCorrectionAction::class, 'freezeContentCorrection'],
+            );
+            $g->get(
                 '/submissions/jmhz-protocol-import',
                 [PayrollJmhzProtocolImportAction::class, 'history'],
             );

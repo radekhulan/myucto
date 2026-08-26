@@ -8,6 +8,8 @@ const m = vi.hoisted(() => ({
   cancelJmhzSubmission: vi.fn(),
   jmhzCorrectableComponents: vi.fn(),
   cancelJmhzSubmissionComponents: vi.fn(),
+  jmhzContentCorrectionCandidates: vi.fn(),
+  freezeJmhzContentCorrection: vi.fn(),
   jmhzImportedProtocols: vi.fn(),
   jmhzImportedProtocolErrors: vi.fn(),
   importJmhzProtocol: vi.fn(),
@@ -27,6 +29,8 @@ vi.mock('@/api/payroll', () => ({
     cancelJmhzSubmission: m.cancelJmhzSubmission,
     jmhzCorrectableComponents: m.jmhzCorrectableComponents,
     cancelJmhzSubmissionComponents: m.cancelJmhzSubmissionComponents,
+    jmhzContentCorrectionCandidates: m.jmhzContentCorrectionCandidates,
+    freezeJmhzContentCorrection: m.freezeJmhzContentCorrection,
     jmhzImportedProtocols: m.jmhzImportedProtocols,
     jmhzImportedProtocolErrors: m.jmhzImportedProtocolErrors,
     importJmhzProtocol: m.importJmhzProtocol,
@@ -939,22 +943,26 @@ describe('PayrollTransportHistoryPanel', () => {
       .toContain('payroll.submissions.transport.storno.frozen 91')
   })
 
-  it('opravné podání vybírá vztahy ze zmrazeného XML bez opisování identifikátorů', async () => {
+  it('obsahová oprava rozliší opravu přijatého a doplnění odmítnutého formuláře', async () => {
     const components = [{
-      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF',
       person_external_identifier: '1234567890',
       employment_external_identifier: '987654321',
+      effective_state: 'accepted',
+      action: 'correct_values',
     }, {
-      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
       person_external_identifier: '1234567891',
       employment_external_identifier: '987654322',
+      effective_state: 'rejected',
+      action: 'complete_form',
     }]
-    m.jmhzCorrectableComponents.mockResolvedValue({
+    m.jmhzContentCorrectionCandidates.mockResolvedValue({
       environment: 'production',
       submission_id: 70,
-      components,
+      preparation_id: 125,
+      document_sha256: 'f'.repeat(64),
+      forms: components,
     })
-    m.cancelJmhzSubmissionComponents.mockResolvedValue({
+    m.freezeJmhzContentCorrection.mockResolvedValue({
       submission_id: 92,
       part_id: 1,
       artifact_id: 2,
@@ -982,27 +990,32 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await wrapper.get('[data-test="transport-correct-preparation"]').setValue('125')
+    await wrapper.get('[data-test="transport-correct-load"]').trigger('click')
     await flushPromises()
-    expect(m.jmhzCorrectableComponents).toHaveBeenCalledWith(70, 'production')
+    expect(m.jmhzContentCorrectionCandidates).toHaveBeenCalledWith(70, 125, 'production')
     expect(wrapper.get('[data-test="transport-correct-form-70"]').text())
       .toContain('payroll.submissions.transport.correction.employment 987654322')
+    expect(wrapper.get('[data-test="transport-correct-form-70"]').text())
+      .toContain('payroll.submissions.transport.correction.action_kind.complete_form')
 
     const second = wrapper.get(
-      '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEF0"] input',
+      '[data-test="transport-correct-component-987654322"] input',
     )
     await second.setValue(true)
     const submit = wrapper.get('[data-test="transport-correct-submit-70"]')
     expect(submit.attributes('disabled')).toBeDefined()
-    expect(m.cancelJmhzSubmissionComponents).not.toHaveBeenCalled()
+    expect(m.freezeJmhzContentCorrection).not.toHaveBeenCalled()
 
     await wrapper.get('[data-test="transport-correct-impact"]').setValue(true)
     await wrapper.get('[data-test="transport-correct-submit-70"]').trigger('click')
     await flushPromises()
 
-    expect(m.cancelJmhzSubmissionComponents).toHaveBeenCalledWith(
+    expect(m.freezeJmhzContentCorrection).toHaveBeenCalledWith(
       70,
+      125,
       'production',
-      [components[1]!.form_guid],
+      [components[1]!.employment_external_identifier],
     )
     expect(wrapper.get('[data-test="transport-success"]').text())
       .toContain('payroll.submissions.transport.correction.frozen 92')
@@ -1022,6 +1035,21 @@ describe('PayrollTransportHistoryPanel', () => {
       })],
     })
     await wrapper.get('[data-test="transport-reload"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(true)
+  })
+
+  it('nabídne doplnění odmítnutého formuláře u částečně přijatého hlášení', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        submission_status: 'partially_accepted',
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      })],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
 
     expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(true)
@@ -1060,10 +1088,12 @@ describe('PayrollTransportHistoryPanel', () => {
     type EmptyComponents = {
       environment: 'production'
       submission_id: number
-      components: []
+      preparation_id: number
+      document_sha256: string
+      forms: []
     }
     let resolveComponents: ((value: EmptyComponents) => void) | undefined
-    m.jmhzCorrectableComponents.mockReturnValue(new Promise<EmptyComponents>(resolve => {
+    m.jmhzContentCorrectionCandidates.mockReturnValue(new Promise<EmptyComponents>(resolve => {
       resolveComponents = resolve
     }))
     m.jmhzTransportHistory.mockResolvedValue({
@@ -1077,11 +1107,19 @@ describe('PayrollTransportHistoryPanel', () => {
     const wrapper = mount(PayrollTransportHistoryPanel)
     await flushPromises()
     await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await wrapper.get('[data-test="transport-correct-preparation"]').setValue('125')
+    await wrapper.get('[data-test="transport-correct-load"]').trigger('click')
 
     expect(wrapper.find('[data-test="transport-correct-loading"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="transport-correct-empty"]').exists()).toBe(false)
 
-    resolveComponents?.({ environment: 'production', submission_id: 70, components: [] })
+    resolveComponents?.({
+      environment: 'production',
+      submission_id: 70,
+      preparation_id: 125,
+      document_sha256: 'f'.repeat(64),
+      forms: [],
+    })
     await flushPromises()
     expect(wrapper.find('[data-test="transport-correct-loading"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="transport-correct-empty"]').exists()).toBe(true)
@@ -1108,18 +1146,22 @@ describe('PayrollTransportHistoryPanel', () => {
 
   it('umí vybrat konkrétní chybnou součást z protokolu a hledat ve vztazích', async () => {
     const components = [{
-      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF',
       person_external_identifier: '1234567891',
       employment_external_identifier: '987654321',
+      effective_state: 'accepted',
+      action: 'correct_values',
     }, {
-      form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
       person_external_identifier: '1234567891',
       employment_external_identifier: '987654322',
+      effective_state: 'rejected',
+      action: 'complete_form',
     }]
-    m.jmhzCorrectableComponents.mockResolvedValue({
+    m.jmhzContentCorrectionCandidates.mockResolvedValue({
       environment: 'production',
       submission_id: 70,
-      components,
+      preparation_id: 125,
+      document_sha256: 'f'.repeat(64),
+      forms: components,
     })
     m.pollJmhzTransportAttempt.mockResolvedValue({
       attempt: attempt({
@@ -1135,7 +1177,7 @@ describe('PayrollTransportHistoryPanel', () => {
           message: 'Chybná hodnota.',
           origin: 'cjmhz',
           control_id: 118,
-          form_guid: components[1]!.form_guid,
+          form_guid: 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
           ik_mpsv: components[1]!.person_external_identifier,
           id_ppv: components[1]!.employment_external_identifier,
           control: null,
@@ -1148,6 +1190,8 @@ describe('PayrollTransportHistoryPanel', () => {
     await wrapper.get('[data-test="transport-poll-1"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="transport-correct-70"]').trigger('click')
+    await wrapper.get('[data-test="transport-correct-preparation"]').setValue('125')
+    await wrapper.get('[data-test="transport-correct-load"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="transport-correct-protocol-hint"]').text())
@@ -1158,10 +1202,10 @@ describe('PayrollTransportHistoryPanel', () => {
 
     await wrapper.get('[data-test="transport-correct-search"]').setValue('987654322')
     expect(wrapper.find(
-      '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEEF"]',
+      '[data-test="transport-correct-component-987654321"]',
     ).exists()).toBe(false)
     expect(wrapper.find(
-      '[data-test="transport-correct-component-AAAABBBB-1111-7222-8333-CCCCDDDDEEF0"]',
+      '[data-test="transport-correct-component-987654322"]',
     ).exists()).toBe(true)
   })
 

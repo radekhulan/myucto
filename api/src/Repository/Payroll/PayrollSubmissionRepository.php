@@ -874,6 +874,39 @@ final class PayrollSubmissionRepository
         return $rows;
     }
 
+    /** @return list<array{id:int,status:string,submission_kind:string}> */
+    public function jmhzChainForRoot(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, status, submission_kind
+               FROM payroll_submissions
+              WHERE supplier_id = ? AND environment = ?
+                AND (id = ? OR corrects_submission_id = ?)
+              ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $regularSubmissionId,
+            $regularSubmissionId,
+            $regularSubmissionId,
+        ]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'řetězec podání JMHZ');
+            $rows[] = [
+                'id' => self::integer($row, 'id'),
+                'status' => self::string($row, 'status'),
+                'submission_kind' => self::string($row, 'submission_kind'),
+            ];
+        }
+
+        return $rows;
+    }
+
     public function insertSubmission(
         int $supplierId,
         string $environment,
@@ -1458,6 +1491,59 @@ final class PayrollSubmissionRepository
         }
 
         return $outcomes;
+    }
+
+    /**
+     * @return list<array{
+     *   receipt_id:int,verification_status:string,remote_status:?string,
+     *   protocol_code:string,form_guid:?string,form_remote_status:?string,
+     *   external_person_reference:?string,external_employment_reference:?string
+     * }>
+     */
+    public function listJmhzReceiptEvidenceForSubmission(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT receipt.id AS receipt_id, receipt.verification_status,
+                    receipt.remote_status, receipt.protocol_code,
+                    outcome.form_guid,
+                    outcome.remote_status AS form_remote_status,
+                    outcome.external_person_reference,
+                    outcome.external_employment_reference
+               FROM payroll_submission_receipts receipt
+               LEFT JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.receipt_id = receipt.id
+              WHERE receipt.supplier_id = ? AND receipt.environment = ?
+                AND receipt.submission_id = ?
+              ORDER BY receipt.received_at, receipt.id, outcome.id',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'důkaz protokolu JMHZ');
+            $rows[] = [
+                'receipt_id' => self::integer($row, 'receipt_id'),
+                'verification_status' => self::string($row, 'verification_status'),
+                'remote_status' => self::nullableString($row, 'remote_status'),
+                'protocol_code' => self::string($row, 'protocol_code'),
+                'form_guid' => self::nullableString($row, 'form_guid'),
+                'form_remote_status' => self::nullableString($row, 'form_remote_status'),
+                'external_person_reference' => self::nullableString(
+                    $row,
+                    'external_person_reference',
+                ),
+                'external_employment_reference' => self::nullableString(
+                    $row,
+                    'external_employment_reference',
+                ),
+            ];
+        }
+
+        return $rows;
     }
 
     public function updateSubmissionStatus(

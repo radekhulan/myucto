@@ -11,6 +11,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
@@ -21,13 +23,17 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -208,6 +214,175 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $xml,
         );
         self::assertSame(hash('sha256', $xml), $result['artifact_sha256']);
+    }
+
+    public function testContentCorrectionFreezesFullAcceptedFormWithSameGuidAndReplaysImmutableArtifact(): void
+    {
+        $original = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalXml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $original['artifact_id'],
+        );
+        $formGuid = $this->firstFormGuid($originalXml);
+        $this->acceptWithFormOutcome($original, $formGuid, 'accepted');
+
+        $service = $this->contentCorrections($this->resolution());
+        $candidates = $service->candidates(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+        );
+        self::assertCount(1, $candidates['forms']);
+        self::assertSame('correct_values', $candidates['forms'][0]['action']);
+        $employment = (string) $candidates['forms'][0]['employment_external_identifier'];
+
+        $correction = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            [$employment],
+            $this->userId,
+        );
+        self::assertTrue($correction['created']);
+        self::assertSame('ready', $correction['status']);
+        self::assertSame('correction', $correction['submission_kind']);
+        self::assertSame($original['submission_id'], $correction['corrects_submission_id']);
+        $correctionXml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $correction['artifact_id'],
+        );
+        self::assertStringContainsString('<typPodani>O</typPodani>', $correctionXml);
+        self::assertStringContainsString('<typFormulare>O</typFormulare>', $correctionXml);
+        self::assertSame($formGuid, $this->firstFormGuid($correctionXml));
+        self::assertStringContainsString('<form:bezPriznaku', $correctionXml);
+        self::assertStringContainsString('<so:souhrn>', $correctionXml);
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $correctionXml);
+
+        $replayed = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            [$employment],
+            $this->userId,
+        );
+        self::assertFalse($replayed['created']);
+        self::assertSame($correction['submission_id'], $replayed['submission_id']);
+        self::assertSame($correction['artifact_id'], $replayed['artifact_id']);
+        self::assertSame(
+            $correctionXml,
+            $this->submissions->artifactBytes($this->supplierId, $replayed['artifact_id']),
+        );
+    }
+
+    public function testContentCorrectionAddsMissingFormWithNewGuidAndWholeCompanyPvpoj(): void
+    {
+        $original = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalGuid = $this->firstFormGuid($this->submissions->artifactBytes(
+            $this->supplierId,
+            $original['artifact_id'],
+        ));
+        $this->acceptWithFormOutcome($original, $originalGuid, 'accepted');
+
+        $service = $this->contentCorrections($this->resolutionWithSecondPerson());
+        $candidates = $service->candidates(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+        );
+        self::assertCount(2, $candidates['forms']);
+        $missing = array_values(array_filter(
+            $candidates['forms'],
+            static fn (array $form): bool => $form['action'] === 'complete_form',
+        ));
+        self::assertCount(1, $missing);
+
+        $correction = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            [(string) $missing[0]['employment_external_identifier']],
+            $this->userId,
+        );
+        $xml = $this->submissions->artifactBytes($this->supplierId, $correction['artifact_id']);
+        self::assertStringContainsString('<typPodani>O</typPodani>', $xml);
+        self::assertStringContainsString('<typFormulare>R</typFormulare>', $xml);
+        self::assertNotSame($originalGuid, $this->firstFormGuid($xml));
+        self::assertMatchesRegularExpression(
+            '/<idFormulare>[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}<\/idFormulare>/',
+            $xml,
+        );
+        self::assertStringContainsString('<pvpoj:pojistneZamestnavateleCelkem>496</pvpoj:pojistneZamestnavateleCelkem>', $xml);
+        self::assertStringContainsString('<pvpoj:pojistneZamestnance>142</pvpoj:pojistneZamestnance>', $xml);
+        self::assertStringContainsString('<pvpoj:pojistneCelkem>638</pvpoj:pojistneCelkem>', $xml);
+        self::assertStringContainsString('<form:idPpv>2000000000000000000002</form:idPpv>', $xml);
+        self::assertStringNotContainsString('<form:idPpv>2000000000000000000001</form:idPpv>', $xml);
+    }
+
+    public function testDecemberCorrectionObligationUsesFollowingJanuaryDueYear(): void
+    {
+        $documents = $this->createStub(JmhzScenario1DocumentService::class);
+        $documents->method('resolve')->willReturn($this->resolution());
+        $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        $service = new JmhzContentCorrectionSubmissionService(
+            $documents,
+            new JmhzScenario1XmlValidator(),
+            JmhzScenario1ControlValidator::create(),
+            new JmhzSubmissionGuidFactory(),
+            new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
+            $frozen,
+            $this->submissionRepository,
+            $this->submissions,
+            $this->obligations,
+            new MockClock('2037-12-31 11:30:00 Europe/Prague'),
+        );
+        $method = new \ReflectionMethod($service, 'correctionObligation');
+        $method->invoke(
+            $service,
+            $this->supplierId,
+            self::ENVIRONMENT,
+            [
+                'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+                'subject_type' => 'payroll_run',
+                'subject_reference' => 'payroll_run:' . self::RUN_ID,
+                'period_start' => '2026-12-01',
+                'period_end' => '2026-12-31',
+            ],
+            9001,
+            self::PREPARATION_ID,
+            str_repeat('a', 64),
+            $this->userId,
+        );
+
+        $deadline = $this->row(
+            'SELECT deadline.due_on
+               FROM payroll_submission_deadlines deadline
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = deadline.supplier_id
+                AND obligation.environment = deadline.environment
+                AND obligation.id = deadline.obligation_id
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = ?
+                AND obligation.obligation_kind = ?',
+            [$this->supplierId, self::ENVIRONMENT, 'correction'],
+        );
+        self::assertSame('2037-12-31', $deadline['due_on']);
     }
 
     public function testRegistersMissingRegularObligationDuringFreeze(): void
@@ -596,6 +771,96 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         );
     }
 
+    /** @param array<string,mixed> $submission */
+    private function acceptWithFormOutcome(array $submission, string $formGuid, string $status): void
+    {
+        $submitted = $this->submissions->transition(
+            $this->supplierId,
+            (int) $submission['submission_id'],
+            (int) $submission['row_version'],
+            'submitted',
+            'VREP-CONTENT-CORRECTION-ROOT',
+        );
+        $verifier = new class ($formGuid, $status) implements PayrollReceiptVerifierInterface {
+            public function __construct(
+                private readonly string $formGuid,
+                private readonly string $status,
+            ) {}
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    $this->status,
+                    $expectedCorrelationReference,
+                    [],
+                    [new PayrollVerifiedReceiptFormOutcome(
+                        $this->formGuid,
+                        null,
+                        $this->status === 'accepted' ? 1 : 3,
+                        $this->status === 'accepted' ? 'ProcessedAndComplete' : 'Rejected',
+                        $this->status,
+                        '1000000001',
+                        '2000000000000000000001',
+                        [],
+                    )],
+                );
+            }
+        };
+        $result = $this->submissions->importReceipt(
+            $this->supplierId,
+            (int) $submission['submission_id'],
+            $submitted['row_version'],
+            null,
+            '<signed-jmhz-protocol/>',
+            'receipt:content-correction-root',
+            'VREP-CONTENT-CORRECTION-ROOT',
+            'CSSZ_JMHZ',
+            $status,
+            'vrep_apep',
+            'receipt-content-correction-root',
+            $this->userId,
+            $verifier,
+        );
+        self::assertSame($status, $result['submission_status']);
+    }
+
+    private function contentCorrections(JmhzScenario1Resolution $resolution): JmhzContentCorrectionSubmissionService
+    {
+        $documents = $this->createMock(JmhzScenario1DocumentService::class);
+        $documents->expects(self::exactly(2))->method('resolve')->willReturn($resolution);
+        $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        $clock = new MockClock('2026-08-05 11:30:00 Europe/Prague');
+
+        return new JmhzContentCorrectionSubmissionService(
+            $documents,
+            new JmhzScenario1XmlValidator(),
+            JmhzScenario1ControlValidator::create(),
+            new JmhzSubmissionGuidFactory(),
+            new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
+            $frozen,
+            $this->submissionRepository,
+            $this->submissions,
+            $this->obligations,
+            $clock,
+        );
+    }
+
+    private function firstFormGuid(string $xml): string
+    {
+        $dom = new DOMDocument();
+        self::assertTrue($dom->loadXML($xml));
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $node = $xpath->query('/p:jmhz/p:formulareOsob/p:formularOsoby[1]/p:hlavicka/p:idFormulare')->item(0);
+        self::assertNotNull($node);
+
+        return trim($node->textContent);
+    }
+
     private function bridge(
         ?JmhzScenario1Resolution $resolution = null,
     ): JmhzSubmissionBridgeService {
@@ -660,6 +925,34 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     private function resolutionWithBrokenPvpoj(): JmhzScenario1Resolution
     {
         return $this->resolutionFor($this->pvpoj(employerTotal: 247));
+    }
+
+    private function resolutionWithSecondPerson(): JmhzScenario1Resolution
+    {
+        $payload = $this->payload();
+        $second = $payload['people'][0];
+        $second['employee_id'] = 12;
+        $second['employments'][0]['employment_id'] = 102;
+        $second['employments'][0]['identity']['person_external_identifier']['value'] = '1000000012';
+        $second['employments'][0]['identity']['jmhz_employment_external_identifier']['value']
+            = '2000000000000000000002';
+        $second['employments'][0]['insurance']['relationship_id'] = 'employment:102';
+        $second['person_summary']['statutory']['net_pay']['relationships'] = [
+            ['relationship_id' => 'employment:102'],
+        ];
+        $payload['people'][] = $second;
+        $payload['ordinary_evidence'][] = [
+            'scope' => ['employee_id' => 12, 'employment_id' => 102],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
+        $payload['source_versions']['ordinary_evidence'][] = [
+            'employment_id' => 102,
+            'id' => 602,
+            'source_manifest_sha256' => str_repeat('6', 64),
+            'snapshot_fingerprint' => str_repeat('7', 64),
+        ];
+
+        return $this->resolutionFor($this->pvpoj(employerTotal: 496, people: 2), $payload);
     }
 
     /**
@@ -761,6 +1054,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         int $employerTotal = 248,
         int $officeId = 4,
         string $variableSymbol = '1234567890',
+        int $people = 1,
     ): JmhzPvpojPreview {
         return new JmhzPvpojPreview(
             7,
@@ -776,22 +1070,25 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             ],
             [[
                 'office_id' => $officeId,
-                'employee_contribution_minor_units' => 7_100,
-                'employer_contribution_minor_units' => 24_800,
-                'amount_minor_units' => 31_900,
+                'employee_contribution_minor_units' => 7_100 * $people,
+                'employer_contribution_minor_units' => 24_800 * $people,
+                'amount_minor_units' => 31_900 * $people,
             ]],
             ['revision_input_hash' => str_repeat('d', 64)],
             [
                 'pojistne' => [
-                    'zakladZamestnavateleA' => 1_000,
+                    'zakladZamestnavateleA' => 1_000 * $people,
                     'pojistneZamestnavateleA' => $employerTotal,
                     'pojistneZamestnavateleCelkem' => $employerTotal,
-                    'pojistneZamestnance' => 71,
-                    'pojistneCelkem' => $employerTotal + 71,
+                    'pojistneZamestnance' => 71 * $people,
+                    'pojistneCelkem' => $employerTotal + (71 * $people),
                 ],
-                'pojistneUhrada' => $employerTotal + 71,
+                'pojistneUhrada' => $employerTotal + (71 * $people),
             ],
-            [['employee_id' => 11]],
+            array_map(
+                static fn (int $offset): array => ['employee_id' => 11 + $offset],
+                range(0, $people - 1),
+            ),
         );
     }
 

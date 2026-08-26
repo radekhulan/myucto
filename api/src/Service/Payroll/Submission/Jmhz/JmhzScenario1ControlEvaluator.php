@@ -204,9 +204,9 @@ final class JmhzScenario1ControlEvaluator
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 118, 121, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
-            153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 207, 208, 211,
-            216, 227, 232, 235,
-            236, 240, 244, 248, 251,
+            153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 204, 207, 208,
+            211, 216, 227, 232, 233, 235,
+            236, 237, 240, 244, 248, 251,
             253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
             296, 299, 300, 301, 303, 304, 306, 307, 309, 315, 328, 329, 330, 332,
             335, 341, 342, 354, 355,
@@ -402,11 +402,14 @@ final class JmhzScenario1ControlEvaluator
             ),
             135 => $this->insuranceDaysAgainstEldpCode($projection),
             157 => $this->eldpCodeFromCodebook($projection),
+            204 => $this->componentCancellationWindow($projection, $context),
             211 => $this->cancelledFormsLeaveAtLeastOne($projection),
             232 => $this->regularStructureComplete($projection),
+            233 => $this->amendmentStructureNonEmpty($projection),
             235 => $this->declaredFormCountMatchesReality($projection),
             227 => $this->totalFormCountMatchesReality($projection),
             236 => $this->regularSubmissionHasOnlyRegularForms($projection),
+            237 => $this->cancelledFormsHaveHeaderOnly($projection),
             240 => $this->packageMetadataPresent($projection),
             341, 342 => $this->schemaValidated($context),
             244 => $this->noCreditsWithoutDeclaration($projection),
@@ -433,7 +436,7 @@ final class JmhzScenario1ControlEvaluator
             96 => $this->nonNegativeScaled($projection, '10261'),
             100 => $this->eldpValidityOrdering($projection),
             129 => $this->monthInRange($projection),
-            132 => $this->amendmentWindow($projection),
+            132 => $this->amendmentWindow($projection, $context),
             134 => $this->insuranceDaysWithinInterval($projection),
             144 => $this->obstacleWithinAgreedFund($projection, '10471'),
             145 => $this->obstacleWithinAgreedFund($projection, '10472'),
@@ -1211,8 +1214,10 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /** @return list<JmhzControlVerdict> */
-    private function amendmentWindow(JmhzAttributeProjection $projection): array
-    {
+    private function amendmentWindow(
+        JmhzAttributeProjection $projection,
+        JmhzControlContext $context,
+    ): array {
         $type = $projection->submission()->value('10007');
         if ($type !== 'O') {
             return [JmhzControlVerdict::notApplicable(
@@ -1221,11 +1226,18 @@ final class JmhzScenario1ControlEvaluator
             )];
         }
 
-        return [JmhzControlVerdict::notEvaluable(
-            JmhzAttributeProjection::PART_SUBMISSION,
-            'Desetiletá lhůta pro opravné hlášení se počítá od konce roku vzniku'
-                . ' povinnosti; opravné podání zatím serializér nestaví.',
-        )];
+        $lastAllowedOn = $this->deadlines->lastCorrectionOn(
+            $this->periodStart($projection),
+        );
+        if (strcmp($context->evaluatedOn, $lastAllowedOn) > 0) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                "Desetiletá lhůta pro opravné hlášení skončila {$lastAllowedOn}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
     }
 
     /** @return list<JmhzControlVerdict> */
@@ -2049,6 +2061,99 @@ final class JmhzScenario1ControlEvaluator
         }
 
         return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function componentCancellationWindow(
+        JmhzAttributeProjection $projection,
+        JmhzControlContext $context,
+    ): array {
+        $hasCancellation = false;
+        foreach ($projection->forms() as $form) {
+            if ($form->value('10016') === 'S') {
+                $hasCancellation = true;
+                break;
+            }
+        }
+        if (!$hasCancellation) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_FORM,
+                'Opravné podání neobsahuje stornující formulář.',
+            )];
+        }
+        $periodStart = $this->periodStart($projection);
+        if (!$this->deadlines->cancellationAllowed($periodStart)) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_FORM,
+                null,
+                'ČSSZ nepovoluje storno formuláře za leden až březen 2026.',
+            )];
+        }
+        $window = $this->deadlines->forPeriod($periodStart);
+        if (strcmp($context->evaluatedOn, $window->earliestSubmissionOn) < 0
+            || strcmp($context->evaluatedOn, $window->dueOn) > 0
+        ) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_FORM,
+                null,
+                "Storno formuláře lze podat jen od {$window->earliestSubmissionOn}"
+                    . " do {$window->dueOn}.",
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function amendmentStructureNonEmpty(JmhzAttributeProjection $projection): array
+    {
+        if ($projection->submission()->value('10007') !== 'O') {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_SUBMISSION,
+            )];
+        }
+        if ($projection->summary()->attributeIds() === []
+            && $projection->pvpoj()->attributeIds() === []
+            && $projection->forms() === []
+        ) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUBMISSION,
+                null,
+                'Opravné podání musí obsahovat souhrn, PVPOJ nebo alespoň jeden formulář.',
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function cancelledFormsHaveHeaderOnly(JmhzAttributeProjection $projection): array
+    {
+        $evaluated = 0;
+        $verdicts = [];
+        foreach ($projection->forms() as $form) {
+            if ($form->value('10016') !== 'S') {
+                continue;
+            }
+            ++$evaluated;
+            if ($form->bodies() !== []) {
+                $verdicts[] = JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_FORM,
+                    $form->ordinal,
+                    'Stornující formulář smí obsahovat pouze hlavičku.',
+                );
+            }
+        }
+        if ($evaluated === 0) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_FORM,
+                'Opravné podání neobsahuje stornující formulář.',
+            )];
+        }
+
+        return $verdicts === []
+            ? [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)]
+            : $verdicts;
     }
 
     /** @return list<JmhzControlVerdict> */

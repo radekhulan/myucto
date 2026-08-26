@@ -610,6 +610,76 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         self::assertContains(232, $this->failedIds($report));
     }
 
+    public function testContentCorrectionIsAllowedAfterTheStornoWindow(): void
+    {
+        $report = $this->validate(
+            $this->amendmentXml(),
+            new JmhzControlContext('2026-08-21', schemaValidated: true),
+        );
+
+        self::assertSame(JmhzControlOutcome::NotApplicable, $this->finding($report, 204)->outcome);
+        self::assertNotContains(204, $this->failedIds($report));
+    }
+
+    public function testComponentCancellationAfterTheWindowFailsControl204(): void
+    {
+        $report = $this->validate(
+            $this->amendmentXml('S', keepBody: false),
+            new JmhzControlContext('2026-08-21', schemaValidated: true),
+        );
+
+        self::assertContains(204, $this->failedIds($report));
+    }
+
+    public function testCancellationFormWithDataFailsControl237(): void
+    {
+        $report = $this->validate(
+            $this->amendmentXml('S'),
+            new JmhzControlContext('2026-08-14', schemaValidated: true),
+        );
+
+        self::assertContains(237, $this->failedIds($report));
+    }
+
+    public function testEmptyAmendmentFailsControl233(): void
+    {
+        $xml = (string) preg_replace(
+            '~\s*<so:souhrn>.*?</formulareOsob>~s',
+            '',
+            $this->amendmentXml(),
+        );
+
+        self::assertContains(233, $this->failedIds($this->validate($xml)));
+    }
+
+    public function testContentCorrectionAfterTenYearMaximumFailsControl132(): void
+    {
+        $report = $this->validate(
+            $this->amendmentXml(),
+            new JmhzControlContext('2037-01-01', schemaValidated: true),
+        );
+
+        self::assertContains(132, $this->failedIds($report));
+    }
+
+    public function testDecemberCorrectionUsesFollowingJanuaryDueYearForControl132(): void
+    {
+        $xml = str_replace(
+            '<mesic>7</mesic>',
+            '<mesic>12</mesic>',
+            $this->amendmentXml(),
+        );
+
+        self::assertNotContains(132, $this->failedIds($this->validate(
+            $xml,
+            new JmhzControlContext('2037-12-31', schemaValidated: true),
+        )));
+        self::assertContains(132, $this->failedIds($this->validate(
+            $xml,
+            new JmhzControlContext('2038-01-01', schemaValidated: true),
+        )));
+    }
+
     /**
      * Kontroly mimo profil se nesmí vypnout natvrdo. Jakmile se rozhodný
      * atribut v podání objeví, musí se z nich stát viditelná mezera v pokrytí,
@@ -1080,6 +1150,25 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         return JmhzScenario1ControlValidator::create()->validate(
             $xml,
             $context ?? new JmhzControlContext('2026-08-14'),
+        );
+    }
+
+    private function amendmentXml(string $formType = 'O', bool $keepBody = true): string
+    {
+        $xml = str_replace(
+            ['<typPodani>R</typPodani>', '<typFormulare>R</typFormulare>'],
+            ['<typPodani>O</typPodani>', "<typFormulare>{$formType}</typFormulare>"],
+            JmhzXmlSample::minimal(),
+        );
+        if ($keepBody) {
+            return $xml;
+        }
+
+        return (string) preg_replace(
+            '~(</hlavicka>)\s*<form:bezPriznaku>.*?</form:bezPriznaku>~s',
+            '$1',
+            $xml,
+            1,
         );
     }
 

@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -32,8 +33,79 @@ final class PayrollJmhzCorrectionAction
 
     public function __construct(
         private readonly JmhzCorrectiveSubmissionService $corrections,
+        private readonly JmhzContentCorrectionSubmissionService $contentCorrections,
         private readonly PayrollModuleAccess $access,
     ) {
+    }
+
+    /** @param array{submissionId:string} $args */
+    public function contentCorrection(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        $preparationId = $this->positiveInput($request, 'preparation_id');
+        if ($environment === null || $preparationId === null
+            || preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1
+        ) {
+            return $this->invalid($response, 'Podání, příprava nebo prostředí obsahové opravy nejsou platné.');
+        }
+        try {
+            $officeId = $this->optionalPositiveInput($request, 'office_id');
+            $result = $this->contentCorrections->candidates(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $args['submissionId'],
+                $preparationId,
+                $officeId,
+            );
+        } catch (JmhzXmlException|\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array{submissionId:string} $args */
+    public function freezeContentCorrection(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        $preparationId = $this->positiveInput($request, 'preparation_id');
+        $body = $request->getParsedBody();
+        $selected = is_array($body) ? ($body['employment_external_identifiers'] ?? null) : null;
+        if ($environment === null || $preparationId === null || !is_array($selected)
+            || preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1
+        ) {
+            return $this->invalid($response, 'Podání, příprava nebo výběr obsahové opravy nejsou platné.');
+        }
+        try {
+            $officeId = $this->optionalPositiveInput($request, 'office_id');
+            $result = $this->contentCorrections->freeze(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $args['submissionId'],
+                $preparationId,
+                array_values($selected),
+                $this->userId($request),
+                $officeId,
+            );
+        } catch (JmhzXmlException|\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result, $result['created'] ? 201 : 200)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
     }
 
     /** @param array{submissionId:string} $args */
@@ -168,6 +240,35 @@ final class PayrollJmhzCorrectionAction
         return Json::error($response, 'validation_failed', $message, 422)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    private function positiveInput(Request $request, string $name): ?int
+    {
+        $body = $request->getParsedBody();
+        $value = is_array($body) ? ($body[$name] ?? null) : null;
+        $value ??= $request->getQueryParams()[$name] ?? null;
+
+        return is_int($value) && $value > 0
+            ? $value
+            : (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1
+                ? (int) $value
+                : null);
+    }
+
+    private function optionalPositiveInput(Request $request, string $name): ?int
+    {
+        $body = $request->getParsedBody();
+        $value = is_array($body) ? ($body[$name] ?? null) : null;
+        $value ??= $request->getQueryParams()[$name] ?? null;
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $positive = $this->positiveInput($request, $name);
+        if ($positive === null) {
+            throw new \InvalidArgumentException('Nepovinný identifikátor musí být kladné celé číslo.');
+        }
+
+        return $positive;
     }
 
     private function authorize(Request $request, Response $response): ?Response

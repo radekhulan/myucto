@@ -229,14 +229,13 @@ zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
 vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
 zrušeno v termínu), položka automaticky zmizí jako vyřešená.
 
-## Storno a následná oprava JMHZ
+## Storno a obsahová oprava JMHZ
 
 Storno JMHZ nevzniká přepsáním původního XML. V **Stavu odeslání** otevřete
 způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** zruší
-celé hlášení za období. **Stornovat vybrané vztahy** vytvoří podání druhu O,
-které zneplatní pouze vybrané součásti podle konkrétních pracovněprávních
-vztahů. Tato druhá akce sama neopravuje jejich hodnoty. Aplikace vytvoří nový
-neměnný artefakt s vlastní identitou a vazbou na původní podání.
+celé hlášení za období. **Opravit hodnoty hlášení** pracuje s aktuální úplnou
+přípravou JMHZ po opravě mzdových údajů a vytvoří skutečné obsahové opravné
+hlášení. Aplikace vytvoří nový neměnný artefakt s vazbou na původní podání.
 
 Příprava storna sama nic neodešle. Nový artefakt se ve **Stavu odeslání** ukáže
 v oddílu **Připravená podání čekají na odeslání** se svým přesným číslem,
@@ -256,16 +255,21 @@ aktuální stav. Další odeslání přes ISDS i VREP zablokuje, aby účetní o
 nepodala tutéž datovou větu dvakrát. Pokračujte odkazem **Otevřít odchozí
 zprávy**, kde se dokončí přihlášení, odeslání a evidence doručenky.
 
-Ve **Stavu odeslání** nemusíte opisovat GUID ani identifikátory osoby a vztahu.
-Akce **Stornovat vybrané vztahy** se nabídne až po konečném protokolu. Aplikace
-načte součásti přímo ze zmrazeného řádného XML; prohlížeč posílá serveru jen
-vybrané GUIDy a zákonné identifikátory znovu doplní server z neměnného originálu.
-Ve větším seznamu můžete hledat podle identifikátoru vztahu nebo osoby. Nelze
-vybrat všechny součásti — pokud nemá žádná zůstat platná, použijte storno celého
-podání. U částečně přijatého hlášení se akce odemkne až po doložení výsledku
-jednotlivých formulářů z úplného protokolu ČSSZ. Plné sestavení opravného
-hlášení s novými hodnotami z opravné mzdové revize tato obrazovka zatím
-nenabízí; nepovažujte storno vybraných vztahů za dokončenou opravu údajů.
+Ve **Stavu odeslání** nemusíte opisovat GUID. Zadejte číslo aktuální úplné
+přípravy a aplikace spojí neměnné odeslané XML s výsledky jednotlivých formulářů
+z přijatých podepsaných protokolů ČSSZ. Neověřený, neúplný nebo rozporný protokol
+opravu zablokuje. U přijatého formuláře nabídne **Opravit přijaté hodnoty** a
+odešle jeho úplné opravené tělo se zachovanou identitou. U odmítnutého,
+stornovaného nebo dosud chybějícího formuláře nabídne **Doplnit
+odmítnutý/chybějící formulář** a vytvoří novou identitu formuláře.
+
+Vyberete jen vztahy, jejichž obsah chcete změnit, ale souhrn a PVPOJ se při
+dopadu kontrolují proti úplnému aktuálnímu setu všech osob firmy. Tím se
+pojistný přehled nikdy nepřepočítá jen z vybrané podmnožiny. Příprava opravy
+zůstává oddělená od odeslání: nejprve potvrdíte zmrazení přesných bajtů XML a
+teprve potom podání odešlete v oddílu připravených podání. Opakovaná stejná
+akce vrátí tentýž zmrazený artefakt. Testovací a produkční prostředí mají
+oddělené řetězce i idempotenci.
 
 ## Evidenční list důchodového pojištění
 

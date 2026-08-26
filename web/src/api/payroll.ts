@@ -3394,6 +3394,21 @@ export interface PayrollJmhzCorrectableComponent {
   employment_external_identifier: string
 }
 
+export interface PayrollJmhzContentCorrectionForm {
+  person_external_identifier: string
+  employment_external_identifier: string
+  effective_state: 'accepted' | 'rejected' | 'cancelled' | 'missing'
+  action: 'correct_values' | 'complete_form'
+}
+
+export interface PayrollJmhzContentCorrectionCandidates {
+  environment: PayrollJmhzTransportEnvironment
+  submission_id: number
+  preparation_id: number
+  document_sha256: string
+  forms: PayrollJmhzContentCorrectionForm[]
+}
+
 export interface PayrollJmhzTransportHistory {
   environment: PayrollJmhzTransportEnvironment
   attempts: PayrollJmhzTransportAttempt[]
@@ -4750,6 +4765,27 @@ export const payrollApi = {
   ) => api.post<PayrollJmhzCorrectiveSubmission>(
     `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
     { environment, form_guids: formGuids },
+  ).then(response => response.data),
+  jmhzContentCorrectionCandidates: (
+    submissionId: number,
+    preparationId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzContentCorrectionCandidates>(
+    `/payroll/submissions/${submissionId}/jmhz-content-correction`,
+    { params: { environment, preparation_id: preparationId } },
+  ).then(response => response.data),
+  freezeJmhzContentCorrection: (
+    submissionId: number,
+    preparationId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    employmentExternalIdentifiers: string[],
+  ) => api.post<PayrollJmhzCorrectiveSubmission>(
+    `/payroll/submissions/${submissionId}/jmhz-content-correction`,
+    {
+      environment,
+      preparation_id: preparationId,
+      employment_external_identifiers: employmentExternalIdentifiers,
+    },
   ).then(response => response.data),
   /** Protokoly načtené ze souboru, od nejnovějšího období. */
   jmhzImportedProtocols: (
