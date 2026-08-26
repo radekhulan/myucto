@@ -1227,7 +1227,8 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             'balance_rounding_mode' => 'exact_minor_units',
             'home_office_policy' => 'not_used',
             'travel_expense_policy' => 'not_used',
-            'four_eyes_required' => true,
+            'leave_entitlement_weeks' => 4,
+            'four_eyes_required' => false,
             'automatic_calculation_enabled' => true,
             // Vypnuté automatické zaúčtování je právě ten případ, kdy dosud
             // neexistovala žádná cesta, jak mzdy zaúčtovat.

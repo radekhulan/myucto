@@ -1164,7 +1164,7 @@
             "command_done": "Stav mzdového běhu byl změněn.",
             "command_failed": "Příkaz mzdového běhu se nepodařilo provést.",
             "payments_unsettled": "Běh zatím není skutečně uhrazený. V agendě Mzdové příkazy a úhrady spárujte všechny částky s bankovními pohyby nebo zaúčtovanými pokladními doklady a vyřešte případné vratky či storna.",
-            "incoming_refund_unresolved": "Běh obsahuje nevyřešenou příchozí opravnou vratku. Tu nelze vložit do odchozí platební dávky a aktuální agenda ji zatím neumí připojit k mzdovému závazku bez takové dávky. Běh proto zůstává otevřený; nevytvářejte falešnou odchozí platbu.",
+            "incoming_refund_unresolved": "Běh zatím není zcela vypořádaný a obsahuje nejméně jednu příchozí opravnou vratku. Běžné odchozí úhrady nejprve spárujte v agendě Mzdové příkazy a úhrady. Příchozí vratku nelze vložit do odchozí dávky a aktuální agenda ji zatím neumí připojit k mzdovému závazku bez takové dávky; nevytvářejte proto falešnou odchozí platbu.",
             "empty": "Pro zvolené období není mzdový běh",
             "empty_hint": "Zkontrolujte vstupy a vytvořte první běh tlačítkem nahoře.",
             "run_label": "Mzdy za {period}",
