@@ -9,7 +9,6 @@ import {
   type PayrollDocumentBatchReport,
   type PayrollDocumentList,
   type PayrollPeriodExportScope,
-  type PayrollPersonOption,
   type PayrollTaxCertificateKind,
   type PayrollTaxCertificateGenerationPayload,
 } from '@/api/payroll'
@@ -18,7 +17,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
-import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
@@ -53,7 +52,7 @@ const activeTab = ref<'monthly' | 'annual' | 'archive'>(
 const focusPersonId = ref<number | null>(payrollQueryId(route.query, 'person'))
 const data = ref<PayrollDocumentList | null>(null)
 const annualItems = ref<PayrollDocument[]>([])
-const people = ref<PayrollPersonOption[]>([])
+const focusPersonName = ref<string | null>(null)
 const selectedEmployeeId = ref<number | null>(focusPersonId.value)
 const loading = ref(true)
 const generatingRevisionId = ref<number | null>(null)
@@ -111,10 +110,8 @@ const visibleItems = computed(() =>
       ? annualItems.value
       : [])
 const focusName = computed(() => {
-  const id = focusPersonId.value
-  if (id === null) return null
-  return people.value.find(person => person.id === id)?.full_name
-    ?? t('payroll.agendas.focus.unknown_person')
+  if (focusPersonId.value === null) return null
+  return focusPersonName.value ?? t('payroll.agendas.focus.unknown_person')
 })
 /**
  * Server zúžení uplatnil a nezbylo nic. Tichá prázdná tabulka by tvrdila „ten
@@ -127,16 +124,23 @@ const focusMissing = computed(() =>
   && visibleItems.value.length === 0)
 function clearFocus(): void {
   focusPersonId.value = null
+  focusPersonName.value = null
   const query = { ...route.query }
   delete query.person
   void router.replace({ query })
   reload()
 }
-const employeeOptions = computed(() => people.value.map(person => ({
-  value: person.id,
-  label: person.full_name,
-  secondary: person.needs_setup ? t('payroll.documents.employee_profile_incomplete') : undefined,
-})))
+
+async function loadFocusPersonName(): Promise<void> {
+  const employeeId = focusPersonId.value
+  if (employeeId === null || focusPersonName.value !== null) return
+  try {
+    const person = await payrollApi.person(employeeId)
+    if (focusPersonId.value === employeeId) focusPersonName.value = person.full_name
+  } catch {
+    // Neplatný nebo již nepřístupný deep-link přizná stávající text „neznámá osoba".
+  }
+}
 const annualActions = computed<ActionItem[]>(() => {
   const disabled = selectedEmployeeId.value === null
     || generatingAnnualKind.value !== null
@@ -263,34 +267,26 @@ async function load(): Promise<void> {
   try {
     const page = { limit: pageSize, offset: offset.value }
     if (requestedTab === 'monthly') {
-      const loaded = await payrollApi.listDocuments(
-        requestedPeriod,
-        page,
-        focusPersonId.value ?? undefined,
-      )
+      const [loaded] = await Promise.all([
+        payrollApi.listDocuments(
+          requestedPeriod,
+          page,
+          focusPersonId.value ?? undefined,
+        ),
+        loadFocusPersonName(),
+      ])
       if (sequence === loadSequence && requestedPeriod === period.value) {
         data.value = loaded
         total.value = loaded.total
       }
-      // Jmenný seznam se na měsíčním tabu jinak nenačítá, ale zúžení z odkazu
-      // musí umět říct KOHO se týká — bez jména by byl filtr neviditelný.
-      // Dotahuje se proto AŽ po výpisu a jen když zúžení opravdu je: jinak by
-      // se výpis zdržoval o požadavek, který k ničemu není.
-      if (focusPersonId.value !== null && people.value.length === 0) {
-        people.value = await payrollApi.peopleOptions().catch(() => people.value)
-      }
     } else if (requestedTab === 'annual') {
-      const [loaded, loadedPeople] = await Promise.all([
+      const [loaded] = await Promise.all([
         payrollApi.listAnnualDocuments(requestedYear, page, focusPersonId.value ?? undefined),
-        people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions(),
+        loadFocusPersonName(),
       ])
       if (sequence === loadSequence && requestedYear === year.value) {
         annualItems.value = loaded.items
         total.value = loaded.total
-        people.value = loadedPeople
-        if (selectedEmployeeId.value === null && loadedPeople.length === 1) {
-          selectedEmployeeId.value = loadedPeople[0].id
-        }
       }
     }
   } catch (error) {
@@ -694,17 +690,16 @@ onMounted(load)
       class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm"
     >
       <div class="flex flex-wrap items-end gap-3">
-        <label class="min-w-64 flex-1">
+        <div class="min-w-64 flex-1">
           <span class="form-label">{{ t('payroll.documents.select_employee') }}</span>
-          <SearchableSelect
+          <PayrollPersonSearchSelect
             v-model="selectedEmployeeId"
-            :options="employeeOptions"
             :placeholder="t('payroll.documents.select_employee_placeholder')"
             :clearable="false"
-            accent="payroll"
-            :aria-label="t('payroll.documents.select_employee')"
+            :label="t('payroll.documents.select_employee')"
+            data-test="payroll-documents-person"
           />
-        </label>
+        </div>
         <ActionBar :actions="annualActions" />
       </div>
       <p class="mt-2 text-xs text-neutral-500">{{ t('payroll.documents.payroll_sheet_hint') }}</p>
