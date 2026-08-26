@@ -74,6 +74,22 @@ final class JmhzReceiptVerifierTest extends TestCase
         self::assertSame('partially_accepted', $receipt->remoteStatus);
         self::assertSame('CID0000000001', $receipt->correlationReference);
         self::assertSame([11 => 'accepted', 12 => 'rejected'], $receipt->partStatuses);
+        self::assertCount(2, $receipt->formOutcomes);
+        self::assertSame(JmhzTransportSample::FORM_GUID, $receipt->formOutcomes[0]->formReference);
+        self::assertSame(11, $receipt->formOutcomes[0]->partId);
+        self::assertSame(1, $receipt->formOutcomes[0]->protocolStatusCode);
+        self::assertSame('ProcessedAndComplete', $receipt->formOutcomes[0]->protocolStatusName);
+        self::assertSame('accepted', $receipt->formOutcomes[0]->remoteStatus);
+        self::assertSame([], $receipt->formOutcomes[0]->errors);
+        self::assertSame(JmhzTransportSample::OTHER_FORM_GUID, $receipt->formOutcomes[1]->formReference);
+        self::assertSame(12, $receipt->formOutcomes[1]->partId);
+        self::assertSame(3, $receipt->formOutcomes[1]->protocolStatusCode);
+        self::assertSame('Rejected', $receipt->formOutcomes[1]->protocolStatusName);
+        self::assertSame('rejected', $receipt->formOutcomes[1]->remoteStatus);
+        self::assertCount(1, $receipt->formOutcomes[1]->errors);
+        self::assertSame(20118, $receipt->formOutcomes[1]->errors[0]->code);
+        self::assertSame('dis', $receipt->formOutcomes[1]->errors[0]->origin);
+        self::assertSame(118, $receipt->formOutcomes[1]->errors[0]->controlId);
     }
 
     public function testReceiptWithoutAFormMapCarriesOnlyTheOverallStatus(): void
@@ -87,6 +103,40 @@ final class JmhzReceiptVerifierTest extends TestCase
 
         self::assertSame('accepted', $receipt->remoteStatus);
         self::assertSame([], $receipt->partStatuses);
+        self::assertCount(2, $receipt->formOutcomes);
+        self::assertNull($receipt->formOutcomes[0]->partId);
+    }
+
+    public function testCompletenessProtocolDoesNotInventAFormStatusFromItsError(): void
+    {
+        $receipt = (new JmhzReceiptVerifier($this->signatures()))->verify(
+            JmhzTransportSample::completenessProtocol(
+                '4',
+                'Hlášení je částečně přijato',
+                '4',
+                'CID0000000001',
+                [[
+                    'kod' => '40042',
+                    'popis' => 'Nesoulad počtu součástí s registrem.',
+                    'typChyby' => 'zpracovani',
+                    'castPodani' => 'form',
+                    'idFormulare' => JmhzTransportSample::FORM_GUID,
+                ]],
+            ),
+            'vrep_apep',
+            'test',
+            'CID0000000001',
+        );
+
+        self::assertSame('partially_accepted', $receipt->remoteStatus);
+        self::assertCount(1, $receipt->formOutcomes);
+        self::assertNull($receipt->formOutcomes[0]->protocolStatusCode);
+        self::assertNull($receipt->formOutcomes[0]->protocolStatusName);
+        self::assertNull($receipt->formOutcomes[0]->remoteStatus);
+        self::assertCount(1, $receipt->formOutcomes[0]->errors);
+        self::assertSame(40042, $receipt->formOutcomes[0]->errors[0]->code);
+        self::assertSame('cjmhz', $receipt->formOutcomes[0]->errors[0]->origin);
+        self::assertSame(42, $receipt->formOutcomes[0]->errors[0]->controlId);
     }
 
     /**

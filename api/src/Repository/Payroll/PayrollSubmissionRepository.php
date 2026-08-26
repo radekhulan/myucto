@@ -1376,6 +1376,90 @@ final class PayrollSubmissionRepository
         return (int) $this->db->pdo()->lastInsertId();
     }
 
+    public function insertJmhzProtocolFormOutcome(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        int $artifactId,
+        ?int $partId,
+        string $formGuid,
+        ?int $protocolStatusCode,
+        ?string $protocolStatusName,
+        ?string $remoteStatus,
+        ?string $externalPersonReference,
+        ?string $externalEmploymentReference,
+        int $errorCount,
+        string $errorsCiphertext,
+        string $errorsSha256,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_jmhz_protocol_form_outcomes
+                (supplier_id, environment, submission_id, receipt_id,
+                 artifact_id, part_id, form_guid, protocol_status_code,
+                 protocol_status_name, remote_status,
+                 external_person_reference, external_employment_reference,
+                 error_count, errors_ciphertext, errors_sha256)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+            $artifactId,
+            $partId,
+            $formGuid,
+            $protocolStatusCode,
+            $protocolStatusName,
+            $remoteStatus,
+            $externalPersonReference,
+            $externalEmploymentReference,
+            $errorCount,
+            $errorsCiphertext,
+            $errorsSha256,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listJmhzProtocolFormOutcomes(
+        int $supplierId,
+        string $environment,
+        int $receiptId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, environment, submission_id, receipt_id,
+                    artifact_id, part_id, form_guid, protocol_status_code,
+                    protocol_status_name, remote_status,
+                    external_person_reference, external_employment_reference,
+                    error_count, errors_ciphertext, errors_sha256, created_at
+               FROM payroll_jmhz_protocol_form_outcomes
+              WHERE supplier_id = ? AND environment = ? AND receipt_id = ?
+              ORDER BY id',
+        );
+        $statement->execute([$supplierId, $environment, $receiptId]);
+        $outcomes = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'výsledek formuláře protokolu JMHZ');
+            foreach ([
+                'id', 'supplier_id', 'submission_id', 'receipt_id',
+                'artifact_id', 'error_count',
+            ] as $field) {
+                $row[$field] = self::integer($row, $field);
+            }
+            $row['part_id'] = self::nullableInteger($row, 'part_id');
+            $row['protocol_status_code'] = self::nullableInteger(
+                $row,
+                'protocol_status_code',
+            );
+            $outcomes[] = $row;
+        }
+
+        return $outcomes;
+    }
+
     public function updateSubmissionStatus(
         int $supplierId,
         int $submissionId,
