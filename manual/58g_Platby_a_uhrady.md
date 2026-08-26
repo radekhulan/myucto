@@ -88,10 +88,15 @@ Opravná revize nezapisuje znovu celou mzdu, ale jen rozdíl proti předchozím
 závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost,
 částku a odvozený stav. Záporný rozdíl institucionálního odvodu se zobrazí jako
 příchozí opravný závazek, ale nelze jej vložit do odchozí bankovní dávky;
-vratku je nutné doložit příchozím bankovním nebo pokladním dokladem.
-Aktuální agenda zatím neumí takový příchozí doklad připojit k mzdovému
-závazku bez platební dávky. Běh s příchozí opravnou vratkou proto
-zůstane otevřený; nevytvářejte kvůli jeho uzavření falešnou odchozí dávku.
+vratku je nutné doložit skutečně přijatým bankovním pohybem nebo zaúčtovaným
+příjmovým pokladním dokladem. Na kartě **Spárování úhrad** zvolte
+**Potvrdit skutečně přijatou vratku**, vyberte nevyrovnaný příchozí závazek,
+doklad ve stejné měně a přijatou částku. Aplikace dovolí i částečné přijetí,
+ale před uložením vždy vyžaduje výslovné potvrzení účetní, že peníze byly
+firmě skutečně připsány nebo přijaty do pokladny. Změna závazku, dokladu nebo
+částky potvrzení zruší. Příchozí vratka nevytváří odchozí dávku; případná
+reverze přidá samostatnou neměnnou událost s vlastním bankovním důkazem nebo
+naváže na stornovaný původní pokladní doklad.
 
 Na kartě **Co zaplatit** vybereš připravené závazky; karta **Mzdové příkazy**
 ukazuje už vytvořené dávky. Aplikace podle
