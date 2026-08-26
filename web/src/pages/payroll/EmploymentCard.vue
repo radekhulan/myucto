@@ -70,6 +70,20 @@ const ordinaryProfileFields = [
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
 
+function nextCalendarDay(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const date = new Date(Date.UTC(year!, month! - 1, day! + 1))
+  return date.toISOString().slice(0, 10)
+}
+
+const minimumNewTermsDate = computed(() => {
+  const today = todayIso()
+  const latest = currentTerms.value?.effective_from
+  if (latest === undefined) return today
+  const next = nextCalendarDay(latest)
+  return next > today ? next : today
+})
+
 /**
  * Mzdová účtárna vztahu — jediné místo, kde se dá vybrat.
  *
@@ -309,7 +323,7 @@ async function startTermsEdit() {
   if (!terms) return
   termsForm.value = {
     office_id: terms.office_id,
-    effective_from: todayIso(),
+    effective_from: minimumNewTermsDate.value,
     contract_signed_on: terms.contract_signed_on,
     planned_start_on: terms.planned_start_on,
     actual_start_on: terms.actual_start_on,
@@ -713,7 +727,14 @@ const actions = computed<ActionItem[]>(() => [
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>
       <p class="mt-1 text-xs text-neutral-600">{{ t('payroll.people.terms_basics_hint') }}</p>
       <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <label class="text-xs text-neutral-600">{{ t('payroll.people.effective_from') }} <RequiredMark /><input v-model="termsForm.effective_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">
+          {{ t('payroll.people.effective_from') }} <RequiredMark />
+          <input v-model="termsForm.effective_from" required type="date" :min="minimumNewTermsDate" data-test="terms-effective-from" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <span class="mt-1 block text-neutral-500">{{ t('payroll.people.new_terms_effective_hint', {
+            date: formatDate(currentTerms?.effective_from ?? ''),
+            min: formatDate(minimumNewTermsDate),
+          }) }}</span>
+        </label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><input v-model="termsForm.planned_start_on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <!--
           Účtárna se dosud NEDALA VYBRAT nikde ve frontendu — karta ji jen

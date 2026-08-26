@@ -2638,6 +2638,7 @@
             "transition_saved": "The employment status has been changed.",
             "transition_date": "Status change on",
             "effective_from": "Terms effective from",
+            "new_terms_effective_hint": "The latest version is effective from {date}. The new one can start no earlier than {min}.",
             "planned_start": "Planned start",
             "actual_start": "Actual start",
             "fixed_end": "Fixed term until",

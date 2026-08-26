@@ -2638,6 +2638,7 @@
             "transition_saved": "Stav pracovního vztahu byl změněn.",
             "transition_date": "Změna stavu k",
             "effective_from": "Účinnost podmínek od",
+            "new_terms_effective_hint": "Poslední verze platí od {date}. Nová může začít nejdříve {min}.",
             "planned_start": "Plánovaný nástup",
             "actual_start": "Skutečný nástup",
             "fixed_end": "Doba určitá do",

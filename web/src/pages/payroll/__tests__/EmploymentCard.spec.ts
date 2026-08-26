@@ -312,6 +312,22 @@ describe('EmploymentCard', () => {
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
   })
 
+  it('novou verzi nabídne až ode dne následujícího po poslední verzi', async () => {
+    const stored = employment()
+    stored.terms[0]!.effective_from = '2099-12-31'
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: stored, canWrite: true },
+    })
+    await wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )!.trigger('click')
+    await flushPromises()
+
+    const effectiveFrom = wrapper.get('[data-test="terms-effective-from"]')
+    expect((effectiveFrom.element as HTMLInputElement).value).toBe('2100-01-01')
+    expect(effectiveFrom.attributes('min')).toBe('2100-01-01')
+  })
+
   it('běžný vztah nemá JMHZ výjimku a změnu uloží jen jednou do účinných podmínek', async () => {
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
     const wrapper = mount(EmploymentCard, {
