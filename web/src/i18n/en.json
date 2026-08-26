@@ -3318,6 +3318,28 @@
                     "submission": "Submission no. {id}",
                     "attempts": "Attempts: {total}"
                 },
+                "ready": {
+                    "title": "Prepared submissions are waiting to be sent",
+                    "description": "These exact submissions have already been frozen but have no dispatch attempt yet. Send them directly from here by their submission number — the application will not look up another submission for the same period.",
+                    "submission": "Submission no. {id}",
+                    "corrects": "follows submission no. {id}",
+                    "kind": {
+                        "regular": "Regular report",
+                        "correction": "Selected-employment cancellation",
+                        "cancellation": "Whole-report cancellation"
+                    },
+                    "send_isds": "Send via ISDS",
+                    "send_vrep": "Send via VREP",
+                    "sending": "Preparing dispatch…",
+                    "user_action_note": "Nothing is sent automatically. You start every dispatch with this button; for ISDS you then explicitly confirm sign-in and sending.",
+                    "vrep_started": "Submission no. {id} was handed to the VREP gateway. Follow the result in the history below.",
+                    "isds_queued": "The submission was prepared in the ISDS outbox as message no. {id}.",
+                    "isds_already_queued": "The submission is already in the ISDS outbox as message no. {id}; no duplicate message was created.",
+                    "outbox": "ISDS outgoing message no. {id} is prepared. Your sign-in and confirmation are still required before sending.",
+                    "continue_isds": "Sign in and send",
+                    "gateway_start_failed": "The message is safely stored in the outbox, but ISDS sign-in could not be started. Open outgoing submissions and try signing in again.",
+                    "dispatch_failed": "The prepared submission could not be handed over for dispatch."
+                },
                 "status": {
                     "prepared": "Ready to send",
                     "sent": "Sent",

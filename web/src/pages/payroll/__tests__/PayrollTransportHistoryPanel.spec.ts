@@ -13,6 +13,9 @@ const m = vi.hoisted(() => ({
   importJmhzProtocol: vi.fn(),
   employerSettings: vi.fn(),
   submissionDetail: vi.fn(),
+  sendJmhzTransport: vi.fn(),
+  enqueueJmhzIsds: vi.fn(),
+  gatewayStartPayroll: vi.fn(),
   canWrite: vi.fn(() => true),
 }))
 
@@ -29,7 +32,13 @@ vi.mock('@/api/payroll', () => ({
     importJmhzProtocol: m.importJmhzProtocol,
     employerSettings: m.employerSettings,
     submissionDetail: m.submissionDetail,
+    sendJmhzTransport: m.sendJmhzTransport,
+    enqueueJmhzIsds: m.enqueueJmhzIsds,
   },
+}))
+
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: { gatewayStartPayroll: m.gatewayStartPayroll },
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -131,6 +140,32 @@ describe('PayrollTransportHistoryPanel', () => {
       environment: 'production',
       attempts: [attempt()],
     })
+    m.sendJmhzTransport.mockResolvedValue({
+      attempt: attempt({ id: 81, submission_id: 91 }),
+      acknowledgement: null,
+      settled: false,
+      report: null,
+    })
+    m.enqueueJmhzIsds.mockResolvedValue({
+      outbox_id: 77,
+      created: true,
+      environment: 'production',
+      recipient: { environment: 'production', box_id: '5ffu6xk', name: 'ČSSZ', note: '' },
+      subject: 'JMHZ 2026-07',
+      sender_ident: 'MU-JMHZ',
+      attachment: { filename: 'jmhz.xml', mime: 'application/xml', sha256: 'a', bytes: 10 },
+      transport: { automatic: false, channel: 'manual_upload', reason: 'gateway_unavailable' },
+      response_hint: { subject_prefix: 'JMHZ', attachment_prefix: 'JMHZ', note: '' },
+    })
+    m.gatewayStartPayroll.mockResolvedValue({
+      session_id: 1,
+      app_token: 'token',
+      redirect_url: 'https://www.datovka.gov.cz/as/login',
+      login_guidance: 'Přihlaste se metodou, kterou nabízí ISDS.',
+      login_policy_documented: false,
+      expires_at: '2026-08-26 08:00:00',
+      resumed: false,
+    })
   })
 
   it('seskupí pokusy jednoho podání a zachová pořadí z ledgeru', async () => {
@@ -154,6 +189,88 @@ describe('PayrollTransportHistoryPanel', () => {
       .map(node => node.attributes('data-test'))
     expect(numbers).toEqual(['transport-attempt-3', 'transport-attempt-2'])
     expect(wrapper.find('[data-test="transport-group-71"]').exists()).toBe(true)
+  })
+
+  it('připravené storno odešle přes VREP podle jeho vlastního ID', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt()],
+      ready_submissions: [{
+        submission_id: 91,
+        submission_kind: 'cancellation',
+        submission_status: 'ready',
+        corrects_submission_id: 70,
+        period_start: '2026-07-01',
+        period_end: '2026-07-31',
+        created_at: '2026-08-26 07:00:00',
+      }],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    await wrapper.get('[data-test="transport-ready-vrep-91"]').trigger('click')
+    await flushPromises()
+
+    expect(m.sendJmhzTransport).toHaveBeenCalledWith(
+      91,
+      '1234567890',
+      'production',
+      expect.any(String),
+    )
+  })
+
+  it('připravené storno vloží do ISDS fronty pouze po kliknutí uživatele', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt()],
+      ready_submissions: [{
+        submission_id: 91,
+        submission_kind: 'cancellation',
+        submission_status: 'ready',
+        corrects_submission_id: 70,
+        period_start: '2026-07-01',
+        period_end: '2026-07-31',
+        created_at: '2026-08-26 07:00:00',
+      }],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(m.enqueueJmhzIsds).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="transport-ready-isds-91"]').trigger('click')
+    await flushPromises()
+
+    expect(m.enqueueJmhzIsds).toHaveBeenCalledWith(91, 'production')
+    expect(m.gatewayStartPayroll).not.toHaveBeenCalled()
+  })
+
+  it('u aktivní ISDS brány čeká s přesměrováním na další potvrzení uživatele', async () => {
+    m.enqueueJmhzIsds.mockResolvedValue({
+      ...(await m.enqueueJmhzIsds()),
+      transport: { automatic: true, channel: 'gateway', reason: null },
+    })
+    m.enqueueJmhzIsds.mockClear()
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [],
+      ready_submissions: [{
+        submission_id: 91,
+        submission_kind: 'cancellation',
+        submission_status: 'ready',
+        corrects_submission_id: 70,
+        period_start: '2026-07-01',
+        period_end: '2026-07-31',
+        created_at: '2026-08-26 07:00:00',
+      }],
+    })
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    await wrapper.get('[data-test="transport-ready-isds-91"]').trigger('click')
+    await flushPromises()
+
+    expect(m.gatewayStartPayroll).toHaveBeenCalledWith(77)
+    expect(wrapper.find('[data-test="transport-ready-gateway-91"]').exists()).toBe(true)
   })
 
   it('převzetí neoznačí jako přijaté a uzavření u něj vůbec nenabídne', async () => {

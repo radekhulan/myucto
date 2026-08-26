@@ -3385,9 +3385,20 @@ export interface PayrollJmhzCorrectableComponent {
 export interface PayrollJmhzTransportHistory {
   environment: PayrollJmhzTransportEnvironment
   attempts: PayrollJmhzTransportAttempt[]
+  ready_submissions: PayrollJmhzReadySubmission[]
   total: number
   limit: number
   offset: number
+}
+
+export interface PayrollJmhzReadySubmission {
+  submission_id: number
+  submission_kind: string
+  submission_status: 'ready'
+  corrects_submission_id: number | null
+  period_start: string
+  period_end: string
+  created_at: string
 }
 
 /** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */

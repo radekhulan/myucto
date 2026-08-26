@@ -238,9 +238,14 @@ které zneplatní pouze vybrané součásti podle konkrétních pracovněprávn�
 vztahů. Tato druhá akce sama neopravuje jejich hodnoty. Aplikace vytvoří nový
 neměnný artefakt s vlastní identitou a vazbou na původní podání.
 
-Příprava storna sama nic neodešle. Nový artefakt odešlete stejným kanálem jako
-řádné JMHZ a samostatně sledujte jeho protokol až do přijetí. Opakování stejné
-přípravy vrací již vytvořený výsledek, i když tlačítko použijete později znovu.
+Příprava storna sama nic neodešle. Nový artefakt se ve **Stavu odeslání** ukáže
+v oddílu **Připravená podání čekají na odeslání** se svým přesným číslem,
+druhem a vazbou na původní hlášení. Odtud jej odešlete tlačítkem **Odeslat přes
+ISDS** nebo **Odeslat přes VREP**; aplikace nehledá jiné podání za stejné
+období. ISDS nejprve vytvoří odchozí zprávu a teprve další výslovná akce otevře
+přihlášení a potvrzení odeslání. Samostatně potom sledujte protokol až do
+přijetí. Opakování stejné přípravy vrací již vytvořený výsledek, i když
+tlačítko použijete později znovu.
 
 Ve **Stavu odeslání** nemusíte opisovat GUID ani identifikátory osoby a vztahu.
 Akce **Stornovat vybrané vztahy** se nabídne až po konečném protokolu. Aplikace

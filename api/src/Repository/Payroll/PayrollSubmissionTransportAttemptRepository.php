@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use PDO;
 use PDOException;
 
@@ -249,6 +250,78 @@ final class PayrollSubmissionTransportAttemptRepository
         }
 
         return ['items' => $rows, 'total' => $total];
+    }
+
+    /**
+     * Zmrazená JMHZ podání, která jsou připravená, ale ještě nemají pokus o
+     * odeslání. V historii stojí zvlášť od ledgeru: dokud nevznikl pokus,
+     * nesmí se podání tvářit jako odeslané, zároveň ale nesmí po přípravě
+     * opravného či stornovacího podání zmizet bez cesty k odeslání.
+     *
+     * @return list<array{
+     *   submission_id:int,submission_kind:string,submission_status:string,
+     *   corrects_submission_id:?int,period_start:string,period_end:string,
+     *   created_at:string
+     * }>
+     */
+    public function listReadyJmhzSubmissions(
+        int $supplierId,
+        string $environment,
+        int $limit = 50,
+    ): array {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        $limit = max(1, min($limit, 100));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id AS submission_id,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id,
+                    obligation.period_start, obligation.period_end,
+                    submission.created_at
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+               LEFT JOIN ' . self::TABLE . ' attempt
+                 ON attempt.supplier_id = submission.supplier_id
+                AND attempt.environment = submission.environment
+                AND attempt.submission_id = submission.id
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND submission.status = "ready"
+                AND obligation.agenda_code = ?
+                AND attempt.id IS NULL
+              ORDER BY submission.created_at DESC, submission.id DESC
+              LIMIT ' . $limit,
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+        ]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rows[] = [
+                'submission_id' => (int) $row['submission_id'],
+                'submission_kind' => (string) $row['submission_kind'],
+                'submission_status' => (string) $row['submission_status'],
+                'corrects_submission_id' => $row['corrects_submission_id'] === null
+                    ? null
+                    : (int) $row['corrects_submission_id'],
+                'period_start' => (string) $row['period_start'],
+                'period_end' => (string) $row['period_end'],
+                'created_at' => (string) $row['created_at'],
+            ];
+        }
+
+        return $rows;
     }
 
     /**

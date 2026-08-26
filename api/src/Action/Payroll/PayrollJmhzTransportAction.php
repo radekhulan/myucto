@@ -120,16 +120,22 @@ final class PayrollJmhzTransportAction
                 ?? PayrollSubmissionTransportAttemptRepository::LIST_DEFAULT_LIMIT),
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
+        $supplierId = $this->currentSupplierId($request);
         $page = $this->attempts->listRecentPage(
-            $this->currentSupplierId($request),
+            $supplierId,
             $environment,
             $limit,
             $offset,
+        );
+        $readySubmissions = $this->attempts->listReadyJmhzSubmissions(
+            $supplierId,
+            $environment,
         );
 
         return $this->noStore(Json::ok($response, [
             'environment' => $environment,
             'attempts' => $page['items'],
+            'ready_submissions' => $readySubmissions,
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,

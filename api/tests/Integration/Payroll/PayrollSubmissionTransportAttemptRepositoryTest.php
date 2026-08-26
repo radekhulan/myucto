@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
@@ -489,6 +490,74 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         );
         self::assertIsArray($detail);
         self::assertArrayNotHasKey('period_start', $detail);
+    }
+
+    /**
+     * Připravené opravné a stornovací podání ještě nemá pokus v ledgeru, ale
+     * právě proto musí být v UI dohledatelné a odeslatelné podle vlastního ID.
+     */
+    public function testReadyCorrectiveSubmissionWithoutAttemptIsListed(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP()
+              WHERE id = ?',
+        )->execute([$this->submissionId]);
+        $obligationId = (int) $pdo->query(
+            'SELECT obligation_id FROM payroll_submissions WHERE id = '
+            . $this->submissionId,
+        )->fetchColumn();
+        $pdo->prepare('UPDATE payroll_obligations SET agenda_code = ? WHERE id = ?')
+            ->execute([JmhzSubmissionBridgeService::AGENDA_CODE, $obligationId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_submissions
+                (supplier_id, environment, obligation_id,
+                 corrects_submission_id, submission_kind, channel, status,
+                 source_snapshot_hash, request_fingerprint,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, ?, "cancellation", ?, "ready", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $obligationId,
+            $this->submissionId,
+            self::CHANNEL,
+            hash('sha256', "corrective-snapshot:{$this->supplierId}"),
+            hash('sha256', "corrective-request:{$this->supplierId}"),
+            hash('sha256', "corrective-key:{$this->supplierId}", true),
+        ]);
+        $correctiveId = (int) $pdo->lastInsertId();
+
+        $ready = $this->repository->listReadyJmhzSubmissions(
+            $this->supplierId,
+            self::ENVIRONMENT,
+        );
+
+        self::assertCount(1, $ready);
+        self::assertSame($correctiveId, $ready[0]['submission_id']);
+        self::assertSame('cancellation', $ready[0]['submission_kind']);
+        self::assertSame($this->submissionId, $ready[0]['corrects_submission_id']);
+        self::assertSame('2026-07-01', $ready[0]['period_start']);
+
+        $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $correctiveId,
+            self::CHANNEL,
+            1,
+            'corrective-attempt',
+            str_repeat('c', 64),
+            null,
+        );
+        self::assertSame(
+            [],
+            $this->repository->listReadyJmhzSubmissions(
+                $this->supplierId,
+                self::ENVIRONMENT,
+            ),
+        );
     }
 
     /**

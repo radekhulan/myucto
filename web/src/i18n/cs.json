@@ -3318,6 +3318,28 @@
                     "submission": "Podání č. {id}",
                     "attempts": "Pokusů: {total}"
                 },
+                "ready": {
+                    "title": "Připravená podání čekají na odeslání",
+                    "description": "Tato přesná podání už jsou zmrazená, ale zatím nemají žádný pokus o odeslání. Odešlete je přímo odsud podle jejich čísla — aplikace nebude hledat jiné podání za stejné období.",
+                    "submission": "Podání č. {id}",
+                    "corrects": "navazuje na podání č. {id}",
+                    "kind": {
+                        "regular": "Řádné hlášení",
+                        "correction": "Storno vybraných vztahů",
+                        "cancellation": "Storno celého hlášení"
+                    },
+                    "send_isds": "Odeslat přes ISDS",
+                    "send_vrep": "Odeslat přes VREP",
+                    "sending": "Připravuji odeslání…",
+                    "user_action_note": "Nic se neodesílá automaticky. Každé odeslání spouštíte tímto tlačítkem; u ISDS následně výslovně potvrdíte přihlášení a odeslání.",
+                    "vrep_started": "Podání č. {id} bylo předáno bráně VREP. Výsledek sledujte níže v historii.",
+                    "isds_queued": "Podání bylo připravené v odchozí frontě ISDS jako zpráva č. {id}.",
+                    "isds_already_queued": "Podání už v odchozí frontě ISDS je jako zpráva č. {id}; druhá zpráva nevznikla.",
+                    "outbox": "Odchozí zpráva ISDS č. {id} je připravená. K odeslání je ještě potřeba Vaše přihlášení a potvrzení.",
+                    "continue_isds": "Přihlásit se a odeslat",
+                    "gateway_start_failed": "Zpráva je bezpečně uložená v odchozí frontě, ale přihlášení do ISDS se nepodařilo zahájit. Otevřete odchozí podání a zkuste přihlášení znovu.",
+                    "dispatch_failed": "Připravené podání se nepodařilo předat k odeslání."
+                },
                 "status": {
                     "prepared": "Připraveno k odeslání",
                     "sent": "Odesláno",

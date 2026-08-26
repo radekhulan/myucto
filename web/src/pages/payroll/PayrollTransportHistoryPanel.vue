@@ -4,9 +4,10 @@
  *
  * Odesílací cesta i ledger pokusů existovaly dřív než tahle obrazovka, takže
  * odpověď na otázku „co jsem podal a v jakém je to stavu" žila jen v databázi.
- * Tady se čte a doptává; ODESÍLÁ se jinde — odeslání patří ke zmrazení podání,
- * ne k seznamu stavů, a tlačítko „odeslat" v přehledu by svádělo k druhému
- * podání za totéž období.
+ * Historické pokusy se tu jen čtou a doptávají. Výjimkou jsou přesně určená
+ * zmrazená podání ve stavu `ready`, která ještě nemají žádný pokus: ta se tu
+ * dají odeslat podle vlastního ID, aby opravné či stornovací podání po přípravě
+ * nezmizelo a UI omylem nehledalo jiné podání za stejné období.
  *
  * Tři rozlišení, na kterých celá obrazovka stojí:
  *
@@ -29,11 +30,14 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
+import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollApi,
   type PayrollJmhzCorrectableComponent,
   type PayrollJmhzImportedProtocol,
+  type PayrollJmhzIsdsEnqueueResult,
   type PayrollJmhzProtocolError,
+  type PayrollJmhzReadySubmission,
   type PayrollJmhzTransportAttempt,
   type PayrollJmhzTransportEnvironment,
   type PayrollJmhzTransportPoll,
@@ -53,6 +57,7 @@ const environment = defineModel<PayrollJmhzTransportEnvironment>('environment', 
 })
 const loading = ref(false)
 const attempts = ref<PayrollJmhzTransportAttempt[]>([])
+const readySubmissions = ref<PayrollJmhzReadySubmission[]>([])
 const imported = ref<PayrollJmhzImportedProtocol[]>([])
 const importing = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -79,6 +84,9 @@ const correctableComponents = ref<PayrollJmhzCorrectableComponent[]>([])
 const selectedCorrectionGuids = ref<string[]>([])
 const correctionQuery = ref('')
 const correctionImpactConfirmed = ref(false)
+const readyDispatchPending = ref<{ id: number; channel: 'isds' | 'vrep' } | null>(null)
+const readyIsdsResults = ref<Record<number, PayrollJmhzIsdsEnqueueResult>>({})
+const readyGateways = ref<Record<number, GatewayStart>>({})
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
@@ -163,7 +171,8 @@ const busy = computed(() =>
   || closingId.value !== null
   || cancelPendingId.value !== null
   || correctionPendingId.value !== null
-  || correctionLoadingId.value !== null,
+  || correctionLoadingId.value !== null
+  || readyDispatchPending.value !== null,
 )
 
 const variableSymbolValid = computed(() =>
@@ -490,6 +499,7 @@ async function load() {
       }),
     ])
     attempts.value = history.attempts ?? []
+    readySubmissions.value = history.ready_submissions ?? []
     attemptsTotal.value = history.total ?? 0
     imported.value = protocols.protocols ?? []
     importedTotal.value = protocols.total ?? 0
@@ -497,6 +507,7 @@ async function load() {
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
+    readySubmissions.value = []
     attemptsTotal.value = 0
     imported.value = []
     importedTotal.value = 0
@@ -552,6 +563,8 @@ async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   closeCorrection()
   environment.value = next
   polls.value = {}
+  readyIsdsResults.value = {}
+  readyGateways.value = {}
   // Jiné prostředí = jiné seznamy, takže stránky musí zpět na začátek.
   attemptsOffset.value = 0
   importedOffset.value = 0
@@ -570,6 +583,10 @@ function replaceAttempt(updated: PayrollJmhzTransportAttempt) {
         ...updated,
         period_start: updated.period_start ?? attempt.period_start,
         period_end: updated.period_end ?? attempt.period_end,
+        submission_kind: updated.submission_kind ?? attempt.submission_kind,
+        submission_status: updated.submission_status ?? attempt.submission_status,
+        corrects_submission_id:
+          updated.corrects_submission_id ?? attempt.corrects_submission_id,
       }
       : attempt),
   )
@@ -704,6 +721,81 @@ async function confirmCancel(submissionId: number) {
   } finally {
     cancelPendingId.value = null
   }
+}
+
+function readyPeriodLabel(submission: PayrollJmhzReadySubmission): string {
+  return t('payroll.submissions.transport.group.period', {
+    start: submission.period_start,
+    end: submission.period_end,
+  })
+}
+
+async function dispatchReady(
+  submission: PayrollJmhzReadySubmission,
+  channel: 'isds' | 'vrep',
+) {
+  if (
+    !canWrite.value
+    || busy.value
+    || (channel === 'vrep' && !variableSymbolValid.value)
+  ) return
+
+  readyDispatchPending.value = { id: submission.submission_id, channel }
+  actionError.value = ''
+  success.value = ''
+  try {
+    if (channel === 'vrep') {
+      await payrollApi.sendJmhzTransport(
+        submission.submission_id,
+        variableSymbol.value.trim(),
+        environment.value,
+        crypto.randomUUID(),
+      )
+      await load()
+      success.value = t('payroll.submissions.transport.ready.vrep_started', {
+        id: submission.submission_id,
+      })
+      return
+    }
+
+    const queued = await payrollApi.enqueueJmhzIsds(
+      submission.submission_id,
+      environment.value,
+    )
+    readyIsdsResults.value = {
+      ...readyIsdsResults.value,
+      [submission.submission_id]: queued,
+    }
+    if (queued.transport.automatic) {
+      try {
+        const gateway = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
+        readyGateways.value = {
+          ...readyGateways.value,
+          [submission.submission_id]: gateway,
+        }
+      } catch (exception: unknown) {
+        actionError.value = apiErrorMessage(
+          exception,
+          t('payroll.submissions.transport.ready.gateway_start_failed'),
+        )
+      }
+    }
+    success.value = queued.created
+      ? t('payroll.submissions.transport.ready.isds_queued', { id: queued.outbox_id })
+      : t('payroll.submissions.transport.ready.isds_already_queued', { id: queued.outbox_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.ready.dispatch_failed'),
+    )
+  } finally {
+    readyDispatchPending.value = null
+  }
+}
+
+function continueReadyGateway(submissionId: number) {
+  const gateway = readyGateways.value[submissionId]
+  if (gateway) window.location.assign(gateway.redirect_url)
 }
 
 async function close(attempt: PayrollJmhzTransportAttempt) {
@@ -917,8 +1009,113 @@ onMounted(loadVariableSymbols)
         {{ success }}
       </p>
 
+      <section
+        v-if="readySubmissions.length > 0"
+        class="overflow-hidden rounded-xl border border-payroll-500/30 bg-payroll-50"
+        data-test="transport-ready-submissions"
+      >
+        <div class="border-b border-payroll-500/20 p-4 sm:p-6">
+          <h3 class="text-base font-semibold text-neutral-900">
+            {{ t('payroll.submissions.transport.ready.title') }}
+          </h3>
+          <p class="mt-1 max-w-3xl text-sm text-neutral-600">
+            {{ t('payroll.submissions.transport.ready.description') }}
+          </p>
+        </div>
+        <div class="divide-y divide-payroll-500/20">
+          <article
+            v-for="submission in readySubmissions"
+            :key="submission.submission_id"
+            class="p-4 sm:p-6"
+            :data-test="`transport-ready-${submission.submission_id}`"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h4 class="font-semibold text-neutral-900">
+                    {{ readyPeriodLabel(submission) }}
+                  </h4>
+                  <span class="rounded-full bg-payroll-100 px-2.5 py-1 text-xs font-medium text-payroll-800">
+                    {{ t(`payroll.submissions.transport.ready.kind.${submission.submission_kind}`) }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-neutral-600">
+                  {{ t('payroll.submissions.transport.ready.submission', {
+                    id: submission.submission_id,
+                  }) }}
+                  <template v-if="submission.corrects_submission_id">
+                    · {{ t('payroll.submissions.transport.ready.corrects', {
+                      id: submission.corrects_submission_id,
+                    }) }}
+                  </template>
+                </p>
+              </div>
+              <div v-if="canWrite" class="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  :data-test="`transport-ready-vrep-${submission.submission_id}`"
+                  :class="btnOutline('neutral')"
+                  :disabled="busy || !variableSymbolValid"
+                  @click="dispatchReady(submission, 'vrep')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.cycle" />
+                  </svg>
+                  {{ readyDispatchPending?.id === submission.submission_id
+                    && readyDispatchPending.channel === 'vrep'
+                    ? t('payroll.submissions.transport.ready.sending')
+                    : t('payroll.submissions.transport.ready.send_vrep') }}
+                </button>
+                <button
+                  type="button"
+                  :data-test="`transport-ready-isds-${submission.submission_id}`"
+                  :class="btnFilled('primary')"
+                  :disabled="busy"
+                  @click="dispatchReady(submission, 'isds')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.send" />
+                  </svg>
+                  {{ readyDispatchPending?.id === submission.submission_id
+                    && readyDispatchPending.channel === 'isds'
+                    ? t('payroll.submissions.transport.ready.sending')
+                    : t('payroll.submissions.transport.ready.send_isds') }}
+                </button>
+              </div>
+            </div>
+            <p class="mt-3 text-xs text-neutral-600">
+              {{ t('payroll.submissions.transport.ready.user_action_note') }}
+            </p>
+            <div
+              v-if="readyIsdsResults[submission.submission_id]"
+              class="mt-3 rounded-lg border border-payroll-500/30 bg-surface p-3 text-sm text-neutral-700"
+              :data-test="`transport-ready-isds-result-${submission.submission_id}`"
+            >
+              <p>
+                {{ t('payroll.submissions.transport.ready.outbox', {
+                  id: readyIsdsResults[submission.submission_id]!.outbox_id,
+                }) }}
+              </p>
+              <button
+                v-if="readyGateways[submission.submission_id]"
+                type="button"
+                class="mt-3"
+                :class="btnFilled('primary')"
+                :data-test="`transport-ready-gateway-${submission.submission_id}`"
+                @click="continueReadyGateway(submission.submission_id)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.send" />
+                </svg>
+                {{ t('payroll.submissions.transport.ready.continue_isds') }}
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <div
-        v-if="timeline.length === 0"
+        v-if="timeline.length === 0 && readySubmissions.length === 0"
         data-test="transport-empty"
         class="rounded-xl border border-dashed border-neutral-300 bg-surface p-6 text-sm text-neutral-600"
       >
