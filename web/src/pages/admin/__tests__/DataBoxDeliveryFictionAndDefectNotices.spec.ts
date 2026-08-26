@@ -47,6 +47,7 @@ vi.mock('@/api/dataBox', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/composables/useFormat', () => ({ formatUtcDateTime: (value: string) => value }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
@@ -88,6 +89,12 @@ function message(overrides: Partial<InboxMessage> = {}): InboxMessage {
     delivered_at: '2026-03-02 09:15:00',
     accepted_at: null,
     fetched_at: '2026-03-02 10:00:00',
+    hidden_at: null,
+    hidden_by: null,
+    local_content_state: 'available',
+    local_content_purged_at: null,
+    local_content_purged_by: null,
+    lifecycle_row_version: 1,
     delivery_basis: 'pending',
     delivered_on: null,
     fiction_statutory_on: '2026-03-12',
@@ -167,6 +174,13 @@ async function openTab(wrapper: Awaited<ReturnType<typeof mountWith>>, index: nu
 }
 
 describe('DataBox — rozhodný den doručení', () => {
+  it('zpřístupní stažený ZFO a jeho přílohy přes uložený dokument', async () => {
+    const wrapper = await mountWith({ messages: [message({ document_id: 500 })] })
+    await openTab(wrapper, 2)
+
+    expect(wrapper.text()).toContain('databox.inbox.openMessage')
+  })
+
   it('běžící lhůtu fikce ukáže jako „doručeno není“, ne jako doručení', async () => {
     const wrapper = await mountWith({ messages: [message()] })
     await openTab(wrapper, 2)

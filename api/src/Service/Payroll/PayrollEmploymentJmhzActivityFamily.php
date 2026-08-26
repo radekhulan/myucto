@@ -22,9 +22,9 @@ final class PayrollEmploymentJmhzActivityFamily
             'employment', 'small_scale_employment' => preg_match('/^[1-9]$/D', $activityCode) === 1
                 && $relationshipDetailCode === '1',
             'dpc' => preg_match('/^[A-J]$/D', $activityCode) === 1
-                && $relationshipDetailCode === null,
+                && $relationshipDetailCode === '1',
             'dpp' => in_array($activityCode, self::DPP_ACTIVITY_CODES, true)
-                && $relationshipDetailCode === null,
+                && $relationshipDetailCode === '1',
             default => false,
         };
     }

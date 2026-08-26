@@ -735,6 +735,18 @@ final class PayrollEnforcementRepository implements
                 $caseDocumentId,
                 $userId,
             ]);
+            $eventId = (int) $pdo->lastInsertId();
+            if (in_array($command, [
+                EnforcementCaseCommand::AuthorizeRemittance,
+                EnforcementCaseCommand::ResumeRemittance,
+            ], true)) {
+                $this->releaseHeldForRemittance(
+                    $supplierId,
+                    $caseId,
+                    $eventId,
+                    $userId,
+                );
+            }
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -1680,7 +1692,9 @@ final class PayrollEnforcementRepository implements
      *   held_minor:int,
      *   liability_minor:int,
      *   settled_minor:int,
+     *   original_minor:int,
      *   outstanding_minor:int,
+     *   remaining_to_withhold_minor:int,
      *   remaining_minor:int
      * }
      */
@@ -1693,7 +1707,9 @@ final class PayrollEnforcementRepository implements
             'held_minor' => 0,
             'liability_minor' => 0,
             'settled_minor' => 0,
+            'original_minor' => 0,
             'outstanding_minor' => 0,
+            'remaining_to_withhold_minor' => 0,
             'remaining_minor' => 0,
         ];
         foreach ($claims as $claim) {
@@ -1704,7 +1720,10 @@ final class PayrollEnforcementRepository implements
             $totals['held_minor'] += $claim['held_minor'];
             $totals['liability_minor'] += $claim['liability_minor'];
             $totals['settled_minor'] += $claim['settled_minor'];
+            $totals['original_minor'] += $claim['original_minor'];
             $totals['outstanding_minor'] += $claim['outstanding_minor'];
+            $totals['remaining_to_withhold_minor'] +=
+                $claim['remaining_to_withhold_minor'];
             $totals['remaining_minor'] += $claim['remaining_minor'];
         }
 
@@ -1739,14 +1758,17 @@ final class PayrollEnforcementRepository implements
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, claim_id, month_result_id, entry_kind, amount_minor_units,
-                    actor_user_id, created_at
+                    actor_user_id, decision_event_id, created_at
                FROM payroll_enforcement_ledger
               WHERE supplier_id = ? AND case_id = ? ORDER BY id DESC'
         );
         $stmt->execute([$supplierId, $caseId]);
         return array_map(static fn (array $row): array => self::castBooleansAndIntegers(
             $row,
-            ['id', 'claim_id', 'month_result_id', 'amount_minor_units', 'actor_user_id'],
+            [
+                'id', 'claim_id', 'month_result_id', 'amount_minor_units',
+                'actor_user_id', 'decision_event_id',
+            ],
             [],
         ), PayrollTimeValue::rows(
             $stmt->fetchAll(PDO::FETCH_ASSOC),
@@ -2372,17 +2394,108 @@ final class PayrollEnforcementRepository implements
         string $entryKind,
         int $amount,
         string $idempotencyKey,
+        ?int $actorUserId = null,
+        ?int $decisionEventId = null,
     ): void {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_enforcement_ledger
                 (supplier_id, case_id, claim_id, month_result_id, entry_kind,
-                 amount_minor_units, idempotency_key_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+                 amount_minor_units, idempotency_key_hash, actor_user_id,
+                 decision_event_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $supplierId, $caseId, $claimId, $resultId, $entryKind, $amount,
             hash('sha256', $idempotencyKey, true),
+            $actorUserId,
+            $decisionEventId,
         ]);
+    }
+
+    private function releaseHeldForRemittance(
+        int $supplierId,
+        int $caseId,
+        int $decisionEventId,
+        ?int $actorUserId,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            "SELECT ledger.month_result_id, ledger.claim_id, ledger.entry_kind,
+                    ledger.amount_minor_units
+               FROM payroll_enforcement_ledger ledger
+               JOIN payroll_enforcement_month_results month_result
+                 ON month_result.supplier_id = ledger.supplier_id
+                AND month_result.id = ledger.month_result_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = month_result.supplier_id
+                AND revision.id = month_result.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE ledger.supplier_id = ? AND ledger.case_id = ?
+                AND ledger.claim_id IS NOT NULL
+                AND ledger.entry_kind IN (
+                  'held','released_for_remittance','remitted','released_to_employee'
+                )
+                AND revision.status = 'approved'
+                AND revision.revision_no = run.current_revision_no
+              ORDER BY ledger.month_result_id, ledger.claim_id, ledger.id
+              FOR UPDATE"
+        );
+        $statement->execute([$supplierId, $caseId]);
+        $balances = [];
+        foreach (PayrollTimeValue::rows(
+            $statement->fetchAll(PDO::FETCH_ASSOC),
+            'enforcement_held_ledger',
+        ) as $row) {
+            $resultId = PayrollTimeValue::int(
+                $row['month_result_id'] ?? null,
+                'month_result_id',
+            );
+            $claimId = PayrollTimeValue::int($row['claim_id'] ?? null, 'claim_id');
+            $key = "{$resultId}:{$claimId}";
+            $amount = PayrollTimeValue::int(
+                $row['amount_minor_units'] ?? null,
+                'amount_minor_units',
+            );
+            $balances[$key] ??= [
+                'result_id' => $resultId,
+                'claim_id' => $claimId,
+                'held' => 0,
+                'released' => 0,
+                'remitted' => 0,
+                'returned' => 0,
+            ];
+            $bucket = match (PayrollTimeValue::string(
+                $row['entry_kind'] ?? null,
+                'entry_kind',
+            )) {
+                'held' => 'held',
+                'released_for_remittance' => 'released',
+                'remitted' => 'remitted',
+                'released_to_employee' => 'returned',
+            };
+            $balances[$key][$bucket] += $amount;
+        }
+
+        foreach ($balances as $balance) {
+            $amount = $balance['held'] - $balance['returned']
+                - max($balance['released'], $balance['remitted']);
+            if ($amount <= 0) {
+                continue;
+            }
+            $this->insertLedger(
+                $supplierId,
+                $caseId,
+                $balance['claim_id'],
+                $balance['result_id'],
+                'released_for_remittance',
+                $amount,
+                "deposit-release:event:{$decisionEventId}:result:{$balance['result_id']}"
+                    . ":claim:{$balance['claim_id']}",
+                $actorUserId,
+                $decisionEventId,
+            );
+        }
     }
 
     private function assertStoredResultIntegrity(

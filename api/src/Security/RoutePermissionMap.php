@@ -246,6 +246,8 @@ final class RoutePermissionMap
         // by se v praxi vždy přidělovaly společně.
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+/poll$#', 'payroll.submissions', AccessLevel::WRITE],

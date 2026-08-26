@@ -127,11 +127,13 @@ function detailOf(item: EnforcementCaseSummary): EnforcementCaseDetail {
     ledger: [],
     settlement: {
       claims: [],
+      original_minor: 0,
       withheld_minor: 0,
       held_minor: 0,
       liability_minor: 0,
       settled_minor: 0,
       outstanding_minor: 0,
+      remaining_to_withhold_minor: 0,
       remaining_minor: 0,
     },
   }
@@ -394,6 +396,71 @@ describe('EnforcementCases', () => {
       .toContain('payroll.enforcement.commands.defer_no_withholding')
     expect(wrapper.get('[data-test="enforcement-state-actions"]').text())
       .toContain('payroll.enforcement.commands.stop')
+    wrapper.unmount()
+  })
+
+  it('ukáže účet se symboly a oddělí zůstatek ke sražení od zůstatku k odeslání', async () => {
+    const active = summary({ status: 'remit', evidence_complete: true, recipient_verified: true })
+    m.institutionAccounts.mockResolvedValue([{
+      id: 91,
+      supplier_id: 1,
+      institution_id: 9,
+      institution_type: 'other_recipient',
+      institution_code: 'SYNTH-EXE',
+      institution_name: 'Syntetický exekutor',
+      bank_account: '1000000005/0100',
+      bank_account_masked: '******0005/0100',
+      currency_code: 'CZK',
+      variable_symbol: '1234567890',
+      specific_symbol: '55',
+      constant_symbol: null,
+      valid_from: '2026-01-01',
+      valid_to: null,
+      source_kind: 'manual_verified',
+      source_reference: 'synthetic-test',
+      verified_on: '2026-01-01',
+      verified_by: 1,
+      row_version: 1,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+    }])
+    m.detail.mockResolvedValue({
+      ...detailOf(active),
+      recipient_institution_id: 9,
+      settlement: {
+        claims: [{
+          claim_id: 51,
+          category: 'non_priority',
+          priority_date: '2026-05-01',
+          is_active: true,
+          original_minor: 300_00,
+          outstanding_minor: 300_00,
+          withheld_minor: 300_00,
+          held_minor: 0,
+          liability_minor: 300_00,
+          settled_minor: 100_00,
+          remaining_to_withhold_minor: 0,
+          remaining_minor: 200_00,
+        }],
+        original_minor: 300_00,
+        withheld_minor: 300_00,
+        held_minor: 0,
+        liability_minor: 300_00,
+        settled_minor: 100_00,
+        outstanding_minor: 300_00,
+        remaining_to_withhold_minor: 0,
+        remaining_minor: 200_00,
+      },
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.text()).toContain('Syntetický exekutor · 1000000005/0100 · VS 1234567890 · SS 55')
+    expect(wrapper.text()).toContain('payroll.enforcement.settlement.original')
+    expect(wrapper.text()).toContain('payroll.enforcement.settlement.remaining_to_withhold')
+    expect(wrapper.text()).toContain('payroll.enforcement.settlement.remaining')
     wrapper.unmount()
   })
 

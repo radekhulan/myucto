@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport;
@@ -19,6 +20,7 @@ use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
 use MyInvoice\Service\Submission\SubmissionInboxService;
+use MyInvoice\Service\Submission\SubmissionInboxPrivacyService;
 use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -39,6 +41,8 @@ final class SubmissionInboxAction
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
         private readonly SmsIsdsAuthenticator $sms,
         private readonly IsdsMobileCredentialService $mobileCredentials,
+        private readonly SubmissionInboxPrivacyService $privacy,
+        private readonly ActivityLogger $logger,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -52,11 +56,21 @@ final class SubmissionInboxAction
         $classification = isset($params['classification']) && $params['classification'] !== ''
             ? (string) $params['classification']
             : null;
+        $visibility = (string) ($params['visibility'] ?? 'active');
 
-        return Json::ok($response, [
-            'items' => $this->inbox->listRecent($supplierId, $environment, $classification),
-            'state' => $this->inbox->pollState($supplierId, 'isds', $environment),
-        ]);
+        try {
+            return Json::ok($response, [
+                'items' => $this->inbox->listRecent(
+                    $supplierId,
+                    $environment,
+                    $classification,
+                    visibility: $visibility,
+                ),
+                'state' => $this->inbox->pollState($supplierId, 'isds', $environment),
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'invalid_visibility', $e->getMessage(), 400);
+        }
     }
 
     /** Ruční vyzvednutí — jediná povolená cesta, vždy spuštěná uživatelem. */
@@ -78,7 +92,6 @@ final class SubmissionInboxAction
                 $context,
                 'isds',
                 new IsdsChannel($this->directTransport),
-                null,
                 500,
                 $this->userId($request),
             );
@@ -128,7 +141,6 @@ final class SubmissionInboxAction
                 $context,
                 'isds',
                 new IsdsChannel($this->directTransport),
-                null,
                 500,
                 $this->userId($request),
             );
@@ -206,7 +218,6 @@ final class SubmissionInboxAction
                     $context,
                     'isds',
                     new IsdsChannel($this->directTransport),
-                    null,
                     500,
                     $this->userId($request),
                 );
@@ -275,7 +286,6 @@ final class SubmissionInboxAction
                     $context,
                     'isds',
                     new IsdsChannel($this->directTransport),
-                    null,
                     500,
                     $this->userId($request),
                 );
@@ -327,6 +337,130 @@ final class SubmissionInboxAction
         }
 
         return Json::ok($response, ['updated' => true]);
+    }
+
+    /** @param array<string,string> $args */
+    public function hide(Request $request, Response $response, array $args): Response
+    {
+        return $this->changeVisibility($request, $response, $args, true);
+    }
+
+    /** @param array<string,string> $args */
+    public function restore(Request $request, Response $response, array $args): Response
+    {
+        return $this->changeVisibility($request, $response, $args, false);
+    }
+
+    /** @param array<string,string> $args */
+    public function purgeLocalContent(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (($body['acknowledged'] ?? false) !== true) {
+            return Json::error(
+                $response,
+                'acknowledgement_required',
+                'Nevratné odstranění místní kopie musíte výslovně potvrdit.',
+                400,
+            );
+        }
+        try {
+            $supplierId = SupplierGuard::currentId($request);
+            $item = $this->privacy->purgeLocalContent(
+                $supplierId,
+                $this->positiveMessageId($args),
+                $this->rowVersion($body),
+                $this->userId($request),
+            );
+            $this->auditPrivacy($request, $supplierId, (int) $item['id'], 'purged');
+            return Json::ok($response, ['item' => $item]);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+    }
+
+    /** @param array<string,string> $args */
+    private function changeVisibility(
+        Request $request,
+        Response $response,
+        array $args,
+        bool $hidden,
+    ): Response {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        try {
+            $supplierId = SupplierGuard::currentId($request);
+            $body = (array) ($request->getParsedBody() ?? []);
+            $item = $hidden
+                ? $this->privacy->hide(
+                    $supplierId,
+                    $this->positiveMessageId($args),
+                    $this->rowVersion($body),
+                    $this->userId($request),
+                )
+                : $this->privacy->restore(
+                    $supplierId,
+                    $this->positiveMessageId($args),
+                    $this->rowVersion($body),
+                    $this->userId($request),
+                );
+            $this->auditPrivacy(
+                $request,
+                $supplierId,
+                (int) $item['id'],
+                $hidden ? 'hidden' : 'restored',
+            );
+            return Json::ok($response, ['item' => $item]);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+    }
+
+    /** @param array<string,string> $args */
+    private function positiveMessageId(array $args): int
+    {
+        $value = (string) ($args['id'] ?? '');
+        if (preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
+            throw new \InvalidArgumentException('ID zprávy musí být kladné celé číslo.');
+        }
+        return (int) $value;
+    }
+
+    /** @param array<string,mixed> $body */
+    private function rowVersion(array $body): int
+    {
+        $value = $body['row_version'] ?? null;
+        if ((!is_int($value) && !(is_string($value) && ctype_digit($value)))
+            || (int) $value <= 0
+        ) {
+            throw new \InvalidArgumentException('Chybí platná verze zprávy.');
+        }
+        return (int) $value;
+    }
+
+    private function auditPrivacy(
+        Request $request,
+        int $supplierId,
+        int $messageId,
+        string $operation,
+    ): void {
+        $this->logger->log(
+            'databox.inbox_privacy_' . $operation,
+            $this->userId($request),
+            'submission_inbox_message',
+            $messageId,
+            ['operation' => $operation],
+            null,
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
     }
 
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response

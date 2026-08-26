@@ -122,11 +122,85 @@ final readonly class PayrollRegistrationXmlValidator
             }
         } elseif ($payload->employerName === null
             || $payload->csszWorkplaceCode === null
-            || $payload->actualStartOn === null
         ) {
             $this->invalid(
                 'registration_regzec_full_payload_incomplete',
-                'REGZEC A1 nemá úplná povinná metadata zaměstnavatele a nástupu.',
+                'REGZEC nemá úplná povinná metadata zaměstnavatele.',
+            );
+        } elseif ($payload->interaction->actionCode === 1
+            && $payload->actualStartOn === null
+        ) {
+            $this->invalid(
+                'registration_regzec_full_payload_incomplete',
+                'REGZEC A1 nemá datum skutečného nástupu.',
+            );
+        } elseif ($payload->interaction->actionCode >= 2) {
+            $this->validateEventSnapshot($payload);
+        }
+    }
+
+    private function validateEventSnapshot(
+        PayrollRegistrationXmlPayload $payload,
+    ): void {
+        $event = $payload->eventSnapshot;
+        if (!is_array($event)
+            || ($event['schema_reference'] ?? null)
+                !== PayrollRegistrationEventService::SCHEMA_REFERENCE
+            || ($event['interaction'] ?? null)
+                !== $payload->interaction->interaction
+            || (int) ($event['action_code'] ?? 0)
+                !== $payload->interaction->actionCode
+        ) {
+            $this->invalid(
+                'registration_event_snapshot_invalid',
+                'REGZEC A2–A8 neodpovídá schválenému neměnnému zdroji.',
+            );
+        }
+        $person = $event['person_external_identifier'] ?? null;
+        $employment = $event['employment_external_identifier'] ?? null;
+        $effectiveOn = $event['effective_on'] ?? null;
+        $notificationTriggerOn = $event['notification_trigger_on'] ?? null;
+        if (!is_array($person) || !is_array($employment)
+            || preg_match('/^\d{10}$/D', (string) ($person['value'] ?? '')) !== 1
+            || preg_match('/^\d{1,22}$/D', (string) ($employment['value'] ?? '')) !== 1
+            || !is_string($effectiveOn)
+            || !is_string($notificationTriggerOn)
+        ) {
+            $this->invalid(
+                'registration_event_identifiers_invalid',
+                'Navazující REGZEC vyžaduje účinné OIČ / IK MPSV a ID PPV.',
+            );
+        }
+        $this->exactDate($effectiveOn);
+        $this->exactDate($notificationTriggerOn);
+        $data = $event['data'] ?? null;
+        if (!is_array($data) || array_is_list($data)) {
+            $this->invalid(
+                'registration_event_snapshot_invalid',
+                'Navazující REGZEC nemá platná data události.',
+            );
+        }
+        $action = $payload->interaction->actionCode;
+        $valid = match ($action) {
+            2 => ($data['end_on'] ?? null) === $effectiveOn
+                && is_string($data['activity_code'] ?? null),
+            3, 4 => is_array($data['delta'] ?? null)
+                && ($data['delta'] ?? []) !== []
+                && is_string($data['activity_code'] ?? null),
+            5 => preg_match(
+                '/^\d{8,10}$/D',
+                (string) ($data['new_variable_symbol'] ?? ''),
+            ) === 1,
+            6 => ($data['foreign_insurance']['current'] ?? null) === 'P',
+            7 => ($data['foreign_insurance']['current'] ?? null) === 'S'
+                && is_string($data['foreign_insurance']['identifier'] ?? null),
+            8 => ($data['not_started'] ?? null) === true,
+            default => false,
+        };
+        if (!$valid) {
+            $this->invalid(
+                'registration_event_required_fields_missing',
+                'Neměnný zdroj neobsahuje povinná pole z matice REGZEC A2–A8.',
             );
         }
     }

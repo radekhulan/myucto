@@ -367,6 +367,13 @@ final class PayrollRiskySavingsAction
         };
     }
 
+    private function noStore(Response $response): Response
+    {
+        return $response
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
     /** @param array<string,mixed> $evidence */
     private function audit(Request $request, array $evidence): void
     {

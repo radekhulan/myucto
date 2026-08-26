@@ -33,6 +33,9 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         'cz-employee-registration-2026-07.v1';
     private const NO_SHOW_RULESET_ID =
         'cz-employee-registration-no-show-2026-07.v1';
+    private const FOLLOW_UP_RULESET_ID =
+        'cz-regzec-follow-up-2026-04.v1';
+    private const FOLLOW_UP_SUPPORTED_FROM = '2026-04-01';
 
     /**
      * Osm KALENDÁŘNÍCH dnů, ne pracovních. Kdyby se počítaly pracovní, okno by
@@ -110,7 +113,45 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         );
     }
 
+    public function forFollowUp(
+        int $actionCode,
+        string $effectiveOn,
+    ): PayrollEmployeeRegistrationDeadlineWindow {
+        if ($actionCode < 2 || $actionCode > 8) {
+            throw new \InvalidArgumentException(
+                'Navazující lhůta patří pouze REGZEC A2–A8.',
+            );
+        }
+        $effective = $this->date($effectiveOn);
+        $due = $effective->modify('+8 days');
+
+        return new PayrollEmployeeRegistrationDeadlineWindow(
+            $effectiveOn,
+            $due->format('Y-m-d'),
+            'calendar_days',
+            self::FOLLOW_UP_RULESET_ID,
+            $this->rulesetHash(self::FOLLOW_UP_RULESET_ID, [
+                'action_code' => $actionCode,
+                'notification_calendar_days' => 8,
+                'window_opens_on' => 'registration_event_effective_on',
+            ]),
+        );
+    }
+
     private function supportedDate(string $value): \DateTimeImmutable
+    {
+        $date = $this->date($value);
+        if ($value < self::SUPPORTED_FROM) {
+            throw new PayrollRegistrationXmlException(
+                'registration_deadline_before_supported_window',
+                'Registrační lhůta zaměstnance se počítá až od 1. 7. 2026; pro dřívější nástup ji tenhle core neodvozuje.',
+            );
+        }
+
+        return $date;
+    }
+
+    private function date(string $value): \DateTimeImmutable
     {
         $date = \DateTimeImmutable::createFromFormat(
             '!Y-m-d',
@@ -122,16 +163,9 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
         ) {
             throw new PayrollRegistrationXmlException(
                 'registration_deadline_start_date_invalid',
-                'Datum nástupu pro výpočet registrační lhůty musí být ve tvaru RRRR-MM-DD.',
+                'Datum registrační události musí být ve tvaru RRRR-MM-DD.',
             );
         }
-        if ($value < self::SUPPORTED_FROM) {
-            throw new PayrollRegistrationXmlException(
-                'registration_deadline_before_supported_window',
-                'Registrační lhůta zaměstnance se počítá až od 1. 7. 2026; pro dřívější nástup ji tenhle core neodvozuje.',
-            );
-        }
-
         return $date;
     }
 
@@ -142,7 +176,9 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
             'schema_reference' =>
                 'payroll-employee-registration-deadline-policy.v1',
             'ruleset_id' => $rulesetId,
-            'effective_from' => self::SUPPORTED_FROM,
+            'effective_from' => $rulesetId === self::FOLLOW_UP_RULESET_ID
+                ? self::FOLLOW_UP_SUPPORTED_FROM
+                : self::SUPPORTED_FROM,
             'calendar_basis' => 'calendar_days',
             'rule' => $rule,
             'sources' => self::SOURCES,

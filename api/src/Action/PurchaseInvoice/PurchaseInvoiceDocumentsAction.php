@@ -83,7 +83,7 @@ final class PurchaseInvoiceDocumentsAction
         if ($this->documents->find($documentId, $sid, $this->viewer($request)) === null) {
             return Json::error($response, 'document_not_found', 'Dokument nenalezen.', 404);
         }
-        $this->links->attach($documentId, 'purchase_invoice', $id);
+        $this->links->attach($sid, $documentId, 'purchase_invoice', $id);
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -121,7 +121,7 @@ final class PurchaseInvoiceDocumentsAction
             if ($this->documents->find($documentId, $sid, $this->viewer($request)) === null) {
                 return Json::error($response, 'document_not_found', 'Dokument nenalezen.', 404);
             }
-            $this->links->detach($documentId, 'purchase_invoice', $id);
+            $this->links->detach($sid, $documentId, 'purchase_invoice', $id);
             $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
             $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
             $this->logger->log('purchase_invoice.document_unlinked', $user['id'] ?? null, 'purchase_invoice', $id,

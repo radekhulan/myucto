@@ -103,6 +103,14 @@ export function formatDateTime(date: string | null | undefined): string {
   }).format(d)
 }
 
+export function formatUtcDateTime(date: string | null | undefined): string {
+  if (!date) return '—'
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(date)
+    ? `${date.replace(' ', 'T')}Z`
+    : date
+  return formatDateTime(normalized)
+}
+
 /**
  * Období „YYYY-MM" jako „srpen 2026" / „August 2026".
  *

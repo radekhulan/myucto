@@ -9,6 +9,7 @@ use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Submission\Channel\AcceptanceState;
+use MyInvoice\Service\Submission\Channel\AcceptanceEvidence;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\DispatchState;
@@ -613,6 +614,59 @@ final readonly class SubmissionOutboxService
             $status->evidence->value,
             $status->note,
             $version,
+        );
+    }
+
+    /**
+     * Promítne výsledek samostatného, kryptograficky ověřeného protokolu.
+     * Doručenka sem nikdy nejde; schopnost číst protokol musí být doložená
+     * pro přesnou dvojici kanál + agenda.
+     *
+     * @return array<string,mixed>
+     */
+    public function applyVerifiedProtocolOutcome(
+        int $supplierId,
+        int $id,
+        string $remoteStatus,
+        ?string $note = null,
+    ): array {
+        $row = $this->outbox->find($supplierId, $id);
+        if ($row === null) {
+            throw new SubmissionChannelException(
+                'submission_not_found',
+                'Podání ve frontě není.',
+                404,
+            );
+        }
+        if (AgendaReceiptCapability::forChannel(
+            (string) $row['channel'],
+            (string) $row['agenda_code'],
+        ) !== AgendaReceiptCapability::ProcessingProtocol) {
+            throw new SubmissionChannelException(
+                'processing_protocol_undocumented',
+                'Tahle agenda nemá doložený strojově čitelný protokol.',
+                409,
+            );
+        }
+        if ((string) $row['acceptance_state'] !== AcceptanceState::Unknown->value) {
+            return $row;
+        }
+        $acceptance = match ($remoteStatus) {
+            'accepted' => AcceptanceState::Accepted,
+            'rejected', 'correction_required' => AcceptanceState::Rejected,
+            default => null,
+        };
+        if ($acceptance === null) {
+            return $row;
+        }
+
+        return $this->outbox->recordAcceptance(
+            $supplierId,
+            $id,
+            $acceptance->value,
+            AcceptanceEvidence::AgencyProtocolMessage->value,
+            $note,
+            (int) $row['row_version'],
         );
     }
 

@@ -55,6 +55,28 @@ export interface DataBoxCredential {
   inbox_polling_enabled_by: number | null
 }
 
+export interface DataBoxArchiveFolder {
+  id: number
+  parent_id: number | null
+  name: string
+}
+
+export interface DataBoxInboxStorageSetting {
+  supplier_id: number
+  channel: 'isds'
+  environment: 'production' | 'test'
+  base_folder_id: number
+  row_version: number
+  updated_by: number | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DataBoxInboxStorageSettings {
+  items: DataBoxInboxStorageSetting[]
+  folders: DataBoxArchiveFolder[]
+}
+
 export interface SubmissionRecipient {
   id: number
   supplier_id: number | null
@@ -158,6 +180,12 @@ export interface InboxMessage {
   delivered_at: string | null
   accepted_at: string | null
   fetched_at: string
+  hidden_at: string | null
+  hidden_by: number | null
+  local_content_state: 'available' | 'purged'
+  local_content_purged_at: string | null
+  local_content_purged_by: number | null
+  lifecycle_row_version: number
   /** Rozhodný den doručení a čím je podložený — viz {@link DeliveryBasis}. */
   delivery_basis?: DeliveryBasis
   delivered_on?: string | null
@@ -484,6 +512,18 @@ export const dataBoxApi = {
   deleteMobileKeyProfile: (environment: 'production' | 'test') =>
     api.delete<{ deleted: boolean }>(`/settings/databox/mobile-key/${environment}`).then(r => r.data),
 
+  inboxStorage: () =>
+    api.get<DataBoxInboxStorageSettings>('/settings/databox/inbox-storage').then(r => r.data),
+
+  saveInboxStorage: (
+    environment: 'production' | 'test',
+    baseFolderId: number | null,
+    rowVersion: number,
+  ) => api.put<{ item: DataBoxInboxStorageSetting | null }>(
+    `/settings/databox/inbox-storage/${environment}`,
+    { base_folder_id: baseFolderId, row_version: rowVersion },
+  ).then(r => r.data.item),
+
   recipients: (kind?: RecipientKind) =>
     api.get<{ items: SubmissionRecipient[] }>('/submissions/recipients', {
       params: kind ? { kind } : undefined,
@@ -579,10 +619,29 @@ export const dataBoxApi = {
       session_id: sessionId,
     }).then(r => r.data),
 
-  inbox: (environment: string, classification?: InboxClassification) =>
+  inbox: (
+    environment: string,
+    classification?: InboxClassification,
+    visibility: 'active' | 'hidden' | 'all' = 'active',
+  ) =>
     api.get<{ items: InboxMessage[]; state: InboxPollState | null }>('/submissions/inbox', {
-      params: { environment, classification },
+      params: { environment, classification, visibility },
     }).then(r => r.data),
+
+  hideInboxMessage: (id: number, rowVersion: number) =>
+    api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/hide`, {
+      row_version: rowVersion,
+    }).then(r => r.data.item),
+
+  restoreInboxMessage: (id: number, rowVersion: number) =>
+    api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/restore`, {
+      row_version: rowVersion,
+    }).then(r => r.data.item),
+
+  purgeInboxLocalContent: (id: number, rowVersion: number) =>
+    api.delete<{ item: InboxMessage }>(`/submissions/inbox/${id}/local-content`, {
+      data: { row_version: rowVersion, acknowledged: true },
+    }).then(r => r.data.item),
 
   pollInbox: (environment: string) =>
     api.post<InboxPollResult>(

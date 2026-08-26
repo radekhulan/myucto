@@ -157,6 +157,14 @@ final readonly class AnnualSettlementResult implements JsonSerializable
             'settlement_difference_minor_units' => $this->settlementDifferenceMinorUnits,
             'payable_minor_units' => $this->payableMinorUnits,
             'annual_bonus_threshold_met' => $this->annualBonusThresholdMet,
+            'bonus_qualifying_income_minor_units' =>
+                (int) ($this->trace['total_bonus_qualifying_income_minor_units'] ?? 0),
+            'bonus_minimum_income_minor_units' =>
+                (int) ($this->trace['rates']['bonus_minimum_income_minor_units'] ?? 0),
+            'bonus_minimum_amount_minor_units' =>
+                (int) ($this->trace['rates']['bonus_minimum_amount_minor_units'] ?? 0),
+            'monthly_tax_bonus_minor_units' =>
+                (int) ($this->trace['total_monthly_tax_bonus_minor_units'] ?? 0),
             'trace' => $this->trace,
         ];
     }

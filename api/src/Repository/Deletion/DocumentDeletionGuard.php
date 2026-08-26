@@ -85,6 +85,24 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ['table' => 'tax_submission_artifacts', 'column' => 'document_id'],
                 ],
             ],
+            'document_link' => [
+                'message' => 'Doklad je propojený s jinou agendou přes vazby Dokumentů (%d vazeb). Odpojte ho nejdřív v detailu příslušné agendy.',
+                'references' => [
+                    ['table' => 'document_links', 'column' => 'document_id'],
+                ],
+            ],
+            'monthly_report_send' => [
+                'message' => 'Doklad je archivovanou kopií odeslaného měsíčního reportu (%d vazeb) a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'monthly_report_sends', 'column' => 'document_id'],
+                ],
+            ],
+            'submission_receipt' => [
+                'message' => 'Doklad je doručenkou podání v datové schránce (%d vazeb) a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'submission_outbox', 'column' => 'receipt_document_id'],
+                ],
+            ],
         ];
     }
 
@@ -102,7 +120,10 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
      */
     public static function deliberateCascadeBlockers(): array
     {
-        return ['tax_submission_artifacts'];
+        return [
+            'tax_submission_artifacts',
+            'document_links',
+        ];
     }
 
     /**

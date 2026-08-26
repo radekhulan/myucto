@@ -161,6 +161,10 @@ function result(overrides: Record<string, unknown> = {}) {
     settlement_difference_minor_units: 120_000,
     payable_minor_units: 120_000,
     annual_bonus_threshold_met: true,
+    bonus_qualifying_income_minor_units: 14_000_000,
+    bonus_minimum_income_minor_units: 13_440_000,
+    bonus_minimum_amount_minor_units: 10_000,
+    monthly_tax_bonus_minor_units: 1_267_000,
     ...overrides,
   }
 }
@@ -287,6 +291,15 @@ describe('Roční zúčtování', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="annual-settlement-result"]').exists()).toBe(true)
+    const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain('payroll.annual_settlement.bonus_threshold_met')
+    expect(wrapper.get('[data-test="annual-tax-bonus-income"]').text()).toContain('140 000')
+    expect(wrapper.get('[data-test="annual-tax-bonus-income-threshold"]').text())
+      .toContain('134 400')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text())
+      .toContain('payroll.annual_settlement.row_annual_tax_bonus')
+    expect(wrapper.get('[data-test="annual-tax-bonus-paid-monthly"]').text())
+      .toContain('payroll.annual_settlement.row_monthly_tax_bonus')
     const settle = wrapper.find('[data-action="settle"]')
     expect(settle.attributes('disabled')).toBeUndefined()
 
@@ -296,6 +309,26 @@ describe('Roční zúčtování', () => {
     expect(m.settleAnnualSettlement).toHaveBeenCalledWith(defaultYear, 7)
     expect(m.success).toHaveBeenCalledWith('payroll.annual_settlement.settled')
     expect(wrapper.find('[data-test="annual-settlement-download"]').exists()).toBe(true)
+  })
+
+  it('vysvětlí nulový roční bonus příjmem pod roční hranicí', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        annual_bonus_threshold_met: false,
+        bonus_qualifying_income_minor_units: 10_000_000,
+        annual_tax_bonus_minor_units: 0,
+        bonus_difference_minor_units: 0,
+      }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain('payroll.annual_settlement.bonus_threshold_not_met')
+    expect(wrapper.get('[data-test="annual-tax-bonus-income"]').text()).toContain('100 000')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('0,00')
   })
 
   /**

@@ -45,6 +45,14 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
                 . '<employees><employee act="1"><comp vs="1234567890"/></employee></employees>'
                 . '</REGZEC>',
         ];
+        yield 'REGZEC A2' => [
+            'REGZEC25',
+            'CSSZ_REGZEC',
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                . '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025">'
+                . '<employees><employee act="2"><comp vs="1234567890"/></employee></employees>'
+                . '</REGZEC>',
+        ];
     }
 
     #[DataProvider('registrations')]
@@ -156,10 +164,10 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
     }
 
-    public function testRegzecA2NeverReachesTheTransport(): void
+    public function testUnknownRegzecActionNeverReachesTheTransport(): void
     {
         $xml = '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
-            . '<employee act="2"><comp vs="1234567890"/></employee></employees></REGZEC>';
+            . '<employee act="9"><comp vs="1234567890"/></employee></employees></REGZEC>';
         $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
         $frozen->method('bytes')->willReturn($xml);
         $dispatch = $this->createMock(JmhzDispatchService::class);
@@ -172,7 +180,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('A1');
+        $this->expectExceptionMessage('podporovanou akci');
 
         $service->send(
             self::SUPPLIER,

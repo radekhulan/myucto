@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementPaymentRepository;
+use MyInvoice\Repository\Payroll\PayrollEnforcementConflictException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
@@ -22,6 +23,7 @@ use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseCommand;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseLifecycle;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementDecisionDocumentReference;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthRequest;
 use MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeResult;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentAllocation;
@@ -50,9 +52,9 @@ use Symfony\Component\Clock\MockClock;
 /**
  * MZ-14-W08 — skutečné odeslání sražených exekučních částek příjemcům.
  *
- * Nejtvrdší pravidlo řezu: částka v depozitu (`held`) se nikdy nedostane do
- * odchozí platební dávky. Druhé pravidlo: zůstatek pohledávky klesá až po
- * potvrzené úhradě, nikoli po sražení ze mzdy.
+ * Nejtvrdší pravidlo řezu: částka v depozitu (`held`) se do odchozí platební
+ * dávky nedostane bez doloženého append-only uvolnění. Druhé pravidlo: zůstatek
+ * pohledávky klesá až po potvrzené úhradě, nikoli po sražení ze mzdy.
  */
 #[Group('integration')]
 final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
@@ -247,6 +249,209 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         );
         self::assertSame(300_00, $batch['declared_total_minor']);
         self::assertSame(1, $batch['declared_item_count']);
+    }
+
+    public function testDecisionReleasesHistoricalDepositExactlyOnceAndPaymentReconciles(): void
+    {
+        $caseId = $this->createCase();
+        $claim = $this->createClaim($caseId, 'non_priority', 300_00, '2026-05-01');
+        $this->setCaseStatus($caseId, 'withhold_and_hold');
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeMonthResult(
+            $revisionId,
+            [$claim['claim_key'] => 300_00],
+            'synthetic-held-before-remittance-decision',
+        );
+
+        $beforeDecision = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame([], $beforeDecision['liability_ids']);
+        self::assertSame(0, $beforeDecision['created_count']);
+
+        $documentHash = $this->db->pdo()->prepare(
+            'SELECT sha256 FROM documents WHERE supplier_id = ? AND id = ?',
+        );
+        $documentHash->execute([$this->supplierId, $this->decisionDocumentId]);
+        $evidenceHash = PayrollTimeValue::string(
+            $documentHash->fetchColumn(),
+            'document_sha256',
+        );
+        $version = $this->caseVersion($caseId);
+
+        try {
+            $this->enforcement->transition(
+                $this->supplierId,
+                $caseId,
+                EnforcementCaseCommand::AuthorizeRemittance,
+                $version - 1,
+                null,
+                new EnforcementDecisionDocumentReference(
+                    $this->decisionDocumentId,
+                    $evidenceHash,
+                ),
+                $this->actorId,
+                new EnforcementCaseLifecycle(),
+            );
+            self::fail('Zastaralá verze nesmí uvolnit depozitum.');
+        } catch (PayrollEnforcementConflictException $exception) {
+            self::assertSame($version, $exception->currentVersion);
+        }
+        self::assertNotContains(
+            'released_for_remittance',
+            array_column(
+                $this->enforcement->findCase($this->supplierId, $caseId)['ledger'],
+                'entry_kind',
+            ),
+        );
+
+        $sourceSupplier = $this->db->pdo()->query('SELECT MIN(id) FROM supplier');
+        self::assertInstanceOf(\PDOStatement::class, $sourceSupplier);
+        $otherSupplierId = $this->createIsolatedSupplier(
+            $this->db->pdo(),
+            (int) $sourceSupplier->fetchColumn(),
+        );
+        try {
+            $this->enforcement->transition(
+                $otherSupplierId,
+                $caseId,
+                EnforcementCaseCommand::AuthorizeRemittance,
+                $version,
+                null,
+                null,
+                $this->actorId,
+                new EnforcementCaseLifecycle(),
+            );
+            self::fail('Cizí firma nesmí uvolnit depozitum.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('nebyl nalezen', $exception->getMessage());
+        }
+
+        $released = $this->enforcement->transition(
+            $this->supplierId,
+            $caseId,
+            EnforcementCaseCommand::AuthorizeRemittance,
+            $version,
+            null,
+            new EnforcementDecisionDocumentReference(
+                $this->decisionDocumentId,
+                $evidenceHash,
+            ),
+            $this->actorId,
+            new EnforcementCaseLifecycle(),
+        );
+        self::assertSame('remit', $released['status']);
+        $ledgerKinds = array_column($released['ledger'], 'entry_kind');
+        self::assertCount(3, $ledgerKinds);
+        self::assertContains('withheld', $ledgerKinds);
+        self::assertContains('held', $ledgerKinds);
+        self::assertContains('released_for_remittance', $ledgerKinds);
+        $releaseLedger = array_values(array_filter(
+            $released['ledger'],
+            static fn (array $entry): bool =>
+                $entry['entry_kind'] === 'released_for_remittance',
+        ));
+        self::assertCount(1, $releaseLedger);
+        self::assertSame($this->actorId, $releaseLedger[0]['actor_user_id']);
+        self::assertIsInt($releaseLedger[0]['decision_event_id']);
+        try {
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_enforcement_ledger
+                    (supplier_id, case_id, claim_id, month_result_id, entry_kind,
+                     amount_minor_units, idempotency_key_hash, actor_user_id,
+                     decision_event_id)
+                 VALUES (?, ?, ?, ?, "released_for_remittance", 1, ?, ?, ?)',
+            )->execute([
+                $this->supplierId,
+                $caseId,
+                $claim['id'],
+                $releaseLedger[0]['month_result_id'],
+                random_bytes(32),
+                $this->actorId,
+                $releaseLedger[0]['decision_event_id'],
+            ]);
+            self::fail('Jednou uvolněné depozitum se nesmí uvolnit podruhé.');
+        } catch (\PDOException $exception) {
+            self::assertStringContainsString(
+                'held amount is over-disposed',
+                $exception->getMessage(),
+            );
+        }
+
+        $materialized = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(1, $materialized['created_count']);
+        self::assertCount(1, $materialized['liability_ids']);
+        $liabilityId = $materialized['liability_ids'][0];
+        self::assertSame(300_00, $this->integerValue(
+            $this->liability($liabilityId),
+            'amount_minor',
+        ));
+        $source = PayrollTimeValue::row(json_decode(
+            $this->stringValue($this->liability($liabilityId), 'source_snapshot_json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR,
+        ), 'liability_source');
+        self::assertSame(
+            $releaseLedger[0]['decision_event_id'],
+            $source['release_decision_event_id'],
+        );
+        self::assertSame(
+            $this->decisionDocumentId,
+            $source['release_decision_document_id'],
+        );
+        self::assertSame($evidenceHash, $source['release_decision_evidence_hash']);
+
+        $replay = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(0, $replay['created_count']);
+        self::assertSame([$liabilityId], $replay['liability_ids']);
+        self::assertSame(1, $this->countLiabilitiesFor($caseId));
+
+        $batch = $this->batches->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [['liability_id' => $liabilityId, 'amount_minor' => 300_00]],
+            $this->actorId,
+        );
+        $batchReplay = $this->batches->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [['liability_id' => $liabilityId, 'amount_minor' => 300_00]],
+            $this->actorId,
+        );
+        self::assertSame($batch['batch_id'], $batchReplay['batch_id']);
+        self::assertFalse($batchReplay['created']);
+        self::assertTrue($batchReplay['replayed']);
+        $allocationId = $this->allocationFor($liabilityId);
+        $this->reconciliation->match(new PayrollPaymentReconciliationCommand(
+            $this->supplierId,
+            $allocationId,
+            300_00,
+            PayrollPaymentEvidenceReference::bank(
+                ...$this->bankEvidence('-300.00', 'released-deposit'),
+            ),
+            'synthetic-released-deposit-match',
+            $this->actorId,
+        ));
+
+        self::assertSame(300_00, $batch['declared_total_minor']);
+        $settlement = $this->settlement($caseId);
+        self::assertSame(300_00, $settlement['withheld_minor']);
+        self::assertSame(0, $settlement['held_minor']);
+        self::assertSame(300_00, $settlement['settled_minor']);
+        self::assertSame(0, $settlement['remaining_minor']);
     }
 
     public function testApprovedStandardInsolvencyCreatesExplicitPayableInstruction(): void
@@ -746,6 +951,8 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         self::assertSame(300_00, $beforeBatch['withheld_minor']);
         self::assertSame(0, $beforeBatch['held_minor']);
         self::assertSame(0, $beforeBatch['settled_minor']);
+        self::assertSame(300_00, $beforeBatch['original_minor']);
+        self::assertSame(0, $beforeBatch['remaining_to_withhold_minor']);
         self::assertSame(300_00, $beforeBatch['remaining_minor']);
         $this->assertMarkPaidBlocked($caseId);
 
@@ -946,14 +1153,16 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         }
     }
 
-    /** @return array{withheld_minor:int,held_minor:int,liability_minor:int,settled_minor:int,remaining_minor:int} */
+    /** @return array{original_minor:int,withheld_minor:int,held_minor:int,liability_minor:int,settled_minor:int,remaining_to_withhold_minor:int,remaining_minor:int} */
     private function settlement(int $caseId): array
     {
         $totals = [
+            'original_minor' => 0,
             'withheld_minor' => 0,
             'held_minor' => 0,
             'liability_minor' => 0,
             'settled_minor' => 0,
+            'remaining_to_withhold_minor' => 0,
             'remaining_minor' => 0,
         ];
         foreach ($this->enforcementPayments->settlementForCase(

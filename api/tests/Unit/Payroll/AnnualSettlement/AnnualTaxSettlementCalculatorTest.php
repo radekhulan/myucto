@@ -369,6 +369,81 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertSame(0, $result->payableMinorUnits);
     }
 
+    /**
+     * Dva měsíce nedosáhnou měsíční hranice, ale úhrn roku dosáhne roční.
+     * Roční zúčtování proto doplatí právě bonus za oba vynechané měsíce.
+     */
+    public function testAnnualSettlementCatchesUpMonthsBelowTheMonthlyBonusThreshold(): void
+    {
+        $monthly = new MonthlyAdvanceTaxCalculator($this->rulesets());
+        $monthlyPaid = 0;
+        $annualIncome = 0;
+        foreach ([1_000_000, 1_000_000, ...array_fill(0, 10, 1_200_000)] as $month => $income) {
+            $result = $monthly->calculate(
+                sprintf('%04d-%02d-01', self::YEAR, $month + 1),
+                new MonthlyAdvanceTaxInput(
+                    taxableIncomeMinorUnits: $income,
+                    signedDeclaration: true,
+                    claimTaxpayerCredit: true,
+                    childCreditMinorUnits: 126_700,
+                ),
+            );
+            $annualIncome += $income;
+            $monthlyPaid += $result->taxBonusMinorUnits;
+        }
+
+        self::assertSame(14_000_000, $annualIncome);
+        self::assertSame(1_267_000, $monthlyPaid);
+
+        $result = (new AnnualTaxSettlementCalculator())->calculate(
+            $this->input(
+                advanceBase: $annualIncome,
+                advanceTax: 0,
+                appliedCredits: 0,
+                bonusQualifyingIncome: $annualIncome,
+                creditMonths: [
+                    new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
+                ],
+                monthlyTaxBonus: $monthlyPaid,
+                childMonths: [
+                    new AnnualSettlementChildMonths('child-a', 1, 12, 0),
+                ],
+            ),
+            $this->rates(),
+        );
+
+        self::assertTrue($result->annualBonusThresholdMet);
+        self::assertSame(1_520_400, $result->annualTaxBonusMinorUnits);
+        self::assertSame(253_400, $result->bonusDifferenceMinorUnits);
+        self::assertSame(253_400, $result->payableMinorUnits);
+        self::assertSame(13_440_000, $result->jsonSerialize()['bonus_minimum_income_minor_units']);
+        self::assertSame(14_000_000, $result->jsonSerialize()['bonus_qualifying_income_minor_units']);
+        self::assertSame(1_267_000, $result->jsonSerialize()['monthly_tax_bonus_minor_units']);
+    }
+
+    public function testAnnualBonusIncomeThresholdIsInclusive(): void
+    {
+        $result = (new AnnualTaxSettlementCalculator())->calculate(
+            $this->input(
+                advanceBase: 13_440_000,
+                advanceTax: 0,
+                appliedCredits: 0,
+                bonusQualifyingIncome: 13_440_000,
+                creditMonths: [
+                    new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
+                ],
+                childMonths: [
+                    new AnnualSettlementChildMonths('child-a', 1, 12, 0),
+                ],
+            ),
+            $this->rates(),
+        );
+
+        self::assertTrue($result->annualBonusThresholdMet);
+        self::assertSame(1_520_400, $result->annualTaxBonusMinorUnits);
+        self::assertSame(13_440_000, $result->jsonSerialize()['bonus_minimum_income_minor_units']);
+    }
+
     /** Rok bez jediného uzavřeného měsíce se nedopočítává „aspoň částečně". */
     public function testYearWithoutApprovedMonthsIsRefused(): void
     {

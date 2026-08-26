@@ -275,7 +275,7 @@ final class DocumentsAction
         if (!$this->links->entityBelongsToSupplier($type, $eid, $sid)) {
             return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
         }
-        $this->links->attach($id, $type, $eid);
+        $this->links->attach($sid, $id, $type, $eid);
         return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid)]);
     }
 
@@ -291,7 +291,7 @@ final class DocumentsAction
         $q = $request->getQueryParams();
         $type = (string) ($body['entity_type'] ?? $q['entity_type'] ?? '');
         $eid = (int) ($body['entity_id'] ?? $q['entity_id'] ?? 0);
-        $this->links->detach($id, $type, $eid);
+        $this->links->detach($sid, $id, $type, $eid);
         return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid)]);
     }
 

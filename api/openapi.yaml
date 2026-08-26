@@ -55,6 +55,13 @@ info:
     - `/api/v1/ai/suggestions/{id}/accept` a `/reject` — přijetí návrhu je
       zaúčtování, viz předchozí odstavec.
 
+    Mzdový modul je kvůli zvláštní citlivosti personálních, daňových a platebních
+    údajů dostupný jen z přihlášeného webového rozhraní pod `/api/payroll/**`.
+    Veřejná bearer varianta pro mzdy neexistuje a proto v tomto OpenAPI kontraktu
+    není. Její případné budoucí zpřístupnění vyžaduje samostatný
+    omezený kontrakt oprávnění, rozsahů dat a auditování; interní session endpointy
+    se do veřejného API automaticky nepromítají.
+
     ## Logování volání
 
     Každé volání tokenem se zaznamenává (cesta, metoda, návratový kód, doba

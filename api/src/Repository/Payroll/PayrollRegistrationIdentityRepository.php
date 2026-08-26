@@ -294,6 +294,63 @@ final class PayrollRegistrationIdentityRepository
         return $raw === false ? null : $this->externalId($this->row($raw));
     }
 
+    /** @return array<string,mixed>|null */
+    public function externalIdFromReceipt(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        int $receiptId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, employment_id, environment,
+                    identifier_type, value_ciphertext, value_hash,
+                    value_masked, valid_from, valid_to, source_kind,
+                    source_receipt_id, source_reference_hash, row_version
+               FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND employment_id = ?
+                AND environment = ? AND identifier_type = "id_ppv"
+                AND source_receipt_id = ?
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $statement->execute([
+            $supplierId,
+            $employmentId,
+            $environment,
+            $receiptId,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return $raw === false ? null : $this->externalId($this->row($raw));
+    }
+
+    public function closeExternalId(
+        int $supplierId,
+        int $externalId,
+        int $expectedRowVersion,
+        string $validTo,
+        ?int $updatedBy,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_external_ids
+                SET valid_to = ?, updated_by = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND row_version = ?
+                AND valid_to IS NULL'
+        );
+        $statement->execute([
+            $validTo,
+            $updatedBy,
+            $supplierId,
+            $externalId,
+            $expectedRowVersion,
+        ]);
+        if ($statement->rowCount() !== 1) {
+            throw new \DomainException(
+                'Aktivní ID PPV se mezitím změnilo a nelze je bezpečně nahradit.',
+            );
+        }
+    }
+
     /**
      * @return array{
      *   id:int,employee_id:int,environment:string,identifier_type:string,

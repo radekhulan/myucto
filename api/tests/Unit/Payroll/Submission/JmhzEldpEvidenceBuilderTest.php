@@ -91,7 +91,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
         self::assertIsArray($input);
         $input['people'][0]['employments'][0]['term']['activity_code'] = '15';
-        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] = null;
+        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] = '1';
         $source = $this->withInput($source, $input);
 
         $this->expectException(JmhzEldpEvidenceException::class);
@@ -303,7 +303,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertIsArray($input);
         $input['people'][0]['employments'][0]['employment']['relation_type'] = $relationType;
         $input['people'][0]['employments'][0]['term']['activity_code'] = $activityCode;
-        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] = null;
+        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] = '1';
         $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values']['evidence_days'] = 0;
         $source = $this->withInput($source, $input);
 

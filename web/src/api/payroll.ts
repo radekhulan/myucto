@@ -2757,6 +2757,10 @@ export interface PayrollAnnualSettlementResult {
   settlement_difference_minor_units: number
   payable_minor_units: number
   annual_bonus_threshold_met: boolean
+  bonus_qualifying_income_minor_units?: number
+  bonus_minimum_income_minor_units?: number
+  bonus_minimum_amount_minor_units?: number
+  monthly_tax_bonus_minor_units?: number
 }
 
 export interface PayrollAnnualSettlementStoredOutcome {
@@ -3142,6 +3146,16 @@ export interface PayrollIncomeTaxAdvanceResult {
   tax_bonus_eligible: boolean
   tax_after_credits_minor_units: number
   tax_bonus_minor_units: number
+  tax_bonus_candidate_minor_units?: number
+  tax_bonus_minimum_income_minor_units?: number
+  tax_bonus_minimum_amount_minor_units?: number
+  tax_bonus_income_threshold_met?: boolean
+  tax_bonus_amount_threshold_met?: boolean
+  tax_bonus_eligibility_reason?:
+    | 'eligible'
+    | 'declaration_not_signed'
+    | 'income_below_threshold'
+    | 'amount_below_threshold'
   ruleset_id: string
   ruleset_hash: string
 }

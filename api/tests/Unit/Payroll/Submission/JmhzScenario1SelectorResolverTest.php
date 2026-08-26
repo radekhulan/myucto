@@ -10,18 +10,18 @@ use PHPUnit\Framework\TestCase;
 
 final class JmhzScenario1SelectorResolverTest extends TestCase
 {
-    /** @return iterable<string,array{string,?string}> */
+    /** @return iterable<string,array{string,?string,?string}> */
     public static function supportedSelectors(): iterable
     {
         foreach (range(1, 9) as $code) {
-            yield "activity-{$code}-none" => [(string) $code, '1'];
+            yield "activity-{$code}-none" => [(string) $code, '1', '1'];
         }
         foreach ([
             '15', '16',
             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
             'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC',
         ] as $code) {
-            yield "direct-{$code}" => [$code, null];
+            yield "direct-{$code}" => [$code, '1', null];
         }
     }
 
@@ -29,6 +29,7 @@ final class JmhzScenario1SelectorResolverTest extends TestCase
     public function testResolvesOnlyPinnedScenarioOneBranches(
         string $activityCode,
         ?string $detailCode,
+        ?string $expectedDetailCode,
     ): void {
         $resolution = JmhzScenario1SelectorResolver::load()->resolve(
             $activityCode,
@@ -39,7 +40,7 @@ final class JmhzScenario1SelectorResolverTest extends TestCase
         self::assertNull($resolution['issue_code']);
         self::assertSame('scenario_1', $resolution['evidence']['scenario_key'] ?? null);
         self::assertSame($activityCode, $resolution['evidence']['activity_code'] ?? null);
-        self::assertSame($detailCode, $resolution['evidence']['relationship_detail_code'] ?? null);
+        self::assertSame($expectedDetailCode, $resolution['evidence']['relationship_detail_code'] ?? null);
         self::assertSame(
             JmhzScenario1SelectorResolver::MATRIX_SHA256,
             $resolution['evidence']['matrix_sha256'] ?? null,
@@ -54,8 +55,8 @@ final class JmhzScenario1SelectorResolverTest extends TestCase
         yield 'missing detail' => ['1', null, 'jmhz_scenario_relationship_detail_missing'];
         yield 'other scenario prison' => ['1', '2', 'jmhz_scenario_not_supported'];
         yield 'other scenario group' => ['9', '3', 'jmhz_scenario_not_supported'];
-        yield 'detail not applicable' => ['A', '1', 'jmhz_scenario_relationship_detail_not_applicable'];
-        yield 'other direct scenario' => ['M', null, 'jmhz_scenario_not_supported'];
+        yield 'missing direct detail' => ['A', null, 'jmhz_scenario_relationship_detail_missing'];
+        yield 'other direct scenario' => ['M', '1', 'jmhz_scenario_not_supported'];
     }
 
     #[DataProvider('blockedSelectors')]

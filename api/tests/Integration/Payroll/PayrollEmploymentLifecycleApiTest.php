@@ -704,8 +704,8 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
     ): array
     {
         [$activityCode, $relationshipDetailCode] = match ($relationType) {
-            'dpc' => ['A', null],
-            'dpp' => ['T', null],
+            'dpc' => ['A', '1'],
+            'dpp' => ['T', '1'],
             default => ['1', '1'],
         };
 

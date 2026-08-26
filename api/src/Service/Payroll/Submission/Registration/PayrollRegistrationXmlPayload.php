@@ -17,5 +17,7 @@ final readonly class PayrollRegistrationXmlPayload
         public string $employerVariableSymbol,
         public ?string $employerName = null,
         public ?string $csszWorkplaceCode = null,
+        /** @var array<string,mixed>|null */
+        public ?array $eventSnapshot = null,
     ) {}
 }

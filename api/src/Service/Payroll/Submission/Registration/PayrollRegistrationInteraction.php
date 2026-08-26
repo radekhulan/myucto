@@ -7,9 +7,8 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 /**
  * Jediný seznam registračních interakcí, které tenhle core umí vyrobit.
  *
- * Opravy, storna a další akce (REGZEC A2–A8) tady schválně nejsou. Připnuté
- * REGZEC25 XSD povoluje `employee/@act` v rozsahu 1..99, takže bez allowlistu
- * by je serializér bez odporu vyrobil a XSD by je propustilo.
+ * Připnuté REGZEC25 XSD povoluje `employee/@act` v rozsahu 1..99, takže tento
+ * katalog je hranice podporovaných interakcí pro resolver, validátor i transport.
  */
 final readonly class PayrollRegistrationInteraction
 {
@@ -30,6 +29,34 @@ final readonly class PayrollRegistrationInteraction
         'full_registration_after_p1' => [
             'document_type' => 'REGZEC25',
             'action_code' => 1,
+        ],
+        'termination' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 2,
+        ],
+        'change' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 3,
+        ],
+        'correction' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 4,
+        ],
+        'variable_symbol_transfer' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 5,
+        ],
+        'czech_legislation_start' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 6,
+        ],
+        'czech_legislation_end' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 7,
+        ],
+        'cancellation' => [
+            'document_type' => 'REGZEC25',
+            'action_code' => 8,
         ],
     ];
 
@@ -58,5 +85,20 @@ final readonly class PayrollRegistrationInteraction
             $this->interaction,
             $this->actionCode,
         );
+    }
+
+    /** @return list<int> */
+    public static function actionsFor(string $documentType): array
+    {
+        $actions = [];
+        foreach (self::SUPPORTED as $definition) {
+            if ($definition['document_type'] === $documentType) {
+                $actions[$definition['action_code']] = true;
+            }
+        }
+        $result = array_map('intval', array_keys($actions));
+        sort($result, SORT_NUMERIC);
+
+        return $result;
     }
 }

@@ -303,13 +303,14 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         }
     }
 
-    public function testCorrectionsCancellationsAndOtherActionsStayClosed(): void
+    public function testRegzecA2ToA8RequireTheirMatchingImmutableEvent(): void
     {
         $serializer = new PayrollRegistrationXmlSerializer();
         $validator = new PayrollRegistrationXmlValidator(
             new PayrollRegistrationSchemaCatalog(),
         );
-        // REGZEC25 XSD povoluje act 1..99; A2–A8 smí zastavit jen náš allowlist.
+        // REGZEC25 XSD povoluje act 1..99; katalog musí odmítnout záměnu názvu
+        // interakce za jinou akci a validátor nesmí přijmout payload bez zdroje.
         foreach ([2, 3, 4, 5, 6, 7, 8] as $actionCode) {
             $payload = self::payload(
                 self::snapshot('SK'),
@@ -322,11 +323,15 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 actualStartOn: '2026-08-05',
             );
             $this->expectCode(
-                'registration_interaction_unsupported',
+                $actionCode === 4
+                    ? 'registration_event_snapshot_missing'
+                    : 'registration_interaction_unsupported',
                 static fn () => $serializer->serialize($payload),
             );
             $this->expectCode(
-                'registration_interaction_unsupported',
+                $actionCode === 4
+                    ? 'registration_event_snapshot_invalid'
+                    : 'registration_interaction_unsupported',
                 static fn () => $validator->validate($payload, '<REGZEC/>'),
             );
         }
@@ -345,14 +350,82 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 ->schemaFor('ZREZAM26'),
         );
         self::assertSame(
-            ['PREZEC26', 'PREZEC26', 'REGZEC25', 'REGZEC25'],
-            array_column(
-                PayrollRegistrationInteraction::SUPPORTED,
-                'document_type',
-            ),
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            PayrollRegistrationInteraction::actionsFor('REGZEC25'),
         );
+    }
+
+    public function testRegzecA2ToA8MinimalOfficialShapesPassPinnedXsd(): void
+    {
+        $serializer = new PayrollRegistrationXmlSerializer();
+        $validator = new PayrollRegistrationXmlValidator(
+            new PayrollRegistrationSchemaCatalog(),
+        );
+        $cases = [
+            'termination' => [2, [
+                'end_on' => '2026-08-04',
+                'activity_code' => '10',
+                'relationship_detail_code' => null,
+                'ended_by_death' => null,
+                'unemployment' => null,
+            ]],
+            'change' => [3, [
+                'activity_code' => '10',
+                'relationship_detail_code' => null,
+                'delta' => ['title_prefix' => 'Mgr.'],
+            ]],
+            'correction' => [4, [
+                'activity_code' => '10',
+                'relationship_detail_code' => null,
+                'delta' => ['title_prefix' => 'Mgr.'],
+            ]],
+            'variable_symbol_transfer' => [5, [
+                'new_variable_symbol' => '9876543210',
+            ]],
+            'czech_legislation_start' => [6, [
+                'foreign_insurance' => [
+                    'current' => 'P',
+                    'name' => 'Syntetická instituce',
+                    'country_code' => 'SK',
+                ],
+            ]],
+            'czech_legislation_end' => [7, [
+                'foreign_insurance' => [
+                    'current' => 'S',
+                    'name' => 'Syntetická instituce',
+                    'country_code' => 'SK',
+                    'identifier' => 'SYN-123',
+                ],
+            ]],
+            'cancellation' => [8, ['not_started' => true]],
+        ];
+
+        foreach ($cases as $interaction => [$actionCode, $data]) {
+            $payload = self::payload(
+                self::snapshot('SK'),
+                new PayrollRegistrationInteraction(
+                    'REGZEC25',
+                    $interaction,
+                    $actionCode,
+                ),
+                expectedStartOn: null,
+                actualStartOn: null,
+                eventSnapshot: self::eventSnapshot(
+                    $interaction,
+                    $actionCode,
+                    $data,
+                ),
+            );
+            $xml = $serializer->serialize($payload);
+            $validator->validate($payload, $xml);
+            self::assertStringContainsString('act="' . $actionCode . '"', $xml);
+            self::assertStringContainsString('oid="200000000000000000002"', $xml);
+            if (in_array($actionCode, [2, 8], true)) {
+                self::assertStringNotContainsString(' fro=', $xml);
+            }
+        }
         self::assertSame(
-            [9, 10, 1, 1],
+            [9, 10, 1, 1, 2, 3, 4, 5, 6, 7, 8],
             array_column(
                 PayrollRegistrationInteraction::SUPPORTED,
                 'action_code',
@@ -418,6 +491,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         PayrollRegistrationInteraction $interaction,
         ?string $expectedStartOn = '2026-08-05',
         ?string $actualStartOn = null,
+        ?array $eventSnapshot = null,
     ): PayrollRegistrationXmlPayload {
         return new PayrollRegistrationXmlPayload(
             identity: $snapshot,
@@ -430,7 +504,47 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             employerVariableSymbol: '1234567890',
             employerName: 'Syntetický zaměstnavatel s.r.o.',
             csszWorkplaceCode: '110',
+            eventSnapshot: $eventSnapshot,
         );
+    }
+
+    /** @param array<string,mixed> $data @return array<string,mixed> */
+    private static function eventSnapshot(
+        string $interaction,
+        int $actionCode,
+        array $data,
+    ): array {
+        return [
+            'schema_reference' => 'payroll-registration-event-snapshot.v1',
+            'supplier_id' => 11,
+            'employee_id' => 41,
+            'employment_id' => 51,
+            'environment' => 'production',
+            'interaction' => $interaction,
+            'action_code' => $actionCode,
+            'effective_on' => '2026-08-04',
+            'notification_trigger_on' => '2026-08-04',
+            'person_external_identifier' => [
+                'id' => 61,
+                'row_version' => 1,
+                'value' => '1000000001',
+            ],
+            'employment_external_identifier' => [
+                'id' => 71,
+                'row_version' => 1,
+                'value' => '200000000000000000002',
+            ],
+            'employer' => [
+                'variable_symbol' => '1234567890',
+                'name' => 'Syntetický zaměstnavatel s.r.o.',
+                'workplace_code' => '110',
+            ],
+            'data' => $data,
+            'source' => [
+                'kind' => 'synthetic',
+                'reference' => 'synthetic:' . $interaction,
+            ],
+        ];
     }
 
     /**

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
+
 /**
  * @phpstan-type TermsInput array{
  *   office_id:?int,
@@ -285,11 +287,12 @@ final class PayrollEmploymentValidator
         }
         if ($relationshipDetailCode !== null) {
             $this->jmhzEvidence->requireRelationshipDetailCode($relationshipDetailCode);
-            if ($activityCode === null || preg_match('/^[1-9]$/D', $activityCode) !== 1) {
-                throw new \InvalidArgumentException(
-                    'Bližší určení pracovněprávního vztahu lze vyplnit jen pro druh činnosti 1 až 9.',
-                );
-            }
+        }
+        if ($activityCode !== null) {
+            $relationshipDetailCode = PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $activityCode,
+                $relationshipDetailCode,
+            );
         }
         if ($relationType !== null) {
             $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);

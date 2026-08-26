@@ -1185,6 +1185,14 @@ final class Routes
                 '/submissions/registration/{employmentId:[0-9]+}',
                 [PayrollRegistrationAction::class, 'prepare'],
             );
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/events',
+                [PayrollRegistrationAction::class, 'events'],
+            );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/events',
+                [PayrollRegistrationAction::class, 'approveEvent'],
+            );
             $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
                 [PayrollRegistrationTransportAction::class, 'send'],
@@ -2114,6 +2122,8 @@ final class Routes
         $app->get    ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'mobileKeyProfile']);
         $app->post   ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'saveMobileKeyProfile']);
         $app->delete ('/api/settings/databox/mobile-key/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'deleteMobileKeyProfile']);
+        $app->get    ('/api/settings/databox/inbox-storage', [\MyInvoice\Action\Submission\SubmissionInboxStorageSettingsAction::class, 'list']);
+        $app->put    ('/api/settings/databox/inbox-storage/{environment:production|test}', [\MyInvoice\Action\Submission\SubmissionInboxStorageSettingsAction::class, 'save']);
         $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
         // Registrace odesílací brány je věc PROVOZOVATELE, ne zákazníka:
         // certifikát je jeden pro celou službu a zákazník k odeslání přes bránu
@@ -2161,6 +2171,9 @@ final class Routes
         $app->post   ('/api/submissions/inbox/sms/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsStart']);
         $app->post   ('/api/submissions/inbox/sms/complete', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsComplete']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/hide', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'hide']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/restore', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'restore']);
+        $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);
         // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
         // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4
         // zák. 300/2008 Sb.) se mění pouhým během času.

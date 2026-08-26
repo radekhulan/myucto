@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use DragonOfMercy\PhpPdf\PdfEditor;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -95,6 +96,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         $employeeId = $this->employee($pdo);
         $this->employmentId = $this->employment($pdo, $employeeId);
         $this->coverage($pdo, $employeeId);
+        $this->healthInsurerAccount($pdo);
         $this->revisionId = $this->revision($pdo, $employeeId);
         $this->storeResult($employeeId);
     }
@@ -600,6 +602,25 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             $result['pdf_artifact_sha256'],
             hash('sha256', $pdf),
         );
+        self::assertSame([
+            false,
+            'Praha 1',
+            '420111222333',
+            'Syntetický plátce s.r.o.',
+            'Zkušební',
+            '12',
+            '1234567800',
+            '11000',
+            date('j.n.Y'),
+            '1',
+            '10000',
+            '1350',
+            '06/2026',
+            true,
+        ], array_map(
+            static fn ($field): string|bool|array|null => $field->value,
+            PdfEditor::fromBytes($pdf)->formFields(),
+        ));
 
         if (!$bundleAvailable) {
             $issues = $this->db->pdo()->prepare(
@@ -700,6 +721,27 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             self::fail('Bez IČO nelze sestavit číslo plátce.');
         } catch (HealthNotificationException $e) {
             self::assertSame('zp_payer_business_id_missing', $e->errorCode);
+        }
+    }
+
+    public function testMissingInsurerPayerNumberStopsTheSubmission(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET variable_symbol = NULL, row_version = row_version + 1
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        try {
+            $this->service->preparePaymentOverview(
+                $this->supplierId,
+                'production',
+                $this->revisionId,
+                '111',
+            );
+            self::fail('Bez čísla plátce u konkrétní pojišťovny nesmí podání vzniknout.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_payer_number_missing', $e->errorCode);
         }
     }
 
@@ -828,6 +870,40 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
              VALUES (?, ?, "czech_regime_verified", "verified", "111",
                      "synteticky-doklad", "2026-01-01")',
         )->execute([$this->supplierId, $employeeId]);
+    }
+
+    private function healthInsurerAccount(PDO $pdo): void
+    {
+        $actorId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')
+            ->fetchColumn();
+        if ($actorId <= 0) {
+            throw new \RuntimeException('Chybí syntetický uživatel pro ověření účtu.');
+        }
+        $pdo->prepare(
+            'INSERT INTO payroll_institutions
+                (supplier_id, institution_type, institution_code)
+             VALUES (?, "health_insurer", "111")',
+        )->execute([$this->supplierId]);
+        $institutionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_institution_accounts
+                (supplier_id, institution_id, institution_name,
+                 bank_account_ciphertext, bank_account_hash,
+                 bank_account_masked, currency_code, variable_symbol,
+                 valid_from, source_kind, source_reference, verified_on,
+                 verified_by, created_by, updated_by)
+             VALUES (?, ?, "VZP", "synthetic", ?, "synthetic",
+                     "CZK", "1234567800", "2026-01-01",
+                     "user_verified", "synthetic-test", "2026-01-01",
+                     ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $institutionId,
+            hash('sha256', 'synthetic-vzp-account', true),
+            $actorId,
+            $actorId,
+            $actorId,
+        ]);
     }
 
     private function revision(PDO $pdo, int $employeeId): int

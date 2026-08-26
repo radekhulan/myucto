@@ -108,7 +108,8 @@ final class HealthInsurerChannelCatalog
                     self::REASON_TRANSPORT_UNDOCUMENTED,
                 note: 'VZP zveřejňuje aktuální formulář i XDP šablonu pro '
                     . 'hromadné vyplnění. Pro datovou schránku MyÚčto '
-                    . 'připraví strojově čitelné PDF se stejnými údaji.',
+                    . 'vyplní přímo připnutý oficiální PDF formulář a před '
+                    . 'odesláním ověří jeho integritu i hodnoty polí.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '201',

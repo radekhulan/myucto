@@ -154,6 +154,9 @@ final class PayrollEnforcementLiabilityMaterializer
                 $targetSnapshot = $target['target_snapshot']
                     ?? $previous['target_snapshot']
                     ?? throw new \LogicException('Chybí snapshot příjemce.');
+                $releaseEvidence = $target === null
+                    ? ($previous['release_evidence'] ?? self::emptyReleaseEvidence())
+                    : $target['release_evidence'];
                 $source = [
                     'schema_reference' => self::SOURCE_SCHEMA,
                     'run_id' => $revision['run_id'],
@@ -164,6 +167,7 @@ final class PayrollEnforcementLiabilityMaterializer
                     'liability_kind' =>
                         PayrollEnforcementPaymentRepository::LIABILITY_KIND,
                     ...$targetSnapshot,
+                    ...$releaseEvidence,
                     'target_amount_minor' => $targetAmount,
                     'prior_signed_minor' => $priorSigned,
                     'delta_signed_minor' => $delta,
@@ -253,6 +257,7 @@ final class PayrollEnforcementLiabilityMaterializer
      *   recipient_reference:string,
      *   amount_minor:int,
      *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }>
      */
@@ -365,6 +370,14 @@ final class PayrollEnforcementLiabilityMaterializer
                     $row['claim_priority_date'] ?? '9999-12-31',
                     $claimId,
                 ],
+                'release_evidence' => [
+                    'release_decision_event_id' =>
+                        $row['release_decision_event_id'],
+                    'release_decision_document_id' =>
+                        $row['release_decision_document_id'],
+                    'release_decision_evidence_hash' =>
+                        $row['release_decision_evidence_hash'],
+                ],
                 'target_snapshot' => [
                     'case_id' => $caseId,
                     'claim_id' => $claimId,
@@ -390,12 +403,14 @@ final class PayrollEnforcementLiabilityMaterializer
      *   recipient_reference:string,
      *   amount_minor:int,
      *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }|null $left
      * @param array{
      *   recipient_reference:string,
      *   amount_minor:int,
      *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }|null $right
      */
@@ -493,6 +508,7 @@ final class PayrollEnforcementLiabilityMaterializer
      *   recipient_reference:string,
      *   signed_minor:int,
      *   latest_id:int,
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }>
      */
@@ -538,6 +554,14 @@ final class PayrollEnforcementLiabilityMaterializer
                     'recipient_reference' => $row['recipient_reference'],
                     'signed_minor' => 0,
                     'latest_id' => $row['id'],
+                    'release_evidence' => [
+                        'release_decision_event_id' =>
+                            $source['release_decision_event_id'] ?? null,
+                        'release_decision_document_id' =>
+                            $source['release_decision_document_id'] ?? null,
+                        'release_decision_evidence_hash' =>
+                            $source['release_decision_evidence_hash'] ?? null,
+                    ],
                     'target_snapshot' => $snapshot,
                 ];
             } elseif ($state[$reference]['recipient_reference']
@@ -553,6 +577,14 @@ final class PayrollEnforcementLiabilityMaterializer
                 $signed,
             );
             $state[$reference]['latest_id'] = $row['id'];
+            $state[$reference]['release_evidence'] = [
+                'release_decision_event_id' =>
+                    $source['release_decision_event_id'] ?? null,
+                'release_decision_document_id' =>
+                    $source['release_decision_document_id'] ?? null,
+                'release_decision_evidence_hash' =>
+                    $source['release_decision_evidence_hash'] ?? null,
+            ];
         }
         foreach ($state as $item) {
             if ($item['signed_minor'] < 0) {
@@ -563,6 +595,16 @@ final class PayrollEnforcementLiabilityMaterializer
         }
 
         return $state;
+    }
+
+    /** @return array<string,null> */
+    private static function emptyReleaseEvidence(): array
+    {
+        return [
+            'release_decision_event_id' => null,
+            'release_decision_document_id' => null,
+            'release_decision_evidence_hash' => null,
+        ];
     }
 
     /**

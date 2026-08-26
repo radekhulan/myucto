@@ -432,6 +432,38 @@ final class DocumentRepository
         return $stmt->rowCount() > 0;
     }
 
+    /** @return list<array{id:int,sha256:string,filename:string,thumb_path:?string}> */
+    public function privacyPurgeRows(int $supplierId, int $rootId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'WITH RECURSIVE document_tree AS (
+                SELECT id, parent_document_id
+                  FROM documents
+                 WHERE supplier_id = ? AND id = ?
+                UNION ALL
+                SELECT child.id, child.parent_document_id
+                  FROM documents child
+                  JOIN document_tree parent ON child.parent_document_id = parent.id
+                 WHERE child.supplier_id = ?
+             )
+             SELECT document.id, document.sha256, document.filename, document.thumb_path
+               FROM documents document
+               JOIN document_tree tree ON tree.id = document.id
+              WHERE document.supplier_id = ?
+              ORDER BY document.id'
+        );
+        $stmt->execute([$supplierId, $rootId, $supplierId, $supplierId]);
+        return array_map(
+            static fn (array $row): array => [
+                'id' => (int) $row['id'],
+                'sha256' => (string) $row['sha256'],
+                'filename' => (string) $row['filename'],
+                'thumb_path' => $row['thumb_path'] !== null ? (string) $row['thumb_path'] : null,
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+        );
+    }
+
     /**
      * Surové řádky v koši (vč. filename/sha) — pro fyzické mazání. Scope-aware:
      * non-admin vysype jen company + vlastní user doklady (nesmí odpojit cizí user bajty).

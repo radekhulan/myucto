@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService;
 use Psr\Clock\ClockInterface;
 
 final class PayrollSubmissionService
@@ -72,6 +73,7 @@ final class PayrollSubmissionService
         private readonly PayrollSubmissionStateMachine $stateMachine,
         private readonly SecretEncryption $encryption,
         private readonly ClockInterface $clock,
+        private readonly ?PayrollRegistrationReceiptIdentityService $registrationReceiptIdentities = null,
     ) {}
 
     /**
@@ -1230,9 +1232,13 @@ final class PayrollSubmissionService
                 $importedBy,
             );
             if ($verified !== null && $verified->formOutcomes !== []) {
-                if ($protocolCode !== 'CSSZ_JMHZ') {
+                if (!in_array(
+                    $protocolCode,
+                    ['CSSZ_JMHZ', 'CSSZ_REGZEC', 'CSSZ_PREZEC'],
+                    true,
+                )) {
                     throw new \DomainException(
-                        'Výsledky formulářů lze uložit jen k protokolu JMHZ.',
+                        'Výsledky formulářů lze uložit jen k protokolu ČSSZ.',
                     );
                 }
                 foreach ($verified->formOutcomes as $outcome) {
@@ -1270,6 +1276,19 @@ final class PayrollSubmissionService
                         $errorsHash,
                     );
                 }
+            }
+            if ($trusted
+                && $remoteStatus === 'accepted'
+                && $this->registrationReceiptIdentities !== null
+            ) {
+                $this->registrationReceiptIdentities
+                    ->applyAcceptedVariableSymbolTransfer(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $receiptId,
+                        $importedBy,
+                    );
             }
 
             return [

@@ -134,6 +134,44 @@ final class DocumentStorage
      */
     public function storeFromTemp(string $tmpPath, int $supplierId, string $originalName): array
     {
+        return $this->storeFromTempWithPolicy($tmpPath, $supplierId, $originalName, false);
+    }
+
+    /**
+     * Uloží přílohu vytaženou ze ZFO. HTML smí projít pouze touto úzkou cestou
+     * a v DB dostane generický MIME; download endpoint je vždy vydává jako
+     * `attachment` + `nosniff`, takže se v původu aplikace nevykreslí.
+     *
+     * @return array{sha256:string,filename:string,size_bytes:int,mime_type:string,doc_type:string,abs_path:string,ext:string}
+     */
+    public function storeZfoAttachmentFromBytes(
+        string $bytes,
+        int $supplierId,
+        string $originalName,
+        string $declaredMime,
+    ): array {
+        $tmp = $this->tmpPath($supplierId);
+        if (@file_put_contents($tmp, $bytes) === false) {
+            throw new DocumentException('store_failed', 'Nepodařilo se zapsat dočasný soubor.', 500);
+        }
+
+        $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+        $allowDownloadOnlyHtml = in_array($ext, ['html', 'htm'], true)
+            && in_array(strtolower(trim($declaredMime)), ['text/html', 'application/xhtml+xml'], true);
+
+        return $this->storeFromTempWithPolicy($tmp, $supplierId, $originalName, $allowDownloadOnlyHtml);
+    }
+
+    /**
+     * @return array{sha256:string,filename:string,size_bytes:int,mime_type:string,doc_type:string,abs_path:string,ext:string}
+     */
+    private function storeFromTempWithPolicy(
+        string $tmpPath,
+        int $supplierId,
+        string $originalName,
+        bool $allowDownloadOnlyHtml,
+    ): array
+    {
         if (!is_file($tmpPath)) {
             throw new DocumentException('move_failed', 'Dočasný soubor nenalezen.', 500);
         }
@@ -150,9 +188,12 @@ final class DocumentStorage
 
         $detectedMime = $this->detectMime($tmpPath);
         $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+        $downloadOnlyHtml = $allowDownloadOnlyHtml
+            && in_array($ext, ['html', 'htm'], true)
+            && in_array(strtolower($detectedMime), ['text/html', 'application/xhtml+xml'], true);
 
         try {
-            $docType = $this->classify($ext, $detectedMime);
+            $docType = $downloadOnlyHtml ? 'other' : $this->classify($ext, $detectedMime);
         } catch (DocumentException $e) {
             @unlink($tmpPath);
             throw $e;
@@ -191,7 +232,9 @@ final class DocumentStorage
             'sha256'     => $sha256,
             'filename'   => $diskName,
             'size_bytes' => $size,
-            'mime_type'  => $detectedMime !== '' ? $detectedMime : 'application/octet-stream',
+            'mime_type'  => $downloadOnlyHtml
+                ? 'application/octet-stream'
+                : ($detectedMime !== '' ? $detectedMime : 'application/octet-stream'),
             'doc_type'   => $docType,
             'abs_path'   => $diskPath,
             'ext'        => $ext,

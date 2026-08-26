@@ -45,7 +45,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         foreach ([['dpc', 'A'], ['dpp', 'T']] as [$relationType, $activityCode]) {
             $terms = $this->terms();
             $terms['activity_code'] = $activityCode;
-            $terms['jmhz_relationship_detail_code'] = null;
+            $terms['jmhz_relationship_detail_code'] = '1';
 
             $result = $this->validator()->create([
                 'code' => strtoupper($relationType) . '-1',
@@ -63,7 +63,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         foreach ([['dpc', 'T'], ['dpp', 'A'], ['dpp', '1']] as [$relationType, $activityCode]) {
             $terms = $this->terms();
             $terms['activity_code'] = $activityCode;
-            $terms['jmhz_relationship_detail_code'] = null;
+            $terms['jmhz_relationship_detail_code'] = '1';
 
             try {
                 $this->validator()->create([
@@ -386,21 +386,30 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $this->validator()->terms($input);
     }
 
-    public function testRelationshipDetailRequiresPinnedCodeAndApplicableActivity(): void
+    public function testRelationshipDetailFollowsPinnedRegzecMatrix(): void
     {
         $valid = $this->terms();
         $validated = $this->validator()->terms($valid);
         self::assertSame('1', $validated['activity_code']);
         self::assertSame('1', $validated['jmhz_relationship_detail_code']);
 
-        $notApplicable = $valid;
-        $notApplicable['activity_code'] = 'A';
+        $direct = $valid;
+        $direct['activity_code'] = 'A';
+        self::assertSame('1', $this->validator()->terms($direct)['jmhz_relationship_detail_code']);
+
+        $missingDirect = $direct;
+        $missingDirect['jmhz_relationship_detail_code'] = null;
         try {
-            $this->validator()->terms($notApplicable);
-            self::fail('Bližší určení nesmí být u druhu činnosti mimo 1 až 9.');
+            $this->validator()->terms($missingDirect);
+            self::fail('Přímý druh činnosti musí mít bližší určení 1.');
         } catch (\InvalidArgumentException $exception) {
-            self::assertStringContainsString('jen pro druh činnosti 1 až 9', $exception->getMessage());
+            self::assertStringContainsString('vyžaduje bližší určení', $exception->getMessage());
         }
+
+        $activityTen = $valid;
+        $activityTen['activity_code'] = '10';
+        $activityTen['jmhz_relationship_detail_code'] = null;
+        self::assertNull($this->validator()->terms($activityTen)['jmhz_relationship_detail_code']);
 
         $unknown = $valid;
         $unknown['jmhz_relationship_detail_code'] = '9';

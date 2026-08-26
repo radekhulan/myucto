@@ -134,6 +134,18 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier::class,
+                ),
+            \MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor::class,
+                ),
+            \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPdfTemplateProvider::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthPaymentOverviewPdfTemplateProvider::class,
+                ),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,
@@ -317,6 +329,14 @@ final class Bootstrap
                         $version === '' ? '0.0.0' : $version,
                     );
                 },
+            \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine::class),
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                    $c->get(ClockInterface::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService::class),
+                ),
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
                 if (

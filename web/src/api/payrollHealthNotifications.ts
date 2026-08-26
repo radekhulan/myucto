@@ -287,9 +287,14 @@ export const payrollHealthNotificationApi = {
       { params: { on_date: onDate } },
     ).then(response => response.data),
 
-  preparePaymentOverview: (revisionId: number, insurerCode: string) =>
+  preparePaymentOverview: (
+    revisionId: number,
+    insurerCode: string,
+    environment: 'production' | 'test' = 'production',
+  ) =>
     api.post<HealthPreparedOverview>(
       `/payroll/submissions/health-notifications/payment-overview/${revisionId}/${insurerCode}/prepare`,
+      { environment },
     ).then(response => response.data),
 
   registerPeriodObligations: (period: string) =>

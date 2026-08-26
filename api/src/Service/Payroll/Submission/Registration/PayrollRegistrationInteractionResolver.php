@@ -19,14 +19,18 @@ final class PayrollRegistrationInteractionResolver
     /**
      * @param array{
      *   work_started:bool,full_registration_data:bool,
-     *   pre_registration_accepted:bool,did_not_start:bool
+     *   pre_registration_accepted:bool,did_not_start:bool,
+     *   employment_ended:bool,event_interaction:?string
      * } $context
      */
     public function resolve(
         PayrollRegistrationIdentitySnapshot $snapshot,
         array $context,
     ): PayrollRegistrationInteraction {
-        if ($snapshot->scope['effective_on'] < self::SUPPORTED_FROM) {
+        $eventInteraction = $context['event_interaction'] ?? null;
+        if (!is_string($eventInteraction)
+            && $snapshot->scope['effective_on'] < self::SUPPORTED_FROM
+        ) {
             $this->invalid(
                 'registration_interaction_before_supported_window',
                 'PREZEC/REGZEC tok není podporován před začátkem ověřeného okna.',
@@ -37,6 +41,27 @@ final class PayrollRegistrationInteractionResolver
             $this->invalid(
                 'registration_interaction_citizenship_unverified',
                 'Bez ověřeného státního občanství nelze rozlišit částečné přihlášení a plnou registraci.',
+            );
+        }
+        if (is_string($eventInteraction)) {
+            $definition = PayrollRegistrationInteraction::SUPPORTED[$eventInteraction]
+                ?? null;
+            if ($definition === null
+                || $definition['document_type'] !== 'REGZEC25'
+                || $definition['action_code'] < 2
+                || $definition['action_code'] > 8
+            ) {
+                $this->invalid(
+                    'registration_event_interaction_invalid',
+                    'Neměnný zdroj neodpovídá podporované interakci REGZEC A2–A8.',
+                );
+            }
+
+            return $this->forSnapshot(
+                $snapshot,
+                'REGZEC25',
+                $eventInteraction,
+                $definition['action_code'],
             );
         }
         if ($context['did_not_start']) {
@@ -52,6 +77,12 @@ final class PayrollRegistrationInteractionResolver
                 'PREZEC26',
                 'pre_registration_no_show',
                 10,
+            );
+        }
+        if ($context['employment_ended'] ?? false) {
+            $this->invalid(
+                'registration_regzec_a2_source_missing',
+                'Skončený pracovní vztah vyžaduje samostatný schválený zdroj REGZEC A2; nelze za něj znovu vytvořit přihlášku A1.',
             );
         }
         if ($this->agendaFor($citizenship, $context) === 'REGZEC25') {
@@ -97,13 +128,17 @@ final class PayrollRegistrationInteractionResolver
      *
      * @param array{
      *   work_started:bool,full_registration_data:bool,
-     *   pre_registration_accepted:bool,did_not_start:bool
+     *   pre_registration_accepted:bool,did_not_start:bool,
+     *   employment_ended:bool,event_interaction:?string
      * } $context
      */
     public function agendaFor(
         ?string $citizenshipCountryCode,
         array $context,
     ): string {
+        if (is_string($context['event_interaction'] ?? null)) {
+            return 'REGZEC25';
+        }
         if ($context['did_not_start']) {
             return 'PREZEC26';
         }
@@ -184,7 +219,7 @@ final class PayrollRegistrationInteractionResolver
         if (!$interaction->supported()) {
             $this->invalid(
                 'registration_interaction_unsupported',
-                'Core umí jen PREZEC P1/P2 a REGZEC A1; opravy, storna a další akce zůstávají uzavřené.',
+                'Registrační interakce není v podporovaném katalogu.',
             );
         }
     }

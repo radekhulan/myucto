@@ -23,6 +23,7 @@
         "ext-zip": "*",
         "ext-zlib": "*",
         "chillerlan/php-qrcode": "^6.0",
+        "dragonofmercy/phppdf": "^1.0",
         "enshrined/svg-sanitize": "^0.22",
         "guzzlehttp/guzzle": "^7.11",
         "monolog/monolog": "^3.7",

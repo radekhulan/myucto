@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
 use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\InstitutionAccountType;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
@@ -45,7 +47,6 @@ final readonly class HealthInsuranceSubmissionService
     private const CHANNEL = 'health_portal';
     private const SUBJECT_EMPLOYMENT = 'employment';
     private const SUBJECT_RUN = 'payroll_run';
-    private const PDF_TEMPLATE_VERSION = 'payroll-health-payment-overview.v1';
 
     /** Strop stránky je tvrdý — z URL ho zvednout nejde. */
     public const PERIOD_MAX_LIMIT = 200;
@@ -53,6 +54,7 @@ final readonly class HealthInsuranceSubmissionService
 
     public function __construct(
         private PayrollHealthNotificationRepository $facts,
+        private PayrollInstitutionAccountRepository $institutionAccounts,
         private HealthNotificationDutyResolver $resolver,
         private HealthNotificationDutyCatalog $duties,
         private HealthNotificationCodeCatalog $codes,
@@ -447,7 +449,8 @@ final readonly class HealthInsuranceSubmissionService
             'insurer_code' => $insurerCode,
             'statutory_result_hash' => $overview->statutoryResultHash,
             'xml_sha256' => hash('sha256', $xml),
-            'pdf_template_version' => self::PDF_TEMPLATE_VERSION,
+            'pdf_template_reference' =>
+                $this->pdfRenderer->templateReference($insurerCode),
             'isds_attachment_rules' => $channel['isds_attachment_rules'],
         ]));
         $obligation = $this->obligations->register(
@@ -1213,7 +1216,11 @@ final readonly class HealthInsuranceSubmissionService
         int $supplierId,
         HealthPaymentOverview $overview,
     ): HealthPaymentOverviewPayload {
-        $employer = $this->requireEmployer($supplierId);
+        $employer = $this->requireEmployer(
+            $supplierId,
+            $overview->insurerCode,
+            $overview->period . '-01',
+        );
         $contribution = $overview->totals['total_contribution_minor_units'];
         if ($contribution % 100 !== 0) {
             throw new HealthNotificationException(
@@ -1239,6 +1246,8 @@ final readonly class HealthInsuranceSubmissionService
 
     private function requireEmployer(
         int $supplierId,
+        string $insurerCode,
+        string $effectiveOn,
     ): HealthEmployerIdentification {
         $row = $this->facts->findEmployerIdentification($supplierId);
         if ($row === null) {
@@ -1255,11 +1264,27 @@ final readonly class HealthInsuranceSubmissionService
             );
         }
 
-        return HealthEmployerIdentification::fromBusinessId(
-            businessId: $row['business_id'],
-            // Číslo účtárny plátce aplikace neeviduje; výchozí `00` je
-            // doložený tvar pro zaměstnavatele s jedinou účtárnou.
-            accountingUnit: '00',
+        $identifiers = $this->institutionAccounts->findEffectivePaymentIdentifiers(
+            $supplierId,
+            InstitutionAccountType::HEALTH_INSURER->value,
+            $insurerCode,
+            'CZK',
+            $effectiveOn,
+        );
+        $payerNumber = preg_replace(
+            '/\D+/',
+            '',
+            (string) ($identifiers['variable_symbol'] ?? ''),
+        );
+        if (preg_match('/^[0-9]{10}$/', $payerNumber) !== 1) {
+            throw new HealthNotificationException(
+                'zp_payer_number_missing',
+                'U účinného platebního účtu pojišťovny chybí desetimístné identifikační číslo plátce (VS zaměstnavatele).',
+            );
+        }
+
+        return new HealthEmployerIdentification(
+            payerNumber: $payerNumber,
             name: $row['name'],
             street: (string) ($row['street'] ?? ''),
             houseNumber: (string) ($row['house_number'] ?? ''),

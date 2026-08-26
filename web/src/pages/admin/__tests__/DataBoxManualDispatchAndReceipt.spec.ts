@@ -40,6 +40,7 @@ vi.mock('@/api/dataBox', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('@/composables/useFormat', () => ({ formatUtcDateTime: (value: string) => value }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError }),
@@ -121,6 +122,12 @@ function receipt(overrides: Partial<InboxMessage> = {}): InboxMessage {
     delivered_at: '2026-08-15 10:00:00',
     accepted_at: null,
     fetched_at: '2026-08-15 10:05:00',
+    hidden_at: null,
+    hidden_by: null,
+    local_content_state: 'available',
+    local_content_purged_at: null,
+    local_content_purged_by: null,
+    lifecycle_row_version: 1,
     ...overrides,
   }
 }

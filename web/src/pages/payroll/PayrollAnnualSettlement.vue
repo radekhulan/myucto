@@ -1010,7 +1010,53 @@ onMounted(async () => {
                 </ul>
               </div>
 
-              <table v-else class="mt-4 w-full text-sm" data-test="annual-settlement-result">
+              <div
+                v-if="blockers.length === 0 && result.bonus_minimum_income_minor_units !== undefined"
+                data-test="annual-tax-bonus-eligibility"
+                class="mt-4 rounded-md border p-4"
+                :class="result.annual_bonus_threshold_met
+                  ? 'border-success-500/40 bg-success-50'
+                  : 'border-warning-500/40 bg-warning-50'"
+              >
+                <p class="text-sm font-medium text-neutral-900">
+                  {{ t(result.annual_bonus_threshold_met
+                    ? 'payroll.annual_settlement.bonus_threshold_met'
+                    : 'payroll.annual_settlement.bonus_threshold_not_met', {
+                    income: money(result.bonus_qualifying_income_minor_units),
+                    threshold: money(result.bonus_minimum_income_minor_units),
+                    minimum: money(result.bonus_minimum_amount_minor_units),
+                  }) }}
+                </p>
+                <p class="mt-1 text-xs text-neutral-600">
+                  {{ t('payroll.annual_settlement.bonus_threshold_hint') }}
+                </p>
+                <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                  <div data-test="annual-tax-bonus-income">
+                    <dt class="text-xs text-neutral-500">{{ t('payroll.annual_settlement.bonus_income') }}</dt>
+                    <dd class="mt-0.5 font-medium tabular-nums text-neutral-900">
+                      {{ money(result.bonus_qualifying_income_minor_units) }}
+                    </dd>
+                  </div>
+                  <div data-test="annual-tax-bonus-income-threshold">
+                    <dt class="text-xs text-neutral-500">{{ t('payroll.annual_settlement.bonus_income_threshold') }}</dt>
+                    <dd class="mt-0.5 font-medium tabular-nums text-neutral-900">
+                      {{ money(result.bonus_minimum_income_minor_units) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs text-neutral-500">{{ t('payroll.annual_settlement.bonus_amount_minimum') }}</dt>
+                    <dd class="mt-0.5 font-medium tabular-nums text-neutral-900">
+                      {{ money(result.bonus_minimum_amount_minor_units) }}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+
+              <table
+                v-if="blockers.length === 0"
+                class="mt-4 w-full text-sm"
+                data-test="annual-settlement-result"
+              >
                 <tbody class="divide-y divide-neutral-100">
                   <tr>
                     <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_rounded_base') }}</td>
@@ -1048,6 +1094,24 @@ onMounted(async () => {
                     <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_tax_difference') }}</td>
                     <td class="py-2 text-right tabular-nums text-neutral-900">
                       {{ money(result.tax_difference_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr
+                    v-if="result.bonus_minimum_income_minor_units !== undefined"
+                    data-test="annual-tax-bonus-entitlement"
+                  >
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_annual_tax_bonus') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      {{ money(result.annual_tax_bonus_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr
+                    v-if="result.monthly_tax_bonus_minor_units !== undefined"
+                    data-test="annual-tax-bonus-paid-monthly"
+                  >
+                    <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_monthly_tax_bonus') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-900">
+                      −{{ money(result.monthly_tax_bonus_minor_units) }}
                     </td>
                   </tr>
                   <tr>

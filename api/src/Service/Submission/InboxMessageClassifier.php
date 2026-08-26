@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Submission;
 
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsResponseMatcher;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
 
 /**
@@ -53,9 +55,21 @@ final readonly class InboxMessageClassifier
         InboxMessageHeader $header,
         array $recipientBoxIds = [],
     ): array {
-        $matchedOutboxId = $this->matchByReference($supplierId, $header);
-
         $classification = $this->guessKind($header, $recipientBoxIds);
+        $matchedOutboxId = $this->matchByReference(
+            $supplierId,
+            $environment,
+            $header,
+        );
+        if ($matchedOutboxId === null
+            && $classification === self::CSSZ_PROTOCOL
+        ) {
+            $matchedOutboxId = $this->matchCsszResponse(
+                $supplierId,
+                $environment,
+                $header,
+            );
+        }
 
         // Zpráva bez rozpoznaného druhu se NIKDY neváže na podání — DB to
         // stejně odmítne (trigger `trg_submission_inbox_tenant_guard`).
@@ -70,16 +84,63 @@ final readonly class InboxMessageClassifier
      * Vazba na podání — výhradně přes naši vlastní spisovou značku.
      * Cokoliv jiného by bylo hádání.
      */
-    private function matchByReference(int $supplierId, InboxMessageHeader $header): ?int
+    private function matchByReference(
+        int $supplierId,
+        string $environment,
+        InboxMessageHeader $header,
+    ): ?int
     {
         $reference = trim((string) $header->senderIdent);
         if ($reference === '') {
             return null;
         }
         $row = $this->outbox->findByCorrelation($supplierId, $reference);
-        if ($row === null) {
+        if ($row === null || (string) $row['environment'] !== $environment) {
             return null;
         }
+        return (int) $row['id'];
+    }
+
+    /**
+     * ČSSZ u odpovědi na e-Podání garantuje dmID původní zprávy v předmětu.
+     * Je to stejně přesná vazba jako vlastní spisová značka: dmID přidělilo
+     * ISDS a v odchozí frontě je pro daný kanál jednoznačné.
+     */
+    private function matchCsszResponse(
+        int $supplierId,
+        string $environment,
+        InboxMessageHeader $header,
+    ): ?int {
+        $matcher = new JmhzIsdsResponseMatcher();
+        $reference = $matcher->parseSubject($header->subject);
+        if ($reference === null) {
+            return null;
+        }
+        $row = $this->outbox->findByExternalMessageId(
+            $supplierId,
+            'isds',
+            $reference->originalMessageId,
+        );
+        if ($row === null
+            || (string) $row['environment'] !== $environment
+            || AgendaReceiptCapability::forChannel(
+                (string) $row['channel'],
+                (string) $row['agenda_code'],
+            ) !== AgendaReceiptCapability::ProcessingProtocol
+            || !in_array(
+                strtoupper((string) $row['agenda_code']),
+                ['JMHZ', 'JMHZ25'],
+                true,
+            )
+            || !$matcher->matches(
+                $header->subject,
+                $reference->originalMessageId,
+                JmhzDispatchService::SUBMISSION_CLASS,
+            )
+        ) {
+            return null;
+        }
+
         return (int) $row['id'];
     }
 

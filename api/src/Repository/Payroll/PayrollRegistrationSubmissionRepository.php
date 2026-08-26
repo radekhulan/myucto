@@ -186,6 +186,133 @@ final class PayrollRegistrationSubmissionRepository
     }
 
     /**
+     * @return array{
+     *   submission_id:int,agenda_code:string,status:string,
+     *   created_at:string,artifact_sha256:?string
+     * }|null
+     */
+    public function registrationBySubmission(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $submissionId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id,
+                    part.agenda_code,
+                    submission.status,
+                    submission.created_at,
+                    artifact.artifact_sha256
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               LEFT JOIN payroll_submission_artifacts artifact
+                 ON artifact.supplier_id = part.supplier_id
+                AND artifact.part_id = part.id
+                AND artifact.artifact_kind = \'outbound_xml\'
+              WHERE part.supplier_id = ?
+                AND part.environment = ?
+                AND part.submission_id = ?
+                AND part.subject_reference = ?
+                AND part.agenda_code IN (\'PREZEC26\', \'REGZEC25\')
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            self::employmentReference($employmentId),
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'submission_id' => (int) $row['id'],
+            'agenda_code' => (string) $row['agenda_code'],
+            'status' => (string) $row['status'],
+            'created_at' => (string) $row['created_at'],
+            'artifact_sha256' => $this->nullableString($row['artifact_sha256']),
+        ];
+    }
+
+    /**
+     * @return list<array{
+     *   receipt_id:int,employment_id:int,effective_on:string,
+     *   form_guid:string,external_employment_reference:string
+     * }>
+     */
+    public function acceptedVariableSymbolTransferOutcomes(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT receipt.id AS receipt_id, event.employment_id,
+                    event.effective_on, outcome.form_guid,
+                    outcome.external_employment_reference
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_registration_event_snapshots event
+                 ON event.supplier_id = part.supplier_id
+                AND event.environment = part.environment
+                AND part.source_entity_type = "payroll_registration_event"
+                AND part.source_entity_reference =
+                    CONCAT("payroll_registration_event:", event.id)
+               JOIN payroll_submission_receipts receipt
+                 ON receipt.supplier_id = submission.supplier_id
+                AND receipt.environment = submission.environment
+                AND receipt.submission_id = submission.id
+                AND receipt.verification_status = "trusted"
+                AND receipt.remote_status = "accepted"
+               JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.submission_id = receipt.submission_id
+                AND outcome.receipt_id = receipt.id
+                AND (outcome.part_id IS NULL OR outcome.part_id = part.id)
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND submission.id = ?
+                AND receipt.id = ?
+                AND submission.status = "accepted"
+                AND part.agenda_code = "REGZEC25"
+                AND event.action_code = 5
+                AND outcome.external_employment_reference IS NOT NULL
+              ORDER BY receipt.id, outcome.id'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+        ]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $result[] = [
+                'receipt_id' => (int) $row['receipt_id'],
+                'employment_id' => (int) $row['employment_id'],
+                'effective_on' => (string) $row['effective_on'],
+                'form_guid' => (string) $row['form_guid'],
+                'external_employment_reference' =>
+                    (string) $row['external_employment_reference'],
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Termín položky checklistu se přepisuje na skutečnou zákonnou lhůtu.
      * Seed při založení vztahu dává všem položkám fáze stejné datum (den
      * nástupu) — u registrace je to o osm dnů vedle a obsluha by se řídila

@@ -245,6 +245,49 @@ function unavailableAdvanceLabel(): string {
         </div>
       </dl>
 
+      <section
+        v-if="advance?.tax_bonus_eligibility_reason"
+        data-test="monthly-tax-bonus-eligibility"
+        class="rounded-lg border p-4"
+        :class="advance.tax_bonus_eligible
+          ? 'border-success-500/40 bg-success-50'
+          : 'border-warning-500/40 bg-warning-50'"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h4 class="font-medium text-neutral-900">
+              {{ t('payroll.runs.tax.bonus_eligibility.title') }}
+            </h4>
+            <p class="mt-1 text-sm text-neutral-700">
+              {{ t(`payroll.runs.tax.bonus_eligibility.${advance.tax_bonus_eligibility_reason}`, {
+                income: money(advance.taxable_income_minor_units),
+                incomeThreshold: money(advance.tax_bonus_minimum_income_minor_units),
+                candidate: money(advance.tax_bonus_candidate_minor_units),
+                amountThreshold: money(advance.tax_bonus_minimum_amount_minor_units),
+              }) }}
+            </p>
+          </div>
+          <span
+            class="whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium"
+            :class="advance.tax_bonus_eligible
+              ? 'bg-success-100 text-success-800'
+              : 'bg-warning-100 text-warning-800'"
+          >
+            {{ t(advance.tax_bonus_eligible
+              ? 'payroll.runs.tax.bonus_eligibility.status_met'
+              : 'payroll.runs.tax.bonus_eligibility.status_not_met') }}
+          </span>
+        </div>
+        <p class="mt-2 text-xs text-neutral-600">
+          {{ t('payroll.runs.tax.bonus_eligibility.thresholds', {
+            income: money(advance.taxable_income_minor_units),
+            incomeThreshold: money(advance.tax_bonus_minimum_income_minor_units),
+            candidate: money(advance.tax_bonus_candidate_minor_units),
+            amountThreshold: money(advance.tax_bonus_minimum_amount_minor_units),
+          }) }}
+        </p>
+      </section>
+
       <section v-if="advance" class="rounded-lg border border-neutral-200">
         <div class="border-b border-neutral-200 px-4 py-3">
           <h4 class="font-medium text-neutral-900">{{ t('payroll.runs.tax.rounding_title') }}</h4>

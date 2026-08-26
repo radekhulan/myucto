@@ -28,6 +28,9 @@ final class SubmissionInboxRepository
     private const DELIVERY_COLUMNS = 'delivery_basis, delivered_on, fiction_statutory_on, fiction_due_on,
         fiction_days, fiction_days_source, sender_is_public_authority, delivery_resolved_at, delivery_note';
 
+    private const PRIVACY_COLUMNS = 'hidden_at, hidden_by, local_content_state,
+        local_content_purged_at, local_content_purged_by, lifecycle_row_version';
+
     public function __construct(private readonly Connection $db) {}
 
     public function isAvailable(): bool
@@ -47,9 +50,18 @@ final class SubmissionInboxRepository
 
     private function columns(): string
     {
-        return $this->supportsDeliveryResolution()
+        $columns = $this->supportsDeliveryResolution()
             ? self::COLUMNS . ', ' . self::DELIVERY_COLUMNS
             : self::COLUMNS;
+        return $this->supportsPrivacyLifecycle()
+            ? $columns . ', ' . self::PRIVACY_COLUMNS
+            : $columns;
+    }
+
+    public function supportsPrivacyLifecycle(): bool
+    {
+        return $this->isAvailable()
+            && $this->db->hasColumn(self::TABLE, 'lifecycle_row_version');
     }
 
     public function exists(int $supplierId, string $channel, string $environment, string $messageId): bool
@@ -132,13 +144,27 @@ final class SubmissionInboxRepository
     }
 
     /** @return list<array<string,mixed>> */
-    public function listRecent(int $supplierId, string $environment, ?string $classification = null, int $limit = 100): array
+    public function listRecent(
+        int $supplierId,
+        string $environment,
+        ?string $classification = null,
+        int $limit = 100,
+        string $visibility = 'active',
+    ): array
     {
         $this->assertAvailable();
         $limit = max(1, min(500, $limit));
         $sql = 'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
                  WHERE supplier_id = ? AND environment = ?';
         $params = [$supplierId, $environment];
+        if (!in_array($visibility, ['active', 'hidden', 'all'], true)) {
+            throw new \InvalidArgumentException('Neznámý pohled příchozích zpráv.');
+        }
+        if ($this->supportsPrivacyLifecycle() && $visibility !== 'all') {
+            $sql .= $visibility === 'hidden'
+                ? ' AND hidden_at IS NOT NULL'
+                : ' AND hidden_at IS NULL';
+        }
         if ($classification !== null) {
             $sql .= ' AND classification = ?';
             $params[] = $classification;
@@ -216,6 +242,72 @@ final class SubmissionInboxRepository
         );
         $stmt->execute([$classification, $matchedOutboxId, $id, $supplierId]);
         return $stmt->rowCount() > 0;
+    }
+
+    /** @return list<string> */
+    public function privacyBlockers(int $supplierId, int $id): array
+    {
+        $this->assertPrivacyLifecycle();
+        $row = $this->findById($supplierId, $id);
+        if ($row === null) {
+            return ['not_found'];
+        }
+        $blockers = [];
+        if ((string) $row['classification'] !== 'unclassified') {
+            $blockers[] = 'classified';
+        }
+        if ($row['matched_outbox_id'] !== null) {
+            $blockers[] = 'matched_outbox';
+        }
+        foreach ([
+            'defect_notice' => 'SELECT 1 FROM submission_defect_notices WHERE supplier_id = ? AND inbox_message_id = ? LIMIT 1',
+            'receipt' => 'SELECT 1 FROM submission_outbox WHERE supplier_id = ? AND receipt_inbox_message_id = ? LIMIT 1',
+        ] as $code => $sql) {
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute([$supplierId, $id]);
+            if ($stmt->fetchColumn() !== false) {
+                $blockers[] = $code;
+            }
+        }
+        return $blockers;
+    }
+
+    public function setHidden(
+        int $supplierId,
+        int $id,
+        bool $hidden,
+        int $expectedVersion,
+        ?int $userId,
+    ): bool {
+        $this->assertPrivacyLifecycle();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET hidden_at = ' . ($hidden ? 'UTC_TIMESTAMP()' : 'NULL') . ',
+                    hidden_by = ?, lifecycle_row_version = lifecycle_row_version + 1
+              WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?'
+        );
+        $stmt->execute([$hidden ? $userId : null, $supplierId, $id, $expectedVersion]);
+        return $stmt->rowCount() === 1;
+    }
+
+    public function markLocalContentPurged(
+        int $supplierId,
+        int $id,
+        int $expectedVersion,
+        ?int $userId,
+    ): bool {
+        $this->assertPrivacyLifecycle();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET document_id = NULL, local_content_state = \'purged\',
+                    local_content_purged_at = UTC_TIMESTAMP(),
+                    local_content_purged_by = ?,
+                    lifecycle_row_version = lifecycle_row_version + 1
+              WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?
+                AND local_content_state = \'available\''
+        );
+        $stmt->execute([$userId, $supplierId, $id, $expectedVersion]);
+        return $stmt->rowCount() === 1;
     }
 
     // ───────────────────────── rozhodný den doručení ─────────────────────────
@@ -356,6 +448,13 @@ final class SubmissionInboxRepository
         }
     }
 
+    private function assertPrivacyLifecycle(): void
+    {
+        if (!$this->supportsPrivacyLifecycle()) {
+            throw new \DomainException('Soukromí příchozí ISDS není k dispozici (chybí migrace 1574).');
+        }
+    }
+
     private function assertPollAvailable(): void
     {
         if (!$this->db->hasTable(self::POLL_TABLE)) {
@@ -375,6 +474,19 @@ final class SubmissionInboxRepository
             if (array_key_exists($key, $row)) {
                 $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
             }
+        }
+        foreach (['hidden_by', 'local_content_purged_by', 'lifecycle_row_version'] as $key) {
+            if (array_key_exists($key, $row)) {
+                $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
+            }
+        }
+        if (!array_key_exists('hidden_at', $row)) {
+            $row['hidden_at'] = null;
+            $row['hidden_by'] = null;
+            $row['local_content_state'] = 'available';
+            $row['local_content_purged_at'] = null;
+            $row['local_content_purged_by'] = null;
+            $row['lifecycle_row_version'] = 1;
         }
         if (array_key_exists('sender_is_public_authority', $row)) {
             $row['sender_is_public_authority'] = $row['sender_is_public_authority'] !== null

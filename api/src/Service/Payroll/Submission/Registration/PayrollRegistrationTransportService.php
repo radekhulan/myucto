@@ -35,7 +35,7 @@ final readonly class PayrollRegistrationTransportService
             'root' => 'REGZEC',
             'namespace' => 'http://schemas.cssz.cz/REGZEC/2025',
             'class' => 'CSSZ_REGZEC',
-            'actions' => [1],
+            'actions' => [1, 2, 3, 4, 5, 6, 7, 8],
         ],
     ];
 
@@ -296,7 +296,7 @@ final readonly class PayrollRegistrationTransportService
                 || !in_array((int) $action, $document['actions'], true)
             ) {
                 throw new \DomainException(
-                    'Transport podporuje pouze PREZEC P1/P2 a REGZEC A1.',
+                    'Transport podporuje pouze schválenou podporovanou akci PREZEC/REGZEC.',
                 );
             }
         }

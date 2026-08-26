@@ -54,6 +54,7 @@ final class PayrollRegistrationAction
                 $this->currentSupplierId($request),
                 $this->environment($request),
                 $this->employmentId($args),
+                $this->eventId($request),
             );
         });
     }
@@ -81,8 +82,50 @@ final class PayrollRegistrationAction
                 $this->environment($request),
                 $this->employmentId($args),
                 $this->userId($request),
+                $this->eventId($request),
             );
         }, 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function events(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::READ);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => [
+            'items' => $this->registrations->listEvents(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->employmentId($args),
+            ),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function approveEvent(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array =>
+            $this->registrations->approveEvent(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->employmentId($args),
+                (array) ($request->getParsedBody() ?? []),
+                $this->userId($request),
+            ), 201);
     }
 
     /**
@@ -198,6 +241,25 @@ final class PayrollRegistrationAction
         if (preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
             throw new \InvalidArgumentException(
                 'employmentId musí být kladné celé číslo.',
+            );
+        }
+
+        return (int) $value;
+    }
+
+    private function eventId(Request $request): ?int
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $value = $body['event_id']
+            ?? ($request->getQueryParams()['event_id'] ?? null);
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if ((!is_int($value) && !is_string($value))
+            || preg_match('/^[1-9][0-9]*$/D', (string) $value) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'event_id musí být kladné celé číslo.',
             );
         }
 

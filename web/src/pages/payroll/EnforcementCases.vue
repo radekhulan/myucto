@@ -110,6 +110,18 @@ const recipientOptions = computed(() => {
   }
   return [...seen.values()]
 })
+function recipientAccountLabel(account: PayrollInstitutionAccount): string {
+  const paymentSymbols = [
+    account.variable_symbol ? `VS ${account.variable_symbol}` : null,
+    account.specific_symbol ? `SS ${account.specific_symbol}` : null,
+    account.constant_symbol ? `KS ${account.constant_symbol}` : null,
+  ].filter((value): value is string => value !== null)
+  return [
+    account.institution_name,
+    account.bank_account || account.bank_account_masked,
+    ...paymentSymbols,
+  ].join(' · ')
+}
 const today = appIsoDate()
 const evidencePeriod = ref(today.slice(0, 7))
 const monthEvidence = ref<EnforcementMonthEvidence | null>(null)
@@ -1178,7 +1190,7 @@ onMounted(load)
               {{ t('payroll.enforcement.recipient_account') }}
               <select v-model="detail.recipient_institution_id" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
                 <option :value="null">{{ t('payroll.enforcement.recipient_account_none') }}</option>
-                <option v-for="account in recipientOptions" :key="account.institution_id" :value="account.institution_id">{{ account.institution_name }} · {{ account.bank_account_masked }}</option>
+                <option v-for="account in recipientOptions" :key="account.institution_id" :value="account.institution_id">{{ recipientAccountLabel(account) }}</option>
               </select>
               <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.enforcement.recipient_account_hint') }}</span>
             </label>
@@ -1195,11 +1207,13 @@ onMounted(load)
             <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.settlement.title') }}</h3>
             <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.hint') }}</p>
           </div>
-          <dl class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+          <dl class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.original') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.original_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.withheld_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="mt-1 font-medium text-warning-600">{{ money(detail.settlement.held_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.liability') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.liability_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="mt-1 font-medium text-success-700">{{ money(detail.settlement.settled_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining_to_withhold') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_to_withhold_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_minor) }}</dd></div>
           </dl>
           <p v-if="detail.settlement.held_minor > 0" class="mt-3 text-xs text-warning-600">{{ t('payroll.enforcement.settlement.held_hint') }}</p>
@@ -1210,10 +1224,12 @@ onMounted(load)
                 <span class="text-sm font-medium text-neutral-900">{{ t(`payroll.enforcement.categories.${claim.category}`) }}</span>
                 <span class="text-xs text-neutral-500">{{ claim.priority_date || '—' }}<span v-if="!claim.is_active"> · {{ t('payroll.enforcement.settlement.inactive') }}</span></span>
               </div>
-              <dl class="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <dl class="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-6">
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.original') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.original_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.withheld_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="font-medium text-warning-700">{{ money(claim.held_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="font-medium text-success-700">{{ money(claim.settled_minor) }}</dd></div>
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remaining_to_withhold') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.remaining_to_withhold_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.remaining_minor) }}</dd></div>
               </dl>
             </li>

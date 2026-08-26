@@ -25,6 +25,12 @@ final readonly class MonthlyAdvanceTaxResult implements JsonSerializable
         public int $taxBonusMinorUnits,
         public string $rulesetId,
         public string $rulesetHash,
+        public int $taxBonusCandidateMinorUnits = 0,
+        public int $taxBonusMinimumIncomeMinorUnits = 0,
+        public int $taxBonusMinimumAmountMinorUnits = 0,
+        public bool $taxBonusIncomeThresholdMet = false,
+        public bool $taxBonusAmountThresholdMet = false,
+        public string $taxBonusEligibilityReason = 'amount_below_threshold',
     ) {}
 
     /** @return array<string,mixed> */
@@ -45,6 +51,12 @@ final readonly class MonthlyAdvanceTaxResult implements JsonSerializable
             'tax_bonus_eligible' => $this->taxBonusEligible,
             'tax_after_credits_minor_units' => $this->taxAfterCreditsMinorUnits,
             'tax_bonus_minor_units' => $this->taxBonusMinorUnits,
+            'tax_bonus_candidate_minor_units' => $this->taxBonusCandidateMinorUnits,
+            'tax_bonus_minimum_income_minor_units' => $this->taxBonusMinimumIncomeMinorUnits,
+            'tax_bonus_minimum_amount_minor_units' => $this->taxBonusMinimumAmountMinorUnits,
+            'tax_bonus_income_threshold_met' => $this->taxBonusIncomeThresholdMet,
+            'tax_bonus_amount_threshold_met' => $this->taxBonusAmountThresholdMet,
+            'tax_bonus_eligibility_reason' => $this->taxBonusEligibilityReason,
             'ruleset_id' => $this->rulesetId,
             'ruleset_hash' => $this->rulesetHash,
         ];

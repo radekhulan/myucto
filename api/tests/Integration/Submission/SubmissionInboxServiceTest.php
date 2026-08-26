@@ -11,8 +11,10 @@ use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxAttemptRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentIngestService;
+use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Epo\EpoAttemptStatusReader;
@@ -28,10 +30,13 @@ use MyInvoice\Service\Submission\SubmissionArtifactResolver;
 use MyInvoice\Service\Submission\SubmissionArtifactValidator;
 use MyInvoice\Service\Submission\SubmissionChannelRegistry;
 use MyInvoice\Service\Submission\SubmissionInboxService;
+use MyInvoice\Service\Submission\SubmissionInboxPrivacyService;
+use MyInvoice\Service\Submission\SubmissionInboxStorageSettingsService;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 use MyInvoice\Tests\Support\FakeIsdsTransport;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\SyntheticZfoBuilder;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
@@ -51,13 +56,23 @@ final class SubmissionInboxServiceTest extends TestCase
     private Connection $db;
     private SubmissionInboxService $service;
     private SubmissionInboxRepository $inbox;
+    private SubmissionOutboxRepository $outbox;
     private SubmissionChannelCredentialRepository $credentials;
+    private SubmissionInboxStorageSettingsService $storageSettings;
+    private SubmissionInboxPrivacyService $privacy;
     private FakeIsdsTransport $transport;
     private int $supplierId;
     private int $userId;
+    private DocumentIngestService $documents;
+    private string|false $previousDataDir;
+    private string $dataDir;
 
     protected function setUp(): void
     {
+        $this->previousDataDir = getenv('MYINVOICE_DATA_DIR');
+        $this->dataDir = sys_get_temp_dir() . '/myucto-inbox-zfo-' . bin2hex(random_bytes(8));
+        putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
+
         $container = Bootstrap::buildContainer();
         $db = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);
@@ -77,6 +92,7 @@ final class SubmissionInboxServiceTest extends TestCase
         $this->transport = new FakeIsdsTransport();
 
         $outboxRepo = new SubmissionOutboxRepository($db);
+        $this->outbox = $outboxRepo;
         $recipients = new SubmissionRecipientRepository($db);
         $registry = new SubmissionChannelRegistry(
             new EpoChannel($this->stubEpoReader()),
@@ -95,6 +111,13 @@ final class SubmissionInboxServiceTest extends TestCase
 
         $documents = $container->get(DocumentIngestService::class);
         self::assertInstanceOf(DocumentIngestService::class, $documents);
+        $this->documents = $documents;
+        $storageSettings = $container->get(SubmissionInboxStorageSettingsService::class);
+        self::assertInstanceOf(SubmissionInboxStorageSettingsService::class, $storageSettings);
+        $this->storageSettings = $storageSettings;
+        $privacy = $container->get(SubmissionInboxPrivacyService::class);
+        self::assertInstanceOf(SubmissionInboxPrivacyService::class, $privacy);
+        $this->privacy = $privacy;
         $activity = $container->get(ActivityLogger::class);
         self::assertInstanceOf(ActivityLogger::class, $activity);
 
@@ -106,6 +129,7 @@ final class SubmissionInboxServiceTest extends TestCase
             $registry,
             new InboxMessageClassifier($outboxRepo),
             $documents,
+            $storageSettings,
             new DeliveryResolutionService(
                 $this->inbox,
                 $recipients,
@@ -123,6 +147,21 @@ final class SubmissionInboxServiceTest extends TestCase
     {
         if (isset($this->db) && $this->db->pdo()->inTransaction()) {
             $this->db->pdo()->rollBack();
+        }
+        if (isset($this->dataDir) && is_dir($this->dataDir)) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($this->dataDir, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($iterator as $item) {
+                $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+            }
+            rmdir($this->dataDir);
+        }
+        if (isset($this->previousDataDir)) {
+            $this->previousDataDir === false
+                ? putenv('MYINVOICE_DATA_DIR')
+                : putenv('MYINVOICE_DATA_DIR=' . $this->previousDataDir);
         }
     }
 
@@ -163,7 +202,6 @@ final class SubmissionInboxServiceTest extends TestCase
         $result = $this->service->poll(
             $this->context(),
             'isds',
-            null,
             50,
             $this->userId,
         );
@@ -302,6 +340,117 @@ final class SubmissionInboxServiceTest extends TestCase
         self::assertNull($stored['matched_outbox_id'], 'Nezařazená zpráva se nesmí hádat na podání.');
     }
 
+    public function testPrivateUnclassifiedMessageCanBeHiddenAndItsLocalTreePurged(): void
+    {
+        $this->enablePolling();
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-PRIVATE',
+            'sender_box_id' => 'qqqqqqq',
+            'sender_name' => 'Soukromý syntetický odesílatel',
+            'subject' => 'Soukromá syntetická zpráva',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        $this->transport->downloads['DM-PRIVATE'] = SyntheticZfoBuilder::receivedMessage([[
+            'name' => 'soukroma-priloha.txt',
+            'mime' => 'text/plain',
+            'bytes' => 'SYNTETICKY-SOUKROMY-OBSAH',
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-PRIVATE']);
+        $this->pollInteractively();
+
+        $stored = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-PRIVATE');
+        self::assertNotNull($stored);
+        self::assertSame('unclassified', $stored['classification']);
+        $documentRows = $this->db->pdo()->prepare(
+            'SELECT id, sha256, filename FROM documents
+              WHERE supplier_id = ? AND (id = ? OR parent_document_id = ?)'
+        );
+        $documentRows->execute([
+            $this->supplierId,
+            $stored['document_id'],
+            $stored['document_id'],
+        ]);
+        $rows = $documentRows->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertCount(2, $rows);
+        $paths = array_map(
+            fn (array $row): string => DocumentStorage::baseDir($this->supplierId)
+                . '/' . substr((string) $row['sha256'], 0, 2)
+                . '/' . $row['filename'],
+            $rows,
+        );
+        foreach ($paths as $path) {
+            self::assertFileExists($path);
+        }
+
+        $hidden = $this->privacy->hide(
+            $this->supplierId,
+            (int) $stored['id'],
+            (int) $stored['lifecycle_row_version'],
+            $this->userId,
+        );
+        self::assertNotNull($hidden['hidden_at']);
+        self::assertSame([], $this->service->listRecent(
+            $this->supplierId,
+            'test',
+            visibility: 'active',
+        ));
+        self::assertCount(1, $this->service->listRecent(
+            $this->supplierId,
+            'test',
+            visibility: 'hidden',
+        ));
+
+        $purged = $this->privacy->purgeLocalContent(
+            $this->supplierId,
+            (int) $stored['id'],
+            (int) $hidden['lifecycle_row_version'],
+            $this->userId,
+        );
+        self::assertSame('purged', $purged['local_content_state']);
+        self::assertNull($purged['document_id']);
+        self::assertNotNull($purged['local_content_purged_at']);
+        foreach ($paths as $path) {
+            self::assertFileDoesNotExist($path);
+        }
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM documents WHERE supplier_id = ? AND id IN (?, ?)'
+        );
+        $count->execute([$this->supplierId, $rows[0]['id'], $rows[1]['id']]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testClassifiedMessageCannotUsePrivacyPurge(): void
+    {
+        $this->enablePolling();
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-LEGAL',
+            'sender_box_id' => 'qqqqqqq',
+            'sender_name' => 'Okresní správa sociálního zabezpečení',
+            'subject' => 'Protokol',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        $this->transport->downloads['DM-LEGAL'] = $this->syntheticZfo();
+        $this->pollInteractively();
+        $stored = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-LEGAL');
+        self::assertNotNull($stored);
+
+        try {
+            $this->privacy->purgeLocalContent(
+                $this->supplierId,
+                (int) $stored['id'],
+                (int) $stored['lifecycle_row_version'],
+                $this->userId,
+            );
+            self::fail('Zařazený protokol nesmí jít odstranit jako soukromá zpráva.');
+        } catch (SubmissionChannelException $e) {
+            self::assertSame('isds_inbox_message_has_business_link', $e->errorCode);
+        }
+    }
+
     public function testDeliveryReceiptIsRecognisedByItsSubject(): void
     {
         $this->enablePolling();
@@ -344,6 +493,187 @@ final class SubmissionInboxServiceTest extends TestCase
         self::assertNotNull($stored);
         self::assertNotNull($stored['document_id'], 'Zpráva musí skončit v sekci Dokumenty.');
         self::assertSame('cssz_protocol', $stored['classification']);
+        self::assertNull($this->documentFolderId((int) $stored['document_id']));
+    }
+
+    public function testDownloadedMessageUsesConfiguredDeterministicArchivePath(): void
+    {
+        $this->enablePolling();
+        $baseFolderId = $this->createFolder(null, 'ISDS archiv');
+        $this->storageSettings->save($this->supplierId, 'test', $baseFolderId, 0, $this->userId);
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-ARCHIVE-1',
+            'sender_box_id' => 'qqqqqqq',
+            'sender_name' => 'Syntetický odesílatel',
+            'subject' => 'Archivovaná zpráva',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        $this->transport->downloads['DM-ARCHIVE-1'] = $this->syntheticZfo();
+
+        $result = $this->pollInteractively();
+
+        self::assertSame(1, $result['stored']);
+        $stored = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-ARCHIVE-1');
+        self::assertNotNull($stored);
+        self::assertSame(
+            ['ISDS archiv', '2026', '08', '15', 'DM-ARCHIVE-1'],
+            $this->folderPath($this->documentFolderId((int) $stored['document_id'])),
+        );
+    }
+
+    public function testDeletedConfiguredArchiveFolderFailsClosedWithoutRootFallback(): void
+    {
+        $this->enablePolling();
+        $baseFolderId = $this->createFolder(null, 'ISDS archiv ke smazání');
+        $this->storageSettings->save($this->supplierId, 'test', $baseFolderId, 0, $this->userId);
+        $this->db->pdo()->prepare('UPDATE document_folders SET deleted_at = UTC_TIMESTAMP() WHERE id = ?')
+            ->execute([$baseFolderId]);
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-DELETED-BASE',
+            'sender_box_id' => 'qqqqqqq',
+            'sender_name' => 'Syntetický odesílatel',
+            'subject' => 'Nesmí spadnout do rootu',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        $this->transport->downloads['DM-DELETED-BASE'] = $this->syntheticZfo();
+
+        $result = $this->pollInteractively();
+
+        self::assertSame(0, $result['stored']);
+        self::assertSame(1, $result['failed']);
+        self::assertNull($this->inbox->find($this->supplierId, 'isds', 'test', 'DM-DELETED-BASE'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM documents WHERE supplier_id = ? AND original_name = 'datova-zprava-DM-DELETED-BASE.zfo'"
+        );
+        $stmt->execute([$this->supplierId]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+    }
+
+    /**
+     * ČSSZ garantuje vazbu odpovědi přes dmID původní zprávy v předmětu.
+     * Bez ní by protokol skončil jen ve správné kategorii, ale u cizího
+     * podání by se nikdy neprovedlo jeho ověření a promítnutí výsledku.
+     */
+    public function testCsszProtocolMatchesJmhzOutboxByGuaranteedOriginalMessageId(): void
+    {
+        $queued = $this->outbox->enqueue([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'channel' => 'isds',
+            'agenda_code' => 'JMHZ25',
+            'recipient_id' => null,
+            'recipient_box_id' => '9tsaf6s',
+            'subject' => 'Syntetické JMHZ',
+            'artifact_kind' => 'payroll_submission',
+            'artifact_id' => 987654,
+            'artifact_filename' => 'jmhz.xml',
+            'artifact_sha256' => str_repeat('a', 64),
+            'correlation_reference' => 'JMHZ-SYNTHETIC-01',
+            'created_by' => $this->userId,
+        ], 'jmhz-inbox-response-match');
+        $outboxId = (int) $queued['row']['id'];
+        $claimed = $this->outbox->claimForManualSending(
+            $this->supplierId,
+            $outboxId,
+            $this->userId,
+        );
+        self::assertNotNull($claimed);
+        $this->outbox->markSentManually(
+            $this->supplierId,
+            $outboxId,
+            '1752953337',
+            new \DateTimeImmutable('2026-08-14 08:00:00'),
+            (int) $claimed['row_version'],
+        );
+
+        $this->enablePolling();
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-JMHZ-RESPONSE',
+            'sender_box_id' => '9tsaf6s',
+            'sender_name' => 'Česká správa sociálního zabezpečení',
+            'subject' => 'ČSSZ - Odpověď na e-Podání. [CSSZ_JMHZ-CID-ABC-1752953337]',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        $this->transport->downloads['DM-JMHZ-RESPONSE'] = $this->syntheticZfo();
+
+        $this->pollInteractively();
+
+        $stored = $this->inbox->find(
+            $this->supplierId,
+            'isds',
+            'test',
+            'DM-JMHZ-RESPONSE',
+        );
+        self::assertNotNull($stored);
+        self::assertSame('cssz_protocol', $stored['classification']);
+        self::assertSame($outboxId, $stored['matched_outbox_id']);
+    }
+
+    public function testHtmlAttachmentFromDownloadedZfoIsStoredForSafeDownload(): void
+    {
+        $this->enablePolling();
+        $html = '<!doctype html><html><body><h1>Syntetické oznámení</h1></body></html>';
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-HTML',
+            'sender_box_id' => 'qqqqqqq',
+            'sender_name' => 'Informační systém datových schránek',
+            'subject' => 'Důležité oznámení',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        $this->transport->downloads['DM-HTML'] = SyntheticZfoBuilder::receivedMessage([[
+            'name' => 'oznámení.html',
+            'mime' => 'text/html',
+            'bytes' => $html,
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-HTML']);
+
+        $result = $this->pollInteractively();
+
+        self::assertSame(1, $result['stored']);
+        $inbox = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-HTML');
+        self::assertNotNull($inbox);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT original_name, mime_type, doc_type, sha256, filename
+               FROM documents
+              WHERE supplier_id = ? AND parent_document_id = ? AND deleted_at IS NULL',
+        );
+        $stmt->execute([$this->supplierId, $inbox['document_id']]);
+        $attachments = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        self::assertCount(1, $attachments);
+        self::assertSame('oznámení.html', $attachments[0]['original_name']);
+        self::assertSame('application/octet-stream', $attachments[0]['mime_type']);
+        self::assertSame('other', $attachments[0]['doc_type']);
+        $path = DocumentStorage::baseDir($this->supplierId)
+            . '/' . substr((string) $attachments[0]['sha256'], 0, 2)
+            . '/' . $attachments[0]['filename'];
+        self::assertSame($html, file_get_contents($path));
+
+        $this->db->pdo()->prepare('DELETE FROM documents WHERE supplier_id = ? AND parent_document_id = ?')
+            ->execute([$this->supplierId, $inbox['document_id']]);
+        $recovered = $this->documents->reextractZfoAttachments(
+            (int) $inbox['document_id'],
+            $this->supplierId,
+            DocumentViewerContext::admin($this->userId),
+            $this->userId,
+        );
+        self::assertCount(1, $recovered['created_ids']);
+
+        $again = $this->documents->reextractZfoAttachments(
+            (int) $inbox['document_id'],
+            $this->supplierId,
+            DocumentViewerContext::admin($this->userId),
+            $this->userId,
+        );
+        self::assertSame([], $again['created_ids']);
     }
 
     /** Opakované stažení téže zprávy nesmí založit druhý záznam. */
@@ -401,7 +731,6 @@ final class SubmissionInboxServiceTest extends TestCase
         return $this->service->poll(
             $this->context(),
             'isds',
-            null,
             50,
             $this->userId,
         );
@@ -420,6 +749,40 @@ final class SubmissionInboxServiceTest extends TestCase
     private function syntheticZfo(): string
     {
         return "SYNTETICKA-DATOVA-ZPRAVA-BEZ-REALNYCH-UDAJU";
+    }
+
+    private function createFolder(?int $parentId, string $name): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO document_folders (supplier_id, parent_id, name, created_by) VALUES (?, ?, ?, ?)'
+        );
+        $stmt->execute([$this->supplierId, $parentId, $name, $this->userId]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function documentFolderId(int $documentId): ?int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT folder_id FROM documents WHERE id = ? AND supplier_id = ?');
+        $stmt->execute([$documentId, $this->supplierId]);
+        $value = $stmt->fetchColumn();
+        return $value !== false && $value !== null ? (int) $value : null;
+    }
+
+    /** @return list<string> */
+    private function folderPath(?int $folderId): array
+    {
+        $path = [];
+        while ($folderId !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT parent_id, name FROM document_folders WHERE id = ? AND supplier_id = ?'
+            );
+            $stmt->execute([$folderId, $this->supplierId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            self::assertIsArray($row);
+            array_unshift($path, (string) $row['name']);
+            $folderId = $row['parent_id'] !== null ? (int) $row['parent_id'] : null;
+        }
+        return $path;
     }
 
     private function stubArtifacts(): SubmissionArtifactResolver

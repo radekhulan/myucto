@@ -73,15 +73,25 @@ final class MonthlyAdvanceTaxCalculator
             0,
             $input->childCreditMinorUnits - $taxAfterNonRefundableCredits,
         );
+        $bonusMinimumIncome = $this->moneyParameter(
+            $ruleset,
+            'bonus.minimum_income.monthly',
+        );
+        $bonusMinimumAmount = $this->moneyParameter(
+            $ruleset,
+            'bonus.minimum_amount.monthly',
+        );
+        $bonusIncomeThresholdMet = $input->taxableIncomeMinorUnits >= $bonusMinimumIncome;
+        $bonusAmountThresholdMet = $bonusCandidate >= $bonusMinimumAmount;
         $taxBonusEligible = $input->signedDeclaration
-            && $input->taxableIncomeMinorUnits >= $this->moneyParameter(
-                $ruleset,
-                'bonus.minimum_income.monthly',
-            )
-            && $bonusCandidate >= $this->moneyParameter(
-                $ruleset,
-                'bonus.minimum_amount.monthly',
-            );
+            && $bonusIncomeThresholdMet
+            && $bonusAmountThresholdMet;
+        $taxBonusEligibilityReason = match (true) {
+            !$input->signedDeclaration => 'declaration_not_signed',
+            !$bonusIncomeThresholdMet => 'income_below_threshold',
+            !$bonusAmountThresholdMet => 'amount_below_threshold',
+            default => 'eligible',
+        };
 
         return new MonthlyAdvanceTaxResult(
             taxableIncomeMinorUnits: $input->taxableIncomeMinorUnits,
@@ -97,6 +107,12 @@ final class MonthlyAdvanceTaxCalculator
             taxBonusMinorUnits: $taxBonusEligible ? $bonusCandidate : 0,
             rulesetId: $ruleset->id,
             rulesetHash: $ruleset->canonicalHash,
+            taxBonusCandidateMinorUnits: $bonusCandidate,
+            taxBonusMinimumIncomeMinorUnits: $bonusMinimumIncome,
+            taxBonusMinimumAmountMinorUnits: $bonusMinimumAmount,
+            taxBonusIncomeThresholdMet: $bonusIncomeThresholdMet,
+            taxBonusAmountThresholdMet: $bonusAmountThresholdMet,
+            taxBonusEligibilityReason: $taxBonusEligibilityReason,
         );
     }
 

@@ -87,9 +87,10 @@ export interface EnforcementLedgerEntry {
   id: number
   claim_id: number | null
   month_result_id: number
-  entry_kind: 'withheld' | 'held' | 'remitted' | 'released_to_employee' | 'employer_fee' | 'adjustment'
+  entry_kind: 'withheld' | 'held' | 'released_for_remittance' | 'remitted' | 'released_to_employee' | 'employer_fee' | 'adjustment'
   amount_minor_units: number
   actor_user_id: number | null
+  decision_event_id: number | null
   created_at: string
 }
 
@@ -122,11 +123,13 @@ export interface EnforcementSettlementClaim {
   category: EnforcementClaimCategory
   priority_date: string | null
   is_active: boolean
+  original_minor: number
   outstanding_minor: number
   withheld_minor: number
   held_minor: number
   liability_minor: number
   settled_minor: number
+  remaining_to_withhold_minor: number
   remaining_minor: number
 }
 
@@ -136,7 +139,9 @@ export interface EnforcementSettlement {
   held_minor: number
   liability_minor: number
   settled_minor: number
+  original_minor: number
   outstanding_minor: number
+  remaining_to_withhold_minor: number
   remaining_minor: number
 }
 

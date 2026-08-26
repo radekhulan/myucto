@@ -82,8 +82,17 @@ final class MobileKeyIsdsAuthenticator
         if ($response['status'] === 401) {
             throw new SubmissionChannelException('isds_mobile_login_rejected', 'ISDS odmítl uživatelské jméno nebo komunikační kód Mobilního klíče.', 401);
         }
-        $sCookie = $response['cookies']['S-COOKIE'] ?? '';
+        $sCookieName = isset($response['cookies']['IPCZ-S-COOKIE'])
+            ? 'IPCZ-S-COOKIE'
+            : 'S-COOKIE';
+        $sCookie = $response['cookies'][$sCookieName] ?? '';
         if ($response['status'] !== 302 || $sCookie === '') {
+            error_log(json_encode([
+                'event' => 'isds_mobile_login_unexpected_response',
+                'environment' => $environment,
+                'status' => $response['status'],
+                'cookie_names' => array_keys($response['cookies']),
+            ], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR));
             throw new SubmissionChannelException('isds_mobile_login_failed', 'ISDS nezahájil přihlášení Mobilním klíčem.', 502);
         }
 
@@ -91,6 +100,7 @@ final class MobileKeyIsdsAuthenticator
         $payload = json_encode([
             'username' => $username,
             'communication_code' => $communicationCode,
+            's_cookie_name' => $sCookieName,
             's_cookie' => $this->safeCookie($sCookie),
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         $flowToken = $this->newFlowToken();
@@ -126,7 +136,7 @@ final class MobileKeyIsdsAuthenticator
                 'status',
                 'GET',
                 $this->host($environment) . '/as/mepWsStateUpdate2',
-                ['cookie' => 'S-COOKIE=' . $this->safeCookie($state['s_cookie'])],
+                ['cookie' => $state['s_cookie_name'] . '=' . $this->safeCookie($state['s_cookie'])],
             );
         } catch (\Throwable $e) {
             $this->flows->release($flow['id']);
@@ -146,7 +156,13 @@ final class MobileKeyIsdsAuthenticator
         $description = trim((string) ($statusBody['description'] ?? ''));
         if ($status === 2) {
             try {
-                $login = $this->loginRequest($environment, $state['username'], $state['communication_code'], $state['s_cookie']);
+                $login = $this->loginRequest(
+                    $environment,
+                    $state['username'],
+                    $state['communication_code'],
+                    $state['s_cookie'],
+                    $state['s_cookie_name'],
+                );
             } catch (\Throwable $e) {
                 $this->flows->release($flow['id']);
                 throw $e;
@@ -211,7 +227,7 @@ final class MobileKeyIsdsAuthenticator
         }
     }
 
-    /** @return array{id:int,state:array{username:string,communication_code:string,s_cookie:string}} */
+    /** @return array{id:int,state:array{username:string,communication_code:string,s_cookie_name:string,s_cookie:string}} */
     private function claimFlow(string $token, int $supplierId, int $userId, string $environment): array
     {
         if (preg_match('/^[A-Za-z0-9_-]{43}$/', $token) !== 1) {
@@ -240,6 +256,7 @@ final class MobileKeyIsdsAuthenticator
             'state' => [
                 'username' => (string) ($state['username'] ?? ''),
                 'communication_code' => (string) ($state['communication_code'] ?? ''),
+                's_cookie_name' => $this->safeStateCookieName((string) ($state['s_cookie_name'] ?? 'S-COOKIE')),
                 's_cookie' => (string) ($state['s_cookie'] ?? ''),
             ],
         ];
@@ -256,7 +273,13 @@ final class MobileKeyIsdsAuthenticator
     }
 
     /** @return array{status:int,body:string,cookies:array<string,string>} */
-    private function loginRequest(string $environment, string $username, string $code, ?string $sCookie): array
+    private function loginRequest(
+        string $environment,
+        string $username,
+        string $code,
+        ?string $sCookie,
+        string $sCookieName = 'S-COOKIE',
+    ): array
     {
         $host = $this->host($environment);
         $uri = $host . '/apps/DS/dx';
@@ -267,7 +290,7 @@ final class MobileKeyIsdsAuthenticator
         ], '', '&', PHP_QUERY_RFC3986);
         $options = ['username' => $username, 'password' => $code];
         if ($sCookie !== null) {
-            $options['cookie'] = 'S-COOKIE=' . $this->safeCookie($sCookie);
+            $options['cookie'] = $this->safeStateCookieName($sCookieName) . '=' . $this->safeCookie($sCookie);
         }
         return $this->request('login', 'POST', $url, $options);
     }
@@ -341,6 +364,14 @@ final class MobileKeyIsdsAuthenticator
             throw new SubmissionChannelException('isds_mobile_cookie_invalid', 'Přihlašovací relace Mobilního klíče není platná.', 409);
         }
         return $cookie;
+    }
+
+    private function safeStateCookieName(string $cookieName): string
+    {
+        if (!in_array($cookieName, ['S-COOKIE', 'IPCZ-S-COOKIE'], true)) {
+            throw new SubmissionChannelException('isds_mobile_cookie_invalid', 'Přihlašovací relace Mobilního klíče není platná.', 409);
+        }
+        return $cookieName;
     }
 
     private function assertEnvironment(string $environment): void
