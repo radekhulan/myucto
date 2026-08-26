@@ -472,7 +472,7 @@ describe('PayrollSubmissions', () => {
     // stránky, jinak by pager počítal řádky, které tabulka neukazuje.
     await clickTab(wrapper, 'jmhz')
     expect(m.overview).toHaveBeenCalledWith(
-      'production',
+      'test',
       expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
       { agenda_group: 'jmhz', limit: 50, offset: 0 },
     )

@@ -32,7 +32,9 @@ const employments = ref<PayrollEmployment[]>([])
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
 const year = ref<number>(new Date().getFullYear() - 1)
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 const excludedDaysConfirmed = ref(false)
 const deductedDaysNone = ref(false)
 const requestedByAuthority = ref(false)

@@ -42,7 +42,9 @@ const creating = ref(false)
 const items = ref<PayrollDiscountIntent[]>([])
 const people = ref<PayrollPersonOption[]>([])
 const employments = ref<PayrollEmployment[]>([])
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
 const intentFrom = ref('')

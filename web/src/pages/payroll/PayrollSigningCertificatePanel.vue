@@ -33,7 +33,9 @@ const ENVIRONMENTS: PayrollSigningEnvironment[] = ['production', 'test']
 /** Lhůta, od které má smysl obnovu připomínat dřív, než na ni upozorní termín. */
 const EXPIRY_NOTICE_DAYS = 60
 
-const environment = ref<PayrollSigningEnvironment>('production')
+const environment = defineModel<PayrollSigningEnvironment>('environment', {
+  default: 'production',
+})
 const loading = ref(false)
 const saving = ref(false)
 const removing = ref(false)

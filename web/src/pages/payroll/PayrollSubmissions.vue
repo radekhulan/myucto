@@ -69,6 +69,9 @@ const snapshotsTotal = ref(0)
 const snapshotsOffset = ref(0)
 const snapshotsPage = computed(() =>
   Math.floor(snapshotsOffset.value / snapshotsPageSize) + 1)
+// Prostředí je jedna volba pro celou stránku. Kdyby si je držely jednotlivé
+// záložky samy, přepnutí z TESTU na jinou agendu by uživatele bez upozornění
+// vrátilo do produkce.
 const environment = ref<PayrollRegzelEnvironment>('production')
 const officeId = ref<number | null>(null)
 const evidenceConfirmed = ref(false)
@@ -302,7 +305,10 @@ onMounted(loadInboxBadge)
       obstarává sám a schovat ho za skeleton registrace by znamenalo, že se
       odpověď na „co jsem odeslal" objeví později, než by musela.
     -->
-    <PayrollTransportHistoryPanel v-if="activeTab === 'transport'" />
+    <PayrollTransportHistoryPanel
+      v-if="activeTab === 'transport'"
+      v-model:environment="environment"
+    />
 
     <!--
       Evidenční list si data obstarává sám a nepotřebuje načtení REGZEL
@@ -312,9 +318,15 @@ onMounted(loadInboxBadge)
       Záměr uplatňovat slevu si data obstarává sám a na REGZEL profilu
       nezávisí, proto stojí mimo společný skeleton.
     -->
-    <PayrollDiscountIntentsPanel v-else-if="activeTab === 'discount_intents'" />
+    <PayrollDiscountIntentsPanel
+      v-else-if="activeTab === 'discount_intents'"
+      v-model:environment="environment"
+    />
 
-    <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
+    <PayrollEldpPanel
+      v-else-if="activeTab === 'eldp'"
+      v-model:environment="environment"
+    />
 
     <!--
       Zdravotní agenda si data obstarává sama a na REGZEL profilu
@@ -322,7 +334,7 @@ onMounted(loadInboxBadge)
     -->
     <template v-else-if="activeTab === 'health'">
       <PayrollHealthNotificationPanel />
-      <PayrollSubmissionOverviewPanel mode="health" />
+      <PayrollSubmissionOverviewPanel v-model:environment="environment" mode="health" />
     </template>
 
     <div v-else-if="loading" class="space-y-4">
@@ -589,13 +601,18 @@ onMounted(loadInboxBadge)
 
     <PayrollSubmissionInboxPanel
       v-else-if="activeTab === 'inbox'"
+      v-model:environment="environment"
       @update:open-count="inboxOpenCount = $event"
     />
 
-    <PayrollSigningCertificatePanel v-else-if="activeTab === 'certificate'" />
+    <PayrollSigningCertificatePanel
+      v-else-if="activeTab === 'certificate'"
+      v-model:environment="environment"
+    />
 
     <PayrollSubmissionOverviewPanel
       v-else
+      v-model:environment="environment"
       :mode="activeTab === 'other' ? activeTab : 'jmhz'"
     />
   </div>

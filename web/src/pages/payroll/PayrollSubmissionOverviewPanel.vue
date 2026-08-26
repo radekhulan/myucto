@@ -42,7 +42,9 @@ const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
 const period = ref(localPayrollPeriod())
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 // Server filtruje podle `agenda_group`, takže `items` je rovnou to, co panel
 // ukazuje — žádné doufiltrovávání na klientovi.
 const items = ref<PayrollSubmissionOverviewItem[]>([])

@@ -48,7 +48,9 @@ const auth = useAuthStore()
 
 const ENVIRONMENTS: PayrollJmhzTransportEnvironment[] = ['production', 'test']
 
-const environment = ref<PayrollJmhzTransportEnvironment>('production')
+const environment = defineModel<PayrollJmhzTransportEnvironment>('environment', {
+  default: 'production',
+})
 const loading = ref(false)
 const attempts = ref<PayrollJmhzTransportAttempt[]>([])
 const imported = ref<PayrollJmhzImportedProtocol[]>([])
