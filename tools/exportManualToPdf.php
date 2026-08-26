@@ -8,7 +8,7 @@
  *
  * Konvence:
  *  - Pořadí kapitol řídí manual/INDEX.md (### skupiny + číslované odkazy
- *    [název](NN_Name.md)). Soubory mimo INDEX.md (např. 99_Reseni_problemu)
+ *    [název](NNN_Name.md)). Soubory mimo INDEX.md (např. 999_Reseni_problemu)
  *    se připojí na konec.
  *  - Každá kapitola začíná na nové stránce (H1 page-break-before).
  *  - Cross-chapter linky (.md soubory) se přepisují na interní PDF anchory.
@@ -39,7 +39,7 @@ if (!is_dir($srcDir)) {
     exit(1);
 }
 
-// ---------- Mapa: NN_Name.md → ch-NN_name (interní PDF anchor) ----------
+// ---------- Mapa: NNN_Name.md → ch-NNN_name (interní PDF anchor) ----------
 function chapterAnchorId(string $base): string
 {
     return 'ch-' . strtolower(preg_replace('/[^A-Za-z0-9_-]/', '-', $base));
@@ -70,7 +70,7 @@ function mdInline(string $s): string
     $s = preg_replace_callback('/\[([^\]]+)\]\(([^)]+)\)/', function ($m) {
         $text = $m[1];
         $href = $m[2];
-        if (preg_match('~^([0-9]{2}[a-z]?_[^/]+|99_[^/]+|README)\.md(#(.+))?$~i', $href, $hm)) {
+        if (preg_match('~^([0-9]{2,3}[a-z]?_[^/]+|README)\.md(#(.+))?$~i', $href, $hm)) {
             $href = '#' . (isset($hm[3]) ? $hm[3] : chapterAnchorId($hm[1]));
         }
         return '<a href="' . $href . '">' . $text . '</a>';
@@ -429,7 +429,7 @@ foreach ($groups as $g) {
     }
 }
 
-// Doplň soubory, které nejsou v INDEX.md (např. 99_*) na konec
+// Doplň soubory, které nejsou v INDEX.md (např. 999_*) na konec
 $allBases   = array_map(fn ($f) => pathinfo($f, PATHINFO_FILENAME), $allFiles);
 $missing    = array_diff($allBases, $orderedBases);
 foreach ($missing as $base) {

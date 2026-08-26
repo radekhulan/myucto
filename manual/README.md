@@ -13,7 +13,7 @@ manual/
 ├── 01_Uvod.md                # kapitoly NN_Nazev.md (řazené dle menu aplikace)
 ├── 02_Instalace_Quickstart.md
 ├── ...
-├── 99_Reseni_problemu.md
+├── 999_Reseni_problemu.md
 ├── img/                      # screenshoty (WEBP po konverzi z PNG)
 │   └── SCREENSHOTS.md        # seznam, co vyfotit
 ├── index.php                 # PHP route handler — servíruje HTML manuál
@@ -51,7 +51,8 @@ php tools/exportManualToPdf.php
 
 ### Přidání nové kapitoly
 
-1. Vytvoř `manual/NN_Nazev.md` (NN = pořadové dvojcifré číslo).
+1. Vytvoř `manual/NNN_Nazev.md` (číselný prefix může mít dvě nebo tři číslice;
+   `999` je vyhrazené pro řešení problémů).
 2. Přidej řádek do `manual/INDEX.md` ve správné grupě (### Instalace a start /
    ### Grafy / ### Prodej / ### Nákup / ### Peníze / ### Dokumenty /
    ### Sklad / ### Daně / ### Účetnictví / ### Mzdy / ### Nástroje /
@@ -64,8 +65,8 @@ php tools/exportManualToPdf.php
 Změň prefix v názvu souborů a aktualizuj odkazy v `INDEX.md`. Generátor sortuje
 abecedně podle filename — `01_*` přijde před `02_*` atd.
 
-Pro vsuvku mezi `15_*` a `16_*` můžeš použít `15a_*` (glob `[0-9][0-9]_*.md`
-zachytí.)
+Pro vsuvku mezi `15_*` a `16_*` můžeš použít `15a_*`; generátory zachytí
+dvou- i trojciferné prefixy s volitelnou písmennou příponou.
 
 ## Konvence pro psaní
 

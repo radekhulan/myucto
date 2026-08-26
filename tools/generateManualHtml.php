@@ -3,7 +3,7 @@
  * Generuje HTML verzi manuálu z manual/*.md.
  *
  * Výstup:
- *  - manual/generated/<NN_Name>.html       — body fragment per kapitola
+ *  - manual/generated/<NNN_Name>.html      — body fragment per kapitola
  *  - manual/generated/INDEX.html           — landing fragment (z INDEX.md)
  *  - manual/generated/_toc.php             — pole sekcí pro layout
  *  - manual/generated/img/                 — kopie WEBP obrázků
@@ -39,8 +39,8 @@ function mdInline(string $s): string {
     // Links: [text](url)
     $s = preg_replace_callback('/\[([^\]]+)\]\(([^)]+)\)/', function ($m) {
         $href = $m[2];
-        // Přepiš odkazy na .md soubory na ?ch=NN_Name
-        if (preg_match('~^([0-9]{2}[a-z]?_[^/]+|99_[^/]+)\.md(#.+)?$~i', $href, $hm)) {
+        // Přepiš odkazy na .md soubory na ?ch=NNN_Name.
+        if (preg_match('~^([0-9]{2,3}[a-z]?_[^/]+)\.md(#.+)?$~i', $href, $hm)) {
             $href = '/manual?ch=' . $hm[1] . ($hm[2] ?? '');
         }
         return '<a href="' . htmlspecialchars($href, ENT_QUOTES) . '">' . $m[1] . '</a>';
@@ -302,7 +302,7 @@ foreach (glob($dstDir . '/*.html') as $oldHtml) {
 // Generate chapter HTMLs
 // ============================================================================
 
-// Glob NN[a-z]?_*.md (e.g. 01_Uvod.md, 13a_Importy.md, 99_Reseni_problemu.md)
+// Glob NNN[a-z]?_*.md (e.g. 01_Uvod.md, 58a_Importy.md, 999_Reseni_problemu.md)
 $files = glob($srcDir . '/[0-9][0-9]*_*.md');
 sort($files, SORT_STRING);
 

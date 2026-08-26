@@ -247,4 +247,4 @@ firmy.
 
 ## Kde začít při potížích
 
-Nejprve zkontrolujte aktivaci a podporovaný rozsah výše, potom [mzdové běhy](58e_Mzdove_behy.md) a [legislativní pravidla](58q_Legislativni_pravidla_mezd.md). Obecné diagnostické postupy jsou v kapitole [Řešení problémů](99_Reseni_problemu.md).
+Nejprve zkontrolujte aktivaci a podporovaný rozsah výše, potom [mzdové běhy](58e_Mzdove_behy.md) a [legislativní pravidla](58q_Legislativni_pravidla_mezd.md). Obecné diagnostické postupy jsou v kapitole [Řešení problémů](999_Reseni_problemu.md).

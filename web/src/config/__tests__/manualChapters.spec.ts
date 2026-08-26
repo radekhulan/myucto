@@ -36,6 +36,8 @@ describe('contextual manual for application menu', () => {
     ['/admin/databox', '73a_Datova_schranka'],
     ['/admin/isds-gateway', '73b_Odesilaci_brana_ISDS'],
     ['/isds-gateway/callback', '73b_Odesilaci_brana_ISDS'],
+    ['/admin/diagnostics', '999_Reseni_problemu'],
+    ['/admin/support', '999_Reseni_problemu'],
   ])('uses the subject-specific chapter for %s', (path, chapter) => {
     expect(manualChapter(path)).toBe(chapter)
   })

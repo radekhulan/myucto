@@ -108,7 +108,7 @@ Runtime zapíše pro stavy s `routing_compatible: false` serverový warning
 `configuration.app_url_unusable`. Kontext obsahuje jen stabilní `state` a
 `reason_code`; původní ani odvozená hodnota konfigurace se neloguje. Umístění
 logu určuje `logging.path`. Podrobný recovery postup je v
-[§ 99 Řešení problémů](99_Reseni_problemu.md#diagnostika-appurl).
+[§ 999 Řešení problémů](999_Reseni_problemu.md#diagnostika-appurl).
 
 Vlastní domény klientských portálů se nestávají dalším WebAuthn RP ID. Browser
 se z nich přesměruje na přesný canonical origin z `app.url`, kde proběhne
@@ -328,7 +328,7 @@ uvidí na health endpointu warning `mfa_methods_configuration`.
 
 > ⚠️ Povolení TOTP vyžaduje validní `app.secret_encryption_key` (32B base64).
 > Health endpoint na chybnou konfiguraci upozorní; viz
-> [§ 99 Řešení problémů](99_Reseni_problemu.md).
+> [§ 999 Řešení problémů](999_Reseni_problemu.md).
 
 ### 76.2.6 E-mailové ověření pro účet bez silného faktoru
 

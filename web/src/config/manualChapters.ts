@@ -66,7 +66,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/admin\/tax-constants(?:\/|$)/, '75_Danove_konstanty'],
   [/^\/admin\/(?:users|roles|activity-log|cron-jobs)(?:\/|$)/, '76_Bezpecnost'],
   [/^\/admin\/update(?:\/|$)/, '77_Aktualizace'],
-  [/^\/admin\/(?:diagnostics|support)(?:\/|$)/, '99_Reseni_problemu'],
+  [/^\/admin\/(?:diagnostics|support)(?:\/|$)/, '999_Reseni_problemu'],
   [/^\/profile\/mcp-server(?:\/|$)/, '80_MCP_server'],
   [/^\/profile\/api-tokens(?:\/|$)/, '78_API'],
   [/^\/activation(?:\/|$)|^\/hosting(?:\/|$)/, '79_Licence_a_aktivace'],

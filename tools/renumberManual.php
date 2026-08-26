@@ -5,7 +5,7 @@
  *
  * Logika číslování:
  *  - Sort podle natural sort filename (`05_*`, `05a_*`, `06_*`, …).
- *  - Sekvenčně přečísluje na 01..NN, přeskočí 99 (FAQ zůstává na konci).
+ *  - Sekvenčně přečísluje na 01..NNN; FAQ s prefixem 999 zůstává na konci.
  *  - Headings `# N. Title`, `## N.X.Y …` i in-text `§ N.X` se přepíší na nová čísla.
  *  - Anchory `(file.md#NNN-...)` se přepíší (chapter prefix v anchor slugu).
  *  - Apply se zablokuje, pokud by rozbil písmennou rodinu nebo vytvořil kolizi čísla.
@@ -26,7 +26,7 @@ if (!is_dir($manualDir)) {
     exit(1);
 }
 
-// 1. Discover MD files matching NN[a-z]?_*.md
+// 1. Discover MD files matching NNN[a-z]?_*.md
 $files = glob($manualDir . '/[0-9][0-9]*.md') ?: [];
 usort($files, fn ($a, $b) => strnatcmp(basename($a), basename($b)));
 
@@ -38,10 +38,10 @@ foreach ($files as $f) {
     if (!preg_match('/^(\d+[a-z]*)_(.+)\.md$/i', $base, $m)) continue;
     $oldPrefix = $m[1];
     $stem = $m[2];
-    // FAQ má file prefix '99' i label '99.' (konvence — kapitola na konci si drží
-    // svou „rezervní" pozici 99 nezávisle na počtu regulérních kapitol před ní).
-    if ($oldPrefix === '99') {
-        $newPrefix = '99';
+    // FAQ má file prefix '999' i label '999.' a drží si rezervní koncovou pozici
+    // nezávisle na počtu regulérních kapitol před ní.
+    if ($oldPrefix === '999') {
+        $newPrefix = '999';
     } else {
         $newPrefix = sprintf('%02d', $nextNum++);
     }
@@ -59,7 +59,7 @@ foreach ($files as $f) {
 }
 
 // Safety guard: stabilní písmenné rodiny (např. 58a–58s) nesmějí být tiše
-// rozbaleny na samostatná čísla a rezervované číslo 99 nesmí dostat další kapitola.
+// rozbaleny na samostatná čísla a rezervované číslo 999 nesmí dostat další kapitola.
 // Dry run problém ukáže, --apply skončí dřív, než se dotkne jediného souboru.
 $guardProblems = [];
 $flattenedFamilies = [];

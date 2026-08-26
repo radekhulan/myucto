@@ -4,7 +4,7 @@
  * ===================================================
  *
  * Lokální konfigurace pro sdílený MD2PDF engine (c:\work\MD2PDF). Sloučí všechny
- * kapitoly manuálu (manual/NN_Nazev.md, pořadí dle manual/INDEX.md) do JEDNOHO
+ * kapitoly manuálu (manual/NNN_Nazev.md, pořadí dle manual/INDEX.md) do JEDNOHO
  * PDF — manual/manual.pdf. Nahrazuje původní tools/exportManualToPdf.php.
  *
  * Spuštění (Windows):
