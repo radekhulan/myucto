@@ -95,12 +95,12 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 54. [Úplnost dokladů](54_Uplnost_dokladu.md)
 55. [Měsíční kontrola](55_Mesicni_kontrola.md)
 56. [Měsíční přehled](56_Mesicni_report.md)
+57. [Mzdová rekapitulace a mzdový list](57_Mzdy.md)
 59. [Majetek](59_Majetek.md)
 60. [Účetní kontroly a inventarizace — metodika](60_Ucetni_kontroly_a_inventarizace.md)
 
 ### Mzdy
 
-57. [Mzdová rekapitulace a mzdový list](57_Mzdy.md)
 58. [Úplné mzdy — jak začít a jak postupovat](58_Uplne_mzdy.md)
 58a. [Absence a dovolená](58a_Absence_a_dovolena.md)
 58b. [Docházka a směny](58b_Dochazka_a_smeny.md)
