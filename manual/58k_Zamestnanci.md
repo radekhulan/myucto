@@ -107,6 +107,16 @@ adres se stát vybírá ze stejného číselníku. U citlivých údajů se zobra
 pouze maska; novou hodnotu zadej jen tehdy, když ji chceš změnit. Po uložení
 aplikace otevřenou hodnotu z formuláře odstraní.
 
+Každá verze jména má sbalenou část **Údaje pro registraci zaměstnance**.
+Zadává se v ní titul před a za jménem, datum a místo narození, stát narození,
+státní občanství a pohlaví používané registračním formulářem ČSSZ. Běžnou práci
+s kartou tato pole nezahltí; rozbal je při nástupu nebo při opravě registrační
+identity. Státy vyber ze stejného číselníku zemí jako u adres. Údaje se uloží
+do konkrétní historické verze a platí od data **Platí od** uvedeného nad nimi.
+Při registraci pracovního vztahu proto aplikace použije verzi účinnou k datu
+nástupu, nikoli dnešní nebo poslední zadanou hodnotu. Prázdné nepovinné pole lze
+doplnit později; test registrace pak přesně řekne, který údaj ještě chybí.
+
 Výplatní účet musí mít název, období účinnosti a rozdělení výplaty. Před
 zařazením do platební dávky jej samostatně ověř tlačítkem **Ověřit účet** a
 uveď druh podkladu i datum ověření. Máš-li ve formuláři neuloženou změnu účtu,

@@ -325,6 +325,7 @@ export type PayrollSecureDeliveryChannel = 'portal' | 'paper'
 export type PayrollPersonAddressType = 'residence' | 'mailing'
 export type PayrollPersonContactType = 'email' | 'phone'
 export type PayrollPersonIdentifierType = 'birth_number' | 'ecp' | 'vcp' | 'foreign_tax_identifier'
+export type PayrollPersonSex = 'female' | 'male' | 'unspecified'
 export type PayrollPersonAccountVerificationSource =
   | 'employee_confirmation'
   | 'bank_document'
@@ -335,7 +336,14 @@ export interface PayrollPersonIdentityHistory {
   full_name: string
   first_name: string | null
   last_name: string | null
+  title_prefix: string | null
+  title_suffix: string | null
   birth_surname_masked: string | null
+  birth_date: string | null
+  birth_place: string | null
+  birth_country_code: string | null
+  citizenship_country_code: string | null
+  sex: PayrollPersonSex | null
   effective_from: string
   effective_to: string | null
   row_version: number
@@ -507,8 +515,15 @@ export interface PayrollPersonIdentityPayload {
   full_name: string
   first_name: string
   last_name: string
+  title_prefix?: string | null
+  title_suffix?: string | null
   birth_surname?: string | null
   birth_surname_source_id?: number
+  birth_date?: string | null
+  birth_place?: string | null
+  birth_country_code?: string | null
+  citizenship_country_code?: string | null
+  sex?: PayrollPersonSex | null
   effective_from: string
   effective_to: string | null
 }

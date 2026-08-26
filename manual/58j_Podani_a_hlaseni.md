@@ -96,6 +96,17 @@ Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíč
 hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
 pojištění a oznámení o zaměstnání osoby pobírající starobní důchod.
 
+### Registrace zaměstnance PREZEC a REGZEC
+
+Test registrace zaměstnance čte identitu z osobní karty účinnou přesně k datu
+nástupu pracovního vztahu. V **Mzdy → Zaměstnanci → Úplná osobní evidence a
+historie → Identita a adresy** rozbal u příslušné verze jména část **Údaje pro
+registraci zaměstnance** a doplň datum a místo narození, stát narození, státní
+občanství, pohlaví a případné tituly. Občanství rozhoduje také o tom, zda lze
+použít omezenou předregistraci PREZEC, nebo je potřeba úplná registrace REGZEC.
+Náhled i následné zmrazení používají stejný historický zdroj a stejné kontroly;
+pozdější změna osobní karty už nemění dříve zmrazené podání.
+
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
