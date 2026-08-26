@@ -148,12 +148,18 @@ final class PaymentTaxDocumentCreator
         if (($proforma['invoice_type'] ?? '') !== 'proforma') {
             throw new \RuntimeException('Daňový doklad k přijaté platbě lze vystavit jen k zálohové faktuře.');
         }
-        // Guard proti dvojímu zdanění: jakmile k proformě existuje (nestornovaný)
-        // finální doklad, jeho odpočtové řádky (§ 37a) jsou zafixované — dodatečný
-        // daňový doklad k platbě by stejnou úplatu zdanil podruhé.
+        // Guard proti dvojímu zdanění: jakmile k proformě existuje VYSTAVENÝ
+        // (nestornovaný) finální doklad, jeho odpočtové řádky (§ 37a) jsou zafixované
+        // a dodatečný daňový doklad k platbě by stejnou úplatu zdanil podruhé.
+        //
+        // Koncept se sem ZÁMĚRNĚ nepočítá (issue #39): automatika zakládá finál jako
+        // draft, takže dřív si sama znepřístupnila tlačítko „Vystavit daňový doklad"
+        // a uživatel musel nejdřív uhodnout, že má koncept smazat. Nevystavený draft
+        // nic nezdanil — žádné dvojí zdanění z něj vzniknout nemůže.
         $finalExists = $pdo->prepare(
             "SELECT 1 FROM invoices
-              WHERE parent_invoice_id = ? AND invoice_type = 'invoice' AND status <> 'cancelled'
+              WHERE parent_invoice_id = ? AND invoice_type = 'invoice'
+                AND status NOT IN ('draft', 'cancelled')
               LIMIT 1"
         );
         $finalExists->execute([(int) $proforma['id']]);

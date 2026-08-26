@@ -162,6 +162,7 @@ export interface Supplier {
   reminder_days_after_due: number
   auto_generate_recurring: boolean
   embed_isdoc: boolean
+  proforma_payment_document: 'final_on_full_payment' | 'always_tax_document'
   logo_path: string | null
   signature_path: string | null
   pohoda_account_code: string | null

@@ -353,6 +353,7 @@ final class MatchSuggestionService
                 isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
                 $userId ?: 0,
                 $postedAt,
+                $this->db->pdo(),
             );
             if ($followUp['final_draft_id'] !== null) {
                 $finalDraftIds[] = $followUp['final_draft_id'];

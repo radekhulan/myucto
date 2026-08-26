@@ -522,6 +522,7 @@ final class StatementMatcher
                         null,
                         0,
                         (string) $row['posted_at'],
+                        $pdo,
                     )['final_draft_id'];
                 }
                 $pdo->commit();
@@ -584,6 +585,7 @@ final class StatementMatcher
                     isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
                     0,
                     (string) $row['posted_at'],
+                    $pdo,
                 )['tax_document_id'];
                 $pdo->commit();
             } catch (\Throwable $e) {

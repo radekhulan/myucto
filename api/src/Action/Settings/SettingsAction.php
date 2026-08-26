@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Settings;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -506,6 +507,9 @@ final class SettingsAction
             'accounting_enabled',
             // „Vést mzdy" (migrace 1187) — výchozí opt-in modulu, bez vlivu na licenci.
             'payroll_enabled',
+            // Doklad po úhradě proformy (issue #39, migrace 1565) — rychlý prodej vs.
+            // zakázková výroba; výchozí hodnota drží dnešní chování.
+            'proforma_payment_document',
             // Sklad (Epic SKLAD, migrace 1023) — opt-in modul evidence zásob + auto-výdejka
             // při vystavení FV; smí přepínat i účetní (viz bypass guard() výše).
             // `stock_in_transit_from` (migrace 1331) rozhoduje, od kterého stavu objednávky
@@ -536,6 +540,19 @@ final class SettingsAction
             && !in_array($body['accounting_mode'], ['tax_evidence', 'double_entry'], true)
         ) {
             return Json::error($response, 'validation_failed', "accounting_mode musí být 'tax_evidence' nebo 'double_entry'.", 400);
+        }
+
+        // Jaký doklad vzniká po úhradě proformy (issue #39, migrace 1565). Cizí hodnota
+        // by v strict mode shodila UPDATE na PDOException → 500; tady je z ní čitelná 400.
+        if (array_key_exists('proforma_payment_document', $body)
+            && !in_array($body['proforma_payment_document'], ProformaPaymentDocuments::modes(), true)
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                "proforma_payment_document musí být 'final_on_full_payment' nebo 'always_tax_document'.",
+                400,
+            );
         }
 
         // Sklad — od kterého stavu objednávky se zboží počítá „na cestě" (rozhodnutí #2).
@@ -1085,6 +1102,14 @@ final class SettingsAction
         // „Vést mzdy" (migrace 1187, opt-in od 1290) — stejný vzor jako sklad níž:
         // chybějící hodnota znamená vypnuto, ne zapnuto.
         $row['payroll_enabled']          = (bool) ($row['payroll_enabled'] ?? false);
+        // Doklad po úhradě proformy (issue #39, migrace 1565). Chybějící hodnota =
+        // nedoběhlá migrace; fallback drží dnešní chování a hlavně nenechá FE select
+        // bez vybrané položky (vykreslil by se prázdný a uložil by prázdnou hodnotu).
+        $row['proforma_payment_document'] = in_array(
+            $row['proforma_payment_document'] ?? null,
+            ProformaPaymentDocuments::modes(),
+            true,
+        ) ? (string) $row['proforma_payment_document'] : ProformaPaymentDocuments::MODE_FINAL_ON_FULL_PAYMENT;
         // Sklad (Epic SKLAD, migrace 1023) — opt-in modul; FE nav sekci gatuje MeAction.
         $row['stock_enabled']            = (bool) ($row['stock_enabled'] ?? false);
         $row['stock_auto_issue']         = (bool) ($row['stock_auto_issue'] ?? true);

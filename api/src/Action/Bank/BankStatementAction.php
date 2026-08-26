@@ -2631,6 +2631,7 @@ final class BankStatementAction
                         isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
                         $userId ?: 0,
                         $postedAt,
+                        $pdo,
                     );
                     $finalDraftId = $followUp['final_draft_id'] ?? $finalDraftId;
                     $taxDocId = $followUp['tax_document_id'] ?? $taxDocId;
@@ -3003,6 +3004,7 @@ final class BankStatementAction
                     isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
                     $userId ?: 0,
                     $postedAt,
+                    $pdo,
                 );
                 if ($followUp['final_draft_id'] !== null) {
                     $finalDraftIds[$iid] = $followUp['final_draft_id'];
