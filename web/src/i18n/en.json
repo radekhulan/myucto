@@ -4334,6 +4334,10 @@
                     "title": "Close attendance",
                     "hint": "Review hours worked and approve the month."
                 },
+                "travel": {
+                    "title": "Record business trips",
+                    "hint": "Complete trips, reimbursements and their monthly inputs before calculation."
+                },
                 "quick_inputs": {
                     "title": "Enter pay and bonuses",
                     "hint": "Base pay, overtime, bonuses — one row per employee."
@@ -4342,8 +4346,12 @@
                     "title": "Calculate the payroll run",
                     "hint": "Lock inputs → calculate → review → approve."
                 },
+                "posting_reconciliation": {
+                    "title": "Post and reconcile",
+                    "hint": "Post the approved revision and reconcile the accounting bridge with the result."
+                },
                 "payments": {
-                    "title": "Post and pay",
+                    "title": "Prepare and make payments",
                     "hint": "Net pay, tax advance and insurance ready for payment."
                 },
                 "documents": {

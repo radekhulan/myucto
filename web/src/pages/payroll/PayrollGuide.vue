@@ -10,7 +10,7 @@ import { ICONS } from '@/components/ui/buttonStyles'
  * Why: pořadí kroků mzdového měsíce je dané stavy běhu
  * (`lock_inputs → calculate → review → approve → post → prepare_payments →
  * mark_paid → close`), ale v UI nebylo nikde
- * napsané — menu mzdové sekce má 15 položek v jiném pořadí. Nový uživatel tak
+ * napsané — menu mzdové sekce má 20 položek v jiném pořadí. Nový uživatel tak
  * nemá jak zjistit, že nepřítomnosti musí být v systému DŘÍV než výpočet.
  *
  * Odmlčí se křížkem (stejný vzor jako `FooterTip.vue`) a jde vrátit odkazem
@@ -31,8 +31,10 @@ const forcedOpen = ref(false)
 const steps = computed(() => [
   { route: 'payroll-absences', title: t('payroll.guide.steps.absences.title'), hint: t('payroll.guide.steps.absences.hint') },
   { route: 'payroll-time', title: t('payroll.guide.steps.time.title'), hint: t('payroll.guide.steps.time.hint') },
+  { route: 'payroll-travel', title: t('payroll.guide.steps.travel.title'), hint: t('payroll.guide.steps.travel.hint') },
   { route: 'payroll-quick-inputs', title: t('payroll.guide.steps.quick_inputs.title'), hint: t('payroll.guide.steps.quick_inputs.hint') },
   { route: 'payroll-runs', title: t('payroll.guide.steps.runs.title'), hint: t('payroll.guide.steps.runs.hint') },
+  { route: 'payroll-posting-reconciliation', title: t('payroll.guide.steps.posting_reconciliation.title'), hint: t('payroll.guide.steps.posting_reconciliation.hint') },
   { route: 'payroll-payments', title: t('payroll.guide.steps.payments.title'), hint: t('payroll.guide.steps.payments.hint') },
   { route: 'payroll-documents', title: t('payroll.guide.steps.documents.title'), hint: t('payroll.guide.steps.documents.hint') },
   { route: 'payroll-submissions', title: t('payroll.guide.steps.submissions.title'), hint: t('payroll.guide.steps.submissions.hint') },

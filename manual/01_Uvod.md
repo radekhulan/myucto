@@ -367,9 +367,9 @@ Agendy, kvůli kterým účetní v jednodušších systémech vede paralelní ta
 - **Mzdy** — plnohodnotný mzdový modul: osobní karty a pracovní vztahy,
   docházka, absence a dovolená, mzdové složky, řízený mzdový běh, srážky
   a exekuce, výplatní pásky a mzdový list, platby odvodů, účetní můstek
-  a příprava zákonných hlášení. Modul je funkčně hotový a do **ostrého
-  spuštění plánovaného na září 2026** běží ve zkušebním provozu — výstupy
-  je do té doby potřeba ověřovat proti jinému zdroji.
+  a příprava zákonných hlášení; JMHZ umí po výslovném potvrzení také řízeně
+  odeslat přes ISDS nebo VREP. Modul běží ve zkušebním provozu a jeho výstupy
+  je potřeba ověřovat proti jinému důvěryhodnému zdroji.
 - **Mzdová rekapitulace** — jednodušší cesta pro zaúčtování mezd z cizí
   mzdovky, i importem CSV
 - **Kniha jízd** — vozidla, cesty, tankování a daňové souhrny

@@ -36,14 +36,16 @@ describe('PayrollGuide', () => {
     expect(steps.map(step => step.attributes('data-to'))).toEqual([
       '{"name":"payroll-absences"}',
       '{"name":"payroll-time"}',
+      '{"name":"payroll-travel"}',
       '{"name":"payroll-quick-inputs"}',
       '{"name":"payroll-runs"}',
+      '{"name":"payroll-posting-reconciliation"}',
       '{"name":"payroll-payments"}',
       '{"name":"payroll-documents"}',
       '{"name":"payroll-submissions"}',
     ])
     expect(steps[0].text()).toContain('1')
-    expect(steps[6].text()).toContain('7')
+    expect(steps[8].text()).toContain('9')
   })
 
   it('points a first-time user at settings and the manual chapter', async () => {

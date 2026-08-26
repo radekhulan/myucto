@@ -4334,6 +4334,10 @@
                     "title": "Uzavřít docházku",
                     "hint": "Zkontrolovat odpracované hodiny a měsíc schválit."
                 },
+                "travel": {
+                    "title": "Zapsat pracovní cesty",
+                    "hint": "Doplnit cesty, náhrady a jejich měsíční podklady před výpočtem."
+                },
                 "quick_inputs": {
                     "title": "Doplnit mzdy a odměny",
                     "hint": "Základní mzda, přesčasy, bonusy — jeden řádek na zaměstnance."
@@ -4342,8 +4346,12 @@
                     "title": "Spočítat mzdový běh",
                     "hint": "Uzamknout vstupy → přepočítat → zkontrolovat → schválit."
                 },
+                "posting_reconciliation": {
+                    "title": "Zaúčtovat a zkontrolovat shodu",
+                    "hint": "Zaúčtovat schválenou revizi a ověřit účetní můstek proti výsledku."
+                },
                 "payments": {
-                    "title": "Zaúčtovat a zaplatit",
+                    "title": "Připravit a provést platby",
                     "hint": "Čisté mzdy, záloha na daň a pojistné k úhradě."
                 },
                 "documents": {
