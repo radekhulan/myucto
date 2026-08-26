@@ -24,6 +24,8 @@ const m = vi.hoisted(() => ({
   previewInput: vi.fn(),
   previewInputImport: vi.fn(),
   applyInputImport: vi.fn(),
+  riskySavings: vi.fn(),
+  institutionAccounts: vi.fn(),
   canWrite: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -63,6 +65,8 @@ vi.mock('@/api/payroll', () => ({
     createInput: m.createInput,
     updateInput: vi.fn(),
     approveInput: vi.fn(),
+    riskySavings: m.riskySavings,
+    institutionAccounts: m.institutionAccounts,
   },
 }))
 
@@ -113,6 +117,15 @@ describe('PayrollComponents', () => {
     // do dalších a ty by měřily něco jiného, než co mají v názvu.
     m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
+    // PayrollRiskySavingsPanel se montuje uvnitř této obrazovky a načítá se sám.
+    // Bez těchto dvou mocků skončí jeho `load()` v catch větvi a vyhodí toast,
+    // který pak měří testy o něčem úplně jiném.
+    m.riskySavings.mockResolvedValue({
+      items: [],
+      minimum_shift_eighths: 24,
+      rate_basis_points: 400,
+    })
+    m.institutionAccounts.mockResolvedValue([])
     m.components.mockResolvedValue([{
       id: 5,
       supplier_id: 1,

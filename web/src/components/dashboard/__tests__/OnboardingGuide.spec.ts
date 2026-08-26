@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   canWrite: vi.fn((_p: string) => true),
   isSuperadmin: true,
   accountingMode: 'tax_evidence' as string,
+  payrollEnabled: true as boolean,
   license: null as null | { max_companies: number | null; companies_active: number },
 }))
 
@@ -42,7 +43,7 @@ vi.mock('@/stores/auth', () => ({
 
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({
-    get currentSupplier() { return { accounting_mode: m.accountingMode } },
+    get currentSupplier() { return { accounting_mode: m.accountingMode, payroll_enabled: m.payrollEnabled } },
   }),
 }))
 
@@ -66,6 +67,7 @@ beforeEach(() => {
   m.canWrite.mockReturnValue(true)
   m.isSuperadmin = true
   m.accountingMode = 'tax_evidence'
+  m.payrollEnabled = true
   m.license = null
 })
 
@@ -102,6 +104,20 @@ describe('OnboardingGuide', () => {
 
     expect(wrapper.text()).toContain('dashboard.onboarding.steps.series.title')
     expect(wrapper.findAll('article')).toHaveLength(11)
+  })
+
+  /**
+   * Datovou schránku firma zřizuje kvůli mzdovým podáním. S vypnutými mzdami
+   * krok mizí stejně jako položka v menu — jinak by průvodce posílal uživatele
+   * nastavovat kanál, kterým nemá co odeslat.
+   */
+  it('datovou schránku nabídne jen se zapnutými mzdami', async () => {
+    expect((await mountGuide()).text()).toContain('dashboard.onboarding.steps.databox.title')
+
+    m.payrollEnabled = false
+    const wrapper = await mountGuide()
+    expect(wrapper.text()).not.toContain('dashboard.onboarding.steps.databox.title')
+    expect(wrapper.findAll('article')).toHaveLength(9)
   })
 
   it('vynechá kroky, na které uživatel nemá právo', async () => {

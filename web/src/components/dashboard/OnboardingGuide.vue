@@ -70,6 +70,12 @@ interface Group {
 const isSuperadmin = computed(() => auth.isSuperadmin)
 /** Číselné řady deníku dávají smysl až v podvojném účetnictví — jinde krok nenabízíme. */
 const isDoubleEntry = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+/**
+ * Datovou schránku firma zřizuje kvůli mzdovým podáním (ČSSZ, zdravotní
+ * pojišťovny, JMHZ). S vypnutými mzdami nemá co odesílat, takže krok
+ * nenabízíme — stejně jako mizí i z menu. Mzdy jsou opt-in, undefined = vypnuto.
+ */
+const payrollEnabled = computed(() => supplierStore.currentSupplier?.payroll_enabled === true)
 
 /**
  * Účtování dalších firem nabízíme jen tomu, kdo na ně má licenci a ještě mu
@@ -103,7 +109,7 @@ const GROUPS: Group[] = [
       { id: 'numbering', to: '/admin/settings?tab=documents',  visible: () => auth.canRead('settings.company') },
       { id: 'series',    to: '/utilities?section=document-series', visible: () => isDoubleEntry.value && auth.canRead('utilities') },
       { id: 'bank_email', to: '/bank?tab=email',               visible: () => auth.canRead('bank') },
-      { id: 'databox',   to: '/admin/databox',                 visible: () => isSuperadmin.value },
+      { id: 'databox',   to: '/admin/databox',                 visible: () => isSuperadmin.value && payrollEnabled.value },
       { id: 'users',     to: '/admin/users',                   visible: () => isSuperadmin.value },
     ],
   },

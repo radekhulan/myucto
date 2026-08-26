@@ -644,7 +644,9 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
         { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
         { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
-        { to: '/admin/databox',               label: t('nav.databox'),         icon: ICONS.documents, permission: 'settings.signing' as PermissionKey },
+        // Datová schránka obsluhuje mzdová podání (ČSSZ, zdravotní pojišťovny, JMHZ),
+        // takže s vypnutými mzdami nemá firma co odesílat — položka mizí spolu s nimi.
+        ...(payrollEnabled ? [{ to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' as PermissionKey }] : []),
       ],
     })
     // Systém — globální nastavení a licenční agenda v jednom menu.
@@ -702,7 +704,7 @@ const navSections = computed<NavSection[]>(() => {
     // Non-admin role (accountant/readonly) nemá žádnou jinou cestu k vlastním API
     // tokenům — route /profile/api-tokens nemá adminOnly, ale dřív byl jediný
     // sidebar link uvnitř isAdmin bloku výše, takže k němu vedla jen přímá URL.
-    if (auth.canWrite('settings.signing')) {
+    if (payrollEnabled && auth.canWrite('settings.signing')) {
       sections.push({
         key: 'company_databox',
         title: t('nav.section_company'),
