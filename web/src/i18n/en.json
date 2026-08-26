@@ -1037,12 +1037,12 @@
                 "download_failed": "The payment export could not be downloaded."
             },
             "batches": {
-                "title": "Payment batches",
+                "title": "Payroll payment orders",
                 "foundation": "Batches are archived as immutable revisions with an exact total and a hash of exported bytes. Export is enabled only after a verified payer account and a secure bank format are available."
             },
             "options_failed": "The selection list could not be loaded.",
             "settlements": {
-                "title": "Settlement and matching",
+                "title": "Payment matching",
                 "foundation": "Settlement status is derived only from a bank transaction or a posted cash document; it never overwrites approved payroll or its liability.",
                 "new_match": "Match an actual payment",
                 "new_match_hint": "Select a payment batch item and an unused bank transaction or cash document.",
@@ -1092,7 +1092,7 @@
             "reload": "Refresh",
             "retry": "Try again",
             "load_failed": "The payroll posting reconciliation could not be loaded.",
-            "detail_hint": "Per-employee detail is available in the payroll run and on the Payments and settlement page for the same period.",
+            "detail_hint": "Per-employee detail is available in the payroll run and on the Payroll payment orders and settlement page for the same period.",
             "hint_tax_evidence": "The company keeps tax records — payroll is not posted to the journal, so the Journal column stays empty.",
             "hint_unposted": "The revision is approved but has not been posted yet (automatic posting is disabled or has not run yet) — the Journal column stays empty.",
             "hint_payments_not_materialized": "Payment liabilities for this period have not been prepared yet — the Payments columns stay empty.",

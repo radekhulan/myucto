@@ -125,7 +125,7 @@ prostředí mají oddělené podání, certifikáty i stav.
 | 5 | Zkontroluje čisté mzdy, odvody, daně, součty podle zaměstnanců a případné srážky nebo exekuce. | [Mzdové běhy](58e_Mzdove_behy.md), [Srážky a exekuce](58m_Srazky_a_exekuce.md) |
 | 6 | Schválí výslednou revizi. Při nalezené chybě opraví zdrojový údaj a vytvoří novou revizi; nepřepisuje schválený otisk. | [Mzdové běhy](58e_Mzdove_behy.md) |
 | 7 | Vygeneruje výplatní pásky a povinné dokumenty a zkontroluje stav po jednotlivých osobách. | [Dokumenty a výstupy](58h_Dokumenty_a_vystupy.md) |
-| 8 | Připraví a provede výplaty, odvody a ostatní platby; následně je spáruje s bankou. | [Platby a úhrady](58g_Platby_a_uhrady.md) |
+| 8 | Připraví a provede výplaty, odvody a ostatní platby; následně je spáruje s bankou. | [Mzdové příkazy a úhrady](58g_Platby_a_uhrady.md) |
 | 9 | Připraví JMHZ a hlášení zdravotním pojišťovnám, zkontroluje XML/PDF, zvolí kanál a každé odeslání výslovně potvrdí. | [Podání a hlášení](58j_Podani_a_hlaseni.md) |
 | 10 | Zaúčtuje mzdy a porovná mzdovou revizi, platby, účetní zápisy a podání. | [Shoda účtování mezd](58f_Shoda_uctovani_mezd.md) |
 
@@ -197,7 +197,7 @@ kapitole
 4. [Rychlý měsíční vstup](58d_Rychly_mesicni_vstup.md)
 5. [Mzdové běhy](58e_Mzdove_behy.md)
 6. [Shoda účtování mezd](58f_Shoda_uctovani_mezd.md)
-7. [Platby a úhrady](58g_Platby_a_uhrady.md)
+7. [Mzdové příkazy a úhrady](58g_Platby_a_uhrady.md)
 8. [Dokumenty a výstupy](58h_Dokumenty_a_vystupy.md)
 9. [Roční zúčtování](58i_Rocni_zuctovani.md)
 10. [Podání a hlášení](58j_Podani_a_hlaseni.md)

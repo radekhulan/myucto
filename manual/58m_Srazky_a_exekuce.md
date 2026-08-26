@@ -82,7 +82,7 @@ Aby aplikace sražené peníze skutečně odeslala, vyber v případu **příjem
 z katalogu **Mzdy → Nastavení mezd → Účty institucí** (typ *ostatní příjemce*). Účet
 musí být ověřený a účinný k datu výplaty; číslo účtu ani symboly se do případu
 neopisují. Po schválení mzdové revize vytvoří akce **Připravit závazky**
-v **Mzdy → Platby a úhrady** závazek vůči tomuto příjemci — ale jen z částek, které jsou
+v **Mzdy → Mzdové příkazy a úhrady** závazek vůči tomuto příjemci — ale jen z částek, které jsou
 ve stavu **odesílání**. Cokoli je deponované (nový případ, odklad, zastavení)
 se do odchozí platební dávky nedostane. Opakovaná příprava nevytvoří druhý
 závazek; oprava mzdy promítne jen rozdíl a pokles vznikne jako samostatný
@@ -91,5 +91,5 @@ příchozí opravný závazek.
 Blok **Sraženo, depozitum a odeslané platby** v detailu případu ukazuje, kolik
 bylo sraženo, kolik drží depozitum, kolik je připraveno k úhradě, kolik už
 příjemce dostal a kolik na pohledávce zbývá. Poslední dva údaje se mění až
-po spárování skutečné bankovní nebo pokladní platby v **Mzdy → Platby a úhrady →
-Úhrady a párování**.
+po spárování skutečné bankovní nebo pokladní platby v **Mzdy → Mzdové příkazy a úhrady →
+Spárování úhrad**.

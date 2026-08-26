@@ -108,7 +108,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 58d. [Rychlý měsíční vstup](58d_Rychly_mesicni_vstup.md)
 58e. [Mzdové běhy](58e_Mzdove_behy.md)
 58f. [Shoda účtování mezd](58f_Shoda_uctovani_mezd.md)
-58g. [Platby a úhrady](58g_Platby_a_uhrady.md)
+58g. [Mzdové příkazy a úhrady](58g_Platby_a_uhrady.md)
 58h. [Dokumenty a výstupy](58h_Dokumenty_a_vystupy.md)
 58i. [Roční zúčtování](58i_Rocni_zuctovani.md)
 58j. [Podání a hlášení](58j_Podani_a_hlaseni.md)

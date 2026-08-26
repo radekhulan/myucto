@@ -1037,12 +1037,12 @@
                 "download_failed": "Platební export se nepodařilo stáhnout."
             },
             "batches": {
-                "title": "Platební dávky",
+                "title": "Mzdové příkazy",
                 "foundation": "Dávky jsou archivované jako neměnné revize s přesným součtem a otiskem exportovaných bajtů. Export se zpřístupní až po doplnění ověřeného plátcovského účtu a bezpečného bankovního formátu."
             },
             "options_failed": "Nabídku pro výběr se nepodařilo načíst.",
             "settlements": {
-                "title": "Úhrady a párování",
+                "title": "Spárování úhrad",
                 "foundation": "Stav úhrady se odvozuje jen z bankovního pohybu nebo zaúčtovaného pokladního dokladu; schválenou mzdu ani závazek nikdy nepřepisuje.",
                 "new_match": "Spárovat skutečnou úhradu",
                 "new_match_hint": "Vyberte položku platební dávky a dosud nepoužitý bankovní pohyb nebo pokladní doklad.",
@@ -1092,7 +1092,7 @@
             "reload": "Obnovit",
             "retry": "Zkusit znovu",
             "load_failed": "Reconciliaci účtování mezd se nepodařilo načíst.",
-            "detail_hint": "Podrobný rozpad podle zaměstnance najdete v mzdovém běhu a na stránce Platby a úhrady za totéž období.",
+            "detail_hint": "Podrobný rozpad podle zaměstnance najdete v mzdovém běhu a na stránce Mzdové příkazy a úhrady za totéž období.",
             "hint_tax_evidence": "Firma vede daňovou evidenci — mzdy se do deníku neúčtují, sloupec Deník proto zůstává prázdný.",
             "hint_unposted": "Revize je schválená, ale zatím nebyla zaúčtována (automatické zaúčtování je vypnuté nebo zatím neproběhlo) — sloupec Deník proto zůstává prázdný.",
             "hint_payments_not_materialized": "Platební závazky pro toto období zatím nebyly připraveny — sloupce Platby proto zůstávají prázdné.",

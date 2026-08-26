@@ -33,7 +33,7 @@ Ověřte vyrovnanost, období, účty závazků, nákladů, daně, pojistného a
 
 ## Návaznosti
 
-Zdroj je [mzdový běh](58e_Mzdove_behy.md), účty nastavuje [kapitola 58o](58o_Nastaveni_mezd.md) a peněžní vypořádání ověřují [platby a úhrady](58g_Platby_a_uhrady.md).
+Zdroj je [mzdový běh](58e_Mzdove_behy.md), účty nastavuje [kapitola 58o](58o_Nastaveni_mezd.md) a peněžní vypořádání ověřují [mzdové příkazy a úhrady](58g_Platby_a_uhrady.md).
 
 
 

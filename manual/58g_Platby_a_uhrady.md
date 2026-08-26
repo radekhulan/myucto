@@ -1,4 +1,4 @@
-# Platby a úhrady
+# Mzdové příkazy a úhrady
 
 ## Účel
 
@@ -10,9 +10,9 @@ Je nutný uzavřený běh, oprávnění `payroll.payments`, správné účty, te
 
 ## Krokový postup
 
-1. Otevřete **Mzdy → Platby a úhrady** a vyberte uzavřený běh.
+1. U zaúčtovaného běhu zvolte **Připravit platby**. Aplikace otevře **Mzdy → Mzdové příkazy a úhrady** ve správném období a nabídne závazky daného běhu.
 2. Zkontrolujte příjemce, účet, částku, splatnost a platební symboly každého závazku.
-3. Připravte platební podklad nebo export podporovaným způsobem.
+3. Na kartě **Co zaplatit** vyberte kompatibilní závazky a vytvořte mzdový příkaz ABO pro CZK, SEPA pro EUR, nebo evidenci hotovostní výplaty.
 4. Platby autorizujte v bance podle interních pravidel firmy.
 5. Po provedení spárujte úhrady a vyřešte rozdíly nebo vratky.
 
@@ -22,7 +22,7 @@ Připravená platba není odeslaná. Exportovaná čeká na autorizaci v bance. 
 
 ## Kontroly a bezpečnost
 
-Používejte kontrolu druhou osobou, zejména při změně účtu. Porovnejte součet plateb s uzavřeným během a s účetními závazky. Bankovní export chraňte jako citlivý soubor a po přenosu jej nenechávejte na sdíleném místě.
+Jedna účetní může připravit i dokončit celý tok. Při změně účtu aplikace vyžaduje ověřený podklad; před vytvořením příkazu porovnejte součet plateb s uzavřeným během a účetními závazky. Bankovní export chraňte jako citlivý soubor a po přenosu jej nenechávejte na sdíleném místě.
 
 ## Časté chyby
 
@@ -39,7 +39,7 @@ Používejte kontrolu druhou osobou, zejména při změně účtu. Porovnejte so
 
 ## Podrobný pracovní postup a kontroly
 
-V **Mzdy → Platby a úhrady** vybereš mzdové období a připravíš platební
+V **Mzdy → Mzdové příkazy a úhrady** vybereš mzdové období a připravíš platební
 závazky z aktuálních schválených revizí. Čistá mzda se vždy odvozuje z částky
 po exekučních srážkách. Rozdělení mezi ověřené bankovní účty a hotovost se
 znovu vypočte nad pravidly a účty zmrazenými při uzamčení vstupů; pozdější
@@ -90,7 +90,8 @@ závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost
 příchozí opravný závazek, ale nelze jej vložit do odchozí bankovní dávky;
 vratku je nutné doložit příchozím bankovním nebo pokladním dokladem.
 
-V záložce **Platební dávky** vybereš připravené závazky. Aplikace podle
+Na kartě **Co zaplatit** vybereš připravené závazky; karta **Mzdové příkazy**
+ukazuje už vytvořené dávky. Aplikace podle
 výplatních cílů nabídne účet plátce a formát ABO nebo SEPA, znovu ověří
 nezměněné účty příjemců a vytvoří dávku. U zdravotní pojišťovny, ČSSZ i
 finančního úřadu použije přesné zmrazené VS, SS a KS. Export se ukládá
@@ -99,7 +100,7 @@ v těch bajtech, které se stáhnou do banky. Opakování se stejným klíčem v
 tentýž export a nevytvoří další ekonomický závazek. Stažení vyžaduje právo
 zápisu a používá krátkodobé jednorázové oprávnění.
 
-V záložce **Úhrady a párování** vybereš konkrétní alokaci závazku a kompatibilní
+Na kartě **Spárování úhrad** vybereš konkrétní alokaci závazku a kompatibilní
 bankovní pohyb nebo zaúčtovaný pokladní doklad. Lze zapsat i částečnou úhradu.
 Historie je neměnná: vratka nebo storno nevynuluje původní záznam, ale přidá
 samostatnou reverzní událost s vlastním důkazem. Jeden bankovní nebo pokladní
