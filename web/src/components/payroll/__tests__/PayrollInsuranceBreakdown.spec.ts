@@ -254,6 +254,11 @@ describe('PayrollInsuranceBreakdown', () => {
     expect(socialStep).toContain('7,1')
     expect(wrapper.get('[data-testid="health-standard-step"]').text()).toContain('13,5')
     expect(wrapper.text()).toContain('payroll.runs.insurance.employer_scope_note')
+    await wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.runs.insurance.relationships_show'))
+      ?.trigger('click')
+    expect(wrapper.text()).toContain('payroll.runs.insurance.reason.regular_relationship')
+    expect(wrapper.text()).not.toContain('regular-employment')
   })
 
   it('shows that the annual maximum capped the social base', async () => {

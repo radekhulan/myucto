@@ -126,7 +126,45 @@ function statusTone(status: string | undefined): string {
 }
 
 function issueLabel(code: string): string {
-  return t('payroll.runs.insurance.issue', { code })
+  return t('payroll.runs.insurance.issue', { code: participationReasonLabel(code) })
+}
+
+const PARTICIPATION_REASON_KEYS = new Set([
+  'inactive_without_attributable_income',
+  'income_month_attribution_unverified',
+  'dpp_group_contains_unresolved_relationship',
+  'dpp_group_threshold_met',
+  'dpp_group_below_threshold',
+  'regular_relationship',
+  'agreed_income_threshold_met',
+  'small_scale_group_contains_unresolved_relationship',
+  'small_scale_group_threshold_met',
+  'small_scale_group_below_threshold',
+  'dpc_group_contains_unresolved_relationship',
+  'dpc_group_negative_income_requires_period_revision',
+  'dpc_group_threshold_met',
+  'dpc_group_below_threshold',
+  'dpp_group_negative_income_requires_period_revision',
+  'dependent_income_relationship',
+  'manual_review',
+])
+
+function participationReasonLabel(rawCode: string): string {
+  const [rawKind, detail] = rawCode.split(':', 2)
+  const kind = rawKind === 'regular-employment' ? 'regular_relationship' : rawKind
+  if (kind === 'participation_component_manual_review') {
+    return t('payroll.runs.insurance.reason.participation_component_manual_review', {
+      component: detail || t('payroll.runs.insurance.unknown_component'),
+    })
+  }
+  if (PARTICIPATION_REASON_KEYS.has(kind)) {
+    return t(`payroll.runs.insurance.reason.${kind}`)
+  }
+  return t('payroll.runs.insurance.reason.unknown')
+}
+
+function participationReasonList(codes: string[]): string {
+  return codes.map(participationReasonLabel).join('; ')
 }
 
 function componentList(codes: string[]): string {
@@ -426,7 +464,7 @@ watch(
                 </div>
               </dl>
               <p v-if="relationship.reason_codes.length" class="mt-2 text-xs text-neutral-500">
-                {{ t('payroll.runs.insurance.reasons', { codes: relationship.reason_codes.join(', ') }) }}
+                {{ t('payroll.runs.insurance.reasons', { codes: participationReasonList(relationship.reason_codes) }) }}
               </p>
             </article>
           </div>
@@ -688,7 +726,7 @@ watch(
                 </div>
               </dl>
               <p v-if="relationship.reason_codes.length" class="mt-2 text-xs text-neutral-500">
-                {{ t('payroll.runs.insurance.reasons', { codes: relationship.reason_codes.join(', ') }) }}
+                {{ t('payroll.runs.insurance.reasons', { codes: participationReasonList(relationship.reason_codes) }) }}
               </p>
             </article>
           </div>
