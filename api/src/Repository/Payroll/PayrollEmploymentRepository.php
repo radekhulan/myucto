@@ -742,7 +742,8 @@ final class PayrollEmploymentRepository
                     terms.effective_from, terms.effective_to,
                     terms.contract_signed_on, terms.planned_start_on,
                     terms.actual_start_on, terms.fixed_term_end_on,
-                    terms.weekly_hours, terms.workload_basis_points,
+                    terms.weekly_hours, terms.leave_entitlement_weeks_override,
+                    terms.workload_basis_points,
                     terms.work_place, terms.regular_workplace,
                     terms.jmhz_workplace_municipality_code,
                     terms.jmhz_workplace_country_code,
@@ -846,7 +847,8 @@ final class PayrollEmploymentRepository
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
-                 fixed_term_end_on, weekly_hours, workload_basis_points,
+                 fixed_term_end_on, weekly_hours, leave_entitlement_weeks_override,
+                 workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
                  jmhz_relationship_detail_code,
                  jmhz_workplace_municipality_code,
@@ -869,7 +871,7 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_notified_on,
                  tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -880,6 +882,7 @@ final class PayrollEmploymentRepository
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
             $data['weekly_hours'],
+            $data['leave_entitlement_weeks_override'],
             $data['workload_basis_points'],
             $data['work_place'],
             $data['regular_workplace'],

@@ -69,6 +69,7 @@ function policy(overrides: Partial<PayrollEmployerPolicy> = {}): PayrollEmployer
     balance_rounding_mode: 'exact_minor_units',
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
+    leave_entitlement_weeks: 5,
     four_eyes_required: true,
     automatic_calculation_enabled: false,
     automatic_posting_enabled: false,

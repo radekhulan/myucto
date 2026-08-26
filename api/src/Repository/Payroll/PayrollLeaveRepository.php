@@ -160,7 +160,15 @@ final class PayrollLeaveRepository
         string $rationale,
         LeaveEntitlementResult $result,
         ?int $userId,
+        string $calculationMode = 'manual',
+        ?string $sourceSnapshotHash = null,
     ): array {
+        if (!in_array($calculationMode, ['manual', 'automatic'], true)) {
+            throw new \InvalidArgumentException('Režim výpočtu nároku není platný.');
+        }
+        if ($calculationMode === 'automatic' && ($sourceSnapshotHash === null || strlen($sourceSnapshotHash) !== 32)) {
+            throw new \InvalidArgumentException('Automatický výpočet vyžaduje platný otisk schválených podkladů.');
+        }
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -209,6 +217,8 @@ final class PayrollLeaveRepository
                 'rationale' => $rationale,
                 'worked_equivalent_minutes' => $workedEquivalentMinutes,
                 'year' => $year,
+                'calculation_mode' => $calculationMode,
+                'source_snapshot_hash' => $sourceSnapshotHash === null ? null : bin2hex($sourceSnapshotHash),
             ];
             $inputHash = hash('sha256', CanonicalJson::encode($input), true);
             $entry = $this->append(
@@ -222,22 +232,25 @@ final class PayrollLeaveRepository
                 null,
                 "Nárok dovolené – revize {$revision}: {$rationale}",
                 $userId,
+                $result->supportStatus,
             );
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_leave_entitlement_snapshots
                     (supplier_id, employment_id, leave_year, revision_no, relation_type,
                      weekly_minutes, entitlement_weeks, continuous_calendar_days,
                      worked_equivalent_minutes, worked_week_multiples, entitlement_minutes,
-                     rationale, support_status, input_hash, calculation_trace,
+                     rationale, support_status, calculation_mode, source_snapshot_hash,
+                     input_hash, calculation_trace,
                      leave_ledger_entry_id, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
                 $supplierId, $employmentId, $year, $revision, $relationType,
                 $result->weeklyMinutes, $entitlementWeeks, $continuousCalendarDays,
                 $workedEquivalentMinutes, $result->workedWeekMultiples,
                 $result->entitlementMinutes, $rationale, $result->supportStatus,
-                $inputHash, CanonicalJson::encode($result->trace), $entry['id'], $userId,
+                $calculationMode, $sourceSnapshotHash, $inputHash,
+                CanonicalJson::encode($result->trace), $entry['id'], $userId,
             ]);
             $snapshotId = (int) $pdo->lastInsertId();
             if ($ownsTransaction) {
@@ -317,6 +330,7 @@ final class PayrollLeaveRepository
         ?int $reversalOfId,
         string $reason,
         ?int $userId,
+        string $supportStatus = 'manual_review',
     ): array {
         if ($minutesDelta === 0 || trim($reason) === '') {
             throw new \InvalidArgumentException('Položka dovolené vyžaduje nenulové minuty a důvod.');
@@ -332,6 +346,7 @@ final class PayrollLeaveRepository
             'reversal_of_id' => $reversalOfId,
             'source_absence_id' => $absenceId,
             'supplier_id' => $supplierId,
+            'support_status' => $supportStatus,
         ]), true);
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_leave_ledger
@@ -343,7 +358,7 @@ final class PayrollLeaveRepository
         $stmt->execute([
             $supplierId, $employmentId, $year, $effectiveDate, $entryType,
             $minutesDelta, $absenceId, $reversalOfId, trim($reason),
-            'manual_review', $hash, $userId,
+            $supportStatus, $hash, $userId,
         ]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $find = $this->db->pdo()->prepare('SELECT * FROM payroll_leave_ledger WHERE supplier_id = ? AND id = ?');

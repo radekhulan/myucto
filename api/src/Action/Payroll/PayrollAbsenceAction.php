@@ -19,6 +19,8 @@ use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
+use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
+use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
@@ -42,6 +44,7 @@ final class PayrollAbsenceAction
         private readonly PayrollAbsenceValidator $validator,
         private readonly AverageEarningCalculator $averageCalculator,
         private readonly LeaveEntitlementCalculator $leaveCalculator,
+        private readonly AutomaticLeaveEntitlementService $automaticLeaveEntitlements,
         private readonly SicknessCompensationCalculator $sicknessCalculator,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollRulesetProvider $rulesets,
@@ -438,6 +441,69 @@ final class PayrollAbsenceAction
         return Json::ok($response, ['entitlement' => $entitlement], 201);
     }
 
+    public function leaveEntitlementCandidates(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+        try {
+            $query = $request->getQueryParams();
+            $year = $this->requiredPositiveInt($query['year'] ?? null, 'year');
+            $through = $this->queryDate($query['through'] ?? null, 'through');
+            $limit = max(1, min(
+                AutomaticLeaveEntitlementService::MAX_LIMIT,
+                (int) ($query['limit'] ?? AutomaticLeaveEntitlementService::DEFAULT_LIMIT),
+            ));
+            $offset = max(0, (int) ($query['offset'] ?? 0));
+            $page = $this->automaticLeaveEntitlements->page(
+                $this->currentSupplierId($request),
+                $year,
+                $through,
+                $limit,
+                $offset,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, $page);
+    }
+
+    public function createAutomaticEntitlements(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $year = $this->requiredPositiveInt($body['year'] ?? null, 'year');
+            $through = $this->queryDate($body['through'] ?? null, 'through');
+            $items = $body['items'] ?? null;
+            if (!is_array($items) || !array_is_list($items)) {
+                throw new \InvalidArgumentException('Výběr pracovních vztahů není platný.');
+            }
+            $entitlements = $this->automaticLeaveEntitlements->calculateBatch(
+                $this->currentSupplierId($request),
+                $year,
+                $through,
+                $items,
+                $this->userId($request),
+            );
+        } catch (AutomaticLeaveEntitlementConflictException $exception) {
+            return Json::error(
+                $response,
+                'leave_entitlement_inputs_changed',
+                $exception->getMessage(),
+                409,
+                ['employment_id' => $exception->employmentId],
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, ['entitlements' => $entitlements], 201);
+    }
+
     /**
      * Smaže špatně zadaný průměrný výdělek, který ještě nikdo neschválil.
      *
@@ -557,7 +623,9 @@ final class PayrollAbsenceAction
         $text = trim((string) $value);
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $text);
         if ($date === false || $date->format('Y-m-d') !== $text) {
-            throw new \InvalidArgumentException("{$field} musí být platné datum YYYY-MM-DD.");
+            throw new \InvalidArgumentException(
+                $this->fieldLabel($field) . ' musí být platné datum ve formátu RRRR-MM-DD.',
+            );
         }
         return $text;
     }
@@ -574,7 +642,9 @@ final class PayrollAbsenceAction
     {
         $result = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
         if ($result === false) {
-            throw new \InvalidArgumentException("{$field} musí být kladné celé číslo.");
+            throw new \InvalidArgumentException(
+                $this->fieldLabel($field) . ' musí být kladné celé číslo.',
+            );
         }
         return (int) $result;
     }
@@ -583,16 +653,35 @@ final class PayrollAbsenceAction
     {
         $result = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0]]);
         if ($result === false) {
-            throw new \InvalidArgumentException("{$field} musí být nezáporné celé číslo.");
+            throw new \InvalidArgumentException(
+                $this->fieldLabel($field) . ' musí být nezáporné celé číslo.',
+            );
         }
         return (int) $result;
+    }
+
+    private function fieldLabel(string $field): string
+    {
+        return match ($field) {
+            'from' => 'Datum od',
+            'to' => 'Datum do',
+            'through' => 'Datum výpočtu',
+            'effective_date' => 'Datum účinnosti',
+            'employment_id' => 'Pracovní vztah',
+            'leave_year', 'year' => 'Rok',
+            'row_version' => 'Verze záznamu',
+            'minutes_delta' => 'Změna nároku v minutách',
+            default => 'Zadaná hodnota',
+        };
     }
 
     private function requiredNonZeroInt(mixed $value, string $field): int
     {
         $result = filter_var($value, FILTER_VALIDATE_INT);
         if ($result === false || (int) $result === 0) {
-            throw new \InvalidArgumentException("{$field} musí být nenulové celé číslo.");
+            throw new \InvalidArgumentException(
+                $this->fieldLabel($field) . ' musí být nenulové celé číslo.',
+            );
         }
         return (int) $result;
     }

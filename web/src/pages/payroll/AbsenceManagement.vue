@@ -18,6 +18,7 @@ import {
   type AbsenceType,
   type AverageSnapshot,
   type LeaveEntry,
+  type LeaveEntitlementCandidate,
   type PayrollAbsence,
   type PayrollAbsenceEmployment,
 } from '@/api/payrollAbsences'
@@ -61,6 +62,13 @@ const currentAbsencePage = computed(() => Math.floor(absenceOffset.value / absen
 const averages = ref<AverageSnapshot[]>([])
 const leaveEntries = ref<LeaveEntry[]>([])
 const leaveBalance = ref(0)
+const leaveCandidates = ref<LeaveEntitlementCandidate[]>([])
+const leaveCandidateTotal = ref(0)
+const leaveCandidateOffset = ref(0)
+const leaveCandidatePageSize = 25
+const leaveCandidateLoading = ref(false)
+const leaveCandidateError = ref('')
+const selectedLeaveCandidates = ref<number[]>([])
 const selectedEmployeeId = ref<number | null>(null)
 const selectedEmploymentId = ref<number | null>(null)
 const filterFrom = ref(monthStart)
@@ -69,6 +77,14 @@ const leaveYear = ref(year)
 const minimumFormYear = year - 5
 const maximumFormYear = year + 2
 const canWrite = computed(() => auth.canWrite('payroll.time.write'))
+const leaveCandidatePage = computed(() => Math.floor(
+  leaveCandidateOffset.value / leaveCandidatePageSize,
+) + 1)
+const leaveThrough = computed(() => leaveYear.value === year
+  ? localDate(today)
+  : `${leaveYear.value}-12-31`)
+const selectedReadyCandidates = computed(() => leaveCandidates.value.filter(candidate =>
+  candidate.ready && selectedLeaveCandidates.value.includes(candidate.employment_id)))
 const fieldClass = 'mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20'
 const absenceTypes: AbsenceType[] = [
@@ -487,6 +503,63 @@ async function createEntitlement() {
   }
 }
 
+async function loadLeaveCandidates() {
+  leaveCandidateLoading.value = true
+  leaveCandidateError.value = ''
+  try {
+    const page = await payrollAbsenceApi.leaveEntitlementCandidates(
+      leaveYear.value,
+      leaveThrough.value,
+      { limit: leaveCandidatePageSize, offset: leaveCandidateOffset.value },
+    )
+    leaveCandidates.value = page.items
+    leaveCandidateTotal.value = page.total
+    selectedLeaveCandidates.value = selectedLeaveCandidates.value.filter(id =>
+      page.items.some(candidate => candidate.ready && candidate.employment_id === id))
+  } catch (error: any) {
+    leaveCandidateError.value = exactError(error, 'payroll_absence.leave.automatic_load_failed')
+  } finally {
+    leaveCandidateLoading.value = false
+  }
+}
+
+function goToLeaveCandidatePage(nextPage: number) {
+  leaveCandidateOffset.value = Math.max(0, (nextPage - 1) * leaveCandidatePageSize)
+  selectedLeaveCandidates.value = []
+  void loadLeaveCandidates()
+}
+
+function selectAllReadyCandidates() {
+  selectedLeaveCandidates.value = leaveCandidates.value
+    .filter(candidate => candidate.ready)
+    .map(candidate => candidate.employment_id)
+}
+
+async function createAutomaticEntitlements() {
+  if (selectedReadyCandidates.value.length === 0) return
+  saving.value = true
+  leaveCandidateError.value = ''
+  try {
+    await payrollAbsenceApi.createAutomaticEntitlements({
+      year: leaveYear.value,
+      through: leaveThrough.value,
+      items: selectedReadyCandidates.value.map(candidate => ({
+        employment_id: candidate.employment_id,
+        input_version: candidate.input_version,
+      })),
+    })
+    toast.success(t('payroll_absence.leave.automatic_created', {
+      count: selectedReadyCandidates.value.length,
+    }))
+    selectedLeaveCandidates.value = []
+    await Promise.all([loadLeaveCandidates(), loadData()])
+  } catch (error: any) {
+    leaveCandidateError.value = exactError(error, 'payroll_absence.messages.save_failed')
+  } finally {
+    saving.value = false
+  }
+}
+
 async function createEntry() {
   entryError.value = ''
   saving.value = true
@@ -543,7 +616,10 @@ watch(leaveYear, (selectedYear, previousYear) => {
   if (entryForm.effective_date === `${previousYear}-01-01`) {
     entryForm.effective_date = `${selectedYear}-01-01`
   }
+  leaveCandidateOffset.value = 0
+  selectedLeaveCandidates.value = []
   void loadData()
+  void loadLeaveCandidates()
 })
 watch(
   [() => averageForm.applicable_year, () => averageForm.applicable_quarter],
@@ -558,7 +634,7 @@ watch(
 onMounted(async () => {
   try {
     await loadContext()
-    await loadData()
+    await Promise.all([loadData(), loadLeaveCandidates()])
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.load_failed'))
     loading.value = false
@@ -879,7 +955,55 @@ onMounted(async () => {
           <label><span class="form-label">{{ t('payroll_absence.leave.year') }}</span><input v-model.number="leaveYear" data-test="leave-year" :min="minimumFormYear" :max="maximumFormYear" type="number" :class="[fieldClass, 'w-32']"></label>
         </div>
       </section>
-      <div v-if="canWrite" class="grid gap-4 xl:grid-cols-2">
+      <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6" data-test="automatic-leave-entitlements">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="font-semibold text-neutral-900">{{ t('payroll_absence.leave.automatic_title') }}</h2>
+            <p class="mt-1 text-sm text-neutral-500">{{ t('payroll_absence.leave.automatic_hint', { through: leaveThrough }) }}</p>
+          </div>
+          <div v-if="canWrite" class="flex flex-wrap gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="leaveCandidateLoading" @click="selectAllReadyCandidates">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t('payroll_absence.leave.select_ready') }}
+            </button>
+            <button type="button" :class="btnFilled('primary')" :disabled="saving || selectedReadyCandidates.length === 0" @click="createAutomaticEntitlements">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+              {{ t('payroll_absence.leave.calculate_selected', { count: selectedReadyCandidates.length }) }}
+            </button>
+          </div>
+        </div>
+        <p v-if="leaveCandidateError" class="mt-3 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700" role="alert">{{ leaveCandidateError }}</p>
+        <p v-if="leaveCandidateLoading" class="mt-4 text-sm text-neutral-500">{{ t('common.loading') }}</p>
+        <div v-else class="mt-4 divide-y divide-neutral-200 rounded-lg border border-neutral-200">
+          <label v-for="candidate in leaveCandidates" :key="candidate.employment_id" class="flex items-start gap-3 p-3" :class="candidate.ready ? 'cursor-pointer' : 'bg-neutral-50'">
+            <input v-if="canWrite" v-model="selectedLeaveCandidates" type="checkbox" :value="candidate.employment_id" :disabled="!candidate.ready" class="mt-1 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
+            <span class="min-w-0 flex-1">
+              <span class="block font-medium text-neutral-900">{{ candidate.employee_name }} · {{ candidate.employment_code }}</span>
+              <span v-if="candidate.ready" class="mt-1 block text-xs text-neutral-500">
+                {{ t('payroll_absence.leave.automatic_summary', {
+                  hours: minutes(candidate.weekly_minutes ?? 0),
+                  weeks: candidate.entitlement_weeks,
+                  worked: minutes(candidate.worked_equivalent_minutes),
+                }) }}
+              </span>
+              <span v-else class="mt-1 block text-xs text-warning-700">
+                {{ candidate.blockers.map(blocker => t(`payroll_absence.leave.blockers.${blocker}`)).join(' · ') }}
+              </span>
+            </span>
+            <span class="rounded-full px-2 py-1 text-xs font-medium" :class="candidate.ready ? 'bg-success-50 text-success-700' : 'bg-warning-50 text-warning-700'">
+              {{ t(candidate.ready ? 'payroll_absence.leave.ready' : 'payroll_absence.leave.needs_attention') }}
+            </span>
+          </label>
+          <p v-if="leaveCandidates.length === 0" class="p-6 text-center text-sm text-neutral-500">{{ t('payroll_absence.leave.automatic_empty') }}</p>
+        </div>
+        <PaginationBar class="mt-4" :page="leaveCandidatePage" :per-page="leaveCandidatePageSize" :total="leaveCandidateTotal" @update:page="goToLeaveCandidatePage" />
+      </section>
+      <details v-if="canWrite" class="group rounded-xl border border-neutral-200 bg-surface shadow-sm">
+        <summary class="flex cursor-pointer list-none items-center gap-2 p-4 sm:p-6">
+          <svg class="h-4 w-4 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6" /></svg>
+          <span><strong class="text-neutral-900">{{ t('payroll_absence.leave.manual_tools') }}</strong><span class="ml-2 text-sm text-neutral-500">{{ t('payroll_absence.leave.manual_tools_hint') }}</span></span>
+        </summary>
+        <div class="grid gap-4 border-t border-neutral-200 p-4 sm:p-6 xl:grid-cols-2">
         <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
           <h2 class="font-semibold text-neutral-900">{{ t('payroll_absence.leave.entitlement') }}</h2>
           <form data-test="leave-entitlement-form" class="mt-4 grid gap-3 sm:grid-cols-2" @submit.prevent="createEntitlement">
@@ -903,7 +1027,8 @@ onMounted(async () => {
             <p v-if="entryError" data-test="entry-error" role="alert" class="rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2">{{ entryError }}</p>
           </form>
         </section>
-      </div>
+        </div>
+      </details>
       <section>
         <h2 class="mb-3 text-lg font-semibold text-neutral-900">{{ t('payroll_absence.leave.ledger') }}</h2>
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">

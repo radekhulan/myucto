@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Payroll\Absence;
 final readonly class LeaveEntitlementResult
 {
     /**
-     * @param array<string,int|string> $trace
+     * @param array<string,mixed> $trace
      */
     public function __construct(
         public int $weeklyMinutes,

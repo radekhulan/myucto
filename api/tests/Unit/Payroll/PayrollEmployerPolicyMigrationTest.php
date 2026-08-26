@@ -45,4 +45,17 @@ final class PayrollEmployerPolicyMigrationTest extends TestCase
             $sql,
         );
     }
+
+    public function testLeavePolicyMigrationAddsEffectiveAllowanceAndImmutableAutomaticSources(): void
+    {
+        $sql = file_get_contents(
+            Bootstrap::rootDir()
+                . '/db/migrations/1557_payroll_leave_policy_automation.sql',
+        );
+        self::assertIsString($sql);
+        self::assertStringContainsString('leave_entitlement_weeks', $sql);
+        self::assertStringContainsString('leave_entitlement_weeks_override', $sql);
+        self::assertStringContainsString("ENUM('manual_review','supported')", $sql);
+        self::assertStringContainsString('calculation_mode', $sql);
+    }
 }

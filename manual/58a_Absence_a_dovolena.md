@@ -62,6 +62,27 @@ Schválení čerpání zapíše zápornou položku podle publikovaných směn. Z
 schváleného čerpání ji nemaže, ale vytvoří kladnou reverzi a označí absenci
 pro kontrolu případné opravy mzdy.
 
+### Hromadný výpočet nároku
+
+Firemní výměru nastav v **Mzdy → Nastavení → Politiky a připravenost**. Musí
+mít nejméně 4 týdny; běžnou hodnotou je 5 týdnů. Jen odlišný pracovní vztah
+má na své kartě výjimku. Pokud ji nevyplníš, automat převezme účinnou firemní
+výměru. Odkaz na zdroj je volitelná auditní poznámka a výpočet ho nevyžaduje.
+
+Na záložce **Dovolená** se pracovní vztahy načítají po stránkách, takže stejný
+postup funguje pro deset i stovky zaměstnanců. Aplikace pro každý vztah spojí
+účinné smluvní podmínky, sjednanou týdenní pracovní dobu, firemní politiku a
+schválené měsíce docházky. Vyber připravené vztahy na aktuální stránce a spusť
+výpočet; bez tohoto kroku se nic nezapisuje. Jedna mzdová účetní může výběr i
+zápis dokončit sama.
+
+Výpočet se bezpečně zastaví jen tehdy, když chybí skutečný právní údaj, změnila
+se během roku výměra nebo pracovní doba, jiná absence vyžaduje právní posouzení
+započitatelnosti, případně chybí schválený měsíc docházky. Již existující nárok
+automat nepřepíše. Při uložení znovu ověří otisk podkladů; mezitím změněná data
+vyžadují obnovení přehledu. Uložená revize uchová použitou politiku, smluvní
+podmínky, schválenou docházku i výpočetní stopu.
+
 Náhrada při DPN se počítá pouze z publikovaných směn v prvních 14 kalendářních
 dnech. Před schválením potvrď účast na nemocenském pojištění a vyloučení
 souběžné dávky. Pokud zaměstnanec první plánovanou směnu celou odpracoval,

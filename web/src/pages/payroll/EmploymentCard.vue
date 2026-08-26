@@ -329,6 +329,7 @@ async function startTermsEdit() {
     actual_start_on: terms.actual_start_on,
     fixed_term_end_on: terms.fixed_term_end_on,
     weekly_hours: terms.weekly_hours,
+    leave_entitlement_weeks_override: terms.leave_entitlement_weeks_override ?? null,
     workload_basis_points: terms.workload_basis_points,
     work_place: terms.work_place,
     regular_workplace: terms.regular_workplace,
@@ -760,6 +761,11 @@ const actions = computed<ActionItem[]>(() => [
           <span v-if="officeOptions.length === 0" class="mt-1 block text-neutral-500">{{ t('payroll.people.office_empty') }}</span>
         </label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="termsForm.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+        <label class="text-xs text-neutral-600">
+          {{ t('payroll.people.leave_entitlement_weeks_override') }}
+          <input v-model.number="termsForm.leave_entitlement_weeks_override" type="number" min="4" max="12" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+          <span class="mt-1 block text-neutral-500">{{ t('payroll.people.leave_entitlement_weeks_override_hint') }}</span>
+        </label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.workload_bps') }}<input v-model.number="termsForm.workload_basis_points" type="number" min="1" max="10000" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.contract_signed') }}<input v-model="termsForm.contract_signed_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.actual_start') }}<input v-model="termsForm.actual_start_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>

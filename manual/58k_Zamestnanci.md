@@ -55,6 +55,11 @@ se pak otevře k doplnění zbytku osobního profilu.
 
 Týdenní pracovní doba je součástí zakládacího formuláře. Zadejte skutečný
 úvazek hned při založení, aby první interval podmínek odpovídal realitě.
+Automatický nárok dovolené tuto sjednanou dobu převezme; není nutné ji znovu
+opisovat v agendě absencí. Firemní výměra dovolené platí všem vztahům. Pole
+**Výjimka z výměry dovolené** vyplňte jen tam, kde má konkrétní vztah jiný
+nárok; prázdná hodnota znamená převzetí účinné firemní politiky. Změna se
+ukládá jako nová účinná verze podmínek, takže starší nároky zůstanou dohledatelné.
 Mzdová účtárna se
 nabízí firmě s víc než jednou aktivní účtárnou; ostatním ji aplikace dosadí
 z výchozí účtárny zaměstnavatele. Zdravotní pojišťovna se předvyplní tou, kterou

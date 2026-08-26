@@ -1382,6 +1382,14 @@ final class Routes
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
             $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
             $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
+            $g->get(
+                '/time/leave-entitlement-candidates',
+                [PayrollAbsenceAction::class, 'leaveEntitlementCandidates'],
+            );
+            $g->post(
+                '/time/leave-entitlements/bulk',
+                [PayrollAbsenceAction::class, 'createAutomaticEntitlements'],
+            );
             $g->delete('/time/leave-entitlements/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteEntitlement']);
 
             // Retence osobních údajů, zadržení výmazu a výmaz jako NÁVRH ke schválení.

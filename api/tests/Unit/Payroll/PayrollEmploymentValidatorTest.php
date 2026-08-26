@@ -28,6 +28,18 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertTrue($result['terms']['is_primary']);
     }
 
+    public function testLeaveAllowanceOverrideIsOptionalAndMustRespectStatutoryMinimum(): void
+    {
+        $terms = $this->terms();
+        $terms['leave_entitlement_weeks_override'] = 5;
+        self::assertSame(5, $this->validator()->terms($terms)['leave_entitlement_weeks_override']);
+
+        $terms['leave_entitlement_weeks_override'] = 3;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nejméně 4 týdny');
+        $this->validator()->terms($terms);
+    }
+
     public function testAcceptsActivityFamilyMatchingAgreement(): void
     {
         foreach ([['dpc', 'A'], ['dpp', 'T']] as [$relationType, $activityCode]) {

@@ -76,6 +76,30 @@ export interface PayrollAbsencesPage {
   offset: number
 }
 
+export interface LeaveEntitlementCandidate {
+  employment_id: number
+  employee_name: string
+  employment_code: string
+  relation_type: string
+  period_from: string
+  period_to: string
+  weekly_minutes: number | null
+  entitlement_weeks: number | null
+  allowance_source: 'company_policy' | 'employment_override' | 'mixed_same_value' | null
+  continuous_calendar_days: number
+  worked_equivalent_minutes: number
+  ready: boolean
+  blockers: string[]
+  input_version: string
+}
+
+export interface LeaveEntitlementCandidatesPage {
+  items: LeaveEntitlementCandidate[]
+  total: number
+  limit: number
+  offset: number
+}
+
 export const payrollAbsenceApi = {
   context: () =>
     api.get<{ employments: PayrollAbsenceEmployment[] }>('/payroll/time/context')
@@ -142,4 +166,17 @@ export const payrollAbsenceApi = {
       .then(response => response.data.entry),
   createEntitlement: (payload: Record<string, unknown>) =>
     api.post('/payroll/time/leave-entitlements', payload).then(response => response.data.entitlement),
+  leaveEntitlementCandidates: (
+    year: number,
+    through: string,
+    page: { limit: number, offset: number },
+  ) => api.get<LeaveEntitlementCandidatesPage>('/payroll/time/leave-entitlement-candidates', {
+    params: { year, through, ...page },
+  }).then(response => response.data),
+  createAutomaticEntitlements: (payload: {
+    year: number
+    through: string
+    items: Array<{ employment_id: number, input_version: string }>
+  }) => api.post<{ entitlements: unknown[] }>('/payroll/time/leave-entitlements/bulk', payload)
+    .then(response => response.data.entitlements),
 }

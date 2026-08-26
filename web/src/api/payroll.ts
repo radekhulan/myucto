@@ -156,6 +156,7 @@ export interface PayrollEmploymentTerms {
   actual_start_on: string | null
   fixed_term_end_on: string | null
   weekly_hours: string | null
+  leave_entitlement_weeks_override?: number | null
   workload_basis_points: number
   work_place: string | null
   regular_workplace: string | null
@@ -2329,6 +2330,7 @@ export interface PayrollEmployerPolicy {
   balance_rounding_mode: PayrollBalanceRoundingMode
   home_office_policy: PayrollOptionalPolicyState
   travel_expense_policy: PayrollOptionalPolicyState
+  leave_entitlement_weeks: number
   four_eyes_required: boolean
   automatic_calculation_enabled: boolean
   automatic_posting_enabled: boolean

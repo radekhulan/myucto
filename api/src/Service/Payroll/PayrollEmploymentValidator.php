@@ -13,6 +13,7 @@ namespace MyInvoice\Service\Payroll;
  *   actual_start_on:?string,
  *   fixed_term_end_on:?string,
  *   weekly_hours:?string,
+ *   leave_entitlement_weeks_override:?int,
  *   workload_basis_points:int,
  *   work_place:?string,
  *   regular_workplace:?string,
@@ -302,6 +303,9 @@ final class PayrollEmploymentValidator
             'actual_start_on' => $this->optionalDate($input, 'actual_start_on'),
             'fixed_term_end_on' => $fixedEnd,
             'weekly_hours' => $hours === null ? null : (string) $hours,
+            'leave_entitlement_weeks_override' => $this->leaveWeeksOverride(
+                $input['leave_entitlement_weeks_override'] ?? null,
+            ),
             'workload_basis_points' => $workload,
             'work_place' => $workPlace,
             'regular_workplace' => $this->optionalText($input, 'regular_workplace', 255),
@@ -355,6 +359,20 @@ final class PayrollEmploymentValidator
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
         ];
+    }
+
+    private function leaveWeeksOverride(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_int($value) || $value < 4 || $value > 12) {
+            throw new \InvalidArgumentException(
+                'Výjimka výměry dovolené musí mít nejméně 4 týdny a nejvýše 12 týdnů.',
+            );
+        }
+
+        return $value;
     }
 
     private function assertRelationActivityFamily(

@@ -12,6 +12,8 @@ const m = vi.hoisted(() => ({
   createAverage: vi.fn(),
   createEntitlement: vi.fn(),
   createLeaveEntry: vi.fn(),
+  leaveEntitlementCandidates: vi.fn(),
+  createAutomaticEntitlements: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -34,6 +36,8 @@ vi.mock('@/api/payrollAbsences', () => ({
     approveAverage: vi.fn(),
     createLeaveEntry: m.createLeaveEntry,
     createEntitlement: m.createEntitlement,
+    leaveEntitlementCandidates: m.leaveEntitlementCandidates,
+    createAutomaticEntitlements: m.createAutomaticEntitlements,
   },
 }))
 
@@ -138,6 +142,10 @@ describe('AbsenceManagement', () => {
     m.createAverage.mockResolvedValue({ id: 9 })
     m.createEntitlement.mockResolvedValue({ id: 10 })
     m.createLeaveEntry.mockResolvedValue({ id: 11 })
+    m.leaveEntitlementCandidates.mockResolvedValue({
+      items: [], total: 0, limit: 25, offset: 0,
+    })
+    m.createAutomaticEntitlements.mockResolvedValue([])
   })
 
   it('explains itself instead of pulsing forever when the company has no employee', async () => {
