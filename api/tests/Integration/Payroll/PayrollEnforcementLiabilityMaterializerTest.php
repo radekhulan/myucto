@@ -67,6 +67,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
     private PayrollEnforcementPaymentRepository $enforcementPayments;
     private PayrollEnforcementLiabilityMaterializer $materializer;
     private PayrollInsolvencyLiabilityMaterializer $insolvencyMaterializer;
+    private PayrollInstitutionAccountRepository $institutions;
     private PayrollPaymentBatchBuilder $batches;
     private PayrollPaymentReconciliationService $reconciliation;
     private SecretEncryption $encryption;
@@ -126,6 +127,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
                 new ActivityLogger($connection),
             ),
         );
+        $this->institutions = $institutions;
         $institutions->create($this->supplierId, [
             'institution_type' => 'other_recipient',
             'institution_code' => 'EXEK1',
@@ -385,6 +387,38 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
 
         $this->expectException(\DomainException::class);
         $this->expectExceptionMessage('jen ke standardnímu schválenému oddlužení');
+        $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            null,
+        );
+    }
+
+    public function testApprovedInsolvencyRejectsAccountOutsideReportedMonth(): void
+    {
+        $account = $this->institutions->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'EXPIRED',
+            'institution_name' => 'Syntetický bývalý insolvenční správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => '0558',
+            'valid_from' => '2026-01-01',
+            'valid_to' => '2026-05-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:expired-insolvency-recipient',
+            'verified_on' => '2026-05-31',
+        ], $this->actorId);
+        $payload = $this->approvedInsolvencyPayload();
+        $payload['insolvency_institution_account_id'] = (int) $account['id'];
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nebyl v měsíci účinný');
         $this->enforcement->saveMonthEvidence(
             $this->supplierId,
             $this->employeeId,

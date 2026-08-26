@@ -107,6 +107,19 @@ final readonly class PayrollInsolvencyPaymentInstructionService
                 . 'ověřený účet příjemce.',
             );
         }
+        $periodEnd = (new \DateTimeImmutable($periodStart))
+            ->modify('last day of this month')
+            ->format('Y-m-d');
+        $validFrom = (string) ($account['valid_from'] ?? '');
+        $validTo = $account['valid_to'] ?? null;
+        if ($validFrom === '' || $validFrom > $periodEnd
+            || ($validTo !== null
+                && (!is_string($validTo) || $validTo < $periodStart))
+        ) {
+            throw new \DomainException(
+                'Vybraný účet příjemce oddlužení nebyl v měsíci účinný.',
+            );
+        }
         $accountHash = (string) ($account['account_hash'] ?? '');
         if (preg_match('/^[0-9a-f]{64}$/D', $accountHash) !== 1
             || $accountHash === str_repeat('0', 64)
