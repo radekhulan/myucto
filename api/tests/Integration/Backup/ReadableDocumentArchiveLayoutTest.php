@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Backup\ReadableDocumentArchiveLayout;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Service\Document\JournalAttachmentStorage;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -46,12 +47,15 @@ final class ReadableDocumentArchiveLayoutTest extends TestCase
         );
         $stmt->execute(['Čitelný ZIP s.r.o.', $countryId, 'readable-zip@example.com', $currencyId, $vatRateId]);
         $this->supplierId = (int) $pdo->lastInsertId();
+        $this->removeDir(DocumentStorage::baseDir($this->supplierId));
+        $this->removeDir(JournalAttachmentStorage::baseDir($this->supplierId));
     }
 
     protected function tearDown(): void
     {
         if ($this->supplierId > 0) {
             $this->removeDir(DocumentStorage::baseDir($this->supplierId));
+            $this->removeDir(JournalAttachmentStorage::baseDir($this->supplierId));
         }
         if (isset($this->db) && $this->inTransaction) {
             $pdo = $this->db->pdo();
