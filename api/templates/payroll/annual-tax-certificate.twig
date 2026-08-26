@@ -227,10 +227,20 @@
                 Podepsané kalendářní měsíce:
                 {{ tax_declaration.signed_months_label }}.
             {% endif %}
+            <br>
+            <span class="label">Daňová rezidence poplatníka</span>
+            {% if tax_residence.is_czech_resident %}
+                Daňový rezident ČR (CZ)
+            {% else %}
+                Daňový nerezident ČR ({{ tax_residence.country_code }})
+            {% endif %}
         {% else %}
             <span class="label">Daňová rezidence poplatníka</span>
-            Daňový rezident ČR
-            ({{ tax_residence.country_code }})
+            {% if tax_residence.is_czech_resident %}
+                Daňový rezident ČR (CZ)
+            {% else %}
+                Daňový nerezident EU/EHP ({{ tax_residence.country_code }})
+            {% endif %}
         {% endif %}
     </div>
 
@@ -374,7 +384,18 @@
                 <td>
                     Roční zúčtování záloh a daňového zvýhodnění
                     {% if annual_settlement.performed %}
-                        bylo provedeno s výsledkem uvedeným níže
+                        bylo provedeno s tímto výsledkem
+                        <table class="subtable">
+                            <tr><td>Přeplatek na dani z ročního zúčtování záloh</td><td class="amount">{{ annual_settlement.result.tax_overpayment_czk|whole_czk }}</td></tr>
+                            <tr><td>Doplatek ze zúčtování</td><td class="amount">{{ annual_settlement.result.settlement_supplement_czk|whole_czk }}</td></tr>
+                            <tr><td>Z toho přeplatek na dani po slevě</td><td class="amount">{{ annual_settlement.result.tax_overpayment_after_credit_czk|whole_czk }}</td></tr>
+                            <tr><td>Doplatek (+) / přeplacená částka (−) na daňovém bonusu</td><td class="amount">{{ annual_settlement.result.tax_bonus_difference_czk|whole_czk }}</td></tr>
+                            <tr><td>Penzijní připojištění se státním příspěvkem</td><td class="amount">{{ annual_settlement.result.taxpayer_product_deductions_czk.pension_supplementary|whole_czk }}</td></tr>
+                            <tr><td>Doplňkové penzijní spoření</td><td class="amount">{{ annual_settlement.result.taxpayer_product_deductions_czk.supplementary_pension|whole_czk }}</td></tr>
+                            <tr><td>Penzijní pojištění u instituce penzijního pojištění</td><td class="amount">{{ annual_settlement.result.taxpayer_product_deductions_czk.pension_insurance|whole_czk }}</td></tr>
+                            <tr><td>Soukromé životní pojištění</td><td class="amount">{{ annual_settlement.result.taxpayer_product_deductions_czk.private_life_insurance|whole_czk }}</td></tr>
+                            <tr><td>Dlouhodobý investiční produkt</td><td class="amount">{{ annual_settlement.result.taxpayer_product_deductions_czk.long_term_investment_product|whole_czk }}</td></tr>
+                        </table>
                     {% else %}
                         <strong>nebylo provedeno</strong>
                     {% endif %}

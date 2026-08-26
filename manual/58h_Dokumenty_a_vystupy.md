@@ -53,21 +53,38 @@ a zobrazí konkrétní důvod.
 
 Daňová potvrzení jsou dva samostatné formuláře: `25 5460, MFin 5460 – vzor
 č. 33` pro zálohovou daň a `25 5460/A, MFin 5460/A – vzor č. 12` pro příjmy
-zdaněné srážkou. Automaticky se vytvářejí pro rok 2026 a českého
-daňového rezidenta v podporovaném běžném režimu. Zálohové potvrzení zmrazí
+zdaněné srážkou. Automaticky se vytvářejí pro rok 2026. Zálohové potvrzení zmrazí
 stav Prohlášení poplatníka i měsíce, ve kterých bylo podepsané; srážkové
 potvrzení uvádí přesné měsíce příjmů. Pro přesná pole tiskopisu musí mít
 historická identita zaměstnance vedle celého zobrazovaného jména vyplněné
 také samostatné jméno a příjmení; systém je z celého jména neodhaduje.
+
+Zálohové potvrzení podporuje také doloženého daňového nerezidenta. Nemá-li
+přidělené české rodné číslo, uvede se datum narození. Řádek 14 se naplní
+součtem povinného sociálního a zdravotního pojistného zaměstnance výhradně ze
+schválených měsíčních výsledků. Srážkové potvrzení 25 5460/A lze podle
+oficiálního tiskopisu vystavit českému rezidentovi nebo nerezidentovi EU/EHP;
+jinou rezidenci aplikace odmítne.
+
+Řádky 11 a 12 zálohového potvrzení přebírají doložené měsíční nároky na děti,
+invaliditu I./II. stupně, invaliditu III. stupně a průkaz ZTP/P. Jméno a rodné
+číslo dítěte, případně datum narození dítěte bez českého rodného čísla, se při
+vydání uzamknou do šifrované roční revize. Pozdější úprava karty proto již
+vydané PDF nezmění. Pokud bylo v aplikaci provedeno a schváleno roční
+zúčtování, řádek 13 zobrazí jeho uložený přeplatek, doplatek ze zúčtování a
+rozdíl na daňovém bonusu. Přeplatek před zvýhodněním na děti, přeplatek po
+zvýhodnění i výsledný doplatek jsou na tiskopisu oddělené. Aplikace neprovádí
+nový daňový výpočet; ověří vzájemné součty zmrazeného výsledku a pouze je
+převede do odpovídajících polí formuláře.
 
 Řádek skutečně vyplacených příjmů nevychází z plánovaného výplatního dne.
 Aplikace jej povolí jen tehdy, když neměnná platební evidence dokládá úplnou
 výplatu všech zahrnutých čistých mezd nejpozději do 31. ledna následujícího
 roku. Chybějící, částečná, pozdní nebo zvrácená úhrada vytvoření zablokuje.
 Stejně bezpečně se odmítnou situace, pro které snapshot nemá všechna
-povinná pole formuláře, například dítě, invalidita, nerezident, podporovaný
-produkt spoření, nepeněžní příjem, doplatek za minulý rok nebo provedené roční
-zúčtování. Údaj se nikdy tiše nedopočítá z dnešní karty zaměstnance.
+povinná pole formuláře, například nedoložený nárok, nerezident bez částky
+povinného pojistného, podporovaný produkt spoření bez přesného mapování,
+nepeněžní příjem nebo doplatek za minulý rok. Údaj se nikdy tiše nedopočítá.
 
 Roční dokument má vlastní neměnnou revizi a není uměle připojený k prosincové
 mzdě. Osobní údaje jeho zdrojového snapshotu jsou kontextově šifrované;

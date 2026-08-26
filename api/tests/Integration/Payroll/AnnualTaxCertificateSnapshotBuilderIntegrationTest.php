@@ -7,6 +7,12 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementBlocker;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementOutcome;
+use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementResult;
+use MyInvoice\Service\Payroll\Document\AnnualSettlementSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificatePdfRenderer;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateService;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateSnapshotBuilder;
@@ -328,11 +334,225 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
         }
     }
 
+    public function testBuildsDocumentedChildrenDisabilityAndAnnualSettlement(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $settlementBuilder = $container->get(AnnualSettlementSnapshotBuilder::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+                'common-variants',
+            );
+            $result = AnnualSettlementResult::performed(
+                2026,
+                AnnualSettlementOutcome::Overpayment,
+                10_000_000,
+                1_500_000,
+                500_000,
+                500_000,
+                220_000,
+                200_000,
+                20_000,
+                800_000,
+                450_000,
+                20_000,
+                470_000,
+                470_000,
+                true,
+                [
+                    'completed_months' => 1,
+                    'advance_base_minor_units' => 10_000_000,
+                    'advance_tax_minor_units' => 1_250_000,
+                    'monthly_tax_bonus_minor_units' => 0,
+                    'total_advance_tax_minor_units' => 1_250_000,
+                    'payout_threshold_minor_units' => 5_000,
+                ],
+            );
+            $settlementBuilder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                $result,
+                '2027-03-15',
+                [],
+                [],
+                null,
+            );
+
+            $prepared = $builder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+                null,
+            );
+
+            self::assertSame('Dítě Syntetické', $prepared['document']->childTaxBenefits[0]['name']);
+            self::assertSame('1', $prepared['document']->childTaxBenefits[0]['first_child_period']);
+            self::assertSame([
+                ['period' => '1', 'degree' => 'III. stupeň'],
+                ['period' => '1', 'degree' => 'průkaz ZTP/P'],
+            ], $prepared['document']->disabilityTaxCredits);
+            self::assertTrue($prepared['document']->annualSettlement['performed']);
+            $settlement = $prepared['document']->annualSettlement['result'];
+            self::assertSame(250_000, $settlement['tax_overpayment_minor_units']);
+            self::assertSame(470_000, $settlement['settlement_supplement_minor_units']);
+            self::assertSame(450_000, $settlement['tax_overpayment_after_credit_minor_units']);
+            self::assertSame(20_000, $settlement['tax_bonus_difference_minor_units']);
+        } finally {
+            $pdo->rollBack();
+            $connection->close();
+        }
+    }
+
+    public function testBuildsNonresidentAdvanceCertificateFromFrozenInsurance(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+                'nonresident',
+            );
+
+            $prepared = $builder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+                null,
+            );
+
+            self::assertSame('non-resident', $prepared['document']->taxResidenceStatus);
+            self::assertSame('SK', $prepared['document']->taxResidenceCountryCode);
+            self::assertSame('Datum narození', $prepared['document']->personalIdentifierLabel);
+            self::assertSame('1. 1. 1990', $prepared['document']->personalIdentifierValue);
+            self::assertSame(1_130_000, $prepared['document']->nonresidentInsuranceMinorUnits);
+        } finally {
+            $pdo->rollBack();
+            $connection->close();
+        }
+    }
+
+    public function testRefusedAnnualSettlementLeavesRowThirteenEmpty(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $annualRevisions = $container->get(PayrollAnnualDocumentRepository::class);
+        $encryption = $container->get(SecretEncryption::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+            );
+            $result = AnnualSettlementResult::refused(
+                2026,
+                [AnnualSettlementBlocker::NotRequested],
+            );
+            $snapshotJson = CanonicalJson::encode([
+                'schema_version' => AnnualSettlementSnapshotBuilder::SCHEMA_VERSION,
+                'tax_year' => 2026,
+                'result' => $result->jsonSerialize(),
+            ]);
+            $manifestJson = CanonicalJson::encode([
+                'schema_version' => 'synthetic-refused-settlement.v1',
+                'result_hash' => hash('sha256', $snapshotJson),
+            ]);
+            $manifestHash = hash('sha256', $manifestJson);
+            $snapshotHash = $sensitive->keyedFingerprint(
+                $snapshotJson,
+                AnnualSettlementSnapshotBuilder::SNAPSHOT_FINGERPRINT_DOMAIN,
+                $supplierId,
+            );
+            $refused = $annualRevisions->insertApproved([
+                'supplier_id' => $supplierId,
+                'employee_id' => $employeeId,
+                'tax_year' => 2026,
+                'purpose' => AnnualSettlementSnapshotBuilder::PURPOSE,
+                'revision_no' => 1,
+                'previous_revision_id' => null,
+                'snapshot_ciphertext' => $encryption->encryptFor(
+                    $snapshotJson,
+                    implode(':', [
+                        'payroll-annual-document',
+                        (string) $supplierId,
+                        (string) $employeeId,
+                        '2026',
+                        AnnualSettlementSnapshotBuilder::PURPOSE,
+                        $manifestHash,
+                    ]),
+                ),
+                'snapshot_hash' => $snapshotHash,
+                'source_manifest_json' => $manifestJson,
+                'source_manifest_hash' => $manifestHash,
+                'approved_by' => null,
+            ], []);
+
+            $prepared = $builder->build(
+                $supplierId,
+                $employeeId,
+                2026,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+                null,
+            );
+
+            self::assertSame(
+                ['performed' => false, 'result' => null],
+                $prepared['document']->annualSettlement,
+            );
+            $manifest = json_decode(
+                $prepared['revision']['source_manifest_json'],
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+            self::assertSame(
+                [
+                    'performed' => false,
+                    'revision_id' => $refused['id'],
+                    'snapshot_hash' => $snapshotHash,
+                ],
+                $manifest['annual_settlement_source'],
+            );
+        } finally {
+            $pdo->rollBack();
+            $connection->close();
+        }
+    }
+
     /** @return array{int,int} */
     private function fixture(
         PDO $pdo,
         int $sourceSupplierId,
         PayrollSensitiveData $sensitive,
+        string $variant = 'base',
     ): array {
         $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $countryId = (int) $pdo->query(
@@ -373,6 +593,12 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
              VALUES (?, "Syntetická osoba", "employee", 1)',
         )->execute([$supplierId]);
         $employeeId = (int) $pdo->lastInsertId();
+        if ($variant === 'nonresident') {
+            $pdo->prepare(
+                'UPDATE payroll_employees SET birth_date = "1990-01-01"
+                  WHERE supplier_id = ? AND id = ?',
+            )->execute([$supplierId, $employeeId]);
+        }
         $pdo->prepare(
             'INSERT INTO payroll_person_identity_history
                 (supplier_id, employee_id, full_name, first_name, last_name,
@@ -386,32 +612,70 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
                 (supplier_id, employee_id, address_type, street_line, city,
                  postal_code, country_code, effective_from)
              VALUES (?, ?, "residence", "Modelová 2", "Brno", "602 00",
-                     "CZ", "2026-01-01")',
-        )->execute([$supplierId, $employeeId]);
-        $pdo->prepare(
-            'INSERT INTO payroll_person_identifiers
-                (supplier_id, employee_id, identifier_type, value_ciphertext,
-                 value_hash, value_masked)
-             VALUES (?, ?, "birth_number", "enc:v2:synthetic", ?, "••••0009")',
-        )->execute([$supplierId, $employeeId, random_bytes(32)]);
-        $identifierId = (int) $pdo->lastInsertId();
-        $sealed = $sensitive->seal(
-            '0001010009',
-            PayrollSensitiveField::PERSONAL_IDENTIFIER,
-            $supplierId,
-            $identifierId,
-        );
-        $pdo->prepare(
-            'UPDATE payroll_person_identifiers
-                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
-              WHERE supplier_id = ? AND id = ?',
+                      ?, "2026-01-01")',
         )->execute([
-            $sealed->ciphertext,
-            $sealed->lookupHash,
-            $sealed->masked,
             $supplierId,
-            $identifierId,
+            $employeeId,
+            $variant === 'nonresident' ? 'SK' : 'CZ',
         ]);
+        if ($variant !== 'nonresident') {
+            $pdo->prepare(
+                'INSERT INTO payroll_person_identifiers
+                    (supplier_id, employee_id, identifier_type, value_ciphertext,
+                     value_hash, value_masked)
+                 VALUES (?, ?, "birth_number", "enc:v2:synthetic", ?, "••••0009")',
+            )->execute([$supplierId, $employeeId, random_bytes(32)]);
+            $identifierId = (int) $pdo->lastInsertId();
+            $sealed = $sensitive->seal(
+                '0001010009',
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $supplierId,
+                $identifierId,
+            );
+            $pdo->prepare(
+                'UPDATE payroll_person_identifiers
+                    SET value_ciphertext = ?, value_hash = ?, value_masked = ?
+                  WHERE supplier_id = ? AND id = ?',
+            )->execute([
+                $sealed->ciphertext,
+                $sealed->lookupHash,
+                $sealed->masked,
+                $supplierId,
+                $identifierId,
+            ]);
+        }
+
+        $childClaims = [];
+        $creditClaims = [[
+            'credit_kind' => 'taxpayer',
+            'evidence_status' => 'verified',
+        ]];
+        if ($variant === 'common-variants') {
+            $pdo->prepare(
+                'INSERT INTO payroll_dependants
+                    (supplier_id, employee_id, relation, full_name, birth_date,
+                     ztp_p, student, existence_from)
+                 VALUES (?, ?, "child_own", "Dítě Syntetické", "2020-02-01",
+                         1, 0, "2020-02-01")',
+            )->execute([$supplierId, $employeeId]);
+            $dependantId = (int) $pdo->lastInsertId();
+            $creditClaims[] = [
+                'credit_kind' => 'disability-extended',
+                'evidence_status' => 'verified',
+            ];
+            $creditClaims[] = [
+                'credit_kind' => 'ztp-p',
+                'evidence_status' => 'verified',
+            ];
+            $childClaims[] = [
+                'child_reference' => 'dependant-' . $dependantId,
+                'child_order' => 1,
+                'ztp_p' => true,
+                'evidence_status' => 'verified',
+                'shared_household_confirmed' => true,
+                'other_claimant_excluded' => true,
+            ];
+        }
 
         $person = [
             'employee_id' => $employeeId,
@@ -431,6 +695,14 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
                     'withholding_tax_minor_units' => 300_000,
                     'tax_bonus_minor_units' => 0,
                 ],
+                'social_insurance' => [
+                    'employee_contribution_minor_units' =>
+                        $variant === 'nonresident' ? 710_000 : 0,
+                ],
+                'health_insurance' => [
+                    'employee_contribution_minor_units' =>
+                        $variant === 'nonresident' ? 420_000 : 0,
+                ],
             ],
             'payable_after_enforcement_minor' => 7_000_000,
         ];
@@ -446,14 +718,15 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
                             'effective_to' => '2026-12-31',
                         ],
                         'residence' => [
-                            'residence' => 'czech-resident',
-                            'country_code' => 'CZ',
+                            'residence' => $variant === 'nonresident'
+                                ? 'non-resident'
+                                : 'czech-resident',
+                            'country_code' => $variant === 'nonresident'
+                                ? 'SK'
+                                : 'CZ',
                         ],
-                        'credit_claims' => [[
-                            'credit_kind' => 'taxpayer',
-                            'evidence_status' => 'verified',
-                        ]],
-                        'child_claims' => [],
+                        'credit_claims' => $creditClaims,
+                        'child_claims' => $childClaims,
                     ],
                 ],
                 'employments' => [[

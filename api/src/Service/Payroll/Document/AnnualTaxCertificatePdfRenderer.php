@@ -14,7 +14,7 @@ use Twig\Loader\FilesystemLoader;
 
 class AnnualTaxCertificatePdfRenderer
 {
-    public const VERSION = 'mz-annual-tax-certificate-2026-v2';
+    public const VERSION = 'mz-annual-tax-certificate-2026-v3';
 
     private ?Environment $twig = null;
 
