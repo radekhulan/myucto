@@ -1,14 +1,14 @@
 # Retenční lhůty
 
-## Účel
+## 76.1 Účel
 
 Agenda retenčních lhůt určuje, jak dlouho se jednotlivé kategorie mzdových záznamů a dokumentů uchovávají a které položky se blíží konci stanovené doby.
 
-## Předpoklady a oprávnění
+## 76.2 Předpoklady a oprávnění
 
 Uživatel potřebuje `payroll.retention`. Firma musí mít schválená pravidla uchování zohledňující zákonné povinnosti, právní nároky, probíhající řízení a vlastní oprávněné potřeby.
 
-## Krokový postup
+## 76.3 Krokový postup
 
 1. Otevřete **Mzdy → Retenční lhůty** a projděte kategorie údajů.
 2. Ověřte délku lhůty, počátek jejího běhu a právní důvod.
@@ -16,28 +16,28 @@ Uživatel potřebuje `payroll.retention`. Firma musí mít schválená pravidla 
 4. Před rozhodnutím ověřte vazby na dokumenty, běhy, platby, účetnictví, podání a otevřená řízení.
 5. Samotný výmaz spouštějte jen v oddělené agendě a po schválení odpovědnou osobou.
 
-## Stavy
+## 76.4 Stavy
 
 Záznam může být v aktivní retenční době, blízko konce, po lhůtě nebo blokovaný právním důvodem. Uplynutí lhůty není automatickým výmazem a blokace má přednost před plánovaným odstraněním.
 
-## Kontroly a bezpečnost
+## 76.5 Kontroly a bezpečnost
 
 Retenci pravidelně revidujte a používejte kontrolu druhou osobou. Nezkracujte lhůty jen kvůli úspoře místa. Přehledy obsahují osobní údaje a musí mít omezený přístup. Export seznamu nemažte ani nesdílejte bez stejné ochrany jako původní data.
 
-## Časté chyby
+## 76.6 Časté chyby
 
 - Počítání lhůty od data vložení místo právně rozhodné události.
 - Ignorování probíhajícího sporu, kontroly nebo exekuce.
 - Domněnka, že stav „po lhůtě“ data automaticky odstranil.
 - Posouzení jen databázového záznamu bez dokumentů a exportů.
 
-## Návaznosti
+## 76.7 Návaznosti
 
 Fyzický proces popisuje [výmaz osobních údajů](77_Vymaz_osobnich_udaju.md). Uchovávané výstupy vznikají v [dokumentech](66_Dokumenty_a_vystupy.md) a [podáních](68_Podani_a_hlaseni.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 76.8 Podrobný pracovní postup a kontroly
 
 Mzdový modul drží nejcitlivější osobní údaje v aplikaci a nesmí je držet
 navždy ani je zahodit dřív, než smí. Přehled **Mzdy → Retenční lhůty** ukazuje,
@@ -61,7 +61,7 @@ U každé kategorie je vidět:
 - **Ověřeno** — den, ke kterému se citace porovnala s účinným zněním předpisu.
 - **Dotčené tabulky** — čeho přesně se lhůta drží.
 
-### Původ lhůty
+### 76.8.1 Původ lhůty
 
 Nejdůležitější sloupec není číslo, ale odkud se vzalo. Rozlišují se tři stavy
 a jejich počty stojí jako dlaždice nad tabulkou, takže rozdíl je vidět hned:
@@ -79,7 +79,7 @@ a jejich počty stojí jako dlaždice nad tabulkou, takže rozdíl je vidět hne
 Kategorie bez lhůty se k výmazu **nikdy** nenavrhne, dokud lhůtu nedodá firma
 vlastní politikou. Sloupec **Výmaz** to u každé kategorie říká přímo.
 
-### Co z lhůt plyne pro výmaz
+### 76.8.2 Co z lhůt plyne pro výmaz
 
 Spodní panel přepočítá lhůty na konkrétní osoby k zadanému dni: kolik jich lze
 navrhnout k výmazu a — hlavně — proč se ostatní nenavrhly. Rozlišuje běžící
@@ -93,7 +93,7 @@ zadržení. Nevratný úkon se podle samotného čísla odklepnout nedá.
 Lhůty účetních a daňových záznamů firmy jako celku (§ 31 a § 32 zákona
 o účetnictví) mají vlastní přehled na **Účetnictví → Retenční lhůty**.
 
-### Odchylka firmy od katalogové lhůty
+### 76.8.3 Odchylka firmy od katalogové lhůty
 
 Tlačítko **Odchylka firmy** na řádku kategorie otevře jeden formulář s jedním
 tlačítkem Uložit. Zadává se v něm:
@@ -112,7 +112,7 @@ se odmítne s vysvětlením, které řekne, odkud lhůta pochází. Odchylku jde
 kdykoli zrušit tlačítkem **Zrušit odchylku**; lhůta se tím vrátí na hodnotu
 z katalogu.
 
-### Zadržení výmazu (legal hold)
+### 76.8.4 Zadržení výmazu (legal hold)
 
 Zadržení drží data osoby i po uplynutí lhůty — kvůli daňové kontrole,
 odvolání, soudnímu sporu, exekuci nebo insolvenci (§ 32 zákona o účetnictví

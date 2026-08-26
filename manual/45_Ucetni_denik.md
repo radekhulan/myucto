@@ -54,7 +54,7 @@ a přijaté faktury, banku, pokladnu, majetek, odpisy i vypořádání.
 > V deníku pak filtr **Zdroj** + drill-down podle `source_id` zobrazí přesně zápis
 > k danému dokladu.
 
-### Idempotence — proč doklad nejde zaúčtovat dvakrát
+### 45.1.1 Idempotence — proč doklad nejde zaúčtovat dvakrát
 
 Dvojice `(typ zdroje, ID zdrojového dokladu)` je pro zápis **jedinečná** — v databázi
 ji hlídá unikátní klíč přímo nad tabulkou zápisů. Opětovné zaúčtování téhož dokladu
@@ -93,7 +93,7 @@ zápisu, při shodném datu podle pořadí vzniku) se sloupci:
 - **Zdroj** — typ a číslo zdrojového dokladu; odznak **Automaticky** se u
   automatického zápisu zobrazuje přímo v tomto sloupci, stejně jako ikona
   řetězu u zápisů, které mají protějšek (doklad ↔ jeho úhrada — viz
-  [Souvisí: doklad a jeho úhrada](#souvisi-doklad-a-jeho-uhrada)),
+  [Souvisí: doklad a jeho úhrada](#4522-souvisi-doklad-a-jeho-uhrada)),
 - **Částka** — bez filtru **Účet od / Účet do** celková částka zápisu (Σ MD, u
   vyváženého zápisu shodná se Σ Dal); s aktivním filtrem na účet naopak částka
   PŘIPADAJÍCÍ na filtrovaný rozsah účtů v daném zápisu, se značkou **MD**/**Dal**
@@ -106,7 +106,7 @@ Přes ikonu ozubeného kola (**ColumnPicker**) si zobrazené sloupce přizpůsob
 hustoty řádků (**DensityToggle**) zvolíš kompaktnější nebo prostornější tabulku. Nastavené
 kombinace filtrů lze uložit a znovu použít přes **Uložené filtry**.
 
-### Drill-down na zdrojový doklad
+### 45.2.1 Drill-down na zdrojový doklad
 
 Kliknutí na **Zdroj** otevře read-only postranní panel se souhrnem zdroje, aniž by
 uživatel ztratil rozevřený deník a filtry. Podle typu nabízí odkaz do plného detailu:
@@ -125,7 +125,7 @@ uživatel ztratil rozevřený deník a filtry. Podle typu nabízí odkaz do pln�
 U technických zdrojů bez samostatného detailu, například u uzavření knih nebo
 kurzového přecenění, zůstane zdroj textový.
 
-### Souvisí: doklad a jeho úhrada
+### 45.2.2 Souvisí: doklad a jeho úhrada
 
 Deník vede fakturu a její úhradu jako **dva samostatné zápisy** — předpis (311/6xx,
 resp. 5xx/321) a úhradu (221/311, resp. 321/221). Účetní je ale řeší jako jeden
@@ -153,11 +153,11 @@ Ikona řetězu ve sloupci **Zdroj** ukazuje, které zápisy protějšek mají, j
 řádek rozbalíš.
 
 Kromě takto **odvozených** vazeb panel ukazuje i **ruční vazby na doklad** (viz
-[Vazba na doklad](#vazba-na-doklad)) — mají vlastní barvu štítku, protože nevznikly
+[Vazba na doklad](#4564-vazba-na-doklad)) — mají vlastní barvu štítku, protože nevznikly
 z evidence plateb, ale zadal je uživatel. Vidíš je z obou stran: u ručního zápisu
 jako *Navázaný doklad*, u zaúčtování dokladu jako *Navázaný zápis*.
 
-### Filtry
+### 45.2.3 Filtry
 
 Nad tabulkou je filtrační lišta:
 
@@ -180,7 +180,7 @@ prokliknutím z jiného místa aplikace (detail dokladu, uzávěrka, sestavy), f
 předvyplní automaticky podle parametrů v URL — typicky se rovnou rozbalí konkrétní zápis
 a rozsah data se zúží přesně na den daného zápisu, aby ses v dlouhém deníku neztratil(a).
 
-### Export PDF / XLSX
+### 45.2.4 Export PDF / XLSX
 
 Tlačítka **Export PDF** a **Export XLSX** nad tabulkou stáhnou deník **přesně s aktuálně
 nastavenými filtry** (fulltext, číslo dokladu, období, rozsah dat, zdroj, původ,
@@ -195,7 +195,7 @@ na účet naopak jen částka připadající na filtrovaný rozsah účtů, ve s
 podle strany. PDF má **číslované strany**. Export je omezený na max. **5 000 zápisů** najednou
 — při větším rozsahu zúži filtr (typicky Datum od/do) a export zopakuj po částech.
 
-### Rozklik na detail zápisu
+### 45.2.5 Rozklik na detail zápisu
 
 Klikem na řádek se zápis rozbalí a zobrazí:
 
@@ -229,7 +229,7 @@ Zápis může být ve dvou stavech:
   N nezaúčtovaných konceptů — nejsou zahrnuty").
 
 Rozlišení najdeš v badge sloupce **Stav** i ve filtru **Stav**. Koncept se u
-přepisovatelných dokladů (viz idempotence v [§ 45.1](#idempotence-proc-doklad-nejde-zauctovat-dvakrat))
+přepisovatelných dokladů (viz idempotence v [§ 45.1](#4511-idempotence-proc-doklad-nejde-zauctovat-dvakrat))
 při opravě zdrojového dokladu jednoduše přepíše — storno dává smysl **jen u zaúčtovaného**
 zápisu (koncept se opraví/nahradí přímo, ne protizápisem).
 
@@ -238,7 +238,7 @@ zápisu (koncept se opraví/nahradí přímo, ne protizápisem).
 Tlačítkem **„Ruční zápis"** na hlavní stránce deníku (jen role s právem zápisu — účetní/
 administrátor) otevřeš formulář **Ruční účetní zápis** (`/accounting/journal/new`).
 
-### Hlavička
+### 45.4.1 Hlavička
 
 - **Datum zápisu** — povinné, datum účetního případu; musí spadat do **existujícího a
   otevřeného** účetního období, jinak zaúčtování selže s chybou o chybějícím/uzavřeném období,
@@ -248,7 +248,7 @@ administrátor) otevřeš formulář **Ruční účetní zápis** (`/accounting/
   zápisy (spravuje se v Nástrojích na záložce **Číselné řady**),
 - **Popis** — volitelný text zápisu (max. 255 znaků).
 
-### Řádky zápisu
+### 45.4.2 Řádky zápisu
 
 Tabulka řádků, kde ke každému přidáš:
 
@@ -267,7 +267,7 @@ Tlačítkem **„+ Přidat řádek"** přidáš další řádek, křížkem u ř
 zůstat aspoň jeden). Do nabídky účtů se dostanou jen **aktivní** účty (syntetika i
 analytika), neaktivní se v novém zápisu nenabízí.
 
-### Kontrola vyrovnanosti
+### 45.4.3 Kontrola vyrovnanosti
 
 Pod tabulkou řádků systém průběžně počítá součty **MD** a **Dal** a zobrazuje badge:
 
@@ -283,7 +283,7 @@ kontroly na frontendu tedy nic nezmůže, server nevyrovnaný zápis vždy odmí
 Po úspěšném uložení se zápis rovnou zaúčtuje (vznikne `posted_at`) a přesměruje tě zpět
 do seznamu deníku.
 
-### Nejčastější chybové hlášky při ukládání
+### 45.4.4 Nejčastější chybové hlášky při ukládání
 
 Kromě nevyrovnanosti může uložení ručního zápisu odmítnout i z dalších důvodů —
 všechny hlídá server bez ohledu na to, co propustí formulář:
@@ -297,7 +297,7 @@ všechny hlídá server bez ohledu na to, co propustí formulář:
 | Pro datum zápisu neexistuje založené účetní období | Pro zadané datum neexistuje účetní období |
 | Účetní období pro dané datum je uzavřené / uzavírá se | Do uzavřeného období nelze účtovat (§35 ZoÚ) |
 
-### Příklad: ruční zápis se dvěma řádky
+### 45.4.5 Příklad: ruční zápis se dvěma řádky
 
 Účetní potřebuje zaúčtovat zálohu na pracovní cestu vyplacenou zaměstnanci z hotovosti
 mimo běžný pokladní doklad. Založí ruční zápis takto:
@@ -315,7 +315,7 @@ mimo běžný pokladní doklad. Založí ruční zápis takto:
 Badge pod tabulkou ukáže **„Vyrovnáno"** (Σ MD = Σ Dal = 5 000 Kč), tlačítko
 **„Zaúčtovat"** se odemkne a po odeslání zápis rovnou vznikne jako **Zaúčtováno**.
 
-### Převod mezi účty (261 — Peníze na cestě)
+### 45.4.6 Převod mezi účty (261 — Peníze na cestě)
 
 Vedle tlačítka Zaúčtovat je i tlačítko **„Převod banka ↔ pokladna"**, které otevře
 samostatný dialog **Převod mezi účty (261)**. Použiješ ho pro přesun peněz mezi dvěma
@@ -332,14 +332,14 @@ sdílející číslo dokladu z vlastní číselné řady **PP** (přebírá se z
 
 Po odeslání se obě nohy zaúčtují najednou a dialog se zavře s potvrzením čísel dokladů.
 
-### Uložit a nový
+### 45.4.7 Uložit a nový
 
 Tlačítko **„Uložit a nový"** vedle **„Zaúčtovat"** uloží rozepsaný zápis stejně jako
 běžné odeslání, ale místo přesměrování do deníku **vyčistí řádky** pro další zápis
 (datum a popis zůstávají). Hodí se, když účetní zapisuje víc podobných interních
 dokladů za sebou (např. zálohy víc zaměstnancům ve stejný den).
 
-### Šablony ručních zápisů a mzdový můstek
+### 45.4.8 Šablony ručních zápisů a mzdový můstek
 
 Ruční zápisy, které se opakují (mzdy z externí mzdovky, splátky leasingu), nemusíš
 každý měsíc vyklikávat znovu — ulož si je jako **šablonu**.
@@ -446,10 +446,10 @@ co přeceňovat). **Ruční zápis** cizí měnu na řádku zadat neumožňuje �
 částky jsou vždy v CZK.
 
 V rozbaleném detailu zápisu se cizoměnová částka zobrazí jako malý řádek pod částkou
-v CZK (viz [§ 45.2](#rozklik-na-detail-zapisu)), takže u faktury v eurech vidíš
+v CZK (viz [§ 45.2](#4525-rozklik-na-detail-zapisu)), takže u faktury v eurech vidíš
 zaokrouhlenou korunovou částku i skutečnou částku v EUR, ze které vznikla.
 
-### Kurzové přecenění a kurzové rozdíly
+### 45.5.1 Kurzové přecenění a kurzové rozdíly
 
 K rozvahovému dni (v rámci [uzávěrky](87_Uzaverka.md)) systém přecení otevřené
 cizoměnové zůstatky aktuálním kurzem a rozdíl proti účetně vedené hodnotě zaúčtuje jako
@@ -485,7 +485,7 @@ s výchozí hodnotou 663/563, pokud si ji ve firemní osnově nepřenastavíš).
 
 Po rozbalení detailu zápisu jsou pod řádky MD/Dal dvě další sekce.
 
-### Inline editace popisu
+### 45.6.1 Inline editace popisu
 
 U zápisů se zdrojem **Ruční**, **Uzavření knih** nebo **Otevření knih** (jediné typy,
 u kterých popis nespravuje jiný doklad) se u popisu zobrazí ikona **tužky** — kliknutím
@@ -510,7 +510,7 @@ si zároveň sama načte aktuální stav zápisu (aktuální popis i nové čís
 předvyplní jím editační pole, takže rozepsaný text se **neztratí** — porovnáš si ho
 s tím, co mezitím uložil kolega, a uložení jednoduše zopakuješ.
 
-### Přílohy zápisu
+### 45.6.2 Přílohy zápisu
 
 Sekce **Přílohy** umožňuje k ruční nebo jinak vzniklé položce deníku připojit skutečný
 doklad (sken, PDF, fotku) — nezávisle na tom, jestli má zdrojový doklad (faktura) své
@@ -546,7 +546,7 @@ prohlížeči) — bezpečnostní opatření proti spuštění škodlivého obsa
 > Role **jen pro čtení** vidí přílohy i popis zápisu, ale nemůže nic nahrávat, mazat
 > ani editovat — tlačítka pro zápis se jí nezobrazí.
 
-### Poznámky k zápisu
+### 45.6.3 Poznámky k zápisu
 
 Poznámky jsou oddělené od účetního popisu. Jeden zápis jich může mít více a
 každá nese autora a čas vytvoření či poslední úpravy. Text může mít až 5 000
@@ -560,7 +560,7 @@ nikoli přepis historie účetního zápisu.
 > účetní doklad ani přílohu, která tvrzení prokazuje. Role jen pro čtení poznámky
 > vidí, ale nemůže je měnit.
 
-### Vazba na doklad
+### 45.6.4 Vazba na doklad
 
 Interní zápis často *souvisí* s konkrétním dokladem, aniž by byl jeho zaúčtováním —
 dohadná položka k faktuře, kurzový rozdíl, přeúčtování, oprava. V rozbaleném detailu
@@ -587,7 +587,7 @@ máš jak uklidit.
 ## 45.7 Historie zápisu
 
 Každý přepis existujícího zápisu (idempotentní re-post popsaný v
-[§ 45.1](#idempotence-proc-doklad-nejde-zauctovat-dvakrat)) i editace popisu
+[§ 45.1](#4511-idempotence-proc-doklad-nejde-zauctovat-dvakrat)) i editace popisu
 zanechává v databázi **neměnnou historickou verzi** předchozího stavu hlavičky i řádků
 zápisu — jde o auditní mechanismus na úrovni databázového serveru (tzv. systémové
 verzování), který běží automaticky na pozadí ke každé změně a nejde ho vypnout ani
@@ -649,7 +649,7 @@ mechanismy podle toho, zda je období, kam zápis patří, ještě **otevřené*
   (zruší příznak „Zaúčtováno" na faktuře), pokud k dokladu neexistuje jiný aktivní
   zaúčtovaný zápis — doklad tak můžeš opravit a zaúčtovat znovu.
 
-### Automatické storno při smazání nebo interním stornu dokladu
+### 45.8.1 Automatické storno při smazání nebo interním stornu dokladu
 
 Storno popsané výše spouštíš ručně tlačítkem v deníku. Když ale **smažeš** nebo
 **interně stornuješ** zaúčtovanou vydanou či přijatou fakturu přímo v [Fakturách](14_Faktury.md)
@@ -773,7 +773,7 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
 
 ## 45.11 Omezení a tipy
 
-### Kdo smí co
+### 45.11.1 Kdo smí co
 
 | Akce | Jen pro čtení | Účetní / administrátor |
 |---|:---:|:---:|

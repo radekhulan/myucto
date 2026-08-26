@@ -1,14 +1,14 @@
 # Zaměstnanci
 
-## Účel
+## 69.1 Účel
 
 Agenda zaměstnanců spojuje osobní kartu s jedním nebo více pracovními vztahy. Oddělení osoby od vztahu zachovává historii a umožňuje správně zpracovat souběhy.
 
-## Předpoklady a oprávnění
+## 69.2 Předpoklady a oprávnění
 
 Uživatel potřebuje právo číst nebo měnit osoby a pracovní vztahy. Připravte pouze údaje potřebné pro mzdu, daň, pojištění, platbu, dokumenty a podání a ověřte je z oprávněného podkladu.
 
-## Krokový postup
+## 69.3 Krokový postup
 
 1. Otevřete **Mzdy → Zaměstnanci** a založte osobu nebo otevřete existující.
 2. Vyplňte identifikační, adresní, daňové, pojistné a platební údaje.
@@ -17,28 +17,28 @@ Uživatel potřebuje právo číst nebo měnit osoby a pracovní vztahy. Připra
 5. Změny podmínek zapisujte s účinností; nepřepisujte údaje použité v uzavřených obdobích.
 6. Při skončení uzavřete poslední období, připravte dokumenty a proveďte podporovaná hlášení; nepodporované registrace dokončete ručně.
 
-## Stavy
+## 69.4 Stavy
 
 Osoba může existovat bez aktivního vztahu. Vztah může být budoucí, aktivní nebo skončený. Neúplná data lze evidovat, ale výpočet, dokument či podání může vyžadovat jejich doplnění.
 
-## Kontroly a bezpečnost
+## 69.5 Kontroly a bezpečnost
 
 Ověřte identifikátory, pojišťovnu, účet, data vztahu a souběhy. Osobní a zdravotní údaje zpřístupněte jen podle role. Odkaz na dokument je volitelná stopa k bezpečně uloženému podkladu; nenahrazuje zákonný identifikátor a nesmí obsahovat tajné údaje.
 
-## Časté chyby
+## 69.6 Časté chyby
 
 - Duplicitní osobní karta místo dalšího vztahu.
 - Přepsání historické podmínky bez data účinnosti.
 - Nesprávné přiřazení vstupu k jednomu ze souběžných vztahů.
 - Skončení vztahu bez poslední mzdy, dokumentů nebo ruční oznamovací povinnosti.
 
-## Návaznosti
+## 69.7 Návaznosti
 
 Zaměstnavatele a předkontace nastavuje [kapitola 58o](73_Nastaveni_mezd.md), pravidelné odměňování [58p](74_Mzdove_slozky_a_vstupy.md), běhy [58e](63_Mzdove_behy.md) a životní události vůči institucím [58j](68_Podani_a_hlaseni.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 69.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Zaměstnanci** se zobrazují stejné karty jako ve spodní části Mzdové
 rekapitulace. Změna jména nebo aktivního stavu v původní agendě se proto týká
@@ -139,7 +139,7 @@ ověření je zablokované: nejdříve kartu ulož, aby se nikdy neověřila př
 uložená hodnota pod nově zobrazenými údaji. Každá pozdější změna čísla účtu,
 účinnosti nebo aktivního stavu ověření automaticky zneplatní.
 
-### Vyživované osoby a daňové zvýhodnění na dítě
+### 69.8.1 Vyživované osoby a daňové zvýhodnění na dítě
 
 Ve sbalené části **Úplná osobní evidence a historie** je pod osobním profilem
 sekce **Vyživované osoby a daňové zvýhodnění**. Eviduje děti, na které se
@@ -179,7 +179,7 @@ a vznikne nová účinná verze od měsíce následujícího, takže historický
 zůstane nedotčený. Ukončení nároku mimo zmrazené období se provede běžnou
 úpravou data „Nárok do".
 
-### Zákonná evidence osoby
+### 69.8.2 Zákonná evidence osoby
 
 Pod běžnými údaji zaměstnance je sekce **Zákonná evidence osoby**. Vede právní
 skutečnosti, ze kterých vychází zákonný výpočet:
@@ -245,7 +245,7 @@ Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné
 pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
 evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
 
-## Pracovní vztah a předkontace
+## 69.9 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité
 pro výpočet, podání i účetnictví:
@@ -266,7 +266,7 @@ ostrým použitím úplných mezd zkontroluj, zda právní titul odpovídá skut
 zejména starší karta „jednatel-společník“ sama nerozliší smlouvu o výkonu funkce
 od ostatní závislé činnosti.
 
-## Životní cyklus vztahu
+## 69.10 Životní cyklus vztahu
 
 Nový vztah začíná jako **Plánovaný**. Stav se nemění volným přepsáním pole, ale
 jen nabízenými akcemi:
@@ -281,7 +281,7 @@ kroku nebo návrat ze skončeného vztahu aplikace odmítne.
 Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
 dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
 
-## Historie smluvních podmínek a souběhy
+## 69.11 Historie smluvních podmínek a souběhy
 
 Tlačítko **Nová verze podmínek** založí další účinný interval. Předchozí verzi
 uzavře dnem před novou účinností; starší mzdové období proto pozdější změna
@@ -358,7 +358,7 @@ a odměnu za výkon funkce. V aktivním workflow může být právě jeden vztah
 jako primární. Každý souběh má vlastní kód, stav, historii a budoucí registrační
 identitu.
 
-### OIČ / IK MPSV a ID PPV pro JMHZ
+### 69.11.1 OIČ / IK MPSV a ID PPV pro JMHZ
 
 Po přidělení identifikátorů ČSSZ otevřete na kartě konkrétního pracovního vztahu
 sbalenou sekci **Identifikátory JMHZ od ČSSZ**. Sekce se načte až po otevření,
@@ -387,7 +387,7 @@ vztahu, a proto vyžaduje současně oprávnění spravovat zaměstnance i praco
 vztahy. Nejde o pravidlo čtyř očí: uživatel s oběma oprávněními provede celý
 krok sám.
 
-## Checklist a časová osa
+## 69.12 Checklist a časová osa
 
 Detail ukazuje povinnosti nástupu, změny a skončení. Patří sem smlouva nebo
 dohoda, registrace a změny pro zdravotní pojišťovnu a ČSSZ/JMHZ, daňové
@@ -399,7 +399,7 @@ pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je
 nutné načíst aktuální verzi.
 
-### Navazující agendy
+### 69.12.1 Navazující agendy
 
 Karta vztahu má sekci **Navazující agendy**. Vede z ní jedno kliknutí do každé
 agendy, kde se k tomuto člověku dá něco pořídit — docházka a směny,

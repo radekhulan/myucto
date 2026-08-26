@@ -108,7 +108,7 @@ Runtime zapíše pro stavy s `routing_compatible: false` serverový warning
 `configuration.app_url_unusable`. Kontext obsahuje jen stabilní `state` a
 `reason_code`; původní ani odvozená hodnota konfigurace se neloguje. Umístění
 logu určuje `logging.path`. Podrobný recovery postup je v
-[§ 999 Řešení problémů](999_Reseni_problemu.md#diagnostika-appurl).
+[§ 999 Řešení problémů](999_Reseni_problemu.md#99918-diagnostika-appurl).
 
 Vlastní domény klientských portálů se nestávají dalším WebAuthn RP ID. Browser
 se z nich přesměruje na přesný canonical origin z `app.url`, kde proběhne
@@ -596,7 +596,7 @@ Každý non-superadmin potřebuje explicitní membership firmy. U jedné firmy m
 mít kompatibilní přepis role; role se nesčítají. Neaktivní role, neplatný přepis
 nebo prázdný membership jsou vždy fail-closed.
 
-### Jak je to vynucené
+### 97.5.1 Jak je to vynucené
 
 1. **Backend** mapuje každou neveřejnou routu na konkrétní permission klíč a
    minimální úroveň. Nezmapovaná routa je odmítnuta; stavové, tenant a vlastnické
@@ -686,7 +686,7 @@ Formulář nedovolí duplicitní kombinace ani klávesy vyhrazené pro prohlíž
 pevné akce aplikace. Zkratky se nespouštějí při psaní do formuláře, během
 zamčené relace ani v otevřeném modálním dialogu. **Obnovit výchozí** odstraní
 uživatelský přepis a vrátí bezpečné kombinace popsané v
-[Přehledu](10_Prehled.md#klavesove-zkratky).
+[Přehledu](10_Prehled.md#1061-klavesove-zkratky).
 
 ## 97.10 Tipy
 

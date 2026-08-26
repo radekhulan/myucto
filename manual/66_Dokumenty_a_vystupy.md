@@ -1,14 +1,14 @@
 # Dokumenty a výstupy
 
-## Účel
+## 66.1 Účel
 
 Agenda vytváří mzdové listiny a zaměstnanecké dokumenty z uzavřených nebo jinak způsobilých dat a uchovává jejich vazbu na osobu, vztah a období.
 
-## Předpoklady a oprávnění
+## 66.2 Předpoklady a oprávnění
 
 Uživatel potřebuje `payroll.documents`. Zdrojová data musí být zkontrolována a u měsíčních výstupů zpravidla uzavřena. Dokument nesmí být vydán, pokud aplikace nemá údaje potřebné pro jeho zákonný obsah.
 
-## Krokový postup
+## 66.3 Krokový postup
 
 1. Otevřete **Mzdy → Dokumenty a výstupy** a vyberte typ, zaměstnance a období.
 2. Zkontrolujte náhled, identifikaci zaměstnavatele, vztah, částky a data.
@@ -16,28 +16,28 @@ Uživatel potřebuje `payroll.documents`. Zdrojová data musí být zkontrolová
 4. Evidujte vydání nebo převzetí bez ukládání přístupových tajemství.
 5. Při opravě vytvořte navazující dokument a zachovejte původní auditní stopu.
 
-## Stavy
+## 66.4 Stavy
 
 Návrh čeká na kontrolu, vygenerovaný dokument odpovídá konkrétním zdrojovým datům a vydaný má evidované předání. Vygenerování samo o sobě neznamená doručení ani podpis příjemce.
 
-## Kontroly a bezpečnost
+## 66.5 Kontroly a bezpečnost
 
 PDF a exporty obsahují osobní a mzdové údaje. Chraňte je při stažení, přenosu i archivaci. Před vydáním zkontrolujte správnou osobu a období. Potvrzení pro úřad práce závislé na zákonném přepočtu průměrného výdělku dokončete ručně, pokud aplikace bezpečný výpočet nenabízí.
 
-## Časté chyby
+## 66.6 Časté chyby
 
 - Výstup z návrhu běhu vydaný jako konečný.
 - Odeslání dokumentu nesprávnému zaměstnanci.
 - Domněnka, že stažení PDF je důkaz předání.
 - Ruční úprava vygenerovaného dokumentu bez auditní návaznosti.
 
-## Návaznosti
+## 66.7 Návaznosti
 
 Zdrojem je [mzdový běh](63_Mzdove_behy.md) a [zaměstnanci](69_Zamestnanci.md). Doby uchování řeší [retenční lhůty](76_Retencni_lhuty.md) a bezpečný výmaz [kapitola 58s](77_Vymaz_osobnich_udaju.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 66.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Dokumenty a výstupy** vyber období. Seznam zobrazuje dokumenty
 uložené ke schválené revizi mzdového běhu, zaměstnance, mzdovou účtárnu,
@@ -121,7 +121,7 @@ právě ty dokumenty, které už byly k revizi archivovány, a strojově čiteln
 manifest s jejich otisky. Doplníš-li později další dokument, vznikne nová
 revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.
 
-## Měsíční a roční archiv mezd
+## 66.9 Měsíční a roční archiv mezd
 
 Záložka **Archiv mezd** vytváří souhrnný ZIP za celou firmu. Není to export
 jednoho zaměstnance a kvůli jeho sestavení se nenačítá ani nevybírá seznam

@@ -407,9 +407,9 @@ rozpadu DPH; nejde o pouhý evidenční záznam čekající na ruční deník.
 > (proforma) přijatou fakturu, zaúčtuje se místo saldokonta 321 jako **poskytnutá záloha —
 > MD 314 Poskytnuté zálohy / D 211 Pokladna**. Když později zaúčtuješ vyúčtovací fakturu
 > vázanou na tuto zálohu, zápis automaticky doplní i zúčtovací řádek (321/314) ve výši
-> skutečně zaplacené zálohy — viz [Přijaté faktury § 23.3.1](23_Prijate_faktury.md#2331-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni).
+> skutečně zaplacené zálohy — viz [Přijaté faktury § 23.3.1](23_Prijate_faktury.md#2332-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni).
 
-## Omezení a tipy
+## 30.7 Omezení a tipy
 
 - Valutová pokladna je dostupná jen v podvojném účetnictví. Podporuje samostatný
   hotovostní Prodej, Nákup a Ostatní, nikoli úhradu cizoměnové vydané/přijaté

@@ -8,7 +8,7 @@ v menu hned **před sekcí Daně**.
 Vše je odděleně **per dodavatel** (firma/IČO) — co nahraješ pod jednou firmou,
 nevidíš pod jinou.
 
-## Organizace — složky, vazby a tagy
+## 31.1 Organizace — složky, vazby a tagy
 
 Dokumenty organizuješ třemi způsoby, které se doplňují:
 
@@ -20,7 +20,7 @@ Dokumenty organizuješ třemi způsoby, které se doplňují:
   jak v detailu dokumentu, tak v panelu *Dokumenty* v detailu té faktury/klienta.
 - **Tagy** — volné štítky pro průřezové hledání (např. `smlouva`, `2026`, `GDPR`).
 
-## Nahrávání
+## 31.2 Nahrávání
 
 V pravém horním rohu jsou tři způsoby (potřebuješ právo zápisu):
 
@@ -32,7 +32,7 @@ V pravém horním rohu jsou tři způsoby (potřebuješ právo zápisu):
 
 Nové soubory se nahrají do **aktuálně otevřené složky**.
 
-### Soubory ZIP — dva režimy
+### 31.2.1 Soubory ZIP — dva režimy
 
 Přepínač **Soubory ZIP** určuje, co se stane s nahraným `.zip`:
 
@@ -40,7 +40,7 @@ Přepínač **Soubory ZIP** určuje, co se stane s nahraným `.zip`:
   promítnou do stromu složek a každý soubor se uloží samostatně.
 - **Nahrát jako jeden ZIP** — archiv zůstane jako jeden soubor ke stažení.
 
-### ZFO — datové zprávy ze schránky
+### 31.2.2 ZFO — datové zprávy ze schránky
 
 Když nahraješ **ZFO** (stažená nebo odeslaná datová zpráva), aplikace ji
 **automaticky rozbalí**:
@@ -51,7 +51,7 @@ Když nahraješ **ZFO** (stažená nebo odeslaná datová zpráva), aplikace ji
   původní ZFO,
 - případný odpojený podpis **P7S** se napáruje na podepsaný dokument.
 
-## Náhledy a otevírání
+## 31.3 Náhledy a otevírání
 
 U PDF a obrázků se generují **náhledy (thumbnaily)** a v detailu je **inline
 náhled** přímo v aplikaci (stejně jako u přijatých faktur). Přímo v detailu lze
@@ -61,14 +61,14 @@ textové soubory mají náhled omezený; celý originál zůstává vždy dostup
 stažení. Ostatní typy souborů se z bezpečnostních důvodů nabízejí pouze ke
 **stažení**.
 
-## Vyhledávání
+## 31.4 Vyhledávání
 
 Pole **Hledat** nahoře prohledává **názvy, popisy i obsah** dokumentů. U PDF
 s textovou vrstvou, dokumentů Office (DOC/XLS) a XML se text indexuje při nahrání,
 takže najdeš dokument i podle slova uvnitř. Naskenované PDF bez textové vrstvy
 zůstává dohledatelné podle názvu a tagů.
 
-## Párování s fakturami a klienty
+## 31.5 Párování s fakturami a klienty
 
 V detailu dokumentu v sekci **Souvisí s** přidáš vazbu přes **našeptávač** — píšeš
 a aplikace průběžně nabízí **vystavené i přijaté faktury, klienty a zakázky**.
@@ -79,7 +79,7 @@ Obráceně: v detailu **klienta, vystavené faktury, přijaté faktury i zakázk
 najdeš panel **Dokumenty**, kde vidíš všechny připojené soubory a přes tlačítko
 *Připojit dokument* k nim přidáš další.
 
-## Hromadné akce
+## 31.6 Hromadné akce
 
 Zaškrtni více dokumentů **i složek současně** (v mřížce i seznamu) a v liště nahoře:
 
@@ -90,19 +90,19 @@ Zaškrtni více dokumentů **i složek současně** (v mřížce i seznamu) a v 
 
 Velikost každé složky je vidět přímo v dlaždici. Na mobilu (bez najetí myší) se akce složky (přejmenovat/smazat) odkryjí prvním ťuknutím a spustí až druhým — ochrana proti nechtěnému smazání.
 
-## Koš
+## 31.7 Koš
 
 Smazání je **nevratné až po vysypání koše**. Tlačítko **Koš** přepne na seznam
 smazaných dokumentů i složek, kde je můžeš **Obnovit**. **Vysypat koš** je trvale
 odstraní z databáze i z disku (soubor se fyzicky smaže jen tehdy, když na něj
 neukazuje žádný jiný dokument — kvůli deduplikaci).
 
-## Oprávnění
+## 31.8 Oprávnění
 
 - **Jen pro čtení (readonly)** — procházení, náhledy, fulltext, stahování a export.
 - **Účetní / admin** — navíc nahrávání, mazání, přesouvání, tagy a vazby.
 
-## Firemní a osobní dokumenty
+## 31.9 Firemní a osobní dokumenty
 
 Nad seznamem je přepínač **Firemní / Osobní**, který řídí, kterou vrstvu dokumentů
 zrovna procházíš:
@@ -125,7 +125,7 @@ uživateli nezobrazí v žádném z těchto míst, ani v hromadném ZIP exportu.
 > obě běží současně. Nejdřív tě systém omezí na dokumenty tvé aktuální firmy,
 > teprve uvnitř ní pak na firemní vs. tvoje osobní.
 
-## Vyžádání chybějících podkladů
+## 31.10 Vyžádání chybějících podkladů
 
 Stránka **Firma → Žádosti o dokumenty** slouží účetnímu k evidenci podkladů,
 které má dodat klient. Není to další složka DMS: každý řádek je pracovní požadavek
@@ -159,7 +159,7 @@ existence ukáže v [Úplnosti dokladů](54_Uplnost_dokladu.md), ale pohyb z kon
 zmizí až po doložení a správném účetním zpracování — samotné založení požadavku ho
 neřeší.
 
-## Přílohy účetních zápisů (§33a)
+## 31.11 Přílohy účetních zápisů (§33a)
 
 Kromě obecného úložiště popsaného v této kapitole má MyÚčto ještě **samostatnou,
 oddělenou evidenci příloh přímo u jednotlivých zápisů v účetním deníku** — sken
@@ -169,7 +169,7 @@ zde v sekci Dokumenty**, ale přímo v detailu zápisu v [Účetním deníku](45
 tady popisujeme jen princip, protože jde o technicky příbuzné, ale oddělené
 úložiště.
 
-### Proč oddělené úložiště
+### 31.11.1 Proč oddělené úložiště
 
 Přílohy zápisu žijí ve **vlastní databázové tabulce** a **vlastním diskovém
 prostoru** (`storage/journal/…`, mimo `storage/documents/` používaný zbytkem
@@ -183,7 +183,7 @@ této kapitoly). Bajty jsou stejně jako u Dokumentů ukládané podle otisku
 - životní cyklus přílohy je svázaný s životním cyklem zápisu (smazání zápisu
   smaže i jeho přílohy).
 
-### Nahrávání a limity
+### 31.11.2 Nahrávání a limity
 
 U zápisu jde nahrát **více souborů najednou**. Systém zpracuje každý soubor
 samostatně — pokud jeden selže (např. je duplicitní), zbytek dávky se přesto
@@ -197,11 +197,11 @@ nahraje a u odpovědi vidíš přehled, co se povedlo a co ne s důvodem (např.
   problému přiložit k **různým** zápisům — bajty na disku se sdílejí.
 - Typ souboru se stejně jako u Dokumentů poznává **z obsahu**, ne z přípony;
   spustitelné a aktivní obsahy (skripty, HTML/SVG) jsou odmítnuty stejným
-  blocklistem jako v [§ Bezpečnost](#bezpecnost).
+  blocklistem jako v [§ Bezpečnost](#3113-bezpecnost).
 - Rozpoznávané typy: **PDF, obrázek, XML/ISDOC(x), ZFO** — ostatní se uloží
   jako „ostatní".
 
-### Popisek, stažení a mazání
+### 31.11.3 Popisek, stažení a mazání
 
 - Ke každé příloze jde inline dopsat/upravit **popisek** (do 255 znaků) — každá
   změna se loguje (před/po) do historie zápisu.
@@ -212,19 +212,19 @@ nahraje a u odpovědi vidíš přehled, co se povedlo a co ne s důvodem (např.
   jen když na jeho otisk neukazuje žádná jiná příloha (stejný princip dedupu
   jako u Dokumentů, ale počítaný odděleně).
 
-### Oprávnění
+### 31.11.4 Oprávnění
 
 - **Čtení** (zobrazení seznamu příloh u zápisu) — kdokoli s přístupem k
   účetnímu deníku (readonly a výš).
 - **Nahrávání, mazání a úprava popisku** — jen role **účetní** nebo **admin**.
 
 > [!WARNING]
-> Plánovaná úloha `cron-backup-documents` (viz [§ Zálohování](#zalohovani) níže)
+> Plánovaná úloha `cron-backup-documents` (viz [§ Zálohování](#3112-zalohovani) níže)
 > zálohuje jen `storage/documents/` — přílohy účetního deníku (`storage/journal/`)
 > v ní **aktuálně obsažené nejsou**. Počítej s tím při plánování celkové zálohy
 > databáze a souborového úložiště.
 
-## Zálohování
+## 31.12 Zálohování
 
 Dokumenty zálohuje **samostatná plánovaná úloha** `cron-backup-documents`
 (viz *Systém → Plánované úlohy*), oddělená od zálohy PDF faktur. Zálohuje celé
@@ -234,7 +234,7 @@ záloh. Náhledy se nezálohují (regenerují se). Zálohu lze volitelně šifro
 heslem `cron.backup.password` v `cfg.php` (AES-256, společné pro všechny typy
 záloh — viz [§ 5.5 Cron skripty](05_Po_instalaci.md#55-cron-skripty)).
 
-## Bezpečnost
+## 31.13 Bezpečnost
 
 Sekce přijímá libovolné soubory, proto je upload chráněný: typ se ověřuje podle
 **obsahu** (ne podle přípony), spustitelné soubory a HTML/SVG jsou odmítnuty,

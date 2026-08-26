@@ -1,14 +1,14 @@
 # Mzdové složky a vstupy
 
-## Účel
+## 74.1 Účel
 
 Mzdové složky definují význam pravidelných a jednorázových plnění, náhrad a korekcí. Vstupy přiřazují konkrétní hodnotu zaměstnanci, vztahu a období.
 
-## Předpoklady a oprávnění
+## 74.2 Předpoklady a oprávnění
 
 Musí existovat aktivní vztah a správné období. Uživatel potřebuje mzdové oprávnění a podklad pro částku, jednotky, účinnost a případné daňové či pojistné zacházení.
 
-## Krokový postup
+## 74.3 Krokový postup
 
 1. Otevřete **Mzdy → Mzdové složky a vstupy** a ověřte význam dostupných složek.
 2. Pravidelnou složku nastavte s datem účinnosti u vztahu; jednorázovou vložte do konkrétního měsíce.
@@ -16,28 +16,28 @@ Musí existovat aktivní vztah a správné období. Uživatel potřebuje mzdové
 4. Zkontrolujte návaznost benefitů, cestovních náhrad, absencí a srážek v jejich vlastních agendách.
 5. Před výpočtem porovnejte soupis vstupů s podklady a odstraňte duplicity.
 
-## Stavy
+## 74.4 Stavy
 
 Budoucí pravidelná složka čeká na účinnost, aktivní se použije pro rozhodné období a ukončená zůstává v historii. Jednorázový vstup čeká na běh. Po uzavření období jej nepřepisujte bez řízené opravy.
 
-## Kontroly a bezpečnost
+## 74.5 Kontroly a bezpečnost
 
 Kontrolujte znaménko, jednotku, období, vztah a klasifikaci plnění. Obecnou složku nepoužívejte k obcházení nepodporovaného právního režimu. Odkaz na podklad je volitelný důkaz; hodnota, období a druh plnění jsou skutečné vstupy.
 
-## Časté chyby
+## 74.6 Časté chyby
 
 - Jednorázová složka zadaná jako pravidelná.
 - Vstup přiřazený jinému souběžnému vztahu.
 - Duplicitní import a ruční zadání stejné částky.
 - Změna vstupu bez nového výpočtu otevřeného běhu.
 
-## Návaznosti
+## 74.7 Návaznosti
 
 Hromadné zadání nabízí [rychlý měsíční vstup](62_Rychly_mesicni_vstup.md), speciální plnění [koše benefitů](72_Kose_benefitu.md) a vše zpracuje [mzdový běh](63_Mzdove_behy.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 74.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Mzdové složky a vstupy** jsou běžnými záložkami oddělené:
 
@@ -67,7 +67,7 @@ potvrzení. Jakmile byl záznam použit, aplikace smazání odmítne a vysvětl�
 je potřeba ukončit jeho platnost nebo jej deaktivovat; již zpracovaná historie
 se nemaže.
 
-## Povinné spoření u rizikové práce
+## 74.9 Povinné spoření u rizikové práce
 
 Panel **Povinné spoření u rizikové práce** slouží pouze pro práce 3. kategorie,
 u nichž je rozhodným faktorem vibrace, chlad, teplo nebo dynamická fyzická

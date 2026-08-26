@@ -8,7 +8,7 @@ Wizard má **3 kroky** (admin → dodavatel → sample data) a po dokončení t�
 **automaticky přihlásí**. Předchází jim ještě **kontrola prostředí**, která se
 ale ukáže jen tehdy, když je co řešit.
 
-## 7.0 Kontrola prostředí
+## 7.1 Kontrola prostředí
 
 Než tě wizard pustí k zakládání účtu, zkontroluje prostředí instalace: verzi
 PHP a rozšíření, verzi a znakovou sadu MariaDB, limity nahrávání, práva zápisu,
@@ -32,7 +32,7 @@ Stejná kontrola je i po instalaci v **Systém → Diagnostika**, kde navíc hl�
 plánované úlohy, velikost logů a dostupnost novější verze — viz
 [999. Řešení problémů](999_Reseni_problemu.md).
 
-## 7.1 Krok 1 — Administrátor
+## 7.2 Krok 1 — Administrátor
 
 ![Setup wizard krok 1](img/03_setup_admin.webp)
 
@@ -55,7 +55,7 @@ Klikni **Další**.
 > 💡 Tip: Použij passphrase 4–5 slov místo krátkého složitého hesla. „korelace
 > medvědí dýně přístav 2026" je odolnější vůči brute-force než „Hu1@n!".
 
-## 7.2 Krok 2 — Dodavatel
+## 7.3 Krok 2 — Dodavatel
 
 ![Setup wizard krok 2](img/03_setup_dodavatel.webp)
 
@@ -77,7 +77,7 @@ Klikni **Další**.
 > účtů). Pokud zadáš neplatné číslo, QR platba se ve faktuře nezobrazí. Příklad
 > platného testovacího čísla: `1000000005 / 0100`.
 
-## 7.3 Krok 3 — Sample data (volitelné)
+## 7.4 Krok 3 — Sample data (volitelné)
 
 ![Setup wizard krok 3](img/03_setup_sample.webp)
 
@@ -114,7 +114,7 @@ dostaneš nejprve omezenou stránku `/setup-mfa`; plný přístup vznikne až po
 registraci jedné z povolených metod. Passkey vyžaduje stabilní HTTPS hostname
 v `app.url` (lokálně je podporované `http://localhost`).
 
-## 7.4 Co dál po setupu
+## 7.5 Co dál po setupu
 
 1. Otevři **Systém → Nastavení** a doplň, co wizard nepokryl: e-mail kontakt,
    doplnění více bankovních účtů — viz [92. Nastavení](92_Nastaveni.md).

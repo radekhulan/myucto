@@ -1,14 +1,14 @@
 # Shoda účtování mezd
 
-## Účel
+## 64.1 Účel
 
 Kontrola shody porovnává uzavřený mzdový běh s účetními zápisy. Odhaluje chybějící, duplicitní nebo částkově odlišné zaúčtování.
 
-## Předpoklady a oprávnění
+## 64.2 Předpoklady a oprávnění
 
 Musí existovat uzavřený běh a nastavené předkontace. Uživatel potřebuje oprávnění `payroll.post` a přístup k účetním dokladům dané firmy a období.
 
-## Krokový postup
+## 64.3 Krokový postup
 
 1. Otevřete **Mzdy → Shoda účtování mezd** a vyberte uzavřený běh.
 2. Zkontrolujte navržené účty, střediska, částky a strany Má dáti/Dal.
@@ -16,28 +16,28 @@ Musí existovat uzavřený běh a nastavené předkontace. Uživatel potřebuje 
 4. Spusťte porovnání mzdových součtů s účetními zápisy.
 5. Rozdíl opravte v příčině a kontrolu opakujte; nepřekrývejte jej nesouvisejícím ručním zápisem.
 
-## Stavy
+## 64.4 Stavy
 
 Nezaúčtováno znamená, že pro běh není úplný účetní protějšek. Částečná nebo rozdílná shoda vyžaduje opravu. Shoda potvrzuje částkovou a vazební kontrolu, nikoli správnost celého účtového rozvrhu.
 
-## Kontroly a bezpečnost
+## 64.5 Kontroly a bezpečnost
 
 Ověřte vyrovnanost, období, účty závazků, nákladů, daně, pojistného a srážek. U ručních změn zachovejte auditní stopu. Mzdový detail zpřístupněte jen oprávněným účetním.
 
-## Časté chyby
+## 64.6 Časté chyby
 
 - Dvojí zaúčtování stejného běhu.
 - Zaúčtování návrhu místo uzavřené revize.
 - Rozdíl způsobený zaokrouhlením zakrytý nesouvisejícím zápisem.
 - Smíchání účetních období nebo středisek.
 
-## Návaznosti
+## 64.7 Návaznosti
 
 Zdroj je [mzdový běh](63_Mzdove_behy.md), účty nastavuje [kapitola 58o](73_Nastaveni_mezd.md) a peněžní vypořádání ověřují [mzdové příkazy a úhrady](65_Platby_a_uhrady.md).
 
 
 
-## Jak porovnání pracuje
+## 64.8 Jak porovnání pracuje
 
 V podvojném účetnictví je pro schválenou revizi dostupná stránka
 **Mzdy → Shoda účtování mezd**. Pro zvolené období porovná mzdovou revizi,

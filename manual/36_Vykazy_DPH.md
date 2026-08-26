@@ -14,9 +14,9 @@ rekonciliace](89_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
 
 OSS má samostatnou stránku **Daně → OSS přiznání**, která se objeví až po
 zapnutí režimu v nastavení firmy. Zdroj dat, kontroly, sledování prahu a XML
-export popisuje oddíl [OSS přiznání](#oss-priznani-ossei1).
+export popisuje oddíl [OSS přiznání](#363-oss-priznani-ossei1).
 
-## Předpoklady před prvním podáním
+## 36.1 Předpoklady před prvním podáním
 
 V **Nastavení → Daňové nastavení** vyplň:
 
@@ -28,20 +28,20 @@ V **Nastavení → Daňové nastavení** vyplň:
 6. Volitelně: CZ-NACE, datová schránka, sestavitel přiznání
 7. Pro OSS: zapnout OSS režim, zemi identifikace, měnu podání a platnost registrace
 
-Detailní mapping všech polí v UI na XML atributy najdeš v sekci [Pole EPO / VetaP](#pole-epo-vetap) níže.
+Detailní mapping všech polí v UI na XML atributy najdeš v sekci [Pole EPO / VetaP](#362-pole-epo-vetap) níže.
 
 > [!NOTE]
 > **Právnické osoby (PO/s.r.o./a.s.) podávají Kontrolní hlášení VŽDY měsíčně** (§ 101e odst. 1 ZDPH).
 > OSVČ (FO) mohou podávat KH ve stejné lhůtě jako přiznání k DPH — tj. **kvartálně**, pokud jsou kvartálním plátcem (§ 101e odst. 2).
 > Přepínač Měsíčně / Kvartálně se v `Daně → Kontrolní hlášení` zobrazí jen FO.
 
-## Pole EPO / VetaP
+## 36.2 Pole EPO / VetaP
 
 Tato sekce mapuje pole z **Nastavení → Daňové nastavení** (admin only) na konkrétní
 atributy v EPO XML (DPHDP3 + DPHKH1). Vyplň je všechny — bez nich EPO portál podání
 odmítne nebo bude generovat formálně neúplný výkaz.
 
-### Identifikace finančního úřadu
+### 36.2.1 Identifikace finančního úřadu
 
 | Pole v UI | XML atribut | Popis | Jak zjistit |
 |---|---|---|---|
@@ -49,7 +49,7 @@ odmítne nebo bude generovat formálně neúplný výkaz.
 | **Kód územního pracoviště** | `c_pracufo` | Konkrétní pracoviště v rámci FÚ | např. `3203` pracoviště Brno III. Volitelné, ale EPO ho někdy vyžaduje. |
 | **CZ-NACE kód (`cz_nace_code`)** | `c_okec` | Hlavní podnikatelská činnost (NACE) | např. `631000` (IT poradenství). Najdeš na živnostenském listě / ARES. Fallback `631000` pokud necháš prázdné. |
 
-### Typ plátce a perioda
+### 36.2.2 Typ plátce a perioda
 
 | Pole v UI | XML atribut | Hodnoty | Kdy použít |
 |---|---|---|---|
@@ -63,7 +63,7 @@ odmítne nebo bude generovat formálně neúplný výkaz.
 > a oddíl C se automaticky vynechají (s upozorněním v náhledu). Kontrolní
 > hlášení IO nepodává; služby do EU vykazuje v souhrnném hlášení.
 
-### Sídlo / adresa
+### 36.2.3 Sídlo / adresa
 
 EPO rozděluje uliční adresu na tři samostatné atributy (`ulice` + `c_pop` + `c_orient`).
 Naše DB tyto sloupce drží separátně (`supplier.street`, `street_number_pop`,
@@ -82,7 +82,7 @@ Naše DB tyto sloupce drží separátně (`supplier.street`, `street_number_pop`
 > **Pro OSVČ:** EPO vyžaduje **adresu sídla podnikání**, nikoli trvalého bydliště,
 > pokud jsou různé. Najdeš v živnostenském rejstříku / ARES jako *„Místo podnikání"*.
 
-### Osobní údaje (jen pro FO/OSVČ)
+### 36.2.4 Osobní údaje (jen pro FO/OSVČ)
 
 | Pole v UI | XML atribut | Popis |
 |---|---|---|
@@ -92,7 +92,7 @@ Naše DB tyto sloupce drží separátně (`supplier.street`, `street_number_pop`
 
 PO (právnické osoby) tyto pole nevyplňují — místo nich se použije `zkrobchjm` z firmy.
 
-### Oprávněná osoba k podpisu — POVINNÉ pro PO
+### 36.2.5 Oprávněná osoba k podpisu — POVINNÉ pro PO
 
 Pole `opr_*` identifikují fyzickou osobu, která je u právnické osoby oprávněná
 přiznání podepsat (typicky jednatel, předseda představenstva).
@@ -105,7 +105,7 @@ přiznání podepsat (typicky jednatel, předseda představenstva).
 
 U FO (OSVČ) zůstávají prázdná — fallback je `jmeno` + `prijmeni`.
 
-### Sestavitel přiznání (sest_*)
+### 36.2.6 Sestavitel přiznání (sest_*)
 
 Pole sestavitele jsou relevantní jen pokud **přiznání za tebe podává jiná osoba**
 (účetní, daňový poradce). Pokud podáváš sám, nech prázdná — builder použije tvoje
@@ -123,14 +123,14 @@ Pole sestavitele jsou relevantní jen pokud **přiznání za tebe podává jiná
 > („Jan Novák"), builder ho do XML rozdělí podle první mezery (zpětná
 > kompatibilita). Pro spolehlivost ale vyplň obě pole zvlášť.
 
-### Kontaktní údaje pro podání
+### 36.2.7 Kontaktní údaje pro podání
 
 | Pole v UI | XML atribut | Popis |
 |---|---|---|
 | **E-mail** (`email`) | `email` | Kontakt pro FÚ |
 | **Telefon** (`phone`) | `c_telef` | Ve formátu `+420XXXXXXXXX` |
 
-### Postup podání na EPO portál
+### 36.2.8 Postup podání na EPO portál
 
 1. **Vygeneruj XML** v aplikaci: `Daně → DPH přiznání` (resp. KH/SH), vyber období
    a klikni **Stáhnout XML**.
@@ -162,7 +162,7 @@ sledovat podle portálu. Rozhodujícím důkazem zůstává potvrzení z EPO.
 > zachovaná, ale hodnoty atributů můžeš editovat. Užitečné pro hotfix bez
 > přepočtu celé databáze.
 
-### Časté problémy
+### 36.2.9 Časté problémy
 
 **EPO odmítne soubor s chybou „neúplná adresa"**
 → Vyplň `street_number_pop` + `street_number_orient` v Daňovém nastavení.
@@ -200,7 +200,7 @@ sekci VetaD/VetaP. Alternativně zavolej na svůj FÚ nebo se podívej na
 nebo v ARES. Builder ho normalizuje (odstraní `CZ-NACE ` prefix, padne na 6
 číslic).
 
-## OSS přiznání (OSSEI1)
+## 36.3 OSS přiznání (OSSEI1)
 
 **Cesta: `Daně → OSS přiznání`**. Stránka připravuje podklad a XML formuláře
 `OSSEI1` za zvolený kalendářní kvartál. Objeví se až po zapnutí OSS v daňovém
@@ -208,7 +208,7 @@ nastavení firmy.
 
 Hotové XML se **podává v aplikaci MOSS/OSS na Daňovém portálu**, do které se
 musíš přihlásit — obecnou cestou EPO to nejde, viz
-[§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava).
+[§ 40.8.5](40_OSS.md#4095-kde-se-oss-priznani-podava).
 
 Do přiznání vstupují jednotlivé OSS řádky vydaných faktur, jejichž datum
 zdanitelného plnění patří do vybraného kvartálu. Aplikace je seskupí podle státu
@@ -226,7 +226,7 @@ kanálech — ruční označování řádků není potřeba.
 > prahu 10 000 EUR, přepočet kurzem ECB, opravy minulých období, XML `OSSEI1`,
 > archiv podání, rekonciliace a evidence § 110f.
 
-### Co se z OSS promítne do přiznání k DPH
+### 36.3.1 Co se z OSS promítne do přiznání k DPH
 
 Přiznání k DPH hlásí varování se seznamem dokladů u řádků, které zůstaly **mimo
 OSS s příznakem „k ručnímu posouzení"** — vstupují na **ř. 1 a 2**, aniž to kdo
@@ -236,15 +236,15 @@ Projdi je dřív, než přiznání podáš — najdeš je filtrem **Místo plně
 v seznamu faktur, volbou **Nejisté — v tuzemsku**
 ([§ 14.1.1](14_Faktury.md#nejiste-misto-plneni-oss)). Druhou skupinu, tedy řádky
 zařazené do OSS s týmž otazníkem, hlásí náhled OSS podání; rozdíl mezi nimi
-vysvětluje [§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
+vysvětluje [§ 40.4](40_OSS.md#405-plneni-k-rucnimu-posouzeni).
 
 Účtování OSS daně na vlastní účet **345.100** je důvod, proč **zůstatek 343 jde
 s přiznáním k DPH srovnat** — podrobně
-[§ 40.7](40_OSS.md#407-uctovani-oss-dane).
+[§ 40.7](40_OSS.md#408-uctovani-oss-dane).
 
-## DPH přiznání (DPHDP3)
+## 36.4 DPH přiznání (DPHDP3)
 
-### Cesta: `Daně → DPH přiznání`
+### 36.4.1 Cesta: `Daně → DPH přiznání`
 
 #### Topbar
 
@@ -363,7 +363,7 @@ Nevysvětlený zbytek nad toleranci zůstává červený a blokující.
 > (že jsi o rozdílu věděl/a a přesto jsi stáhl/a) se spolu s celým rozpisem rozdílu
 > zaloguje do auditní stopy.
 
-### Převod DPH na zúčtovací účet
+### 36.4.2 Převod DPH na zúčtovací účet
 
 Po skončení zdaňovacího období vzniká interní doklad **„převod DPH"**, který přesune
 výstupní daň z `343.200` a vstupní daň z `343.100` na zúčtovací účet `343.900`. Po něm
@@ -417,7 +417,7 @@ období dorazí až po termínu, změní přiznání — a s ním i převod.
 
 Per řádek: kód, popis, základ, DPH. Hodnoty se počítají agregací `invoice_items` / `purchase_invoice_items` per `vat_classification_code`.
 
-### Jak se DPHDP3 generuje a co zahrnuje
+### 36.4.3 Jak se DPHDP3 generuje a co zahrnuje
 
 Tato sekce přesně popisuje, podle jakých pravidel se přiznání sestavuje — užitečné
 pro kontrolu proti seznamu faktur i pro účetní.
@@ -571,7 +571,7 @@ Net dopad na vlastní daň je tedy nulový (daň = odpočet), pokud máš plný 
 záporná = nadměrný odpočet. Atribut `trans` ve `VetaD` se nastaví `A` (vznikla
 povinnost) / `N` podle znaménka.
 
-### Jak fungují VAT klasifikační kódy
+### 36.4.4 Jak fungují VAT klasifikační kódy
 
 Každá faktura (nebo její řádek) má `vat_classification_code` (např. "1", "40", "5", "20"). Tento kód určuje na který **řádek DPH přiznání** položka patří.
 
@@ -616,7 +616,7 @@ Každá faktura (nebo její řádek) má `vat_classification_code` (např. "1", 
 > Číselník je editovatelný: v `Nastavení → Číselníky → Klasifikace DPH` si můžeš přidat vlastní
 > kód, včetně kódu předmětu plnění s písmenným sufixem (`1a`, `3a`) z číselníku MFČR.
 
-### Auto-default klasifikace
+### 36.4.5 Auto-default klasifikace
 
 Pokud na fakturu ani řádek kód nevybereš, doplní ho systém sám. Rozhoduje:
 
@@ -683,13 +683,13 @@ Když si vybereš kód pro základní sazbu, ale řádek nese sníženou (nebo o
 podle skutečné sazby do 12% sloupce, a oba výkazy by se rozešly. Vlastní přemapování kódu
 v číselníku (per firma) tím dotčené není — přepíná se jen při skutečném rozporu sazeb.
 
-### Override per řádek nebo header
+### 36.4.6 Override per řádek nebo header
 
 V editoru faktury (vystavené i přijaté) je sekce **Klasifikace** s VAT picker dropdown. Můžeš:
 - Nechat prázdné → auto-default
 - Vybrat konkrétní kód → manual override (např. specifický kód pro export)
 
-### Reverse charge v cizí měně
+### 36.4.7 Reverse charge v cizí měně
 
 Pro RC plnění (typicky `reverse_charge=true` na fakturě, kódy 5 / 23 / 24)
 v cizí měně:
@@ -704,7 +704,7 @@ Příklad: faktura z DE, 1 000 € @ kurz 25, vat_classification_code='23' →
 ř. 3 (`p_zb23=25000`, `dan_pzb23=5250`) + ř. 43 (`odp_rezim=25000`,
 `odp_rez_nar=5250`) + KH sekce A.2.
 
-### Pořízení dlouhodobého majetku
+### 36.4.8 Pořízení dlouhodobého majetku
 
 Checkbox **„Pořízení dlouhodobého majetku"** v editoru přijaté faktury označí
 doklad za majetek vymezený v § 4 odst. 4 písm. c) (vozidlo, stroj). Pro
@@ -717,9 +717,9 @@ Hodnota se na DPHDP3 uvede:
 Daň se v součtech ř. 46 neduplikuje (ř. 47 je informativní). V [Knize DPH](37_Kniha_DPH.md)
 je samostatná sekce **47.047** se sumací.
 
-## Kontrolní hlášení (DPHKH1)
+## 36.5 Kontrolní hlášení (DPHKH1)
 
-### Cesta: `Daně → Kontrolní hlášení`
+### 36.5.1 Cesta: `Daně → Kontrolní hlášení`
 
 Právnická osoba podává KH měsíčně; fyzická osoba podle svého zdaňovacího období
 měsíčně nebo čtvrtletně. Identifikovaná osoba KH nepodává. KH obsahuje sekce:
@@ -742,7 +742,7 @@ měsíčně nebo čtvrtletně. Identifikovaná osoba KH nepodává. KH obsahuje 
 
 UI ukazuje **count řádků per sekce** + deadline countdown.
 
-### Typ podání — řádné, opravné, následné
+### 36.5.2 Typ podání — řádné, opravné, následné
 
 Analogicky k DPH přiznání nabízí stránka **Kontrolní hlášení** selector **Typ podání**:
 
@@ -766,7 +766,7 @@ Po výběru **Následné** nebo **Následné/opravné** se zobrazí dvě volitel
 > ne jen rozdíl oproti dřívějšímu podání. To vyžaduje přímo zákon — u kontrolního
 > hlášení se rozdílový způsob (na rozdíl od dodatečného DPH přiznání) nepoužívá.
 
-### Pravidla zařazení do sekcí
+### 36.5.3 Pravidla zařazení do sekcí
 
 Aby v reálně podaném KH seděly sekce, řídí se zařazení dokladů těmito pravidly
 (odpovídají metodice GFŘ a opravám z reportu #35):
@@ -809,7 +809,7 @@ Oddíl A.2 zahrnuje také přijaté služby od osoby neusazené v tuzemsku ze t�
 země (kód `24`, ř. 12/13 přiznání). U takového dodavatele může zůstat VAT ID
 i kód členského státu prázdný.
 
-### Zvláštní režimy a opravy nedobytných pohledávek
+### 36.5.4 Zvláštní režimy a opravy nedobytných pohledávek
 
 V `Systém → Číselníky → Klasifikace DPH` lze u vlastního kódu nastavit:
 
@@ -824,7 +824,7 @@ Příznak `zdph_44` na klasifikačním kódu označuje zvláštní režim v KH. 
 korekci odpočtu dlužníka podle § 74b připravuje a eviduje samostatná stránka
 **Daně → Oprava odpočtu §74b**, popsaná níže.
 
-## Oprava odpočtu §74b
+## 36.6 Oprava odpočtu §74b
 
 **Cesta: `Daně → Oprava odpočtu §74b`**.
 
@@ -858,12 +858,12 @@ oprávnění finalizovat výkazy. Teprve zaevidované nenulové pohyby se promí
 Náhled nic nezapisuje ani neúčtuje do deníku. Před zaevidováním ověř splatnost,
 skutečné úhrady, původní nárok na odpočet a aktuální právní podmínky § 74b.
 
-## Opravy DPH (§43, §79 a §79a)
+## 36.7 Opravy DPH (§43, §79 a §79a)
 
 **Cesta: `Daně → Opravy DPH (§43, §79)`**. Stránka vede dvě samostatné evidence;
 zápis vyžaduje oprávnění finalizovat výkazy, čtení běžné oprávnění k reportům.
 
-### §43 — oprava výše daně
+### 36.7.1 §43 — oprava výše daně
 
 §43 se používá při chybně určené **výši daně**, například při nesprávné sazbě
 nebo výpočtu. Není to dobropis podle §42: oprava patří zpětně do období
@@ -879,7 +879,7 @@ Evidované částky se podle sazby přičtou k řádkům 1 nebo 2 DPHDP3 za obdo
 původního plnění. Evidence sama nevytváří účetní zápis a nepřepočítává zdrojovou
 fakturu.
 
-### §79 a §79a — registrace a zrušení registrace
+### 36.7.2 §79 a §79a — registrace a zrušení registrace
 
 Tato záložka eviduje odpočet při registraci a jeho snížení při zrušení
 registrace. Položky zadává účetní ručně, protože systém z dokladu nepozná, zda
@@ -898,7 +898,7 @@ pětiletá nebo desetiletá lhůta. Rozhodný den určuje období vykázání.
 Součet platných položek se promítá na řádek 45 DPHDP3, zaokrouhlený na celé Kč.
 Ani tato evidence sama neúčtuje do účetního deníku.
 
-## Co kontrola podání neumí
+## 36.8 Co kontrola podání neumí
 
 Křížové kontroly porovnávají sestavy vypočtené z aktuálních dat aplikace. Neumějí
 načíst skutečně odeslané DPHDP3 nebo DPHKH1 z portálu a porovnat je řádek po řádku.
@@ -907,7 +907,7 @@ aplikaci a při další opravě ji porovnej ručně. Archivní snapshot je věrn
 souboru vytvořeného aplikací, nikoli automatickým potvrzením, že právě tento soubor
 byl přijat finanční správou.
 
-## Změna sazby DPH s budoucí platností
+## 36.9 Změna sazby DPH s budoucí platností
 
 Pokud se sazba změní, postupuj:
 
@@ -921,35 +921,35 @@ Pokud se sazba změní, postupuj:
 4. **Doklady s DUZP v nové účinnosti** použijí platnou sazbu a odpovídající výchozí
    klasifikaci.
 
-## Časté chyby
+## 36.10 Časté chyby
 
-### "Chybí kód finančního úřadu"
+### 36.10.1 "Chybí kód finančního úřadu"
 → Doplň v Nastavení → Daňové nastavení.
 
-### "Faktura nemá VAT klasifikační kód"
+### 36.10.2 "Faktura nemá VAT klasifikační kód"
 → Auto-default by ho měl přiřadit. Pokud ne, znamená to, že VAT sazba na řádku nemá v `vat_classifications` defaultní kód. Buď přidej kód v Codebooks, nebo vyber manual v editoru.
 
-### "DIČ klienta není ve formátu CZxxxxxxxx"
+### 36.10.3 "DIČ klienta není ve formátu CZxxxxxxxx"
 → Pro KH XML potřebuje DIČ být čisté číslo (bez prefixu CZ). Systém to ořezává automaticky. Pokud klient **nemá DIČ**, doklad se zařadí do **sumační sekce A.5 (resp. B.3)** bez ohledu na částku — do A.4/B.2, kde je DIČ povinné, se nedostane. Pokud doklad do A.4/B.2 patřit má (protistrana je plátce), doplň jí DIČ.
 
-### "Dodatečné přiznání vyžaduje datum zjištění důvodů"
+### 36.10.4 "Dodatečné přiznání vyžaduje datum zjištění důvodů"
 → U typu podání **Dodatečné** vyplň pole **Datum zjištění** — bez něj systém rozdíl
 proti poslední známé dani nedokáže spočítat (§ 141 daňového řádu vyžaduje toto datum
 jako součást přiznání).
 
-### "Pro dané období neexistuje dřívější řádné/opravné přiznání"
+### 36.10.5 "Pro dané období neexistuje dřívější řádné/opravné přiznání"
 → Dodatečné přiznání se vždy počítá jako **rozdíl** proti poslední známé dani — pokud
 za dané období ještě nebylo podáno žádné řádné ani opravné přiznání, nemá se vůči
 čemu rozdíl počítat. Nejdřív podej za dané období **řádné** (nebo opravné) přiznání,
 teprve pak lze dodatečně opravovat.
 
-### "Opravné dodatečné přiznání (druh E) zatím není podporováno"
+### 36.10.6 "Opravné dodatečné přiznání (druh E) zatím není podporováno"
 → Volba **Dodatečné/opravné** se v selectoru schválně vůbec nenabízí (viz [Typ podání
 — DPH přiznání](#typ-podani-radne-opravne-dodatecne)) — jde o právně složitější
 případ (nahrazuje předchozí dodatečné přiznání, ne že by k němu jen přičítal rozdíl).
 Sestav ho ručně ve spolupráci s daňovým poradcem.
 
-## Podpora pro daňového poradce
+## 36.11 Podpora pro daňového poradce
 
 Pokud XML zpracovává externí účetní:
 1. Vyplň v Nastavení **Sestavitel přiznání** (jméno, funkce, telefon, email)

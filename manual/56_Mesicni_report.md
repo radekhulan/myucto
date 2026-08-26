@@ -32,7 +32,7 @@ uloží se až jako součást záznamu o skutečném odeslání.
 
 ## 56.2 Jak se jednotlivé části počítají
 
-### Výsledovka za měsíc
+### 56.2.1 Výsledovka za měsíc
 
 Zdroj je stejná služba jako samostatná Výsledovka:
 
@@ -50,14 +50,14 @@ KPI **Výsledek hospodaření YTD** je kontrolní hodnota
 `income_statement_ytd.checks.profit_current`, nikoli prostý součet libovolně
 zobrazených detailních řádků na frontendu.
 
-### Rozvaha
+### 56.2.2 Rozvaha
 
 Rozvaha se sestaví ke stejnému rozhodnému datu a stejnou službou jako
 samostatná Rozvaha. PDF obsahuje aktiva, pasiva a kontrolu, zda se čistá aktiva
 rovnají pasivům. Webový náhled zobrazuje hlavně KPI a měsíční výsledovku;
 plná rozvaha je součástí staženého nebo odeslaného PDF.
 
-### Pohledávky a závazky po splatnosti
+### 56.2.3 Pohledávky a závazky po splatnosti
 
 Zdroj je historické saldokonto ke dni konce reportu:
 
@@ -69,7 +69,7 @@ dní po splatnosti, seřazených od nejdelšího prodlení. Částka je zbývaj�
 zůstatek v CZK. KPI v náhledu ukazuje počet položek v tomto omezeném top
 seznamu, nikoli počet všech otevřených položek firmy.
 
-### DPH
+### 56.2.4 DPH
 
 U neplátce se sekce nezobrazí jako daň k úhradě. U plátce server sestaví
 read-only náhled přiznání k DPH pro zvolený rok a měsíc a převezme:
@@ -83,7 +83,7 @@ sekci nepodaří sestavit, zbytek měsíčního reportu zůstane dostupný a DPH
 vynechá. Chybějící DPH v reportu proto není důkaz, že firma nemá daňovou
 povinnost; ověřte samostatné výkazy.
 
-### Nadcházející termíny
+### 56.2.5 Nadcházející termíny
 
 PDF přebírá nejvýše osm nadcházejících předpisů ze služby daňových záloh.
 Uvádí typ, datum, částku, stav a informaci, zda je termín po splatnosti.

@@ -1,14 +1,14 @@
 # Docházka a směny
 
-## Účel
+## 60.1 Účel
 
 Docházka a směny určují plánovaný a skutečně odpracovaný čas. Slouží jako podklad pro mzdu, příplatky, překážky a kontrolu fondu pracovní doby.
 
-## Předpoklady a oprávnění
+## 60.2 Předpoklady a oprávnění
 
 Zaměstnanec musí mít aktivní vztah a přiřazený pracovní režim. Uživatel potřebuje mzdové oprávnění a schválený podklad docházky; samotná přítomnost záznamu nepotvrzuje jeho správnost.
 
-## Krokový postup
+## 60.3 Krokový postup
 
 1. Otevřete **Mzdy → Docházka a směny** a zvolte měsíc.
 2. Zkontrolujte pracovní kalendář, úvazek a naplánované směny.
@@ -16,7 +16,7 @@ Zaměstnanec musí mít aktivní vztah a přiřazený pracovní režim. Uživate
 4. Porovnejte docházku s absencemi, svátky a změnami vztahu.
 5. Vyřešte varování a teprve potom předejte období do mzdového běhu.
 
-## Import docházky z CSV nebo XLSX
+## 60.4 Import docházky z CSV nebo XLSX
 
 Tlačítko **Import** slouží pro docházkové systémy i vlastní tabulku. CSV a XLSX
 používají stejnou datovou větu, stejnou kontrolu a stejný výsledek. Import je
@@ -46,7 +46,7 @@ zopakovat požadavek po přerušení spojení, aniž vznikne dvojí docházka. P
 vždy probíhá jen uvnitř právě zvolené firmy a import vyžaduje přihlášenou relaci
 s oprávněním zapisovat docházku.
 
-### Bezpečnost a limity XLSX
+### 60.4.1 Bezpečnost a limity XLSX
 
 Soubor smí mít nejvýše 5 MB, 10 000 datových řádků a 24 sloupců. U XLSX se
 zpracuje pouze první list. Aplikace přijímá jen statické hodnoty: vzorec,
@@ -61,30 +61,30 @@ postup lze použít pro deset i pět set zaměstnanců. Pro rozsáhlý soubor ne
 zkontrolujte souhrn platných, chybných a duplicitních řádků a teprve potom
 potvrďte zápis.
 
-## Stavy
+## 60.5 Stavy
 
 Období může být rozpracované, úplné nebo blokované nesouladem. Po převzetí do otevřeného běhu se změna projeví až novým výpočtem. Uzavřené období neupravujte bez opravy běhu.
 
-## Kontroly a bezpečnost
+## 60.6 Kontroly a bezpečnost
 
 Kontrolujte fond, odpočinek, překryv směn, práci ve svátek, přesčas a návaznost na úvazek. Záznamy docházky jsou osobní údaje; exportujte je jen oprávněným osobám a v nezbytném rozsahu.
 
-## Časté chyby
+## 60.7 Časté chyby
 
 - Plánovaná směna považovaná za skutečně odpracovanou dobu.
 - Dvojí započtení hodin při překryvu směny a absence.
 - Zadání hodin k jinému souběžnému vztahu.
 - Oprava docházky bez přepočtu otevřeného běhu.
 
-## Návaznosti
+## 60.8 Návaznosti
 
 Nepřítomnosti patří do [absencí](59_Absence_a_dovolena.md), jednorázové odměny do [rychlého vstupu](62_Rychly_mesicni_vstup.md) a výsledný čas do [mzdových běhů](63_Mzdove_behy.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 60.9 Podrobný pracovní postup a kontroly
 
-### Limity práce přesčas
+### 60.9.1 Limity práce přesčas
 
 V **Mzdy → Docházka a směny** aplikace u každého pracovního vztahu hlídá limity
 práce přesčas podle § 93 zákoníku práce a stav ukazuje přímo u zaměstnance:
@@ -112,7 +112,7 @@ evidované dohody se proti nim poměřuje všechen přesčas.
 > zákonný rozsah, proto se nález eviduje jako **upozornění** u revize mzdového
 > běhu a schválení ani výplatu nezastaví.
 
-### Náhradní volno za přesčas
+### 60.9.2 Náhradní volno za přesčas
 
 Náhradní volno se eviduje na dvou místech, protože každý zápis odpovídá na
 jinou otázku a váže se k jinému dni:

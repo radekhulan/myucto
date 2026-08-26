@@ -17,7 +17,7 @@ Co kniha jízd ze zákona musí evidovat:
 - **u každé jízdy** — datum, čas odjezdu/příjezdu, odkud → kam, **konkrétní účel**
   cesty (samotné slovo „práce" nestačí) a ujeté kilometry / stav tachometru.
 
-## Automobily
+## 32.1 Automobily
 
 V záložce **Automobily** vedeš číselník vozidel. U auta zadáš **SPZ** (povinné),
 volitelně značku, model, VIN, **druh paliva** a **počáteční stav tachometru** (k datu
@@ -29,13 +29,13 @@ určuje, na které vozidlo se nové záznamy a tankování navážou automaticky
 Auto, které má navázané jízdy nebo tankování, nelze smazat (jen archivovat při
 úpravě) — historie zůstane zachována.
 
-## Kniha jízd — jízdy
+## 32.2 Kniha jízd — jízdy
 
 Záložka **Kniha jízd** je seznam jednotlivých jízd, seskupený **po měsících**
 s měsíčním součtem ujetých km. Nahoře filtruješ podle auta, roku a měsíce
 (výchozí = vše); dlouhý seznam se stránkuje.
 
-### Nový záznam
+### 32.2.1 Nový záznam
 
 Tlačítko **Nový záznam** otevře formulář jízdy:
 
@@ -47,7 +47,7 @@ Tlačítko **Nový záznam** otevře formulář jízdy:
 - Pole **Účel cesty** **našeptává** dříve zadané účely — stačí začít psát.
 - **Kategorie cesty** (služební / soukromá) viz níže.
 
-### Import z CSV / XLSX
+### 32.2.2 Import z CSV / XLSX
 
 Tlačítko **Import** nahraje knihu jízd z **CSV nebo XLSX**. Hlavička určuje
 sloupce (pořadí je libovolné), podporované názvy:
@@ -66,13 +66,13 @@ Tlačítkem **Stáhnout vzor** získáš prázdnou šablonu CSV. Po importu se z
 přehled (kolik jízd vzniklo, kolik řádků selhalo a proč) i seznam nově
 založených kategorií.
 
-### Export
+### 32.2.3 Export
 
 Tlačítkem **Export** vyexportuješ jízdy za **zvolené období** (datum od/do) a
 auto do **XLSX** nebo **PDF**. Výstup je seskupený po vozidlech, s mezisoučty
 a celkovým počtem km — vhodné jako příloha k daňové evidenci.
 
-## Tankování a nabíjení
+## 32.3 Tankování a nabíjení
 
 Tankování (u elektromobilů **nabíjení**) můžeš vést **ručně**, nebo je nechat
 **vytěžit z přijatých faktur** od čerpacích a nabíjecích stanic. Seznam je opět
@@ -83,7 +83,7 @@ Tankování je čistě **evidenční vrstva** nad přijatou fakturou — náklad
 sama [přijatá faktura](23_Prijate_faktury.md), tankování ho jen rozpadá na
 jednotlivá čerpání/nabití a auta. Do DPH ani [nákladů](13_Naklady.md) nevstupuje dvakrát.
 
-### Ruční záznam
+### 32.3.1 Ruční záznam
 
 Tlačítko **Nové tankování** otevře formulář s datem, množstvím, částkou a místem.
 U množství je **přepínač jednotky l / kWh** — automaticky se předvyplní podle
@@ -92,7 +92,7 @@ přepínač necháváš na sobě: tankování benzínu zadáš v litrech, dobíj
 Pole **Tachometr** se dá nechat prázdné — aplikace doplní *orientační* stav z knihy
 jízd (zobrazí se jako `≈`), pro přesnost ho ale raději vyplň.
 
-### Načíst z faktur od stanic
+### 32.3.2 Načíst z faktur od stanic
 
 1. V detailu dodavatele zaškrtni **Čerpací / nabíjecí stanice** (sekce dodavatele).
    Tím se jeho faktury začnou nabízet ke zpracování — funguje jak pro benzínky,
@@ -108,7 +108,7 @@ Tlačítko **Vytěžit historii** projede zpětně **jen dosud nezpracované** f
 od stanic a hromadně z nich vytvoří záznamy. Každá faktura se zpracuje jen
 jednou, opakované spuštění nic nezdvojí.
 
-### Detailní výpisy (Axigon a další)
+### 32.3.3 Detailní výpisy (Axigon a další)
 
 U dokladů s detailním rozpisem (např. **Axigon**) se aplikace pokusí dohledat
 **jednotlivá tankování** včetně data, času, druhu paliva a ceny. Děje se to
@@ -120,14 +120,14 @@ souhrnný záznam s datem vystavení, popisem a částkou z faktury.
 Architektura parserů je rozšiřitelná — další karetní společnost s jiným formátem
 výpisu lze doplnit bez zásahu do zbytku.
 
-## Kategorie cest
+## 32.4 Kategorie cest
 
 Záložka **Kategorie cest** je číselník pro rozlišení účelu jízdy. Výchozí jsou
 **Služební** a **Soukromá**; příznak *soukromá* označuje daňově neuznatelné jízdy.
 Kategorie můžeš přidávat, upravovat a archivovat; kategorii s navázanými jízdami
 nelze smazat. Nové kategorie vznikají i automaticky při importu (viz výše).
 
-## Souhrny
+## 32.5 Souhrny
 
 Záložka **Souhrny** dává **roční daňový/účetní přehled** počítaný z jízd a
 tankování/nabíjení — **per vozidlo**: ujeté km (služební / soukromé / nezařazené)
@@ -143,7 +143,7 @@ a informativně srovnává s **paušálem na dopravu** (5 000 / 4 000 Kč/měs).
 přehledem jsou grafy najetých km po měsících a kumulativně; vše vyexportuješ do
 **XLSX** nebo **PDF** jako přílohu k daňové evidenci.
 
-## Tipy
+## 32.6 Tipy
 
 - **Tachometr na přelomu roku** — stav k 31. 12. / 1. 1. doložíš poslední jízdou
   v prosinci a první v lednu; díky předvyplnění tachometru na sebe navazují samy.

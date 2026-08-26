@@ -126,7 +126,7 @@ Každý dodavatel může mít více IMAP účtů, typicky jeden pro každou bank
 | E-mail přeposílatele | Volitelné omezení, od koho smí přeposlaná avíza chodit — adresa (`jan@firma.cz`) nebo doména (`firma.cz`); prázdné = libovolný |
 | Po úspěchu | Co udělat se zpracovanou zprávou |
 
-### Ověření autenticity e-mailu (DKIM/DMARC)
+### 29.3.1 Ověření autenticity e-mailu (DKIM/DMARC)
 
 Odesílatel e-mailu se dá podvrhnout, takže samotná adresa v poli *Od* nic
 negarantuje. **Vyžadovat ověření autenticity** je proto u nových účtů zapnuté:
@@ -219,7 +219,7 @@ U regex provideru nastavuješ:
 | Regex těla | Volitelný pattern, který musí být v těle e-mailu |
 | Vytěžená pole | Regexy pro VS, částku, měnu, datum, cílový účet atd. |
 
-### Odesílatel je povinný
+### 29.4.1 Odesílatel je povinný
 
 Pole **Odesílatel** vyplň vždy. Regex provider s prázdným odesílatelem
 **nezpracuje nic** — prázdná hodnota neznamená „přijmout od kohokoli". Vzory
@@ -349,7 +349,7 @@ Smazání záznamu zde nemaže transakci ani fakturu. Maže jen deduplikační z
 takže je možné stejný e-mail znovu zpracovat při dalším scanu. Používej to jen
 jako emergency/debug akci.
 
-### Když k avízu dorazí GPC výpis
+### 29.6.1 Když k avízu dorazí GPC výpis
 
 Zdroj pravdy je GPC. Když se importuje transakce, která už předtím přišla
 avízem a je spárovaná, aplikace **párování převezme z avíza na GPC transakci**

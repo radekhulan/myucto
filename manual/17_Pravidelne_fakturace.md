@@ -70,7 +70,7 @@ Tady nastavíš metadata, která se zkopírují na každou vygenerovanou fakturu
       31.5.2026. Měsíc v popiscích položek se synchronizuje k DUZP, takže
       „Hosting 05/2026" zůstane „05/2026" i když je vystavena 1.6.
 
-### 17.2.2a Sekce „Poznámky"
+### 17.2.3 17.2.2a Sekce „Poznámky"
 
 Stejná dvě pole jako u běžné faktury — **Poznámka nad položkami** a
 **Poznámka pod položkami**. Text se 1:1 přenáší na každou vygenerovanou
@@ -81,7 +81,7 @@ sdělení pro zákazníka. Obě pole podporují **placeholdery období** (viz
 datu vystavení), takže např. „Vyúčtování za období {BOM} – {EOM}" se na
 faktuře propíše jako konkrétní rozsah měsíce.
 
-### 17.2.3 Položky
+### 17.2.4 Položky
 
 Položky šablony se 1:1 kopírují na každou vygenerovanou fakturu (popis, mn.,
 cena/j, sazba DPH). Sazba se bere podle vybraného `vat_rate_id` ze šablony.
@@ -124,7 +124,7 @@ snapshotu uložit bez jeho výslovného obnovení.
 
 #### Režim OSS na položce šablony
 
-Má-li firma [zapnutý režim OSS](40_OSS.md#4021-zapnuti-rezimu-a-platnost-registrace),
+Má-li firma [zapnutý režim OSS](40_OSS.md#4031-zapnuti-rezimu-a-platnost-registrace),
 je u každého řádku šablony zaškrtávátko **OSS**. Po zaškrtnutí se pod řádkem otevře
 proužek se **státem spotřeby**, **typem sazby** a **typem plnění** — přesně jako na
 řádku faktury. Sazba DPH pak nabízí i sazby cizích států, aby OSS řádek mohl nést
@@ -147,7 +147,7 @@ vlastnosti konkrétního dokladu k jeho datu plnění a dopočítá je až gener
 > a povinně dostane příznak **k ručnímu posouzení** — přeřazení proti rozhodnutí
 > člověka nesmí být tiché. Bez toho by řádek nespadl do žádného přiznání: z OSS
 > podání by ho vyřadila platnost registrace, z tuzemského přiznání OSS příznak.
-> Podrobně [§ 40.3.5](40_OSS.md#4035-rozdily-mezi-kanaly).
+> Podrobně [§ 40.3.5](40_OSS.md#4045-rozdily-mezi-kanaly).
 
 **Placeholdery období** — do popisu položky (a do poznámek nad/pod
 položkami šablony) lze vložit tokeny, které se při **každém vygenerování** faktury
@@ -190,7 +190,7 @@ Další ukázky: `sezóna {YY}/{YY+1}` → „sezóna 26/27", `servis {Q}Q/{YYYY
 > volbě „Synchronizovat měsíc" níže (lze kombinovat; obojí míří na stejné
 > referenční datum).
 
-### 17.2.4 Sekce „Automatizace"
+### 17.2.5 Sekce „Automatizace"
 
 - **Synchronizovat měsíc v popiscích položek s DUZP** — pokud je v popisu
   vzorec `M/YYYY` (např. „Hosting 03/2026"), automaticky se **nahradí**
@@ -210,7 +210,7 @@ Další ukázky: `sezóna {YY}/{YY+1}` → „sezóna 26/27", `servis {Q}Q/{YYYY
 - **Po vystavení rovnou odeslat klientovi e-mailem** — automatický send PDF
   + e-mailu na klienta a fakturační e-maily zakázky. Vyžaduje předchozí
   volbu (nelze odeslat draft).
-- **Kdy vytvořit koncept** — viz [§ 17.2.5](#1725-otevreny-koncept-prubezny-vykaz-vicepraci).
+- **Kdy vytvořit koncept** — viz [§ 17.2.5](#1726-otevreny-koncept-prubezny-vykaz-vicepraci).
 - **Připomenout dní před vystavením** — jen u režimu „Na začátku období";
   počet dní předem, kdy ti přijde e-mailová připomínka doplnit vícepráce
   (0 = neposílat).
@@ -218,7 +218,7 @@ Další ukázky: `sezóna {YY}/{YY+1}` → „sezóna 26/27", `servis {Q}Q/{YYYY
 **Výchozí nastavení šablony** má obojí (vystavit + odeslat) zapnuté a režim
 konceptu „Až při vystavení" → plně automatická pravidelná fakturace.
 
-### 17.2.5 Otevřený koncept (průběžný výkaz víceprací)
+### 17.2.6 Otevřený koncept (průběžný výkaz víceprací)
 
 Řeší fakturaci typu **fixní SLA + nepravidelné vícepráce**: část faktury je
 stálý paušál, ke kterému během měsíce přibývá proměnný seznam víceprací.

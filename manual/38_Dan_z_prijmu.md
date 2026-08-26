@@ -16,14 +16,14 @@ a stáhneš **validované XML pro EPO** (portál Moje daně):
 > mění — před podáním hodnoty ověřte a případně konzultujte s daňovým poradcem. Vygenerované
 > XML se ověřuje proti oficiálnímu **XSD schématu** finanční správy a archivuje.
 
-## Workflow — 4 karty
+## 38.1 Workflow — 4 karty
 
 Stránka vede od podkladů k exportu ve čtyřech kartách. Rozpracované přiznání se ukládá
 (stav **Rozpracováno**), po dokončení jde **Uzamknout (finální)** — tím se zmrazí snímek
 vypočtených řádků. Uzamčené přiznání lze zase **Odemknout**. Souběžnou editaci chrání
 verzování (při konfliktu se stránka znovu načte).
 
-### 1. Podklady
+### 38.1.1 1. Podklady
 
 Automaticky načtená data ze systému:
 
@@ -41,7 +41,7 @@ Automaticky načtená data ze systému:
   ZTP/P a měsíční režim OSVČ se spravují přímo v daňovém profilu. U dítěte se
   eviduje identita, pořadí, oprávněné měsíce a ZTP/P; neúplný nárok finalizaci zablokuje.
 
-### 2. Úpravy a odpočty
+### 38.1.2 2. Úpravy a odpočty
 
 Ruční položky, které systém nezná a které **přežijí mezi sezeními**:
 
@@ -64,13 +64,13 @@ rok vzniku + 5). Ztráta vzniká **automaticky** při finalizaci přiznání se 
 uplatnění (při vrácení přiznání do rozpracovaného stavu se automaticky uvolní). Poplatník
 uplatňující ztrátu přikládá k přiznání **samostatnou přílohu podle § 34 odst. 1**.
 
-### 3. Náhled přiznání
+### 38.1.3 3. Náhled přiznání
 
 Tabulka řádků formuláře (číslo řádku, popis, hodnota, zdroj) + **celková daň**,
 **doplatek/přeplatek** a u DPPO **předpis záloh na další období** (§ 38a, prahy 30/150 tis. Kč).
 Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary, daňová ztráta k převodu…).
 
-### 4. Export
+### 38.1.4 4. Export
 
 - **Náhled XML** — pracovní XML rozpracovaného přiznání; nearchivuje se a není určeno
   k podání.
@@ -93,7 +93,7 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   Oba přehledy vycházejí ze stejného základu § 7, ale používají vlastní sazby, minima
   a pravidla. Shodný zdroj proto neznamená shodný vyměřovací základ ani částku.
 
-## Jak se počítá DPFO
+## 38.2 Jak se počítá DPFO
 
 Výpočet odděluje dílčí základy § 6, § 7, § 8, § 9 a položkové § 10. Výdaj u každého
 druhu § 10 je nejvýše jeho příjem. Záporný úhrn § 7 až § 10 může vytvořit daňovou
@@ -120,7 +120,7 @@ selže, náhled může zobrazit nouzový fakturační součet, ale finalizace je
 U podvojného účetnictví FO vychází § 7 z účtovaných výnosů a nákladů; rozdíl účetních
 a daňových odpisů a neobvyklé mimoúčetní úpravy je nutné prověřit ručně.
 
-## Jak se počítá DPPO
+## 38.3 Jak se počítá DPPO
 
 Výchozí řádek 10 je výsledek hospodaření z účtů 6xx minus 5xx bez daně z příjmů a bez
 technických uzávěrkových zápisů. Základ upravují nedaňové náklady, ruční položky § 23,
@@ -140,7 +140,7 @@ kurzové rozdíly, rezervy nebo dohadné položky. Je pouze projekcí: do DPPO v
 řádně zaúčtované položky a schválené ruční daňové úpravy. Účetní závěrku dokonči podle
 [kapitoly Účetní závěrka](87_Uzaverka.md).
 
-## Zálohy na daň a pojistné
+## 38.4 Zálohy na daň a pojistné
 
 V kartě **Export** je pod přehledy panel **Zálohy na daň a pojistné**. Z **finalizovaného
 řádného** přiznání se automaticky (nebo tlačítkem **Vygenerovat předpisy**) založí předpisy
@@ -169,7 +169,7 @@ Zálohy se **nepárují na doklady**, jen na bankovní pohyby — proto je nutn�
 
 > 🛈 QR platba záloh není součástí — předpis slouží jako plánovací a párovací pomůcka.
 
-## Předfinalizační kontrola („závěrková kontrola účetní")
+## 38.5 Předfinalizační kontrola („závěrková kontrola účetní")
 
 Než přiznání **finalizuješ**, systém nad kartami zobrazí panel **Předfinalizační kontrola** — sadu
 kontrol, které dělá zkušená účetní ručně, aby se do XML nedostala tichá chyba. Každá kontrola má
@@ -196,7 +196,7 @@ neúplné osoby, činnosti nebo měsíce OSVČ. Výsledek kontrol se ukládá do
 snapshotu. Informativní kontroly a upozornění, která neovlivňují zákonnou úplnost,
 zůstávají poradní.
 
-## Daňová (ne)uznatelnost nákladů (§ 25) — DPPO
+## 38.6 Daňová (ne)uznatelnost nákladů (§ 25) — DPPO
 
 Nedaňové náklady se u DPPO poznají podle příznaku **Daňová uznatelnost** na účtu v
 [účtovém rozvrhu](81_Ucetni_osnova.md). Šablona rovnou označí jako nedaňové syntetiky
@@ -206,7 +206,7 @@ položky). Analytiky **dědí** příznak ze syntetiky; ručně jej lze změnit.
 daň z příjmů (59x) se neflagují — řeší se vlastní mechanikou (rozdíl odpisů, resp. vyloučení
 z výsledku hospodaření).
 
-## Příjem mimo základ daně z příjmů (osvobozený / přefakturace)
+## 38.7 Příjem mimo základ daně z příjmů (osvobozený / přefakturace)
 
 Některé **vydané** doklady nejsou základem daně z příjmů — typicky:
 
@@ -220,7 +220,7 @@ U takové faktury zaškrtni v editoru **„Osvobozeno od daně z příjmů"** (v
 Příznak **nezahrne částku do základu daně z příjmů** (výkaz i optimalizátor; osvobozená část
 se ukáže odděleně) a **nedotkne se DPH** — doklad zůstává v přiznání DPH i v obratu beze změny.
 
-### Souvislost se sociálním a zdravotním pojištěním (OSVČ)
+### 38.7.1 Souvislost se sociálním a zdravotním pojištěním (OSVČ)
 
 U OSVČ se **vyměřovací základ** pojistného odvozuje z **daňového základu § 7**. Když částka
 nevstoupí do základu daně z příjmů, zmizí i z vyměřovacího základu SP a ZP — jeden příznak
@@ -236,7 +236,7 @@ sedí na daň i na pojistné.
 > netýká; příznak tam ovlivní jen základ DPPO. Vedlejší činnost pod **rozhodnou částkou**
 > neplatí sociální pojistné vůbec.
 
-## Opravné a dodatečné přiznání (§ 141 DŘ)
+## 38.8 Opravné a dodatečné přiznání (§ 141 DŘ)
 
 Přepínačem **Řádné / Opravné / Dodatečné** nahoře zvolíš druh přiznání; každý druh je samostatný
 záznam za totéž období.
@@ -253,7 +253,7 @@ Systém ji u nového dodatečného předvyplní (lze ručně přepsat); rozdíl 
 promítne do V. oddílu formuláře (u DPPO řádky iv1/iv2/iv3). Dodatečné přiznání č. N tedy vždy
 navazuje na to předchozí, ne na řádné.
 
-### Kontrola proti skutečně podanému DPPO
+### 38.8.1 Kontrola proti skutečně podanému DPPO
 
 U DPPO lze v kartě Export nahrát XML DPPDP9, které bylo skutečně podáno účetní nebo
 upraveno na EPO. Aplikace nejprve zkontroluje typ formuláře a rok a potom porovná
@@ -262,7 +262,7 @@ v podaném souboru. Jde o read-only kontrolu: nahrání nic nezaúčtuje, nepře
 a soubor samo neoznačí jako přijatý finanční správou. Importní rekonciliace
 skutečně podaného DPFO, DPHDP3 a KH není k dispozici.
 
-## Roční uzávěrka daňové evidence a snapshot DPFO
+## 38.9 Roční uzávěrka daňové evidence a snapshot DPFO
 
 DPFO ze skutečných výdajů nelze finalizovat bez dokončené roční uzávěrky podle § 7b.
 Kontrolní seznam pokrývá deník, nepeněžní operace, majetek, zásoby, pohledávky,
@@ -280,7 +280,7 @@ Finální DPFO uloží výpočet, podklady, kontroly, seznam zdrojových pohybů
 kontrolní otisky. Oprava podkladů vyžaduje znovu otevřít uzávěrku i přiznání a vytvořit
 nový snapshot. Podrobnosti jsou v [Daňové evidenci](90_Danova_evidence.md#9083-rocni-uzaverka-danove-evidence).
 
-## Pojistné OSVČ — důležitá omezení
+## 38.10 Pojistné OSVČ — důležitá omezení
 
 Měsíční profil eviduje aktivní, hlavní, vedlejší a přerušenou činnost a příznak, zda
 se v daném měsíci uplatní minimum zdravotního pojištění. Tato data se používají při
@@ -296,13 +296,13 @@ nebo jde o novou OSVČ či jiný zvláštní režim. Pole `state_insured`, `empl
 ve všech zákonných kombinacích. Zdravotní přehled je pouze PDF pomůcka bez jednotného
 podávacího XML. V těchto případech přepiš údaje do formuláře instituce a ověř je.
 
-## Termíny podání
+## 38.11 Termíny podání
 
 - **Daň z příjmů FO (bez poradce):** **1. 4.** následujícího roku · **elektronicky / s poradcem:** **2. 5.**, resp. **1. 7.**
 - **Daň z příjmů PO:** dle účetního období (řádně 1. 4., s auditem/poradcem 1. 7.)
 - **Přehledy pojistného OSVČ:** do **1 měsíce** po lhůtě pro daňové přiznání.
 
-## Rozsah a co ještě není
+## 38.12 Rozsah a co ještě není
 
 Pokrývá **řádné, opravné i dodatečné** přiznání DPPO (s.r.o./a.s., kalendářní rok i
 **hospodářský rok**, česká rezidence) a DPFO (OSVČ § 7 automaticky; § 6 z potvrzení

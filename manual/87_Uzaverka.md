@@ -34,7 +34,7 @@ Systém validuje, že:
 - období se **nepřekrývá** s žádným existujícím obdobím firmy (souvislá řada let bez
   mezer i překryvů je nutná pro navazující uzávěrky a výkazy).
 
-### Stavy období
+### 87.1.1 Stavy období
 
 Každé období prochází stavovým automatem s pěti stavy, zobrazenými jako barevný
 štítek:
@@ -342,7 +342,7 @@ inventuru, ocenění, neidentifikované doklady a posouzení mank a přebytků.
 
 ## 87.3 Uzavření knih a otevření nového roku
 
-### Krok — Uzavření knih
+### 87.3.1 Krok — Uzavření knih
 
 Tlačítko **„Uzavřít knihy"** (jen administrátor) je aktivní teprve když je období ve
 stavu Uzavírá se, kontroly z kroku 1 neobsahují chyby a backend potvrdí, že je
@@ -359,7 +359,7 @@ a odkaz **„Zobrazit uzávěrkové zápisy v deníku"**. Dokud závěrka není 
 administrátor může krok tlačítkem **„Vzít zpět uzavření knih"** zrušit — uzávěrkové
 zápisy se smažou (opět s auditní stopou).
 
-### Krok — Otevření nového roku
+### 87.3.2 Krok — Otevření nového roku
 
 Tlačítko **„Otevřít nový rok"** (jen administrátor) je aktivní až po dokončení kroku
 Uzavření knih. Zaúčtuje otevírací zápis k **1. dni následujícího období** (to se
@@ -463,7 +463,7 @@ vystavený v MyÚčtu pak bude `26HP00011` a řada zůstane spojitá. Čítač l
 jedinečnost čísla ale hlídá databáze, takže kolize s už existujícím dokladem skončí
 chybou uložení, ne tichým duplikátem.
 
-### Nastavení uzávěrky a výkazů
+### 87.5.1 Nastavení uzávěrky a výkazů
 
 Tlačítkem **„Nastavení uzávěrky"** na stránce Účetní období otevřeš firemní výchozí
 hodnoty:

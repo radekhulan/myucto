@@ -10,7 +10,7 @@ Na stránce najdete pět záložek:
 - **Příjemci** — ID datových schránek institucí,
 - **Výzvy k odstranění vad** — evidence výzev a lhůt navázaných na podání.
 
-## Dvě oddělené cesty
+## 93.1 Dvě oddělené cesty
 
 MyÚčto rozlišuje odesílání a načítání doručené pošty:
 
@@ -19,29 +19,29 @@ MyÚčto rozlišuje odesílání a načítání doručené pošty:
 
 Globální registraci odesílací brány spravuje provozovatel systému v kapitole [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md). Firma její certifikát ani tajné údaje nevidí.
 
-## Přístup pro ruční načtení doručené pošty
+## 93.2 Přístup pro ruční načtení doručené pošty
 
-### Mobilní klíč eGovernmentu
+### 93.2.1 Mobilní klíč eGovernmentu
 
 Zadejte uživatelské jméno datové schránky a komunikační nebo aplikační heslo určené pro tento způsob přihlášení. Po spuštění přihlášení potvrďte požadavek v aplikaci Mobilní klíč eGovernmentu.
 
 Přístup lze uložit šifrovaně pro kombinaci **firma + uživatel + prostředí**. Uložený profil jedné účetní není dostupný jiné účetní ani jiné firmě. Profil můžete kdykoli odstranit.
 
-### Uživatelské jméno a heslo
+### 93.2.2 Uživatelské jméno a heslo
 
 Heslo server přijme pouze pro právě spuštěné načtení. Požadavek proběhne synchronně a heslo se neukládá do databáze ani do nastavení firmy.
 
-### Uživatelské jméno, heslo a SMS kód
+### 93.2.3 Uživatelské jméno, heslo a SMS kód
 
 První krok zahájí krátkodobý jednorázový proces. Heslo zůstane po omezenou dobu šifrované na serveru; prohlížeč dostane jen náhodný neprůhledný token. Po zadání SMS kódu se proces atomicky spotřebuje. Má omezený počet pokusů a po vypršení jej musíte zahájit znovu. SMS kód se neukládá.
 
-### Systémový certifikát firmy
+### 93.2.4 Systémový certifikát firmy
 
 Nahrajte soubor **PFX/P12** obsahující klientský certifikát i odpovídající soukromý klíč. MyÚčto soubor při uložení ověří a odmítne balíček bez soukromého klíče. Certifikát a jeho heslo ukládá šifrovaně pro vybranou firmu a prostředí.
 
 Technická dostupnost přihlašovací metody sama o sobě nepotvrzuje, že ji smíte použít pro konkrétní schránku nebo úkon. Oprávnění a interní pravidla organizace si ověřte u správce datové schránky.
 
-## Ruční načtení příchozích zpráv
+## 93.3 Ruční načtení příchozích zpráv
 
 Příchozí zprávy se nenačítají automaticky ani na pozadí. Postupujte takto:
 
@@ -55,11 +55,11 @@ Server při jednom načtení projde dostupné stránky až do bezpečného limit
 
 Kontrola stavu přihlášení Mobilním klíčem sleduje jen právě zahájený požadavek. Nejde o automatické sledování schránky.
 
-## Odchozí podání
+## 93.4 Odchozí podání
 
 Podání vytvořené v MyÚčtu nejprve získá stav **Připraveno**. Tento stav neznamená, že bylo odesláno.
 
-### Odeslání přes bránu ISDS
+### 93.4.1 Odeslání přes bránu ISDS
 
 Pokud je pro zvolené prostředí aktivní brána:
 
@@ -70,7 +70,7 @@ Pokud je pro zvolené prostředí aktivní brána:
 
 Samotné přesměrování ani návrat na callback není potvrzením odeslání. Pokud je výsledek neurčitý, zprávu neposílejte znovu, dokud neověříte stav v datové schránce.
 
-### Ruční odeslání
+### 93.4.2 Ruční odeslání
 
 Když brána není dostupná, zůstává ruční postup:
 
@@ -81,13 +81,13 @@ Když brána není dostupná, zůstává ruční postup:
 
 MyÚčto vede zvlášť stav dopravy datové zprávy a věcný stav formuláře u cílové instituce. Doručená datová zpráva proto ještě neznamená, že instituce podání přijala bez výhrad. Nahraná doručenka se eviduje jako podklad; aplikace nezaručuje kryptografické ověření jejího podpisu.
 
-## Příjemci a výzvy
+## 93.5 Příjemci a výzvy
 
 V záložce **Příjemci** zkontrolujte ID datové schránky cílové instituce. Výchozí adresář zdravotních pojišťoven lze přepsat pro konkrétní firmu; jiné instituce doplňte podle jejich aktuálních údajů. Před každým odesláním příjemce ověřte.
 
 Výzvu k odstranění vad můžete založit z příchozí zprávy nebo ručně. Zapište vazbu na původní podání, datum doručení, lhůtu a výsledek opravy. Evidence výzvy sama žádnou odpověď neodešle.
 
-## Související kapitoly
+## 93.6 Související kapitoly
 
 - [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md) — globální registrace a provoz brány,
 - [Podání a hlášení](68_Podani_a_hlaseni.md) — mzdové formuláře, jejich stavy a opravy,

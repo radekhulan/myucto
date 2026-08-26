@@ -1,14 +1,14 @@
 # Rychlý měsíční vstup
 
-## Účel
+## 62.1 Účel
 
 Rychlý měsíční vstup umožňuje zadat jednorázové částky a jednotky pro více zaměstnanců v jednom období bez otevírání každého vztahu zvlášť.
 
-## Předpoklady a oprávnění
+## 62.2 Předpoklady a oprávnění
 
 Musí být vybraný správný měsíc, existovat aktivní vztahy a nastavené mzdové složky. Uživatel potřebuje mzdové oprávnění a podklad pro každý údaj.
 
-## Krokový postup
+## 62.3 Krokový postup
 
 1. Otevřete **Mzdy → Rychlý měsíční vstup** a ověřte firmu a období.
 2. Vyberte zaměstnance, vztah a složku.
@@ -16,28 +16,28 @@ Musí být vybraný správný měsíc, existovat aktivní vztahy a nastavené mz
 4. Uložte řádek a pokračujte dalšími zaměstnanci.
 5. Porovnejte souhrn se zdrojovým podkladem a přepočítejte otevřený běh.
 
-## Stavy
+## 62.4 Stavy
 
 Uložený vstup čeká na zpracování během. V otevřeném běhu se projeví po výpočtu. Po uzavření nelze změnou vstupu přepsat archivovaný výsledek; je nutný podporovaný opravný postup.
 
-## Kontroly a bezpečnost
+## 62.5 Kontroly a bezpečnost
 
 Kontrolujte období, souběžný vztah, znaménko, jednotku a duplicity. Hromadné zadání zvyšuje riziko záměny osoby; před uložením používejte kontrolní součet. Zdrojovou přílohu nesdílejte mimo oprávněný okruh.
 
-## Časté chyby
+## 62.6 Časté chyby
 
 - Vstup v jiném měsíci nebo u jiného vztahu.
 - Duplicitní ruční zadání již importované částky.
 - Jednorázová částka vložená do pravidelné složky.
 - Oprava vstupu bez nového výpočtu.
 
-## Návaznosti
+## 62.7 Návaznosti
 
 Význam složek popisuje [kapitola 58p](74_Mzdove_slozky_a_vstupy.md). Výsledek ověřte v [mzdovém běhu](63_Mzdove_behy.md) a následně v [platbách](65_Platby_a_uhrady.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 62.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Rychlý měsíční vstup** vybereš měsíc a upravíš všechny účinné
 pracovní vztahy na jedné stránce. U každého zaměstnance se zobrazí jméno,

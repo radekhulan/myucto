@@ -153,11 +153,11 @@ schválení se faktura **automaticky vystaví a odešle**.
 > paušál), schvalovací proces se přeskočí — faktura jde vystavit normálně.
 > Schvalování se týká jen faktur s výkazem.
 
-### Kam jde e-mail se žádostí o schválení
+### 19.7.1 Kam jde e-mail se žádostí o schválení
 
 | Konfigurace | Příjemce schvalovacího e-mailu |
 |---|---|
-| Klient má **kontakty s účelem Schvalování** ([§ 18.2.2](18_Klienti.md#1822-e-mailove-kontakty-podle-ucelu)) | Tyto kontakty (+ e-maily zakázky dle režimu kombinace) |
+| Klient má **kontakty s účelem Schvalování** ([§ 18.2.2](18_Klienti.md#1823-e-mailove-kontakty-podle-ucelu)) | Tyto kontakty (+ e-maily zakázky dle režimu kombinace) |
 | Zakázka má **fakturační e-maily** (§ 19.2.1) | Jen na ně, hlavní e-mail klienta NEDOSTANE |
 | Zakázka **nemá** fakturační e-maily | Hlavní e-mail klienta |
 
@@ -179,7 +179,7 @@ hodin i průběžnou částku k vyúčtování — ještě než z nich vznikne f
 
 Náhled je „živý" — pokaždé zobrazí aktuální stav konceptů faktur s výkazem práce.
 
-### Odeslání odkazu
+### 19.8.1 Odeslání odkazu
 
 Po kliknutí na tlačítko se otevře okno s **předvyplněnými příjemci** (e-maily
 klienta, u zakázky i fakturační e-maily zakázky). Příjemce lze upravit, přidat
@@ -187,7 +187,7 @@ kopii (CC/BCC) a krátkou poznámku. Po odeslání se příjemcům doručí e-ma
 s odkazem; tentýž odkaz se ukáže i v okně k ručnímu zkopírování (tlačítko
 **Kopírovat**), spolu s časem posledního odeslání a posledního zobrazení.
 
-### Ověření přístupu
+### 19.8.2 Ověření přístupu
 
 Odkaz je veřejný, ale chráněný:
 
@@ -199,7 +199,7 @@ Odkaz je veřejný, ale chráněný:
   zobrazují jen **maskované** adresy (např. `j****@fialka.cz`).
 - **Přihlášený uživatel** (ty nebo účetní) vidí náhled rovnou, bez kódu.
 
-### Zneplatnění
+### 19.8.3 Zneplatnění
 
 V okně je tlačítko **„Zneplatnit odkaz"** — stávající odkaz okamžitě přestane
 fungovat (i pro všechny, kdo už byli ověření). Při dalším odeslání se vytvoří

@@ -63,7 +63,7 @@ Aby ses nemusel po importu zabývat starými fakturami:
   v seznamu vypadá jako naimportovaný, ale do žádného výkazu nepřispěje.
   Doplň položky ve zdrojovém systému a doklad naimportuj znovu.
 
-## 21.4a Dobropis se stejným variabilním symbolem jako faktura
+## 21.5 21.4a Dobropis se stejným variabilním symbolem jako faktura
 
 Většina systémů vystavuje opravný daňový doklad (dobropis) s **týmž variabilním
 symbolem**, jaký má opravovaná faktura, aby vratka odešla na stejný symbol.
@@ -82,16 +82,16 @@ Import to řeší takto:
   i ten obsazený, doklad se přeskočí s hláškou, ať mu zadáš jiný variabilní
   symbol a naimportuješ ho znovu.
 
-## 21.4b Zahraniční doklady a režim OSS
+## 21.6 21.4b Zahraniční doklady a režim OSS
 
 Import vydaných faktur umí sám poznat plnění v [režimu OSS](40_OSS.md) a vyplnit
 na položce příznak OSS, zemi spotřeby, typ sazby i typ plnění. Nemusíš je
 proklikávat ručně.
 
-### Než spustíš import
+### 21.6.1 Než spustíš import
 
 1. **Spusť databázové migrace** (`php api/bin/migrate.php`). Bez číselníku
-   [sazeb států OSS](92_Nastaveni.md#9212b-sazby-statu-oss) se import zahraničních
+   [sazeb států OSS](92_Nastaveni.md#9214-9212b-sazby-statu-oss) se import zahraničních
    dokladů **vůbec nerozběhne** — raději neudělá nic, než aby doklady zařadil naslepo.
 2. **Zkontroluj zemi u zahraničních sazeb** v `Nastavení → Číselníky → DPH sazby`.
    Formulář zemi předvyplňuje na `CZ`, takže sazba `PL-23` bývá založená se zemí `CZ`.
@@ -100,10 +100,10 @@ proklikávat ručně.
    a vyplň platnost registrace. Doklady
    s datem plnění před začátkem registrace zůstanou tuzemské — to je správně.
 
-### Jak se import rozhoduje
+### 21.6.2 Jak se import rozhoduje
 
 Rozhodovací pravidlo je společné všem vstupním kanálům a popisuje ho
-[§ 40.3](40_OSS.md#403-jak-vznika-oss-radek). Ve zkratce: **autoritou pro místo
+[§ 40.3](40_OSS.md#404-jak-vznika-oss-radek). Ve zkratce: **autoritou pro místo
 plnění je číselník sazeb států OSS, ne tvoje tabulka DPH sazeb** — a do tuzemského
 přiznání smí jen řádek, u kterého číselník potvrdí, že sazba v zemi dodavatele
 k datu plnění opravdu platí. Každá jiná odpověď znamená buď zařazení do OSS, nebo
@@ -126,7 +126,7 @@ Specifika importu ze souboru:
   jako duplicity.
 - **Nejednoznačnou sazbu import zařadí do OSS** a označí k ručnímu posouzení, ne
   naopak. Proč právě tímto směrem, vysvětluje
-  [§ 40.4.1](40_OSS.md#4041-dva-stavy-ktere-vypadaji-podobne).
+  [§ 40.4.1](40_OSS.md#4051-dva-stavy-ktere-vypadaji-podobne).
 - **Doklad, který se rozpadne** mezi OSS podání a tuzemské přiznání, se neodmítá
   (smíšená faktura umí vzniknout legitimně), ale hlásí se zvlášť a jeho řádky se
   označí k posouzení.
@@ -134,7 +134,7 @@ Specifika importu ze souboru:
   poznat — a na každý takový doklad upozorní. Dokud období nedoplníš (`RRRRQn`
   v editoru položky), vykáže se oprava do běžného čtvrtletí.
 
-### Co po importu zkontrolovat
+### 21.6.3 Co po importu zkontrolovat
 
 1. **Typ plnění zboží / služba** u položek, kde soubor jednotku neuvedl — dosadí se
    výchozí „služba" a v podání to vyjde jako `S`, kdežto u zboží tam patří `G`.
@@ -142,9 +142,9 @@ Specifika importu ze souboru:
 3. **OSS řádky bez typu sazby** — bez typu sazby se řádek do podání nedostane.
 4. **Náhled OSS podání** před stažením XML — poslední místo, kde se chyba dá chytit.
 
-Kolik čeho vzniklo, říká souhrn importu ([§ 21.5](#215-report)); souhrn ale po
+Kolik čeho vzniklo, říká souhrn importu ([§ 21.5](#217-report)); souhrn ale po
 zavření stránky zmizí, kdežto filtr **Místo plnění (OSS)** v seznamu faktur ne.
-Všechny tři první body má [hromadná úprava OSS](40_OSS.md#405-hromadna-editace-oss)
+Všechny tři první body má [hromadná úprava OSS](40_OSS.md#406-hromadna-editace-oss)
 jako samostatný výběr položek — nemusíš je hledat po jednom.
 
 > [!TIP]
@@ -153,7 +153,7 @@ jako samostatný výběr položek — nemusíš je hledat po jednom.
 > Než podáš přiznání za období, do kterého import spadl, projdi si zahraniční
 > doklady v tom období a ověř, že v přiznání k DPH nefigurují.
 
-## 21.5 Report
+## 21.7 Report
 
 Po importu vidíš tabulku:
 
@@ -187,7 +187,7 @@ z tisícovky řádků rychle vyfiltrovat to, co potřebuje pozornost.
 Souhrn existuje právě proto, aby se při tisícovce dokladů dalo přečíst jedno číslo místo
 tisícovky hlášek.
 
-## 21.6 PDF/A-3 a ISDOCX import (embedded i samostatný ISDOC)
+## 21.8 PDF/A-3 a ISDOCX import (embedded i samostatný ISDOC)
 
 Většina českých fakturačních systémů (**iDoklad**, **Fakturoid**, **Superfaktura**,
 **Pohoda**, **MyÚčto**) dnes vkládá ISDOC XML přímo do PDF dokumentu jako
@@ -251,7 +251,7 @@ ISDOC přílohu". V tom případě:
   Vzácné, ale existuje. Workaround: stáhni si ISDOC samostatně v původním
   systému.
 
-## 21.7 Tipy
+## 21.9 Tipy
 
 - **Před importem nahraj klienty z ARES** — ne nutné, ale pokud máš čas, můžeš
   je založit ručně se správnou výchozí měnou a paušálem; import pak jen použije
@@ -266,14 +266,14 @@ ISDOC přílohu". V tom případě:
   pro Pohodu, `<Invoice>` v ISDOC namespace pro ISDOC). Pro PDF zkontroluj,
   jestli má `.isdoc` přílohu (viz § 21.6).
 
-## 21.8 API import z iDoklad
+## 21.10 API import z iDoklad
 
 Alternativa k file uploadu: přímé volání iDoklad API v3 (OAuth2 Client Credentials).
 Vhodné pro většinu dat — táhne **kontakty + vystavené faktury + dobropisy + přijaté
 faktury + přijaté účtenky/paragony + bankovní pohyby** najednou, po sekcích a rocích, s dry-run
 preview a background jobem.
 
-### 21.8.1 Získání API credentials
+### 21.10.1 Získání API credentials
 
 1. Přihlas se do [iDokladu](https://app.idoklad.cz/).
 2. **Nastavení → API přístup** (nebo **Uživatelský účet → API**).
@@ -282,7 +282,7 @@ preview a background jobem.
    - **Client ID** — identifikátor aplikace
    - **Client Secret** — tajný klíč (zobrazí se **jen jednou**; uschovej si ho)
 
-### 21.8.2 Nastavení v MyÚčto
+### 21.10.2 Nastavení v MyÚčto
 
 `Systém → Externí integrace → iDoklad` (admin only):
 
@@ -295,7 +295,7 @@ Klikni **Uložit** → MyÚčto si **otestuje connection** (token endpoint + pin
 na první sekci). Pokud OAuth2 selže (401), zkontroluj copy-paste (typicky se
 přidá whitespace).
 
-### 21.8.3 Spuštění importu
+### 21.10.3 Spuštění importu
 
 Na téže stránce, sekce **Spustit import**:
 
@@ -323,7 +323,7 @@ GPC nebo PDF výpis z banky je autoritativnější zdroj. Když stejná platba
 přijde i z iDokladu nebo e-mailového avíza, sekundární záznam se při
 jednoznačné shodě označí jako ignorovaný, aby nevznikla dvojí úhrada.
 
-### 21.8.4 Co se importuje
+### 21.10.4 Co se importuje
 
 | Sekce | Co se vytvoří |
 |---|---|
@@ -338,7 +338,7 @@ U vydané faktury se bankovní účet přebírá z historických údajů `MyAddr
 konkrétního dokladu. Výchozí účet měny se použije jen tehdy, když doklad účet
 neobsahuje nebo jej nelze jednoznačně spojit s aktivním účtem v MyÚčtu.
 
-### 21.8.5 Platební stav
+### 21.10.5 Platební stav
 
 API import přebírá **skutečný platební stav ze zdrojového systému** — na rozdíl
 od file uploadu (§ 21.3), kde se stáří jen odhaduje pravidlem 30 dní:
@@ -371,12 +371,12 @@ iDokladu.
 prvním importu. Druhý import téhož období záznamy **přeskočí** (žádné duplicity,
 žádný update existujících — import je čistě additivní).
 
-## 21.9 API import z Fakturoid
+## 21.11 API import z Fakturoid
 
 Stejný flow jako iDoklad, jen jiný provider. **Podporujeme dvě auth
 metody** — email + API token i OAuth2 Client Credentials.
 
-### 21.9.1 Získání API credentials
+### 21.11.1 Získání API credentials
 
 **OAuth2 Client Credentials (doporučeno):**
 
@@ -392,7 +392,7 @@ metody** — email + API token i OAuth2 Client Credentials.
 2. Zkopíruj **email** + **API token**.
 3. Zjisti **slug** (stejný postup).
 
-### 21.9.2 Nastavení v MyÚčto
+### 21.11.2 Nastavení v MyÚčto
 
 `Systém → Externí integrace → Fakturoid`:
 
@@ -410,11 +410,11 @@ OAuth2 token MyÚčto cachuje šifrovaně (AES-256-GCM v
 `supplier.fakturoid_access_token_enc`) s TTL ~2h. Při HTTP 401 se token vyhodí
 a obnoví automaticky — uživatel to nemusí řešit.
 
-### 21.9.3 Spuštění importu
+### 21.11.3 Spuštění importu
 
 Identické s iDoklad (viz § 21.8.3) — vyber roky, sekce, dry-run.
 
-### 21.9.4 Co se importuje
+### 21.11.4 Co se importuje
 
 | Sekce | Co se vytvoří |
 |---|---|
@@ -433,7 +433,7 @@ za vybrané roky.
 
 **Idempotence přes `fakturoid_id`** stejně jako u iDokladu.
 
-## 21.10 Dry-run mód
+## 21.12 Dry-run mód
 
 Společný pro iDoklad i Fakturoid. Po zaškrtnutí **Jen náhled (dry-run)** se import
 provede **synchronně** (vrátí výsledek najednou) a **nezapisuje do DB**. Slouží
@@ -449,7 +449,7 @@ k validaci credentials + náhledu dat.
 
 Pokud výstup vypadá rozumně, odzaškrtni dry-run a spusť ostrý import.
 
-## 21.11 Background job (ostrý import)
+## 21.13 Background job (ostrý import)
 
 Ostrý import (bez dry-run) běží jako **background worker** přes PHP CLI proces
 (`api/bin/import-worker.php`). Aplikace vrátí `job_id` okamžitě a UI sleduje
@@ -464,7 +464,7 @@ průběh:
 **Prevence duplicitních jobů:** stejné parametry (provider + sekce + roky)
 nelze spustit znovu, dokud běží — UI vrátí 409 Conflict s odkazem na běžící job.
 
-## 21.12 Časté problémy API importu
+## 21.14 Časté problémy API importu
 
 **„Neplatné credentials" / 401 Unauthorized**
 → Whitespace v copy-pastu Client Secret / API tokenu. Vygeneruj credentials znovu
@@ -492,7 +492,7 @@ nároku zůstává výchozí kód `42`.
 → Originální systém je nemá vyplněné. Doplň ručně v `Klienti` po importu —
 jinak nebudou fungovat upomínky.
 
-## 21.13 Import přijatých faktur
+## 21.15 Import přijatých faktur
 
 **Cesta: `Nákup → Import`** (jen administrátor).
 

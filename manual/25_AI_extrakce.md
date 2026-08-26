@@ -4,7 +4,7 @@
 AI extrakce.
 Extrakci provádí jeden ze čtyř podporovaných poskytovatelů AI (Anthropic Claude,
 Azure OpenAI, OpenAI nebo Google Gemini) — volbu a přihlašovací údaje nastavíš
-v [§ 25.7 Multi-provider AI brána](#257-multi-provider-ai-brana-vyber-poskytovatele).
+v [§ 25.7 Multi-provider AI brána](#252-multi-provider-ai-brana-vyber-poskytovatele).
 Tato kapitola dále popisuje **kontrolu výsledků** extrakce a automatiky, které
 doklad daňově připraví.
 
@@ -13,7 +13,7 @@ se řádky bez DPH a porovnají s celkovým základem daně, který AI přečetl
 „K úhradě". Pokud se hodnoty liší o víc než 2 %, faktura získá flag **„Ke
 kontrole"** a uživatel by měl řádky před zaúčtováním ověřit.
 
-### Indikátory v UI
+### 25.1.1 Indikátory v UI
 
 - **Žluté zvýraznění řádku** + ikona ⚠ vedle čísla faktury v seznamu přijatých
   faktur (`/purchase-invoices`).
@@ -23,21 +23,21 @@ kontrole"** a uživatel by měl řádky před zaúčtováním ověřit.
   (např. *„součet řádků bez DPH (XX) je vyšší než AI-vrácený základ daně bez
   DPH (YY) — rozdíl Z %"*).
 
-### Jak zrušit warning
+### 25.1.2 Jak zrušit warning
 
 - Tlačítko **Beru na vědomí** v banneru — pošle POST
   `/api/purchase-invoices/{id}/dismiss-extraction-warning` a flag se smaže.
 - **Automaticky** při přechodu z draftu na další stav (received / booked /
   paid) — uživatel posunul stav = ověřil data.
 
-### Auto-upgrade modelu
+### 25.1.3 Auto-upgrade modelu
 
 Pokud levnější model (Haiku 4.5) vrátí slabý výsledek (vendor se shoduje s
 tenantem nebo součet řádků se výrazně liší od totalu), extractor automaticky
 zkusí znovu se silnějším modelem (Sonnet 4.6, ~4× dráž za extract). Pokud máš
 Sonnet/Opus jako default, retry se přeskočí.
 
-### Katastrofální mismatch — placeholder
+### 25.1.4 Katastrofální mismatch — placeholder
 
 Když ani silnější model nezvládne rozparsovat řádky (typicky komplexní
 multi-column servisní faktury) a součet řádků se liší od totalu o víc než
@@ -51,7 +51,7 @@ multi-column servisní faktury) a součet řádků se liší od totalu o víc ne
 Uživatel pak postupně doplní qty/cenu k jednotlivým řádkům a nakonec smaže
 korekční řádek.
 
-### Dodatečná kontrola uložených faktur
+### 25.1.5 Dodatečná kontrola uložených faktur
 
 CLI skript `php api/bin/recheck-ai-extracted-invoices.php` projde přijaté
 faktury s PDF přílohou, re-spustí AI extrakci a porovná AI total s aktuálním
@@ -64,14 +64,14 @@ php api/bin/recheck-ai-extracted-invoices.php --supplier-id=1
 php api/bin/recheck-ai-extracted-invoices.php --threshold=0.05
 ```
 
-### Dodavatel neplátce DPH
+### 25.1.6 Dodavatel neplátce DPH
 
 Při AI importu se ověří **plátcovství dodavatele** (ARES/VIES, případně signál
 z dokladu „DIČ: Neplátce DPH"). U neplátce se automaticky nastaví **Bez nároku
 na odpočet**, vynulují sazby a doplní varování — aby se neoprávněný odpočet
 nedostal do přiznání. Detail viz [§ 23.2.4](23_Prijate_faktury.md#2324-danova-uznatelnost-a-narok-na-odpocet).
 
-### Doklad bez jednotkových cen — založení ze souhrnné rekapitulace
+### 25.1.7 Doklad bez jednotkových cen — založení ze souhrnné rekapitulace
 
 Souhrnné doklady za období (typicky měsíční vyúčtování palivových karet) často
 **jednotkovou cenu vůbec neuvádějí** — mají jen množství, částku za řádek a dole
@@ -88,7 +88,7 @@ Koncept nese **varování**, že položky nebyly vytěženy — pokud potřebuje
 rozepsaný, doplň řádky ručně. Doklady, které jednotkové ceny uvádějí, se
 extrahují **beze změny** i nadále včetně rozpadu na položky.
 
-### Kontrola dat a identifikátorů při extrakci
+### 25.1.8 Kontrola dat a identifikátorů při extrakci
 
 - **Datum objednávky není datum vystavení.** Extraktor přijme jako datum
   vystavení jen údaj, který je tak na dokladu označený; datum objednávky,
@@ -100,7 +100,7 @@ extrahují **beze změny** i nadále včetně rozpadu na položky.
   používá normalizovaný osmimístný tvar, takže například `01234567` není
   zaměněno za jiný identifikátor ani uloženo bez úvodní nuly.
 
-### Dodavatel se skupinovou registrací k DPH (dvě DIČ na dokladu)
+### 25.1.9 Dodavatel se skupinovou registrací k DPH (dvě DIČ na dokladu)
 
 Doklad odštěpného závodu nebo člena **skupinové registrace k DPH** má v hlavičce
 dvě různá čísla: **DIČ** samotného subjektu (typicky `CZ` + IČO) a **DIČ k DPH**
@@ -114,7 +114,7 @@ Bez toho by ARES podle IČO vrátil zaniklou registraci (vlastní registrace čl
 skupiny vstupem do skupiny zaniká) a doklad by se vytěžil jako od neplátce —
 tedy s nulovou daní a bez nároku na odpočet.
 
-### Reverse charge ze zahraničí — automatika
+### 25.1.10 Reverse charge ze zahraničí — automatika
 
 Když extraktor detekuje **reverse charge** (zahraniční dodavatel + všechny řádky
 bez DPH), doklad automaticky daňově připraví:
@@ -133,7 +133,7 @@ bez DPH), doklad automaticky daňově připraví:
 
 Detail daňové logiky viz [§ 23.2.7](23_Prijate_faktury.md#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 
-## 25.7 Multi-provider AI brána (výběr poskytovatele)
+## 25.2 Multi-provider AI brána (výběr poskytovatele)
 
 AI extrakce neběží natvrdo nad jedním modelem — MyÚčto.cz nabízí **AI bránu** se
 čtyřmi poskytovateli, mezi kterými si každý dodavatel (tenant) vybere podle toho,
@@ -162,7 +162,7 @@ co už používá, kde chce mít API klíč a jaké má požadavky na rezidenci 
 Nastavení je **per dodavatel** (celá firma/tenant sdílí jednoho aktivního
 poskytovatele a jeho přihlašovací údaje, ne po jednotlivých uživatelích).
 
-### 25.7.1 Kde se to nastavuje
+### 25.2.1 Kde se to nastavuje
 
 Admin otevře **Firma → AI nastavení** (položka menu je viditelná jen adminům;
 vede na `/admin/integrations?tab=ai`). Pokud AI přihlašovací údaje ještě nejsou
@@ -177,7 +177,7 @@ V sekci nastavíš:
    uložené přihlašovací údaje. Klik na tlačítko jen přepne, které přihlašovací
    údaje a model se dole zobrazí/upravují — **neuloží** to ještě aktivní volbu.
 2. **Vynutit EU rezidenci dat** (checkbox) a **Region dat** (EU/US) — viz
-   [§ 25.7.2](#2572-eu-rezidence-dat-co-to-znamena-a-jak-se-vynucuje).
+   [§ 25.7.2](#2522-eu-rezidence-dat-co-to-znamena-a-jak-se-vynucuje).
 3. Tlačítko **Uložit nastavení brány** — teprve tím se aktivní poskytovatel a
    EU volba zapíší k dodavateli a od té chvíle je používá i "Import přijatých"
    / drag&drop PDF na této stránce i AI import v [Přijatých fakturách](23_Prijate_faktury.md).
@@ -205,10 +205,10 @@ U nakonfigurovaného poskytovatele vidíš i **počet dosud provedených extrakc
 
 > [!NOTE]
 > Pokud brána ještě není pro dodavatele vůbec nakonfigurovaná a uživatel se
-> pokusí o AI import v [Import přijatých](21_Importy.md#2113-import-prijatych-faktur), zobrazí se
+> pokusí o AI import v [Import přijatých](21_Importy.md#2115-import-prijatych-faktur), zobrazí se
 > upozornění s odkazem přímo sem („→ AI nastavení").
 
-### 25.7.2 EU rezidence dat — co to znamená a jak se vynucuje
+### 25.2.2 EU rezidence dat — co to znamená a jak se vynucuje
 
 Checkbox **Vynutit EU rezidenci dat** říká systému: *„tento dodavatel smí AI
 extrakci posílat jen na servery fyzicky v EU, nikdy do USA."* Hodí se pro firmy
@@ -240,7 +240,7 @@ vynucení EU zapnuté.
 > **žádná data se neodešlou** a žádný cross-provider ani cross-tenant fallback
 > se nekoná — buď proběhne extrakce ve správném regionu, nebo neproběhne vůbec.
 
-### 25.7.3 Výběr modelu a chování shodné napříč poskytovateli
+### 25.2.3 Výběr modelu a chování shodné napříč poskytovateli
 
 Ať zvolíš kteréhokoli poskytovatele, chování zbytku extrakce zůstává stejné —
 funkce popsané výše v této kapitole (sanity check, flag „Ke kontrole", auto-
@@ -251,7 +251,7 @@ poskytovatele, ne jen nad Anthropic:
 - **Výchozí model** (pole *Model* ve formuláři přihlašovacích údajů) se použije,
   pokud u konkrétního importu nezvolíš jiný. Whitelist modelů je uzavřený —
   nelze zapsat libovolný řetězec, jen jeden z nabízených.
-- Auto-upgrade z [„Auto-upgrade modelu"](#auto-upgrade-modelu) platí analogicky
+- Auto-upgrade z [„Auto-upgrade modelu"](#2513-auto-upgrade-modelu) platí analogicky
   u všech poskytovatelů a jde vždy o **jeden stupeň nahoru** po žebříčku:
   Anthropic `haiku → sonnet → opus → fable`, OpenAI/Azure
   `nano → mini → plný model`, Gemini `lite → flash → pro`. Stupeň, který nemá
@@ -263,7 +263,7 @@ poskytovatele, ne jen nad Anthropic:
 - Maximální velikost PDF k extrakci se liší poskytovatel od poskytovatele
   (Anthropic 32 MB, ostatní 20 MB) — u větších souborů extrakce vrátí chybu.
 
-### 25.7.4 Ladění extrakce — poznámky a míra uvažování
+### 25.2.4 Ladění extrakce — poznámky a míra uvažování
 
 Pod formulářem přihlašovacích údajů jsou dvě volby, které platí pro **celého
 dodavatele napříč poskytovateli** — nepřenastavují se při přepnutí brány:
@@ -303,7 +303,7 @@ na 2000 znaků.
 Obojí se ukládá tlačítkem **Uložit ladění** (je aktivní jen při skutečné změně)
 a projeví se okamžitě na další extrakci.
 
-### 25.7.5 Omezení a tipy
+### 25.2.5 Omezení a tipy
 
 - Aktivní poskytovatel je nastavení **celého dodavatele**, ne uživatele — změna
   se projeví pro všechny uživatele firmy okamžitě po uložení.
@@ -314,7 +314,7 @@ a projeví se okamžitě na další extrakci.
   i to, že vrácený model odpovídá whitelistu.
 - Privacy: obsah nahraného PDF (položky, IČ/DIČ dodavatele, vlastní data) jde
   přes HTTPS na servery zvoleného poskytovatele. Pro obzvlášť citlivé doklady
-  zvaž [ISDOC import](21_Importy.md#2113-import-prijatych-faktur) (data zůstanou lokálně, AI se
+  zvaž [ISDOC import](21_Importy.md#2115-import-prijatych-faktur) (data zůstanou lokálně, AI se
   vůbec nevolá).
 
 > [!TIP]
@@ -323,7 +323,7 @@ a projeví se okamžitě na další extrakci.
 > fakturách). Azure OpenAI zvol, pokud firma potřebuje EU rezidenci dat se
 > smluvním zajištěním nebo už Azure OpenAI používá pro jiné účely.
 
-## 25.8 AI import vydaných faktur
+## 25.3 AI import vydaných faktur
 
 **Cesta: `Prodej → AI import`**. Položku vidí uživatel, který smí vytvářet
 vydané faktury.
@@ -331,7 +331,7 @@ vydané faktury.
 Stránka přijímá PDF, obrázek, ISDOC nebo ISDOCX a vždy vytváří jen **koncept
 vydané faktury**. Pokud soubor obsahuje platný ISDOC, systém použije jeho
 strukturovaná data a AI vůbec nevolá. Teprve když strukturovaná data chybí,
-použije aktivního poskytovatele a model z [§ 25.7](#257-multi-provider-ai-brana-vyber-poskytovatele).
+použije aktivního poskytovatele a model z [§ 25.7](#252-multi-provider-ai-brana-vyber-poskytovatele).
 
 Z jednoho souboru systém vytěží odběratele, data dokladu, měnu, platební údaje
 a položky. Odběratele vyhledá nebo založí, vytvoří koncept stejnou interní
@@ -350,7 +350,7 @@ aby nepřetížila limit poskytovatele; u každého řádku je samostatný výsl
 a odkaz na vytvořený koncept. Pro jednotlivý import i dávku lze dočasně vybrat
 jiný model z whitelistu aktivního poskytovatele. Maximální velikost jednoho
 uploadu je 32 MiB; konkrétní poskytovatel může mít nižší limit uvedený
-v [§ 25.7.3](#2573-vyber-modelu-a-chovani-shodne-napric-poskytovateli).
+v [§ 25.7.3](#2523-vyber-modelu-a-chovani-shodne-napric-poskytovateli).
 
 Výsledek nese zdroj (`ISDOC`, `AI` nebo duplicita), poskytovatele, model, region
 a případně spotřebu tokenů. Tyto údaje se spolu s názvem a velikostí souboru

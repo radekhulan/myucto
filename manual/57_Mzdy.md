@@ -139,7 +139,7 @@ Náhled je čistý výpočet bez zápisu; ostrá akce vyžaduje
 `accounting.journal.post`. Výsledný zápis i snapshot vznikají společně v
 transakci, aby mzdový list nemohl tvrdit něco jiného než deník.
 
-### Automatické měsíční zaúčtování
+### 57.4.1 Automatické měsíční zaúčtování
 
 Má-li zaměstnanec na kartě vyplněnou pravidelnou hrubou mzdu a zapnuté **Účtovat
 automaticky**, zaúčtuje jeho rekapitulaci úloha `cron-payroll-post` sama — běží 1. dne

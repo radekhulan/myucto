@@ -4,7 +4,7 @@ Odesílací brána ISDS je globální nastavení provozovatele MyÚčta. Otevře
 
 Brána umožní předat připravené podání do oficiálního rozhraní ISDS jako koncept. Uživatel se přihlásí a odeslání potvrdí až na stránce ISDS.
 
-## Rozsah registrace
+## 94.1 Rozsah registrace
 
 Produkční a testovací prostředí mají samostatnou registraci. Každá obsahuje zejména:
 
@@ -16,7 +16,7 @@ Produkční a testovací prostředí mají samostatnou registraci. Každá obsah
 
 Přihlašovací politika zobrazená v nastavení je informativní. Konkrétní metody, které se uživateli při odesílání skutečně nabídnou, určuje oficiální stránka ISDS podle účtu, prostředí a aktuálních pravidel služby.
 
-## Registrace v ISDS
+## 94.2 Registrace v ISDS
 
 Nejprve zaregistrujte externí aplikaci pro službu vytváření konceptu v portálu ISDS. Do registrace opište přesnou návratovou adresu, kterou MyÚčto zobrazuje:
 
@@ -28,7 +28,7 @@ V reálném provozu musí jít o úplnou veřejnou HTTPS adresu této cesty. Vol
 
 Certifikát musí obsahovat soukromý klíč. MyÚčto jej při uložení parsuje a odmítne neúplný nebo nečitelný balíček. Citlivý obsah a heslo ukládá šifrovaně; API a uživatelské rozhraní zpět vracejí jen provozní údaje, například otisk a konec platnosti. Při změně registrace nahrajte certifikát znovu.
 
-## Uložení, ověření a aktivace
+## 94.3 Uložení, ověření a aktivace
 
 Uložení registrace ji samo neaktivuje. Doporučený postup je:
 
@@ -40,7 +40,7 @@ Uložení registrace ji samo neaktivuje. Doporučený postup je:
 
 MyÚčto při aktivaci hlídá existenci registrace a platnost uloženého certifikátu, samo však nepotvrzuje správnost externí registrace v ISDS. Registraci s prošlým certifikátem nelze aktivovat. Deaktivace odebere firmám možnost použít bránu v daném prostředí, ale neodebere jejich připravená podání ani možnost ručního odeslání.
 
-## Průběh jednoho odeslání
+## 94.4 Průběh jednoho odeslání
 
 1. Uživatel otevře připravené podání firmy a zvolí odeslání přes ISDS.
 2. Server ověří oprávnění, firmu, příjemce, přílohu a aktivní registraci prostředí.
@@ -52,7 +52,7 @@ Callback je součástí autentizovaného toku a nelze jej použít jako obecné 
 
 Pokud ISDS výsledek nepotvrdí jednoznačně, podání zůstane v neurčitém stavu. Nezakládejte automaticky druhou zprávu; nejprve ověřte skutečný stav v datové schránce.
 
-## Co brána neřeší
+## 94.5 Co brána neřeší
 
 - Nezajišťuje automatické načítání doručené pošty.
 - Neobchází přihlášení ani potvrzení uživatele na oficiální stránce ISDS.
@@ -62,7 +62,7 @@ Pokud ISDS výsledek nepotvrdí jednoznačně, podání zůstane v neurčitém s
 
 Ruční načtení doručených zpráv, firemní přístupy a náhradní ruční odeslání popisuje kapitola [Datová schránka](93_Datova_schranka.md). Mzdové formuláře a jejich věcný stav popisuje kapitola [Podání a hlášení](68_Podani_a_hlaseni.md).
 
-## Řešení potíží
+## 94.6 Řešení potíží
 
 - **Brána není nabízena:** zkontrolujte prostředí, aktivaci registrace a platnost certifikátu.
 - **ISDS odmítne certifikát:** ověřte, že PFX/P12 obsahuje soukromý klíč a patří ke stejné registraci aplikace.

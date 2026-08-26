@@ -76,7 +76,7 @@ označeném jako OSS; běžný tuzemský řádek dál používá domácí sazby.
 > v českém přiznání k DPH. Zemi zkontroluj dřív, než spustíš import nebo hromadnou
 > úpravu OSS.
 
-### 92.1.2a OSS a daňové nastavení
+### 92.1.3 92.1.2a OSS a daňové nastavení
 
 V **Nastavení → Daně a účetnictví** je karta **Režim OSS (One Stop Shop)** —
 čtvrtá v řadě za kartami *Vést účetnictví*, *Vést mzdy* a *Vést skladovou
@@ -95,7 +95,7 @@ Podrobnosti — odvození řádku, plnění k ručnímu posouzení, hromadná ú
 účtování, podání a evidence — má vlastní kapitola
 [40. Režim OSS (One Stop Shop)](40_OSS.md).
 
-### 92.1.2b Sazby států OSS
+### 92.1.4 92.1.2b Sazby států OSS
 
 **Cesta: `Nastavení → Číselníky → Sazby států OSS`.**
 
@@ -143,12 +143,12 @@ Ve stejném bloku zůstává vedle ID datové schránky také **typ datové schr
 elektronická podání; typ poplatníka se přitom nastavuje samostatně podle právní
 formy firmy.
 
-### 92.1.3 Země
+### 92.1.5 Země
 
 Statický číselník — nemělo by být potřeba editovat. Obsahuje 200+ zemí podle
 ISO 3166-1.
 
-### 92.1.4 Jednotky
+### 92.1.6 Jednotky
 
 Číselník měrných jednotek pro položky faktury. Globální (sdílený mezi
 dodavateli), nahrazuje volný textový vstup za dropdown.
@@ -168,7 +168,7 @@ dodavateli), nahrazuje volný textový vstup za dropdown.
 > popisu i bez ceny tiše smažou. Můžeš tedy v editoru přidat víc řádků na
 > zásobu a nepoužité se neuloží.
 
-### 92.1.5 Ceníkové položky
+### 92.1.7 Ceníkové položky
 
 **Prodej → Ceník** (jen administrátor) spravuje ceník aktuálního dodavatele.
 Každá položka má kód, název, fakturační popis, jednotku, sazbu DPH a povinnou
@@ -669,7 +669,7 @@ přepínače:
 | Přepínač | Co dělá |
 |---|---|
 | **Automaticky účtovat vydané faktury** | Po **vystavení** faktury ji appka rovnou zaúčtuje do deníku — stejný mechanismus jako ruční tlačítko [Zaúčtovat](16_Faktura_PDF.md#1613-zauctovani-do-deniku). |
-| **Automaticky účtovat přijaté faktury** | Po přechodu přijaté faktury na stav **Přijatá** ji appka rovnou zaúčtuje — viz [§ 23.3.3](23_Prijate_faktury.md#2333-filtr-a-tlacitko-zauctovat). Na další přechody stavu (uhrazená, stornovaná…) auto-post nereaguje. |
+| **Automaticky účtovat přijaté faktury** | Po přechodu přijaté faktury na stav **Přijatá** ji appka rovnou zaúčtuje — viz [§ 23.3.3](23_Prijate_faktury.md#2334-filtr-a-tlacitko-zauctovat). Na další přechody stavu (uhrazená, stornovaná…) auto-post nereaguje. |
 
 > [!NOTE]
 > **Chyba zaúčtování vystavení/přijetí nezablokuje.** Pokud automatické
@@ -712,7 +712,7 @@ Výsledná úroveň je vždy nejvýše tak automatická, jak dovoluje preset a k
 vyžaduje potvrzení a **Automaticky** pouze dovoluje motoru pokračovat k dalším
 kontrolám. Není to příkaz „zaúčtuj za každou cenu“.
 
-### Bezpečnostní pořadí a limity
+### 92.11.1 Bezpečnostní pořadí a limity
 
 Před automatickým zápisem se postupně ověří firma a oprávnění, otevřené období,
 jednoznačná vazba, povolený typ operace, limit pravidla, celofiremní denní limit,
@@ -798,7 +798,7 @@ jedinečný.
 Sazby, země a jednotky popisuje [§ 92.1](#921-ciselniky); pro výkazy je
 zásadní také následující klasifikace DPH.
 
-### Klasifikace DPH
+### 92.14.1 Klasifikace DPH
 
 Klasifikační kód určuje směr použití (prodej, nákup nebo oba), řádek přiznání
 DPHDP3, oddíl kontrolního hlášení, sazbu a zvláštní režimy, například reverse
@@ -810,7 +810,7 @@ Vestavěné systémové kódy jsou společné a nelze je upravit ani smazat. Pro
 aktuální firmu lze vytvořit vlastní kód, upravit ho a později archivovat.
 Změnu prováděj jen tehdy, když znáš její dopad na DPHDP3, kontrolní hlášení a
 Knihu DPH. Význam jednotlivých polí je podrobně popsán v
-[36. Výkazech DPH](36_Vykazy_DPH.md#jak-funguji-vat-klasifikacni-kody), kde je
+[36. Výkazech DPH](36_Vykazy_DPH.md#3644-jak-funguji-vat-klasifikacni-kody), kde je
 i kompletní tabulka vestavěných kódů.
 
 **Kód předmětu plnění** (`kod_pred_pl`, jde do vět KH A.1 a B.1) přijímá jednu až dvě
@@ -890,7 +890,7 @@ endpointy neobsluhuje. Stejná hranice platí pro výpis, přejmenování a odvo
 passkeys i pro WebAuthn odemčení zamčené session; běžné TOTP operace zůstávají
 samostatné a na WebAuthn originu nezávisí.
 
-### Ověření a aktivace
+### 92.16.1 Ověření a aktivace
 
 Nová doména zobrazí přesný DNS TXT záznam ve tvaru:
 

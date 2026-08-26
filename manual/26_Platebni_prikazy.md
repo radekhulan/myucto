@@ -40,7 +40,7 @@ k úhradě) se zobrazí ve **dvou tabulkách**, aby bylo jasné, co čím zaplat
 
 - **Faktury v CZK** — platba přes **ABO (KPC)** (i CSV/PDF),
 - **Ostatní měny** — platba přes **CSV / PDF**, u účtu plátce v **EUR** navíc přes
-  **SEPA XML** (viz [§ 26.7a](#267a-format-sepa-pain001) — ABO je tuzemský CZK
+  **SEPA XML** (viz [§ 26.7a](#268-267a-format-sepa-pain001) — ABO je tuzemský CZK
   platební styk, SEPA slouží pro EUR platby v rámci Evropy).
 
 Vybíratelné (zaškrtávací) jsou jen faktury, které **mají platební účet** a jsou ve
@@ -107,7 +107,7 @@ Vyber faktury a zvol akci:
 - **Export PDF** — tištěný přehled příkazu na šířku (příjemci, účty, symboly, částky, ověření).
 - **Export ABO (KPC)** — datový soubor pro nahrání do banky (jen CZK, viz [§ 26.7](#267-format-abo-kpc)).
 - **Export SEPA (pain.001)** — XML soubor pro EUR platby do zahraničí (jen účet plátce
-  v EUR, viz [§ 26.7a](#267a-format-sepa-pain001)).
+  v EUR, viz [§ 26.7a](#268-267a-format-sepa-pain001)).
 
 Při exportu se z vybraných faktur vytvoří **dávka** (snapshot údajů v daném okamžiku),
 faktury dostanou příznak **„Předáno k úhradě"** a soubor se rovnou stáhne.
@@ -131,7 +131,7 @@ plátce v hlavičce, položky pro jednotlivé příjemce, jedno datum splatnosti
 Vygenerovaný `.kpc` soubor jednoduše nahraješ v internetovém bankovnictví do importu
 hromadných příkazů.
 
-## 26.7a Formát SEPA (pain.001)
+## 26.8 26.7a Formát SEPA (pain.001)
 
 **SEPA Credit Transfer** (ISO 20022, formát `pain.001.001.03`) je standardní XML
 formát pro platby v **EUR** — přijímají ho banky napříč Evropou, včetně českých
@@ -156,7 +156,7 @@ formát pro platby v **EUR** — přijímají ho banky napříč Evropou, včetn
 > výpisu; uložený snapshot dávky je doklad toho, co bylo předáno bance, nikoli
 > důkaz, že banka platbu provedla.
 
-## 26.8 Stav „Předáno k úhradě" a filtrování
+## 26.9 Stav „Předáno k úhradě" a filtrování
 
 Předání k úhradě je **samostatná dimenze**, ne stav faktury — faktura zůstává
 `Přijatá`/`Zaúčtovaná` a navíc nese příznak **„Předáno k úhradě"**. V seznamu
@@ -166,14 +166,14 @@ Předání k úhradě je **samostatná dimenze**, ne stav faktury — faktura z�
 Skutečné **Zaplaceno** nastaví až spárování bankovního výpisu ([Banka](28_Banka.md)),
 ruční označení úhrady, nebo volba „označit jako zaplacené" při exportu.
 
-## 26.9 Historie příkazů
+## 26.10 Historie příkazů
 
 Dole na stránce je **Historie příkazů** — každá vytvořená dávka s datem, účtem plátce,
 počtem položek, součtem a příznakem „zaplaceno". U každé dávky můžeš příkaz **stáhnout
 znovu** (CSV / PDF / ABO / SEPA) — díky uloženému snapshotu je opětovné stažení
 totožné s původním, nezávisle na pozdějších změnách faktur.
 
-## 26.10 Omezení a tipy
+## 26.11 Omezení a tipy
 
 - **ABO jen CZK** + tuzemský účet příjemce. **SEPA jen EUR** + IBAN plátce i příjemce.
   Ostatní cizí měny se platí přes CSV/PDF, nebo zahraničním příkazem ve své bance.

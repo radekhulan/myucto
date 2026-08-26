@@ -32,7 +32,7 @@ GitHub API a cachuje výsledek do tabulky `app_meta` (klíče
 `latest_published_at`, `last_check_at`). UI / footer čte z cache, žádný
 blocking síťový call při každém načtení stránky.
 
-### Plánování cronu
+### 98.2.1 Plánování cronu
 
 | Prostředí | Příklad |
 |-----------|---------|
@@ -63,7 +63,7 @@ upgrade ale provádí host-side watcher** — proces běžící mimo container,
 který má přístup k `docker compose` na hostu a přes `docker compose exec`
 čte/píše do storage volume.
 
-### Test režim (jednorázově, ve foregroundu)
+### 98.4.1 Test režim (jednorázově, ve foregroundu)
 
 Než nainstaluješ watcher jako daemon, otestuj ho ručně v PowerShell /
 bash okně:
@@ -91,7 +91,7 @@ container every 30s` — watcher poslouchá. Klikni v UI **„Aktualizovat"**
 a do 30 s zachytí flag, spustí `docker-update.{sh,ps1}`, výsledek napíše
 do kontejneru. Watcher zastav `Ctrl+C`.
 
-### Instalace watcheru jako daemon (na produkci)
+### 98.4.2 Instalace watcheru jako daemon (na produkci)
 
 #### Linux — systemd unit
 
@@ -138,7 +138,7 @@ schtasks /run /tn "MyUcto Update Watcher"
 Stav úlohy: `schtasks /query /tn "MyUcto Update Watcher" /v /fo list`.
 Stop: `schtasks /end /tn "MyUcto Update Watcher"`.
 
-### Co watcher dělá
+### 98.4.3 Co watcher dělá
 
 1. Každých 30 s: `docker compose exec -T app test -f storage/upgrade-requested.json`.
 2. Když ho najde → přečte `target_version` přes `cat`, přejmenuje na
@@ -157,7 +157,7 @@ Stop: `schtasks /end /tn "MyUcto Update Watcher"`.
    status`, který načte `upgrade-result.json` z kontejneru a zobrazí
    „Upgrade úspěšně dokončen" nebo „Upgrade selhal" s message.
 
-### Pokud watcher neběží
+### 98.4.4 Pokud watcher neběží
 
 UI sice flag soubor zapíše, ale nikdo ho nezpracuje (UI zůstane věčně
 ve stavu „Upgrade probíhá…"). Spusť na hostu ručně:
@@ -211,7 +211,7 @@ a spustí migrace. **Composer, Node ani pnpm na hostu potřeba nejsou** —
 bundle má `api/vendor/`, `web/dist/`, `manual/generated/` i
 `manual/manual.pdf` už představěné.
 
-### Co se děje na pozadí
+### 98.6.1 Co se děje na pozadí
 
 Vlastní práci dělá detached CLI worker `api/bin/native-update.php`
 (z UI se spouští automaticky, ručně jde zavolat taky):
@@ -237,7 +237,7 @@ heartbeat), výsledek do `storage/upgrade-result.json` a plný log do
 `storage/upgrade-<timestamp>.log`. UI všechny tři čte a ukazuje krok
 za krokem.
 
-### Co zůstane nedotčené
+### 98.6.2 Co zůstane nedotčené
 
 `cfg.php`, `cfg.local.php`, `cfg.docker.php`, `.env`, `storage/`,
 `private/`, `log/`, `tmp/` a `.git/` se nikdy nepřepisují — bundle je
@@ -257,7 +257,7 @@ aktualizace nevypadá jako dokončená.
 > php-fpm / IIS application pool — jinak poběží stará bytecode cache.
 > Preflight na to upozorní sám.
 
-### Bezpečnostní model
+### 98.6.3 Bezpečnostní model
 
 Bundle se stahuje po HTTPS jen z hostů GitHubu a kontroluje se jeho
 SHA-256. Checksum ale leží ve stejném releasu jako tarball, takže
@@ -265,7 +265,7 @@ chrání proti **poškozenému přenosu, ne proti kompromitovanému
 repozitáři** — trust root je GitHub účet projektu. Aktualizaci smí
 spustit jen superadmin.
 
-### Když automatická cesta nejde
+### 98.6.4 Když automatická cesta nejde
 
 Sdílený hosting často zakazuje spouštění procesů nebo nemá práva na
 zápis do rootu. Preflight to pozná dopředu, vypíše konkrétní důvody
@@ -286,7 +286,7 @@ bundle by ti jinak zašpinil pracovní kopii. Preflight na to upozorní.
 
 ## 98.7 Co když upgrade selže
 
-### Docker watcher
+### 98.7.1 Docker watcher
 
 Watcher zapíše `storage/upgrade-result.json` se `status: "failed"` a
 plným logem do `storage/upgrade-YYYYMMDDTHHMMSSZ.log`. UI ho zobrazí.
@@ -337,7 +337,7 @@ Selhání kroku aktualizace už také nikdy nekončí tiše — skript vypíše
 `ERROR: … AKTUALIZACE NEBYLA DOKONČENA` s číslem řádku a skončí nenulovým
 kódem; watcher tenhle důvod propíše i do hlášky v UI.
 
-### Nativní
+### 98.7.2 Nativní
 
 Worker zapíše `storage/upgrade-result.json` se `status: "failed"`,
 důvodem a cestou k logu `storage/upgrade-<timestamp>.log`. UI to

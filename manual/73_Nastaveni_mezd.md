@@ -1,14 +1,14 @@
 # Nastavení mezd
 
-## Účel
+## 73.1 Účel
 
 Nastavení mezd obsahuje údaje zaměstnavatele, výchozí účty, termíny, institucionální identifikátory a předkontace používané napříč mzdovým tokem.
 
-## Předpoklady a oprávnění
+## 73.2 Předpoklady a oprávnění
 
 Je nutné oprávnění `payroll.settings`. Připravte ověřené identifikační údaje, symboly ČSSZ a zdravotních pojišťoven, bankovní účty a schválený účtový rozvrh. ISDS se nastavuje samostatně v obecném nastavení firmy.
 
-## Krokový postup
+## 73.3 Krokový postup
 
 1. Otevřete **Mzdy → Nastavení mezd**.
 2. Vyplňte identifikaci zaměstnavatele a údaje pro dokumenty a podání.
@@ -17,7 +17,7 @@ Je nutné oprávnění `payroll.settings`. Připravte ověřené identifikační
 5. Nastavte výchozí předkontace a zkontrolujte jejich existenci v účtovém rozvrhu.
 6. Pro podání vytvořte oddělené TEST a produkční profily; certifikát uložte jen do určeného bezpečného úložiště.
 
-## Stavy
+## 73.4 Stavy
 
 Rozpracované nastavení lze uložit, ale navazující krok může být blokován. Validační chyba označuje neúplný nebo neplatný údaj. Úspěšné uložení nepotvrzuje, že identifikátor či účet uznala externí instituce.
 
@@ -26,26 +26,26 @@ Výpočty a testovací podání fungují, ale ostrá podání a mzdové platebn�
 jsou blokované. K jejich povolení otevřete přehled **Mzdy**, vyberte dva
 schválené měsíce a schválenou opravu a připojte souhrnný firemní kvalifikační
 protokol z Dokumentů. Otisk dokumentu ověří server; ručně se nezadává.
-Podrobný postup je v [úvodní kapitole mezd](58_Uplne_mzdy.md#7-projdete-cely-tok-v-testovacim-prostredi-a-povolte-ostry-provoz).
+Podrobný postup je v [úvodní kapitole mezd](58_Uplne_mzdy.md#5827-7-projdete-cely-tok-v-testovacim-prostredi-a-povolte-ostry-provoz).
 
-## Kontroly a bezpečnost
+## 73.5 Kontroly a bezpečnost
 
 Ověřte každou hodnotu proti oficiálnímu zdroji a správné firmě. Privátní klíče, hesla a SMS kódy nepatří do poznámek ani příloh. Testovací certifikát ČSSZ používejte jen v TEST profilu a produkční konfiguraci ověřte samostatně.
 
-## Časté chyby
+## 73.6 Časté chyby
 
 - Identifikátor nebo účet zkopírovaný z jiné firmy.
 - Záměna TEST a produkčního prostředí.
 - Chybějící předkontace blokující účetní krok.
 - Domněnka, že nastavení ISDS automaticky odesílá podání nebo načítá inbox.
 
-## Návaznosti
+## 73.7 Návaznosti
 
 Osoby a vztahy založíte v [kapitole 58k](69_Zamestnanci.md), složky v [58p](74_Mzdove_slozky_a_vstupy.md), účetní kontrolu v [58f](64_Shoda_uctovani_mezd.md) a elektronické odeslání v [58j](68_Podani_a_hlaseni.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 73.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Nastavení mezd** se evidují registrační a kontaktní údaje
 pro mzdovou agendu. Stránka používá čtyři samostatné záložky:

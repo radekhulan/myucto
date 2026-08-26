@@ -1,14 +1,14 @@
 # Srážky a exekuce
 
-## Účel
+## 71.1 Účel
 
 Agenda spravuje exekuce, insolvenční a další nucené srážky, jejich pořadí, rozhodné údaje, výpočet a závazky příjemcům.
 
-## Předpoklady a oprávnění
+## 71.2 Předpoklady a oprávnění
 
 Je nutné oprávnění `payroll.enforcement` a podle případu `payroll.insolvency`. Připravte rozhodnutí, datum doručení, pořadí, typ pohledávky, příjemce a stav řízení. Nejasný případ posuďte s odborníkem.
 
-## Krokový postup
+## 71.3 Krokový postup
 
 1. Otevřete **Mzdy → Srážky a exekuce** a založte případ u správné osoby.
 2. Vyplňte rozhodné datum, pořadí, druh pohledávky, spis, příjemce a částky.
@@ -39,11 +39,11 @@ ručně a úhradu doloží. Volby **Pouze evidovat upozornění** a **Individuá
 neodešlou. Potvrzení příjemce v měsíčních podkladech nenahrazuje rozhodnutí ani
 ověřený platební účet.
 
-## Stavy
+## 71.4 Stavy
 
 Případ může být evidovaný, aktivní, pozastavený, čekající v pořadí, doplacený nebo ukončený. Samotné vložení rozhodnutí nezaručuje srážku v uzavřeném běhu; rozhodují účinnost, pořadí a disponibilní částka.
 
-## Oprava omylem založeného případu
+## 71.5 Oprava omylem založeného případu
 
 Prázdný případ ve stavu **Přijato — čeká na ověření** můžete v nabídce
 akcí detailu smazat. Aplikace před smazáním znovu ověří, že k případu
@@ -63,24 +63,24 @@ výsledku, ledgeru ani platebního závazku, můžete ji v tabulce **Opravit** n
 znovu označí podklady případu jako neověřené. Po zahájení srážení se původní
 záznam nemění ani nemaže; použijte navazující právní nebo opravný postup.
 
-## Kontroly a bezpečnost
+## 71.6 Kontroly a bezpečnost
 
 Použijte nejvyšší míru omezení přístupu. Ověřte pravidla účinná v měsíci, pořadí doručení, přednostní charakter, nezabavitelnou částku a souběh. Citlivé listiny neukládejte do veřejných odkazů a neměňte historické rozhodné datum bez auditní stopy.
 
-## Časté chyby
+## 71.7 Časté chyby
 
 - Chybné pořadí více exekucí.
 - Záměna přednostní a nepřednostní pohledávky.
 - Neaktualizovaný zůstatek po externí platbě.
 - Ruční srážka navíc k automaticky vypočtené částce.
 
-## Návaznosti
+## 71.8 Návaznosti
 
 Dobrovolné srážky jsou v [kapitole 58l](70_Dohody_o_srazkach.md), účinné parametry v [58q](75_Legislativni_pravidla_mezd.md), výpočet v [58e](63_Mzdove_behy.md) a úhrada příjemci v [58g](65_Platby_a_uhrady.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 71.9 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Srážky a exekuce** založíš zaměstnanci zákonnou srážku, exekuci
 nebo dohodu o srážkách. Případ začíná ve stavu **Přijato — čeká na ověření**.
@@ -119,7 +119,7 @@ ověřené rozhodnutí a důvod. Ukončený případ nelze zkratkou znovu otevř
 Označení případu za uhrazený projde teprve tehdy, když potvrzené úhrady pokryjí
 celý zůstatek pohledávek — samotné sražení ze mzdy k tomu nestačí.
 
-### Odeslání sražených částek příjemci
+### 71.9.1 Odeslání sražených částek příjemci
 
 Aby aplikace sražené peníze skutečně odeslala, vyber v případu **příjemce srážky**
 z katalogu **Mzdy → Nastavení mezd → Účty institucí** (typ *ostatní příjemce*). Účet

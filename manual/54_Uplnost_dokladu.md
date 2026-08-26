@@ -39,7 +39,7 @@ Odkaz **Otevřít výpis** vede na detail bankovního výpisu. Samotný štítek
 **Doklad vyžádán** položku neřeší; podklad je potřeba doručit, zkontrolovat a
 správně zaúčtovat.
 
-### Aging a součty
+### 54.1.1 Aging a součty
 
 Pohyby jsou rozdělené podle stáří:
 

@@ -5,7 +5,7 @@ ve třech formátech — per doklad i hromadně za měsíc nebo celé čtvrtlet�
 
 V detailu přijaté faktury najdeš tlačítko **„Exporty"** s dropdown menu:
 
-### Naše PDF (rekonstrukce)
+### 24.1.1 Naše PDF (rekonstrukce)
 Vygeneruje naši vlastní PDF kopii ze strukturovaných dat. Užitečné když:
 - Importovaly se jen metadata (z iDokladu/Fakturoidu API, ne originální PDF)
 - Originál není dostupný (přijatá faktura zadaná ručně)
@@ -15,7 +15,7 @@ PDF obsahuje hlavičku s dodavatelem, položky, totals, poznámky. Footer pozná
 *„Naše rekonstrukce přijaté faktury z dat v MyÚčto.cz. Originál od dodavatele je
 referenční dokument."*
 
-### ISDOC XML
+### 24.1.2 ISDOC XML
 Export do ISDOC 6.0 standardu — kompatibilní s Pohoda, Money S3, iDoklad a dalšími.
 Strategie: **role inversion** — v ISDOC pro přijatou fakturu je *dodavatel* =
 původní vendor, *zákazník* = naše firma (opak vystavené).
@@ -28,11 +28,11 @@ faktury v MyInvoice (např. `PF2607002`) zůstává oddělené v
 `<Extensions><myi:InternalDocumentNumber>` s namespace
 `https://myinvoice.cz/isdoc/extensions/2026`.
 
-### Pohoda XML
+### 24.1.3 Pohoda XML
 Pohoda dataPack XML pro import do účetního software Pohoda. Direction =
 purchase (`<pur:purchase>` místo `<inv:invoice>`).
 
-### Hromadný export za období
+### 24.1.4 Hromadný export za období
 
 V hlavním menu **Účetnictví → Export / Import**, záložka **Export přijatých**
 (firmy bez podvojného účetnictví najdou položku **Export / Import** v sekci

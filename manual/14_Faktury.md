@@ -87,7 +87,7 @@ U dokladu v seznamu je vidět, který otazník nese: štítek **OSS ?** u varsym
 oba štítky.
 
 Jak oba stavy vznikají a co s každým z nich dělat, popisuje
-[§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
+[§ 40.4](40_OSS.md#405-plneni-k-rucnimu-posouzeni).
 
 Filtr se zapisuje do URL i do uložených filtrů. Souhrnná volba **Nejisté místo
 plnění (OSS)** zobrazí oba dílčí stavy najednou, takže se žádný nejistý doklad
@@ -184,7 +184,7 @@ zhasnutí příznaku přesouvá daň na ř. 1 českého přiznání, takže proj
 číselník sazeb států OSS sazbu v zemi dodavatele potvrdí.
 
 Úplný seznam důvodů přeskočení, pravidla pro vypnutí OSS a chování dávky při chybě
-popisuje [§ 40.5](40_OSS.md#405-hromadna-editace-oss).
+popisuje [§ 40.5](40_OSS.md#406-hromadna-editace-oss).
 
 ## 14.4 Ikony stavu (legenda)
 

@@ -114,7 +114,7 @@ Stejné zkratky najdeš jako nenápadné **„+"** u příslušné položky v po
 sekce (objeví se po najetí myší). Rychlé vytváření je dostupné jen pro
 uživatele s právem zápisu.
 
-### Klávesové zkratky
+### 10.6.1 Klávesové zkratky
 
 Pátá položka uživatelského menu **Klávesové zkratky** umožňuje nastavit
 kombinaci pro každý viditelný bod menu, položky **Přidat / Nová** i hledání ve
@@ -129,7 +129,7 @@ Výchozí kombinace jsou **Alt+Q** pro hledání, **Alt+1** vydaná faktura,
 firem. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám.
 Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
 
-### Více panelů pracovního prostoru
+### 10.6.2 Více panelů pracovního prostoru
 
 Na široké desktopové obrazovce můžeš v horní liště zvolit rozložení s jedním,
 dvěma nebo třemi stejně širokými panely. Dva panely jsou dostupné od šířky
@@ -193,7 +193,7 @@ blížící se daňové termíny aktuálního dodavatele do jednoho seznamu:
 - **DPH přiznání** a **Kontrolní hlášení** — dle periodicity dodavatele
   (měsíčně / čtvrtletně, viz [§ 36](36_Vykazy_DPH.md)).
 - **Souhrnné hlášení** — jen pokud má firma za předchozí měsíc EU B2B plnění.
-- **Zálohy na daň a pojistné** — z [Daně z příjmů § Zálohy na daň a pojistné](38_Dan_z_prijmu.md#zalohy-na-dan-a-pojistne),
+- **Zálohy na daň a pojistné** — z [Daně z příjmů § Zálohy na daň a pojistné](38_Dan_z_prijmu.md#384-zalohy-na-dan-a-pojistne),
   s částkou a stavem *naplánováno* / *zaplaceno*.
 - **Roční přiznání DPFO/DPPO** — standardní termíny (papírově 1. 4.,
   elektronicky začátkem května, posunuto z 1. 5. na nejbližší pracovní den).
@@ -254,7 +254,7 @@ počtem:
   `/invoices?booked=0` (viz [§ 14.1.1](14_Faktury.md#1411-filtry-vlevo)).
 - **Přijaté** — přijaté faktury s `booked_at IS NULL` (mimo koncepty a
   stornované) → `/purchase-invoices?booked=0` (viz
-  [§ 23.3.3](23_Prijate_faktury.md#2333-filtr-a-tlacitko-zauctovat)).
+  [§ 23.3.3](23_Prijate_faktury.md#2334-filtr-a-tlacitko-zauctovat)).
 - **Banka** — nevyřízené návrhy zaúčtování bankovních transakcí → [Banka](28_Banka.md).
 
 Zálohové (proforma) faktury se do počtu záměrně nepočítají — nejsou daňový

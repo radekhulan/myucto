@@ -54,7 +54,7 @@ nebo zdroje. Výběr firmy je společný pro frontu, pravidla, checklist i
 průvodce, takže editovaná pravidla vždy patří právě zobrazené firmě. Následují
 pracovní záložky:
 
-### Zaúčtováno dnes
+### 46.2.1 Zaúčtováno dnes
 
 Zobrazuje zápisy, které automat provedl bez ručního potvrzení. U každého řádku
 vidíte firmu, datum, částku, důvod, jistotu a kontaci **MD/D**. Rozbalením řádku
@@ -69,7 +69,7 @@ dne. Pokud nastavíte rozsah **Od/Do**, lze stejným způsobem projít i starš�
 historii. Delší seznamy jsou rozdělené na stránky; volba všech položek se vždy
 týká jen právě zobrazené stránky.
 
-### Ke schválení
+### 46.2.2 Ke schválení
 
 Obsahuje návrhy, u kterých systém zná pravděpodobnou kontaci, ale podle
 nastavení nebo bezpečnostní pojistky čeká na účetní. Tlačítko **Schválit**
@@ -97,7 +97,7 @@ položky každého pravidla. Hromadná akce je rozdělena po firmách, takže se
 různých účetních jednotek nesmísí. Vybrané návrhy lze také hromadně odmítnout;
 zvolený důvod se uloží pro další zlepšování pravidel.
 
-### Vyžaduje zásah
+### 46.2.3 Vyžaduje zásah
 
 Sem patří položky, které bez lidského rozhodnutí nelze bezpečně dokončit.
 Červené nebo varovné označení neznamená poškozená data — znamená, že systém
@@ -139,7 +139,7 @@ odkazem do deníku; teprve po porovnání zvolte **Přesto schválit** nebo
 > pro které **nevznikl žádný návrh**. Bankovní návrhy v jakémkoli stavu zůstávají
 > pouze v Automatu, takže se obě fronty záměrně nepřekrývají.
 
-### Pravidla
+### 46.2.4 Pravidla
 
 Zobrazuje celkové nastavení automatiky a pravidla bankovních pohybů. Pravidlo
 typicky určuje směr platby, protistranu nebo text, případný rozsah částky a
@@ -163,7 +163,7 @@ Jejich režim nastavte v horním boxu **Automatika účtování** presetem
 **Rozpoznávání vlastních převodů**. Starší pravidlo vytvořené pro konkrétní
 vlastní účet lze smazat; rozhodující je registr vlastních bankovních účtů.
 
-### Checklist
+### 46.2.5 Checklist
 
 Checklist nabízí tři pohledy:
 
@@ -176,7 +176,7 @@ Kliknutím na řádek checklistu přejdete přímo na odpovídající frontu. Ze
 fajfka znamená splněnou kontrolu, nikoli automatické potvrzení účetní správnosti
 všech podkladů.
 
-### Historie
+### 46.2.6 Historie
 
 Historie ukazuje automatická zaúčtování, schválení, zamítnutí a nahrazené
 návrhy. Slouží k dohledání, co se s položkou stalo a kdo rozhodnutí provedl.

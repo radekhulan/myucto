@@ -1,6 +1,6 @@
 # 40. Režim OSS (One Stop Shop)
 
-### Cesta: `Daně → OSS přiznání`
+### 40.1.1 Cesta: `Daně → OSS přiznání`
 
 Režim jednoho správního místa (**One Stop Shop**, § 110a a násl. ZDPH) umožňuje
 odvést daň z přeshraničních plnění spotřebitelům v jiných členských státech EU
@@ -11,7 +11,7 @@ ji přepošle do cílových států.
 Tahle kapitola popisuje celý řetěz: kdy se registrovat, co nastavit, jak řádek do
 OSS vzniká, co se dělá s plněními, u kterých si systém není jistý, jak se OSS daň
 účtuje a jak se sestaví a doloží podání. Související témata mají vlastní kapitoly —
-[import zahraničních dokladů](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss),
+[import zahraničních dokladů](21_Importy.md#216-214b-zahranicni-doklady-a-rezim-oss),
 [hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss),
 [sazby a číselníky](92_Nastaveni.md#9212-sazby-dph) a
 [daňový průvodce](35_Fakturujeme.md#355-zahranicni-fakturace-eu-oss-a-treti-zeme).
@@ -21,9 +21,9 @@ OSS vzniká, co se dělá s plněními, u kterých si systém není jistý, jak 
 > státech). Režim mimo EU ani dovozní režim **IOSS** aplikace nevede — pro ně
 > nemá ani přiznání, ani rozpoznání odvodu z banky.
 
-## 40.1 K čemu OSS je a kdy se registrovat
+## 40.2 K čemu OSS je a kdy se registrovat
 
-### 40.1.1 Kdy plnění patří do státu spotřeby
+### 40.2.1 Kdy plnění patří do státu spotřeby
 
 Do OSS patří plnění, u kterých se **místo plnění přesouvá do státu odběratele**:
 
@@ -41,7 +41,7 @@ Běžné služby B2C, u kterých místo plnění zůstává v ČR podle § 9 ods
 (konzultace, řemeslo, hodinová práce), se fakturují s českou daní a do OSS
 nevstupují — i když je odběratel z Polska.
 
-### 40.1.2 Práh 10 000 EUR (§ 8 odst. 3 ZDPH)
+### 40.2.2 Práh 10 000 EUR (§ 8 odst. 3 ZDPH)
 
 Dokud součet **všech** přeshraničních B2C plnění do EU za kalendářní rok
 nepřekročí **10 000 EUR**, může dodavatel plnění dál zdaňovat českou sazbou.
@@ -53,7 +53,7 @@ Práh je **celounijní a společný pro zboží i služby**. Do součtu se proto
 i plnění, která zatím fakturuješ s českou daní — kdyby se sčítala jen ta už
 označená jako OSS, práh by nikdy nemohl být překročen.
 
-### 40.1.3 Sledování prahu v aplikaci
+### 40.2.3 Sledování prahu v aplikaci
 
 Na stránce **Daně → OSS přiznání** je blok **Čerpání prahu 10 000 EUR** za zvolený
 kalendářní rok. Ukazuje součet v EUR, procento vyčerpání, rozpad podle států
@@ -77,9 +77,9 @@ se vylučují.
 > s účetní. Sledování prahu samo OSS nezapne, doklady nepřeklasifikuje ani
 > nerozhodne, jaký režim se na plnění právně vztahuje.
 
-## 40.2 Nastavení
+## 40.3 Nastavení
 
-### 40.2.1 Zapnutí režimu a platnost registrace
+### 40.3.1 Zapnutí režimu a platnost registrace
 
 **Cesta: `Nastavení → Daně a účetnictví → Režim OSS (One Stop Shop)`.** Je to
 čtvrtá modulová karta, hned za *Vést účetnictví*, *Vést mzdy* a *Vést skladovou
@@ -104,7 +104,7 @@ přesměruje na úvodní stránku.
 > Jiná měna podání než `EUR` není zakázaná, ale náhled i export na ni upozorní —
 > EPO očekává částky v eurech.
 
-### 40.2.2 Sazby DPH pro cizí země — hlídej pole Stát
+### 40.3.2 Sazby DPH pro cizí země — hlídej pole Stát
 
 Aby šla na položku vybrat zahraniční sazba, musí být v číselníku **DPH sazeb**
 ([§ 92.1.2](92_Nastaveni.md#9212-sazby-dph)) založená — například `PL-23`, `SK-23`,
@@ -144,10 +144,10 @@ Sazby s příznakem reverse charge se pro OSS nepárují.
 > států popsaný níže. Důvod je prostý: DPH sazby si zakládá uživatel a může v nich
 > mít překlep, kdežto číselník je nezávislý.
 
-### 40.2.3 Číselník sazeb členských států
+### 40.3.3 Číselník sazeb členských států
 
 **Cesta: `Nastavení → Číselníky → Sazby států OSS`**
-([§ 92.1.2b](92_Nastaveni.md#9212b-sazby-statu-oss)).
+([§ 92.1.2b](92_Nastaveni.md#9214-9212b-sazby-statu-oss)).
 
 Je to **kontrolní číselník** sazeb DPH platných v jednotlivých členských státech —
 ne sazby pro doklad. Aplikace se ho ptá na jedinou věc: *platí tahle sazba v téhle
@@ -195,7 +195,7 @@ nejde o chybu jednotlivého dokladu: nejprve spusť všechny databázové migrac
 číselník znovu načti. Přetrvávající mezeru doplň vlastní platnou sazbou až po
 ověření její správnosti. Ručně přidané sazby aktualizační migrace nepřepisuje.
 
-### 40.2.4 Výchozí nastavení na kartě odběratele
+### 40.3.4 Výchozí nastavení na kartě odběratele
 
 Karta klienta má sekci **Režim OSS** se dvěma poli:
 
@@ -209,24 +209,24 @@ o kterém víš, že je osobou povinnou k dani, jen zatím nedodal DIČ. Opačn�
 karta nenabízí schválně: o tom, že plnění do OSS patří, rozhoduje sazba, země
 odběratele a číselník — ne uložený úmysl na kartě.
 
-Vyloučení je přitom bezpečné: pravidlo z [§ 40.3.2](#4032-rozhodovaci-pravidlo)
+Vyloučení je přitom bezpečné: pravidlo z [§ 40.3.2](#4042-rozhodovaci-pravidlo)
 platí dál, takže ani u vyloučeného odběratele se cizí sazba nestane tuzemskou —
 řádek se místo toho odmítne s hláškou.
 
 Výchozí typ plnění je nejlevnější způsob, jak se zbavit opakované ruční práce
-u e-shopu se zbožím — viz [§ 40.9](#409-na-co-si-dat-pozor).
+u e-shopu se zbožím — viz [§ 40.9](#4010-na-co-si-dat-pozor).
 
 > **Výchozí země spotřeby na kartě záměrně není.** Země se bere z adresy odběratele
 > na konkrétním dokladu, protože ta je pravdivější než uložená karta.
 
-## 40.3 Jak vzniká OSS řádek
+## 40.4 Jak vzniká OSS řádek
 
 Zařazení do OSS je **vlastnost jednotlivého řádku faktury**, ne celého dokladu.
 Odvozuje se **automaticky ve všech vstupních kanálech** — při importu, u pravidelné
 fakturace, při synchronizaci z iDokladu a Fakturoidu, při čtení PDF i přes veřejné
 API. V editoru faktury zůstává ruční přepínač, ale i tam běží stejné kontroly.
 
-### 40.3.1 Podmínky, které OSS vylučují
+### 40.4.1 Podmínky, které OSS vylučují
 
 Nejdřív se vyhodnotí, jestli řádek vůbec může být OSS. Stačí jediná z těchto
 podmínek a OSS je vyloučené:
@@ -234,7 +234,7 @@ podmínek a OSS je vyloučené:
 | Podmínka | Poznámka |
 |---|---|
 | Chybí nebo je nečitelné **datum plnění** | Bez data nejde ověřit ani platnost registrace, ani platnost sazby |
-| Chybí **číselník sazeb členských států** | Nespuštěné migrace — viz [§ 40.2.3](#4023-ciselnik-sazeb-clenskych-statu) |
+| Chybí **číselník sazeb členských států** | Nespuštěné migrace — viz [§ 40.2.3](#4033-ciselnik-sazeb-clenskych-statu) |
 | Firma **nemá zapnutý OSS režim** | |
 | Datum plnění leží **mimo platnost registrace** | |
 | Doklad je v režimu **přenesené daňové povinnosti** | |
@@ -242,12 +242,12 @@ podmínek a OSS je vyloučené:
 | Odběratel je ze **země dodavatele** | „Tuzemsko" se bere ze země dodavatele, ne natvrdo z ČR |
 | Odběratel je **mimo EU** | |
 | Odběratel **má DIČ** | Tedy B2B — do OSS nepatří |
-| Karta odběratele **OSS vylučuje** | Viz [§ 40.2.4](#4024-vychozi-nastaveni-na-karte-odberatele) |
+| Karta odběratele **OSS vylučuje** | Viz [§ 40.2.4](#4034-vychozi-nastaveni-na-karte-odberatele) |
 | Sazba řádku je **0 %** | Osvobození, reverse charge a vývoz se vykazují bez daně |
 
 Každá podmínka má vlastní hlášku i konkrétní radu, co doplnit.
 
-### 40.3.2 Rozhodovací pravidlo
+### 40.4.2 Rozhodovací pravidlo
 
 Zbytek rozhodne **číselník sazeb členských států**, kterému se položí dvě otázky:
 *platí tahle sazba v zemi dodavatele k datu plnění?* a *platí ve státě spotřeby?*
@@ -268,7 +268,7 @@ Celé pravidlo se dá shrnout jednou větou:
 
 Řádek s nulovou sazbou je z pravidla vyňatý — číselník nulové sazby nevede.
 
-### 40.3.3 Co systém odmítne a proč
+### 40.4.3 Co systém odmítne a proč
 
 **Odmítnutí** nastane, když je OSS z nějakého důvodu vyloučené, ale číselník
 zároveň nepotvrdí, že sazba v zemi dodavatele platí. Typický případ: doklad se
@@ -286,7 +286,7 @@ Důvod téhle přísnosti je zásadní a stojí za zapamatování:
 > přiznání k DPH jako česká daň na výstupu, kde ji mezi stovkami tuzemských řádků
 > nikdo nenajde — až přijde výzva. Aplikace se raději zastaví a řekne, co opravit.
 
-### 40.3.4 Typ sazby a typ plnění
+### 40.4.4 Typ sazby a typ plnění
 
 **Typ sazby** (základní / snížená / druhá snížená / parkovací) se **nikdy
 nedomýšlí**. Buď ho potvrdí číselník podle země a procenta, nebo zůstane prázdný
@@ -303,9 +303,9 @@ hromadnou úpravou.
 Poslední bod je v praxi nejdůležitější: jednotka `ks` je záměrně vedená jako
 neutrální (je to výchozí hodnota, takže netvrdí nic), takže e-shop se zbožím
 skončí u „služby", pokud nemá vyplněný CZ-NACE nebo výchozí typ na kartě
-odběratele. Viz [§ 40.9](#409-na-co-si-dat-pozor).
+odběratele. Viz [§ 40.9](#4010-na-co-si-dat-pozor).
 
-### 40.3.5 Rozdíly mezi kanály
+### 40.4.5 Rozdíly mezi kanály
 
 Odvození je ve všech kanálech totožné. Liší se jen to, **co se stane s odmítnutým
 řádkem** — a to podle toho, jestli je zdroj pravdy venku a dá se běh zopakovat:
@@ -329,7 +329,7 @@ období (to jsou vlastnosti konkrétního dokladu, ne předpisu). Stát spotřeb
 povinný: bez něj se řádek uloží jako tuzemský, protože položku s OSS a bez země by
 cron při každém běhu vyrobil neplatnou. Prázdný typ sazby doplní při generování
 odvození, ale jen když mluví o **témže** státu spotřeby. Podrobně
-[§ 17.2.3](17_Pravidelne_fakturace.md#1723-polozky).
+[§ 17.2.3](17_Pravidelne_fakturace.md#1724-polozky).
 
 Bez uloženého rozhodnutí šablona **mlčí** a rozhoduje odvození při každém generování —
 tak fungují všechny šablony založené dřív, než přibyla OSS pole. Pro e-shop
@@ -342,12 +342,12 @@ plnění, který z jednotky ani z CZ-NACE nevyplývá).
 > se to jednou nahlas — jinak by se odmítl každý doklad se sazbou nad 0 %, včetně
 > ryze české faktury.
 
-## 40.4 Plnění k ručnímu posouzení
+## 40.5 Plnění k ručnímu posouzení
 
 Některá plnění systém zařadit umí, ale ne s jistotou. Označí je proto **k ručnímu
 posouzení**. Nejde o chybu, jde o otázku, kterou musí zodpovědět člověk.
 
-### 40.4.1 Dva stavy, které vypadají podobně
+### 40.5.1 Dva stavy, které vypadají podobně
 
 Sporné řádky končí na **dvou různých místech** a každé se řeší jinou otázkou:
 
@@ -369,7 +369,7 @@ je dobrovolná, takže plnění tuzemské být může — jen se rozpor označí
 s vyloučeným OSS se tenhle rozpor nehlásí vůbec, byl by to šum na každé jeho
 faktuře.
 
-### 40.4.2 Kde je najdeš
+### 40.5.2 Kde je najdeš
 
 | Kde | Co uvidíš |
 |---|---|
@@ -380,10 +380,10 @@ faktuře.
 | **Report importu** | Souhrn běhu: *položek k ručnímu posouzení*, *položek bez typu sazby OSS*, *dobropisů bez období opravy*. Souhrn po zavření stránky zmizí, filtr v seznamu faktur ne |
 
 Rozhodnutí uděláš v editoru faktury (přepínač OSS na položce) nebo hromadně —
-[§ 40.5](#405-hromadna-editace-oss); výběr **Jen řádky k ručnímu posouzení**
+[§ 40.5](#406-hromadna-editace-oss); výběr **Jen řádky k ručnímu posouzení**
 zabírá oba stavy najednou.
 
-### 40.4.3 Doklad rozpadlý mezi obojí
+### 40.5.3 Doklad rozpadlý mezi obojí
 
 Kontrola soudržnosti běží při **každém** uložení dokladu. Když jedna faktura
 obsahuje zároveň OSS řádky a tuzemsky zdaněné řádky, leží ve dvou různých
@@ -391,7 +391,7 @@ přiznáních. Doklad se **nezamítá** — smíšená faktura umí vzniknout le
 ale **označí se obě strany rozporu** a uživatel dostane výzvu zkontrolovat sazby.
 Nulové sazby a slevové řádky se do posouzení nepočítají.
 
-## 40.5 Hromadná editace OSS
+## 40.6 Hromadná editace OSS
 
 Po migraci nebo po importu zůstanou desítky až stovky řádků, u kterých je potřeba
 údaje doplnit nebo opravit. Proklikat je po jednom není reálné, proto má seznam
@@ -401,7 +401,7 @@ faktur hromadnou akci **Nastavit OSS (N)** —
 Typický postup: vyfiltruj doklady filtrem **Místo plnění (OSS)**, označ je, spusť
 akci, projdi náhled, potvrď.
 
-### 40.5.1 Dialog a povinný náhled
+### 40.6.1 Dialog a povinný náhled
 
 | Pole | Volby |
 |---|---|
@@ -429,7 +429,7 @@ nebo zemi, která není členským státem EU.
 Volba **Označit řádky jako posouzené** existuje proto, že potvrzení místa plnění je
 rozhodnutí člověka a systém ho sám neruší.
 
-### 40.5.2 Co se přeskočí a proč
+### 40.6.2 Co se přeskočí a proč
 
 Akce nemá „provést i tak". Příznak OSS rozhoduje, jestli řádek jde do českého
 přiznání, nebo do OSS podání, takže na dokladu, který už je odevzdaný nebo zamčený,
@@ -444,13 +444,13 @@ se nepřepisuje. Přeskočí se **celý doklad**, ne jen sporný řádek:
 | Záznamy roku jsou zadržené podle § 32 ZoÚ | Retenční hold |
 | Datum plnění mimo platnost registrace | Zapnout OSS na dokladu z doby, kdy registrace neplatila, by ho odstranilo z českého přiznání, aniž by se objevil v OSS podání |
 | Bez země spotřeby by OSS řádek nešel podat | Doplň zemi spotřeby ve stejném dialogu |
-| Sazba řádku v tuzemsku nepotvrzena | Viz [§ 40.5.3](#4053-vypnuti-oss-je-hlidane-stejne-jako-zapnuti) |
+| Sazba řádku v tuzemsku nepotvrzena | Viz [§ 40.5.3](#4063-vypnuti-oss-je-hlidane-stejne-jako-zapnuti) |
 | Doklad nemá položku ve výběru / položky už hodnoty mají | Není co měnit |
 
 „Podáno" znamená **prokazatelně odevzdaný** snapshot. Samotné stažení XML podáním
 není.
 
-### 40.5.3 Vypnutí OSS je hlídané stejně jako zapnutí
+### 40.6.3 Vypnutí OSS je hlídané stejně jako zapnutí
 
 Zhasnout příznak OSS znamená přesunout daň z OSS podání **na ř. 1 českého
 přiznání**. Je to tedy stejně vážný krok jako zapnutí, jen opačným směrem — a proto
@@ -479,9 +479,9 @@ Pokud dávka narazí na chybu, **zastaví se u prvního dokladu, který neproše
 a výsledek vypíše, které doklady jsou už změněné a které se ani nezkusily.
 Změněným dokladům se zahodí PDF cache, protože doklad nese OSS doložku.
 
-## 40.6 Doklad navenek
+## 40.7 Doklad navenek
 
-### 40.6.1 Doložka na faktuře
+### 40.7.1 Doložka na faktuře
 
 Jakmile je na dokladu **aspoň jeden** OSS řádek, nese doklad **OSS doložku** — a to
 shodně v PDF i ve veřejném náhledu („web faktura"), česky nebo anglicky podle
@@ -499,7 +499,7 @@ nedělají smíšený.
 
 V editoru nese OSS řádek informační štítek **Jedno správní místo**.
 
-### 40.6.2 Exporty
+### 40.7.2 Exporty
 
 | Export | Chování |
 |---|---|
@@ -516,7 +516,7 @@ neudělá, než aby cizí sazbu tiše vydával za českou —
 Řádky v režimu OSS vykaž přes **Daně → OSS přiznání** a doklady s nimi z exportu
 do Pohody nebo Sterea vyřaď.
 
-## 40.7 Účtování OSS daně
+## 40.8 Účtování OSS daně
 
 Daň v režimu OSS **není česká daň na výstupu**. Patří jinému členskému státu, do
 přiznání k DPH ani do kontrolního hlášení nevstupuje a odvádí se samostatně. Proto
@@ -561,9 +561,9 @@ se pak přestane shodovat s tuzemským přiznáním k DPH a OSS daň jiného st�
 navíc vstoupila do [měsíčního zúčtování DPH](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph).
 Přesně kvůli tomu má OSS daň vlastní účet **345.100**.
 
-## 40.8 Přiznání a podání
+## 40.9 Přiznání a podání
 
-### 40.8.1 Kvartální náhled
+### 40.9.1 Kvartální náhled
 
 **Cesta: `Daně → OSS přiznání`.** Nahoře se volí **rok a čtvrtletí**, pod tím jsou
 čtyři záložky — **Náhled**, **Archiv podání**, **Rekonciliace**, **Evidence § 110f** —
@@ -586,7 +586,7 @@ Náhled kontroluje zejména vyplněnou zemi spotřeby, existenci a shodu sazby p
 opravy minulých období. OSS řádky jsou současně vyřazené z českého přiznání k DPH,
 kontrolního hlášení i [Knihy DPH](37_Kniha_DPH.md).
 
-### 40.8.2 Přepočet do měny podání
+### 40.9.2 Přepočet do měny podání
 
 Částky v jiné měně se do měny podání přepočtou **kurzem Evropské centrální banky
 zveřejněným pro poslední den zdaňovacího období** (čl. 91 směrnice 2006/112/ES) —
@@ -600,7 +600,7 @@ zveřejněným pro poslední den zdaňovacího období** (čl. 91 směrnice 2006
 - Dokud kurz pro dané čtvrtletí neexistuje (období ještě neskončilo, výpadek),
   zůstanou řádky nepřepočtené, náhled to jmenovitě oznámí a **XML nejde vytvořit**.
 
-### 40.8.3 Opravy minulých období
+### 40.9.3 Opravy minulých období
 
 Oprava plnění za dřívější čtvrtletí patří v OSS podání do **samostatného oddílu
 s uvedením opravovaného období**. Zadává se **na položce faktury** v editoru
@@ -618,7 +618,7 @@ a export se zastaví s vysvětlením — pomůže ruční kurz nebo ruční čá
 náhled na něj upozorní: oprava se započte do běžného čtvrtletí, tedy do jiného, než
 kam patří. Import původní období nedoplňuje — v souboru není z čeho ho poznat.
 
-### 40.8.4 XML formuláře OSSEI1
+### 40.9.4 XML formuláře OSSEI1
 
 Stažení vytvoří XML formuláře **`OSSEI1`** v měně nastavené pro OSS. Struktura:
 
@@ -643,7 +643,7 @@ zdrojových dat do archivu a zapíše akci do activity logu.
 > Aplikace XML **sama neodesílá**. Před podáním ověř varování, součty a registraci;
 > vygenerovaný soubor je pomůcka, ne náhrada odborné kontroly.
 
-### 40.8.5 Kde se OSS přiznání podává
+### 40.9.5 Kde se OSS přiznání podává
 
 XML má formát **`OSSEI1`**, ale **obecnou cestou EPO ho podat nelze**. Daňový portál
 písemnost sice rozpozná — zobrazí *„DAP OSS - režim EU - Přiznání k DPH platné od
@@ -674,7 +674,7 @@ Postup je tedy:
 > mají — viz
 > [kapitola 70](89_Archiv_podani_a_rekonciliace.md#894-asistovane-podani-pres-epo).
 
-### 40.8.6 Archiv podání a rekonciliace
+### 40.9.6 Archiv podání a rekonciliace
 
 Záložka **Archiv podání** vypisuje všechny archivované OSS snapshoty s časem
 vzniku, stavem, výsledkem validace, **SHA-256 otiskem** a odkazem na stažení
@@ -696,7 +696,7 @@ odpovídá; nebo se dnešní náhled liší — pak zvaž opravné podání za p
 Rozdíly se vypisují v součtech, v řádcích podání i jako seznam dokladů změněných
 po podání.
 
-### 40.8.7 Evidence § 110f
+### 40.9.7 Evidence § 110f
 
 Evidence vybraných plnění podle **§ 110f ZDPH** (a čl. 63c prováděcího nařízení
 Rady (EU) č. 282/2011) se uchovává **10 let od konce kalendářního roku, ve kterém
@@ -715,12 +715,12 @@ neumí** — zálohy přijaté před uskutečněním plnění (nemají vazbu na 
 (vrácení je zachyceno opravným dokladem, ne důkazem o vrácení věci). Tyhle body si
 v případě kontroly dolož jinak.
 
-## 40.9 Na co si dát pozor
+## 40.10 Na co si dát pozor
 
 Tenhle oddíl shrnuje věci, které **nejsou vadou aplikace**, ale rozejdou se
 s očekáváním — a některé musí uživatel opravit ručně.
 
-### 40.9.1 Typ plnění u položek v kusech je odhad
+### 40.10.1 Typ plnění u položek v kusech je odhad
 
 Jednotka `ks` je záměrně **neutrální** — je to výchozí hodnota, takže o zboží ani
 službě netvrdí nic. Když soubor jednotku nenese vůbec, dosadí se výchozí **„služba"**
@@ -732,18 +732,18 @@ vět.
 
 Dvě cesty, jak to napravit:
 
-1. **hromadná úprava OSS** nad výběrem dokladů ([§ 40.5](#405-hromadna-editace-oss));
+1. **hromadná úprava OSS** nad výběrem dokladů ([§ 40.5](#406-hromadna-editace-oss));
 2. **výchozí typ plnění na kartě odběratele** — nové doklady ho pak dostanou samy
    a ruční práce se neopakuje. Případně doplnit dodavateli CZ-NACE.
 
-### 40.9.2 Dobropisy a jejich původní období
+### 40.10.2 Dobropisy a jejich původní období
 
 Import ani jiný automatický kanál **původní období opravy nedoplní** — v žádném
 zdrojovém souboru není z čeho ho poznat. Dokud ho na položce nevyplníš, vykáže se
 oprava do **běžného** čtvrtletí místo do toho, kam patří. Kolik takových dokladů
 je, říká souhrn importu i náhled podání.
 
-### 40.9.3 Haléřové rozdíly u množství větší než jedna
+### 40.10.3 Haléřové rozdíly u množství větší než jedna
 
 Jednotková cena bez DPH se vede na **dvě desetinná místa**. Když vyjde na víc
 (např. 0,2683 EUR za kus) a množství je větší než 1, přenásobením vznikne rozdíl
@@ -753,7 +753,7 @@ o jednotky eur.
 Není to chyba importu, je to mez datového modelu. **Při rekonciliaci OSS podání
 proti zdrojovým dokladům tyhle rozdíly očekávej** a nehledej za nimi chybu.
 
-### 40.9.4 Země spotřeby se bere z odběratele, ne z měny
+### 40.10.4 Země spotřeby se bere z odběratele, ne z měny
 
 Doklad v **eurech** pro **slovenského** odběratele jde do **SK** se slovenskou
 sazbou, ne do nějaké „eurozóny". Rozhoduje země odběratele **na konkrétním
@@ -764,7 +764,7 @@ páruje podle shody jména, takže při tisících spotřebitelů může jeden J
 skončit na kartě jiného Jana Nováka. Daňově to neškodí — zařazení bere zemi
 z dokladu — ale v adresáři to nepořádek udělá.
 
-### 40.9.5 Nulová sazba pro odběratele s DIČ
+### 40.10.5 Nulová sazba pro odběratele s DIČ
 
 Dodávka s **nulovou sazbou** odběrateli s platným DIČ do OSS nepatří — je to
 osvobozené dodání do jiného členského státu. Zařadí se podle měrné jednotky buď
@@ -773,7 +773,7 @@ jako **dodání zboží** (ř. 20 přiznání, kód 0 v souhrnném hlášení), 
 může vyjít služba. **Zkontroluj to** a případně oprav —
 [souhrnné hlášení](39_Souhrnne_hlaseni.md) se řídí toutéž klasifikací.
 
-### 40.9.6 Historické doklady z doby před nastavením OSS
+### 40.10.6 Historické doklady z doby před nastavením OSS
 
 Doklady, které do systému natekly dřív, než byl OSS správně nastavený, mohou mít
 příznak OSS prázdný a jejich zahraniční daň může být vykázaná v českém přiznání.
@@ -781,7 +781,7 @@ Než podáš přiznání za období, do kterého takový import spadl, projdi si
 doklady v tom období a ověř, že v přiznání k DPH nefigurují. Filtr **Místo plnění
 (OSS)** a hromadná úprava jsou na to ta správná dvojice.
 
-### 40.9.7 Náhled je poslední kontrolní bod
+### 40.10.7 Náhled je poslední kontrolní bod
 
 Náhled OSS podání je krátký — řádek na kombinaci **stát × sazba** — a je to
 **poslední místo, kde se chyba dá chytit** dřív, než XML odejde na portál.

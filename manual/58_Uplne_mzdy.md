@@ -7,12 +7,12 @@ Samotný výpočet mzdy například neodešle peníze, nezaúčtuje doklad a nep
 hlášení bez další vědomé akce uživatele.
 
 Tato kapitola je praktický rozcestník. Pokud mzdy nastavujete poprvé, projděte
-část [Co nastavit před první mzdou](#co-nastavit-pred-prvni-mzdou). Při běžném
+část [Co nastavit před první mzdou](#582-co-nastavit-pred-prvni-mzdou). Při běžném
 zpracování pokračujte podle části
-[Doporučený měsíční postup](#doporuceny-mesicni-postup). Podrobné návody jsou
+[Doporučený měsíční postup](#583-doporuceny-mesicni-postup). Podrobné návody jsou
 odkazované přímo u jednotlivých kroků.
 
-## Jak je mzdový modul uspořádaný
+## 58.1 Jak je mzdový modul uspořádaný
 
 Základem je **osoba**, která může mít jeden nebo více **pracovních vztahů**.
 Pracovní vztah nese smluvní a zákonné podmínky platné v čase. Každý měsíc se k
@@ -27,13 +27,13 @@ se řeší proti předchozímu schválenému stavu.
 Úplné mzdy používají stejný seznam osob jako Mzdová rekapitulace; nezakládají
 druhou kopii zaměstnance. Jeden měsíc však nelze uzavřít oběma cestami.
 
-## Co nastavit před první mzdou
+## 58.2 Co nastavit před první mzdou
 
 Nastavení proveďte v tomto pořadí. Údaje z předchozího kroku se používají v
 následujících obrazovkách, takže přeskočení obvykle skončí až blokací při
 výpočtu nebo podání.
 
-### 1. Aktivujte mzdy a určete první období
+### 58.2.1 1. Aktivujte mzdy a určete první období
 
 V **Firma → Nastavení** zapněte **Vést mzdy** a zvolte první měsíc, od kterého
 bude firma používat úplný mzdový modul. Starší měsíce mohou zůstat v
@@ -46,7 +46,7 @@ zkontrolovat, schválit i odeslat; modul nevyžaduje druhého schvalovatele.
 Citlivé oblasti, například exekuce nebo nevratný výmaz osobních údajů, mají
 samostatná práva uvedená níže.
 
-### 2. Doplňte zaměstnavatele a registrace
+### 58.2.2 2. Doplňte zaměstnavatele a registrace
 
 V [Nastavení mezd](73_Nastaveni_mezd.md) zkontrolujte zejména:
 
@@ -62,7 +62,7 @@ V [Nastavení mezd](73_Nastaveni_mezd.md) zkontrolujte zejména:
 toho, jak vypadají v certifikátu. Použijte přesně hodnotu přidělenou institucí;
 aplikace při porovnání zohlední povolený zápis.
 
-### 3. Nastavte datovou schránku firmy
+### 58.2.3 3. Nastavte datovou schránku firmy
 
 Datová schránka patří ke konkrétní **firmě**, nikoli obecně k instalaci. V
 **Firma → Datová schránka** zvolte schránku a prostředí, které se mají pro
@@ -77,14 +77,14 @@ stisknutí akce uživatelem. Stejně tak se žádné podání neodešle jen tím
 vytvořeno XML nebo vloženo do odchozí fronty. Podrobný postup je v
 [Podáních a hlášeních](68_Podani_a_hlaseni.md).
 
-### 4. Zkontrolujte legislativní sady
+### 58.2.4 4. Zkontrolujte legislativní sady
 
 V [Legislativních pravidlech mezd](75_Legislativni_pravidla_mezd.md) ověřte,
 že je pro zpracovávaný měsíc dostupná přesně účinná sada. Aplikace chybějící
 pravidlo nenahradí hodnotou z jiného roku ani odhadem. Přehled schopností
 rozlišuje **Podporováno**, **Ruční kontrola** a **Nepodporováno**.
 
-### 5. Založte zaměstnance a pracovní vztahy
+### 58.2.5 5. Založte zaměstnance a pracovní vztahy
 
 Na kartě [Zaměstnanci](69_Zamestnanci.md) nejprve doplňte osobní,
 identifikační, daňové, pojistné a platební údaje. Potom založte každý pracovní
@@ -97,7 +97,7 @@ Při převodu z jiného programu doplňte také počáteční roční součty, z
 dovolené a další návazné hodnoty. Bez nich může být samostatný měsíční výpočet
 správný, ale roční limit, maximální vyměřovací základ nebo roční zúčtování ne.
 
-### 6. Připravte mzdové složky a opakované vstupy
+### 58.2.6 6. Připravte mzdové složky a opakované vstupy
 
 V [Mzdových složkách a vstupech](74_Mzdove_slozky_a_vstupy.md) zkontrolujte
 zařazení do daně, sociálního a zdravotního pojištění, JMHZ a zaúčtování.
@@ -106,7 +106,7 @@ vstup. Jednorázové odměny a výjimky patří do konkrétního měsíce. Odkaz
 je dobrovolný; nenahrazuje skutečný zákonný údaj a jeho absence sama o sobě
 nesmí bránit práci.
 
-### 7. Projděte celý tok v testovacím prostředí a povolte ostrý provoz
+### 58.2.7 7. Projděte celý tok v testovacím prostředí a povolte ostrý provoz
 
 Před prvním ostrým měsícem vytvořte alespoň jeden úplný test: zaměstnanec,
 docházka nebo rychlý měsíční vstup, schválený běh, výplatní dokument, platba,
@@ -132,7 +132,7 @@ po aktivaci nelze trvale smazat z koše. Pokud potřebujete doklad nahradit,
 nedokončujte kvalifikaci se špatným souborem; po potvrzení je stopa záměrně
 neměnná.
 
-## Doporučený měsíční postup
+## 58.3 Doporučený měsíční postup
 
 | Pořadí | Co účetní udělá | Kde pokračovat |
 |---:|---|---|
@@ -152,7 +152,7 @@ tehdy, když souhlasí schválená revize, dokumenty, skutečně provedené plat
 zaúčtování a přijaté protokoly podání. Naopak vytvořený soubor nebo doručenka
 ISDS sama neprokazuje, že cílová instituce podání věcně přijala.
 
-## Co kontrolovat průběžně
+## 58.4 Co kontrolovat průběžně
 
 Některé události nečekají na konec měsíce:
 
@@ -173,7 +173,7 @@ Některé události nečekají na konec měsíce:
   Neprocházejte stovky zaměstnanců jen proto, abyste znovu potvrzovali stav,
   který se od minulého období nezměnil.
 
-## Roční a mimořádné práce
+## 58.5 Roční a mimořádné práce
 
 Na přelomu roku nebo při roční uzávěrce zejména:
 
@@ -194,7 +194,7 @@ Na přelomu roku nebo při roční uzávěrce zejména:
 Stejný kontrolní postup použijte při převodu mezd z jiného systému, změně
 účetní, reorganizaci mzdových účtáren nebo opravě staršího období.
 
-## Podporovaný rozsah a ruční kontrola
+## 58.6 Podporovaný rozsah a ruční kontrola
 
 Podporovány jsou scénáře, pro které aplikace nabídne potřebné údaje, výpočet a
 kontrolu. Neobvyklé souběhy a odvodové režimy, nepokryté registrace,
@@ -206,9 +206,9 @@ JMHZ podporuje řízené storno celého podání i obsahovou opravu vybraných
 formulářů z nové úplné přípravy. Přijatý formulář se opravuje se zachovanou
 identitou, odmítnutý nebo chybějící se doplní jako nový. Podrobnosti jsou v
 kapitole
-[Podání a hlášení](68_Podani_a_hlaseni.md#storno-a-obsahova-oprava-jmhz).
+[Podání a hlášení](68_Podani_a_hlaseni.md#689-storno-a-obsahova-oprava-jmhz).
 
-## Kapitoly
+## 58.7 Kapitoly
 
 1. [Absence a dovolená](59_Absence_a_dovolena.md)
 2. [Docházka a směny](60_Dochazka_a_smeny.md)
@@ -230,7 +230,7 @@ kapitole
 18. [Retenční lhůty](76_Retencni_lhuty.md)
 19. [Výmaz osobních údajů](77_Vymaz_osobnich_udaju.md)
 
-## Společná bezpečnostní pravidla
+## 58.8 Společná bezpečnostní pravidla
 
 - Pracujte jen ve správné firmě, prostředí a mzdovém období.
 - Oprávnění přidělujte podle skutečné role; mzdy obsahují citlivé osobní údaje.
@@ -239,7 +239,7 @@ kapitole
 - Přihlašovací údaje, certifikáty, privátní klíče a SMS kódy nevkládejte do poznámek, příloh ani evidence zdrojů.
 - Před uzavřením období uchovejte kontrolní výstupy a porovnejte součty mezd, plateb, zaúčtování a podání.
 
-## Oprávnění
+## 58.9 Oprávnění
 
 Základní čtení mzdového modulu vyžaduje oprávnění `payroll`. Citlivé nebo
 nevratné kroky jsou oddělené:
@@ -264,6 +264,6 @@ nemá právo provést nevratný výmaz a běžné mzdové oprávnění samo neot
 exekuční spisy. Přístup přidělujte konkrétním rolím, nikoli všem uživatelům
 firmy.
 
-## Kde začít při potížích
+## 58.10 Kde začít při potížích
 
 Nejprve zkontrolujte aktivaci a podporovaný rozsah výše, potom [mzdové běhy](63_Mzdove_behy.md) a [legislativní pravidla](75_Legislativni_pravidla_mezd.md). Obecné diagnostické postupy jsou v kapitole [Řešení problémů](999_Reseni_problemu.md).

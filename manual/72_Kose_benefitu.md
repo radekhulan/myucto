@@ -1,14 +1,14 @@
 # Koše benefitů
 
-## Účel
+## 72.1 Účel
 
 Koše benefitů jsou čtecím zákonným přehledem, který seskupuje schválená plnění a ukazuje jejich čerpání a mzdové zacházení v určeném období. Zákonné koše se nezakládají ručně; plnění do nich zařadí klasifikace použité mzdové složky.
 
-## Předpoklady a oprávnění
+## 72.2 Předpoklady a oprávnění
 
 Musí existovat zaměstnanec, vztah a schválený mzdový vstup se složkou zařazenou do příslušného zákonného koše. Zákonné limity načítá aplikace z účinného rulesetu; vlastní firemní strop lze nastavit u mzdové složky.
 
-## Krokový postup
+## 72.3 Krokový postup
 
 1. V katalogu mzdových složek ověřte zákonné zařazení benefitu a případný vlastní firemní limit.
 2. Benefit zadejte zaměstnanci jako mzdový vstup a schvalte jeho podklad.
@@ -16,30 +16,30 @@ Musí existovat zaměstnanec, vztah a schválený mzdový vstup se složkou zař
 4. Zkontrolujte vyčerpanou, osvobozenou a nadlimitní částku i případné upozornění na neúplný podklad.
 5. Před mzdovým během porovnejte souhrn se zdrojovými doklady; přehled sám nic nepřepočítává ani nezapisuje.
 
-## Stavy
+## 72.4 Stavy
 
 Přehled rozlišuje stav v limitu, blížící se limitu, nad limitem a neúplný podklad. Částky čte ze schválených zmrazených vstupů; změna filtru ani otevření přehledu nemění mzdový běh.
 
-## Kontroly a bezpečnost
+## 72.5 Kontroly a bezpečnost
 
 Kontrolujte období, osobu, limit, duplicity a zákonnou klasifikaci plnění. Benefit nepoužívejte k obcházení zdanitelné mzdy. Zdravotní nebo rodinné údaje související s benefitem evidujte pouze v nezbytném rozsahu.
 
-## Časté chyby
+## 72.6 Časté chyby
 
 - Čerpání ve špatném kalendářním roce.
 - Duplicitní doklad ve více koších.
 - Překročený limit bez správného mzdového dopadu.
 - Benefit přiřazený ukončenému vztahu bez nároku.
 
-## Návaznosti
+## 72.7 Návaznosti
 
 Význam mzdového dopadu nastavují [složky](74_Mzdove_slozky_a_vstupy.md), měsíční hodnotu lze zkontrolovat v [rychlém vstupu](62_Rychly_mesicni_vstup.md) a vypočtený výsledek v [mzdovém běhu](63_Mzdove_behy.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 72.8 Podrobný pracovní postup a kontroly
 
-### Roční koš osvobození benefitů
+### 72.8.1 Roční koš osvobození benefitů
 
 U nepeněžních benefitů se limit osvobození podle zákona o daních z příjmů
 nevztahuje na jednu mzdovou složku, ale na **úhrn všech plnění daného

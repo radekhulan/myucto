@@ -1,14 +1,14 @@
 # Podání a hlášení
 
-## Účel
+## 68.1 Účel
 
 Agenda připravuje vybraná mzdová hlášení, provádí formální kontroly a vede uživatele přes ručně spuštěné odeslání. Pokrývá zejména podporované toky ČSSZ a zdravotních pojišťoven; vytvořený soubor ani datová zpráva nejsou samy o sobě potvrzením věcného přijetí.
 
-## Předpoklady a oprávnění
+## 68.2 Předpoklady a oprávnění
 
 Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo schválená revize, úplné identifikátory a správně oddělené TEST/produkční prostředí. Pro ČSSZ TEST použijte pouze testovací profil a certifikát v určeném bezpečném úložišti. ISDS musí být nastaveno pro správnou firmu a prostředí.
 
-## Krokový postup
+## 68.3 Krokový postup
 
 1. Otevřete **Mzdy → Podání a hlášení**, vyberte typ, období a schválenou revizi.
 2. Spusťte náhled nebo kontrolní přípravu a odstraňte blokující chyby. Řádné JMHZ vzniká ze způsobilé běžné revize. Opravu nebo storno již připraveného JMHZ založte z jeho historie řízenou akcí; nejde o ruční nepodporovaný scénář.
@@ -18,11 +18,11 @@ Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo s
 6. Alternativně použijte podporovaný profil VREP pro ČSSZ. Přihlašovací a certifikační údaje zadávejte jen do určených polí, nikdy do poznámek.
 7. Inbox načítejte pouze ručně. Před načtením vždy potvrďte, že rozumíte tomu, že přístup ke zprávě může způsobit její doručení. Potom přiřaďte odpověď k podání a ověřte věcný výsledek.
 
-## Stavy
+## 68.4 Stavy
 
 Návrh čeká na doplnění, připravené podání prošlo lokální kontrolou, outbox čeká na uživatelskou akci a koncept čeká na potvrzení v ISDS. Odesláno popisuje transport. Doručeno dokládá doručení datové zprávy, nikoli přijetí obsahu institucí. Přijato, odmítnuto nebo vyžaduje opravu určete až z doručenky, odpovědi či stavu cílového systému.
 
-## Kontroly a bezpečnost
+## 68.5 Kontroly a bezpečnost
 
 Odesílací brána přesměruje uživatele na oficiální rozhraní ISDS. Podle nabídky
 konkrétního účtu tam lze použít například jméno a heslo, heslo aplikace
@@ -46,7 +46,7 @@ Každé přihlášení, vytvoření konceptu, odeslání a načtení inboxu mus�
 spustit uživatel. Před načtením inboxu navíc vždy výslovně potvrdí, že rozumí
 možnému účinku doručení a spuštění lhůt.
 
-## Časté chyby
+## 68.6 Časté chyby
 
 - Považování XML, PDF nebo záznamu outboxu za odeslané podání.
 - Záměna testovacího certifikátu či adresáta za produkční.
@@ -55,13 +55,13 @@ možnému účinku doručení a spuštění lhůt.
 - Automatické nebo neuvážené otevření inboxu bez potvrzení možného účinku doručení.
 - Uložení hesla, SMS kódu či privátního klíče do poznámky nebo evidence podání.
 
-## Návaznosti
+## 68.7 Návaznosti
 
 Identifikátory nastavte v [Nastavení mezd](73_Nastaveni_mezd.md). Firemní přístupy, ruční inbox a odchozí zprávy popisuje kapitola [Datová schránka](93_Datova_schranka.md), globální registraci pro odesílání správcem systému pak [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md). Zdrojová data pocházejí z [mzdového běhu](63_Mzdove_behy.md); kontrolní soubory a doručenky uchovávejte podle [retenčních lhůt](76_Retencni_lhuty.md).
 
 
 
-## Podrobný tok podání
+## 68.8 Podrobný tok podání
 
 V **Mzdy → Nastavení mezd → Podání** nejprve potvrď evidenční profil pro
 REGZEL. Zadej čtyřmístný kód finančního úřadu `kodFU` z číselníku finanční
@@ -104,7 +104,7 @@ Záložka **JMHZ** ukazuje všechny povinnosti vůči ČSSZ, tedy vedle měsíč
 hlášení i registrace zaměstnance a zaměstnavatele, evidenční list důchodového
 pojištění a oznámení o zaměstnání osoby pobírající starobní důchod.
 
-### Registrace zaměstnance PREZEC a REGZEC
+### 68.8.1 Registrace zaměstnance PREZEC a REGZEC
 
 Test registrace zaměstnance čte identitu z osobní karty účinnou přesně k datu
 nástupu pracovního vztahu. V **Mzdy → Zaměstnanci → Úplná osobní evidence a
@@ -119,7 +119,7 @@ Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
 má vlastní záložku; podrobnosti jsou v oddílu
-[Podání zdravotním pojišťovnám](#podani-zdravotnim-pojistovnam).
+[Podání zdravotním pojišťovnám](#6811-podani-zdravotnim-pojistovnam).
 
 #### Odeslání registrace přes VREP
 
@@ -243,7 +243,7 @@ zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
 vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
 zrušeno v termínu), položka automaticky zmizí jako vyřešená.
 
-## Storno a obsahová oprava JMHZ
+## 68.9 Storno a obsahová oprava JMHZ
 
 Storno JMHZ nevzniká přepsáním původního XML. V **Stavu odeslání** otevřete
 způsobilé předchozí podání a zvolte řízenou akci. **Připravit storno** zruší
@@ -289,7 +289,7 @@ teprve potom podání odešlete v oddílu připravených podání. Opakovaná st
 akce vrátí tentýž zmrazený artefakt. Testovací a produkční prostředí mají
 oddělené řetězce i idempotenci.
 
-## Evidenční list důchodového pojištění
+## 68.10 Evidenční list důchodového pojištění
 
 Samostatný ELDP se od roku 2026 běžně nesestavuje: ČSSZ jej vytváří z JMHZ.
 V aplikaci jej připravte jen pro starší roky, při přechodném skončení účasti
@@ -305,7 +305,7 @@ Budoucí měsíce se nevyžadují. Chybí-li ale některá revize uvnitř takto
 vymezeného období, příprava zůstane zablokovaná, protože by nebylo možné
 doložit souvislou dobu pojištění ani vyměřovací základ.
 
-## Podání zdravotním pojišťovnám
+## 68.11 Podání zdravotním pojišťovnám
 
 Záložky zdravotních pojišťoven oddělují dvě povinnosti:
 

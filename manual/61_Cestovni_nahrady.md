@@ -1,14 +1,14 @@
 # Cestovní náhrady
 
-## Účel
+## 61.1 Účel
 
 Agenda cestovních náhrad eviduje pracovní cestu a její vyúčtování jako podklad pro nárok zaměstnance a případný dopad do mzdy.
 
-## Předpoklady a oprávnění
+## 61.2 Předpoklady a oprávnění
 
 Musí existovat zaměstnanec a vztah. Připravte schválenou cestu, časy, místo, dopravní prostředek, zálohy a účetní doklady. Sazby a kurz musí odpovídat rozhodnému dni a platným pravidlům.
 
-## Krokový postup
+## 61.3 Krokový postup
 
 1. Otevřete **Mzdy → Cestovní náhrady** a založte cestu pro správného zaměstnance.
 2. Vyplňte začátek, konec, místo, účel a použitou dopravu.
@@ -16,28 +16,28 @@ Musí existovat zaměstnanec a vztah. Připravte schválenou cestu, časy, míst
 4. Zkontrolujte vypočtené stravné a krácení podle poskytnutého jídla.
 5. Schválený výsledek předejte do platby nebo mzdového vstupu podle firemního postupu.
 
-## Stavy
+## 61.4 Stavy
 
 Cesta může být rozpracovaná, připravená ke kontrole, schválená nebo vypořádaná. Rozpracovaný výpočet není účetním dokladem ani příkazem k úhradě.
 
-## Kontroly a bezpečnost
+## 61.5 Kontroly a bezpečnost
 
 Ověřte časová pásma, měnu, kurz, zákonné sazby a odpočet zálohy. Přílohy mohou obsahovat osobní údaje; ukládejte je bezpečně. Nepoužívejte cestovní náhradu jako obecnou nezdaněnou mzdovou složku.
 
-## Časté chyby
+## 61.6 Časté chyby
 
 - Chybné datum kurzu nebo měna.
 - Neodečtená záloha či duplicitně vložená účtenka.
 - Opomenuté krácení stravného.
 - Schválení bez vazby na skutečný pracovní vztah a účel cesty.
 
-## Návaznosti
+## 61.7 Návaznosti
 
 Mzdový dopad zkontrolujte v [rychlém měsíčním vstupu](62_Rychly_mesicni_vstup.md) a [mzdovém běhu](63_Mzdove_behy.md). Úhradu dokončete podle [kapitoly 58g](65_Platby_a_uhrady.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 61.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Cestovní náhrady** vedeš tuzemské pracovní cesty a jejich vyúčtování.
 U cesty zadej pracovní vztah, odjezd a návrat s časem, místo, účel a dopravní

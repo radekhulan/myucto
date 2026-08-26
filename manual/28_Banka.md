@@ -373,7 +373,7 @@ jednotné frontě **Účetnictví → K doúčtování**, i když pro něj nevzn
 
 > [!TIP]
 > **Vyúčtovací faktura ze zálohy.** Když později zaúčtuješ finální (vyúčtovací)
-> fakturu navázanou na zálohu (viz [§ 23.3.1](23_Prijate_faktury.md#2331-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni)
+> fakturu navázanou na zálohu (viz [§ 23.3.1](23_Prijate_faktury.md#2332-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni)
 > nebo [§ 15.8](15_Faktura_editor.md#158-zalohova-faktura-danovy-doklad)), zápis
 > automaticky doplní i **zúčtovací řádek zálohy** (324/311 resp. 321/314) ve výši
 > skutečně přijaté/zaplacené zálohy, nejvýše však do celkové částky vyúčtovacího

@@ -1,14 +1,14 @@
 # Absence a dovolená
 
-## Účel
+## 59.1 Účel
 
 Agenda eviduje dovolenou, překážky, neplacené volno a dočasnou pracovní neschopnost (DPN), aby se správně promítly do odpracované doby, náhrad a mzdy.
 
-## Předpoklady a oprávnění
+## 59.2 Předpoklady a oprávnění
 
 Musí existovat zaměstnanec, aktivní pracovní vztah a pracovní kalendář. Uživatel potřebuje mzdové oprávnění a ověřený podklad s typem, intervalem a případným rozsahem hodin.
 
-## Krokový postup
+## 59.3 Krokový postup
 
 1. Otevřete **Mzdy → Absence a dovolená** a vyberte období, zaměstnance a vztah.
 2. Zvolte typ absence, zadejte začátek, konec a požadované doplňující údaje.
@@ -16,28 +16,28 @@ Musí existovat zaměstnanec, aktivní pracovní vztah a pracovní kalendář. U
 4. U DPN ověřte identifikátor a průběžně zapisujte změny i ukončení podle doložených údajů.
 5. Před mzdovým během odstraňte překryvy a porovnejte absenci s docházkou.
 
-## Stavy
+## 59.4 Stavy
 
 Událost může být budoucí, probíhající nebo ukončená. Otevřená DPN čeká na doplnění konce. Zařazení do mzdy se řídí daty a kalendářem, nikoli dnem vložení záznamu.
 
-## Kontroly a bezpečnost
+## 59.5 Kontroly a bezpečnost
 
 Zdravotní údaje zpřístupněte jen oprávněným osobám a neevidujte diagnózu, pokud není potřebná. Kontrolujte překryvy, směny, svátky, čerpání nároku a návaznost DPN. Odkaz na podklad je volitelná auditní stopa; interval a typ absence jsou skutečné vstupy.
 
-## Časté chyby
+## 59.6 Časté chyby
 
 - Záměna kalendářních dnů za pracovní dny nebo hodiny.
 - Dvojí zadání stejné nepřítomnosti v docházce i absencích.
 - DPN bez ukončení.
 - Změna události po uzavření mzdy bez řízené opravy.
 
-## Návaznosti
+## 59.7 Návaznosti
 
 Absence se porovnávají s [docházkou a směnami](60_Dochazka_a_smeny.md) a vstupují do [mzdového běhu](63_Mzdove_behy.md). Případné výstupy a hlášení popisují [kapitoly 58h](66_Dokumenty_a_vystupy.md) a [58j](68_Podani_a_hlaseni.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 59.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Absence a dovolená** jsou tři navazující agendy:
 
@@ -62,7 +62,7 @@ Schválení čerpání zapíše zápornou položku podle publikovaných směn. Z
 schváleného čerpání ji nemaže, ale vytvoří kladnou reverzi a označí absenci
 pro kontrolu případné opravy mzdy.
 
-### Hromadný výpočet nároku
+### 59.8.1 Hromadný výpočet nároku
 
 Firemní výměru nastav v **Mzdy → Nastavení → Politiky a připravenost**. Musí
 mít nejméně 4 týdny; běžnou hodnotou je 5 týdnů. Jen odlišný pracovní vztah

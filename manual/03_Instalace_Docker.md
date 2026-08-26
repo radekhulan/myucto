@@ -582,7 +582,7 @@ nefungovaly náhledy PDF dokumentů a import fotek ve formátu HEIC/HEIF z iPhon
 GHCR `:latest` (i `:X.Y.Z`, `:X.Y`) používá **Alpine Linux**. Lokální build
 (`docker compose build`) staví taky alpine z `Dockerfile.alpine`.
 
-### Migrace existující instalace = nic navíc
+### 3.10.1 Migrace existující instalace = nic navíc
 
 `/data` i DB volume jsou **plně kompatibilní** mezi variantami (www-data má
 v obou uid 33). Existující Debian instalace se proto zmigruje **sama při
@@ -592,7 +592,7 @@ příštím updatu**:
 cmd/docker-update.sh        # registry: pull :latest (= alpine) + recreate; data zůstanou
 ```
 
-### Lokální Debian varianta
+### 3.10.2 Lokální Debian varianta
 
 Pokud pro své prostředí potřebuješ Debian/Apache, sestav image lokálně ze
 souboru `Dockerfile`; CI tuto variantu do GHCR nepublikuje:
@@ -603,7 +603,7 @@ docker build -f Dockerfile -t myucto:latest .
 docker compose up -d
 ```
 
-### RAM tuning
+### 3.10.3 RAM tuning
 
 Pro stroje s ~512 MB–1 GB RAM lze sáhnout na tyto proměnné (alpine entrypoint
 je čte při startu):
@@ -627,7 +627,7 @@ DB_INNODB_LOG_SIZE=32M      # disk (redo log) — ušetří dalších ~16 MB
 > 🛈 MariaDB redo log se při startu s jinou velikostí bezpečně přesází (po čistém
 > shutdownu), data zůstávají. Změna se projeví při příštím recreatnutí db kontejneru.
 
-### Úklid starých image (uvolnění disku)
+### 3.10.4 Úklid starých image (uvolnění disku)
 
 Po updatech zůstávají osiřelé image. `docker-update` sám uklidí dangling
 vrstvy; staré **tagované** verze smaž explicitně:

@@ -141,7 +141,7 @@ viz [§ 92.11 Automatické zaúčtování](92_Nastaveni.md#9211-automaticke-zauc
 Vygenerované PDF obsahuje:
 
 1. **Hlavičku** — logo dodavatele, jméno, adresa, IČO, DIČ, kontakt
-2. **Adresát** — klient (firma + adresa + IČO + DIČ). U zemí s národním daňovým číslem se tiskne navíc s nativním labelem — slovenský klient má `IČO → DIČ → IČ DPH` (u neplátce jen IČO + DIČ), německý/rakouský Steuernummer, polský NIP, maďarský Adószám (viz [§ 18.2.1a](18_Klienti.md#1821a-slovensky-klient-a-narodni-danova-cisla))
+2. **Adresát** — klient (firma + adresa + IČO + DIČ). U zemí s národním daňovým číslem se tiskne navíc s nativním labelem — slovenský klient má `IČO → DIČ → IČ DPH` (u neplátce jen IČO + DIČ), německý/rakouský Steuernummer, polský NIP, maďarský Adószám (viz [§ 18.2.1a](18_Klienti.md#1822-1821a-slovensky-klient-a-narodni-danova-cisla))
 3. **Číslo faktury** + **typ** (Faktura / Proforma / Dobropis / Storno)
 4. **Data** — vystaveno, DUZP, splatnost
 5. **Bankovní spojení** — číslo účtu / IBAN, BIC, banka, variabilní symbol

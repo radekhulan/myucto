@@ -191,13 +191,13 @@ cena a její zdroj; u kurzového přepočtu také datum použitého kurzovního 
 
 Vložený řádek je samostatný snapshot. Lze jej dále upravit a pozdější změna
 ceníku, zákazníka nebo kurzu jej automaticky nepřecení. Správa ceníku je popsána
-v [§ 92.1.5](92_Nastaveni.md#9215-cenikove-polozky).
+v [§ 92.1.5](92_Nastaveni.md#9217-cenikove-polozky).
 
 | Sloupec | Význam |
 |---|---|
 | Popis | Co fakturuješ. Lze multiline. **Tip:** pokud je v popisu měsíc (`Konzultace 3/2026`), klonování faktury automaticky inkrementuje. |
 | Množství | Počet jednotek (kusy / hodiny / …) |
-| Jednotka | Z číselníku (default `h` / hodina). Číselník spravuješ v **Systém → Číselníky → Jednotky** — viz [§ 92.1.4](92_Nastaveni.md#9214-jednotky). |
+| Jednotka | Z číselníku (default `h` / hodina). Číselník spravuješ v **Systém → Číselníky → Jednotky** — viz [§ 92.1.4](92_Nastaveni.md#9216-jednotky). |
 | Cena/jed. | Jednotková cena (v režimu „bez DPH" netto, v režimu „s DPH" brutto — viz [§ 15.2.6](#1526-ceny-s-dph-vs-bez-dph-brutto-netto-rezim)) |
 | DPH | Sazba — `21 %`, `12 %`, `0 %` (osvobozeno), `RC` (reverse charge) |
 | Celkem | Auto-počítáno (množství × cena/jed.) |

@@ -1,14 +1,14 @@
 # Mzdové příkazy a úhrady
 
-## Účel
+## 65.1 Účel
 
 Agenda připravuje závazky z uzavřené mzdy: čisté mzdy, daň, sociální a zdravotní pojištění, srážky a další příjemce. Následně sleduje jejich úhradu.
 
-## Předpoklady a oprávnění
+## 65.2 Předpoklady a oprávnění
 
 Je nutný uzavřený běh, oprávnění `payroll.payments`, správné účty, termíny a symboly. Bankovní údaje musí být ověřeny z důvěryhodného zdroje.
 
-## Krokový postup
+## 65.3 Krokový postup
 
 1. U zaúčtovaného běhu zvolte **Připravit platby**. Aplikace otevře **Mzdy → Mzdové příkazy a úhrady** ve správném období a nabídne závazky daného běhu.
 2. Zkontrolujte příjemce, účet, částku, splatnost a platební symboly každého závazku.
@@ -16,28 +16,28 @@ Je nutný uzavřený běh, oprávnění `payroll.payments`, správné účty, te
 4. Platby autorizujte v bance podle interních pravidel firmy.
 5. Po provedení spárujte úhrady a vyřešte rozdíly nebo vratky.
 
-## Stavy
+## 65.4 Stavy
 
 Připravená platba není odeslaná. Exportovaná čeká na autorizaci v bance. Uhrazená má odpovídající bankovní pohyb; částečně uhrazená nebo zamítnutá vyžaduje další krok.
 
-## Kontroly a bezpečnost
+## 65.5 Kontroly a bezpečnost
 
 Jedna účetní může připravit i dokončit celý tok. Při změně účtu aplikace vyžaduje ověřený podklad; před vytvořením příkazu porovnejte součet plateb s uzavřeným během a účetními závazky. Bankovní export chraňte jako citlivý soubor a po přenosu jej nenechávejte na sdíleném místě.
 
-## Časté chyby
+## 65.6 Časté chyby
 
 - Považování exportu za odeslanou platbu.
 - Starý účet zaměstnance nebo instituce.
 - Duplicitní export či ruční platba.
 - Spárování podobné částky z jiného období.
 
-## Návaznosti
+## 65.7 Návaznosti
 
 Částky pocházejí z [mzdového běhu](63_Mzdove_behy.md), účetní závazky kontroluje [shoda účtování](64_Shoda_uctovani_mezd.md) a příjemce srážek popisují [kapitoly 58l](70_Dohody_o_srazkach.md) a [58m](71_Srazky_a_exekuce.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 65.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Mzdové příkazy a úhrady** vybereš mzdové období a připravíš platební
 závazky z aktuálních schválených revizí. Čistá mzda se vždy odvozuje z částky

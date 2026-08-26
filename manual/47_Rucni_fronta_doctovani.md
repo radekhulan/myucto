@@ -19,7 +19,7 @@ agendy, ve které se případ skutečně vyřeší.
 
 ## 47.1 Co se do fronty zařazuje
 
-### Bankovní pohyb bez návrhu
+### 47.1.1 Bankovní pohyb bez návrhu
 
 Jde o skutečný pohyb importovaný z výpisu, který:
 
@@ -35,7 +35,7 @@ zaúčtování na detailu výpisu.
 Provizorní e-mailová avíza se do fronty nezařazují. Nejsou skutečným pohybem
 z výpisu a nikdy se neúčtují.
 
-### Nezaúčtovaný vydaný doklad
+### 47.1.2 Nezaúčtovaný vydaný doklad
 
 Zařazují se doklady bez `booked_at`, které nejsou koncept ani stornované a
 patří mezi postovatelné typy:
@@ -48,7 +48,7 @@ patří mezi postovatelné typy:
 Řádek vede na detail vydaného dokladu. Tam zkontrolujte položky, DPH, datum
 účetního případu a předkontaci a teprve potom použijte **Zaúčtovat**.
 
-### Nezaúčtovaný přijatý doklad
+### 47.1.3 Nezaúčtovaný přijatý doklad
 
 Zařazují se přijaté doklady bez `booked_at`, které nejsou koncept ani
 stornované. Zálohová výzva (`document_kind = advance`) se nezobrazuje:
@@ -58,7 +58,7 @@ následným vyúčtováním.
 Částka přijatého dokladu je ve frontě zobrazena záporně, aby byl na první
 pohled odlišen výdajový směr.
 
-### Otevřená žádost o dokument
+### 47.1.4 Otevřená žádost o dokument
 
 Zařazuje se žádost ve stavu **Vyžádáno**. Řádek může nést datum případu,
 částku, protistranu, vlastní popis a termín dodání. Odkaz vede do přehledu

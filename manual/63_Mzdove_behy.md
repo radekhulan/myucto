@@ -1,14 +1,14 @@
 # Mzdové běhy
 
-## Účel
+## 63.1 Účel
 
 Mzdový běh shromáždí data jednoho období, provede výpočet a uchová kontrolovatelný výsledek. Uzavření odděluje návrh od podkladu pro platby, účetnictví, dokumenty a podání.
 
-## Předpoklady a oprávnění
+## 63.2 Předpoklady a oprávnění
 
 Musí být dokončeno nastavení zaměstnavatele, zaměstnanců, vztahů, kalendáře, absencí a vstupů. Uživatel potřebuje mzdové oprávnění; před uzavřením musí rozumět validačním hlášením.
 
-## Krokový postup
+## 63.3 Krokový postup
 
 1. Otevřete **Mzdy → Mzdové běhy**, zvolte rok a měsíc a vytvořte návrh.
 2. Spusťte výpočet a projděte chyby, varování i výsledky jednotlivých zaměstnanců.
@@ -16,28 +16,28 @@ Musí být dokončeno nastavení zaměstnavatele, zaměstnanců, vztahů, kalend
 4. Po opravě zdroje spusťte nový výpočet; neupravujte vypočtený výsledek bez podkladu.
 5. Uzavřete pouze schválený běh a následné činnosti provádějte z této uzavřené revize.
 
-## Stavy
+## 63.4 Stavy
 
 Návrh je měnitelný, vypočtený návrh čeká na kontrolu a uzavřený běh je stabilním podkladem. Chyba blokuje pokračování; varování vyžaduje rozhodnutí uživatele. Storno či oprava musí zachovat auditní návaznost a nesmí přepsat historii.
 
-## Kontroly a bezpečnost
+## 63.5 Kontroly a bezpečnost
 
 Kontrolujte hrubou a čistou mzdu, daň, pojistné, náhrady, srážky a náklad zaměstnavatele. Ověřte počet osob a souběhy. Celý postup může dokončit jedna účetní s příslušným oprávněním; případná interní kontrola další osobou je dobrovolným pravidlem firmy. Výpočet v aplikaci nenahrazuje odborné posouzení nepodporovaného případu.
 
-## Časté chyby
+## 63.6 Časté chyby
 
 - Uzavření před dodáním absence nebo srážky.
 - Oprava vstupu bez přepočtu.
 - Záměna výpočtu za automatické zaúčtování či odeslání plateb.
 - Přehlédnutí varování u souběhu nebo chybějícího identifikátoru.
 
-## Návaznosti
+## 63.7 Návaznosti
 
 Po uzavření zkontrolujte [shodu účtování](64_Shoda_uctovani_mezd.md), připravte [platby](65_Platby_a_uhrady.md), [dokumenty](66_Dokumenty_a_vystupy.md) a [podání](68_Podani_a_hlaseni.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 63.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Mzdové běhy** založíš zpracování konkrétního měsíce. K období se
 zadává také skutečné datum výplaty; podle něj se vybírají účinná pravidla

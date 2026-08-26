@@ -102,7 +102,7 @@ U vlastního profilu jsou dostupné dva zdroje:
 | **Použít osobní certifikát EPO** | Certifikát už máš uložený v osobním šifrovaném trezoru v **Nástroje → EPO podání a archív**. PFX ani heslo se neukládají podruhé. |
 | **Nahrát samostatný certifikát** | Profil dodavatele, profil jiného uživatele nebo certifikát, který nechceš používat pro EPO. |
 
-### Použití osobního certifikátu EPO
+### 95.4.1 Použití osobního certifikátu EPO
 
 1. V **Nástroje → EPO podání a archív** otevři **Certifikáty EPO**, nahraj P12/PFX
    a povol ho pro aktuální firmu.
@@ -120,7 +120,7 @@ dešifrují pouze v paměti serveru. Certifikát nelze z trezoru smazat ani odeb
 z firmy, dokud ho používá její aktivní podpisový profil. Nejprve v profilu
 certifikát odeber nebo ho nahraď jiným.
 
-### Samostatný certifikát profilu
+### 95.4.2 Samostatný certifikát profilu
 
 1. Otevři editaci profilu.
 2. V části **Certifikát profilu** klikni **Vybrat soubor**.
@@ -155,7 +155,7 @@ vyhodnocuje až v e-mailovém klientovi příjemce.
 | **Passphrase file** (`passphrase_file`) | Když nechceš heslo ukládat do DB, ale aplikace musí podepisovat i bez interaktivního vstupu. | V profilu se uloží jen ID hesla. Skutečné heslo se čte ze serverového souboru nastaveného v konfiguraci. |
 | **Ptát se při použití** (`prompt_on_use`) | Interaktivní podpis na vyžádání. | V této iteraci není pro runtime podpisy podporováno. Pro PDF i S/MIME zvol šifrované uložení nebo passphrase file. |
 
-### Passphrase file
+### 95.5.1 Passphrase file
 
 Cestu k souboru nastav správce v konfiguraci:
 
@@ -224,7 +224,7 @@ S/MIME e-mail.
 | **Fallback uživatele** | Co se má stát, když je zvolen **Přihlášený uživatel**, ale uživatel nemá použitelný vlastní profil. |
 | **Při chybě** | Co se má stát, když podpis selže nebo není nakonfigurovaný. |
 
-### Výběr profilu
+### 95.7.1 Výběr profilu
 
 | Hodnota | Chování |
 |---|---|
@@ -235,7 +235,7 @@ U automatických/background operací nemusí existovat přihlášený uživatel.
 je výstup nastavený na **Přihlášený uživatel**, je proto důležité nastavit
 rozumný fallback.
 
-### Fallback uživatele
+### 95.7.2 Fallback uživatele
 
 | Hodnota | Chování |
 |---|---|
@@ -243,7 +243,7 @@ rozumný fallback.
 | **Vrátit nepodepsané** | Výstup pokračuje bez podpisu a událost se zapíše do logu. U PDF se vydá nepodepsané PDF, u e-mailu odejde nepodepsaná zpráva. |
 | **Zastavit s chybou** | Export nebo odeslání selže s chybou. |
 
-### Při chybě
+### 95.7.3 Při chybě
 
 | Hodnota | Chování |
 |---|---|

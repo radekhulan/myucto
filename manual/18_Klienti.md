@@ -71,7 +71,7 @@ Doporučený postup pro českého klienta:
 | Splatnost | Preset **7 dnů / 14 dnů / Měsíc / Vlastní**, nebo **Použít výchozí** = dědit z dodavatele. „Měsíc" = kalendářní měsíc (1. 2. → 1. 3., 31. 1. → 28. 2.), ne fixních 30 dní |
 | Poznámka | Interní text — nezobrazí se na faktuře |
 
-### 18.2.1a Slovenský klient a národní daňová čísla
+### 18.2.2 18.2.1a Slovenský klient a národní daňová čísla
 
 Slovenské subjekty mají **tři** identifikační čísla — IČO, **DIČ** (bez prefixu,
 přiděluje ho finanční úřad každému podnikateli včetně neplátců) a **IČ DPH**
@@ -94,7 +94,7 @@ ověřuje přes evropský **VIES** — zobrazí stav registrace k DPH, název
 a adresu subjektu. Český registr plátců DPH (zveřejněné účty, nespolehlivý
 plátce) se používá dál jen pro česká DIČ.
 
-### 18.2.2 E-mailové kontakty podle účelu
+### 18.2.3 E-mailové kontakty podle účelu
 
 U firemních odběratelů je běžné, že různé typy zpráv mají chodit na různé
 adresy — faktury na účtárnu, upomínky na odpovědnou osobu, schvalování
@@ -138,7 +138,7 @@ Klik na jméno v seznamu → detail.
 
 ![Detail klienta](img/06_klient_detail.webp)
 
-### Bankovní účty protistrany
+### 18.3.1 Bankovní účty protistrany
 
 Na detailu zákazníka nebo dodavatele je sekce **Bankovní účty protistrany**.
 Účet můžeš přidat ručně jako české číslo účtu nebo IBAN. U českého dodavatele
@@ -151,22 +151,22 @@ výpisu nebo byl zadaný ručně; jeden účet může mít více zdrojů součas
 
 Detail má 4 záložky:
 
-### 18.3.1 Přehled
+### 18.3.2 Přehled
 
 Sumář: kontakt, výchozí nastavení, obraty (letos / loni), počet zakázek,
 počet faktur podle stavu.
 
-### 18.3.2 Zakázky
+### 18.3.3 Zakázky
 
 Seznam zakázek pod klientem. Tlačítko **+ Nová zakázka** otevře editor —
 viz [19. Zakázky](19_Zakazky.md).
 
-### 18.3.3 Faktury
+### 18.3.4 Faktury
 
 Seznam faktur klienta (všechny zakázky + faktury bez zakázky). Filtr stavu
 + pagination.
 
-### 18.3.4 Aktivita
+### 18.3.5 Aktivita
 
 Activity log — kdo a kdy klienta vytvořil / upravil / odeslal mu fakturu.
 

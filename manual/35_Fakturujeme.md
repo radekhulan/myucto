@@ -140,7 +140,7 @@ Jakmile do historie zapíšeš registraci nebo její zrušení, aplikace na to
 Položky zadává účetní ručně — z dokladu nejde poznat, zda věc k rozhodnému dni
 pořád tvoří obchodní majetek. Součet se promítne na **ř. 45 přiznání k DPH**;
 evidence sama do deníku neúčtuje. Podrobně
-[§ 36 — Opravy DPH](36_Vykazy_DPH.md#opravy-dph-43-79-a-79a).
+[§ 36 — Opravy DPH](36_Vykazy_DPH.md#367-opravy-dph-43-79-a-79a).
 
 ## 35.2 Sazby DPH a klasifikace
 
@@ -165,14 +165,14 @@ přidané položky faktury.
 > **Pole Stát formulář předvyplňuje na `CZ`.** U sazby členského státu ho musíš
 > přepsat — sazba `SK-23` se zemí `CZ` je pro systém *česká sazba 23 %*, a takovou
 > ČR nezná. Je to nejčastější příčina toho, že import zahraničních dokladů skončí
-> chybou. Detail v [§ 40.2.2](40_OSS.md#4022-sazby-dph-pro-cizi-zeme-hlidej-pole-stat).
+> chybou. Detail v [§ 40.2.2](40_OSS.md#4032-sazby-dph-pro-cizi-zeme-hlidej-pole-stat).
 
 > [!NOTE]
 > Sazby se přiřazují **per položku**, ne per celý doklad. Smíšené sazby v jedné
 > faktuře aplikace zvládá — sumace je rozepsaná po sazbách. Vystavené doklady si
 > sazbu drží na svých řádcích, takže **změna číselníku minulost nepřepíše**;
 > postup při změně sazby s budoucí platností popisuje
-> [§ 36](36_Vykazy_DPH.md#zmena-sazby-dph-s-budouci-platnosti).
+> [§ 36](36_Vykazy_DPH.md#369-zmena-sazby-dph-s-budouci-platnosti).
 
 ### 35.2.2 Klasifikace DPH — co doklad opravdu zařadí do výkazů
 
@@ -189,7 +189,7 @@ kontrolního hlášení.
 - Není to popisek: **backend podle klasifikace zařazuje řádky do daňových
   sestav.**
 
-Detail v [§ 36 — VAT klasifikační kódy](36_Vykazy_DPH.md#jak-funguji-vat-klasifikacni-kody)
+Detail v [§ 36 — VAT klasifikační kódy](36_Vykazy_DPH.md#3644-jak-funguji-vat-klasifikacni-kody)
 a [§ 92.14](92_Nastaveni.md#9214-system-sazby-a-ciselniky).
 
 ## 35.3 Datum plnění, zálohy a zjednodušený doklad
@@ -224,7 +224,7 @@ vystaví jako koncept automaticky (bankovní párování) nebo na klik:
 
 **Daňový doklad k platbě se nevystavuje** u neplátce, u plnění v přenesené
 daňové povinnosti (u RC se záloha nedaní — daň vzniká až k DUZP plnění) a
-[v režimu OSS](40_OSS.md#407-uctovani-oss-dane) (daň se přiznává ke dni přijetí
+[v režimu OSS](40_OSS.md#408-uctovani-oss-dane) (daň se přiznává ke dni přijetí
 úplaty přímo v OSS přiznání). Podrobně
 [§ 16.1.2](16_Faktura_PDF.md#zalohova-faktura-danovy-doklad-k-prijate-platbe) a
 [§ 15.8](15_Faktura_editor.md#158-zalohova-faktura-danovy-doklad).
@@ -294,7 +294,7 @@ směrnice 2006/112/ES". EU plnění se současně vykáže v
 > s DIČ zapne automaticky.
 
 RC doklad v cizí měně má vlastní pravidla přepočtu pro výkazy — viz
-[§ 36](36_Vykazy_DPH.md#reverse-charge-v-cizi-mene).
+[§ 36](36_Vykazy_DPH.md#3647-reverse-charge-v-cizi-mene).
 
 ## 35.5 Zahraniční fakturace — EU, OSS a třetí země
 
@@ -333,7 +333,7 @@ na dokladu, účtování na 345.100, přepočet kurzem ECB, podání, archiv a e
   je filtrem **Místo plnění (OSS)** v seznamu faktur a vyřešíš hromadnou akcí
   **Nastavit OSS**.
 - **Historické doklady nemusíš zadávat ručně** — import vydaných faktur režim
-  OSS odvodí sám, viz [§ 21.4b](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss).
+  OSS odvodí sám, viz [§ 21.4b](21_Importy.md#216-214b-zahranicni-doklady-a-rezim-oss).
 - **Doklad s OSS řádkem se neexportuje do Pohoda XML ani Stereo XML** — ty
   formáty nemají kam zapsat zemi spotřeby.
 
@@ -359,7 +359,7 @@ Daň se odvede přes OSS, ne přes tuzemské přiznání.
 > neodesílá**. Sledování prahu i kontrola sazeb jsou **upozornění**, ne závazné
 > určení povinnosti. OSS přiznání se navíc nepodává obecnou cestou EPO, ale
 > v samostatné aplikaci **MOSS/OSS** Daňového portálu —
-> [§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava). Před podáním vždy ověř
+> [§ 40.8.5](40_OSS.md#4095-kde-se-oss-priznani-podava). Před podáním vždy ověř
 > sazby, zemi spotřeby, přepočet a výsledné XML s účetní nebo daňovým poradcem.
 
 ### 35.5.3 Export mimo EU není reverse charge
@@ -387,7 +387,7 @@ s místní účetní.
 
 ## 35.6 Co MyÚčto dělá a co nedělá
 
-### MyÚčto **dělá**
+### 35.6.1 MyÚčto **dělá**
 
 - Vystavení dokladu — faktura, zálohová, daňový doklad k platbě, dobropis,
   storno, zjednodušený doklad
@@ -429,7 +429,7 @@ s místní účetní.
   stavu proti dnešním datům
 - **REST API v1 (OpenAPI 3.1)**, MCP server a klientský portál
 
-### MyÚčto **nedělá**
+### 35.6.2 MyÚčto **nedělá**
 
 - **Produkční mzdy jako jediný zdroj — zatím.** [Mzdový modul](58_Uplne_mzdy.md)
   běží ve zkušebním provozu: výsledek, odvody, dokumenty i podání je nutné
@@ -438,7 +438,7 @@ s místní účetní.
 - **IOSS ani režim mimo EU** — vede se pouze **režim EU** OSS
 - **Podání OSS přes EPO** — `OSSEI1` se podává v samostatné aplikaci
   **MOSS/OSS** Daňového portálu, přímý ani asistovaný kanál ho proto nenabízí
-  ([§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava))
+  ([§ 40.8.5](40_OSS.md#4095-kde-se-oss-priznani-podava))
 - **Jednotné automatické odeslání všech mzdových podání** — JMHZ lze po
   výslovném potvrzení řízeně odeslat přes VREP nebo ISDS a následně evidovat
   stav a protokol. Ostatní výstupy se podle druhu připraví ke stažení nebo se

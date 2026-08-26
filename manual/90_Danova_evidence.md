@@ -93,7 +93,7 @@ faktury 12 100 Kč, z toho základ 10 000 Kč a DPH 2 100 Kč, vytvoří daňov�
 10 000 Kč a nedaňový výdaj 2 100 Kč. Při 60% poměrném odpočtu je uznatelný výdaj
 10 840 Kč a nedaňová odpočitatelná DPH 1 260 Kč. Konečné DPFO provede vlastní
 formulářová zaokrouhlení popsaná v
-[kapitole Daň z příjmů](38_Dan_z_prijmu.md#jak-se-pocita-dpfo).
+[kapitole Daň z příjmů](38_Dan_z_prijmu.md#382-jak-se-pocita-dpfo).
 
 ## 90.4 Tabulka pohybů
 

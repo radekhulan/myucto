@@ -53,11 +53,11 @@ data a server je vůbec nezveřejní. Přesný počet vypíše server při start
 > zaevidovat opravu podle § 46 / § 74b ani odeslat podání na EPO nemůže. Je to
 > agenda s daňovou odpovědností, kde chyba znamená opravné podání — dělá ji člověk
 > v aplikaci. Zákaz vynucuje server, ne jen MCP: i token s právem zápisu dostane
-> na takovou operaci `403 token_write_forbidden` (viz [kapitola 78.6](99_API.md#996-scopes)).
+> na takovou operaci `403 token_write_forbidden` (viz [kapitola 78.6](99_API.md#997-scopes)).
 
 ## 101.3 Zprovoznění
 
-### Krok 1 — API token
+### 101.3.1 Krok 1 — API token
 
 V **Firma → API tokeny** vytvoř nový token. Zobrazí se **jen jednou**, hned si
 ho zkopíruj.
@@ -66,7 +66,7 @@ ho zkopíruj.
   když má asistent opravdu vystavovat doklady nebo měnit ceny.
 - Token rovnou **omez na svou IP adresu** (sloupec *IP omezení* u tokenu).
 
-### Krok 2 — příprava serveru
+### 101.3.2 Krok 2 — příprava serveru
 
 Server vyžaduje **Node 20 nebo novější**. Ve vydané distribuci je už připravený
 hotový build; nic nemusíš sestavovat ani instalovat. Máš dvě možnosti.
@@ -99,7 +99,7 @@ Server pak běží z `MCP/src/index.mjs` a potřebuje vedle sebe `node_modules`.
 > externích závislostí — Node musí být nainstalovaný v obou případech. Odpadá
 > jen `npm install` a adresář `node_modules`.
 
-### Krok 3 — registrace u asistenta
+### 101.3.3 Krok 3 — registrace u asistenta
 
 Na stránce **Firma → MCP server** vyber v kroku 3 svého asistenta; zobrazí se
 hotová konfigurace i s adresou tvojí instance, kterou stačí zkopírovat.
@@ -131,7 +131,7 @@ ve všech ukázkách naráz.
 > se vzdálenými MCP servery přes HTTP, zatímco tenhle běží lokálně. Pro práci
 > s daty MyÚčta v prostředí OpenAI použij **Codex CLI**.
 
-### Krok 4 — ověření
+### 101.3.4 Krok 4 — ověření
 
 Napiš asistentovi „ověř připojení k MyÚčtu“. Zavolá nástroj `whoami` a vrátí
 uživatele, roli a firmu. Volání se hned objeví v logu na stránce MCP serveru.
@@ -238,13 +238,13 @@ tím, co vrátí rejstřík — může jít o změnu, která se do ARES ještě 
 
 Bez IČO je potřeba název, ulice, město a PSČ; asistent si o ně řekne.
 
-### Ochrana proti duplicitám
+### 101.6.1 Ochrana proti duplicitám
 
 Před založením se kontroluje, jestli odběratel se stejným **IČO nebo DIČ** už
 neexistuje. Pokud ano, **nic se nezaloží** a asistent ukáže stávající kartu.
 Druhou kartu téže firmy lze vytvořit jen vědomě, na výslovné potvrzení.
 
-### Úprava
+### 101.6.2 Úprava
 
 Stačí říct, co se má změnit — zbytek karty zůstane. Asistent si ji načte,
 změnu do ní vloží a uloží celou zpět, takže se nic nevynuluje.
@@ -266,7 +266,7 @@ Výkaz je navázaný na **koncept faktury** — přesně jako v aplikaci. Stač�
 Asistent zakázku dohledá, najde její koncept faktury a řádek přidá. Existující
 řádky zůstanou beze změny.
 
-### Jak se určí hodinová sazba
+### 101.7.1 Jak se určí hodinová sazba
 
 Sazbu zadávat nemusíš. Doplní se v tomhle pořadí a první nenulová vyhraje:
 
@@ -279,7 +279,7 @@ Sazbu zadávat nemusíš. Doplní se v tomhle pořadí a první nenulová vyhraj
 Když sazbu nemá nikdo, asistent to řekne a požádá o ni — netipuje. Vlastní sazbu
 lze samozřejmě určit („…3 hodiny po 1 800 Kč“).
 
-### Který doklad se použije
+### 101.7.2 Který doklad se použije
 
 - Pokud řekneš číslo faktury, použije se ta.
 - Pokud jmenuješ jen zakázku nebo odběratele, hledá se jeho **koncept** faktury.
@@ -287,7 +287,7 @@ lze samozřejmě určit („…3 hodiny po 1 800 Kč“).
   hodiny na cizí doklad by bylo horší než se doptat.
 - Vystavená faktura je uzamčená; do jejího výkazu se zapsat nedá.
 
-### Materiál
+### 101.7.3 Materiál
 
 Řádky materiálu fungují stejně (množství, jednotka, cena za jednotku). Jediný
 rozdíl: **sazbu DPH materiálu si asistent nevymýšlí.** Převezme ji z už
@@ -296,7 +296,7 @@ přiznání k DPH.
 
 ## 101.8 Zakázky, dokumenty a kniha jízd
 
-### Zakázky
+### 101.8.1 Zakázky
 
 Asistent umí zakázku založit, upravit, archivovat i bezpečně smazat, pokud ještě
 nemá doklady. Při úpravě nejdřív načte současný stav a zachová všechna nezadaná
@@ -307,7 +307,7 @@ Přehled ziskovosti je **jen ke čtení**. V podvojném účetnictví vychází 
 v daňové evidenci z dokladů, a upozorní i na nezaúčtované doklady. Asistent přes
 něj nic nezaúčtuje ani neopraví.
 
-### Dokumenty
+### 101.8.2 Dokumenty
 
 MCP umí dokumenty vypsat, hledat v názvu, popisu i vytěženém textu, přečíst
 omezený úsek textu, upravit název, popis a tagy a připojit dokument k odběrateli,
@@ -318,7 +318,7 @@ Přes tento MCP server se **nenahrávají ani nestahují binární soubory**. PD
 obrázek nebo ZIP nahraj v aplikaci; asistent pak pracuje s jeho metadaty a
 vytěženým textem. Odpojení vazby vyžaduje potvrzení, dokument samotný ale nemaže.
 
-### Kniha jízd
+### 101.8.3 Kniha jízd
 
 Asistent umí spravovat vozidla, přidávat a upravovat jízdy a tankování a číst
 roční souhrn kilometrů a spotřeby. U nové jízdy vyžaduje vozidlo, datum,
@@ -342,7 +342,7 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 > Celá tahle agenda je **volitelný modul**. Když ho firma nemá zapnutý,
 > nástroje vracejí `403 stock_disabled` — zapíná se v nastavení firmy.
 
-### Co asistent umí
+### 101.9.1 Co asistent umí
 
 | Oblast | Čtení | Zápis |
 |---|---|---|
@@ -362,7 +362,7 @@ vzniká až v účetní vrstvě, která zůstává jen ke čtení.
 | **Příjemky, výdejky, převodky** | seznam, detail s řádky | založit koncept, upravit, zaúčtovat, stornovat, smazat koncept |
 | **Inventury** | seznam, detail s rozdíly | založit, spustit, zapsat napočítané množství, uzavřít |
 
-### Potvrzování nevratných kroků
+### 101.9.2 Potvrzování nevratných kroků
 
 Mazání, storno dokladu a uzavření inventury vyžadují **výslovné potvrzení**.
 První volání takového nástroje záměrně **nic neprovede** — jen vrátí, čeho by se
@@ -381,7 +381,7 @@ nesmaže fotku cizímu zboží.
 Praktický dopad: **asistent se tě před smazáním vždycky zeptá.** Řetězec „ukliď
 nepoužívané štítky“ neproběhne jedním vrzem, ale jako výpis a dotaz.
 
-### Kolekce se nahrazují celé
+### 101.9.3 Kolekce se nahrazují celé
 
 Ceny, dodavatelé, jazykové verze, kategorie, štítky, parametry a řádky
 skladového dokladu se ukládají **jako celek** — co v uloženém seznamu není, to se
@@ -393,7 +393,7 @@ jistý, řekni si o vypsání současného stavu předem:
 
 > „Ukaž ceny toho zboží, pak k nim přidej eurovou cenu s marží 25 %.“
 
-### Skladové doklady mají dvě fáze
+### 101.9.4 Skladové doklady mají dvě fáze
 
 Příjemka, výdejka i převodka vznikají jako **koncept**, který se stavem skladu
 nedělá nic — teprve zaúčtování pohyb provede, přidělí dokladu číslo a doklad
@@ -411,7 +411,7 @@ opačný protidoklad v původních cenách a oba zůstanou ve skladové knize.
 Server sám odmítne (`409`) výdej do minusu, jakýkoli pohyb na skladu
 s rozběhnutou inventurou a doklad do uzavřeného účetního období.
 
-### Objednávky u dodavatele
+### 101.9.5 Objednávky u dodavatele
 
 Asistent umí celý životní cyklus objednávky
 ([§ 33.11](33_Sklad.md#3311-objednavky-u-dodavatele)) — a drží se v něm stejných
@@ -442,7 +442,7 @@ na konkrétní faktury.
 > → asistent přečte množstevní pohledy a návrh doplnění, objednávky ale založí
 > jako koncepty, které si odsouhlasíš.
 
-### Inventura
+### 101.9.6 Inventura
 
 Postup kopíruje aplikaci: založit → spustit (udělá se snímek očekávaných stavů
 a **sklad se zablokuje** pro zaúčtování dokladů) → zapsat napočítané množství →
@@ -450,7 +450,7 @@ uzavřít. Uzavření vygeneruje rozdílovou příjemku na přebytky a výdejku 
 rovnou zaúčtované — proto vyžaduje potvrzení a proto asistent před ním hlásí,
 kolik řádků zůstalo nespočítaných (ty se přeskočí).
 
-### Co přes MCP nejde
+### 101.9.7 Co přes MCP nejde
 
 - **Nahrát fotku ke zboží.** Přenos souborů běží mimo formát, se kterým tenhle
   server pracuje. Fotky nahraješ v aplikaci, asistent s nimi pak umí pracovat
@@ -468,7 +468,7 @@ tokenů včetně zamítnutých. U volání z MCP serveru je vidět i **název n�
 takže poznáš, co asistent dělal, ne jen jaké URL zavolal.
 
 Filtruje se podle tokenu, metody, cesty, zdroje a na samotné chyby. Podrobnosti
-jsou v [§ 99.8](99_API.md#998-log-volani-api).
+jsou v [§ 99.8](99_API.md#999-log-volani-api).
 
 ## 101.11 Bezpečnost
 
@@ -496,7 +496,7 @@ jsou v [§ 99.8](99_API.md#998-log-volani-api).
 | `401 invalid_token` | Token je zrušený nebo expirovaný — vygeneruj nový. |
 | `403 token_ip_forbidden` | Token má omezení podle IP a tahle adresa mezi nimi není. |
 | `403 insufficient_scope` | Token má jen rozsah čtení, operace vyžaduje zápis. |
-| `403 token_write_forbidden` | Zápis do účetnictví nebo daní — přes API nikdy, viz [§ 99.6](99_API.md#996-scopes). |
+| `403 token_write_forbidden` | Zápis do účetnictví nebo daní — přes API nikdy, viz [§ 99.6](99_API.md#997-scopes). |
 | `403 stock_disabled` | Skladový a e-shopový modul není pro firmu zapnutý. |
 | `409` u mazání zboží, výrobce, kategorie, skladu… | Záznam je někde použitý — server ho nepustí. Archivuj ho (`archived`), případně zboží či sklad jen deaktivuj. |
 | „NEPROVEDENO — chybí potvrzení“ | Není chyba: takhle vypadá náhled nevratné operace. Zkontroluj výpis a řekni asistentovi, ať to potvrdí. |

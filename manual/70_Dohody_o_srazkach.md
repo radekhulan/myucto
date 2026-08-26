@@ -1,14 +1,14 @@
 # Dohody o srážkách
 
-## Účel
+## 70.1 Účel
 
 Agenda eviduje dobrovolné nebo smluvní srážky zaměstnance, jejich pořadí, limity, příjemce a časovou platnost odděleně od výkonu rozhodnutí.
 
-## Předpoklady a oprávnění
+## 70.2 Předpoklady a oprávnění
 
 Musí existovat zaměstnanec a platný právní podklad. Uživatel potřebuje mzdové oprávnění; k platebním údajům a dokumentům dohody má mít přístup jen pověřená osoba.
 
-## Krokový postup
+## 70.3 Krokový postup
 
 1. Otevřete **Mzdy → Dohody o srážkách** a vyberte zaměstnance i vztah.
 2. Zadejte typ, účinnost, částku nebo pravidlo, příjemce a platební údaje.
@@ -16,28 +16,28 @@ Musí existovat zaměstnanec a platný právní podklad. Uživatel potřebuje mz
 4. V prvním dotčeném běhu zkontrolujte výpočet a závazek příjemci.
 5. Při změně či ukončení založte časově navazující stav, nepřepisujte minulost.
 
-## Stavy
+## 70.4 Stavy
 
 Dohoda může být budoucí, aktivní, pozastavená, ukončená nebo plně vypořádaná. Stav evidence není důkazem souhlasu zaměstnance; ten vyplývá z externího právního podkladu.
 
-## Kontroly a bezpečnost
+## 70.5 Kontroly a bezpečnost
 
 Zkontrolujte oprávněnost, datum, maximální částku, pořadí a účet příjemce. Dokument dohody uchovávejte bezpečně. Volitelný odkaz na dokument nenahrazuje vyplnění účinnosti a pravidla srážky.
 
-## Časté chyby
+## 70.6 Časté chyby
 
 - Smluvní dohoda zařazená jako exekuce nebo naopak.
 - Srážka pokračující po dosažení limitu.
 - Neplatný účet příjemce.
 - Ruční částka zadaná současně s aktivní automatickou dohodou.
 
-## Návaznosti
+## 70.7 Návaznosti
 
 Nucené srážky řeší [kapitola 58m](71_Srazky_a_exekuce.md), výpočet [mzdové běhy](63_Mzdove_behy.md) a následnou úhradu [platby](65_Platby_a_uhrady.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 70.8 Podrobný pracovní postup a kontroly
 
 Dobrovolné a standardní srážky — zálohy, stravování, spoření, náhrada škody
 a příspěvky — spravuješ v **Mzdy → Dohody o srážkách**. Dohoda má titul,

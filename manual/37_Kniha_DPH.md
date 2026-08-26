@@ -1,12 +1,12 @@
 # 37. Kniha DPH
 
-### Cesta: `Daně → Kniha DPH`
+### 37.1.1 Cesta: `Daně → Kniha DPH`
 
 Kniha DPH je interní kontrolní sestava za měsíc nebo čtvrtletí. Není formulářem EPO,
 neodesílá se správci daně a její PDF se neukládá do Archivu podání. Slouží k dohledání,
 z jakých dokladů a řádků vzniklo [přiznání DPH a kontrolní hlášení](36_Vykazy_DPH.md).
 
-## Zdroj dat a rozhodné období
+## 37.2 Zdroj dat a rozhodné období
 
 Kniha používá stejnou řádkovou evidenci DPH jako DPHDP3 a DPHKH1, a proto je stejná
 v daňové evidenci i v podvojném účetnictví. Zahrnuje:
@@ -24,7 +24,7 @@ Pracovní kniha záměrně zahrnuje i koncepty, které jsou v PDF označené. St
 doklady a zálohové výzvy se nezahrnují. Ostré DPHDP3 a KH naopak koncepty neobsahují,
 proto se před podáním ujisti, že v knize nezůstaly neuzavřené doklady.
 
-## Členění knihy
+## 37.3 Členění knihy
 
 Řádky se seskupují podle dokladu, klasifikace a sazby. Kód sekce kombinuje pracovní
 skupinu a řádek přiznání, například:
@@ -39,7 +39,7 @@ Každý řádek uvádí datum plnění, datum zaúčtování, období odpočtu, 
 popis, základ, DPH a celkem v Kč, protistranu a DIČ, původní číslo dokladu a účinnou
 sekci KH. Doklady se řadí přirozeně podle čísla.
 
-## Období odpočtu u přijatých dokladů
+## 37.4 Období odpočtu u přijatých dokladů
 
 Sloupec **Období odpočtu** ukazuje datum, podle kterého přijatý doklad spadl do
 zobrazeného období, a pod ním důvod: *dle DUZP*, *dle data vystavení*, nebo
@@ -70,7 +70,7 @@ koeficient a konečné roční vypořádání se uplatní až v DPHDP3, nikoli j
 samostatný pokladní pohyb v knize.
 Plnění bez nároku nevytváří odpočet, ale u samovyměření zůstává daň na výstupu.
 
-## Kontrola před podáním
+## 37.5 Kontrola před podáním
 
 1. Vyfiltruj stejné období jako v DPHDP3 a zkontroluj koncepty a chybějící klasifikace.
 2. Porovnej součty sekcí s řádky náhledu DPHDP3. Částky se v evidenci drží na haléře,

@@ -6,7 +6,7 @@ Zrcadlový protějšek [Tržeb](12_Trzby.md) pro **nákladovou stranu** — hlou
 pohled jen na **přijaté faktury**. U **plátce DPH** se náklady počítají **bez DPH**
 (na vstupu se odečte), u neplátce **s DPH**.
 
-## KPI dlaždice
+## 13.1 KPI dlaždice
 
 - **Plovoucí 12měsíční náklady** (rolling) per měna + meziroční srovnání
 - **Náklady tento / minulý rok** per měna — počty přijatých faktur a dodavatelů
@@ -15,12 +15,12 @@ pohled jen na **přijaté faktury**. U **plátce DPH** se náklady počítají *
 - **Aktivních dodavatelů**, **Ø doba úhrady dodavatelům**, **náklady posledních 30 dní**
 - **Nezaplacené závazky** — kolik čeká na úhradu dodavatelům (z toho kolik po splatnosti)
 
-## Grafy a tabulky
+## 13.2 Grafy a tabulky
 
 - **Měsíční náklady** (bar) za 12 měsíců + loňská linka, **kumulativní platby dodavatelům YTD**
 - **Náklady po rocích** a **po měsících** (tabulky)
 - **Top dodavatelé** — posledních 12 měsíců
-- **Náklady podle kategorií** (12 m) — vyžaduje přiřazené [kategorie nákladů](11_Zisk.md#naklady-podle-kategorii) na přijatých fakturách
+- **Náklady podle kategorií** (12 m) — vyžaduje přiřazené [kategorie nákladů](11_Zisk.md#1118-naklady-podle-kategorii) na přijatých fakturách
 - **Nárok na odpočet DPH podle sazby** (jen plátce)
 - **Závislost na dodavatelích** (concentration risk) — podíl nákladů TOP 1 / TOP 3 dodavatelů + indikátor rizika
 - **Doba úhrady dodavatelům — distribuce** (histogram)

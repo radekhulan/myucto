@@ -21,7 +21,7 @@ Samostatnou obrazovku otevřeš v **Nástroje → EPO podání a archív**. Zobr
 vygenerované snapshoty, výsledek lokální validace, historii předání do EPO,
 uložené důkazní dokumenty a stav podání.
 
-### Kdy jde snapshot smazat
+### 89.1.1 Kdy jde snapshot smazat
 
 Mazání blokuje jen to, co prokazatelně odešlo:
 
@@ -86,7 +86,7 @@ podatelny a po samostatném potvrzení odešle skutečné podání. Potřebuješ
 soukromým klíčem. Certifikát patří fyzické osobě, která podání podepisuje; v
 MyÚčtu jej lze vědomě povolit pro jednu nebo více spravovaných firem.
 
-### Jak získat vhodný certifikát
+### 89.3.1 Jak získat vhodný certifikát
 
 Pro přímé EPO objednej **kvalifikovaný certifikát pro elektronický podpis
 fyzické osoby** (případně zaměstnanecký/OSVČ profil), jehož soukromý klíč lze
@@ -195,7 +195,7 @@ povinný samostatný allowlist
 `MYINVOICE_EPO_TEST_RECEIPT_SIGNER_FINGERPRINTS_SHA256`. Bez přesné shody
 otisku se dodejka pouze archivuje a pokus se automaticky nepotvrdí.
 
-### Zkušební prostředí pro vývoj
+### 89.3.2 Zkušební prostředí pro vývoj
 
 Instalace může přímé podepsané EPO operace přepnout na veřejné zkušební
 prostředí Finanční správy. V `cfg.php` nastav:
@@ -379,7 +379,7 @@ a vznikne nový.
 > MyÚčto proto u OSS snapshotu nenabízí ani asistované předání, ani panel
 > přímého podání (a odmítá obě cesty i přes API). Stáhni XML a nahraj ho
 > v aplikaci MOSS/OSS na Daňovém portálu — podrobně
-> [§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava).
+> [§ 40.8.5](40_OSS.md#4095-kde-se-oss-priznani-podava).
 
 > [!NOTE]
 > Parametr EPO `test=1` je v technické dokumentaci určen pro přímo odesílané
@@ -403,7 +403,7 @@ Rekonciliace odpovídá na otázku: „Shoduje se dnešní výpočet MyÚčto s 
 skutečně odesláno?“ Není to totéž jako kontrola, že dvě interní sestavy čerpají ze
 stejných dokladů.
 
-### DPPO
+### 89.5.1 DPPO
 
 U DPPO lze importovat podané **DPPDP9 XML** a porovnat je s výpočtem stejného roku.
 Systém nejprve tvrdě ověří rok a typ formuláře. Poté zobrazí rozdíly po řádcích,
@@ -420,7 +420,7 @@ Praktický postup:
    která nastala až po podání.
 5. Neshodu nikdy neodstraňuj mechanickým dorovnávacím zápisem bez účetního případu.
 
-### OSS
+### 89.5.2 OSS
 
 U OSS porovnává **Daně → OSS přiznání → Rekonciliace** archivované podání s tím, co
 by se za totéž období podalo dnes. Nejde o import cizího XML: srovnává se uložený
@@ -439,9 +439,9 @@ za shodu. Rozhodnutí o opravném podání zůstává na účetní.
 Tamtéž je i evidence podle § 110f ZDPH (struktura dle čl. 63c nařízení (EU)
 č. 282/2011), která vzniká write-once při archivaci podání, uchovává se 10 let od
 konce roku plnění a exportuje se do CSV nebo JSON. Celý režim OSS včetně podání
-a evidence popisuje kapitola [40. Režim OSS](40_OSS.md#408-priznani-a-podani).
+a evidence popisuje kapitola [40. Režim OSS](40_OSS.md#409-priznani-a-podani).
 
-### DPH, KH, DPFO a pojistné
+### 89.5.3 DPH, KH, DPFO a pojistné
 
 MyÚčto provádí interní křížové kontroly DPHDP3 proti KH, souhrnnému hlášení, knize
 DPH a účtu 343. To však není import a porovnání se skutečně podaným XML. U DPFO,

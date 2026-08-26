@@ -1,14 +1,14 @@
 # Legislativní pravidla mezd
 
-## Účel
+## 75.1 Účel
 
 Legislativní pravidla poskytují datované parametry pro výpočet: sazby, limity, redukční hranice, minimální hodnoty, daňové slevy a parametry srážek.
 
-## Předpoklady a oprávnění
+## 75.2 Předpoklady a oprávnění
 
 Pro prohlížení je nutné mzdové oprávnění, pro správu `payroll.rulesets`. Změnu smí provést jen pověřená osoba na základě ověřeného právního zdroje a s přesným datem účinnosti.
 
-## Krokový postup
+## 75.3 Krokový postup
 
 1. Otevřete **Mzdy → Legislativní pravidla mezd** a vyhledejte rozhodné období.
 2. Zkontrolujte, že existuje právě jedna použitelná sada s odpovídající účinností.
@@ -16,28 +16,28 @@ Pro prohlížení je nutné mzdové oprávnění, pro správu `payroll.rulesets`
 4. Novou hodnotu založte jako datovanou verzi, nepřepisujte pravidlo použité v uzavřeném období.
 5. Před ostrým použitím proveďte kontrolní výpočet hraničních a běžných případů.
 
-## Stavy
+## 75.4 Stavy
 
 Pravidlo může být budoucí, účinné nebo historické. Chybějící či překrývající se účinnost musí výpočet zastavit nebo vyvolat kontrolu. Aktivní neznamená automaticky právně ověřené; rozhoduje zdroj a schválení.
 
-## Kontroly a bezpečnost
+## 75.5 Kontroly a bezpečnost
 
 Jedna oprávněná účetní musí zvládnout pravidlo založit, ověřit i použít bez povinného schválení druhou osobou. Aplikace přesto uchovává auditní stopu hodnoty, účinnosti a změn. Odkaz na zdroj je volitelná důkazní informace, nikoli podmínka výpočtu. Nikdy do něj nevkládejte interní přihlašovací údaje. Změna pravidla může ovlivnit mzdy, platby, účetnictví i podání.
 
-## Časté chyby
+## 75.6 Časté chyby
 
 - Použití současných hodnot pro starší období.
 - Přepsání historické sady místo nové verze.
 - Překryv dvou sad účinných ve stejný den.
 - Kontrola jen běžného výpočtu bez limitních a souběžných případů.
 
-## Návaznosti
+## 75.7 Návaznosti
 
 Obecné daňové hodnoty popisuje [kapitola 75](96_Danove_konstanty.md). Mzdová pravidla používají [běhy](63_Mzdove_behy.md), [roční zúčtování](67_Rocni_zuctovani.md) a [srážky](71_Srazky_a_exekuce.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 75.8 Podrobný pracovní postup a kontroly
 
 Sazby, hranice, lhůty a číselníky, ze kterých mzdový výpočet čerpá, jsou
 rozdělené do samostatných oblastí (daň z příjmů, sociální a zdravotní pojištění,

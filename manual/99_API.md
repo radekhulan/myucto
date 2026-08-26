@@ -4,7 +4,7 @@ MyÚčto.cz nabízí veřejné REST API pro integraci s e-shopy, CRM, Make/Zapie
 a vlastními skripty. API používá **Personal Access Tokens** (PAT) v hlavičce
 `Authorization`.
 
-## Dokumentační rozhraní
+## 99.1 Dokumentační rozhraní
 
 K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI specem
 (navzájem se prolinkují v horní liště):
@@ -29,7 +29,7 @@ K dispozici jsou **tři varianty** stejné dokumentace nad jedním OpenAPI spece
 
 ---
 
-## 99.1 Vytvoření tokenu
+## 99.2 Vytvoření tokenu
 
 1. Otevři položku **API tokeny** v hlavním menu. Každý uživatel spravuje své
    vlastní tokeny; dostupné firmy a oprávnění se odvozují z jeho účtu.
@@ -53,7 +53,7 @@ odemčení zamčené PWA token nevytvoří. PAT je bearer credential a serverov�
 zámek browserové session se na něj nevztahuje; chraň jej vlastní expirací,
 minimálním scopem a včasnou revokací.
 
-## 99.2 Použití tokenu
+## 99.3 Použití tokenu
 
 ```bash
 curl -H "Authorization: Bearer mi_pat_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX" \
@@ -71,7 +71,7 @@ Response:
 }
 ```
 
-### Příklady
+### 99.3.1 Příklady
 
 **Seznam faktur za leden 2026:**
 ```bash
@@ -102,13 +102,13 @@ curl -X POST https://myucto.cz/api/v1/invoices/123/mark-paid \
      -d '{"paid_at": "2026-05-10"}'
 ```
 
-## 99.3 Verzování
+## 99.4 Verzování
 
 - Stabilní cesta: `/api/v1/...`
 - Každá response vrací hlavičku `X-API-Version: 1`.
 - Pokud přidáme nekompatibilní změnu, půjde do `/api/v2/...`; v1 zůstane funkční.
 
-## 99.4 Rate limity
+## 99.5 Rate limity
 
 - **600 requestů / minutu / token** (defaultně, konfigurovatelně přes
   `cfg.rate_limits.api_per_min_per_token`).
@@ -126,7 +126,7 @@ X-RateLimit-Reset:     42          (sekundy do reset countru)
 Doporučujeme klienta s retry-with-backoff (`axios-retry`, Retry-After-aware) +
 sledovat `X-RateLimit-Remaining` a brzdit, když klesá pod ~10 %.
 
-## 99.5 Multi-supplier
+## 99.6 Multi-supplier
 
 Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 
@@ -136,7 +136,7 @@ Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 | Hlavička `X-Supplier-Id` se ignoruje. | Bez hlavičky = výchozí firma. |
 | Token nemůže „skočit“ do jiné firmy = bezpečnější. | Flexibilnější pro power-user skripty. |
 
-## 99.6 Scopes
+## 99.7 Scopes
 
 | Scope | Povolené metody |
 |---|---|
@@ -145,7 +145,7 @@ Pokud má účet **víc firem (dodavatelů)**, máš dvě možnosti:
 
 Volání s nedostatečným scopem vrátí `403 insufficient_scope`.
 
-### Účetnictví a daně jen ke čtení
+### 99.7.1 Účetnictví a daně jen ke čtení
 
 Nad rámec scopů platí tvrdé pravidlo: **účetní a daňová vrstva je přes API token
 jednosměrná**. Čtení funguje normálně, zápis odmítne i token se scope
@@ -164,7 +164,7 @@ kde je vidět kontext a krok se potvrzuje. Integraci ani AI asistentovi to
 nebrání v tom podstatném — obratovku, rozvahu, výsledovku, saldo i odhad DPH
 si přes API přečtou.
 
-## 99.7 Omezení tokenu podle IP adresy
+## 99.8 Omezení tokenu podle IP adresy
 
 U každého tokenu lze nastavit **seznam povolených zdrojových adres**. Ve výpisu
 tokenů k tomu slouží sloupec **IP omezení**.
@@ -191,7 +191,7 @@ které nikdy nic nepovolí, a token by tiše přestal fungovat.
 > Když jede integrace z jednoho serveru, omez token na jeho adresu. Uniklý
 > token je pak k ničemu komukoli mimo tvou síť.
 
-## 99.8 Log volání API
+## 99.9 Log volání API
 
 Každé volání bearer tokenem se zaznamenává — včetně zamítnutých. Výpis najdeš
 v **Nastavení firmy → MCP server → Log volání**; vidíš vždy jen volání svých
@@ -205,7 +205,7 @@ Filtrovat jde podle tokenu, metody, cesty, zdroje (jen MCP) a na samotné chyby.
 Záznamy se drží **90 dní**, pak je uklidí údržbový cron. Nejde o auditní stopu
 podle § 33a — ta žije dál v Aktivitě uživatelů a nemaže se.
 
-## 99.9 Chybové odpovědi
+## 99.10 Chybové odpovědi
 
 Všechny chyby v unifikovaném formátu:
 
@@ -224,7 +224,7 @@ Všechny chyby v unifikovaném formátu:
 | `not_found` | Zdroj neexistuje (nebo nepatří aktuálnímu supplier-ovi) |
 | `rate_limited` | Překročen limit (viz `Retry-After`) |
 
-## 99.10 Nastavení dodavatele a číslování dokladů přes API
+## 99.11 Nastavení dodavatele a číslování dokladů přes API
 
 Veřejný subset nastavení dodavatele jde měnit tokenem se scope `read_write`
 (uživatel tokenu musí být admin):
@@ -267,7 +267,7 @@ curl -X POST https://mojefirma.example/api/v1/settings/supplier/logo \
 # → { "logo_path": "storage/supplier-logos/sup-1.png", "width": 480, "height": 160 }
 ```
 
-## 99.11 Brandingový profil faktury
+## 99.12 Brandingový profil faktury
 
 Po zapnutí modulu brandingových profilů vrací aktivní profily aktuálního
 dodavatele read-only endpoint:
@@ -306,7 +306,7 @@ výchozí profil dodavatele. Není-li žádný nastaven, použije základní ide
 Při vystavení se výsledná identita včetně cesty k verzi loga uloží do snapshotu
 faktury. Pozdější úprava profilu tedy již vystavený doklad nezmění.
 
-## 99.12 Export faktur přes API
+## 99.13 Export faktur přes API
 
 - **`GET /api/v1/invoices/export?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv&month=YYYY-MM`**
   — hromadný export vystavených dokladů za měsíc (nebo
@@ -322,7 +322,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
   "https://mojefirma.example/api/v1/invoices/export?format=isdoc&month=2026-06"
 ```
 
-## 99.13 Bezpečnost tokenů — best practices
+## 99.14 Bezpečnost tokenů — best practices
 
 - **Ukládej token jako secret** (password manager, Make encrypted variable, GitHub Secrets…).
   Nepushuj do gitu.
@@ -333,7 +333,7 @@ curl -H "Authorization: Bearer $TOKEN" -OJ \
 - **Sleduj `last_used_at`** v UI — token, který se 3 měsíce nepoužil, asi nepotřebuješ.
 - **Při ztrátě/podezření** — okamžitě **Zrušit** v UI. Revokace je instantní (žádný cache).
 
-## 99.14 Co API nepokrývá
+## 99.15 Co API nepokrývá
 
 - **Session-only a administrační endpointy** mohou být v `openapi.yaml`
   zdokumentované kvůli úplnému kontraktu SPA, ale bearer token je volat nesmí.

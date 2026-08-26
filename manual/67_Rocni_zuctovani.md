@@ -1,14 +1,14 @@
 # Roční zúčtování
 
-## Účel
+## 67.1 Účel
 
 Roční zúčtování zpracuje podporované roční daňové údaje zaměstnance a připraví kontrolovatelný výsledek pro navazující mzdu a dokumenty.
 
-## Předpoklady a oprávnění
+## 67.2 Předpoklady a oprávnění
 
 Uživatel potřebuje mzdové oprávnění a úplné podklady za rok. Ověřte žádost zaměstnance, prohlášení, příjmy a zálohy od všech relevantních plátců a podporu konkrétních slev či odpočtů v aplikaci.
 
-## Krokový postup
+## 67.3 Krokový postup
 
 1. Otevřete **Mzdy → Roční zúčtování** a zvolte rok a zaměstnance.
 2. Zkontrolujte měsíční údaje a vložte doložené externí podklady.
@@ -16,28 +16,28 @@ Uživatel potřebuje mzdové oprávnění a úplné podklady za rok. Ověřte ž
 4. Spusťte výpočet, zkontrolujte souhrn a případná omezení.
 5. Výsledek promítněte do určeného běhu a vytvořte navazující dokument.
 
-## Stavy
+## 67.4 Stavy
 
 Rozpracované zúčtování je měnitelné, vypočtené čeká na kontrolu a dokončené je podkladem pro vypořádání. Blokovaný či nepodporovaný případ dokončete mimo aplikaci; nevynucujte jej jiným polem.
 
-## Kontroly a bezpečnost
+## 67.5 Kontroly a bezpečnost
 
 Ověřte úplnost roku, souběhy plátců, podepsané dokumenty a platná pravidla pro daný rok. Některé roční odpočty aplikace nepokrývá; tyto případy zpracujte ručně nebo předejte daňovému specialistovi. Podklady uchovávejte podle retenčních pravidel.
 
-## Časté chyby
+## 67.6 Časté chyby
 
 - Zúčtování zaměstnance, který nesplňuje podmínky.
 - Chybějící příjem od jiného plátce.
 - Použití pravidel jiného roku.
 - Nahrazení nepodporovaného odpočtu obecnou částkou.
 
-## Návaznosti
+## 67.7 Návaznosti
 
 Osobní a vztahové údaje jsou v [kapitole 58k](69_Zamestnanci.md), účinná pravidla v [58q](75_Legislativni_pravidla_mezd.md), promítnutí výsledku v [mzdovém běhu](63_Mzdove_behy.md) a doklad v [58h](66_Dokumenty_a_vystupy.md).
 
 
 
-## Podrobný pracovní postup a kontroly
+## 67.8 Podrobný pracovní postup a kontroly
 
 V **Mzdy → Roční zúčtování** zvol zdaňovací období. Vlevo je seznam zaměstnanců
 se stavem žádosti a výsledkem, vpravo evidence podkladů a výpočet vybrané osoby.
@@ -79,7 +79,7 @@ platí „nevíme", zúčtování se neprovádí.
 Nesplněné podmínky se vypisují všechny najednou jako věty, ne jako kódy, a
 tlačítko **Provést roční zúčtování** zůstává vidět zašedlé i s vysvětlením.
 
-### Potvrzení od jiného plátce daně
+### 67.8.1 Potvrzení od jiného plátce daně
 
 Měl-li zaměstnanec v roce ještě jiného zaměstnavatele, zapiš jeho potvrzení
 v sekci **Potvrzení od jiného plátce daně**. Údaje odpovídají tiskopisu

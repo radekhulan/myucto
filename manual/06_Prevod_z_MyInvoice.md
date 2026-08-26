@@ -99,7 +99,7 @@ Skript projde tyto fáze:
 Výstup musí skončit hlášením `HOTOVO — data přenesena a schéma MyÚčta
 dokončeno.` a bez sekce `CHYBY`.
 
-### Preflight zastavil převod
+### 6.4.1 Preflight zastavil převod
 
 Skript se zastaví, dokud by se měla ztratit byť jediná hodnota. Vypíše
 konkrétně, o co jde:
@@ -117,7 +117,7 @@ informativně.
 
 Vědomé pokračování se ztrátou uvedených dat: `--allow-missing`.
 
-### Užitečné přepínače
+### 6.4.2 Užitečné přepínače
 
 | Přepínač | K čemu |
 |---|---|
@@ -151,7 +151,7 @@ Vědomé pokračování se ztrátou uvedených dat: `--allow-missing`.
 Když zdroj a cíl nejsou na témže databázovém serveru, zadej zdroj jako URL.
 Skript se připojí druhým spojením a data přenese proudově po dávkách.
 
-### MyInvoice v jiném Docker stacku (Docker → Docker)
+### 6.5.1 MyInvoice v jiném Docker stacku (Docker → Docker)
 
 Zdrojový kontejner musí být dosažitelný ze sítě, v níž běží `app` kontejner
 MyÚčta. To za tebe vyřeší připravený wrapper — zdrojový kontejner do sítě
@@ -208,14 +208,14 @@ neprojeví. Kontejner je potřeba vytvořit znovu:
 docker compose up -d --force-recreate app
 ```
 
-### MyInvoice na hostiteli, MyÚčto v Dockeru
+### 6.5.2 MyInvoice na hostiteli, MyÚčto v Dockeru
 
 ```powershell
 .\cmd\docker-migrate-from-myinvoice.ps1 -SourceHost host.docker.internal `
     -SourceDb myinvoice -SourceUser root -SourcePassword tajne -Yes
 ```
 
-### Ručně, bez wrapperu
+### 6.5.3 Ručně, bez wrapperu
 
 ```bash
 docker compose exec app php api/bin/MyInvoiceMigrate.php \

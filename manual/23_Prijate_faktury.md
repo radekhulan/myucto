@@ -30,7 +30,7 @@ V hlavním menu **Přijaté faktury**.
 
 Smazat jde **jen koncept**. Pro pozdější stavy použij Stornovat (zachová auditní stopu).
 
-### Příchozí doklady
+### 23.1.1 Příchozí doklady
 
 Originály čekají na zpracování v **Nákup → Příchozí doklady**. Nejsou to koncepty
 přijatých faktur: do okamžiku kontroly nevstupují do nákladů, závazků, cashflow ani
@@ -330,7 +330,7 @@ Systém automaticky vypočte:
 Pole **Klasifikace DPH** v sekci *Klasifikace* můžeš nechat prázdné — kód doplní aplikace
 při uložení podle sazby, **země dodavatele**, reverse charge a plátcovství tvé firmy k datu
 dokladu. Hlavička dokladu kód jen přebírá z řádků; ručně vybraný kód nikdy nepřepíše.
-Kompletní tabulka kódů i pravidel je ve [Výkazech DPH](36_Vykazy_DPH.md#auto-default-klasifikace).
+Kompletní tabulka kódů i pravidel je ve [Výkazech DPH](36_Vykazy_DPH.md#3645-auto-default-klasifikace).
 
 Tři situace, kdy zůstane **prázdná záměrně** — a aplikace ti to řekne upozorněním nad dokladem:
 
@@ -480,12 +480,12 @@ Po uložení / přechodu na detail:
   - Z received: Označit jako zaúčtované / uhrazené / Stornovat
   - Z booked: Označit jako uhrazené / Stornovat
 - „**Označit jako uhrazené**" otevře modální okno s výběrem **data úhrady** (předvyplněno
-  dneškem) a **způsobu úhrady** — viz [§ 23.3.4](#2334-zpusoby-uhrady-prijate-faktury).
+  dneškem) a **způsobu úhrady** — viz [§ 23.3.4](#2331-zpusoby-uhrady-prijate-faktury).
 - Tlačítko **Upravit** je dostupné jen u draft. Po označení jako přijatá je doklad immutable (kromě admin override `?force=1` u received).
 - Tlačítko **Smazat** je dostupné jen u draft. Pro pozdější stavy použij Stornovat.
-- Tlačítko **Zaplatit pomocí QR** (u nezaplacených faktur s kladnou částkou k úhradě) — zobrazí QR platbu dodavateli, viz [§ 23.3.2](#2332-zaplatit-pomoci-qr).
+- Tlačítko **Zaplatit pomocí QR** (u nezaplacených faktur s kladnou částkou k úhradě) — zobrazí QR platbu dodavateli, viz [§ 23.3.2](#2333-zaplatit-pomoci-qr).
 
-### 23.3.4 Způsoby úhrady přijaté faktury
+### 23.3.1 Způsoby úhrady přijaté faktury
 
 Okno „Označit jako uhrazené" nabízí tři způsoby a liší se tím, co po nich zůstane v deníku:
 
@@ -519,7 +519,7 @@ Doklad doplacený jiným kanálem zůstane uhrazený.
 Zatím jen doklady v **CZK**; v daňové evidenci se zápočet neúčtuje (deník tam není), ale
 doklad vyrovná stejně.
 
-### 23.3.1 Propojení zálohy s vyúčtovací fakturou (proti dvojímu započtení)
+### 23.3.2 Propojení zálohy s vyúčtovací fakturou (proti dvojímu započtení)
 
 Když ti dodavatel pošle nejdřív **zálohovou fakturu** (typ dokladu *Záloha* / proforma)
 a po zaplacení samostatnou **vyúčtovací (finální) fakturu**, máš v systému dva doklady
@@ -583,7 +583,7 @@ DPH (viz níže), aby nezůstal viset beze stopy.
 > rámec toho, co DDKP uplatnil už při platbě — zúčtování zálohy pak zapiš ručním
 > zápisem podle této částky.
 
-### 23.3.2 Zaplatit pomocí QR
+### 23.3.3 Zaplatit pomocí QR
 
 U **nezaplacené** přijaté faktury (stav koncept / přijatá / zaúčtovaná) s kladnou
 částkou k úhradě je v hlavičce detailu tlačítko **Zaplatit pomocí QR**. Otevře okno
@@ -626,7 +626,7 @@ měny) a předvyplní se v editoru i v okně QR.
 zkusí najít odpovídající zálohu a v detailu nabídne **návrh propojení**. Stačí ho
 **Potvrdit** (nebo **Zamítnout**) — nic se nepáruje automaticky.
 
-### 23.3.3 Filtr a tlačítko Zaúčtovat
+### 23.3.4 Filtr a tlačítko Zaúčtovat
 
 > [!NOTE]
 > **Stav „Zaúčtovaná" (§ 23.1) a zaúčtování do deníku jsou dvě různé věci.**

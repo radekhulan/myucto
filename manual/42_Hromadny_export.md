@@ -1,6 +1,6 @@
 # 42. Hromadný export (ZIP)
 
-### Cesta: `Daně → Hromadný export`
+### 42.1.1 Cesta: `Daně → Hromadný export`
 
 Stáhne **jeden ZIP** za zvolené období se vším, co účetní pro dané období potřebuje,
 roztříděné do pojmenovaných složek. Období může být **jeden měsíc**, nebo **celé

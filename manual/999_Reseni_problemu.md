@@ -2,7 +2,7 @@
 
 ## 999.1 Přihlášení
 
-### Zapomenuté heslo
+### 999.1.1 Zapomenuté heslo
 
 Klik **Zapomenuté heslo?** na login → zadej e-mail → klik na odkaz v e-mailu
 (platnost 1 h).
@@ -13,7 +13,7 @@ Pokud e-mail nedorazí:
 - Ověř s adminem, že máš nakonfigurované SMTP (`cfg.php → smtp.*`).
 - Krajní řešení: admin spustí `php api/bin/set-password.php tvuj@email.cz`.
 
-### „Origin nesedí s app URL"
+### 999.1.2 „Origin nesedí s app URL"
 
 CSRF check selhal. Příčiny:
 
@@ -27,7 +27,7 @@ CSRF check selhal. Příčiny:
   Alternativa: spusť kontejner s `-e MYINVOICE_APP_URL=http://10.0.0.8:8080`,
   nebo si po `docker run` uprav `cfg.php` přímo v kontejneru.
 
-### „Aplikace ještě není inicializována" (HTTP 423)
+### 999.1.3 „Aplikace ještě není inicializována" (HTTP 423)
 
 Setup wizard ještě neproběhl. Otevři `/setup` v prohlížeči.
 
@@ -38,13 +38,13 @@ php api/bin/migrate.php --status     # zkontroluj, že DB má migrace
 php api/bin/setup.php                # interaktivní fallback z CLI
 ```
 
-### Lockout po brute-force
+### 999.1.4 Lockout po brute-force
 
 Po 10 neúspěšných pokusech / 15 min jsi zablokovaný na 15 min. Po 30 / hod
 na 24 h. Počkej, nebo požádej admina o reset z DB:
 `DELETE FROM login_attempts WHERE bucket_key LIKE '%tvuj_email%';`
 
-### Passkey nefunguje nebo se nezobrazuje systémový dialog
+### 999.1.5 Passkey nefunguje nebo se nezobrazuje systémový dialog
 
 Zkontroluj:
 
@@ -72,7 +72,7 @@ Přihlášený správce uvidí neplatnou WebAuthn konfiguraci také jako provozn
 upozornění na stránce **Administrace → Aktualizace**. Běžný login heslem a TOTP
 zůstává dostupný, dokud se `app.url` neopraví.
 
-### Odemčení PWA selže nebo je zařízení offline
+### 999.1.6 Odemčení PWA selže nebo je zařízení offline
 
 Odemčení vyžaduje spojení se serverem pro vydání a ověření jednorázové
 challenge. Zrušení dialogu, neplatná passkey nebo offline stav ponechá session
@@ -82,7 +82,7 @@ aplikace nejprve bezpečně ukončí zamčenou session a pak provede celý login
 Rozpracovaný formulář zůstane zachovaný jen dokud stránka zůstává v paměti.
 Pokud Android stránku ukončil, neuložená data nelze ze zámku obnovit.
 
-### Ztratil jsem passkey nebo TOTP zařízení
+### 999.1.7 Ztratil jsem passkey nebo TOTP zařízení
 
 Použij jinou passkey, TOTP nebo jeden z dříve uložených **záložních kódů**.
 Každý záložní kód funguje jen jednou; po přihlášení zkontroluj zbývající počet
@@ -100,7 +100,7 @@ ověřovací procesy i záložní kódy a invaliduje všechny session. Detail v�
 Docker příkazů je v [§ 97.2.4](97_Bezpecnost.md#9724-obnova-pristupu). Neupravuj
 jen sloupce TOTP ručně v databázi: ponechal bys aktivní další faktory a session.
 
-### Diagnostika `app.url`
+### 999.1.8 Diagnostika `app.url`
 
 V běžném provozu ověřuj canonical adresu přes přesný origin nastavený v
 `app.url`. Například pro `app.url = https://faktury.example.cz`:
@@ -172,7 +172,7 @@ Stav s `routing_compatible: false` se v serverovém logu hlásí jako
 část. Umístění logu určuje `logging.path`; provozní souhrn je také v
 [§ 97.2.1](97_Bezpecnost.md#provozni-diagnostika-canonical-appurl).
 
-### Varování `secret_encryption_key` (špatná délka klíče)
+### 999.1.9 Varování `secret_encryption_key` (špatná délka klíče)
 
 Backend vrací v `GET /api/health` pole `warnings[]` a admin vidí
 upozornění i v UI (**Systém → Aktualizace**), pokud je problém s
@@ -187,14 +187,14 @@ openssl rand -base64 32
 Vygenerovanou hodnotu ulož do `app.secret_encryption_key`. Klíč musí být
 base64, který po dekódování dává přesně 32 bajtů.
 
-### Varování `mfa_methods_configuration`
+### 999.1.10 Varování `mfa_methods_configuration`
 
 V `auth.allowed_mfa_methods` (nebo `MYINVOICE_AUTH_MFA_METHODS`) je neznámá
 hodnota. Podporované jsou pouze `passkey` a `totp`; e-mailové OTP sem nepatří —
 zapíná se přes `auth.email_otp.enabled`. Aplikace kvůli tomu nespadne, jen
 dočasně jede na výchozím seznamu `['passkey', 'totp']`. Oprav seznam v `cfg.php`.
 
-### Varování `session_lock_without_unlock_method`
+### 999.1.11 Varování `session_lock_without_unlock_method`
 
 `session.lock_after_minutes` je kladné, ale někteří aktivní uživatelé nemají
 passkey. Zamčenou session jde odemknout **jen passkey**, takže se z ní dostanou
@@ -202,14 +202,14 @@ pouze odhlášením (a přijdou o rozepsaný formulář). Buď jim registruj pas
 (**Profil → Přístupové klíče**), nebo nastav `session.lock_after_minutes = 0`
 a nech volbu intervalu na jednotlivých uživatelích.
 
-### Varování `session_lock_configuration`
+### 999.1.12 Varování `session_lock_configuration`
 
 `session.lock_after_minutes` není celé číslo 0–1440. Výchozí automatický zámek
 je proto vypnutý; osobní intervaly uživatelů platí dál.
 
 ## 999.2 Faktury
 
-### Nemůžu editovat vystavenou fakturu
+### 999.2.1 Nemůžu editovat vystavenou fakturu
 
 Schválně. Vystavená faktura je **immutable** (snapshot dodavatele, klienta,
 banky). Pokud potřebuješ změnu:
@@ -219,19 +219,19 @@ banky). Pokud potřebuješ změnu:
 - **Klient ji ještě nedostal** → udělej **Storno** (interní) + nová.
 - **Klient ji už dostal** → udělej **Dobropis** (oficiální oprava) + nová.
 
-### Klonování / „Vystavit znovu" inkrementuje měsíc špatně
+### 999.2.2 Klonování / „Vystavit znovu" inkrementuje měsíc špatně
 
 Inkrement funguje pro popisy obsahující vzor `M/YYYY` (např. „Konzultace
 3/2026" → „Konzultace 4/2026"). Pokud máš vzor jiný (např. „březen 2026"),
 musíš ručně.
 
-### QR platba se na PDF nezobrazuje
+### 999.2.3 QR platba se na PDF nezobrazuje
 
 Bankovní účet musí projít **mod-11 kontrolou** (CZ účty) nebo **IBAN
 checksum** (EUR). Zkontroluj v **Systém → Číselníky → Měny**, jestli máš
 platný účet. Příklad platného CZ testovacího účtu: `1000000005 / 0100`.
 
-### Faktura má v PDF špatné údaje dodavatele
+### 999.2.4 Faktura má v PDF špatné údaje dodavatele
 
 Vystavená faktura má snapshot v `supplier_snapshot` (JSON). Pokud jsi po
 vystavení změnil údaje dodavatele (logo, adresa, …), faktura zůstává
@@ -242,7 +242,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 ## 999.3 E-maily
 
-### Faktura odešla, ale klient ji nedostal
+### 999.3.1 Faktura odešla, ale klient ji nedostal
 
 1. Zkontroluj v **Systém → Activity log** záznam `invoice.sent` — měl by být
    s adresou klienta.
@@ -251,13 +251,13 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 4. Pošli **Test odeslání** na svůj e-mail — pokud nedorazí, problém je v SMTP
    konfiguraci.
 
-### „Test odeslání" funguje, ale klientovi nic nechodí
+### 999.3.2 „Test odeslání" funguje, ale klientovi nic nechodí
 
 - E-mail klienta v MyÚčtu je špatný (typo) → uprav v detailu klienta.
 - Klient má restriktivní spam filtr → zkontroluj, jestli máš správně
   nastavený SPF + DKIM + DMARC pro doménu, ze které posíláš.
 
-### DKIM podpis se nedaří aktivovat
+### 999.3.3 DKIM podpis se nedaří aktivovat
 
 1. Vygeneruj klíče: viz [§ 97.8](97_Bezpecnost.md#978-dkim-podpis-e-mailu).
 2. Publikuj DNS TXT — počkej 5–60 minut na propagaci.
@@ -266,7 +266,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 
 ## 999.4 Banka
 
-### GPC výpis se nenahraje („tento výpis už byl importovaný")
+### 999.4.1 GPC výpis se nenahraje („tento výpis už byl importovaný")
 
 SHA-256 hash souboru se shoduje s nějakým dříve importovaným. Buď:
 
@@ -274,7 +274,7 @@ SHA-256 hash souboru se shoduje s nějakým dříve importovaným. Buď:
 - Stáhl jsi stejný výpis 2× → použij jiný (nebo si vyžádej z banky export
   s jiným časovým rozsahem)
 
-### PDF výpis se nenahraje nebo nesedí zůstatek
+### 999.4.2 PDF výpis se nenahraje nebo nesedí zůstatek
 
 PDF import je deterministický a podporuje aktuální rozvržení výpisů **Banky
 CREDITAS, ČSOB a KB**. Naskenovaný obrázek bez textové vrstvy, PDF jiné banky
@@ -288,7 +288,7 @@ nebo nové neznámé rozvržení se neodhaduje pomocí AI a import se odmítne.
 - U neznámé varianty rozložení přilož k hlášení anonymizovaný vzor bez citlivých
   údajů nebo přesný popis banky a rozložení. Originál s čísly účtů neposílej do veřejného issue.
 
-### Auto-matching nefunguje
+### 999.4.3 Auto-matching nefunguje
 
 - Otevři **Všechny pohyby** nebo detail výpisu a rozbal důvody skórovaného
   návrhu. Bez VS může pomoci číslo faktury ve zprávě, zbývající částka, název,
@@ -305,7 +305,7 @@ nebo nové neznámé rozvržení se neodhaduje pomocí AI a import se odmítne.
 Překlep ve VS, přeplatek, poplatek, rozdílná měna a zálohová faktura se nikdy
 nepotvrdí automaticky, i kdyby ostatní signály byly silné.
 
-### Pohyb není v „K zaúčtování"
+### 999.4.4 Pohyb není v „K zaúčtování"
 
 Záložka **K zaúčtování** je pracovní fronta, ne úplný archiv. Pohyb najdeš v
 top-level záložce **Všechny pohyby**, která zahrnuje i zaúčtované a ignorované
@@ -313,7 +313,7 @@ transakce napříč výpisy. Pokud pro nezaúčtovaný pohyb nevznikl vůbec ž�
 návrh, objeví se také v **Účetnictví → K doúčtování** s důvodem „bez pravidla“
 nebo „nepodporovaná cizí měna“.
 
-### Vlastní převod se nespároval nebo nezaúčtoval přes 261
+### 999.4.5 Vlastní převod se nespároval nebo nezaúčtoval přes 261
 
 - Oba účty musí být v nastavení banky evidované jako vlastní účty stejné firmy.
 - Automaticky se zpracují jen převody ve stejné měně. Převod mezi CZK a EUR je
@@ -323,7 +323,7 @@ nebo „nepodporovaná cizí měna“.
 - Druhá noha může přijít v jiném výpisu nebo období. Do té doby je zůstatek 261
   legitimně „na cestě“; nevytvářej duplicitní ruční zápis.
 
-### Odvod finančnímu úřadu nebo pojišťovně čeká na potvrzení
+### 999.4.6 Odvod finančnímu úřadu nebo pojišťovně čeká na potvrzení
 
 Rozpoznání účtu u ČNB/0710 samo nestačí. Automatické zaúčtování odvodu je
 povolené jen proti existujícímu zaúčtovanému předpisu a nejvýše do jeho
@@ -331,7 +331,7 @@ kreditního zůstatku. Nejdříve zaúčtuj předpis daně, sociálního či zdr
 pojištění. Nejasný VS, neznámé předčíslí nebo nedostatečný zůstatek ponechá
 položku v Automatu k ruční kontrole.
 
-### Bankovní účet z výpisu „nepatří aktuálnímu dodavateli"
+### 999.4.7 Bankovní účet z výpisu „nepatří aktuálnímu dodavateli"
 
 Multi-supplier ochrana — výpis musí být z účtu, který je v **Systém →
 Číselníky → Měny** aktuálního dodavatele. Pokud chceš nahrát výpis pro jiného
@@ -339,32 +339,32 @@ dodavatele, **přepni na něj** přes přepínač v horní liště.
 
 ## 999.5 Exporty
 
-### ISDOC import do Pohody hodí chybu
+### 999.5.1 ISDOC import do Pohody hodí chybu
 
 ISDOC je univerzální standard, ale Pohoda má vlastní quirks. Doporučujeme
 spíš **Pohoda XML export** (nativní formát), pro kterého je import
 spolehlivější.
 
-### Pohoda XML import vyžaduje kódy
+### 999.5.2 Pohoda XML import vyžaduje kódy
 
 Před exportem nastav v **Systém → Číselníky → Dodavatelé → [tvůj] → záložka Pohoda**:
 číselnou řadu, středisko, činnost, předkontace. Bez toho Pohoda hlásí varování
 při importu.
 
-### Měsíční PDF ZIP je velký (>100 MB)
+### 999.5.3 Měsíční PDF ZIP je velký (>100 MB)
 
 Normální při ~100 fakturách/měsíc s 2. stranou výkazu. Pokud chceš menší ZIP,
 exportuj jen menší rozsah období (1 týden místo měsíce).
 
 ## 999.6 Cron / automatika
 
-### Cron upomínek odeslal víc upomínek za den
+### 999.6.1 Cron upomínek odeslal víc upomínek za den
 
 Buď cron je spuštěný 2× (zkontroluj `crontab -l` / Task Scheduler), nebo
 `--cooldown` je moc krátký. Default 14 dní by neměl pouštět více než 1 upomínku
 na fakturu / 14 dní.
 
-### Bank scan cron neimportuje nové výpisy
+### 999.6.2 Bank scan cron neimportuje nové výpisy
 
 1. Zkontroluj, že soubory v `private/bank-incoming/` mají správný formát
    (ABO/GPC nebo podporované PDF; jiné XML ani scan PDF se neimportují).
@@ -373,14 +373,14 @@ na fakturu / 14 dní.
    Linuxu vlastníka a oprávnění adresářů.
 3. Spusť ručně `php api/bin/cron-bank-scan.php` a zkontroluj konkrétní chybu.
 
-### „K doúčtování“ není prázdné, ale Automat ano
+### 999.6.3 „K doúčtování“ není prázdné, ale Automat ano
 
 To je očekávané. **Automat** zobrazuje návrhy a blokace automatizačního motoru.
 **K doúčtování** navíc inventarizuje bankovní pohyby bez jakéhokoli návrhu,
 nezaúčtované vydané/přijaté doklady a otevřené žádosti o dokument. Otevři akci
 na řádku; společná fronta je read-only a sama zápis nevytváří.
 
-### V reportu Úplnost dokladů chybí nebo přebývá položka
+### 999.6.4 V reportu Úplnost dokladů chybí nebo přebývá položka
 
 Report vychází z aktuálních vazeb. Bankovní pohyb zmizí po doložení a párování
 nebo po vzniku aktivního bankovního zápisu; stornovaný zápis se za aktivní
@@ -388,7 +388,7 @@ nepočítá. Zkontroluj nastavený práh dnů a směr příchozí/odchozí. Druh
 reportu vychází ze saldokonta 311/321 a ukazuje jen doklady po splatnosti s
 nenulovým zůstatkem, nikoli všechny faktury ve stavu „nezaplaceno“.
 
-### Valutová pokladna nenabízí úhradu faktury nebo převod
+### 999.6.5 Valutová pokladna nenabízí úhradu faktury nebo převod
 
 Není to chyba oprávnění. Valutová pokladna podporuje PPD Prodej/Ostatní a VPD
 Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes
@@ -396,7 +396,7 @@ Nákup/Ostatní s kurzem a CZK protihodnotou. Úhrada cizoměnové faktury přes
 záměrně blokuje. Proveď doložený ruční zápis v deníku. V daňové evidenci je
 pokladna pouze korunová.
 
-### AI kontace nic nenavrhla
+### 999.6.6 AI kontace nic nenavrhla
 
 Ověř zapnutí AI asistence pro daný typ, přihlašovací údaje poskytovatele,
 potvrzenou DPA, rezidenční politiku a denní limit. Nepoužitelná odpověď levného
@@ -404,7 +404,7 @@ modelu může být jednou zopakována silnějším modelem; pokud ani ta neprojd
 položka zůstane ruční. AI nikdy nezaúčtuje položku sama. Pokus a jeho výsledek
 jsou uložené v auditní stopě návrhu.
 
-### Úplné mzdy zastavily výpočet v ruční kontrole
+### 999.6.7 Úplné mzdy zastavily výpočet v ruční kontrole
 
 Úplné mzdy jsou zkušební agenda. Stav **Ruční kontrola** je bezpečnostní výsledek,
 ne technická porucha: pro rozhodné datum může chybět účinný a odborně schválený
@@ -416,7 +416,7 @@ a nepoužívej jej jako jediný podklad pro výplatu nebo podání. Podrobný po
 v kapitolách [Mzdové běhy](63_Mzdove_behy.md) a
 [Legislativní pravidla mezd](75_Legislativni_pravidla_mezd.md).
 
-### Odkaz do EPO po otevření zmizel
+### 999.6.8 Odkaz do EPO po otevření zmizel
 
 To je očekávané. Handoff URL je jednorázová a portál ji spotřebuje prvním
 otevřením; MyÚčto ji proto podruhé nenabídne. Pokud jsi podání v otevřeném okně
@@ -426,12 +426,12 @@ potvrzení podatelny nahrané nebo převzaté do archivu.
 
 ## 999.7 Výkon
 
-### Dashboard se otevírá pomalu
+### 999.7.1 Dashboard se otevírá pomalu
 
 Stats cache možná chybí. Spusť `php api/bin/recompute-stats.php` — přepočítá
 `project_revenue_cache` + `client_revenue_cache`.
 
-### Aplikace pomalu reaguje pod zátěží
+### 999.7.2 Aplikace pomalu reaguje pod zátěží
 
 - Zapni Redis (`cfg.php → redis.enabled => true`) — rate limiting, brute-force
   ochrana a aplikační cache pak používají paměť místo DB
@@ -441,13 +441,13 @@ Stats cache možná chybí. Spusť `php api/bin/recompute-stats.php` — přepo�
 
 ## 999.8 Multi-supplier
 
-### Po přepnutí dodavatele vidím prázdný seznam klientů
+### 999.8.1 Po přepnutí dodavatele vidím prázdný seznam klientů
 
 Klienti jsou per-dodavatel izolovaní. Buď přepneš zpět na původního, nebo si
 v aktuálním dodavateli vytvoř klienty znovu (nelze migrovat klienta mezi
 dodavateli — záměrně).
 
-### Faktura mi nešla vystavit, hlásí „klient nepatří aktuálnímu dodavateli"
+### 999.8.2 Faktura mi nešla vystavit, hlásí „klient nepatří aktuálnímu dodavateli"
 
 Multi-supplier guard. Buď přepni na dodavatele klienta, nebo si v aktuálním
 vytvoř toho samého klienta (oddělená data).
@@ -468,7 +468,7 @@ a dostupnost novější verze aplikace.
 Nálezy jsou seřazené od problémů k varováním, takže shora dolů odpovídají
 pořadí, v jakém má smysl je řešit.
 
-### Diagnostický balíček
+### 999.9.1 Diagnostický balíček
 
 Tlačítkem na téže stránce vznikne ZIP s podklady pro **placenou technickou
 podporu**. Balíček se vytvoří u tebe v instalaci a zůstane u tebe — aplikace ho
@@ -493,7 +493,7 @@ Ve výchozím stavu obsahuje:
 to, co je jmenovitě povolené. U hesel, klíčů a tokenů se přenáší pouze
 informace, jestli jsou nastavené (`<set>` / `<empty>`), nikdy hodnota.
 
-### Logy v balíčku
+### 999.9.2 Logy v balíčku
 
 Logy aplikace v balíčku **ve výchozím stavu nejsou** a přidávají se zaškrtnutím.
 Před vytvořením balíčku si jejich obsah můžeš přímo na stránce prohlédnout,
