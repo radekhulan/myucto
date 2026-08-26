@@ -500,6 +500,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'trg_payroll_enforcement_case_document_insert',
             'trg_payroll_enforcement_case_immutable_delete',
             'trg_payroll_enforcement_claim_immutable_delete',
+            'trg_payroll_enforcement_claim_mutable_update',
             'trg_payroll_enforcement_event_document_insert',
             'trg_payroll_enforcement_event_immutable_delete',
             'trg_payroll_enforcement_event_immutable_update',
@@ -1387,7 +1388,7 @@ final class PayrollEnforcementApiTest extends TestCase
         ]);
     }
 
-    public function testCasesAndClaimsCannotBeHardDeleted(): void
+    public function testStartedCasesAndClaimsCannotBeHardDeleted(): void
     {
         $case = $this->createCase($this->employeeId);
         $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
@@ -1405,6 +1406,11 @@ final class PayrollEnforcementApiTest extends TestCase
             'due_monetary_claim_verified' => true,
         ]);
         $claimId = PayrollTimeValue::int($claim['id'] ?? null, 'id');
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_enforcement_cases
+                SET status = 'withhold_and_hold'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $caseId]);
 
         try {
             $this->db->pdo()->prepare(
@@ -1512,6 +1518,164 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertNotNull($this->repository->findCase($this->supplierId, $caseId));
     }
 
+    public function testUnusedClaimCanBeCorrectedAndThenDeletedWithAuditTrail(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $claim = $this->createClaim($caseId);
+        $claimId = PayrollTimeValue::int($claim['id'] ?? null, 'id');
+
+        $updated = $this->action->updateClaim(
+            $this->request(
+                'PUT',
+                "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}",
+            )->withParsedBody([
+                ...$this->claimBody(),
+                'outstanding_minor_units' => 125_000,
+                'priority_date' => '2026-05-21',
+                'row_version' => 1,
+            ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(200, $updated->getStatusCode(), (string) $updated->getBody());
+        $updatedClaim = PayrollTimeValue::row(
+            $this->json($updated)['claim'] ?? null,
+            'claim',
+        );
+        self::assertSame(125_000, $updatedClaim['outstanding_minor_units']);
+        self::assertSame('2026-05-21', $updatedClaim['priority_date']);
+        self::assertSame(2, $updatedClaim['row_version']);
+
+        $deleted = $this->action->deleteClaim(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}",
+            )->withParsedBody(['row_version' => 2]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+        $deletedPayload = $this->json($deleted);
+        self::assertTrue((bool) ($deletedPayload['deleted'] ?? false));
+        self::assertSame(4, $deletedPayload['case_row_version']);
+
+        $detail = $this->repository->findCase($this->supplierId, $caseId);
+        self::assertNotNull($detail);
+        self::assertSame(0, $detail['claim_count']);
+        self::assertSame([], $detail['claims']);
+
+        $caseDelete = $this->deleteCase($caseId, 4);
+        self::assertSame(200, $caseDelete->getStatusCode(), (string) $caseDelete->getBody());
+
+        $audit = $this->db->pdo()->prepare(
+            'SELECT action FROM activity_log
+              WHERE supplier_id = ? AND entity_type = ? AND entity_id = ?
+              ORDER BY id'
+        );
+        $audit->execute([$this->supplierId, 'payroll_enforcement_claim', $claimId]);
+        self::assertSame([
+            'payroll.enforcement.claim.created',
+            'payroll.enforcement.claim.updated',
+            'payroll.enforcement.claim.deleted',
+        ], $audit->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function testClaimMutationFailsClosedAfterActivationOrPayrollSnapshot(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $claim = $this->createClaim($caseId);
+        $claimId = PayrollTimeValue::int($claim['id'] ?? null, 'id');
+
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_enforcement_cases
+                SET status = 'withhold_and_hold'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $caseId]);
+
+        $blockedUpdate = $this->updateClaim($caseId, $claimId, 1);
+        self::assertSame(409, $blockedUpdate->getStatusCode());
+        self::assertSame('enforcement_claim_change_blocked', $this->errorCode($blockedUpdate));
+        $blockedDelete = $this->deleteClaim($caseId, $claimId, 1);
+        self::assertSame(409, $blockedDelete->getStatusCode());
+        self::assertSame('enforcement_claim_change_blocked', $this->errorCode($blockedDelete));
+
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_enforcement_cases
+                SET status = 'received'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $caseId]);
+        $claimKeyStatement = $this->db->pdo()->prepare(
+            'SELECT claim_key FROM payroll_enforcement_claims
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $claimKeyStatement->execute([$this->supplierId, $claimId]);
+        $claimKey = (string) $claimKeyStatement->fetchColumn();
+        $snapshot = json_encode([
+            'claims' => [['id' => $claimKey]],
+        ], JSON_THROW_ON_ERROR);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_month_results
+                (supplier_id, revision_id, employee_id, period_start,
+                 result_status, ruleset_id, ruleset_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json, result_snapshot_hash,
+                 total_withheld_minor_units, employee_payment_minor_units,
+                 employer_fee_minor_units, idempotency_key_hash)
+             VALUES (?, NULL, ?, "2026-06-01", "supported", "synthetic", ?, ?, ?,
+                     "{}", ?, 0, 0, 0, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            str_repeat('a', 64),
+            $snapshot,
+            hash('sha256', $snapshot),
+            hash('sha256', '{}'),
+            hash('sha256', 'synthetic-claim-footprint', true),
+        ]);
+
+        $payrollBlocked = $this->deleteClaim($caseId, $claimId, 1);
+        self::assertSame(409, $payrollBlocked->getStatusCode());
+        self::assertSame('enforcement_claim_change_blocked', $this->errorCode($payrollBlocked));
+        self::assertNotNull($this->repository->findCase($this->supplierId, $caseId));
+    }
+
+    public function testClaimMutationRequiresFreshVersionSessionAndTenantOwnership(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $claim = $this->createClaim($caseId);
+        $claimId = PayrollTimeValue::int($claim['id'] ?? null, 'id');
+
+        $stale = $this->updateClaim($caseId, $claimId, 2);
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->errorCode($stale));
+
+        $bearer = $this->action->deleteClaim(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}",
+                authMethod: 'bearer',
+            )->withParsedBody(['row_version' => 1]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->errorCode($bearer));
+
+        $foreign = $this->action->deleteClaim(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}",
+                supplierId: $this->otherSupplierId,
+            )->withParsedBody(['row_version' => 1]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(404, $foreign->getStatusCode());
+        self::assertNotNull($this->repository->findCase($this->supplierId, $caseId));
+    }
+
     /** @return array<string,mixed> */
     private function createCase(int $employeeId, ?int $supplierId = null): array
     {
@@ -1536,6 +1700,70 @@ final class PayrollEnforcementApiTest extends TestCase
                 ->withParsedBody(['row_version' => $rowVersion]),
             new Response(),
             ['id' => (string) $caseId],
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function createClaim(int $caseId): array
+    {
+        $response = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody($this->claimBody()),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        return PayrollTimeValue::row($this->json($response)['claim'] ?? null, 'claim');
+    }
+
+    /** @return array<string,mixed> */
+    private function claimBody(): array
+    {
+        return [
+            'legal_basis' => 'statutory',
+            'category' => 'non_priority',
+            'outstanding_minor_units' => 100_000,
+            'maintenance_weight_minor_units' => null,
+            'priority_date' => '2026-05-20',
+            'order_issued_on' => '2026-05-19',
+            'legal_title_verified' => false,
+            'order_or_notice_delivered' => false,
+            'priority_classification_verified' => false,
+            'agreement_verified' => false,
+            'due_monetary_claim_verified' => false,
+        ];
+    }
+
+    private function updateClaim(
+        int $caseId,
+        int $claimId,
+        int $rowVersion,
+    ): ResponseInterface {
+        return $this->action->updateClaim(
+            $this->request(
+                'PUT',
+                "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}",
+            )->withParsedBody([
+                ...$this->claimBody(),
+                'row_version' => $rowVersion,
+            ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+    }
+
+    private function deleteClaim(
+        int $caseId,
+        int $claimId,
+        int $rowVersion,
+    ): ResponseInterface {
+        return $this->action->deleteClaim(
+            $this->request(
+                'DELETE',
+                "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}",
+            )->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
         );
     }
 
