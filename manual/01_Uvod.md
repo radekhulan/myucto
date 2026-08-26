@@ -249,11 +249,11 @@ vede tu formu, která jí přísluší:
 
 Viz [43. Průvodce účetního](43_Pruvodce_ucetniho.md),
 [45. Účetní deník](45_Ucetni_denik.md),
-[účtový rozvrh](62_Ucetni_osnova.md),
+[účtový rozvrh](81_Ucetni_osnova.md),
 [hlavní kniha](48_Hlavni_kniha.md),
 [rozvaha](50_Rozvaha.md),
 [výkaz zisku a ztráty](51_Vysledovka_druhova.md) a
-[daňová evidence](71_Danova_evidence.md).
+[daňová evidence](90_Danova_evidence.md).
 
 ## 1.11 Automat účtování
 
@@ -287,7 +287,7 @@ nesedí — ukážou konkrétní doklad:
 - **Audit kurzů (ČNB)**
 - **Kontrola integrity deníku** na pozadí — hlídá, že strana MD odpovídá straně D
 
-Viz [60. Účetní kontroly a inventarizace](60_Ucetni_kontroly_a_inventarizace.md).
+Viz [79. Účetní kontroly a inventarizace](79_Ucetni_kontroly_a_inventarizace.md).
 
 ## 1.13 DPH, kontrolní a souhrnné hlášení
 
@@ -324,7 +324,7 @@ zaplatíme" existuje odpověď v systému:
 
 Díky tomu se dá daňová optimalizace řešit v říjnu, ne v březnu, kdy už je pozdě.
 Viz [38. Daň z příjmů](38_Dan_z_prijmu.md),
-[70. EPO podání, archív a rekonciliace](70_Archiv_podani_a_rekonciliace.md) a
+[89. EPO podání, archív a rekonciliace](89_Archiv_podani_a_rekonciliace.md) a
 [41. Daňový optimalizátor](41_Danovy_optimalizator.md).
 
 **Daňové výstupy jsou pomůcka** — před podáním je vždy ověř s účetní nebo
@@ -356,7 +356,7 @@ mimo jiné:
 - **Rozdělení výsledku hospodaření** z účtu `431` na `428/421/364`
 
 Na konci vznikne **závěrkový balíček** a nový rok se otevře automaticky včetně
-řad dokladů. Viz [68. Účetní období a uzávěrka](68_Uzaverka.md).
+řad dokladů. Viz [87. Účetní období a uzávěrka](87_Uzaverka.md).
 
 ## 1.16 Majetek, mzdy, kniha jízd a dokumenty
 
@@ -376,7 +376,7 @@ Agendy, kvůli kterým účetní v jednodušších systémech vede paralelní ta
 - **Dokumenty** — archiv s fulltextem a přiřazením k dokladům
 
 Viz [58. Úplné mzdy](58_Uplne_mzdy.md), [57. Mzdová rekapitulace](57_Mzdy.md),
-[59. Majetek a odpisy](59_Majetek.md), [32. Kniha jízd](32_Kniha_jizd.md)
+[78. Majetek a odpisy](78_Majetek.md), [32. Kniha jízd](32_Kniha_jizd.md)
 a [31. Dokumenty](31_Dokumenty.md).
 
 ## 1.17 Exporty, importy a API
@@ -405,7 +405,7 @@ součást postupu — účtování i výkazy si MyÚčto zvládne samo.
 Nad tím vším je **REST API v1 popsané specifikací OpenAPI 3.1** s tokenovou
 autentizací a výběrem firmy hlavičkou `X-Supplier-Id`. Napojí se na
 něj e-shop, CRM, BI nástroj i automatizační platforma typu Make nebo Zapier.
-Viz [78. REST API](78_API.md), [20. Exporty](20_Exporty.md),
+Viz [99. REST API](99_API.md), [20. Exporty](20_Exporty.md),
 [21. Importy](21_Importy.md) a [42. Hromadný export](42_Hromadny_export.md).
 
 ## 1.18 Multi-supplier — víc firem z jedné instalace
@@ -421,7 +421,7 @@ dodavatelů** (firem / IČO) s plně izolovanými daty:
 - Typické nasazení: účetní kancelář se samostatnými klientskými agendami,
   holding nebo skupina společností sdílející jednu instalaci
 
-Viz [72. Více dodavatelů](72_Multi_supplier.md).
+Viz [91. Více dodavatelů](91_Multi_supplier.md).
 
 ## 1.19 Tým, oprávnění a úlohy na pozadí
 
@@ -437,14 +437,14 @@ Viz [72. Více dodavatelů](72_Multi_supplier.md).
 - **Elektronické podpisy** PDF dokladů i odchozích e-mailů
 - **Zálohování** databáze, dokladů i dokumentů, volitelně šifrované
 
-Viz [73. Nastavení](73_Nastaveni.md),
-[74. Elektronické podpisy](74_Elektronicke_podpisy.md) a
-[77. Aktualizace](77_Aktualizace.md).
+Viz [92. Nastavení](92_Nastaveni.md),
+[95. Elektronické podpisy](95_Elektronicke_podpisy.md) a
+[98. Aktualizace](98_Aktualizace.md).
 
 ## 1.20 Bezpečnost
 
 Bezpečnost má dvě roviny — **kdo se dostane dovnitř** a **co se uvnitř může
-stát s účetnictvím** (detail v [76. Bezpečnost](76_Bezpecnost.md)):
+stát s účetnictvím** (detail v [97. Bezpečnost](97_Bezpecnost.md)):
 
 **Přístup a přihlášení**
 

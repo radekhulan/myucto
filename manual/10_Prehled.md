@@ -283,16 +283,16 @@ vyplnit, než začneš fakturovat. Vidí ho každý, kdo smí zapisovat.
 
 | Krok | Vede na |
 |---|---|
-| Údaje o firmě | [Nastavení → Údaje firmy](73_Nastaveni.md) (`/admin/settings?tab=company`) |
+| Údaje o firmě | [Nastavení → Údaje firmy](92_Nastaveni.md) (`/admin/settings?tab=company`) |
 | Daně a účetnictví | Nastavení → Daně a účetnictví (`/admin/settings?tab=accounting`) |
 | Bankovní účty | [Banka → Účty](28_Banka.md) |
-| Vzhled faktur a logo | [Brandingové profily](73_Nastaveni.md#7312-brandingove-profily) |
+| Vzhled faktur a logo | [Brandingové profily](92_Nastaveni.md#9212-brandingove-profily) |
 | Přidat další firmy | Jen licence na víc firem, dokud v ní zbývá místo — Systém → Dodavatelé (`/admin/suppliers`) |
 | Číselné řady a doklady | Nastavení → Fakturace (`/admin/settings?tab=documents`) |
-| Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](69_Ucetni_nastroje.md) |
+| Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](88_Ucetni_nastroje.md) |
 | Avíza plateb z e-mailů | [Banka → Bankovní avíza z e-mailu](28_Banka.md) (`/bank?tab=email`) |
-| Datová schránka | [Firma → Datová schránka](73_Nastaveni.md#7317-datova-schranka) (`/admin/databox`) |
-| Uživatelé a role | [Uživatelé](73_Nastaveni.md#732-uzivatele) |
+| Datová schránka | [Firma → Datová schránka](92_Nastaveni.md#9217-datova-schranka) (`/admin/databox`) |
+| Uživatelé a role | [Uživatelé](92_Nastaveni.md#922-uzivatele) |
 | První klient / první faktura | [Klienti](18_Klienti.md) · [Faktury](14_Faktury.md) |
 
 Kroky se **odškrtávají ručně** — aplikace nic nekontroluje a odškrtnutí nemá

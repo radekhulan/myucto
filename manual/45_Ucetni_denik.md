@@ -4,14 +4,14 @@
 účetních zápisů firmy, tedy dvojic (nebo vícenásobných skupin) řádků **MD** (má dáti) a
 **Dal**, u kterých musí vždy platit **Σ MD = Σ Dal**. Najdeš ho v menu **Účetnictví →
 Účetní deník**. Modul je dostupný jen pro firmy vedené v režimu **podvojné účetnictví**
-— firmy na [daňové evidenci](71_Danova_evidence.md) vedou místo něj jednodušší
-[Peněžní deník](71_Danova_evidence.md) bez podvojných zápisů.
+— firmy na [daňové evidenci](90_Danova_evidence.md) vedou místo něj jednodušší
+[Peněžní deník](90_Danova_evidence.md) bez podvojných zápisů.
 
 > [!NOTE]
 > Deník je jen **evidence toho, co se stalo** — nepředkontovává sám o sobě. Kterým
 > účtům (MD/Dal) se má konkrétní doklad zaúčtovat, řeší **předkontace** — viz
-> [Účtový rozvrh](62_Ucetni_osnova.md) a
-> [Předkontace](69_Ucetni_nastroje.md#693-predkontace). Tato kapitola popisuje
+> [Účtový rozvrh](81_Ucetni_osnova.md) a
+> [Předkontace](88_Ucetni_nastroje.md#883-predkontace). Tato kapitola popisuje
 > jen samotný deník: jak se v něm zápisy zobrazují, jak založit ruční zápis a jak
 > zápis opravit nebo stornovat.
 
@@ -39,7 +39,7 @@ a můžeš se z něj prokliknout zpět na zdrojový doklad. Podle sloupce **Zdro
 | **Odpis majetku** | měsíční/roční odpisový běh karty majetku |
 | **Zařazení majetku** / **Vyřazení majetku** | uvedení majetku do užívání / jeho vyřazení |
 | **Uzavření knih** / **Otevření knih** | roční uzávěrka a otevření nového účetního období |
-| **Zúčtování DPH** | měsíční (u čtvrtletního plátce čtvrtletní) interní doklad, který převede vstupní a výstupní daň na **343.900** — viz [§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph) |
+| **Zúčtování DPH** | měsíční (u čtvrtletního plátce čtvrtletní) interní doklad, který převede vstupní a výstupní daň na **343.900** — viz [§ 81.3.3](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph) |
 | **Kurzové přecenění** | přecenění cizoměnových zůstatků k rozvahovému dni (viz [§ 45.5](#455-multi-menove-radky-zapisu)) |
 | **Ruční** | zápis, který jsi založil(a) přímo v deníku (viz [§ 45.4](#454-rucni-zapis)) |
 
@@ -243,7 +243,7 @@ administrátor) otevřeš formulář **Ruční účetní zápis** (`/accounting/
 - **Datum zápisu** — povinné, datum účetního případu; musí spadat do **existujícího a
   otevřeného** účetního období, jinak zaúčtování selže s chybou o chybějícím/uzavřeném období,
 - **Číslo dokladu** — volitelné; necháš-li prázdné a firma má na stránce
-  [Účetní období](68_Uzaverka.md) zapnutou volbu **„Automatická čísla dokladů ručních
+  [Účetní období](87_Uzaverka.md) zapnutou volbu **„Automatická čísla dokladů ručních
   zápisů (řada ID)"**, systém číslo přidělí automaticky z číselné řady vedené pro ruční
   zápisy (spravuje se v Nástrojích na záložce **Číselné řady**),
 - **Popis** — volitelný text zápisu (max. 255 znaků).
@@ -323,7 +323,7 @@ samostatný dialog **Převod mezi účty (261)**. Použiješ ho pro přesun pen�
 a přijetí spadá do různých dat — systém vytvoří **dvě nohy** přes účet **261 — Peníze
 na cestě** (MD 261 / D zdrojový účet při odeslání, MD cílový účet / D 261 při přijetí),
 sdílející číslo dokladu z vlastní číselné řady **PP** (přebírá se ze stejné správy
-číselných řad jako řada pro ruční zápisy — viz [Účetní období](68_Uzaverka.md)). Zadáš:
+číselných řad jako řada pro ruční zápisy — viz [Účetní období](87_Uzaverka.md)). Zadáš:
 
 - **Z účtu** / **Na účet** — kódy účtů (musí existovat v osnově a být různé),
 - **Částka** — kladná,
@@ -451,7 +451,7 @@ zaokrouhlenou korunovou částku i skutečnou částku v EUR, ze které vznikla.
 
 ### Kurzové přecenění a kurzové rozdíly
 
-K rozvahovému dni (v rámci [uzávěrky](68_Uzaverka.md)) systém přecení otevřené
+K rozvahovému dni (v rámci [uzávěrky](87_Uzaverka.md)) systém přecení otevřené
 cizoměnové zůstatky aktuálním kurzem a rozdíl proti účetně vedené hodnotě zaúčtuje jako
 samostatný zápis se zdrojem **Kurzové přecenění** — kurzový **zisk** na účet **663**,
 kurzová **ztráta** na účet **563** (přesný účet určuje předkontace `fx.gain`/`fx.loss`,
@@ -477,8 +477,8 @@ s výchozí hodnotou 663/563, pokud si ji ve firemní osnově nepřenastavíš).
 > [!NOTE]
 > Účty **701, 702** a **710**, na které se během roční uzávěrky účtují zápisy se
 > zdrojem Uzavření/Otevření knih, mají v účtové osnově vlastní typ **„Závěrkový"**
-> (odlišný od Kapitálu) — viz [Účtový rozvrh](62_Ucetni_osnova.md) a
-> [Předkontace](69_Ucetni_nastroje.md#693-predkontace).
+> (odlišný od Kapitálu) — viz [Účtový rozvrh](81_Ucetni_osnova.md) a
+> [Předkontace](88_Ucetni_nastroje.md#883-predkontace).
 > Díky tomu je výkazy (rozvaha/VZZ) do vlastního kapitálu firmy nezapočítávají.
 
 ## 45.6 Popis, přílohy a poznámky
@@ -674,7 +674,7 @@ doklady k přijaté platbě). Selhání storna jediného potomka zastaví celé 
   stornovat (Období storna je „closed" — storno nelze zaúčtovat.). Nejdřív
   vyřešte zaúčtování v deníku."* (analogicky pro storno a pro přijaté faktury).
   Řešení je stejné jako jinde v této kapitole — období napřed znovu otevřít
-  přes [Uzávěrku](68_Uzaverka.md), nebo doklad neuzavíráš, ale opravíš
+  přes [Uzávěrku](87_Uzaverka.md), nebo doklad neuzavíráš, ale opravíš
   přeúčtováním.
 - Při **smazání** se navíc na zdrojovém dokladu zruší vazba na zápis
   (`source_id`), protože samotný doklad za okamžik zmizí — v deníku po něm
@@ -683,7 +683,7 @@ doklady k přijaté platbě). Selhání storna jediného potomka zastaví celé 
 > [!WARNING]
 > Storno do **uzavřeného** účetního období nejde provést — systém vrátí chybu, že
 > období je uzavřené. Opravu položek z minulého (uzavřeného) roku řeší jiný postup přes
-> [Uzávěrku](68_Uzaverka.md) (znovuotevření knih do schválení závěrky), ne přímé storno
+> [Uzávěrku](87_Uzaverka.md) (znovuotevření knih do schválení závěrky), ne přímé storno
 > v deníku.
 
 > [!NOTE]
@@ -707,7 +707,7 @@ doklady k přijaté platbě). Selhání storna jediného potomka zastaví celé 
 
 ## 45.9 Zámek účtování k datu
 
-Kromě uzavření **celého** účetního období (viz [Uzávěrka](68_Uzaverka.md)) existuje i
+Kromě uzavření **celého** účetního období (viz [Uzávěrka](87_Uzaverka.md)) existuje i
 jemnější, měkký **zámek účtování k datu** platný napříč všemi obdobími firmy —
 `locked_until`. Řídí, do kterého data (včetně) už nejde nově zaúčtovat, přeúčtovat ani
 stornovat žádný doklad, i když samotné účetní období je pořád formálně **otevřené**.
@@ -794,7 +794,7 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
   desetinná čísla) — frontendová kontrola je jen pomůcka, server nevyrovnaný zápis
   vždy odmítne.
 - Zaúčtovat (i stornovat, i přepsat idempotentním re-postem) lze jen do **otevřeného**
-  účetního období — nejdřív si ověř v [Uzávěrce](68_Uzaverka.md), že období pro dané
+  účetního období — nejdřív si ověř v [Uzávěrce](87_Uzaverka.md), že období pro dané
   datum existuje a je otevřené.
 - Popis zápisu lze inline upravit jen u **ručních** zápisů a zápisů uzavření/otevření
   knih — u ostatních (faktura, banka, pokladna, majetek) se popis mění na zdrojovém

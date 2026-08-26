@@ -9,7 +9,7 @@ Související výkazy a exporty mají v manuálu vlastní kapitoly: [Kniha DPH](
 (interní žurnál), [Souhrnné hlášení](39_Souhrnne_hlaseni.md) (EU dodání B2B) a
 [Hromadný export](42_Hromadny_export.md) (ZIP balíček pro účetní). Rozdíl mezi
 staženým a skutečně podaným XML vysvětluje [Archiv podání a daňová
-rekonciliace](70_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
+rekonciliace](89_Archiv_podani_a_rekonciliace.md). Výkazy najdeš v menu
 **Daně**, archiv podání jako poslední bod menu **Nástroje**.
 
 OSS má samostatnou stránku **Daně → OSS přiznání**, která se objeví až po
@@ -54,7 +54,7 @@ odmítne nebo bude generovat formálně neúplný výkaz.
 | Pole v UI | XML atribut | Hodnoty | Kdy použít |
 |---|---|---|---|
 | **Typ poplatníka** | `typ_ds` ve VetaP | `F` (FO/OSVČ) / `P` (PO/s.r.o.) | Podle právní formy. |
-| **Typ plátce DPH** | `typ_platce` ve VetaD | `P` (plátce) / `I` (identifikovaná osoba) | `I` se nastaví automaticky, když je firma k rozhodnému datu vedená v historii plátcovství jako **Identifikovaná osoba** (viz [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g6l-zdph)). Perioda (měsíc/kvartál) jde zvlášť atributy `mesic`/`ctvrt` dle `vat_period`. |
+| **Typ plátce DPH** | `typ_platce` ve VetaD | `P` (plátce) / `I` (identifikovaná osoba) | `I` se nastaví automaticky, když je firma k rozhodnému datu vedená v historii plátcovství jako **Identifikovaná osoba** (viz [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g-6l-zdph)). Perioda (měsíc/kvartál) jde zvlášť atributy `mesic`/`ctvrt` dle `vat_period`. |
 
 > 🛈 **Identifikovaná osoba**: přiznání obsahuje jen řádky samovyměření
 > z přeshraničních přijatých plnění (ř. 3–6, 12–13) **bez zrcadlového odpočtu
@@ -484,7 +484,7 @@ haléřových součtů proto nemusí být totožný.
 > RC § 92a — jen mezi plátci) IO věcně nemá. Cokoli dalšího, co z klasifikací
 > vyjde (tuzemské ř. 1/2, oddíl C, odpočty ř. 40+), se vynechá **s upozorněním
 > v náhledu**, ať je vidět, co a proč vypadlo. Kvartální volba se ignoruje —
-> IO podává vždy měsíčně. Podrobnosti [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g6l-zdph).
+> IO podává vždy měsíčně. Podrobnosti [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g-6l-zdph).
 
 #### Krácený odpočet § 76 (koeficient)
 
@@ -546,7 +546,7 @@ vypořádací koeficient ho odečte z čitatele nebo jmenovatele.
   s analytikami DPH proti **343.100**) systém **nedělá automaticky** — jen spočte
   a zobrazí částku na ř. 53 v přiznání; do
   [Účetního deníku](45_Ucetni_denik.md) ji zapiš ručním zápisem. Nezaměňuj to
-  s [měsíčním zúčtováním DPH](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph),
+  s [měsíčním zúčtováním DPH](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph),
   které automatické je — to jen převádí obrat období na 343.900, roční
   vypořádání koeficientu neřeší.
 - Kombinace **reverse charge** (samovyměření) a **Krácený (§76)** na jednom dokladu

@@ -13,7 +13,7 @@ OSS vzniká, co se dělá s plněními, u kterých si systém není jistý, jak 
 účtuje a jak se sestaví a doloží podání. Související témata mají vlastní kapitoly —
 [import zahraničních dokladů](21_Importy.md#214b-zahranicni-doklady-a-rezim-oss),
 [hromadné nastavení OSS](14_Faktury.md#1432-hromadne-nastaveni-oss),
-[sazby a číselníky](73_Nastaveni.md#7312-sazby-dph) a
+[sazby a číselníky](92_Nastaveni.md#9212-sazby-dph) a
 [daňový průvodce](35_Fakturujeme.md#355-zahranicni-fakturace-eu-oss-a-treti-zeme).
 
 > [!NOTE]
@@ -107,7 +107,7 @@ přesměruje na úvodní stránku.
 ### 40.2.2 Sazby DPH pro cizí země — hlídej pole Stát
 
 Aby šla na položku vybrat zahraniční sazba, musí být v číselníku **DPH sazeb**
-([§ 73.1.2](73_Nastaveni.md#7312-sazby-dph)) založená — například `PL-23`, `SK-23`,
+([§ 92.1.2](92_Nastaveni.md#9212-sazby-dph)) založená — například `PL-23`, `SK-23`,
 `HU-27`. Zakládá se stejně jako tuzemská sazba, ale s jedním rozdílem, který je
 **nejčastější příčinou toho, že import doklad odmítne**:
 
@@ -147,7 +147,7 @@ Sazby s příznakem reverse charge se pro OSS nepárují.
 ### 40.2.3 Číselník sazeb členských států
 
 **Cesta: `Nastavení → Číselníky → Sazby států OSS`**
-([§ 73.1.2b](73_Nastaveni.md#7312b-sazby-statu-oss)).
+([§ 92.1.2b](92_Nastaveni.md#9212b-sazby-statu-oss)).
 
 Je to **kontrolní číselník** sazeb DPH platných v jednotlivých členských státech —
 ne sazby pro doklad. Aplikace se ho ptá na jedinou věc: *platí tahle sazba v téhle
@@ -556,9 +556,9 @@ což není číselný variabilní symbol. Odvádí se v měně podání, tedy v 
 
 Účet lze v předkontacích u pravidla `oss.output.vat` změnit — například na vlastní
 analytiku **pod 343**. To ale nedělej: součet syntetiky 343 (tedy 343 včetně
-[analytik vstupu, výstupu a zúčtování](62_Ucetni_osnova.md#6232-analytiky-dph-343100-343200-a-343900))
+[analytik vstupu, výstupu a zúčtování](81_Ucetni_osnova.md#8132-analytiky-dph-343100-343200-a-343900))
 se pak přestane shodovat s tuzemským přiznáním k DPH a OSS daň jiného státu by
-navíc vstoupila do [měsíčního zúčtování DPH](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph).
+navíc vstoupila do [měsíčního zúčtování DPH](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph).
 Přesně kvůli tomu má OSS daň vlastní účet **345.100**.
 
 ## 40.8 Přiznání a podání
@@ -672,14 +672,14 @@ Postup je tedy:
 > Nabízet kteroukoli z těch cest by znamenalo posílat uživatele na chybu portálu.
 > Ostatní formuláře (DPH, kontrolní a souhrnné hlášení, daň z příjmů) obě cesty
 > mají — viz
-> [kapitola 70](70_Archiv_podani_a_rekonciliace.md#704-asistovane-podani-pres-epo).
+> [kapitola 70](89_Archiv_podani_a_rekonciliace.md#894-asistovane-podani-pres-epo).
 
 ### 40.8.6 Archiv podání a rekonciliace
 
 Záložka **Archiv podání** vypisuje všechny archivované OSS snapshoty s časem
 vzniku, stavem, výsledkem validace, **SHA-256 otiskem** a odkazem na stažení
 uloženého souboru. Tytéž snapshoty leží ve společném archivu v
-**Nástroje → EPO podání a archiv** ([kapitola 70](70_Archiv_podani_a_rekonciliace.md)),
+**Nástroje → EPO podání a archiv** ([kapitola 70](89_Archiv_podani_a_rekonciliace.md)),
 kde se k nim připojují pokusy o podání, doručenky a označení „podáno".
 
 > Archivovaný soubor prokazuje, **co vzniklo — ne že bylo podáno**. Po odeslání

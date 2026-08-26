@@ -48,7 +48,7 @@ Vytvoříš první uživatelský účet se systémovou rolí **Superadmin** (pln
 
 Povolené jsou obě metody — uživatel si na stránce `/setup-mfa` vybere. Zúžit
 výběr jde až v konfiguraci přes `auth.allowed_mfa_methods`, viz
-[76. Bezpečnost](76_Bezpecnost.md).
+[97. Bezpečnost](97_Bezpecnost.md).
 
 Klikni **Další**.
 
@@ -60,7 +60,7 @@ Klikni **Další**.
 ![Setup wizard krok 2](img/03_setup_dodavatel.webp)
 
 Vyplníš údaje o **prvním dodavateli** (firmě nebo OSVČ), za kterého budeš
-fakturovat. Můžeš jich později přidat víc — viz [72. Multi-supplier](72_Multi_supplier.md).
+fakturovat. Můžeš jich později přidat víc — viz [91. Multi-supplier](91_Multi_supplier.md).
 
 | Sekce | Popis |
 |---|---|
@@ -117,7 +117,7 @@ v `app.url` (lokálně je podporované `http://localhost`).
 ## 7.4 Co dál po setupu
 
 1. Otevři **Systém → Nastavení** a doplň, co wizard nepokryl: e-mail kontakt,
-   doplnění více bankovních účtů — viz [73. Nastavení](73_Nastaveni.md).
+   doplnění více bankovních účtů — viz [92. Nastavení](92_Nastaveni.md).
 2. **Systém → Číselníky → Měny** — pokud fakturuješ i v EUR, doplň druhý účet
    (IBAN + BIC).
 3. **Systém → Uživatelé** — pokud má systém používat někdo další (účetní),

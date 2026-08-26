@@ -91,7 +91,7 @@ proklikávat ručně.
 ### Než spustíš import
 
 1. **Spusť databázové migrace** (`php api/bin/migrate.php`). Bez číselníku
-   [sazeb států OSS](73_Nastaveni.md#7312b-sazby-statu-oss) se import zahraničních
+   [sazeb států OSS](92_Nastaveni.md#9212b-sazby-statu-oss) se import zahraničních
    dokladů **vůbec nerozběhne** — raději neudělá nic, než aby doklady zařadil naslepo.
 2. **Zkontroluj zemi u zahraničních sazeb** v `Nastavení → Číselníky → DPH sazby`.
    Formulář zemi předvyplňuje na `CZ`, takže sazba `PL-23` bývá založená se zemí `CZ`.

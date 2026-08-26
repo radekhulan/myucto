@@ -248,7 +248,7 @@ vytvoření nové faktury **odmítne** — není co nově vyúčtovat.
   kontrolního hlášení.
 - V podvojném účetnictví se účtuje **311 / 644** (Smluvní pokuty a úroky
   z prodlení) — bez řádku DPH (343). Předkontaci lze upravit v [kontačních
-  pravidlech](73_Nastaveni.md) (`invoice.penalty.issued`).
+  pravidlech](92_Nastaveni.md) (`invoice.penalty.issued`).
 
 ### 22.8.5 Číselník repo sazby ČNB
 

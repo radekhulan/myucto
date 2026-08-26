@@ -2,7 +2,7 @@
 
 Životní cyklus finálního XML, potvrzení podání a porovnání proti podanému souboru
 shrnuje samostatná kapitola [Archiv podání a daňová
-rekonciliace](70_Archiv_podani_a_rekonciliace.md).
+rekonciliace](89_Archiv_podani_a_rekonciliace.md).
 
 V menu **Daně → Daň z příjmů** sestavíš **roční přiznání k dani z příjmů** z účetních dat
 a stáhneš **validované XML pro EPO** (portál Moje daně):
@@ -138,7 +138,7 @@ Kč; jednotlivé zálohy na další období se zaokrouhlují nahoru na celé sto
 Panel uzávěrkových návrhů může upozornit na neodpisovaný drobný majetek, časové rozlišení,
 kurzové rozdíly, rezervy nebo dohadné položky. Je pouze projekcí: do DPPO vstoupí až
 řádně zaúčtované položky a schválené ruční daňové úpravy. Účetní závěrku dokonči podle
-[kapitoly Účetní závěrka](68_Uzaverka.md).
+[kapitoly Účetní závěrka](87_Uzaverka.md).
 
 ## Zálohy na daň a pojistné
 
@@ -199,7 +199,7 @@ zůstávají poradní.
 ## Daňová (ne)uznatelnost nákladů (§ 25) — DPPO
 
 Nedaňové náklady se u DPPO poznají podle příznaku **Daňová uznatelnost** na účtu v
-[účtovém rozvrhu](62_Ucetni_osnova.md). Šablona rovnou označí jako nedaňové syntetiky
+[účtovém rozvrhu](81_Ucetni_osnova.md). Šablona rovnou označí jako nedaňové syntetiky
 **513** (reprezentace), **528** (ostatní sociální), **543** (dary), **545** (pokuty a
 penále), **549** (manka nad náhrady), **554** (účetní rezervy), **559** (účetní opravné
 položky). Analytiky **dědí** příznak ze syntetiky; ručně jej lze změnit. Odpisy (551) a
@@ -278,7 +278,7 @@ nenahrazuje její fyzické podklady.
 
 Finální DPFO uloží výpočet, podklady, kontroly, seznam zdrojových pohybů, XML a jejich
 kontrolní otisky. Oprava podkladů vyžaduje znovu otevřít uzávěrku i přiznání a vytvořit
-nový snapshot. Podrobnosti jsou v [Daňové evidenci](71_Danova_evidence.md#7183-rocni-uzaverka-danove-evidence).
+nový snapshot. Podrobnosti jsou v [Daňové evidenci](90_Danova_evidence.md#9083-rocni-uzaverka-danove-evidence).
 
 ## Pojistné OSVČ — důležitá omezení
 

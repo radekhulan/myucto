@@ -251,7 +251,7 @@ U více firem prováděj následující účetní kroky samostatně pro každé 
 > klienti, banka, dokumenty a DPH. Účetnictví (ani daňová evidence) se samo
 > nezapíná — jinak bys hned po převodu měl v menu desítky stránek nad prázdnými
 > tabulkami. Zapíná se přepínačem **Vést účetnictví** v Nastavení → Daně
-> a účetnictví; je to licencovaný modul (viz [79. Licence a aktivace](79_Licence_a_aktivace.md)),
+> a účetnictví; je to licencovaný modul (viz [100. Licence a aktivace](100_Licence_a_aktivace.md)),
 > na nové instalaci ale prvních 60 dní zdarma.
 
 Právnická osoba (s.r.o., a.s.) zůstává po převodu v daňové evidenci, dokud

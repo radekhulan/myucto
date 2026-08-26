@@ -5,7 +5,7 @@
 Saldokonto porovnává otevřené položky podle partnerů se zůstatkem
 saldokontního účtu v hlavní knize k vybranému dni. Je podkladem pro
 inventarizaci pohledávek, závazků a záloh a navazuje na
-[Inventarizaci účtů](65_Inventarizace_rozvahovych_uctu.md).
+[Inventarizaci účtů](84_Inventarizace_rozvahovych_uctu.md).
 
 ## 53.1 Období a účty
 

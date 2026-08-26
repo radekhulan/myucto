@@ -27,7 +27,7 @@ parametry, dodavatelé, přílohy k produktu).
 ## 33.1 Zapnutí modulu
 
 Sklad zapneš na stránce úpravy firmy (**Systém → Nastavení**, viz
-[§ 72.5 Editace dodavatele](72_Multi_supplier.md#725-editace-dodavatele)) v samostatné
+[§ 91.5 Editace dodavatele](91_Multi_supplier.md#915-editace-dodavatele)) v samostatné
 sekci **Vést skladovou evidenci**:
 
 - **Vést skladovou evidenci** — hlavní přepínač (interně sloupec `stock_enabled` na
@@ -57,7 +57,7 @@ vydání funkčně implementované.
 na vybraný sklad), **jen pod minimem**, jen aktivní a fulltextové hledání (SKU, název,
 EAN). Filtry si můžeš uložit jako výchozí přes uložené filtry, sloupce si zapneš/vypneš
 přes výběr sloupců a hustotu řádků přes přepínač hustoty (viz
-[§ 73.9 Uložené filtry a předvolby zobrazení](73_Nastaveni.md#739-ulozene-filtry-a-predvolby-zobrazeni)).
+[§ 92.9 Uložené filtry a předvolby zobrazení](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni)).
 
 Sloupce: **SKU**, **Název**, **Typ**, **MJ** (měrná jednotka), **Stav** (aktuální
 množství — červeně a tučně, pokud je pod nastaveným minimem), **Hodnota** (ocenění
@@ -493,7 +493,7 @@ dlaždicích **nuly** — ne prázdno. Je to záměr: „nula" je odpověď, „
 chyba (viz § 33.9.4).
 
 Hodnota **prodejné** vlastní dlaždici nemá; je to číslo pro strojové odběratele
-(REST API `GET /api/stock/quantities` a [MCP server](80_MCP_server.md)),
+(REST API `GET /api/stock/quantities` a [MCP server](101_MCP_server.md)),
 odkud si ho bere e-shop. Může vyjít i **záporně** — to znamená, že je
 vyfakturováno víc, než je fyzicky skladem, a záměrně se to neschovává nulou.
 
@@ -688,7 +688,7 @@ a vrátí hlášku „Import obsahuje chyby — nic nebylo zapsáno."
 > HTTP endpoint `POST /api/stock/vendor-offers/import` selže dřív, než se ke
 > zpracování souboru dostane.** Tlačítko **Import ceníku** proto v aplikaci
 > zatím nedoběhne. Než bude opravené, zadávej změny ceníku ručně na nabídkách
-> (§ 33.10.1) nebo přes [MCP server](80_MCP_server.md), který nabídky umí
+> (§ 33.10.1) nebo přes [MCP server](101_MCP_server.md), který nabídky umí
 > zakládat i upravovat po jedné.
 
 ## 33.11 Objednávky u dodavatele
@@ -929,7 +929,7 @@ Tlačítko **Doplnění zásob** je v hlavičce seznamu objednávek (§ 33.11.5)
 > množství. Kompletní výpočet podle § 33.12.1 i **hromadné založení objednávek
 > z návrhu** (jedna objednávka na dodavatele, vždy jako koncept, karty bez
 > dodavatele se vypíšou jako přeskočené) jsou zatím dostupné **jen přes
-> [REST API](78_API.md) a [MCP server](80_MCP_server.md)** — asistenta se tedy
+> [REST API](99_API.md) a [MCP server](101_MCP_server.md)** — asistenta se tedy
 > zeptat můžeš, na obrazovce to zatím neuvidíš.
 
 ## 33.13 Omezení a tipy

@@ -5,7 +5,7 @@
 Hlavní kniha je úplný přehled zaúčtovaných pohybů seskupený podle účtů.
 Zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové účty včetně účtové
 třídy 7. Je dostupná jen firmám s podvojným účetnictvím a navazuje na
-[Účtový rozvrh](62_Ucetni_osnova.md).
+[Účtový rozvrh](81_Ucetni_osnova.md).
 
 ## 48.1 Co je zdrojem sestavy
 
@@ -73,7 +73,7 @@ datum, doklad, analytiku, popis a částku na správné straně. Doklad vede na
 prvotní doklad (viz [48.5](#485-opis-uctu)). Zobrazí se prvních 200 řádků;
 u delších měsíců odkaz v patičce pokračuje v opisu účtu za stejný měsíc.
 
-Kliknutí na **kód účtu** otevře [kartu účtu](62_Ucetni_osnova.md#627-karta-uctu)
+Kliknutí na **kód účtu** otevře [kartu účtu](81_Ucetni_osnova.md#817-karta-uctu)
 se zachovaným rozsahem `Od / Do`. Z karty vede odkaz zpět do hlavní knihy;
 kniha pak dotčený účet sama rozbalí a odroluje k němu.
 

@@ -63,10 +63,13 @@ php tools/exportManualToPdf.php
 ### Reorganizace pořadí
 
 Změň prefix v názvu souborů a aktualizuj odkazy v `INDEX.md`. Generátor sortuje
-abecedně podle filename — `01_*` přijde před `02_*` atd.
+přirozeně podle filename (`strnatcmp`) — `01_*` … `99_*`, `100_*`, `101_*`,
+`999_*` na konci.
 
-Pro vsuvku mezi `15_*` a `16_*` můžeš použít `15a_*`; generátory zachytí
-dvou- i trojciferné prefixy s volitelnou písmennou příponou.
+Pro vsuvku mezi `15_*` a `16_*` lze dočasně použít `15a_*`, ale trvale se
+kapitoly drží v souvislé číselné řadě — přečísluj přes
+`php tools/renumberManual.php` (nejdřív dry run, pak `--apply`; rozbalení
+písmenné rodiny na samostatná čísla vyžaduje `--allow-flatten`).
 
 ## Konvence pro psaní
 
@@ -80,7 +83,7 @@ dvou- i trojciferné prefixy s volitelnou písmennou příponou.
   - `> 🛈 Pozn: ...` — poznámka (info)
   - `> ⚠️ Pozor: ...` — varování / důležité
 - **Cross-reference**: `[Detail klienta](18_Klienti.md)` — generátor přepíše na
-  `?ch=14_Klienti`
+  `?ch=18_Klienti`
 
 ## Servírování
 

@@ -87,7 +87,8 @@ function mdInline(string $s): string
 // ---------- Slugify pro klikatelné anchor linky ----------
 function mdSlug(string $s): string
 {
-    $s = strtolower(trim($s));
+    $s = trim($s);
+    $s = function_exists('mb_strtolower') ? mb_strtolower($s, 'UTF-8') : strtolower($s);
     if (function_exists('iconv')) {
         $tr = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
         if ($tr !== false) {
@@ -419,7 +420,7 @@ function parseIndexOrder(string $indexPath): array
 
 // ---------- Najdi soubory ----------
 $allFiles = glob($srcDir . '/[0-9][0-9]*_*.md');
-sort($allFiles, SORT_STRING);
+usort($allFiles, fn ($a, $b) => strnatcmp(basename($a), basename($b)));
 
 $groups          = parseIndexOrder($srcDir . '/INDEX.md');
 $orderedBases    = [];

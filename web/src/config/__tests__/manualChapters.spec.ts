@@ -28,14 +28,14 @@ describe('contextual manual for application menu', () => {
   })
 
   it.each([
-    ['/reports/cnb-rate-audit', '60_Ucetni_kontroly_a_inventarizace'],
-    ['/reports/invoice-series-completeness', '60_Ucetni_kontroly_a_inventarizace'],
+    ['/reports/cnb-rate-audit', '79_Ucetni_kontroly_a_inventarizace'],
+    ['/reports/invoice-series-completeness', '79_Ucetni_kontroly_a_inventarizace'],
     ['/reports/vat-coefficient', '36_Vykazy_DPH'],
     ['/reports/s46', '36_Vykazy_DPH'],
-    ['/hosting', '79_Licence_a_aktivace'],
-    ['/admin/databox', '73a_Datova_schranka'],
-    ['/admin/isds-gateway', '73b_Odesilaci_brana_ISDS'],
-    ['/isds-gateway/callback', '73b_Odesilaci_brana_ISDS'],
+    ['/hosting', '100_Licence_a_aktivace'],
+    ['/admin/databox', '93_Datova_schranka'],
+    ['/admin/isds-gateway', '94_Odesilaci_brana_ISDS'],
+    ['/isds-gateway/callback', '94_Odesilaci_brana_ISDS'],
     ['/admin/diagnostics', '999_Reseni_problemu'],
     ['/admin/support', '999_Reseni_problemu'],
   ])('uses the subject-specific chapter for %s', (path, chapter) => {

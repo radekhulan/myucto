@@ -11,8 +11,9 @@
  *  - Apply se zablokuje, pokud by rozbil písmennou rodinu nebo vytvořil kolizi čísla.
  *
  * Použití:
- *   php tools/renumberManual.php           — DRY RUN, vypíše plánované změny
- *   php tools/renumberManual.php --apply   — provede přejmenování + edits
+ *   php tools/renumberManual.php                   — DRY RUN, vypíše plánované změny
+ *   php tools/renumberManual.php --apply           — provede přejmenování + edits
+ *   php tools/renumberManual.php --allow-flatten   — vědomě povolí rozbalení písmenných rodin
  */
 
 declare(strict_types=1);
@@ -20,6 +21,7 @@ declare(strict_types=1);
 $root = realpath(__DIR__ . '/..');
 $manualDir = $root . '/manual';
 $dryRun = !in_array('--apply', $argv, true);
+$allowFlatten = in_array('--allow-flatten', $argv, true);
 
 if (!is_dir($manualDir)) {
     fwrite(STDERR, "Manual directory not found: $manualDir\n");
@@ -70,8 +72,9 @@ foreach ($map as $old => $info) {
     }
     $targetsByPrefix[$info['new_prefix']][] = $old;
 }
-if ($flattenedFamilies !== []) {
-    $guardProblems[] = 'písmenné kapitoly by ztratily stabilní příponu: ' . implode(', ', $flattenedFamilies);
+if ($flattenedFamilies !== [] && !$allowFlatten) {
+    $guardProblems[] = 'písmenné kapitoly by ztratily stabilní příponu: ' . implode(', ', $flattenedFamilies)
+        . ' (vědomé rozbalení povolíš přepínačem --allow-flatten)';
 }
 foreach ($targetsByPrefix as $prefix => $owners) {
     if (count($owners) > 1) {

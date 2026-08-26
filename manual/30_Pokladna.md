@@ -28,7 +28,7 @@ V modálním okně správy pokladen vyplníte:
 - **Měna** — CZK, EUR, USD nebo GBP. Měnu zvol při založení; po vzniku pohybů ji
   nelze zaměnit za jinou.
 - **Účet** — analytika účtu 211 z účtové osnovy firmy (např. `211.100` — o tečkovaném
-  zápisu viz [§ 62.3.1](62_Ucetni_osnova.md#6231-teckovany-zapis-analytik)). Nabízí se jen aktivní účty
+  zápisu viz [§ 81.3.1](81_Ucetni_osnova.md#8131-teckovany-zapis-analytik)). Nabízí se jen aktivní účty
   začínající prefixem 211; pokud vhodná analytika v osnově chybí, je u pole odkaz na založení
   účtu přímo v osnově. V daňové evidenci se pole s účtem nezobrazuje vůbec (evidence nemá účtovou
   osnovu ani deník). U valutové pokladny je analytika volitelná; ponecháš-li ji
@@ -377,10 +377,10 @@ dokladu:
 | Převod — odvod do banky | MD Převody mezi účty (261) / D Pokladna (211) |
 | Ostatní | volný protiúčet podle zvoleného účtu |
 
-Firmy s analytikami DPH ([§ 62.3.2](62_Ucetni_osnova.md#6232-analytiky-dph-343100-343200-a-343900))
+Firmy s analytikami DPH ([§ 81.3.2](81_Ucetni_osnova.md#8132-analytiky-dph-343100-343200-a-343900))
 účtují daň z pokladních dokladů na **343.100** (vstup) a **343.200** (výstup), takže hotovostní
 doklady vstupují i do měsíčního zúčtování DPH
-([§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph)). Firma, která analytiky nemá,
+([§ 81.3.3](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph)). Firma, která analytiky nemá,
 účtuje jako dřív na holou **343**.
 
 Strana účtu 211 v zápisu vždy odpovídá konkrétní analytice zvolené pokladny. Z detailu dokladu

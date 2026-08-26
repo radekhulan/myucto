@@ -44,7 +44,7 @@ měsíce zaplacené vyšší zálohou a s částkou, na kterou lze **snížit ne
 zálohu** — alternativou je požádat si o vrácení až po skončení roku.
 
 Rozvrh záloh je editovatelný v
-[Systém → Daňové konstanty](75_Danove_konstanty.md)
+[Systém → Daňové konstanty](96_Danove_konstanty.md)
 (sekce *Paušální daň*): tlačítkem **přidat změnu sazby** vznikne další období od
 zvoleného měsíce. Roční částka se z rozvrhu dopočítá, needituje se.
 
@@ -80,7 +80,7 @@ s účetní. Aplikace neslouží k doporučení účelového posouvání faktur 
 ## Daňové konstanty
 
 Roční sazby, minima a limity spravuje admin v
-[Systém → Daňové konstanty](75_Danove_konstanty.md).
+[Systém → Daňové konstanty](96_Danove_konstanty.md).
 Výchozí hodnoty jsou verzované podle roku, ale jejich existence
 nepotvrzuje, že na konkrétní situaci dopadá obecné pravidlo bez výjimky. Změna konstanty
 ovlivní budoucí přepočet; sama nemění již uložený finální snapshot DPFO.

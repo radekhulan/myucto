@@ -49,7 +49,8 @@ function mdInline(string $s): string {
 }
 
 function mdSlug(string $s): string {
-    $s = strtolower(trim($s));
+    $s = trim($s);
+    $s = function_exists('mb_strtolower') ? mb_strtolower($s, 'UTF-8') : strtolower($s);
     if (function_exists('iconv')) {
         $tr = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
         if ($tr !== false) $s = $tr;
@@ -302,9 +303,9 @@ foreach (glob($dstDir . '/*.html') as $oldHtml) {
 // Generate chapter HTMLs
 // ============================================================================
 
-// Glob NNN[a-z]?_*.md (e.g. 01_Uvod.md, 58a_Importy.md, 999_Reseni_problemu.md)
+// Glob NNN[a-z]?_*.md (e.g. 01_Uvod.md, 101_MCP_server.md, 999_Reseni_problemu.md)
 $files = glob($srcDir . '/[0-9][0-9]*_*.md');
-sort($files, SORT_STRING);
+usort($files, fn ($a, $b) => strnatcmp(basename($a), basename($b)));
 
 $chapters = [];
 foreach ($files as $f) {

@@ -48,9 +48,9 @@ nezapočte, protože jej nelze bezpečně přiřadit.
 
 Záložka **Kontace účtů** drží účetní pohled na tytéž účty. **Každý bankovní
 účet má vlastní analytiku syntetického účtu 221** — 221.100, 221.200, 221.300 …
-(tečkovaný zápis, viz [§ 62.3.1](62_Ucetni_osnova.md#6231-teckovany-zapis-analytik))
+(tečkovaný zápis, viz [§ 81.3.1](81_Ucetni_osnova.md#8131-teckovany-zapis-analytik))
 Číslo se přiděluje **automaticky** (první volné, které v
-[účtovém rozvrhu](62_Ucetni_osnova.md) nekoliduje s už existujícím účtem) a
+[účtovém rozvrhu](81_Ucetni_osnova.md) nekoliduje s už existujícím účtem) a
 analytika se zároveň založí v rozvrhu pod 221.
 
 Proč to tak je:
@@ -60,7 +60,7 @@ Proč to tak je:
 - **inventarizace k rozvahovému dni** (§ 29–30 zákona o účetnictví) se dá doložit
   výpisem daného účtu,
 - **cizoměnové účty se přeceňují automaticky** — jednoměnová analytika už
-  nemíchá měny, takže ji [uzávěrkové přecenění](68_Uzaverka.md) nabídne samo,
+  nemíchá měny, takže ji [uzávěrkové přecenění](87_Uzaverka.md) nabídne samo,
 - **převod mezi vlastními účty** je v deníku vidět (obě nohy jsou různé účty).
 
 V tabulce u každého účtu nastavíš:
@@ -393,7 +393,7 @@ plánovaných úloh.
 Bankovní výpis ([kapitola 28](28_Banka.md)) i e-mailové avízo (§ 29.2–29.7) řeší jen **párování na
 faktury**. Transakce, které s fakturou nesouvisí — bankovní poplatky, úroky,
 odvody sociálního a zdravotního pojištění, splátky leasingu, převody mezi
-vlastními účty — potřebují vlastní **účetní zápis** (MD/D dle [Předkontace](69_Ucetni_nastroje.md#693-predkontace)).
+vlastními účty — potřebují vlastní **účetní zápis** (MD/D dle [Předkontace](88_Ucetni_nastroje.md#883-predkontace)).
 O to se stará **PostingService** a dvě záložky na téže stránce **Peníze →
 Bankovní účty**, viditelné jen dodavateli s **podvojným účetnictvím**:
 
@@ -414,7 +414,7 @@ opakuje" — viz § 29.8.4) založíš pravidlo:
 | Variabilní symbol | Přesná shoda VS (číslice) |
 | Fragment zprávy | Podřetězec v popisu/zprávě transakce (bez ohledu na velikost písmen a diakritiku) |
 | Rozsah částky (od–do) | Interval absolutní částky, ve kterém se pravidlo použije |
-| MD účet / D účet | Kontace zápisu — účty musí existovat v [účtovém rozvrhu](62_Ucetni_osnova.md) |
+| MD účet / D účet | Kontace zápisu — účty musí existovat v [účtovém rozvrhu](81_Ucetni_osnova.md) |
 | Režim | **Návrh**, nebo **Automaticky** (§ 29.8.2) |
 
 Pravidlo musí mít **aspoň jedno kritérium** (protiúčet, VS nebo fragment zprávy)
@@ -462,7 +462,7 @@ Záložka **K zaúčtování** má čtyři podzáložky — **K zaúčtování**
 **Zaúčtováno automaticky**, **Schválené** a **Odmítnuté**. U čekajícího návrhu
 vidíš datum, částku, protistranu, navrhované pravidlo a **kontaci** (MD/D):
 
-- **Schválit** — vytvoří zápis do deníku (viz [Předkontace](69_Ucetni_nastroje.md#693-predkontace)
+- **Schválit** — vytvoří zápis do deníku (viz [Předkontace](88_Ucetni_nastroje.md#883-predkontace)
   pro logiku sestavení zápisu) a návrh přejde do stavu Schváleno.
 - **Odmítnout** — návrh se zahodí; ke stejné transakci a pravidlu se už
   znovu nenabídne. **Tři odmítnutí stejného pravidla po sobě** ho automaticky
@@ -475,7 +475,7 @@ vidíš datum, částku, protistranu, navrhované pravidlo a **kontaci** (MD/D):
 
 Transakce v **cizí měně** se automaticky ani návrhem neúčtují (chybí
 řešení kurzových rozdílů) — takové řádky nesou štítek **Cizí měna** a řeší se
-ručně v [Předkontace](69_Ucetni_nastroje.md#693-predkontace).
+ručně v [Předkontace](88_Ucetni_nastroje.md#883-predkontace).
 
 U už **zaúčtovaných** položek (podzáložka **Zaúčtováno automaticky**) vidíš
 odkaz na zápis v deníku a tlačítko **Stornovat** — vytvoří opravný (storno)

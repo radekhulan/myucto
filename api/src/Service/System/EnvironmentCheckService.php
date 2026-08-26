@@ -677,7 +677,7 @@ final class EnvironmentCheckService
             !$opcacheOn || $validateTs === '1' ? self::STATUS_OK : self::STATUS_WARN,
             $validateTs === '1' ? 'zapnuto' : 'vypnuto',
             'zapnuto, nebo restart PHP po každé aktualizaci',
-            '77_Aktualizace'
+            '98_Aktualizace'
         );
 
         // --- Databáze ---
@@ -757,7 +757,7 @@ final class EnvironmentCheckService
             $freeStatus,
             is_int($free) ? self::humanBytes($free) : '?',
             '>= ' . self::humanBytes(self::MIN_FREE_BYTES),
-            '99_Reseni_problemu'
+            '999_Reseni_problemu'
         );
 
         $logBytes = $store['log_bytes'] ?? null;
@@ -766,7 +766,7 @@ final class EnvironmentCheckService
             !is_int($logBytes) ? self::STATUS_SKIP : ($logBytes > self::LOG_WARN_BYTES ? self::STATUS_WARN : self::STATUS_OK),
             is_int($logBytes) ? self::humanBytes($logBytes) : '?',
             '< ' . self::humanBytes(self::LOG_WARN_BYTES),
-            '99_Reseni_problemu'
+            '999_Reseni_problemu'
         );
 
         $notWritable = [];
@@ -792,7 +792,7 @@ final class EnvironmentCheckService
             $pendingCount === null ? self::STATUS_SKIP : ($pendingCount > 0 ? self::STATUS_FAIL : self::STATUS_OK),
             $pendingCount === null ? '?' : (string) $pendingCount,
             '0',
-            '77_Aktualizace',
+            '98_Aktualizace',
             ['pending' => array_slice((array) ($mig['pending'] ?? []), 0, 20)]
         );
 
@@ -807,7 +807,7 @@ final class EnvironmentCheckService
             // Ne plochých 26 hodin: měsíční úloha se za dvanáct dní nezasekla.
             // Interval si nese každá úloha v katalogu sama.
             'každá aktivní úloha proběhla ve svém intervalu',
-            '76_Bezpecnost',
+            '97_Bezpecnost',
             ['stale' => array_values($stale), 'inactive' => $inactive, 'idle' => array_values($idle)],
             implode(', ', array_slice(array_keys($inactive), 0, 8))
         );
@@ -828,7 +828,7 @@ final class EnvironmentCheckService
             $appUrlCheckStatus,
             $appUrl['reason_code'],
             AppUrlConfiguration::REASON_VALID,
-            '99_Reseni_problemu',
+            '999_Reseni_problemu',
             $appUrl,
             $isSetupPreflight && $appUrl['state'] === AppUrlConfiguration::STATE_MISSING
                 ? 'app_url_detected_during_setup'
@@ -841,7 +841,7 @@ final class EnvironmentCheckService
             !$isProd || empty($runtime['app_debug']) ? self::STATUS_OK : self::STATUS_WARN,
             !empty($runtime['app_debug']) ? 'zapnuto' : 'vypnuto',
             'vypnuto v produkci',
-            '76_Bezpecnost'
+            '97_Bezpecnost'
         );
 
         $level = strtolower((string) ($runtime['logging_level'] ?? 'info'));
@@ -850,7 +850,7 @@ final class EnvironmentCheckService
             $isProd && $level === 'debug' ? self::STATUS_FAIL : self::STATUS_OK,
             $level,
             'info a výš v produkci',
-            '76_Bezpecnost'
+            '97_Bezpecnost'
         );
 
         // --- Verze aplikace ---
@@ -864,7 +864,7 @@ final class EnvironmentCheckService
                 $hasUpdate ? self::STATUS_WARN : self::STATUS_OK,
                 (string) ($status['current'] ?? '?'),
                 (string) ($status['latest'] ?? ($status['current'] ?? '?')),
-                '77_Aktualizace',
+                '98_Aktualizace',
                 [
                     'current'     => $status['current'] ?? null,
                     'latest'      => $status['latest'] ?? null,

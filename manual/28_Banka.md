@@ -320,7 +320,7 @@ sloučená úhrada — [§ 28.4](#284-detail-vypisu)), MyÚčto se ji hned pokus
 zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 
 - **běžná vydaná faktura** → **MD 221 Bankovní účty / D 311 Odběratelé**
-  (skutečné účty bere z [předkontace](69_Ucetni_nastroje.md#693-predkontace)
+  (skutečné účty bere z [předkontace](88_Ucetni_nastroje.md#883-predkontace)
   `payment.receivable.bank`, pokud ji máš upravenou),
 - **běžná přijatá faktura** → **MD 321 Dodavatelé / D 221** (`payment.payable.bank`),
 - **zálohová (proforma) faktura** → **MD 221 / D 324 Přijaté zálohy** (inkaso zálohy)
@@ -335,7 +335,7 @@ zaúčtovat. Konkrétní zápis závisí na typu dokladu:
 > **Každý bankovní účet má svou analytiku.** Účet 221 se nikdy nepoužívá plochý:
 > bankovní strana zápisu padá na analytiku toho účtu, ze kterého je výpis —
 > **221.100**, **221.200**, **221.300** … (o tečkovaném zápisu viz
-> [§ 62.3.1](62_Ucetni_osnova.md#6231-teckovany-zapis-analytik)).
+> [§ 81.3.1](81_Ucetni_osnova.md#8131-teckovany-zapis-analytik)).
 > Číslo se přiděluje automaticky (první volné,
 > které v účtovém rozvrhu nekoliduje) a najdeš i změníš ho v
 > **Nastavení → Bankovní účty → Kontace účtů**. Díky tomu sedí zůstatek každé
@@ -526,7 +526,7 @@ nepřebírá.
 Rozpoznaný odvod se zobrazí ve frontě s kontací **336/341/342/343/345 proti
 221**, údajem **Jistota** a lidským vysvětlením. Platba i vratka **DPH** míří na
 zúčtovací analytiku **343.900** — tedy přesně na účet, na kterém po měsíčním
-zúčtování DPH ([§ 62.3.3](62_Ucetni_osnova.md#6233-mesicni-zuctovani-dph)) leží
+zúčtování DPH ([§ 81.3.3](81_Ucetni_osnova.md#8133-mesicni-zuctovani-dph)) leží
 skutečný závazek vůči finančnímu úřadu; firma bez analytik účtuje jako dřív na
 holou 343. Nejasný odvod zůstane pouze
 návrhem. Pokud na zúčtovacím účtu chybí zaúčtovaný předpis nebo jeho kreditní

@@ -453,4 +453,4 @@ k této firmě.
 
 Další informace o importu pohybů a bankovních pravidlech jsou v kapitole
 [Banka — výpisy a párování](28_Banka.md). Účetní období a uzávěrku popisuje
-kapitola [Účetní období a uzávěrka](68_Uzaverka.md).
+kapitola [Účetní období a uzávěrka](87_Uzaverka.md).

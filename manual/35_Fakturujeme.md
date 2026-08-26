@@ -156,7 +156,7 @@ Standardní seed obsahuje čtyři sazby pro Česko:
 | `CZ-RC` | 0 % | Reverse charge | Přenesená daňová povinnost — sazba 0 %, daň odvádí příjemce |
 
 Sazby spravuješ v `Nastavení → Číselníky → Sazby DPH`
-([§ 73.1.2](73_Nastaveni.md#7312-sazby-dph)). Můžeš přidávat další (typicky sazby
+([§ 92.1.2](92_Nastaveni.md#9212-sazby-dph)). Můžeš přidávat další (typicky sazby
 členských států pro OSS — `SK-23`, `PL-23`, `HU-27`), upravovat popisek nebo
 zneplatnit zastaralé pomocí **Platí do**. Default sazba se předvyplní u nově
 přidané položky faktury.
@@ -190,7 +190,7 @@ kontrolního hlášení.
   sestav.**
 
 Detail v [§ 36 — VAT klasifikační kódy](36_Vykazy_DPH.md#jak-funguji-vat-klasifikacni-kody)
-a [§ 73.14](73_Nastaveni.md#7314-system-sazby-a-ciselniky).
+a [§ 92.14](92_Nastaveni.md#9214-system-sazby-a-ciselniky).
 
 ## 35.3 Datum plnění, zálohy a zjednodušený doklad
 
@@ -290,7 +290,7 @@ směrnice 2006/112/ES". EU plnění se současně vykáže v
 > [!NOTE]
 > RC checkbox je v editoru skrytý, když je dodavatel **neplátce DPH** — neplátce
 > RC vystavit nemůže (nemá DPH co přenášet). Výjimkou je **identifikovaná osoba**
-> ([§ 35.1.4](#3514-identifikovana-osoba-6g6l-zdph)), které se RC u EU klienta
+> ([§ 35.1.4](#3514-identifikovana-osoba-6g-6l-zdph)), které se RC u EU klienta
 > s DIČ zapne automaticky.
 
 RC doklad v cizí měně má vlastní pravidla přepočtu pro výkazy — viz
@@ -381,7 +381,7 @@ i končí v jiném státě.
 
 MyÚčto má jeden dodavatelský profil s jedním DIČ. Workaround: založ druhého
 dodavatele (`Nastavení → Dodavatelé → Přidat`) a přepínej mezi nimi přepínačem
-v hlavičce — viz [72. Více dodavatelů](72_Multi_supplier.md). **Není to
+v hlavičce — viz [91. Více dodavatelů](91_Multi_supplier.md). **Není to
 plnohodnotná multi-jurisdikční podpora**: přiznání k DPH pro každou zemi řeš
 s místní účetní.
 
@@ -421,7 +421,7 @@ s místní účetní.
   elektronický podpis kvalifikovaným certifikátem, test oficiální podatelny
   a po samostatném potvrzení skutečné odeslání) a **asistované podání**
   (odeslání snapshotu na oficiální endpoint a otevření předvyplněného
-  formuláře) — viz [70. EPO podání a archiv](70_Archiv_podani_a_rekonciliace.md)
+  formuláře) — viz [89. EPO podání a archiv](89_Archiv_podani_a_rekonciliace.md)
 - Rozšířené opravy DPH — **§ 43, § 46, § 74b, § 79 a § 79a**
 - Pojistné OSVČ: přehled sociálního pojištění pro ČSSZ **jako validovanou XML
   datovou větu** a přehled pro zdravotní pojišťovnu jako PDF pomůcku

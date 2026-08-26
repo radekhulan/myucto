@@ -42,7 +42,7 @@ V každé skupině jsou faktury seřazené podle data vystavení (nejnovější 
 | Hledat | Volný text — varsymbol, popis položky, jméno klienta |
 
 Filtr **Zaúčtování** jde do URL (sdílitelný odkaz) a do [uložených
-filtrů](73_Nastaveni.md#739-ulozene-filtry-a-predvolby-zobrazeni); promítne se
+filtrů](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni); promítne se
 i do CSV exportu (řádky, ale ne samostatný sloupec — export neobsahuje
 příznak zaúčtování).
 
@@ -68,7 +68,7 @@ dokud mezi skrytými nezaškrtneš právě **Bez kategorie**. V seznamu jsou i a
 kategorie — visí na starých fakturách, takže bez nich by je nešlo dohledat ani skrýt.
 
 Filtr se zapisuje do URL i do [uložených
-filtrů](73_Nastaveni.md#739-ulozene-filtry-a-predvolby-zobrazeni) včetně režimu, takže
+filtrů](92_Nastaveni.md#929-ulozene-filtry-a-predvolby-zobrazeni) včetně režimu, takže
 si pohled „prodej bez předplatného" uložíš a příště vyvoláš jedním klikem.
 
 #### Nejisté místo plnění (OSS)

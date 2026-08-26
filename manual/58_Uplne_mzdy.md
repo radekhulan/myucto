@@ -48,13 +48,13 @@ samostatná práva uvedená níže.
 
 ### 2. Doplňte zaměstnavatele a registrace
 
-V [Nastavení mezd](58o_Nastaveni_mezd.md) zkontrolujte zejména:
+V [Nastavení mezd](73_Nastaveni_mezd.md) zkontrolujte zejména:
 
 - identifikační a kontaktní údaje zaměstnavatele;
 - výplatní den, běžné pracovní režimy a mzdový kalendář;
 - registrace a identifikátory pro ČSSZ, zdravotní pojišťovny a daňovou správu;
 - bankovní účty pro výplaty, odvody, srážky a ostatní příjemce;
-- předkontace a účty potřebné pro [zaúčtování mezd](58f_Shoda_uctovani_mezd.md);
+- předkontace a účty potřebné pro [zaúčtování mezd](64_Shoda_uctovani_mezd.md);
 - testovací nebo produkční prostředí a příslušné certifikáty pro podporované
   elektronické kanály.
 
@@ -75,18 +75,18 @@ Inbox se nikdy nevybírá automaticky. Nové zprávy se načtou až po otevřen�
 **Příchozích zpráv**, volbě přihlášení, potvrzení právního významu vyzvednutí a
 stisknutí akce uživatelem. Stejně tak se žádné podání neodešle jen tím, že bylo
 vytvořeno XML nebo vloženo do odchozí fronty. Podrobný postup je v
-[Podáních a hlášeních](58j_Podani_a_hlaseni.md).
+[Podáních a hlášeních](68_Podani_a_hlaseni.md).
 
 ### 4. Zkontrolujte legislativní sady
 
-V [Legislativních pravidlech mezd](58q_Legislativni_pravidla_mezd.md) ověřte,
+V [Legislativních pravidlech mezd](75_Legislativni_pravidla_mezd.md) ověřte,
 že je pro zpracovávaný měsíc dostupná přesně účinná sada. Aplikace chybějící
 pravidlo nenahradí hodnotou z jiného roku ani odhadem. Přehled schopností
 rozlišuje **Podporováno**, **Ruční kontrola** a **Nepodporováno**.
 
 ### 5. Založte zaměstnance a pracovní vztahy
 
-Na kartě [Zaměstnanci](58k_Zamestnanci.md) nejprve doplňte osobní,
+Na kartě [Zaměstnanci](69_Zamestnanci.md) nejprve doplňte osobní,
 identifikační, daňové, pojistné a platební údaje. Potom založte každý pracovní
 vztah a jeho časově účinné podmínky. U údajů, které se běžně nemění — například
 druh činnosti, pojištění, daňové prohlášení nebo běžný profil právních
@@ -99,7 +99,7 @@ správný, ale roční limit, maximální vyměřovací základ nebo roční zú
 
 ### 6. Připravte mzdové složky a opakované vstupy
 
-V [Mzdových složkách a vstupech](58p_Mzdove_slozky_a_vstupy.md) zkontrolujte
+V [Mzdových složkách a vstupech](74_Mzdove_slozky_a_vstupy.md) zkontrolujte
 zařazení do daně, sociálního a zdravotního pojištění, JMHZ a zaúčtování.
 Pravidelnou mzdu, paušál nebo opakovanou srážku nastavte jako účinný opakovaný
 vstup. Jednorázové odměny a výjimky patří do konkrétního měsíce. Odkaz na zdroj
@@ -136,16 +136,16 @@ neměnná.
 
 | Pořadí | Co účetní udělá | Kde pokračovat |
 |---:|---|---|
-| 1 | Otevře správnou firmu a měsíc, zkontroluje nástupy, výstupy a změny podmínek. | [Zaměstnanci](58k_Zamestnanci.md) |
-| 2 | Doplní směny, odpracovanou dobu, absence, dovolenou a pracovní cesty. | [Docházka a směny](58b_Dochazka_a_smeny.md), [Absence a dovolená](58a_Absence_a_dovolena.md), [Cestovní náhrady](58c_Cestovni_nahrady.md) |
-| 3 | Zadá odměny, náhrady, srážky a ostatní měsíční změny; pro větší počet lidí použije rychlý hromadný vstup a vyhledávání. | [Rychlý měsíční vstup](58d_Rychly_mesicni_vstup.md), [Mzdové složky a vstupy](58p_Mzdove_slozky_a_vstupy.md) |
-| 4 | Schválí vstupy, spustí výpočet a projde blokace i varování. | [Mzdové běhy](58e_Mzdove_behy.md) |
-| 5 | Zkontroluje čisté mzdy, odvody, daně, součty podle zaměstnanců a případné srážky nebo exekuce. | [Mzdové běhy](58e_Mzdove_behy.md), [Srážky a exekuce](58m_Srazky_a_exekuce.md) |
-| 6 | Schválí výslednou revizi. Při nalezené chybě opraví zdrojový údaj a vytvoří novou revizi; nepřepisuje schválený otisk. | [Mzdové běhy](58e_Mzdove_behy.md) |
-| 7 | Vygeneruje výplatní pásky a povinné dokumenty a zkontroluje stav po jednotlivých osobách. | [Dokumenty a výstupy](58h_Dokumenty_a_vystupy.md) |
-| 8 | Připraví a provede výplaty, odvody a ostatní platby; následně je spáruje s bankou. | [Mzdové příkazy a úhrady](58g_Platby_a_uhrady.md) |
-| 9 | Připraví JMHZ a hlášení zdravotním pojišťovnám, zkontroluje XML/PDF, zvolí kanál a každé odeslání výslovně potvrdí. | [Podání a hlášení](58j_Podani_a_hlaseni.md) |
-| 10 | Zaúčtuje mzdy a porovná mzdovou revizi, platby, účetní zápisy a podání. | [Shoda účtování mezd](58f_Shoda_uctovani_mezd.md) |
+| 1 | Otevře správnou firmu a měsíc, zkontroluje nástupy, výstupy a změny podmínek. | [Zaměstnanci](69_Zamestnanci.md) |
+| 2 | Doplní směny, odpracovanou dobu, absence, dovolenou a pracovní cesty. | [Docházka a směny](60_Dochazka_a_smeny.md), [Absence a dovolená](59_Absence_a_dovolena.md), [Cestovní náhrady](61_Cestovni_nahrady.md) |
+| 3 | Zadá odměny, náhrady, srážky a ostatní měsíční změny; pro větší počet lidí použije rychlý hromadný vstup a vyhledávání. | [Rychlý měsíční vstup](62_Rychly_mesicni_vstup.md), [Mzdové složky a vstupy](74_Mzdove_slozky_a_vstupy.md) |
+| 4 | Schválí vstupy, spustí výpočet a projde blokace i varování. | [Mzdové běhy](63_Mzdove_behy.md) |
+| 5 | Zkontroluje čisté mzdy, odvody, daně, součty podle zaměstnanců a případné srážky nebo exekuce. | [Mzdové běhy](63_Mzdove_behy.md), [Srážky a exekuce](71_Srazky_a_exekuce.md) |
+| 6 | Schválí výslednou revizi. Při nalezené chybě opraví zdrojový údaj a vytvoří novou revizi; nepřepisuje schválený otisk. | [Mzdové běhy](63_Mzdove_behy.md) |
+| 7 | Vygeneruje výplatní pásky a povinné dokumenty a zkontroluje stav po jednotlivých osobách. | [Dokumenty a výstupy](66_Dokumenty_a_vystupy.md) |
+| 8 | Připraví a provede výplaty, odvody a ostatní platby; následně je spáruje s bankou. | [Mzdové příkazy a úhrady](65_Platby_a_uhrady.md) |
+| 9 | Připraví JMHZ a hlášení zdravotním pojišťovnám, zkontroluje XML/PDF, zvolí kanál a každé odeslání výslovně potvrdí. | [Podání a hlášení](68_Podani_a_hlaseni.md) |
+| 10 | Zaúčtuje mzdy a porovná mzdovou revizi, platby, účetní zápisy a podání. | [Shoda účtování mezd](64_Shoda_uctovani_mezd.md) |
 
 Zelený výpočet ještě neznamená dokončený měsíc. Měsíc je prakticky hotový až
 tehdy, když souhlasí schválená revize, dokumenty, skutečně provedené platby,
@@ -183,12 +183,12 @@ Na přelomu roku nebo při roční uzávěrce zejména:
    podáními, účetnictvím a bankou;
 3. zkontrolujte roční akumulátory, maximální vyměřovací základy, převod
    dovolené a počáteční hodnoty nového roku;
-4. zpracujte [roční zúčtování daně](58i_Rocni_zuctovani.md) pouze zaměstnancům,
+4. zpracujte [roční zúčtování daně](67_Rocni_zuctovani.md) pouze zaměstnancům,
    kteří splňují podmínky a doložili podklady;
 5. připravte zákonná potvrzení a evidenční výstupy v rozsahu, který aplikace
    označuje jako podporovaný; u ruční kontroly výsledek před vydáním ověřte;
-6. projděte [retenční lhůty](58r_Retencni_lhuty.md), zákonná zadržení a žádosti
-   o [výmaz osobních údajů](58s_Vymaz_osobnich_udaju.md). Samotný konec roku
+6. projděte [retenční lhůty](76_Retencni_lhuty.md), zákonná zadržení a žádosti
+   o [výmaz osobních údajů](77_Vymaz_osobnich_udaju.md). Samotný konec roku
    není důvodem ke smazání mzdových podkladů.
 
 Stejný kontrolní postup použijte při převodu mezd z jiného systému, změně
@@ -206,29 +206,29 @@ JMHZ podporuje řízené storno celého podání i obsahovou opravu vybraných
 formulářů z nové úplné přípravy. Přijatý formulář se opravuje se zachovanou
 identitou, odmítnutý nebo chybějící se doplní jako nový. Podrobnosti jsou v
 kapitole
-[Podání a hlášení](58j_Podani_a_hlaseni.md#storno-a-obsahova-oprava-jmhz).
+[Podání a hlášení](68_Podani_a_hlaseni.md#storno-a-obsahova-oprava-jmhz).
 
 ## Kapitoly
 
-1. [Absence a dovolená](58a_Absence_a_dovolena.md)
-2. [Docházka a směny](58b_Dochazka_a_smeny.md)
-3. [Cestovní náhrady](58c_Cestovni_nahrady.md)
-4. [Rychlý měsíční vstup](58d_Rychly_mesicni_vstup.md)
-5. [Mzdové běhy](58e_Mzdove_behy.md)
-6. [Shoda účtování mezd](58f_Shoda_uctovani_mezd.md)
-7. [Mzdové příkazy a úhrady](58g_Platby_a_uhrady.md)
-8. [Dokumenty a výstupy](58h_Dokumenty_a_vystupy.md)
-9. [Roční zúčtování](58i_Rocni_zuctovani.md)
-10. [Podání a hlášení](58j_Podani_a_hlaseni.md)
-11. [Zaměstnanci](58k_Zamestnanci.md)
-12. [Dohody o srážkách](58l_Dohody_o_srazkach.md)
-13. [Srážky a exekuce](58m_Srazky_a_exekuce.md)
-14. [Koše benefitů](58n_Kose_benefitu.md)
-15. [Nastavení mezd](58o_Nastaveni_mezd.md)
-16. [Mzdové složky a vstupy](58p_Mzdove_slozky_a_vstupy.md)
-17. [Legislativní pravidla mezd](58q_Legislativni_pravidla_mezd.md)
-18. [Retenční lhůty](58r_Retencni_lhuty.md)
-19. [Výmaz osobních údajů](58s_Vymaz_osobnich_udaju.md)
+1. [Absence a dovolená](59_Absence_a_dovolena.md)
+2. [Docházka a směny](60_Dochazka_a_smeny.md)
+3. [Cestovní náhrady](61_Cestovni_nahrady.md)
+4. [Rychlý měsíční vstup](62_Rychly_mesicni_vstup.md)
+5. [Mzdové běhy](63_Mzdove_behy.md)
+6. [Shoda účtování mezd](64_Shoda_uctovani_mezd.md)
+7. [Mzdové příkazy a úhrady](65_Platby_a_uhrady.md)
+8. [Dokumenty a výstupy](66_Dokumenty_a_vystupy.md)
+9. [Roční zúčtování](67_Rocni_zuctovani.md)
+10. [Podání a hlášení](68_Podani_a_hlaseni.md)
+11. [Zaměstnanci](69_Zamestnanci.md)
+12. [Dohody o srážkách](70_Dohody_o_srazkach.md)
+13. [Srážky a exekuce](71_Srazky_a_exekuce.md)
+14. [Koše benefitů](72_Kose_benefitu.md)
+15. [Nastavení mezd](73_Nastaveni_mezd.md)
+16. [Mzdové složky a vstupy](74_Mzdove_slozky_a_vstupy.md)
+17. [Legislativní pravidla mezd](75_Legislativni_pravidla_mezd.md)
+18. [Retenční lhůty](76_Retencni_lhuty.md)
+19. [Výmaz osobních údajů](77_Vymaz_osobnich_udaju.md)
 
 ## Společná bezpečnostní pravidla
 
@@ -266,4 +266,4 @@ firmy.
 
 ## Kde začít při potížích
 
-Nejprve zkontrolujte aktivaci a podporovaný rozsah výše, potom [mzdové běhy](58e_Mzdove_behy.md) a [legislativní pravidla](58q_Legislativni_pravidla_mezd.md). Obecné diagnostické postupy jsou v kapitole [Řešení problémů](999_Reseni_problemu.md).
+Nejprve zkontrolujte aktivaci a podporovaný rozsah výše, potom [mzdové běhy](63_Mzdove_behy.md) a [legislativní pravidla](75_Legislativni_pravidla_mezd.md). Obecné diagnostické postupy jsou v kapitole [Řešení problémů](999_Reseni_problemu.md).

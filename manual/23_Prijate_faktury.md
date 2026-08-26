@@ -509,7 +509,7 @@ vybereš. Protiúčtem nesmí být týž účet, na kterém doklad visí — vzn
 Zápočet **může být částečný**: zbytek zůstane na dokladu otevřený, doklad zůstává ve stavu
 Přijatá/Zaúčtovaná a do příkazu k úhradě i k dalšímu zápočtu vstupuje už jen svým zbytkem.
 Na *Uhrazená* se překlopí teprve zápočet, který zbytek vynuluje. Zbytek se počítá ze všech
-kanálů úhrady dohromady — banka, vzájemný zápočet ([§ 63](63_Zapocty.md)) i zápočty proti
+kanálů úhrady dohromady — banka, vzájemný zápočet ([§ 63](82_Zapocty.md)) i zápočty proti
 účtu —, takže tutéž korunu nejde započíst dvakrát.
 
 Zápočet jde **stornovat** (v přehledu úhrad v detailu dokladu). Storno vytvoří protizápis
@@ -642,7 +642,7 @@ Tlačítko **Zaúčtovat** se zobrazí v hlavičce detailu jen firmám v režimu
 doklad nemá účetní ikonu **Zaúčtováno** ani aktivní zápis v deníku. U dokladu typu
 **Záloha** se tlačítko nezobrazuje: zálohová výzva není účetní předpis závazku;
 účtuje se až její skutečná úhrada z banky nebo pokladny na účet 314. Funguje stejně jako u [vydaných faktur](16_Faktura_PDF.md#1613-zauctovani-do-deniku)
-— potvrzovací dialog, zápis podle [předkontace](69_Ucetni_nastroje.md#693-predkontace),
+— potvrzovací dialog, zápis podle [předkontace](88_Ucetni_nastroje.md#883-predkontace),
 po úspěchu účetní ikona **Zaúčtováno** (s datem v tooltipu) + proklik **Zobrazit v deníku**. Stejná
 tabulka chybových hlášek (chybějící kurz, uzavřené období, nevyvážený zápis,
 chybějící účet v osnově…) platí i tady — viz [§ 16.1.3](16_Faktura_PDF.md#1613-zauctovani-do-deniku).
@@ -662,7 +662,7 @@ Doklady se účtují jeden po druhém (chyba jednoho neblokuje ostatní), na kon
 souhrn *„Zaúčtováno {ok}, chyby: {err}"*. Max 500 dokladů na dávku.
 
 **Automatické zaúčtování při přijetí** (volitelné, nastavuje admin — spustí se
-při přechodu na stav Přijatá) — viz [§ 73.11](73_Nastaveni.md#7311-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
+při přechodu na stav Přijatá) — viz [§ 92.11](92_Nastaveni.md#9211-automaticke-zauctovani-pri-vystaveniprijeti-dokladu).
 
 ## 23.4 Scan inbox — automatický import z adresáře
 
