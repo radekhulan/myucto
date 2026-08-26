@@ -227,7 +227,7 @@ final class InstanceExportManifestTest extends TestCase
         $manifest = json_decode((string) $archive->getFromName('manifest.json'), true);
         self::assertIsArray($manifest);
         self::assertSame('myucto-instance-export', $manifest['format']);
-        self::assertSame(4, $manifest['version']);
+        self::assertSame(5, $manifest['version']);
         self::assertArrayHasKey('supplier', $manifest);
         self::assertFalse($archive->locateName('obnova/myucto-archiv-pro-obnovu.zip') !== false, 'Nevzniká druhý vložený ZIP.');
         $archive->close();

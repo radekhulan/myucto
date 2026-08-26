@@ -84,7 +84,7 @@ final class InstanceExportService
     ];
 
     /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
-    private const FORMAT_VERSION = 4;
+    private const FORMAT_VERSION = 5;
 
     /**
      * Globální mzdová konfigurace a připnuté legislativní podklady. Nejsou
@@ -903,6 +903,7 @@ final class InstanceExportService
                         $row[$column] = 0;
                     }
                 }
+                $row = InstanceExportBinaryCodec::encodeRow($row);
                 $line = json_encode(
                     $row,
                     JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION,
@@ -1022,6 +1023,7 @@ final class InstanceExportService
         }
         try {
             foreach ($rows as $row) {
+                $row = InstanceExportBinaryCodec::encodeRow($row);
                 $line = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
                 if ($line === false) {
                     throw new InstanceExportException('encode_failed', 'JSON encode selhal pro identitu uživatele.');
@@ -1073,8 +1075,9 @@ final class InstanceExportService
                 $batchCount = 0;
                 $lastRow = null;
                 while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                    $encodedRow = InstanceExportBinaryCodec::encodeRow($row);
                     $line = json_encode(
-                        $row,
+                        $encodedRow,
                         JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION,
                     );
                     if ($line === false) {

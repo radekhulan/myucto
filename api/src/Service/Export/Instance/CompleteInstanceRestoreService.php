@@ -11,10 +11,15 @@ use ZipArchive;
 final class CompleteInstanceRestoreService
 {
     private const FORMAT = 'myucto-instance-export';
-    private const VERSION = 4;
-    private const SUPPORTED_VERSIONS = [3, self::VERSION];
+    private const VERSION = 5;
+    private const SUPPORTED_VERSIONS = [3, 4, self::VERSION];
     private const DISABLED_PASSWORD_HASH = '$2y$10$K6q6A1qORRMi5gzg1me.bO4w0NqJGb9jY36Tv1azcLYtKpIwZxjua';
     private const RESTORED_RULESET_REASON = 'Obnoveno z úplného exportu firmy bez globální správcovské provenance.';
+
+    /** @var array<string,list<string>> potomek => rodiče ověřované triggerem bez FK */
+    private const TRIGGER_DEPENDENCIES = [
+        'payroll_payment_liabilities' => ['payroll_run_persons'],
+    ];
 
     public function __construct(
         private readonly PDO $pdo,
@@ -64,7 +69,9 @@ final class CompleteInstanceRestoreService
                 foreach (['roles', 'role_permissions', 'users'] as $table) {
                     $this->restoreEntry($dir, $table, $identity[$table]['entry'] ?? null, $counts, $table === 'roles' || $table === 'role_permissions');
                 }
-                foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
+                $tables = (array) ($manifest['sections']['data']['tables'] ?? []);
+                foreach ($this->restoreTableOrder(array_keys($tables)) as $table) {
+                    $info = (array) ($tables[$table] ?? []);
                     $this->restoreEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
                 }
                 $this->restoreEntry($dir, 'user_suppliers', $identity['user_suppliers']['entry'] ?? null, $counts);
@@ -98,6 +105,166 @@ final class CompleteInstanceRestoreService
         } finally {
             $this->removeDir($dir);
         }
+    }
+
+    /**
+     * FOREIGN_KEY_CHECKS dovolí vložit potomka před rodičem, databázové triggery
+     * ale běží dál. Pořadí JSONL v archivu proto nestačí: přímo tenantové tabulky
+     * mají v resolveru stejnou hloubku a starší archiv mohl uvést například
+     * payroll_generated_documents před payroll_run_revisions. Cílové schéma je
+     * autoritativní zdroj vazeb a rodiče řadí před potomky i pro archiv verze 3/4.
+     *
+     * @param list<int|string> $tables
+     * @return list<string>
+     */
+    private function restoreTableOrder(array $tables): array
+    {
+        $orderedInput = array_values(array_unique(array_map('strval', $tables)));
+        $included = array_fill_keys($orderedInput, true);
+        $position = array_flip($orderedInput);
+        $children = array_fill_keys($orderedInput, []);
+        $edges = [];
+        $foreignKeyStatement = $this->pdo->query(
+            'SELECT TABLE_NAME, REFERENCED_TABLE_NAME
+               FROM information_schema.KEY_COLUMN_USAGE
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND REFERENCED_TABLE_NAME IS NOT NULL',
+        );
+        $foreignKeys = $foreignKeyStatement === false
+            ? []
+            : ($foreignKeyStatement->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        foreach ($foreignKeys as $foreignKey) {
+            $child = (string) $foreignKey['TABLE_NAME'];
+            $parent = (string) $foreignKey['REFERENCED_TABLE_NAME'];
+            if ($child === $parent || !isset($included[$child], $included[$parent])) {
+                continue;
+            }
+            $edge = $parent . "\0" . $child;
+            if (isset($edges[$edge])) {
+                continue;
+            }
+            $edges[$edge] = true;
+            $children[$parent][] = $child;
+        }
+        foreach (self::TRIGGER_DEPENDENCIES as $child => $parents) {
+            foreach ($parents as $parent) {
+                if (!isset($included[$child], $included[$parent])) {
+                    continue;
+                }
+                $edge = $parent . "\0" . $child;
+                if (isset($edges[$edge])) {
+                    continue;
+                }
+                $edges[$edge] = true;
+                $children[$parent][] = $child;
+            }
+        }
+
+        // Tenantové schéma obsahuje skutečné cykly (typicky firma ↔ její výchozí
+        // číselník). Nejdřív je proto stáhneme do silně souvislých komponent a
+        // topologicky seřadíme až jejich acyklický graf. Potomci komponenty se tak
+        // nedostanou před ni jen proto, že jeden její člen odkazuje zpět.
+        $nextIndex = 0;
+        $indices = [];
+        $lowLinks = [];
+        $stack = [];
+        $onStack = [];
+        $components = [];
+        $visit = function (string $table) use (
+            &$visit,
+            &$nextIndex,
+            &$indices,
+            &$lowLinks,
+            &$stack,
+            &$onStack,
+            &$components,
+            $children,
+        ): void {
+            $indices[$table] = $nextIndex;
+            $lowLinks[$table] = $nextIndex;
+            $nextIndex++;
+            $stack[] = $table;
+            $onStack[$table] = true;
+            foreach ($children[$table] as $child) {
+                if (!array_key_exists($child, $indices)) {
+                    $visit($child);
+                    $lowLinks[$table] = min($lowLinks[$table], $lowLinks[$child]);
+                } elseif (isset($onStack[$child])) {
+                    $lowLinks[$table] = min($lowLinks[$table], $indices[$child]);
+                }
+            }
+            if ($lowLinks[$table] !== $indices[$table]) {
+                return;
+            }
+            $component = [];
+            do {
+                $member = array_pop($stack);
+                if (!is_string($member)) {
+                    throw new \LogicException('Graf pořadí obnovy obsahuje neúplnou komponentu.');
+                }
+                unset($onStack[$member]);
+                $component[] = $member;
+            } while ($member !== $table);
+            $components[] = $component;
+        };
+        foreach ($orderedInput as $table) {
+            if (!array_key_exists($table, $indices)) {
+                $visit($table);
+            }
+        }
+
+        $componentOf = [];
+        $componentPosition = [];
+        foreach ($components as $componentId => &$component) {
+            usort($component, static fn (string $left, string $right): int => $position[$left] <=> $position[$right]);
+            $componentPosition[$componentId] = min(array_map(
+                static fn (string $table): int => $position[$table],
+                $component,
+            ));
+            foreach ($component as $table) {
+                $componentOf[$table] = $componentId;
+            }
+        }
+        unset($component);
+
+        $componentChildren = array_fill(0, count($components), []);
+        $componentInDegree = array_fill(0, count($components), 0);
+        $componentEdges = [];
+        foreach ($children as $parent => $childTables) {
+            foreach ($childTables as $child) {
+                $from = $componentOf[$parent];
+                $to = $componentOf[$child];
+                if ($from === $to || isset($componentEdges[$from . ':' . $to])) {
+                    continue;
+                }
+                $componentEdges[$from . ':' . $to] = true;
+                $componentChildren[$from][] = $to;
+                $componentInDegree[$to]++;
+            }
+        }
+        $ready = array_keys(array_filter(
+            $componentInDegree,
+            static fn (int $degree): bool => $degree === 0,
+        ));
+        usort($ready, static fn (int $left, int $right): int => $componentPosition[$left] <=> $componentPosition[$right]);
+        $result = [];
+        while ($ready !== []) {
+            $componentId = array_shift($ready);
+            array_push($result, ...$components[$componentId]);
+            foreach ($componentChildren[$componentId] as $childId) {
+                $componentInDegree[$childId]--;
+                if ($componentInDegree[$childId] === 0) {
+                    $ready[] = $childId;
+                }
+            }
+            usort($ready, static fn (int $left, int $right): int => $componentPosition[$left] <=> $componentPosition[$right]);
+        }
+        if (count($result) !== count($orderedInput)) {
+            throw new \LogicException(
+                'Graf pořadí obnovy nepokryl všechny tabulky archivu.',
+            );
+        }
+        return $result;
     }
 
     private function manifest(string $dir): array
@@ -186,6 +353,7 @@ final class CompleteInstanceRestoreService
             if (!is_array($row)) {
                 continue;
             }
+            $row = InstanceExportBinaryCodec::decodeRow($row);
             if ($table === 'users') {
                 $row['password_hash'] = self::DISABLED_PASSWORD_HASH;
                 $row['totp_enabled'] = 0;
@@ -228,6 +396,7 @@ final class CompleteInstanceRestoreService
                 if (!is_array($row)) {
                     continue;
                 }
+                $row = InstanceExportBinaryCodec::decodeRow($row);
                 $row = array_intersect_key($row, $columns);
                 foreach ($primary as $column) {
                     if (!array_key_exists($column, $row)) {
