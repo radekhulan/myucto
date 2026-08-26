@@ -335,7 +335,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(['1', '2', '3', '4'], array_column($options['apz_instruments'], 'code'));
         self::assertSame(250, count($options['countries']));
-        self::assertSame('2026-08-13', $options['external_codebooks']['verified_through']);
+        self::assertSame('2026-12-31', $options['external_codebooks']['verified_through']);
 
         $municipalities = $this->action->jmhzMunicipalities(
             $this->request(

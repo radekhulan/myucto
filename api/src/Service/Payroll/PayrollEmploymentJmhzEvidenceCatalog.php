@@ -73,7 +73,7 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         }
     }
 
-    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string>,activity_codes:list<array{code:string,label:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
+    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
     public function options(): array
     {
         $apzOptions = [];
@@ -92,7 +92,7 @@ final class PayrollEmploymentJmhzEvidenceCatalog
             ),
             'apz_instruments' => $apzOptions,
             'countries' => $this->externalCodebooks->countries(
-                $this->externalCodebooks->provenance()['snapshot_date'],
+                $this->externalCodebooks->provenance()['effective_from'],
             ),
         ];
     }
@@ -107,10 +107,12 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         }
     }
 
-    /** @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,verified_through:string,base_spec_manifest_sha256:string} */
-    public function externalCodebookProvenance(): array
+    /** @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,base_spec_manifest_sha256:string} */
+    public function externalCodebookProvenance(?string $validOn = null): array
     {
-        return $this->externalCodebooks->provenance();
+        return $validOn === null
+            ? $this->externalCodebooks->provenance()
+            : $this->externalCodebooks->provenanceForDate($validOn);
     }
 
     /** @return list<array{code:string,label:string}> */

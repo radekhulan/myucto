@@ -81,7 +81,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertSame('CZ', $result['jmhz_workplace_country_code']);
         self::assertSame('3', $result['jmhz_apz_instrument_code']);
         self::assertSame(
-            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            JmhzExternalCodebookCatalog::AUGUST_2026_MANIFEST_SHA256,
             $result['jmhz_external_codebook_manifest_sha256'],
         );
     }
@@ -93,7 +93,12 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $future['work_place'] = 'Hlavní město Praha';
         $future['jmhz_workplace_municipality_code'] = '554782';
         $future['jmhz_workplace_country_code'] = 'CZ';
-        self::assertSame('554782', $this->validator()->terms($future)['jmhz_workplace_municipality_code']);
+        $futureResult = $this->validator()->terms($future);
+        self::assertSame('554782', $futureResult['jmhz_workplace_municipality_code']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            $futureResult['jmhz_external_codebook_manifest_sha256'],
+        );
 
         $past = $future;
         $past['effective_from'] = '2025-12-31';

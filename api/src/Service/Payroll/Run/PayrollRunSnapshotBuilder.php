@@ -315,7 +315,11 @@ final class PayrollRunSnapshotBuilder
             ];
             $termSnapshot = null;
             if ($row['term_id'] !== null) {
-                $jmhzCodebooksVerified = $this->jmhzCodebooksVerifiedForPeriod($row, $periodEnd);
+                $jmhzValidationCodebook = $this->jmhzCodebookValidationForPeriod(
+                    $row,
+                    $periodStart,
+                    $periodEnd,
+                );
                 $termSnapshot = [
                     'id' => (int) $row['term_id'],
                     'row_version' => (int) $row['term_row_version'],
@@ -337,7 +341,11 @@ final class PayrollRunSnapshotBuilder
                         $row['jmhz_external_codebook_overlay_key'],
                     'jmhz_external_codebook_manifest_sha256' =>
                         $row['jmhz_external_codebook_manifest_sha256'],
-                    'jmhz_external_codebooks_verified_for_period' => $jmhzCodebooksVerified,
+                    'jmhz_external_codebooks_verified_for_period' => $jmhzValidationCodebook !== null,
+                    'jmhz_validation_external_codebook_overlay_key' =>
+                        $jmhzValidationCodebook['overlay_key'] ?? null,
+                    'jmhz_validation_external_codebook_manifest_sha256' =>
+                        $jmhzValidationCodebook['manifest_sha256'] ?? null,
                     'jmhz_apz_contribution_status' =>
                         (string) $row['jmhz_apz_contribution_status'],
                     'jmhz_apz_instrument_code' => $row['jmhz_apz_instrument_code'],
@@ -503,8 +511,15 @@ final class PayrollRunSnapshotBuilder
         return $validations;
     }
 
-    /** @param array<string,mixed> $row */
-    private function jmhzCodebooksVerifiedForPeriod(array $row, string $periodEnd): bool
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,string|null>|null
+     */
+    private function jmhzCodebookValidationForPeriod(
+        array $row,
+        string $periodStart,
+        string $periodEnd,
+    ): ?array
     {
         $code = $row['jmhz_workplace_municipality_code'];
         $country = $row['jmhz_workplace_country_code'];
@@ -512,18 +527,28 @@ final class PayrollRunSnapshotBuilder
         $overlayKey = $row['jmhz_external_codebook_overlay_key'];
         $manifestHash = $row['jmhz_external_codebook_manifest_sha256'];
         if (!is_string($code) || !is_string($country) || !is_string($name)
-            || $overlayKey !== JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY
-            || $manifestHash !== JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256
+            || !is_string($overlayKey)
+            || !is_string($manifestHash)
             || $this->jmhzExternalCodebooks === null
+            || !$this->jmhzExternalCodebooks->hasLoadableIdentity($overlayKey, $manifestHash)
         ) {
-            return false;
+            return null;
         }
         try {
+            $startProvenance = $this->jmhzExternalCodebooks->provenanceForDate($periodStart);
+            $endProvenance = $this->jmhzExternalCodebooks->provenanceForDate($periodEnd);
+            if ($startProvenance['overlay_key'] !== $endProvenance['overlay_key']
+                || $startProvenance['manifest_sha256'] !== $endProvenance['manifest_sha256']
+            ) {
+                return null;
+            }
+            $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodStart);
+            $this->jmhzExternalCodebooks->requireCountry($country, $periodStart);
             $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodEnd);
             $this->jmhzExternalCodebooks->requireCountry($country, $periodEnd);
-            return true;
+            return $endProvenance;
         } catch (JmhzCodebookUnavailableException|JmhzCodebookValueException) {
-            return false;
+            return null;
         }
     }
 

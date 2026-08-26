@@ -37,7 +37,17 @@ final class JmhzCodebookDownloaderTest extends TestCase
 
         $sources = $downloader->sources();
         self::assertSame(
-            ['dictionary', 'control-catalog', 'scenario-matrix', 'cisob', 'czemalfa'],
+            [
+                'dictionary',
+                'control-catalog',
+                'scenario-matrix',
+                'cisob',
+                'czemalfa',
+                'cisob-511-legal-coverage',
+                'czemalfa-august-coverage',
+                'cisob-145-2026',
+                'czemalfa-2026-08-26',
+            ],
             array_keys($sources),
         );
         foreach ($sources as $id => $source) {

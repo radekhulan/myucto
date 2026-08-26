@@ -8,77 +8,86 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzExternalCodebookCatalog
 {
-    public const DEFAULT_OVERLAY_KEY =
+    public const HISTORICAL_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-2026_czemalfa-2026-08-13-v1';
-    public const DEFAULT_MANIFEST_SHA256 =
+    public const HISTORICAL_MANIFEST_SHA256 =
         'ec79c28524b0a8e6a9102dbc879ce69fb7ec8dfdf5489873c81066f4d26b230c';
+    public const AUGUST_2026_OVERLAY_KEY =
+        'jmhz-external-codebooks-cisob-511-2025-through-2026-08-31_czemalfa-2026-08-13-v1';
+    public const AUGUST_2026_MANIFEST_SHA256 =
+        '2af12a425ccb063e8356cd8959ea2921e3693bf2dad278cc1c3276e431bfabaf';
+    public const DEFAULT_OVERLAY_KEY =
+        'jmhz-external-codebooks-cisob-145-2026_czemalfa-2026-08-26-v1';
+    public const DEFAULT_MANIFEST_SHA256 =
+        'd33b1a05add27f1da2033736f377d03b0efe4a2b34390f084f2b3922733940b6';
 
-    private const DIRECTORY = 'external-codebooks-2026-08-13';
-    private const SNAPSHOT_DATE = '2026-08-13';
-    private const EFFECTIVE_FROM = '2026-01-01';
-    private const VERIFIED_THROUGH = '2026-08-13';
+    /** @var array<string,array{manifest_sha256:string,directory:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,selectable:bool}> */
+    private const PACKAGES = [
+        self::HISTORICAL_OVERLAY_KEY => [
+            'manifest_sha256' => self::HISTORICAL_MANIFEST_SHA256,
+            'directory' => 'external-codebooks-2026-08-13',
+            'snapshot_date' => '2026-08-13',
+            'effective_from' => '2026-01-01',
+            'effective_to' => null,
+            'verified_through' => '2026-08-13',
+            'selectable' => false,
+        ],
+        self::AUGUST_2026_OVERLAY_KEY => [
+            'manifest_sha256' => self::AUGUST_2026_MANIFEST_SHA256,
+            'directory' => 'external-codebooks-2026-08-31',
+            'snapshot_date' => '2026-08-13',
+            'effective_from' => '2026-01-01',
+            'effective_to' => '2026-08-31',
+            'verified_through' => '2026-08-31',
+            'selectable' => true,
+        ],
+        self::DEFAULT_OVERLAY_KEY => [
+            'manifest_sha256' => self::DEFAULT_MANIFEST_SHA256,
+            'directory' => 'external-codebooks-2026-09-01',
+            'snapshot_date' => '2026-08-26',
+            'effective_from' => '2026-09-01',
+            'effective_to' => '2026-12-31',
+            'verified_through' => '2026-12-31',
+            'selectable' => true,
+        ],
+    ];
 
-    /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
-    private ?array $manifest = null;
-    /** @var array<string, array<string, array<string,mixed>>>|null */
-    private ?array $entries = null;
+    /** @var array<string,array{manifest:array{manifest_sha256:string,payload:array<string,mixed>},entries:array<string,array<string,array<string,mixed>>>}> */
+    private array $loaded = [];
 
     public function __construct(
         private readonly JmhzSpecPackageCatalog $specPackages,
         private readonly ?string $resourceRoot = null,
     ) {}
 
-    private function load(): void
-    {
-        if ($this->manifest !== null) {
-            return;
-        }
-        $root = $this->resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
-        $directory = $root . DIRECTORY_SEPARATOR . self::DIRECTORY;
-        $json = file_get_contents($directory . DIRECTORY_SEPARATOR . 'manifest.json');
-        if ($json === false) {
-            throw new \RuntimeException('Manifest externích číselníků JMHZ nelze načíst.');
-        }
-        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($decoded) || !is_string($decoded['manifest_sha256'] ?? null)
-            || !is_array($decoded['payload'] ?? null)
-        ) {
-            throw new \UnexpectedValueException('Manifest externích číselníků JMHZ nemá očekávanou strukturu.');
-        }
-        self::validateManifest($decoded, true);
-        $base = $decoded['payload']['base_spec'];
-        $spec = $this->specPackages->load($base['package_key'], $base['manifest_sha256']);
-        if (!hash_equals($base['manifest_sha256'], $spec['manifest_sha256'])) {
-            throw new \UnexpectedValueException('Overlay externích číselníků neodpovídá základní specifikaci JMHZ.');
-        }
-        $this->verifySources($directory, $decoded['payload']);
-        $entries = [];
-        foreach ($decoded['payload']['codebooks'] as $codebook) {
-            $key = $codebook['codebook_key'];
-            foreach ($codebook['entries'] as $entry) {
-                $entries[$key][$entry['item_code']] = $entry;
-            }
-        }
-        $this->entries = $entries;
-        $this->manifest = $decoded;
-    }
-
     /** @return array{manifest_sha256:string,payload:array<string,mixed>} */
     public function manifest(): array
     {
-        $this->load();
-        if ($this->manifest === null) {
-            throw new \LogicException('Manifest externích číselníků JMHZ nebyl načten.');
+        return $this->package(self::DEFAULT_OVERLAY_KEY)['manifest'];
+    }
+
+    /** @return array{manifest_sha256:string,payload:array<string,mixed>} */
+    public function manifestForIdentity(string $overlayKey, string $manifestSha256): array
+    {
+        return $this->package($overlayKey, $manifestSha256)['manifest'];
+    }
+
+    public function hasLoadableIdentity(string $overlayKey, string $manifestSha256): bool
+    {
+        try {
+            $this->manifestForIdentity($overlayKey, $manifestSha256);
+            return true;
+        } catch (JmhzCodebookUnavailableException|\UnexpectedValueException|\JsonException) {
+            return false;
         }
-        return $this->manifest;
     }
 
     /** @return array<string,mixed> */
     public function requireMunicipality(string $code, string $name, string $validOn): array
     {
-        $this->load();
-        $this->assertCovered('obce', $validOn);
-        $entry = $this->codebookEntries('obce')[$code] ?? null;
+        $package = $this->packageForDate($validOn);
+        $this->assertCovered($package['manifest'], 'obce', $validOn);
+        $entry = $this->codebookEntries($package, 'obce')[$code] ?? null;
         if ($entry === null || !$this->entryCovers($entry, $validOn)) {
             throw new JmhzCodebookValueException("Kód obce {$code} není v připnutém číselníku CISOB platný.");
         }
@@ -94,9 +103,9 @@ final class JmhzExternalCodebookCatalog
     /** @return array<string,mixed> */
     public function requireCountry(string $code, string $validOn): array
     {
-        $this->load();
-        $this->assertCovered('stat', $validOn);
-        $entry = $this->codebookEntries('stat')[$code] ?? null;
+        $package = $this->packageForDate($validOn);
+        $this->assertCovered($package['manifest'], 'stat', $validOn);
+        $entry = $this->codebookEntries($package, 'stat')[$code] ?? null;
         if ($entry === null || !$this->entryCovers($entry, $validOn)) {
             throw new JmhzCodebookValueException("Kód státu {$code} není v připnutém číselníku CZEMALFA platný.");
         }
@@ -107,24 +116,22 @@ final class JmhzExternalCodebookCatalog
     /** @return array<string,mixed> */
     public function requireKnownMunicipality(string $code, string $name, string $termEffectiveOn): array
     {
-        $this->assertTermNotBeforeOverlay($termEffectiveOn);
-        return $this->requireMunicipality($code, $name, self::SNAPSHOT_DATE);
+        return $this->requireMunicipality($code, $name, $termEffectiveOn);
     }
 
     /** @return array<string,mixed> */
     public function requireKnownCountry(string $code, string $termEffectiveOn): array
     {
-        $this->assertTermNotBeforeOverlay($termEffectiveOn);
-        return $this->requireCountry($code, self::SNAPSHOT_DATE);
+        return $this->requireCountry($code, $termEffectiveOn);
     }
 
     /** @return list<array{code:string,label:string}> */
     public function countries(string $validOn): array
     {
-        $this->load();
-        $this->assertCovered('stat', $validOn);
+        $package = $this->packageForDate($validOn);
+        $this->assertCovered($package['manifest'], 'stat', $validOn);
         $result = [];
-        foreach ($this->codebookEntries('stat') as $entry) {
+        foreach ($this->codebookEntries($package, 'stat') as $entry) {
             if ($this->entryCovers($entry, $validOn)) {
                 $result[] = ['code' => $entry['item_code'], 'label' => $entry['label']];
             }
@@ -141,8 +148,8 @@ final class JmhzExternalCodebookCatalog
     /** @return list<array{code:string,label:string}> */
     public function searchMunicipalities(string $query, string $validOn, int $limit): array
     {
-        $this->load();
-        $this->assertCovered('obce', $validOn);
+        $package = $this->packageForDate($validOn);
+        $this->assertCovered($package['manifest'], 'obce', $validOn);
         if ($limit < 1 || $limit > 50) {
             throw new \InvalidArgumentException('Limit vyhledávání obcí musí být od 1 do 50.');
         }
@@ -151,7 +158,7 @@ final class JmhzExternalCodebookCatalog
             throw new \InvalidArgumentException('Pro vyhledání obce zadejte alespoň dva znaky.');
         }
         $result = [];
-        foreach ($this->codebookEntries('obce') as $entry) {
+        foreach ($this->codebookEntries($package, 'obce') as $entry) {
             if (!$this->entryCovers($entry, $validOn)
                 || (!str_contains($entry['item_code'], $needle)
                     && !str_contains(mb_strtolower($entry['label'], 'UTF-8'), $needle))
@@ -172,42 +179,45 @@ final class JmhzExternalCodebookCatalog
     /** @return list<array{code:string,label:string}> */
     public function searchKnownMunicipalities(string $query, int $limit): array
     {
-        return $this->searchMunicipalities($query, self::SNAPSHOT_DATE, $limit);
+        return $this->searchMunicipalities(
+            $query,
+            self::PACKAGES[self::DEFAULT_OVERLAY_KEY]['effective_from'],
+            $limit,
+        );
     }
 
-    /** @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,verified_through:string,base_spec_manifest_sha256:string} */
+    /** @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,base_spec_manifest_sha256:string} */
     public function provenance(): array
     {
-        $this->load();
-        if ($this->manifest === null) {
-            throw new \LogicException('Manifest externích číselníků JMHZ nebyl načten.');
-        }
-        $payload = $this->manifest['payload'];
-        $municipalities = $payload['codebooks'][0];
+        return $this->provenanceFromManifest($this->manifest());
+    }
 
-        return [
-            'overlay_key' => $payload['overlay_key'],
-            'manifest_sha256' => $this->manifest['manifest_sha256'],
-            'snapshot_date' => $payload['snapshot_date'],
-            'effective_from' => $municipalities['effective_from'],
-            'verified_through' => $municipalities['verified_through'],
-            'base_spec_manifest_sha256' => $payload['base_spec']['manifest_sha256'],
-        ];
+    /** @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,base_spec_manifest_sha256:string} */
+    public function provenanceForDate(string $validOn): array
+    {
+        return $this->provenanceFromManifest($this->packageForDate($validOn)['manifest']);
     }
 
     /** @param array{manifest_sha256:string,payload:array<string,mixed>} $manifest */
     public static function validateManifest(array $manifest, bool $requirePinnedHash = false): void
     {
-        $payload = $manifest['payload'];
+        $payload = $manifest['payload'] ?? null;
+        $declaredHash = $manifest['manifest_sha256'] ?? null;
+        if (!is_array($payload) || !is_string($declaredHash)) {
+            throw new \UnexpectedValueException('Manifest externích číselníků JMHZ nemá očekávanou strukturu.');
+        }
+        $overlayKey = $payload['overlay_key'] ?? null;
+        $descriptor = is_string($overlayKey) ? (self::PACKAGES[$overlayKey] ?? null) : null;
         $actualHash = hash('sha256', CanonicalJson::encode($payload));
-        if (!hash_equals($manifest['manifest_sha256'], $actualHash)
-            || ($requirePinnedHash && !hash_equals(self::DEFAULT_MANIFEST_SHA256, $actualHash))
+        if (!hash_equals($declaredHash, $actualHash)
+            || ($requirePinnedHash && ($descriptor === null
+                || !hash_equals($descriptor['manifest_sha256'], $actualHash)))
         ) {
             throw new \UnexpectedValueException('Manifest externích číselníků JMHZ nemá připnutý SHA-256.');
         }
-        if (($payload['schema_version'] ?? null) !== 'jmhz-external-codebook-overlay.v1'
-            || ($payload['overlay_key'] ?? null) !== self::DEFAULT_OVERLAY_KEY
-            || ($payload['snapshot_date'] ?? null) !== self::SNAPSHOT_DATE
+        if ($descriptor === null
+            || ($payload['schema_version'] ?? null) !== 'jmhz-external-codebook-overlay.v1'
+            || ($payload['snapshot_date'] ?? null) !== $descriptor['snapshot_date']
             || ($payload['parser_version'] ?? null) !== 1
             || ($payload['usage_policy'] ?? null) !== 'authoritative_validation_only'
         ) {
@@ -229,9 +239,9 @@ final class JmhzExternalCodebookCatalog
                 throw new \UnexpectedValueException("Overlay obsahuje neplatný nebo duplicitní číselník {$key}.");
             }
             $keys[$key] = true;
-            if (($codebook['effective_from'] ?? null) !== self::EFFECTIVE_FROM
-                || ($codebook['effective_to'] ?? null) !== null
-                || ($codebook['verified_through'] ?? null) !== self::VERIFIED_THROUGH
+            if (($codebook['effective_from'] ?? null) !== $descriptor['effective_from']
+                || ($codebook['effective_to'] ?? null) !== $descriptor['effective_to']
+                || ($codebook['verified_through'] ?? null) !== $descriptor['verified_through']
             ) {
                 throw new \UnexpectedValueException("Číselník {$key} má neplatné období ověření.");
             }
@@ -276,6 +286,70 @@ final class JmhzExternalCodebookCatalog
         }
     }
 
+    /** @return array{manifest:array{manifest_sha256:string,payload:array<string,mixed>},entries:array<string,array<string,array<string,mixed>>>} */
+    private function package(string $overlayKey, ?string $manifestSha256 = null): array
+    {
+        $descriptor = self::PACKAGES[$overlayKey] ?? null;
+        if ($descriptor === null
+            || ($manifestSha256 !== null && !hash_equals($descriptor['manifest_sha256'], $manifestSha256))
+        ) {
+            throw new JmhzCodebookUnavailableException('Požadovaný balíček externích číselníků JMHZ není registrovaný.');
+        }
+        if (isset($this->loaded[$overlayKey])) {
+            return $this->loaded[$overlayKey];
+        }
+        $root = $this->resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
+        $directory = $root . DIRECTORY_SEPARATOR . $descriptor['directory'];
+        $json = file_get_contents($directory . DIRECTORY_SEPARATOR . 'manifest.json');
+        if ($json === false) {
+            throw new JmhzCodebookUnavailableException('Manifest externích číselníků JMHZ nelze načíst.');
+        }
+        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($decoded) || !is_string($decoded['manifest_sha256'] ?? null)
+            || !is_array($decoded['payload'] ?? null)
+        ) {
+            throw new \UnexpectedValueException('Manifest externích číselníků JMHZ nemá očekávanou strukturu.');
+        }
+        self::validateManifest($decoded, true);
+        if (!hash_equals($descriptor['manifest_sha256'], $decoded['manifest_sha256'])) {
+            throw new \UnexpectedValueException('Manifest externích číselníků JMHZ neodpovídá registru.');
+        }
+        $base = $decoded['payload']['base_spec'];
+        $spec = $this->specPackages->load($base['package_key'], $base['manifest_sha256']);
+        if (!hash_equals($base['manifest_sha256'], $spec['manifest_sha256'])) {
+            throw new \UnexpectedValueException('Overlay externích číselníků neodpovídá základní specifikaci JMHZ.');
+        }
+        $this->verifySources($directory, $decoded['payload']);
+        $entries = [];
+        foreach ($decoded['payload']['codebooks'] as $codebook) {
+            $key = $codebook['codebook_key'];
+            foreach ($codebook['entries'] as $entry) {
+                $entries[$key][$entry['item_code']] = $entry;
+            }
+        }
+        return $this->loaded[$overlayKey] = ['manifest' => $decoded, 'entries' => $entries];
+    }
+
+    /** @return array{manifest:array{manifest_sha256:string,payload:array<string,mixed>},entries:array<string,array<string,array<string,mixed>>>} */
+    private function packageForDate(string $validOn): array
+    {
+        if (!self::date($validOn)) {
+            throw new \InvalidArgumentException('Datum platnosti externího číselníku JMHZ není platné.');
+        }
+        foreach (self::PACKAGES as $overlayKey => $descriptor) {
+            if ($descriptor['selectable']
+                && $validOn >= $descriptor['effective_from']
+                && ($descriptor['effective_to'] === null || $validOn <= $descriptor['effective_to'])
+                && $validOn <= $descriptor['verified_through']
+            ) {
+                return $this->package($overlayKey);
+            }
+        }
+        throw new JmhzCodebookUnavailableException(
+            "Externí číselníky JMHZ nejsou pro datum {$validOn} právně pokryté.",
+        );
+    }
+
     /** @param array<string,mixed> $payload */
     private function verifySources(string $directory, array $payload): void
     {
@@ -294,17 +368,15 @@ final class JmhzExternalCodebookCatalog
         }
     }
 
-    private function assertCovered(string $codebookKey, string $validOn): void
+    /** @param array{manifest_sha256:string,payload:array<string,mixed>} $manifest */
+    private function assertCovered(array $manifest, string $codebookKey, string $validOn): void
     {
-        if ($this->manifest === null) {
-            throw new \LogicException('Manifest externích číselníků JMHZ nebyl načten.');
-        }
-        if (!self::date($validOn)) {
-            throw new \InvalidArgumentException('Datum platnosti externího číselníku JMHZ není platné.');
-        }
-        foreach ($this->manifest['payload']['codebooks'] as $codebook) {
+        foreach ($manifest['payload']['codebooks'] as $codebook) {
             if ($codebook['codebook_key'] === $codebookKey) {
-                if ($validOn < $codebook['effective_from'] || $validOn > $codebook['verified_through']) {
+                if ($validOn < $codebook['effective_from']
+                    || ($codebook['effective_to'] !== null && $validOn > $codebook['effective_to'])
+                    || $validOn > $codebook['verified_through']
+                ) {
                     throw new JmhzCodebookUnavailableException(
                         "Číselník JMHZ {$codebookKey} není pro datum {$validOn} ověřený.",
                     );
@@ -315,20 +387,13 @@ final class JmhzExternalCodebookCatalog
         throw new JmhzCodebookUnavailableException("Číselník JMHZ {$codebookKey} není v overlay dostupný.");
     }
 
-    private function assertTermNotBeforeOverlay(string $termEffectiveOn): void
+    /**
+     * @param array{manifest:array{manifest_sha256:string,payload:array<string,mixed>},entries:array<string,array<string,array<string,mixed>>>} $package
+     * @return array<string,array<string,mixed>>
+     */
+    private function codebookEntries(array $package, string $codebookKey): array
     {
-        if (!self::date($termEffectiveOn) || $termEffectiveOn < self::EFFECTIVE_FROM) {
-            throw new JmhzCodebookUnavailableException(
-                "Externí číselníky JMHZ nejsou pro datum {$termEffectiveOn} účinné.",
-            );
-        }
-    }
-
-    /** @return array<string,array<string,mixed>> */
-    private function codebookEntries(string $codebookKey): array
-    {
-        $allEntries = $this->entries;
-        $entries = is_array($allEntries) ? ($allEntries[$codebookKey] ?? null) : null;
+        $entries = $package['entries'][$codebookKey] ?? null;
         if (!is_array($entries)) {
             throw new JmhzCodebookUnavailableException(
                 "Číselník JMHZ {$codebookKey} není v overlay dostupný.",
@@ -342,6 +407,26 @@ final class JmhzExternalCodebookCatalog
     {
         return $entry['valid_from'] <= $validOn
             && ($entry['valid_to'] === null || $entry['valid_to'] >= $validOn);
+    }
+
+    /**
+     * @param array{manifest_sha256:string,payload:array<string,mixed>} $manifest
+     * @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,base_spec_manifest_sha256:string}
+     */
+    private function provenanceFromManifest(array $manifest): array
+    {
+        $payload = $manifest['payload'];
+        $municipalities = $payload['codebooks'][0];
+
+        return [
+            'overlay_key' => $payload['overlay_key'],
+            'manifest_sha256' => $manifest['manifest_sha256'],
+            'snapshot_date' => $payload['snapshot_date'],
+            'effective_from' => $municipalities['effective_from'],
+            'effective_to' => $municipalities['effective_to'],
+            'verified_through' => $municipalities['verified_through'],
+            'base_spec_manifest_sha256' => $payload['base_spec']['manifest_sha256'],
+        ];
     }
 
     /** @return list<array<string,mixed>> */

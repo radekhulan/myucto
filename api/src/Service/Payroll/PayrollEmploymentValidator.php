@@ -253,7 +253,7 @@ final class PayrollEmploymentValidator
         }
         $externalCodebook = $municipalityCode === null
             ? null
-            : $this->jmhzEvidence->externalCodebookProvenance();
+            : $this->jmhzEvidence->externalCodebookProvenance($effectiveFrom);
 
         $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
         $apzCode = $this->optionalText($input, 'jmhz_apz_instrument_code', 8);

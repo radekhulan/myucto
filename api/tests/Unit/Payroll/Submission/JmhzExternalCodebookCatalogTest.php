@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 final class JmhzExternalCodebookCatalogTest extends TestCase
 {
-    public function testResolvesPinnedMunicipalityAndCountryIncludingCzemSpecificCode(): void
+    public function testResolvesMunicipalityAndCountryAcrossRegisteredLegalPeriods(): void
     {
         $catalog = $this->catalog();
 
@@ -34,8 +34,49 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         self::assertCount(250, $catalog->countries('2026-08-13'));
         self::assertSame(
             [['code' => '537004', 'label' => 'Nymburk']],
-            $catalog->searchMunicipalities('Nymburk', '2026-08-13', 20),
+            $catalog->searchMunicipalities('Nymburk', '2026-10-31', 20),
         );
+    }
+
+    public function testDateRegistryUses511ThroughAugustAnd145FromSeptember(): void
+    {
+        $catalog = $this->catalog();
+
+        $august = $catalog->provenanceForDate('2026-08-31');
+        self::assertSame(JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY, $august['overlay_key']);
+        self::assertSame(JmhzExternalCodebookCatalog::AUGUST_2026_MANIFEST_SHA256, $august['manifest_sha256']);
+        self::assertSame('2026-08-31', $august['effective_to']);
+        self::assertSame('2026-08-31', $august['verified_through']);
+
+        foreach (['2026-09-01', '2026-10-31'] as $validOn) {
+            $provenance = $catalog->provenanceForDate($validOn);
+            self::assertSame(JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY, $provenance['overlay_key']);
+            self::assertSame(JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256, $provenance['manifest_sha256']);
+            self::assertSame('2026-09-01', $provenance['effective_from']);
+        }
+    }
+
+    public function testHistoricalPackageIdentityAndHashRemainLoadable(): void
+    {
+        $catalog = $this->catalog();
+        $manifest = $catalog->manifestForIdentity(
+            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
+        );
+
+        self::assertSame(
+            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
+            $manifest['payload']['overlay_key'],
+        );
+        self::assertSame(JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256, $manifest['manifest_sha256']);
+        self::assertTrue($catalog->hasLoadableIdentity(
+            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
+        ));
+        self::assertFalse($catalog->hasLoadableIdentity(
+            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
+            str_repeat('0', 64),
+        ));
     }
 
     public function testKnownValueRejectsTermBeforeOverlayEffectivity(): void
@@ -61,7 +102,7 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         }
 
         $this->expectException(JmhzCodebookUnavailableException::class);
-        $catalog->requireCountry('CZ', '2026-08-14');
+        $catalog->requireCountry('CZ', '2027-01-01');
     }
 
     public function testSelfConsistentTamperedManifestStillFailsPinnedTrustAnchor(): void

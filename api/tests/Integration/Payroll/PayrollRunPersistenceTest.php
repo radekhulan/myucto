@@ -632,8 +632,8 @@ final class PayrollRunPersistenceTest extends TestCase
                     , jmhz_relationship_detail_code = "1"
               WHERE supplier_id = ? AND employment_id = ?'
         )->execute([
-            JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
-            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
             $this->supplierId,
             $this->employmentId,
         ]);
@@ -646,10 +646,14 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('554782', $term['jmhz_workplace_municipality_code']);
         self::assertSame('CZ', $term['jmhz_workplace_country_code']);
         self::assertSame(
-            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
             $term['jmhz_external_codebook_manifest_sha256'],
         );
         self::assertTrue($term['jmhz_external_codebooks_verified_for_period']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY,
+            $term['jmhz_validation_external_codebook_overlay_key'],
+        );
         self::assertSame('yes', $term['jmhz_apz_contribution_status']);
         self::assertSame('4', $term['jmhz_apz_instrument_code']);
         self::assertSame('no', $term['jmhz_functional_benefits_status']);
@@ -665,11 +669,23 @@ final class PayrollRunPersistenceTest extends TestCase
             'deep_mining_work_applies' => true,
         ], $snapshot->data['people'][0]['employments'][0]['ordinary_evidence_profile']);
 
-        $futureSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
-            ->build($this->supplierId, '2026-09-01', '2026-10-15');
-        self::assertFalse(
-            $futureSnapshot->data['people'][0]['employments'][0]['term']
-                ['jmhz_external_codebooks_verified_for_period'],
+        $augustPaidInSeptemberSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-08-01', '2026-09-15');
+        $augustPaidInSeptemberTerm =
+            $augustPaidInSeptemberSnapshot->data['people'][0]['employments'][0]['term'];
+        self::assertTrue($augustPaidInSeptemberTerm['jmhz_external_codebooks_verified_for_period']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY,
+            $augustPaidInSeptemberTerm['jmhz_validation_external_codebook_overlay_key'],
+        );
+
+        $septemberSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-09-01', '2026-09-30');
+        $septemberTerm = $septemberSnapshot->data['people'][0]['employments'][0]['term'];
+        self::assertTrue($septemberTerm['jmhz_external_codebooks_verified_for_period']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
+            $septemberTerm['jmhz_validation_external_codebook_overlay_key'],
         );
     }
 
