@@ -226,6 +226,53 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
     }
 
+    public function testSubthresholdDppSerializesIncomeAndCodeLessZeroDayEldp(): void
+    {
+        $payload = $this->payload();
+        $person = &$payload['people'][0];
+        $person['person_summary']['totals']['jmhz_amount_minor'] = 640_000;
+        $person['person_summary']['statutory']['social_insurance']['capped_assessment_base_minor_units'] = 0;
+        $person['person_summary']['statutory']['social_insurance']['employee_contribution_minor_units'] = 0;
+        $person['person_summary']['statutory']['social_insurance']['employer_contribution_minor_units'] = 0;
+        $employment = &$person['employments'][0];
+        $employment['term']['activity_code'] = 'T';
+        $employment['term']['jmhz_relationship_detail_code'] = null;
+        $employment['insurance'] = [
+            'relationship_id' => 'employment:101',
+            'kind' => 'dpp',
+            'participation' => [
+                'relationship_id' => 'employment:101',
+                'status' => 'does_not_participate',
+                'participation_income_minor_units' => 640_000,
+            ],
+            'assessment_base_minor_units' => 0,
+            'capped_assessment_base_minor_units' => 0,
+        ];
+        $section = &$employment['eldp']['eldp_sections'][0];
+        $section['code'] = null;
+        $section['valid_from'] = null;
+        $section['valid_to'] = null;
+        $section['insurance_days'] = 0;
+        $section['assessment_base_czk'] = null;
+        unset($section, $employment, $person);
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload, $this->zeroPvpoj()),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString(
+            '<form:prijemNepojistenaCinnost>6400</form:prijemNepojistenaCinnost>',
+            $result['xml'],
+        );
+        self::assertStringContainsString('<form:pocetDnu>0</form:pocetDnu>', $result['xml']);
+        self::assertStringNotContainsString('<form:castkaOdvodPojistneho>', $result['xml']);
+        self::assertStringNotContainsString('<form:kod>', $result['xml']);
+        self::assertStringNotContainsString('<form:platnostOd>', $result['xml']);
+        self::assertStringNotContainsString('<form:pojisteniZamestnanec>', $result['xml']);
+        self::assertStringNotContainsString('<form:pojisteniZamestnavatel>', $result['xml']);
+    }
+
     public function testNonUuidV7GuidIsRefused(): void
     {
         $this->expectException(JmhzXmlException::class);
@@ -564,6 +611,39 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         );
     }
 
+    private function zeroPvpoj(): JmhzPvpojPreview
+    {
+        return new JmhzPvpojPreview(
+            7,
+            401,
+            301,
+            1,
+            '2026-07',
+            [
+                'office_id' => 4,
+                'code' => 'UC4',
+                'name' => 'Mzdová účtárna 4',
+                'variable_symbol' => '1234567890',
+            ],
+            [[
+                'office_id' => 4,
+                'employee_contribution_minor_units' => 0,
+                'employer_contribution_minor_units' => 0,
+                'amount_minor_units' => 0,
+            ]],
+            ['revision_input_hash' => str_repeat('d', 64)],
+            [
+                'pojistne' => [
+                    'pojistneZamestnavateleCelkem' => 0,
+                    'pojistneZamestnance' => 0,
+                    'pojistneCelkem' => 0,
+                ],
+                'pojistneUhrada' => 0,
+            ],
+            [['employee_id' => 11]],
+        );
+    }
+
     /** @return array<string,mixed> */
     private function payload(): array
     {
@@ -710,6 +790,13 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                     ],
                     'insurance' => [
                         'relationship_id' => 'employment:101',
+                        'kind' => 'employment',
+                        'participation' => [
+                            'relationship_id' => 'employment:101',
+                            'status' => 'participates',
+                            'participation_income_minor_units' => 100_000,
+                        ],
+                        'assessment_base_minor_units' => 100_000,
                         'capped_assessment_base_minor_units' => 100_000,
                         'employer_rate_category' => 'ordinary',
                     ],
@@ -805,6 +892,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                       </form:trvani>
                       <form:vymerovaciZaklad>
                         <form:castkaOdvodPojistneho>1000</form:castkaOdvodPojistneho>
+                        <form:prijemNepojistenaCinnost>1000</form:prijemNepojistenaCinnost>
                       </form:vymerovaciZaklad>
                       <form:vymerovaciZakladParagraf5>
                         <form:pismenoA>1000</form:pismenoA>

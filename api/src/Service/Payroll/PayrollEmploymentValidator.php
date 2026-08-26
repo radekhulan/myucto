@@ -140,7 +140,7 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException('Chybí počáteční smluvní podmínky.');
         }
 
-        $terms = $this->terms($this->stringKeyed($input['terms']));
+        $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType);
         if ($terms['actual_start_on'] !== null) {
             throw new \InvalidArgumentException(
                 'Skutečný nástup se zaznamenává přechodem pracovního vztahu do aktivního stavu.'
@@ -166,12 +166,15 @@ final class PayrollEmploymentValidator
      *        zápisová cesta: obrazovky, které o poli nevědí (rychlá editace,
      *        založení vztahu ze seznamu), posílají podmínky bez něj a nesmí ho
      *        tím zahodit — viz {@see otherWithholdingEligibility()}.
+     * @param ?string $relationType Druh vztahu načtený serverem nebo právě
+     *        validovaný při založení; váže rodinu činností JMHZ k právnímu typu.
      * @return TermsInput
      */
     public function terms(
         array $input,
         ?string $storedCzIscoCode = null,
         ?string $storedOtherWithholdingEligibility = null,
+        ?string $relationType = null,
     ): array {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
@@ -287,6 +290,9 @@ final class PayrollEmploymentValidator
                 );
             }
         }
+        if ($relationType !== null) {
+            $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
+        }
 
         return [
             'office_id' => $officeId,
@@ -349,6 +355,27 @@ final class PayrollEmploymentValidator
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
         ];
+    }
+
+    private function assertRelationActivityFamily(
+        string $relationType,
+        ?string $activityCode,
+        ?string $relationshipDetailCode,
+    ): void {
+        if ($activityCode === null) {
+            return;
+        }
+        if (PayrollEmploymentJmhzActivityFamily::appliesTo($relationType)
+            && !PayrollEmploymentJmhzActivityFamily::matches(
+                $relationType,
+                $activityCode,
+                $relationshipDetailCode,
+            )
+        ) {
+            throw new \InvalidArgumentException(
+                'Druh činnosti nebo bližší určení neodpovídá druhu pracovního vztahu.',
+            );
+        }
     }
 
     /** @param array<string,mixed> $input

@@ -60,7 +60,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         (new JmhzEldpEvidenceBuilder())->build(7, 101, $this->source(), $confirmation);
     }
 
-    public function testRejectsCappedAssessmentBase(): void
+    public function testUsesUncappedAssessmentBaseForEldp(): void
     {
         $source = $this->source();
         $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
@@ -70,9 +70,9 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
         $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
 
-        $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('ročním maximem');
-        (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $this->confirmation());
+        $snapshot = (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $this->confirmation());
+
+        self::assertSame(10_000, $snapshot->payload['eldp_sections'][0]['assessment_base_czk']);
     }
 
     public function testRejectsImplicitOrActiveInteractions(): void
@@ -95,8 +95,64 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source = $this->withInput($source, $input);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('činnost 1–9');
+        $this->expectExceptionMessage('neodpovídá druhu pracovního vztahu');
         (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $this->confirmation());
+    }
+
+    public function testDerivesParticipatingDpcWithFullInsuranceMonth(): void
+    {
+        $source = $this->agreementSource('dpc', 'A', 'dpc', 'participates', 1_200_000, 1_200_000, 1_200_000);
+
+        $confirmation = (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+
+        self::assertSame('A++', $confirmation['code']);
+        self::assertSame(31, $confirmation['insurance_days']);
+        self::assertSame(12_000, $confirmation['assessment_base_czk']);
+    }
+
+    public function testDerivesNonParticipatingDppAsCodeLessZeroDaySection(): void
+    {
+        $source = $this->agreementSource('dpp', 'T', 'dpp', 'does_not_participate', 640_000, 0, 0);
+        $builder = new JmhzEldpEvidenceBuilder();
+
+        $snapshot = $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+        $section = $snapshot->payload['eldp_sections'][0];
+
+        self::assertSame('2026-07-01', $snapshot->payload['insurance_interval']['insurance_from']);
+        self::assertSame('2026-07-31', $snapshot->payload['insurance_interval']['insurance_to']);
+        self::assertNull($section['valid_from']);
+        self::assertNull($section['valid_to']);
+        self::assertSame(0, $section['insurance_days']);
+        self::assertNull($section['code']);
+        self::assertNull($section['assessment_base_czk']);
+        self::assertNull($snapshot->payload['specification']['eldp_code_row_sha256']);
+    }
+
+    public function testRejectsRelationAndActivityFamilyMismatch(): void
+    {
+        $source = $this->agreementSource('dpp', 'A', 'dpp', 'does_not_participate', 640_000, 0, 0);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('neodpovídá druhu pracovního vztahu');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    public function testKeepsParticipatingDppFailClosed(): void
+    {
+        $source = $this->agreementSource('dpp', 'T', 'dpp', 'participates', 640_000, 640_000, 640_000);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('podlimitní neúčastnou DPP');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
+    public function testKeepsNonParticipatingDpcFailClosed(): void
+    {
+        $source = $this->agreementSource('dpc', 'A', 'dpc', 'does_not_participate', 300_000, 0, 0);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('účastný pracovní poměr nebo DPČ');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
     public function testRejectsFractionalCzechCrownWithoutRounding(): void
@@ -127,7 +183,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('běžnou účast');
+        $this->expectExceptionMessage('jednoznačný výsledek účasti');
         (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $this->confirmation());
     }
 
@@ -233,6 +289,40 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
     }
 
     /** @return array<string,mixed> */
+    private function agreementSource(
+        string $relationType,
+        string $activityCode,
+        string $kind,
+        string $participationStatus,
+        int $participationIncomeMinor,
+        int $assessmentBaseMinor,
+        int $cappedAssessmentBaseMinor,
+    ): array {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['employment']['relation_type'] = $relationType;
+        $input['people'][0]['employments'][0]['term']['activity_code'] = $activityCode;
+        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] = null;
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values']['evidence_days'] = 0;
+        $source = $this->withInput($source, $input);
+
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $relationship = &$result['people'][0]['statutory']['social_insurance']['relationships'][0];
+        $relationship['kind'] = $kind;
+        $relationship['participation']['status'] = $participationStatus;
+        $relationship['participation']['participation_income_minor_units'] = $participationIncomeMinor;
+        $relationship['participation']['group_income_minor_units'] = $participationIncomeMinor;
+        $relationship['assessment_base_minor_units'] = $assessmentBaseMinor;
+        $relationship['capped_assessment_base_minor_units'] = $cappedAssessmentBaseMinor;
+        unset($relationship);
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+        return $source;
+    }
+
+    /** @return array<string,mixed> */
     private function source(): array
     {
         $input = [
@@ -301,6 +391,8 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
                                 'relationship_id' => 'employment:101',
                                 'status' => 'participates',
                                 'reason_codes' => [],
+                                'participation_income_minor_units' => 1_000_000,
+                                'group_income_minor_units' => 1_000_000,
                             ],
                             'assessment_base_minor_units' => 1_000_000,
                             'capped_assessment_base_minor_units' => 1_000_000,

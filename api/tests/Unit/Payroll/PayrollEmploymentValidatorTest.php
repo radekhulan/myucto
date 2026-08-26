@@ -28,6 +28,45 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertTrue($result['terms']['is_primary']);
     }
 
+    public function testAcceptsActivityFamilyMatchingAgreement(): void
+    {
+        foreach ([['dpc', 'A'], ['dpp', 'T']] as [$relationType, $activityCode]) {
+            $terms = $this->terms();
+            $terms['activity_code'] = $activityCode;
+            $terms['jmhz_relationship_detail_code'] = null;
+
+            $result = $this->validator()->create([
+                'code' => strtoupper($relationType) . '-1',
+                'relation_type' => $relationType,
+                'monthly_gross_minor' => 640_000,
+                'terms' => $terms,
+            ]);
+
+            self::assertSame($activityCode, $result['terms']['activity_code']);
+        }
+    }
+
+    public function testRejectsActivityFamilyMismatchingRelation(): void
+    {
+        foreach ([['dpc', 'T'], ['dpp', 'A'], ['dpp', '1']] as [$relationType, $activityCode]) {
+            $terms = $this->terms();
+            $terms['activity_code'] = $activityCode;
+            $terms['jmhz_relationship_detail_code'] = null;
+
+            try {
+                $this->validator()->create([
+                    'code' => strtoupper($relationType) . '-1',
+                    'relation_type' => $relationType,
+                    'monthly_gross_minor' => 640_000,
+                    'terms' => $terms,
+                ]);
+                self::fail("Kód {$activityCode} pro vztah {$relationType} měl být odmítnut.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('neodpovídá druhu pracovního vztahu', $exception->getMessage());
+            }
+        }
+    }
+
     public function testForeignModeRequiresCountry(): void
     {
         $terms = $this->terms();

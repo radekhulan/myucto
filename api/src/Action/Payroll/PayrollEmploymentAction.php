@@ -108,6 +108,7 @@ final class PayrollEmploymentAction
                         $supplierId,
                         $employmentId,
                     ),
+                    $this->employments->currentRelationType($supplierId, $employmentId),
                 ),
                 $this->validator->rowVersion($body),
                 $this->userId($request),

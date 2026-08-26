@@ -283,6 +283,21 @@ final class PayrollEmploymentRepository
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    public function currentRelationType(int $supplierId, int $employmentId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT relation_type
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+        if (!is_string($value) || $value === '') {
+            throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+        }
+        return $value;
+    }
+
     /**
      * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP, které u vztahu právě
      * platí. Čte ho validátor smluvních podmínek, aby ho neshodila obrazovka,

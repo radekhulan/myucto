@@ -753,7 +753,7 @@ final class JmhzScenario1DocumentResolver
         if ($relationship === []) {
             return null;
         }
-        $base = $this->wholeCzk(
+        $cappedBase = $this->wholeCzk(
             is_int($relationship['capped_assessment_base_minor_units'] ?? null)
                 ? $relationship['capped_assessment_base_minor_units']
                 : null,
@@ -762,13 +762,24 @@ final class JmhzScenario1DocumentResolver
             $employmentId,
             $blockers,
         );
-        $letter = match ($relationship['employer_rate_category'] ?? null) {
+        $participation = $this->object($relationship['participation'] ?? null);
+        $reportedIncome = $this->wholeCzk(
+            is_int($participation['participation_income_minor_units'] ?? null)
+                ? $participation['participation_income_minor_units']
+                : null,
+            '10476',
+            'employment',
+            $employmentId,
+            $blockers,
+        );
+        $base = $cappedBase === 0 ? null : $cappedBase;
+        $letter = $base === null ? null : match ($relationship['employer_rate_category'] ?? null) {
             'ordinary' => 'a',
             'rescue_and_company_fire_service' => 'b',
             'risk_employment' => 'c',
             default => null,
         };
-        if ($letter === null) {
+        if ($base !== null && $letter === null) {
             $blockers[] = $this->blocker(
                 'jmhz_employer_rate_category_unverified',
                 'employment',
@@ -779,6 +790,7 @@ final class JmhzScenario1DocumentResolver
 
         return [
             'assessment_base_czk' => $base,
+            'reported_income_czk' => $reportedIncome,
             'paragraph5_letter' => $letter,
         ];
     }

@@ -449,6 +449,8 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
                             'participation' => [
                                 'relationship_id' => "employment:{$employmentId}",
                                 'status' => 'participates',
+                                'participation_income_minor_units' => 1_000_000,
+                                'group_income_minor_units' => 1_000_000,
                             ],
                             'assessment_base_minor_units' => 1_000_000,
                             'capped_assessment_base_minor_units' => 1_000_000,

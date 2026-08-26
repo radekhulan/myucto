@@ -548,29 +548,42 @@ final class JmhzScenario1XmlSerializer
         );
         $node->appendChild($duration);
 
-        // 10477 je v XSD volitelný, ale kontroly 118 a 315 ho vyžadují: obě
-        // porovnávají odvedené pojistné se základem a chybějící základ berou
-        // jako nulu, takže podání bez něj ČSSZ odmítne. Pořadí je dané
-        // sekvencí `pojisteniBezPriznakuType` — základ patří mezi `trvani`
-        // a `eldpSeznam`, hned za ním rozpad podle § 5a.
         $social = $this->object($employment['social_base'] ?? null);
-        $amount = $this->int($social['assessment_base_czk'] ?? null, '10477');
-        $base = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vymerovaciZaklad');
-        $this->text(
-            $dom,
-            $base,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:castkaOdvodPojistneho',
-            (string) $amount,
-        );
-        $node->appendChild($base);
+        $amount = is_int($social['assessment_base_czk'] ?? null)
+            ? $this->int($social['assessment_base_czk'], '10477')
+            : null;
+        $reportedIncome = is_int($social['reported_income_czk'] ?? null)
+            ? $this->int($social['reported_income_czk'], '10476')
+            : null;
+        if ($amount !== null || $reportedIncome !== null) {
+            $base = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vymerovaciZaklad');
+            if ($amount !== null) {
+                $this->text(
+                    $dom,
+                    $base,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:castkaOdvodPojistneho',
+                    (string) $amount,
+                );
+            }
+            if ($reportedIncome !== null) {
+                $this->text(
+                    $dom,
+                    $base,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prijemNepojistenaCinnost',
+                    (string) $reportedIncome,
+                );
+            }
+            $node->appendChild($base);
+        }
 
         // Ve větvi `bezPriznaku` vede matice datových scénářů dílčí základy
         // podle § 5a jako povinné, a kontroly 216 a 284 to vynucují — ověřeno
         // odmítnutím podání, ve kterém chyběly. U nulového základu se rozpad
         // neuvádí: kontrola 284 se spouští až od nenulové částky a nula
         // rozdělená na složky nenese žádnou informaci.
-        if ($amount > 0) {
+        if ($amount !== null && $amount > 0) {
             $letter = $social['paragraph5_letter'] ?? null;
             if (!is_string($letter) || !isset(self::PARAGRAPH5_ELEMENTS[$letter])) {
                 $this->invalid(
@@ -632,13 +645,15 @@ final class JmhzScenario1XmlSerializer
                     'ELDP sekce s nenulovým počtem dnů musí mít kód ELDP.',
                 );
             }
-            $this->text(
-                $dom,
-                $entry,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:vymerovaciZaklad',
-                (string) $this->int($section['assessment_base_czk'] ?? null, '10245'),
-            );
+            if (is_int($section['assessment_base_czk'] ?? null)) {
+                $this->text(
+                    $dom,
+                    $entry,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:vymerovaciZaklad',
+                    (string) $this->int($section['assessment_base_czk'], '10245'),
+                );
+            }
             $list->appendChild($entry);
         }
         $node->appendChild($list);
@@ -647,6 +662,9 @@ final class JmhzScenario1XmlSerializer
             'form:pojisteniZamestnanec' => ['employee_social_czk', '10370'],
             'form:pojisteniZamestnavatel' => ['employer_social_czk', '10481'],
         ] as $element => [$key, $attributeId]) {
+            if (!is_int($summary[$key] ?? null) || $amount === null) {
+                continue;
+            }
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
             $this->text(
                 $dom,

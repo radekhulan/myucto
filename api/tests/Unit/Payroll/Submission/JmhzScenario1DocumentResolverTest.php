@@ -124,6 +124,14 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             ['advance_tax_after_credits' => 150, 'tax_bonus' => 0],
             $resolution->candidate?->payload['employer']['summary_totals'],
         );
+        self::assertSame(
+            [
+                'assessment_base_czk' => 1000,
+                'reported_income_czk' => 1000,
+                'paragraph5_letter' => 'a',
+            ],
+            $resolution->candidate?->payload['people'][0]['employments'][0]['social_base'],
+        );
     }
 
     public function testUsesFrozenPayslipAllocationForEmployerSocialContribution(): void
@@ -800,6 +808,13 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                     ],
                     'insurance' => [
                         'relationship_id' => 'employment:101',
+                        'kind' => 'employment',
+                        'participation' => [
+                            'relationship_id' => 'employment:101',
+                            'status' => 'participates',
+                            'participation_income_minor_units' => 100_000,
+                        ],
+                        'assessment_base_minor_units' => 100_000,
                         'capped_assessment_base_minor_units' => 100_000,
                         'employer_rate_category' => 'ordinary',
                     ],
