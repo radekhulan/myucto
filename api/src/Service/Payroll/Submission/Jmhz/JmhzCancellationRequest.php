@@ -39,6 +39,13 @@ final readonly class JmhzCancellationRequest
             );
         }
         $periodStart = sprintf('%04d-%02d-01', $year, $month);
+        if (!$deadlines->cancellationAllowed($periodStart)) {
+            throw new JmhzXmlException(
+                'jmhz_cancellation_transition_period_forbidden',
+                'ČSSZ nepovoluje storno JMHZ za leden až březen 2026;'
+                    . ' případnou změnu je nutné podat jako obsahovou opravu.',
+            );
+        }
         $window = $deadlines->forPeriod($periodStart);
         // Storno lze podat jen do konce lhůty pro řádné podání; potom už jen
         // opravným hlášením. Po lhůtě je odmítnutí jediná správná odpověď —

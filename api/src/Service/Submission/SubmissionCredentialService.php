@@ -8,6 +8,7 @@ use MyInvoice\Repository\Submission\SubmissionChannelCredentialRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelCredentials;
+use MyInvoice\Service\Submission\Channel\Isds\IsdsClientCertificate;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 
@@ -23,13 +24,11 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
  * Kontexty jsou per-pole, takže záměna sloupců v DB nevede k tichému
  * dešifrování cizí hodnoty, ale k chybě.
  *
- * ⚠️ **Jméno a heslo do datové schránky tahle třída nepřijímá a nikdy nesmí.**
- * Podle § 9 odst. 2 zák. 300/2008 Sb. a Provozního řádu ISDS nesmí přístupové
- * údaje opustit zařízení pod plnou kontrolou uživatele; jejich předání
- * cloudové aplikaci třetí strany je porušením podmínek a Správce ISDS je může
- * zneplatnit. Není to naše opatrnost navíc, je to podmínka provozu — proto
- * v téhle třídě není žádný parametr `$login` ani `$password` a v tabulce
- * neexistují odpovídající sloupce.
+ * ⚠️ **Jméno a běžné heslo tahle třída nepřijímá ani nepersistuje.** Firemní
+ * trezor je výhradně pro systémový certifikát. Jednorázové interaktivní metody
+ * obsluhuje `SubmissionInboxAction`; běžné heslo použije jen v právě spuštěném
+ * požadavku a SMS mezikrok drží nejvýše po TTL v odděleném šifrovaném flow.
+ * Proto v této tabulce nejsou sloupce pro login ani heslo.
  */
 final readonly class SubmissionCredentialService
 {
@@ -84,7 +83,8 @@ final readonly class SubmissionCredentialService
             throw new SubmissionChannelException(
                 'certificate_required',
                 'Nahrajte systémový certifikát k datové schránce (soubor PFX nebo P12). '
-                . 'Přihlášení jménem a heslem není u aplikace třetí strany přípustné.',
+                . 'Jméno ani heslo se jako sdílený firemní přístup neukládají; '
+                . 'pro jednorázové přihlášení je použijte při ručně spuštěném načtení zpráv.',
                 400,
             );
         }
@@ -179,13 +179,25 @@ final readonly class SubmissionCredentialService
     /** @return array{0:?string,1:?string} fingerprint, valid_to */
     private function inspectCertificate(string $bytes, ?string $passphrase): array
     {
-        $bundle = [];
-        if (@openssl_pkcs12_read($bytes, $bundle, (string) $passphrase)) {
-            $certificate = (string) ($bundle['cert'] ?? '');
-        } else {
-            // Může jít i o holý PEM/DER certifikát bez klíče — pro otisk stačí.
-            $certificate = $bytes;
+        try {
+            $clientCertificate = IsdsClientCertificate::fromBase64(base64_encode($bytes), (string) $passphrase);
+        } catch (\UnexpectedValueException) {
+            throw new SubmissionChannelException(
+                'invalid_certificate',
+                'Nahraný soubor musí být PKCS#12 (PFX/P12) se soukromým klíčem a správným heslem.',
+                400,
+            );
+        } finally {
+            if (isset($clientCertificate)) {
+                $clientCertificate->clear();
+            }
         }
+
+        $bundle = [];
+        if (!@openssl_pkcs12_read($bytes, $bundle, (string) $passphrase)) {
+            throw new SubmissionChannelException('invalid_certificate', 'Nahraný PKCS#12 certifikát se nepodařilo znovu načíst.', 400);
+        }
+        $certificate = (string) ($bundle['cert'] ?? '');
 
         $parsed = @openssl_x509_parse($certificate, false);
         $fingerprint = @openssl_x509_fingerprint($certificate, 'sha256');

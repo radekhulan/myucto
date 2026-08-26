@@ -43,9 +43,11 @@ function guideSteps(): string[] {
   const routeToPath: Record<string, string> = {
     'payroll-absences': '/payroll/absences',
     'payroll-time': '/payroll/time',
+    'payroll-travel': '/payroll/travel',
     'payroll-quick-inputs': '/payroll/quick-inputs',
     'payroll-runs': '/payroll/runs',
     'payroll-payments': '/payroll/payments',
+    'payroll-posting-reconciliation': '/payroll/posting-reconciliation',
     'payroll-documents': '/payroll/documents',
     'payroll-submissions': '/payroll/submissions',
   }

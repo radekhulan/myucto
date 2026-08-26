@@ -9,7 +9,7 @@ use DOMElement;
 
 /**
  * Serializér prvního profilu měsíčního hlášení: jeden scénář `scenario_1`
- * (`form:bezPriznaku`), řádné podání, jeden dílčí balík.
+ * (`form:bezPriznaku`), řádné i obsahově opravné podání, jeden dílčí balík.
  *
  * Pracuje VÝHRADNĚ s vyřešeným normalizovaným dokumentem. Nesahá do databáze,
  * nedopočítává a nezaokrouhluje — každá hodnota, která v dokumentu není
@@ -84,6 +84,62 @@ final class JmhzScenario1XmlSerializer
         return rtrim($xml, "\r\n");
     }
 
+    public function serializeCorrection(
+        JmhzScenario1NormalizedDocument $document,
+        JmhzSubmissionEnvelope $envelope,
+        JmhzContentCorrectionPlan $plan,
+    ): string {
+        $payload = $document->payload;
+        $this->assertProfile($payload, $envelope);
+        $people = $this->correctionPeople($payload, $envelope, $plan);
+
+        $dom = new DOMDocument('1.0', 'UTF-8');
+        $dom->formatOutput = true;
+        $root = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'jmhz');
+        $dom->appendChild($root);
+        $root->setAttribute(
+            'verze',
+            (new JmhzSchemaCatalog())->entryPoint()['data_version'],
+        );
+        foreach ([
+            'xmlns:so' => JmhzSchemaCatalog::NS_SOUHRN,
+            'xmlns:pvpoj' => JmhzSchemaCatalog::NS_PVPOJ,
+            'xmlns:form' => JmhzSchemaCatalog::NS_FORM,
+        ] as $name => $namespace) {
+            $root->setAttributeNS(self::XMLNS, $name, $namespace);
+        }
+
+        $vendor = $dom->createElementNS(JmhzSchemaCatalog::NS_PODANI, 'VENDOR');
+        $vendor->setAttribute('productName', $envelope->productName);
+        $vendor->setAttribute('productVersion', $envelope->productVersion);
+        $root->appendChild($vendor);
+        $root->appendChild($this->correctionHeader(
+            $dom,
+            $payload,
+            $envelope,
+            count($people)
+                + ($plan->includeSummary ? 1 : 0)
+                + ($plan->includePvpoj ? 1 : 0),
+        ));
+        if ($plan->includeSummary) {
+            $root->appendChild($this->summary($dom, $payload));
+        }
+        if ($plan->includePvpoj) {
+            $root->appendChild($this->pvpoj($dom, $payload));
+        }
+        $root->appendChild($this->correctionForms($dom, $people, $envelope, $plan));
+
+        $xml = $dom->saveXML();
+        if ($xml === false) {
+            throw new JmhzXmlException(
+                'jmhz_xml_serialization_failed',
+                'XML obsahové opravy měsíčního hlášení nelze serializovat.',
+            );
+        }
+
+        return rtrim($xml, "\r\n");
+    }
+
     /**
      * @param array<string,mixed> $payload
      */
@@ -105,14 +161,14 @@ final class JmhzScenario1XmlSerializer
         ) {
             $this->invalid(
                 'jmhz_xml_scenario_unsupported',
-                'Serializér umí jen řádné podání standardního scénáře.',
+                'Zdrojem serializace musí být řádná příprava standardního scénáře.',
             );
         }
         $header = $this->object($payload['header'] ?? null);
         if (($header['type'] ?? null) !== 'R') {
             $this->invalid(
                 'jmhz_xml_submission_type_unsupported',
-                'Opravné ani stornující podání zatím serializér nestaví.',
+                'Zdrojový dokument musí být úplná řádná příprava.',
             );
         }
         $people = $this->rows($payload['people'] ?? null);
@@ -135,10 +191,8 @@ final class JmhzScenario1XmlSerializer
                 'Dělené podání zatím serializér nestaví.',
             );
         }
-        // Serializér staví souhrnnou i pojistnou část vždy, takže kontrola dnes
-        // projde pokaždé. Je tu proto, že opravné hlášení bude části vynechávat
-        // a povolené kombinace se musí posuzovat proti připnuté tabulce ČSSZ,
-        // ne proti tomu, co zrovna umí kód.
+        // Řádná cesta staví souhrnnou i pojistnou část vždy. Obsahová oprava
+        // povolené podmnožiny ověřuje samostatně v JmhzContentCorrectionPlan.
         JmhzSubmissionFlagMatrix::assertAllowed(
             JmhzSubmissionFlagMatrix::TYPE_REGULAR,
             true,
@@ -201,6 +255,60 @@ final class JmhzScenario1XmlSerializer
     }
 
     /** @param array<string,mixed> $payload */
+    private function correctionHeader(
+        DOMDocument $dom,
+        array $payload,
+        JmhzSubmissionEnvelope $envelope,
+        int $formCount,
+    ): DOMElement {
+        $header = $this->object($payload['header'] ?? null);
+        if ($formCount > 1502) {
+            $this->invalid(
+                'jmhz_xml_form_limit_exceeded',
+                'Balík dat pojme nejvýše 1502 formulářů včetně souhrnu a PVPOJ.',
+            );
+        }
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'hlavicka');
+        $this->text($dom, $node, JmhzSchemaCatalog::NS_PODANI, 'idPodani', $envelope->submissionGuid);
+        $this->text(
+            $dom,
+            $node,
+            JmhzSchemaCatalog::NS_PODANI,
+            'typPodani',
+            JmhzSubmissionFlagMatrix::TYPE_AMENDMENT,
+        );
+        $variableSymbol = $this->string($header['variable_symbol'] ?? null, '10221');
+        if (preg_match('/^\d{10}$/D', $variableSymbol) !== 1) {
+            $this->invalid(
+                'jmhz_xml_variable_symbol_invalid',
+                'Variabilní symbol zaměstnavatele musí mít přesně deset číslic.',
+            );
+        }
+        $month = $this->int($header['month'] ?? null, '10010');
+        $year = $this->int($header['year'] ?? null, '10011');
+        if ($month < 1 || $month > 12) {
+            $this->invalid(
+                'jmhz_xml_period_invalid',
+                'Hlášený měsíc je mimo rozsah připnutého schématu.',
+            );
+        }
+        foreach ([
+            'variabilniSymbol' => $variableSymbol,
+            'mesic' => (string) $month,
+            'rok' => (string) $year,
+            'datumVyplneni' => $envelope->filledAt,
+            'balikPoradi' => (string) $envelope->packageOrdinal,
+            'balikyPocet' => (string) $envelope->packageCount,
+            'formularePocetVBaliku' => (string) $formCount,
+            'formularePocetCelkem' => (string) $formCount,
+        ] as $name => $value) {
+            $this->text($dom, $node, JmhzSchemaCatalog::NS_PODANI, $name, $value);
+        }
+
+        return $node;
+    }
+
+    /** @param array<string,mixed> $payload */
     private function summary(DOMDocument $dom, array $payload): DOMElement
     {
         $totals = $this->object(
@@ -223,8 +331,9 @@ final class JmhzScenario1XmlSerializer
             (string) $this->int($totals['tax_bonus'] ?? null, '10035'),
         );
         $node->appendChild($monthly);
-        // `danUdajeRok` a `zamestnavatelUdajeRok` patří do prosincového podání;
-        // roční atributy resolver pro duben až listopad záměrně blokuje.
+        // `danUdajeRok` a `zamestnavatelUdajeRok` jsou v připnutém XSD celé
+        // volitelné bloky. Bez zmrazeného ročního zdroje se proto vynechají;
+        // nulové ani záporné právní skutečnosti se z absence zdroje neodhadují.
         // `specifickaSkutecnost` se neuvádí, protože IN13 je doložené `false`.
 
         return $node;
@@ -350,6 +459,109 @@ final class JmhzScenario1XmlSerializer
         }
 
         return $node;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $people
+     */
+    private function correctionForms(
+        DOMDocument $dom,
+        array $people,
+        JmhzSubmissionEnvelope $envelope,
+        JmhzContentCorrectionPlan $plan,
+    ): DOMElement {
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'formulareOsob');
+        foreach ($people as $person) {
+            $summary = $this->object($person['summary'] ?? null);
+            $employment = $this->rows($person['employments'] ?? null)[0];
+            $employmentId = $employment['employment_id'];
+            if (!is_int($employmentId)) {
+                $this->invalid(
+                    'jmhz_content_correction_employment_invalid',
+                    'Opravovaný formulář nemá platný pracovní vztah.',
+                );
+            }
+            $correction = $plan->formForEmployment($employmentId);
+            if ($correction === null) {
+                $this->invalid(
+                    'jmhz_content_correction_plan_mismatch',
+                    'Opravovaný formulář chybí v plánu obsahové opravy.',
+                );
+            }
+            $form = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'formularOsoby');
+            $header = $this->node($dom, JmhzSchemaCatalog::NS_PODANI, 'hlavicka');
+            $this->text(
+                $dom,
+                $header,
+                JmhzSchemaCatalog::NS_PODANI,
+                'idFormulare',
+                $envelope->formGuid($employmentId),
+            );
+            $this->text(
+                $dom,
+                $header,
+                JmhzSchemaCatalog::NS_PODANI,
+                'typFormulare',
+                $correction->formType,
+            );
+            $this->text(
+                $dom,
+                $header,
+                JmhzSchemaCatalog::NS_PODANI,
+                'primarniPpv',
+                $this->bool($employment['primary'] ?? null, '10495') ? 'true' : 'false',
+            );
+            $form->appendChild($header);
+            $form->appendChild($this->bezPriznaku($dom, $summary, $employment));
+            $node->appendChild($form);
+        }
+
+        return $node;
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return list<array<string,mixed>>
+     */
+    private function correctionPeople(
+        array $payload,
+        JmhzSubmissionEnvelope $envelope,
+        JmhzContentCorrectionPlan $plan,
+    ): array {
+        if (count($envelope->formGuids) !== count($plan->forms)) {
+            $this->invalid(
+                'jmhz_content_correction_envelope_mismatch',
+                'GUIDy obálky neodpovídají formulářům obsahové opravy.',
+            );
+        }
+        $selected = [];
+        foreach ($this->rows($payload['people'] ?? null) as $person) {
+            $employments = $this->rows($person['employments'] ?? null);
+            if (count($employments) !== 1) {
+                $this->invalid(
+                    'jmhz_xml_multiple_employments_unsupported',
+                    'První profil staví právě jednu součást na osobu.',
+                );
+            }
+            $employmentId = $employments[0]['employment_id'] ?? null;
+            if (!is_int($employmentId)) {
+                continue;
+            }
+            $correction = $plan->formForEmployment($employmentId);
+            if ($correction === null) {
+                continue;
+            }
+            $correction->assertEnvelopeGuid($envelope->formGuid($employmentId));
+            $selected[] = $person;
+        }
+        if (count($selected) !== count($plan->forms)) {
+            $this->invalid(
+                'jmhz_content_correction_source_form_missing',
+                'Nová příprava neobsahuje všechny formuláře vybrané pro obsahovou opravu.',
+            );
+        }
+
+        return $selected;
     }
 
     /**
@@ -482,6 +694,105 @@ final class JmhzScenario1XmlSerializer
             $node->appendChild($block);
         }
 
+        $annual = $this->object($summary['annual'] ?? null);
+        if ($annual !== []) {
+            $annualNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rocniUhrny',
+            );
+            $withholding = $this->object($annual['withholding'] ?? null);
+            if ($withholding !== []) {
+                $this->text(
+                    $dom,
+                    $annualNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prijemSrazkDanZvlSazba',
+                    (string) $this->int($withholding['paid_income_czk'] ?? null, '10311'),
+                );
+                $this->text(
+                    $dom,
+                    $annualNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:danSrazenaZvlSazba',
+                    (string) $this->int(
+                        $withholding['withholding_tax_czk'] ?? null,
+                        '10312',
+                    ),
+                );
+            }
+            if (is_bool($annual['requested'] ?? null)) {
+                $this->text(
+                    $dom,
+                    $annualNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:rocniZuctovaniZadost',
+                    $annual['requested'] ? 'true' : 'false',
+                );
+            }
+            $performed = $this->bool(
+                $annual['performed'] ?? null,
+                '10320',
+            );
+            $this->text(
+                $dom,
+                $annualNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rocniZuctovaniProvedeno',
+                $performed ? 'true' : 'false',
+            );
+            if ($performed) {
+                $result = $this->object($annual['result'] ?? null);
+                $resultNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:vysledekRocnihoZuctovani',
+                );
+                foreach ([
+                    'form:preplatekRok' => ['settlement_difference_czk', '10321'],
+                    'form:danPreplatekRok' => ['tax_difference_czk', '10322'],
+                ] as $element => [$key, $attributeId]) {
+                    $this->text(
+                        $dom,
+                        $resultNode,
+                        JmhzSchemaCatalog::NS_FORM,
+                        $element,
+                        (string) $this->int($result[$key] ?? null, $attributeId),
+                    );
+                }
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:danBonusPreplatekRok',
+                    (string) $this->signedInt(
+                        $result['bonus_difference_czk'] ?? null,
+                        '10323',
+                    ),
+                );
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:uplatnenaSlevaNaPartnera',
+                    $this->bool($result['spouse_credit_claimed'] ?? null, '10420')
+                        ? 'true'
+                        : 'false',
+                );
+                $this->text(
+                    $dom,
+                    $resultNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:uplatnenoZvyhodneniNaDeti',
+                    $this->bool($result['child_credit_claimed'] ?? null, '10454')
+                        ? 'true'
+                        : 'false',
+                );
+                $annualNode->appendChild($resultNode);
+            }
+            $node->appendChild($annualNode);
+        }
+
         $net = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaCista');
         $this->text(
             $dom,
@@ -548,29 +859,42 @@ final class JmhzScenario1XmlSerializer
         );
         $node->appendChild($duration);
 
-        // 10477 je v XSD volitelný, ale kontroly 118 a 315 ho vyžadují: obě
-        // porovnávají odvedené pojistné se základem a chybějící základ berou
-        // jako nulu, takže podání bez něj ČSSZ odmítne. Pořadí je dané
-        // sekvencí `pojisteniBezPriznakuType` — základ patří mezi `trvani`
-        // a `eldpSeznam`, hned za ním rozpad podle § 5a.
         $social = $this->object($employment['social_base'] ?? null);
-        $amount = $this->int($social['assessment_base_czk'] ?? null, '10477');
-        $base = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vymerovaciZaklad');
-        $this->text(
-            $dom,
-            $base,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:castkaOdvodPojistneho',
-            (string) $amount,
-        );
-        $node->appendChild($base);
+        $amount = is_int($social['assessment_base_czk'] ?? null)
+            ? $this->int($social['assessment_base_czk'], '10477')
+            : null;
+        $reportedIncome = is_int($social['reported_income_czk'] ?? null)
+            ? $this->int($social['reported_income_czk'], '10476')
+            : null;
+        if ($amount !== null || $reportedIncome !== null) {
+            $base = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:vymerovaciZaklad');
+            if ($amount !== null) {
+                $this->text(
+                    $dom,
+                    $base,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:castkaOdvodPojistneho',
+                    (string) $amount,
+                );
+            }
+            if ($reportedIncome !== null) {
+                $this->text(
+                    $dom,
+                    $base,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prijemNepojistenaCinnost',
+                    (string) $reportedIncome,
+                );
+            }
+            $node->appendChild($base);
+        }
 
         // Ve větvi `bezPriznaku` vede matice datových scénářů dílčí základy
         // podle § 5a jako povinné, a kontroly 216 a 284 to vynucují — ověřeno
         // odmítnutím podání, ve kterém chyběly. U nulového základu se rozpad
         // neuvádí: kontrola 284 se spouští až od nenulové částky a nula
         // rozdělená na složky nenese žádnou informaci.
-        if ($amount > 0) {
+        if ($amount !== null && $amount > 0) {
             $letter = $social['paragraph5_letter'] ?? null;
             if (!is_string($letter) || !isset(self::PARAGRAPH5_ELEMENTS[$letter])) {
                 $this->invalid(
@@ -632,13 +956,15 @@ final class JmhzScenario1XmlSerializer
                     'ELDP sekce s nenulovým počtem dnů musí mít kód ELDP.',
                 );
             }
-            $this->text(
-                $dom,
-                $entry,
-                JmhzSchemaCatalog::NS_FORM,
-                'form:vymerovaciZaklad',
-                (string) $this->int($section['assessment_base_czk'] ?? null, '10245'),
-            );
+            if (is_int($section['assessment_base_czk'] ?? null)) {
+                $this->text(
+                    $dom,
+                    $entry,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:vymerovaciZaklad',
+                    (string) $this->int($section['assessment_base_czk'], '10245'),
+                );
+            }
             $list->appendChild($entry);
         }
         $node->appendChild($list);
@@ -647,6 +973,9 @@ final class JmhzScenario1XmlSerializer
             'form:pojisteniZamestnanec' => ['employee_social_czk', '10370'],
             'form:pojisteniZamestnavatel' => ['employer_social_czk', '10481'],
         ] as $element => [$key, $attributeId]) {
+            if (!is_int($summary[$key] ?? null) || $amount === null) {
+                continue;
+            }
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
             $this->text(
                 $dom,
@@ -1022,6 +1351,15 @@ final class JmhzScenario1XmlSerializer
     private function int(mixed $value, string $attributeId): int
     {
         if (!is_int($value) || $value < 0) {
+            $this->unresolved($attributeId);
+        }
+
+        return $value;
+    }
+
+    private function signedInt(mixed $value, string $attributeId): int
+    {
+        if (!is_int($value)) {
             $this->unresolved($attributeId);
         }
 

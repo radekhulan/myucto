@@ -91,6 +91,7 @@ final class SubmissionOutboxServiceTest extends TestCase
             $this->stubArtifacts(),
             new SubmissionArtifactValidator(new XmlSchemaValidator()),
             new NullLogger(),
+            null,
         );
     }
 

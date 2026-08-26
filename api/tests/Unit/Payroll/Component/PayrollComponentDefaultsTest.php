@@ -162,6 +162,21 @@ final class PayrollComponentDefaultsTest extends TestCase
         }
     }
 
+    public function testMandatoryRiskySavingsIsNotLeftForManualClassification(): void
+    {
+        $row = $this->rowsByCode('2026-01-01')['PRISPEVEK_RIZIKOVE_SPORENI'];
+
+        self::assertSame('non_monetary', $row['value_kind']);
+        self::assertSame('exempt', $row['tax_treatment']);
+        self::assertSame('excluded', $row['social_treatment']);
+        self::assertSame('excluded', $row['health_treatment']);
+        self::assertSame('excluded', $row['average_earning_treatment']);
+        self::assertSame('excluded', $row['enforcement_treatment']);
+        self::assertSame('included', $row['jmhz_treatment']);
+        self::assertSame('old_age_savings', $row['exemption_basket']);
+        self::assertSame('benefit_basket', $row['exemption_basis']);
+    }
+
     public function testEveryDefaultCodeIsKnownToTheDeletionGuard(): void
     {
         $codes = PayrollComponentDefaults::codes();

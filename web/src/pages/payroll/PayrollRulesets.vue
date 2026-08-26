@@ -386,12 +386,17 @@ onMounted(load)
       {{ t('payroll.rulesets.storage_unavailable') }}
     </p>
 
-    <p
+    <div
       v-if="overview?.degraded_reason"
       class="rounded-lg border border-danger-500/40 bg-danger-50 px-4 py-3 text-sm text-danger-500"
+      data-test="ruleset-degraded"
     >
-      {{ t('payroll.rulesets.degraded', { reason: overview.degraded_reason }) }}
-    </p>
+      <p data-test="ruleset-degraded-message">{{ t('payroll.rulesets.degraded') }}</p>
+      <details class="mt-2 text-xs" data-test="ruleset-degraded-technical">
+        <summary class="cursor-pointer">{{ t('payroll.rulesets.degraded_technical') }}</summary>
+        <p class="mt-1 break-words font-mono">{{ overview.degraded_reason }}</p>
+      </details>
+    </div>
 
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-24 animate-pulse rounded-xl bg-neutral-100" />

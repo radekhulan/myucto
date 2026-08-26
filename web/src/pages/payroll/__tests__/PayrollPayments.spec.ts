@@ -14,10 +14,17 @@ const m = vi.hoisted(() => ({
   searchOptions: vi.fn(),
   match: vi.fn(),
   reverse: vi.fn(),
+  matchIncomingRefund: vi.fn(),
+  reverseIncomingRefund: vi.fn(),
   runs: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  routeQuery: {} as Record<string, string>,
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: m.routeQuery }),
 }))
 
 vi.mock('@/api/payrollPayments', () => ({
@@ -35,6 +42,8 @@ vi.mock('@/api/payrollPayments', () => ({
     searchOptions: m.searchOptions,
     match: m.match,
     reverse: m.reverse,
+    matchIncomingRefund: m.matchIncomingRefund,
+    reverseIncomingRefund: m.reverseIncomingRefund,
   },
 }))
 vi.mock('@/api/payroll', () => ({
@@ -98,6 +107,7 @@ function liabilityList(items: Array<Record<string, unknown>>) {
 describe('PayrollPayments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canWrite.mockImplementation(
       (permission: string) => permission === 'payroll.payments',
     )
@@ -207,6 +217,21 @@ describe('PayrollPayments', () => {
         settled_minor: 0,
         remaining_minor: 4_250_000,
       }],
+      allocations_truncated: false,
+      incoming_liabilities: [{
+        id: 44,
+        liability_reference: 'payroll-liability:incoming:synthetic',
+        liability_kind: 'net_wage',
+        direction: 'incoming',
+        due_on: '2026-08-15',
+        currency_code: 'CZK',
+        employee_name: 'Syntetická osoba – opravná vratka',
+        amount_minor: 50_000,
+        settled_minor: 0,
+        remaining_minor: 50_000,
+      }],
+      incoming_liabilities_truncated: false,
+      offered_limit: 50,
       matches: [],
       // Historie párování se stránkuje; nabídka storna má vlastní kolekci,
       // aby nezávisela na tom, kterou stránku historie uživatel čte.
@@ -228,8 +253,23 @@ describe('PayrollPayments', () => {
         status: 'unmatched',
         available_match_minor: 4_250_000,
         available_reversal_minor: 4_250_000,
+      }, {
+        kind: 'bank',
+        bank_statement_id: 95,
+        bank_transaction_id: 96,
+        cash_document_id: null,
+        date: '2026-08-20',
+        amount_minor: 50_000,
+        currency_code: 'CZK',
+        direction: 'incoming',
+        description: 'Syntetická přijatá vratka',
+        reference: null,
+        available_match_minor: 50_000,
+        available_reversal_minor: 50_000,
       }],
+      bank_evidence_truncated: false,
       cash_evidence: [],
+      cash_evidence_truncated: false,
     })
     m.match.mockResolvedValue({
       event: {
@@ -273,6 +313,67 @@ describe('PayrollPayments', () => {
         liability_kind: 'net_wage',
       },
     })
+    m.matchIncomingRefund.mockResolvedValue({
+      id: 103,
+      allocation_id: null,
+      liability_id: 44,
+      event_kind: 'matched',
+      source_match_id: null,
+      amount_minor: 50_000,
+      evidence_kind: 'bank',
+      bank_statement_id: 95,
+      bank_transaction_id: 96,
+      cash_document_id: null,
+      actual_payment_date: '2026-08-20',
+      evidence_amount_minor: 50_000,
+      evidence_currency_code: 'CZK',
+      evidence_fact_hash: 'c'.repeat(64),
+      replayed: false,
+    })
+    m.reverseIncomingRefund.mockResolvedValue({
+      id: 104,
+      allocation_id: null,
+      liability_id: 44,
+      event_kind: 'reversed',
+      source_match_id: 103,
+      amount_minor: -50_000,
+      evidence_kind: 'bank',
+      bank_statement_id: 97,
+      bank_transaction_id: 98,
+      cash_document_id: null,
+      actual_payment_date: '2026-08-21',
+      evidence_amount_minor: 50_000,
+      evidence_currency_code: 'CZK',
+      evidence_fact_hash: 'd'.repeat(64),
+      replayed: false,
+    })
+  })
+
+  it('opens the period from a payroll run link and preselects its compatible liabilities', async () => {
+    m.routeQuery = {
+      period: '2026-08',
+      run: '11',
+      focus: 'bank-order',
+    }
+    const base = (await m.liabilities()).items[0]
+    m.liabilities.mockResolvedValue(liabilityList([
+      base,
+      { ...base, id: 42, employee_id: 32, employee_name: 'Druhá osoba' },
+      { ...base, id: 43, run_id: 12, employee_id: 33, employee_name: 'Jiný běh' },
+      { ...base, id: 44, run_id: 11, due_on: '2026-08-20', employee_id: null },
+    ]))
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    expect(m.liabilities).toHaveBeenCalledWith(
+      '2026-08',
+      { limit: 50, offset: 0 },
+    )
+    expect(wrapper.get('[data-test="run-payment-shortcut"]').text())
+      .toContain('payroll.payments.run_shortcut.ready')
+    expect(wrapper.get('[data-test="batch-selection-summary"]').text())
+      .toContain('"count":2')
   })
 
   /*
@@ -593,6 +694,29 @@ describe('PayrollPayments', () => {
     expect(wrapper.find('[data-layout="batch-mobile"]').exists()).toBe(true)
   })
 
+  it('admits an idempotent replay instead of claiming a second batch was created', async () => {
+    m.createBatch.mockResolvedValue({
+      batch_id: 51,
+      declared_item_count: 1,
+      created: false,
+      replayed: true,
+    })
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+
+    const desktop = wrapper.get('[data-layout="desktop"]')
+    await desktop.findAll('input[type="checkbox"]')[1].setValue(true)
+    await flushPromises()
+    const createButton = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.payments.batch.create'))
+    await createButton!.trigger('click')
+    await flushPromises()
+
+    expect(m.success).toHaveBeenCalledWith(
+      expect.stringContaining('payroll.payments.batch.replayed'),
+    )
+  })
+
   it('generates a batch export and downloads it through a one-use grant', async () => {
     const exportedFile = {
       id: 61,
@@ -739,7 +863,8 @@ describe('PayrollPayments', () => {
 
     expect(wrapper.text()).toContain('payroll.payments.settlements.new_match')
     expect(wrapper.text()).toContain('payroll.payments.settlements.new_reversal')
-    expect(wrapper.findAllComponents({ name: 'SearchableSelect' })).toHaveLength(4)
+    expect(wrapper.text()).toContain('payroll.payments.settlements.incoming_title')
+    expect(wrapper.findAllComponents({ name: 'SearchableSelect' })).toHaveLength(6)
 
     m.canWrite.mockReturnValue(false)
     const readonlyWrapper = mount(PayrollPayments)
@@ -749,6 +874,189 @@ describe('PayrollPayments', () => {
     expect(readonlyWrapper.text()).not.toContain('payroll.payments.settlements.new_match')
     expect(readonlyWrapper.text()).not.toContain('payroll.payments.settlements.new_reversal')
     expect(readonlyWrapper.text()).toContain('payroll.payments.settlements.history')
+  })
+
+  it('matches a partial incoming refund only after an explicit receipt confirmation', async () => {
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    const form = wrapper.get('[data-test="incoming-refund-form"]')
+    const selects = form.findAllComponents({ name: 'SearchableSelect' })
+    await selects[0].vm.$emit('update:modelValue', 44)
+    await flushPromises()
+    await selects[1].vm.$emit('update:modelValue', 'bank:95:96')
+    await flushPromises()
+
+    const amount = form.get('input[inputmode="decimal"]')
+    await amount.setValue('250,00')
+    const submit = form.get('button[type="submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+
+    await form.get('[data-test="incoming-refund-confirmation"]').setValue(true)
+    expect(submit.attributes('disabled')).toBeUndefined()
+    await amount.setValue('300,00')
+    expect(form.get('[data-test="incoming-refund-confirmation"]')
+      .element).toHaveProperty('checked', false)
+    await amount.setValue('250,00')
+    await form.get('[data-test="incoming-refund-confirmation"]').setValue(true)
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(m.matchIncomingRefund).toHaveBeenCalledWith({
+      liability_id: 44,
+      amount_minor: 25_000,
+      evidence: {
+        kind: 'bank',
+        bank_statement_id: 95,
+        bank_transaction_id: 96,
+      },
+      idempotency_key: expect.stringMatching(/^payroll-incoming-44-bank:95:96-25000-/),
+    })
+    expect(m.match).not.toHaveBeenCalled()
+    expect(m.success).toHaveBeenCalledWith(
+      'payroll.payments.settlements.incoming_success',
+    )
+  })
+
+  it('supports a posted cash receipt as explicit incoming-refund evidence', async () => {
+    const base = await m.reconciliation()
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      cash_evidence: [{
+        kind: 'cash',
+        bank_statement_id: null,
+        bank_transaction_id: null,
+        cash_document_id: 501,
+        date: '2026-08-20',
+        amount_minor: 50_000,
+        currency_code: 'CZK',
+        direction: 'incoming',
+        status: 'posted',
+        description: 'Syntetický příjmový pokladní doklad',
+        reference: 'PP-2026-001',
+        available_match_minor: 50_000,
+        available_reversal_minor: 50_000,
+      }],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+    const form = wrapper.get('[data-test="incoming-refund-form"]')
+    const selects = form.findAllComponents({ name: 'SearchableSelect' })
+    await selects[0].vm.$emit('update:modelValue', 44)
+    await form.get('input[type="radio"][value="cash"]').setValue(true)
+    await flushPromises()
+    await selects[1].vm.$emit('update:modelValue', 'cash:501')
+    await form.get('[data-test="incoming-refund-confirmation"]').setValue(true)
+    await form.trigger('submit')
+    await flushPromises()
+
+    expect(m.matchIncomingRefund).toHaveBeenCalledWith(expect.objectContaining({
+      liability_id: 44,
+      amount_minor: 50_000,
+      evidence: {
+        kind: 'cash',
+        cash_document_id: 501,
+      },
+    }))
+  })
+
+  it('routes reversal of a direct incoming match to the incoming-refund endpoint', async () => {
+    const base = await m.reconciliation()
+    const directIncomingMatch = {
+      id: 103,
+      allocation_id: null,
+      liability_id: 44,
+      event_kind: 'matched' as const,
+      source_match_id: null,
+      amount_minor: 50_000,
+      evidence_kind: 'bank' as const,
+      bank_statement_id: 95,
+      bank_transaction_id: 96,
+      cash_document_id: null,
+      actual_payment_date: '2026-08-20',
+      evidence_amount_minor: 50_000,
+      evidence_currency_code: 'CZK',
+      evidence_fact_hash: 'c'.repeat(64),
+      batch_reference: null,
+      liability_kind: 'net_wage',
+      allocation_direction: 'incoming' as const,
+      allocation_currency_code: 'CZK',
+      employee_name: 'Syntetická osoba – opravná vratka',
+      reversible_minor: 50_000,
+      created_at: '2026-08-20 10:00:00',
+    }
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      reversible_matches: [directIncomingMatch],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+    const source = wrapper.findAllComponents({ name: 'SearchableSelect' })
+      .find(select => select.props('placeholder')
+        === 'payroll.payments.settlements.select_source_match')
+    expect(source).toBeDefined()
+    await source!.vm.$emit('update:modelValue', 103)
+    await flushPromises()
+
+    const reversalForm = wrapper.get('[data-test="payment-reversal-form"]')
+    const reverseButton = reversalForm.get('button[type="submit"]')
+    expect(reverseButton).toBeDefined()
+    expect(reverseButton!.attributes('disabled')).toBeUndefined()
+    await reversalForm.trigger('submit')
+    await flushPromises()
+
+    expect(m.reverseIncomingRefund).toHaveBeenCalledWith(expect.objectContaining({
+      source_match_id: 103,
+      amount_minor: 50_000,
+    }))
+    expect(m.reverse).not.toHaveBeenCalled()
+  })
+
+  it('keeps a 500-liability incoming picker bounded and searches it on the server', async () => {
+    const base = await m.reconciliation()
+    const fiveHundred = Array.from({ length: 500 }, (_, index) => ({
+      ...base.incoming_liabilities[0],
+      id: 10_000 + index,
+      liability_reference: `payroll-liability:incoming:${index + 1}`,
+      employee_name: `Syntetická vratka ${index + 1}`,
+    }))
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      incoming_liabilities: fiveHundred.slice(0, 50),
+      incoming_liabilities_truncated: true,
+    })
+    m.searchOptions.mockResolvedValue({
+      kind: 'incoming_liabilities',
+      items: fiveHundred.slice(200, 220),
+      truncated: true,
+      limit: 20,
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+    const liabilitySelect = wrapper.findAllComponents({ name: 'SearchableSelect' })
+      .find(select => select.props('placeholder')
+        === 'payroll.payments.settlements.select_incoming_liability')
+    expect(liabilitySelect).toBeDefined()
+    expect(liabilitySelect!.props('remote')).toBe(true)
+    await liabilitySelect!.find('input').trigger('focus')
+    await flushPromises()
+
+    expect(m.searchOptions).toHaveBeenCalledWith({
+      period: expect.any(String),
+      kind: 'incoming_liabilities',
+      q: '',
+    })
+    expect(liabilitySelect!.props('options')).toHaveLength(20)
+    expect(liabilitySelect!.find('[data-test="searchable-select-truncated"]').text())
+      .toContain('payroll.payments.settlements.options_truncated')
+    expect(wrapper.text()).not.toContain('Syntetická vratka 500')
   })
 
   /**
@@ -821,7 +1129,7 @@ describe('PayrollPayments', () => {
       { limit: 25, offset: 25 },
     )
     // Nabídka storna zůstává úplná, i když historie ukazuje jinou stránku.
-    const reversalSelect = wrapper.findAllComponents({ name: 'SearchableSelect' })[2]
+    const reversalSelect = wrapper.findAllComponents({ name: 'SearchableSelect' })[4]
     expect(reversalSelect.props('options')).toHaveLength(2)
   })
   /**
@@ -861,7 +1169,7 @@ describe('PayrollPayments', () => {
     await flushPromises()
 
     const selects = wrapper.findAllComponents({ name: 'SearchableSelect' })
-    await selects[0].vm.$emit('update:modelValue', 81)
+    await selects[2].vm.$emit('update:modelValue', 81)
     await flushPromises()
 
     expect(m.searchOptions).toHaveBeenCalledWith(expect.objectContaining({
@@ -872,7 +1180,8 @@ describe('PayrollPayments', () => {
     }))
 
     const evidenceSelect = wrapper.findAllComponents({ name: 'SearchableSelect' })
-      .find(select => select.props('remote') === true)
+      .find(select => select.props('placeholder')
+        === 'payroll.payments.settlements.select_evidence')
     expect(evidenceSelect).toBeDefined()
     await evidenceSelect!.find('input').trigger('focus')
     await flushPromises()

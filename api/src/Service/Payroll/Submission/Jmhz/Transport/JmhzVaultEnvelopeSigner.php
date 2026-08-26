@@ -129,9 +129,17 @@ final readonly class JmhzVaultEnvelopeSigner implements JmhzEnvelopeSignerInterf
                     . ' proti registraci u ČSSZ.',
             );
         }
-        if (!hash_equals(
-            self::normalizeSerial($this->registeredSerialNumber),
-            self::normalizeSerial($serial),
+        if (CsszCertificateSerialNumber::normalizeRegisteredInput(
+            $this->registeredSerialNumber,
+        ) === null) {
+            throw new JmhzTransportException(
+                'jmhz_signing_serial_unreadable',
+                'Sériové číslo certifikátu není v čitelném tvaru.',
+            );
+        }
+        if (!CsszCertificateSerialNumber::matches(
+            $serial,
+            $this->registeredSerialNumber,
         )) {
             throw new JmhzTransportException(
                 'jmhz_signing_certificate_not_registered',
@@ -140,31 +148,4 @@ final readonly class JmhzVaultEnvelopeSigner implements JmhzEnvelopeSignerInterf
         }
     }
 
-    /**
-     * ČSSZ eviduje sériové číslo desítkově, trezor ho drží šestnáctkově.
-     * Porovnává se proto normalizovaná desítková podoba bez vedoucích nul.
-     */
-    private static function normalizeSerial(string $serial): string
-    {
-        $trimmed = strtolower(ltrim(trim($serial), '0'));
-        if ($trimmed === '') {
-            return '0';
-        }
-        if (preg_match('/^[0-9]+$/D', $trimmed) === 1) {
-            return $trimmed;
-        }
-        if (preg_match('/^[0-9a-f]+$/D', $trimmed) !== 1) {
-            throw new JmhzTransportException(
-                'jmhz_signing_serial_unreadable',
-                'Sériové číslo certifikátu není v čitelném tvaru.',
-            );
-        }
-
-        $decimal = '0';
-        foreach (str_split($trimmed) as $digit) {
-            $decimal = bcadd(bcmul($decimal, '16'), (string) hexdec($digit));
-        }
-
-        return ltrim($decimal, '0') ?: '0';
-    }
 }

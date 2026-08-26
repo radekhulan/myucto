@@ -247,7 +247,7 @@ a proformy nechat na dodavateli.
 - V editoru konceptu vidíš **placeholder** s předpokládaným číslem (preview).
 - Při Vystavení (Issue) se atomicky vezme další counter z DB a uloží jako
   immutable `varsymbol`.
-- V editoru konceptu můžeš číslo přepsat ručně — viz [§ 15.2.5](15_Faktura_editor.md#1525-islo-dokladu-rucni-override-volitelne).
+- V editoru konceptu můžeš číslo přepsat ručně — viz [§ 15.2.5](15_Faktura_editor.md#1525-cislo-dokladu-rucni-override-volitelne).
 
 ### 72.5.4 Kopie odchozích e-mailů dodavateli
 

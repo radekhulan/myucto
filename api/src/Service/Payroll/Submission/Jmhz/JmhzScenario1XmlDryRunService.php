@@ -7,7 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 use MyInvoice\Service\Report\EpoEnvelope;
 
 /**
- * Lokální nácvik podání. Sestaví XML běžného měsíčního hlášení z ověřeného
+ * Lokální test podání. Sestaví XML běžného měsíčního hlášení z ověřeného
  * preparation snapshotu a ověří je proti připnutému XSD — nic neodesílá,
  * nic neukládá a nezakládá žádné podání.
  *
@@ -72,7 +72,7 @@ final readonly class JmhzScenario1XmlDryRunService
 
         // XSD hlídá tvar, katalog kontrol obsah. Teprve oboje dohromady říká,
         // jestli by ČSSZ podání přijala — a mezera v pokrytí katalogu se musí
-        // projevit jako nepřipravenost, ne jako zelený nácvik.
+        // projevit jako nepřipravenost, ne jako zelený test.
         $controls = $this->controls->validate(
             $result['xml'],
             JmhzControlContext::today(schemaValidated: true),
@@ -97,7 +97,7 @@ final readonly class JmhzScenario1XmlDryRunService
     }
 
     /**
-     * Lhůta pro podání za vykazované období. Do nácviku patří proto, že „XML je
+     * Lhůta pro podání za vykazované období. Do testu patří proto, že „XML je
      * v pořádku" a „ještě to stihnu" jsou dvě různé otázky a uživatel se ptá na
      * obě naráz. Termín se posouvá na nejbližší pracovní den, takže odhadnout
      * ho od dvacátého v měsíci nejde.
@@ -152,8 +152,8 @@ final readonly class JmhzScenario1XmlDryRunService
      * Proč tenhle výsledek NENÍ podání.
      *
      * Důvod se změnil a mlčet o tom by bylo zavádějící: kanál VREP je zapojený
-     * a ověřený odesláním do testovacího prostředí ČSSZ. Nácvik ale zůstává
-     * nácvikem ze dvou důvodů, které s dopravou nesouvisejí — GUIDy tu vznikají
+     * a ověřený odesláním do testovacího prostředí ČSSZ. Test ale zůstává
+     * testem ze dvou důvodů, které s dopravou nesouvisejí — GUIDy tu vznikají
      * při každém běhu nové, kdežto ostré podání si je musí zmrazit (duplicitu
      * u ČSSZ nelze vzít zpět), a nezakládá se žádný záznam podání, takže není
      * co odeslat ani k čemu přiřadit protokol.
@@ -165,7 +165,7 @@ final readonly class JmhzScenario1XmlDryRunService
         return [
             'supported' => false,
             'reason_code' => 'jmhz_dry_run_is_not_a_submission',
-            'reason' => 'Jde o lokální nácvik: GUIDy vznikají při každém běhu nové'
+            'reason' => 'Jde o lokální test: GUIDy vznikají při každém běhu nové'
                 . ' a nezakládá se žádné podání. Odeslání na ČSSZ se spouští'
                 . ' zvlášť nad zmrazeným podáním.',
         ];

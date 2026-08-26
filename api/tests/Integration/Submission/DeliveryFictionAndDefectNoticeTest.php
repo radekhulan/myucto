@@ -109,6 +109,7 @@ final class DeliveryFictionAndDefectNoticeTest extends TestCase
             $this->stubArtifacts(),
             new SubmissionArtifactValidator(new XmlSchemaValidator()),
             new NullLogger(),
+            null,
         );
 
         $activity = $container->get(ActivityLogger::class);

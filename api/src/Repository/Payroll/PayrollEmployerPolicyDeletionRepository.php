@@ -9,8 +9,9 @@ namespace MyInvoice\Repository\Payroll;
  *
  * ── Co smí blokovat ───────────────────────────────────────────────────────────
  * Schválený i rozpracovaný VÝPOČET. Pravidlo určuje výplatní termín, zaokrouhlení
- * salda a čtyři oči — jakmile v jeho platnosti existuje mzdový běh, počítalo se
- * podle něj a smazáním bychom se rozešli s tím, co je v revizích zamrazené.
+ * salda a další provozní volby — jakmile v jeho platnosti existuje mzdový běh,
+ * počítalo se podle něj a smazáním bychom se rozešli s tím, co je v revizích
+ * zamrazené.
  * Typický případ, kvůli kterému mazání vzniklo, je opak: verze s BUDOUCÍ
  * platností, kterou někdo založil s překlepem a ještě do ní nespadl žádný běh.
  *

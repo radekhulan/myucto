@@ -18,6 +18,7 @@ use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentQueryService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -67,6 +68,11 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             $sourceSupplierId,
         );
         $this->actorId = $this->createActor($pdo);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->actorId]);
         $institutionRepository = new PayrollInstitutionAccountRepository(
             $connection,
             $sensitive,
@@ -123,6 +129,7 @@ final class PayrollHealthInsuranceLiabilityMaterializerTest extends TestCase
             new IbanValidator(),
             new CzechBankAccountValidator(),
             new MockClock('2026-07-01 10:00:00 Europe/Prague'),
+            $container->get(PayrollProductionGate::class),
         );
     }
 

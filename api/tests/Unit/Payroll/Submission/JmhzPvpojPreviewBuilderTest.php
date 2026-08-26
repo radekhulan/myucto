@@ -218,8 +218,10 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         self::assertSame(4, $first->office['office_id']);
         self::assertSame('1234567890', $first->office['variable_symbol']);
         self::assertSame('9876543210', $second->office['variable_symbol']);
-        self::assertSame(81, $first->source['social_liability_id']);
-        self::assertSame(82, $second->source['social_liability_id']);
+        self::assertSame(
+            $first->source['statutory_result_hash'],
+            $second->source['statutory_result_hash'],
+        );
         self::assertSame(2_625, $first->pvpoj['pojistneUhrada']);
         self::assertSame(2_233, $second->pvpoj['pojistneUhrada']);
         self::assertSame([
@@ -310,19 +312,15 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         );
     }
 
-    /**
-     * Variabilní symbol účtárny se od zmaterializování závazku změnit může —
-     * přehled a platba by pak šly pod jinou registraci.
-     */
-    public function testRejectsVariableSymbolThatDriftedFromTheLiability(): void
+    public function testUsesSelectedOfficeVariableSymbolWithoutPaymentAccount(): void
     {
         $source = $this->source();
         $source['offices'] = [$this->office(4, '5555555555')];
+        unset($source['social_liabilities']);
 
-        $this->expectCode(
-            'jmhz_social_liability_mismatch',
-            fn () => $this->builder->build(41, $source),
-        );
+        $preview = $this->builder->build(41, $source);
+
+        self::assertSame('5555555555', $preview->office['variable_symbol']);
     }
 
     public function testRejectsFrozenEmploymentWithoutOffice(): void
@@ -342,14 +340,21 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         );
     }
 
-    public function testRejectsMissingCsszLiability(): void
+    public function testBuildsPreviewBeforeCsszPaymentLiabilityExists(): void
     {
         $source = $this->source();
-        $source['social_liabilities'] = [];
+        unset($source['social_liabilities']);
 
-        $this->expectCode(
-            'jmhz_social_liability_missing',
-            fn () => $this->builder->build(41, $source),
+        $preview = $this->builder->build(41, $source);
+
+        self::assertSame(4_858, $preview->pvpoj['pojistneUhrada']);
+        self::assertArrayNotHasKey(
+            'social_liability_id',
+            $preview->source,
+        );
+        self::assertArrayNotHasKey(
+            'social_liability_hash',
+            $preview->source,
         );
     }
 
@@ -386,9 +391,10 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         );
     }
 
-    public function testRejectsCsszLiabilityThatDoesNotMatchPvpojPayable(): void
+    public function testPaymentLiabilityDoesNotAffectStatutoryPreview(): void
     {
         $source = $this->source();
+        $expected = $this->builder->build(41, $source)->canonicalJson();
         $liabilitySource = &$source['social_liabilities'][0]['source_snapshot'];
         $targetAmount = $liabilitySource['target_amount_minor'] ?? null;
         self::assertIsInt($targetAmount);
@@ -400,9 +406,9 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
             $source['social_liabilities'][0]['source_snapshot_json'],
         );
 
-        $this->expectCode(
-            'jmhz_social_liability_mismatch',
-            fn () => $this->builder->build(41, $source),
+        self::assertSame(
+            $expected,
+            $this->builder->build(41, $source)->canonicalJson(),
         );
     }
 

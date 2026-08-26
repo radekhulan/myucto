@@ -21,6 +21,7 @@ import {
   type PayrollSocialBreakdown,
 } from '@/api/payrollInsurance'
 import { btnOutlineSm } from '@/components/ui/buttonStyles'
+import PayrollPersonPicker from '@/components/payroll/PayrollPersonPicker.vue'
 
 const props = withDefaults(defineProps<{
   revisionId: number | null
@@ -41,6 +42,10 @@ let requestSequence = 0
 const insurancePeople = computed(() => props.people.filter(person => person.statutory !== undefined))
 
 const available = computed(() => props.revisionId !== null && insurancePeople.value.length > 0)
+const personOptions = computed(() => insurancePeople.value.map(person => ({
+  value: person.employee_id,
+  label: personLabel(person),
+})))
 
 const social = computed(() =>
   breakdown.value?.social.available ? breakdown.value.social as PayrollSocialBreakdown : null,
@@ -121,7 +126,45 @@ function statusTone(status: string | undefined): string {
 }
 
 function issueLabel(code: string): string {
-  return t('payroll.runs.insurance.issue', { code })
+  return t('payroll.runs.insurance.issue', { code: participationReasonLabel(code) })
+}
+
+const PARTICIPATION_REASON_KEYS = new Set([
+  'inactive_without_attributable_income',
+  'income_month_attribution_unverified',
+  'dpp_group_contains_unresolved_relationship',
+  'dpp_group_threshold_met',
+  'dpp_group_below_threshold',
+  'regular_relationship',
+  'agreed_income_threshold_met',
+  'small_scale_group_contains_unresolved_relationship',
+  'small_scale_group_threshold_met',
+  'small_scale_group_below_threshold',
+  'dpc_group_contains_unresolved_relationship',
+  'dpc_group_negative_income_requires_period_revision',
+  'dpc_group_threshold_met',
+  'dpc_group_below_threshold',
+  'dpp_group_negative_income_requires_period_revision',
+  'dependent_income_relationship',
+  'manual_review',
+])
+
+function participationReasonLabel(rawCode: string): string {
+  const [rawKind, detail] = rawCode.split(':', 2)
+  const kind = rawKind === 'regular-employment' ? 'regular_relationship' : rawKind
+  if (kind === 'participation_component_manual_review') {
+    return t('payroll.runs.insurance.reason.participation_component_manual_review', {
+      component: detail || t('payroll.runs.insurance.unknown_component'),
+    })
+  }
+  if (PARTICIPATION_REASON_KEYS.has(kind)) {
+    return t(`payroll.runs.insurance.reason.${kind}`)
+  }
+  return t('payroll.runs.insurance.reason.unknown')
+}
+
+function participationReasonList(codes: string[]): string {
+  return codes.map(participationReasonLabel).join('; ')
 }
 
 function componentList(codes: string[]): string {
@@ -186,23 +229,11 @@ watch(
       </div>
     </div>
 
-    <nav
-      class="flex gap-1 overflow-x-auto border-b border-neutral-200 px-2 sm:px-4"
-      :aria-label="t('payroll.runs.insurance.people_tabs')"
-    >
-      <button
-        v-for="person in insurancePeople"
-        :key="person.employee_id"
-        type="button"
-        class="whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors"
-        :class="selectedEmployeeId === person.employee_id
-          ? 'border-payroll-500 text-payroll-700'
-          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
-        @click="selectedEmployeeId = person.employee_id"
-      >
-        {{ personLabel(person) }}
-      </button>
-    </nav>
+    <PayrollPersonPicker
+      v-model="selectedEmployeeId"
+      :options="personOptions"
+      :selector-label="t('payroll.runs.insurance.people_tabs')"
+    />
 
     <div v-if="loading" class="space-y-3 p-4 sm:p-5">
       <div v-for="index in 3" :key="index" class="h-16 animate-pulse rounded-lg bg-neutral-100" />
@@ -433,7 +464,7 @@ watch(
                 </div>
               </dl>
               <p v-if="relationship.reason_codes.length" class="mt-2 text-xs text-neutral-500">
-                {{ t('payroll.runs.insurance.reasons', { codes: relationship.reason_codes.join(', ') }) }}
+                {{ t('payroll.runs.insurance.reasons', { codes: participationReasonList(relationship.reason_codes) }) }}
               </p>
             </article>
           </div>
@@ -695,7 +726,7 @@ watch(
                 </div>
               </dl>
               <p v-if="relationship.reason_codes.length" class="mt-2 text-xs text-neutral-500">
-                {{ t('payroll.runs.insurance.reasons', { codes: relationship.reason_codes.join(', ') }) }}
+                {{ t('payroll.runs.insurance.reasons', { codes: participationReasonList(relationship.reason_codes) }) }}
               </p>
             </article>
           </div>

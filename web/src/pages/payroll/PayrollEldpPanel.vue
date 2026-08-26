@@ -7,7 +7,7 @@
  * záměr, ne rozestavěnost: datová věta odesílaného ELDP není v připnuté
  * oficiální sadě, takže odeslat by stejně nešlo bez ověřeného schématu.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
@@ -15,27 +15,28 @@ import {
   type PayrollEldpPrepared,
   type PayrollEldpStatement,
   type PayrollEmployment,
-  type PayrollPersonOption,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 
-const loading = ref(true)
 const preparing = ref(false)
-const people = ref<PayrollPersonOption[]>([])
 const employments = ref<PayrollEmployment[]>([])
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
 const year = ref<number>(new Date().getFullYear() - 1)
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 const excludedDaysConfirmed = ref(false)
 const deductedDaysNone = ref(false)
 const requestedByAuthority = ref(false)
+const authorityRequestReceivedOn = ref('')
 const note = ref('')
 const statement = ref<PayrollEldpStatement | null>(null)
 const prepared = ref<PayrollEldpPrepared | null>(null)
@@ -44,8 +45,6 @@ const error = ref('')
 const success = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const personOptions = computed(() =>
-  people.value.map(person => ({ value: person.id, label: person.full_name })))
 const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
@@ -73,20 +72,9 @@ const canPrepare = computed(() =>
   && employmentId.value !== null
   && excludedDaysConfirmed.value
   && deductedDaysNone.value
+  && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
   && note.value.trim().length >= 5
   && note.value.trim().length <= 500)
-
-async function loadPeople(): Promise<void> {
-  loading.value = true
-  error.value = ''
-  try {
-    people.value = await payrollApi.peopleOptions()
-  } catch {
-    error.value = t('payroll.eldp.errors.loadFailed')
-  } finally {
-    loading.value = false
-  }
-}
 
 async function loadEmployments(id: number): Promise<void> {
   employments.value = []
@@ -135,6 +123,9 @@ async function prepare(): Promise<void> {
       excluded_days_confirmed: excludedDaysConfirmed.value,
       deducted_days_none: deductedDaysNone.value,
       requested_by_authority: requestedByAuthority.value,
+      authority_request_received_on: requestedByAuthority.value
+        ? authorityRequestReceivedOn.value
+        : null,
       note: note.value.trim(),
       idempotency_key: `eldp:${environment.value}:${employmentId.value}:${year.value}`,
     })
@@ -160,6 +151,9 @@ async function prepare(): Promise<void> {
 watch(personId, value => {
   if (value !== null) {
     void loadEmployments(value)
+  } else {
+    employments.value = []
+    employmentId.value = null
   }
 })
 watch([employmentId, year, environment], () => {
@@ -167,12 +161,21 @@ watch([employmentId, year, environment], () => {
   blockers.value = []
   void loadStatement()
 })
-onMounted(loadPeople)
+watch(requestedByAuthority, value => {
+  if (value && authorityRequestReceivedOn.value === '') {
+    const today = new Date()
+    authorityRequestReceivedOn.value = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-')
+  }
+})
 </script>
 
 <template>
   <div class="space-y-4" data-test="eldp-panel">
-    <div class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">
+    <div class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-700">
       <h3 class="text-base font-semibold text-neutral-900">
         {{ t('payroll.eldp.title') }}
       </h3>
@@ -207,16 +210,19 @@ onMounted(loadPeople)
       {{ success }}
     </div>
 
-    <div v-if="loading" class="h-48 animate-pulse rounded-xl bg-neutral-100" />
-
-    <div v-else class="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
+    <div class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
       <div class="grid gap-4 sm:grid-cols-2">
-        <label class="block text-sm">
+        <div class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.eldp.person') }}
           </span>
-          <SearchableSelect v-model="personId" :options="personOptions" />
-        </label>
+          <PayrollPersonSearchSelect
+            v-model="personId"
+            data-test="eldp-person"
+            :label="t('payroll.eldp.person')"
+            :clearable="false"
+          />
+        </div>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.eldp.employment') }}
@@ -265,6 +271,20 @@ onMounted(loadPeople)
           >
           <span>{{ t('payroll.eldp.requestedByAuthority') }}</span>
         </label>
+        <label v-if="requestedByAuthority" class="block max-w-sm text-sm">
+          <span class="mb-1 block font-medium text-neutral-700">
+            {{ t('payroll.eldp.authorityRequestReceivedOn') }}
+          </span>
+          <input
+            v-model="authorityRequestReceivedOn"
+            type="date"
+            class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            data-test="eldp-authority-request-date"
+          >
+          <span class="mt-1 block text-xs text-neutral-500">
+            {{ t('payroll.eldp.authorityRequestReceivedOnHint') }}
+          </span>
+        </label>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.eldp.note') }}
@@ -273,7 +293,7 @@ onMounted(loadPeople)
             v-model="note"
             rows="2"
             maxlength="500"
-            class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+            class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="eldp-note"
           />
         </label>

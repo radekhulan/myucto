@@ -265,6 +265,45 @@ final class PayrollPersonProfileValidatorTest extends TestCase
         }
     }
 
+    public function testNormalizesRegistrationIdentityFactsAndRejectsInvalidValues(): void
+    {
+        $identity = [
+            'full_name' => 'Jana Testovací',
+            'first_name' => 'Jana',
+            'last_name' => 'Testovací',
+            'title_prefix' => ' Ing. ',
+            'title_suffix' => '',
+            'birth_date' => '1990-02-03',
+            'birth_place' => ' Brno ',
+            'birth_country_code' => 'cz',
+            'citizenship_country_code' => 'sk',
+            'sex' => 'female',
+            'effective_from' => '2026-01-01',
+        ];
+        $normalized = $this->validator->validate($this->payload([
+            'identity_history' => [$identity],
+        ]))['identity_history'][0];
+
+        self::assertSame('Ing.', $normalized['title_prefix']);
+        self::assertNull($normalized['title_suffix']);
+        self::assertSame('1990-02-03', $normalized['birth_date']);
+        self::assertSame('Brno', $normalized['birth_place']);
+        self::assertSame('CZ', $normalized['birth_country_code']);
+        self::assertSame('SK', $normalized['citizenship_country_code']);
+        self::assertSame('female', $normalized['sex']);
+
+        foreach ([
+            ['birth_date' => (new \DateTimeImmutable('tomorrow'))->format('Y-m-d')],
+            ['birth_country_code' => 'CZE'],
+            ['citizenship_country_code' => '1X'],
+            ['sex' => 'F'],
+        ] as $invalid) {
+            $this->expectInvalid([
+                'identity_history' => [array_replace($identity, $invalid)],
+            ]);
+        }
+    }
+
     public function testNormalizesTypedIdentifiersAndRejectsArbitraryValues(): void
     {
         $normalized = $this->validator->validate($this->payload([
@@ -285,6 +324,7 @@ final class PayrollPersonProfileValidatorTest extends TestCase
             ['identifier_type' => 'birth_number', 'value' => '1234567890'],
             ['identifier_type' => 'birth_number', 'value' => '0041010002'],
             ['identifier_type' => 'ecp', 'value' => '12345678'],
+            ['identifier_type' => 'vcp', 'value' => '123456789'],
             ['identifier_type' => 'vcp', 'value' => '1234567890'],
             ['identifier_type' => 'foreign_tax_identifier', 'value' => 'bez-zeme'],
         ] as $identifier) {

@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   recipients: vi.fn(),
   outbox: vi.fn(),
   inbox: vi.fn(),
+  mobileKeyProfile: vi.fn(),
   unmatchedReceipts: vi.fn(),
   receiptCandidates: vi.fn(),
   matchReceipt: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/api/dataBox', () => ({
     recipients: m.recipients,
     outbox: m.outbox,
     inbox: m.inbox,
+    mobileKeyProfile: m.mobileKeyProfile,
     unmatchedReceipts: m.unmatchedReceipts,
     receiptCandidates: m.receiptCandidates,
     matchReceipt: m.matchReceipt,
@@ -129,6 +131,7 @@ async function mountWith(rows: OutboxSubmission[], unmatched: InboxMessage[] = [
   m.outbox.mockResolvedValue(rows)
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue(unmatched)
+  m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
 
   const wrapper = mount(DataBox, { global: { stubs: { EmptyState: true } } })
   await flushPromises()

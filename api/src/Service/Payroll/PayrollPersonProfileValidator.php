@@ -9,7 +9,18 @@ use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 
 /**
- * @phpstan-type IdentityInput array{id:?int,full_name:string,first_name:string,last_name:string,birth_surname_present:bool,birth_surname:?string,birth_surname_source_id:?int,effective_from:string,effective_to:?string}
+ * @phpstan-type IdentityInput array{
+ *   id:?int,full_name:string,first_name:string,last_name:string,
+ *   title_prefix_present:bool,title_prefix:?string,
+ *   title_suffix_present:bool,title_suffix:?string,
+ *   birth_surname_present:bool,birth_surname:?string,birth_surname_source_id:?int,
+ *   birth_date_present:bool,birth_date:?string,
+ *   birth_place_present:bool,birth_place:?string,
+ *   birth_country_code_present:bool,birth_country_code:?string,
+ *   citizenship_country_code_present:bool,citizenship_country_code:?string,
+ *   sex_present:bool,sex:?string,
+ *   effective_from:string,effective_to:?string
+ * }
  * @phpstan-type AddressInput array{id:?int,address_type:string,address_present:bool,street_line:?string,city:?string,postal_code:?string,country_code:?string,effective_from:string,effective_to:?string}
  * @phpstan-type ContactInput array{id:?int,contact_type:string,value:?string,is_primary:bool,is_active:bool}
  * @phpstan-type IdentifierInput array{id:?int,identifier_type:string,value:?string}
@@ -151,6 +162,7 @@ final class PayrollPersonProfileValidator
         $rows = $this->list($value, 'identity_history');
         $result = [];
         foreach ($rows as $index => $row) {
+            $path = "identity_history.{$index}";
             $id = $this->optionalId($row['id'] ?? null, "identity_history.{$index}.id");
             $birthSurnamePresent = array_key_exists('birth_surname', $row)
                 && $row['birth_surname'] !== null;
@@ -176,6 +188,15 @@ final class PayrollPersonProfileValidator
                     "identity_history.{$index}.birth_surname",
                 );
             }
+            $birthDatePresent = array_key_exists('birth_date', $row);
+            $birthDate = $birthDatePresent
+                ? $this->nullableDate($row['birth_date'], "{$path}.birth_date")
+                : null;
+            if ($birthDate !== null && $birthDate > date('Y-m-d')) {
+                throw new \InvalidArgumentException(
+                    "{$path}.birth_date nesmí být v budoucnosti."
+                );
+            }
             $result[] = [
                 'id' => $id,
                 'full_name' => $this->text(
@@ -193,9 +214,42 @@ final class PayrollPersonProfileValidator
                     "identity_history.{$index}.last_name",
                     96,
                 ),
+                'title_prefix_present' => array_key_exists('title_prefix', $row),
+                'title_prefix' => array_key_exists('title_prefix', $row)
+                    ? $this->nullableText($row['title_prefix'], "{$path}.title_prefix", 64)
+                    : null,
+                'title_suffix_present' => array_key_exists('title_suffix', $row),
+                'title_suffix' => array_key_exists('title_suffix', $row)
+                    ? $this->nullableText($row['title_suffix'], "{$path}.title_suffix", 64)
+                    : null,
                 'birth_surname_present' => $birthSurnamePresent,
                 'birth_surname' => $birthSurname,
                 'birth_surname_source_id' => $birthSurnameSourceId,
+                'birth_date_present' => $birthDatePresent,
+                'birth_date' => $birthDate,
+                'birth_place_present' => array_key_exists('birth_place', $row),
+                'birth_place' => array_key_exists('birth_place', $row)
+                    ? $this->nullableText($row['birth_place'], "{$path}.birth_place", 128)
+                    : null,
+                'birth_country_code_present' => array_key_exists('birth_country_code', $row),
+                'birth_country_code' => array_key_exists('birth_country_code', $row)
+                    ? $this->nullableCountryCode($row['birth_country_code'], "{$path}.birth_country_code")
+                    : null,
+                'citizenship_country_code_present' => array_key_exists('citizenship_country_code', $row),
+                'citizenship_country_code' => array_key_exists('citizenship_country_code', $row)
+                    ? $this->nullableCountryCode(
+                        $row['citizenship_country_code'],
+                        "{$path}.citizenship_country_code",
+                    )
+                    : null,
+                'sex_present' => array_key_exists('sex', $row),
+                'sex' => array_key_exists('sex', $row)
+                    ? $this->nullableEnum(
+                        $row['sex'],
+                        ['female', 'male', 'unspecified'],
+                        "{$path}.sex",
+                    )
+                    : null,
                 'effective_from' => $this->date(
                     $row['effective_from'] ?? null,
                     "identity_history.{$index}.effective_from",
@@ -570,6 +624,25 @@ final class PayrollPersonProfileValidator
         return strtoupper($value);
     }
 
+    /** @param list<string> $allowed */
+    private function nullableEnum(mixed $value, array $allowed, string $path): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $this->enum($value, $allowed, $path);
+    }
+
+    private function nullableCountryCode(mixed $value, string $path): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        return $this->countryCode($value, $path);
+    }
+
     private function rejectMaskPlaceholder(string $value, string $path): void
     {
         if (str_contains($value, '•') || preg_match('/\*{3,}/u', $value) === 1) {
@@ -585,7 +658,7 @@ final class PayrollPersonProfileValidator
         return match ($type) {
             'birth_number' => $this->normalizeBirthNumber($compact),
             'ecp' => $this->numericIdentifier($compact, 'EČP', 9, 10),
-            'vcp' => $this->numericIdentifier($compact, 'VČP', 9, 9),
+            'vcp' => PayrollVcp::normalize($compact),
             'foreign_tax_identifier' => $this->foreignTaxIdentifier($compact),
             default => throw new \InvalidArgumentException('Typ identifikátoru není podporovaný.'),
         };

@@ -126,9 +126,36 @@ final class JmhzComponentCancellationXmlSerializerTest extends TestCase
     {
         $this->expectException(JmhzXmlException::class);
         JmhzComponentCancellation::create(
+            '0195E2C41A2B4C3D8E4F5A6B7C8D9E10',
+            '1000000001',
+            '2000000000000000000001',
+        );
+    }
+
+    public function testExistingCanonicalUuidDoesNotHaveToBeVersionSeven(): void
+    {
+        $component = JmhzComponentCancellation::create(
             '0195E2C4-1A2B-4C3D-8E4F-5A6B7C8D9E10',
             '1000000001',
             '2000000000000000000001',
+        );
+
+        self::assertSame(
+            '0195E2C4-1A2B-4C3D-8E4F-5A6B7C8D9E10',
+            $component->formGuid,
+        );
+    }
+
+    public function testComponentCancellationAfterTheDeadlineIsRefused(): void
+    {
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessageMatches('/Lhůta pro storno/');
+        JmhzCancellationRequest::create(
+            self::REGULAR_GUID,
+            '1234567890',
+            2026,
+            7,
+            today: '2026-08-25',
         );
     }
 

@@ -1,14 +1,14 @@
 {
-    "manifest_sha256": "79ae3ab0776f0d5a0e6c89a1bf3e9955a51d7e4da7983700a80a0ad4fa97a122",
+    "manifest_sha256": "83ec6a985cf1c6d6e2429657d4ba6d12b09bfb849a32b504fff882383fb03800",
     "payload": {
-        "schema_version": "jmhz-control-source-catalog.v3",
-        "catalog_key": "jmhz-controls-1.4.2.7-source-v3",
-        "version": "1.4.2.7",
-        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1",
-        "spec_manifest_sha256": "f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b",
+        "schema_version": "jmhz-control-source-catalog.v4",
+        "catalog_key": "jmhz-controls-1.4.2.8-source-v4",
+        "version": "1.4.2.8",
+        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1",
+        "spec_manifest_sha256": "429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205",
         "source": {
-            "filename": "Katalog kontrol MH(public)_1.4.2.7.xlsx",
-            "sha256": "fbc87a3aab479af1c58bd44aa710e43f5a522d5ebca5de6eec9bbb690ad8a440",
+            "filename": "Katalog kontrol MH(public)_1.4.2.8.xlsx",
+            "sha256": "8c861badbd6229e9185482b0caaf19d6ded4797b27bf37f8b53dcb3b31151b49",
             "sheets": [
                 "MH",
                 "Parametrické konstanty"
@@ -16,9 +16,10 @@
         },
         "counts": {
             "controls": 199,
-            "attribute_refs": 826,
+            "attribute_refs": 825,
             "unique_attributes": 219,
             "symbolic_attribute_refs": 1,
+            "source_anomalies": 1,
             "parameters": 22,
             "parameter_control_refs": 30,
             "unique_parameter_controls": 19,
@@ -3245,19 +3246,19 @@
                 "control_id": 164,
                 "source_row": 88,
                 "name": "Kontrola na uplatnění slevy na pojistném zaměstnavatele v rámci splatnosti pojistného",
-                "attribute_refs_raw": "10032\n10006\n10010\n10011\n10016",
+                "attribute_refs_raw": "10032\n10006\n10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Přehled o výši pojistného",
                 "scope": "pvpoj",
                 "owner": "ČSSZ",
-                "portal_system": "eportal",
-                "portal_passability": "blocking",
+                "portal_system": "unavailable",
+                "portal_passability": "unavailable",
                 "remote_system": "cjmhz",
                 "remote_passability": "blocking",
                 "category": "F5",
-                "detail_text": "Pokud je (10016) = \"R\" a současně (10032) > 0 a (10006) je po lhůtě splatnosti pojistného (lhůta se určuje podle atributů (10010), (10011) na DIS pomocí kalendáře splatnosti),\npak slevu na pojistném zaměstnavatele (10032) nelze uplatnit.\n---\n10032 Sleva na pojistném zaměstnavatele\n10006 Datum a čas přijetí podání\n10010 Měsíc\n10011 Rok\n10016 Typ formuláře",
+                "detail_text": "Pokud je v první přijaté pojistné části (10032) > 0 a (10006) je po lhůtě splatnosti pojistného, pak slevu na pojistném zaměstnavatele (10032) nelze uplatnit. Kontrola platí jen pro rozhodná období od 04/2026 dál.\n---\n10032 Sleva na pojistném zaměstnavatele\n10006 Datum a čas přijetí podání\n10010 Měsíc\n10011 Rok",
                 "detail_formula": null,
-                "error_message": "Slevu na pojistném zaměstnavatele nelze uplatnit po lhůtě splatnosti pojistného.",
+                "error_message": "Slevu na pojistném zaměstnavatele (zkrácené úvazky) nelze uplatnit po lhůtě splatnosti pojistného.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": "DŮLEŽITÉ:\ntato kontrola 164 bude pro podání za měsíce 1,2,3/2026 vypnuta, tento bypass platí do 30. 06. 2026\n\nvysvětlení lhůta splatnosti: pojistné je splatné od 1. do 20. dne následujícího kalendářního měsíce. Připadne-li 20. den na sobotu, neděli nebo státní svátek, považuje se za den splatnosti nejbližší následující pracovní den.",
@@ -3281,14 +3282,9 @@
                         "attribute_id": "10011",
                         "ordinal": 4,
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
-                    },
-                    {
-                        "attribute_id": "10016",
-                        "ordinal": 5,
-                        "row_hash": "76c91d3247dc6f4eaeec6ab46f81e5289729e4d4e1eebc139c36a34b0f9b2d84"
                     }
                 ],
-                "row_hash": "30bb3f2846a0e5f01248d3bd57c893849391c72e66bb7c85b4a129fd3b09cbf7"
+                "row_hash": "9fdc6cc127d226c834b38f4d1abff3064ff703fa03b025d1dfe3569ad8135b57"
             },
             {
                 "control_id": 165,
@@ -6657,7 +6653,7 @@
                 "control_id": 290,
                 "source_row": 157,
                 "name": "Kontrola na výši slevy na pojistném zaměstnavatele uplatněné v opravném hlášení podaném po zákonné lhůtě",
-                "attribute_refs_raw": "10032\n10007\n10006\n10011\n10010",
+                "attribute_refs_raw": "10032\n10006\n10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Přehled o výši pojistného",
                 "scope": "pvpoj",
@@ -6667,9 +6663,9 @@
                 "remote_system": "cjmhz",
                 "remote_passability": "passable",
                 "category": "F5",
-                "detail_text": "Pokud se jedná o opravné podání (10007) = \"O\", podaného po zákonné lhůtě, kontroluje  se:\nvýše slevy na pojistném v atributu (10032) není vyšší než sleva uplatněná v posledním hlášení zaslaném v zákonné lhůtě.\nPro podání, která budou podána do 30. 6. 2026 za období 01-03/2026 je podmínka modifikována a vztažena k 30. 6. 2026 (po tomto datu nelze vykázat vyšší slevu než na posledním hlášení podaném do tohoto data).\n---\n10032 Sleva na pojistném zaměstnavatele (Přehled o výši pojistného)\n10007 Typ podání\n10006 Datum a čas přijetí podání\n10010 Měsíc\n10011 Rok",
+                "detail_text": "U opravného podání (10007) = \"O\" poslaného po zákonné lhůtě se ověřuje, že hodnota atributu (10032) není vyšší než hodnota atributu (10032) uvedená v posledním hlášení doručeném v zákonné lhůtě, jehož pojistná část byla akceptována.\nPro hlášení za měsíce 01-03/2026 poslané po 30. 6. 2026 se ověřuje, že hodnota atributu (10032) není vyšší než hodnota atributu (10032) uvedená v posledním hlášení doručeném nejpozději 30. 6. 2026, jehož pojistná část byla akceptována.\n---\n10007\n10032 Sleva na pojistném zaměstnavatele (Přehled o výši pojistného)\n10006 Datum a čas přijetí podání\n10010 Měsíc\n10011 Rok",
                 "detail_formula": null,
-                "error_message": "Opravným hlášením podaným po datu splatnosti pojistného nelze dodatečně uplatnit slevu na pojistném zaměstnavatele, resp. nelze uplatnit vyšší slevu než, která byla uplatněna v posledním hlášení podaném v zákonné lhůtě.",
+                "error_message": "Hlášením podaným po datu splatnosti pojistného nelze dodatečně uplatnit slevu na pojistném zaměstnavatele (zkrácené úvazky), resp. nelze uplatnit slevu ve vyšší výši, než v jaké byla uplatněna v posledním hlášení podaném v zákonné lhůtě.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
@@ -6680,27 +6676,22 @@
                         "row_hash": "b4e78345c55b7f530cc9fbfe928e6e39c0110e688cac66aba66364010d49234c"
                     },
                     {
-                        "attribute_id": "10007",
+                        "attribute_id": "10006",
                         "ordinal": 2,
-                        "row_hash": "f8ac4a710fd25956a1e3cf88edbe04ca9963f5a26336d843c798389531c96a3c"
+                        "row_hash": "928bcb934678092e24f6e417764d1fcda6b5cb38cca254eb2772fa51c9ec121c"
                     },
                     {
-                        "attribute_id": "10006",
+                        "attribute_id": "10010",
                         "ordinal": 3,
-                        "row_hash": "feca83d47a8bf1c46176bf8d7fc7810700ee04f460869bb7e35b5306812c23c9"
+                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
                     },
                     {
                         "attribute_id": "10011",
                         "ordinal": 4,
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
-                    },
-                    {
-                        "attribute_id": "10010",
-                        "ordinal": 5,
-                        "row_hash": "7d6b3d4706c0e3b49e2b42a42874d44420058a5e651a8d6098b46b3736dd930e"
                     }
                 ],
-                "row_hash": "a24984e42378e9fc1580d3f4199552b4211763a48bd587117c6e88d60d44946b"
+                "row_hash": "260c1846730c9d796537f0ed374424bff518ce2038bd3641c643c89012664f58"
             },
             {
                 "control_id": 291,
@@ -8471,22 +8462,42 @@
                 "control_id": 333,
                 "source_row": 188,
                 "name": "Časové omezení uplatnění slevy na pojistném (01–03/2026)",
-                "attribute_refs_raw": "10006\n10032\n10016",
+                "attribute_refs_raw": "10006\n10032\n10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Přehled o výši pojistného",
                 "scope": "pvpoj",
                 "owner": "ČSSZ",
-                "portal_system": "eportal",
-                "portal_passability": "blocking",
+                "portal_system": "unavailable",
+                "portal_passability": "unavailable",
                 "remote_system": "cjmhz",
                 "remote_passability": "blocking",
                 "category": "F5",
-                "detail_text": "Pokud je (10016) = \"R\" a současně (10032) > 0 a (10006) > 30. 6. 2026, pak slevu na pojistném nelze uplatnit. Platí jen pro podání za měsíce 01-03/2026.\n---\n10006 Datum a čas přijetí podání\n10032 Sleva na pojistném zaměstnavatele\n10016 Typ formuláře",
+                "detail_text": "Pro datový scénář pro druh činnosti 10 (formOzpTpp.xsd) nebo pro typ formuláře storno (10016) = \"S\" je atribut (10495) nepovinný,\npro všechny ostatní je (10495) povinný.\n---\n10495 Primární pracovněprávní vztah zaměstnance\n10016 Typ formuláře",
                 "detail_formula": null,
-                "error_message": "Slevu na pojistném zaměstnavatele za měsíce leden, únor a březen 2026 uplatňuje zaměstnavatel jejím odečtením od pojistného. Nedílnou součástí je však vykázání uplatněné slevy v měsíčním hlášení za tyto měsíce v souladu s platnou právním úpravou, tj. tato měsíční hlášení měla být podána nejpozději do 30. 6. 2026. Vykázání slevy na pojistném zaměstnavatele po uplynutí této lhůty nelze považovat za její řádné uplatnění.",
+                "error_message": "Slevu na pojistném zaměstnavatele (zkrácené úvazky) za měsíce leden, únor a březen 2026 uplatňuje zaměstnavatel jejím odečtením od pojistného. Nedílnou součástí je však vykázání uplatněné slevy v měsíčním hlášení za tyto měsíce v souladu s platnou právním úpravou, tj. tato měsíční hlášení měla být podána nejpozději do 30. 6. 2026. Vykázání slevy na pojistném zaměstnavatele po uplynutí této lhůty nelze považovat za její řádné uplatnění.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
+                "source_anomaly": {
+                    "code": "official_detail_attribute_mismatch",
+                    "source_cells": [
+                        "B188",
+                        "C188",
+                        "L188",
+                        "M188"
+                    ],
+                    "declared_attribute_ids": [
+                        "10006",
+                        "10032",
+                        "10010",
+                        "10011"
+                    ],
+                    "detail_attribute_ids": [
+                        "10016",
+                        "10495"
+                    ],
+                    "resolution": "fail_closed_not_evaluable"
+                },
                 "attribute_refs": [
                     {
                         "attribute_id": "10006",
@@ -8499,12 +8510,17 @@
                         "row_hash": "01868e67218fb4467b67e4c2d8f975dd76807e23e1a4485f799218b078026933"
                     },
                     {
-                        "attribute_id": "10016",
+                        "attribute_id": "10010",
                         "ordinal": 3,
-                        "row_hash": "b76859082b07bae3b41e19dc388093a21bfce01a9e777f4fbcd251de6752dfa2"
+                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
+                    },
+                    {
+                        "attribute_id": "10011",
+                        "ordinal": 4,
+                        "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "c438278ba6c86aca6e7e6e0b7ffa23d480550e715df5dfc64087482d6c0afff9"
+                "row_hash": "9766e4b851c0456fcbf9031fa90e413a741ccaa596f228a2dfc847a27efb8c6b"
             },
             {
                 "control_id": 334,

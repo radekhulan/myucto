@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\IncomeTax\EuropeanEconomicAreaCountries;
+
 final readonly class AnnualTaxCertificateDocumentData
 {
-    public const SCHEMA_VERSION = 'annual-tax-certificate-document.v2';
+    public const SCHEMA_VERSION = 'annual-tax-certificate-document.v3';
 
     /**
      * @param array{
@@ -25,7 +27,7 @@ final readonly class AnnualTaxCertificateDocumentData
      * @param array<string,int> $employerProductContributionsMinorUnits
      * @param list<array<string,mixed>> $childTaxBenefits
      * @param list<array<string,mixed>> $disabilityTaxCredits
-     * @param array{performed:bool,result:?array<string,mixed>} $annualSettlement
+     * @param array<string,mixed> $annualSettlement
      */
     public function __construct(
         public string $sourceSnapshotSha256,
@@ -136,11 +138,22 @@ final readonly class AnnualTaxCertificateDocumentData
                 'Měsíce daňového potvrzení nejsou seřazené.',
             );
         }
-        if ($taxResidenceStatus !== 'czech-resident'
-            || $taxResidenceCountryCode !== 'CZ'
+        $isCzechResident = $taxResidenceStatus === 'czech-resident'
+            && $taxResidenceCountryCode === 'CZ';
+        $isNonresident = $taxResidenceStatus === 'non-resident'
+            && preg_match('/^[A-Z]{2}$/D', $taxResidenceCountryCode) === 1
+            && $taxResidenceCountryCode !== 'CZ';
+        if (!$isCzechResident && !$isNonresident) {
+            throw new \InvalidArgumentException(
+                'Daňové potvrzení nemá platně doloženou daňovou rezidenci.',
+            );
+        }
+        if ($kind === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
+            && $isNonresident
+            && !EuropeanEconomicAreaCountries::contains($taxResidenceCountryCode)
         ) {
             throw new \InvalidArgumentException(
-                'Daňové potvrzení nemá doložené rezidentství České republiky.',
+                'Srážkové potvrzení lze vystavit jen rezidentovi ČR nebo nerezidentovi EU/EHP.',
             );
         }
         $signedMonths = [];
@@ -231,22 +244,41 @@ final readonly class AnnualTaxCertificateDocumentData
                 );
             }
         }
-        if ($childTaxBenefits !== [] || $disabilityTaxCredits !== []) {
+        self::childTaxBenefits($childTaxBenefits, $kind);
+        self::disabilityTaxCredits($disabilityTaxCredits, $kind);
+        $annualSettlementPerformed = self::annualSettlement(
+            $annualSettlement,
+            $kind,
+        );
+        if ($isNonresident
+            && ($childTaxBenefits !== []
+                || $disabilityTaxCredits !== []
+                || $annualSettlementPerformed)
+        ) {
             throw new \InvalidArgumentException(
-                'Děti a invalidita vyžadují úplná strukturovaná data řádků 11 a 12.',
+                'Nerezident nesmí mít na potvrzení rezidentské slevy ani roční zúčtování.',
             );
         }
-        if ($annualSettlement !== [
-            'performed' => false,
-            'result' => null,
-        ]) {
-            throw new \InvalidArgumentException(
-                'Výsledek ročního zúčtování nemá úplnou strukturu řádku 13.',
-            );
-        }
-        if ($nonresidentInsuranceMinorUnits !== null) {
+        if ($isCzechResident && $nonresidentInsuranceMinorUnits !== null) {
             throw new \InvalidArgumentException(
                 'Řádek 14 musí u českého daňového rezidenta zůstat prázdný.',
+            );
+        }
+        if ($isNonresident
+            && $kind === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
+            && ($nonresidentInsuranceMinorUnits === null
+                || $nonresidentInsuranceMinorUnits < 0
+                || $nonresidentInsuranceMinorUnits % 100 !== 0)
+        ) {
+            throw new \InvalidArgumentException(
+                'Nerezident musí mít na řádku 14 doložené povinné pojistné v celých Kč.',
+            );
+        }
+        if ($kind === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
+            && $nonresidentInsuranceMinorUnits !== null
+        ) {
+            throw new \InvalidArgumentException(
+                'Srážkové potvrzení nemá řádek pro povinné pojistné nerezidenta.',
             );
         }
         foreach ([
@@ -373,7 +405,9 @@ final readonly class AnnualTaxCertificateDocumentData
             ),
             'child_tax_benefits' => $this->childTaxBenefits,
             'disability_tax_credits' => $this->disabilityTaxCredits,
-            'annual_settlement' => $this->annualSettlement,
+            'annual_settlement' => self::annualSettlementTemplate(
+                $this->annualSettlement,
+            ),
             'nonresident_insurance_czk' =>
                 $this->nonresidentInsuranceMinorUnits === null
                     ? null
@@ -396,6 +430,260 @@ final readonly class AnnualTaxCertificateDocumentData
     private static function czk(int $minorUnits): int
     {
         return intdiv($minorUnits, 100);
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function childTaxBenefits(
+        array $rows,
+        PayrollDocumentKind $kind,
+    ): void {
+        if ($kind === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
+            && $rows !== []
+        ) {
+            throw new \InvalidArgumentException(
+                'Srážkové potvrzení nesmí obsahovat daňové zvýhodnění na děti.',
+            );
+        }
+        foreach ($rows as $row) {
+            if (array_keys($row) !== [
+                'name', 'identifier', 'ztpp_period', 'first_child_period',
+                'second_child_period', 'third_child_period',
+            ] || !self::validText($row['name'] ?? null, 191)
+                || !self::validText($row['identifier'] ?? null, 50)
+            ) {
+                throw new \InvalidArgumentException(
+                    'Dítě na řádku 11 nemá úplnou identitu.',
+                );
+            }
+            foreach ([
+                'ztpp_period', 'first_child_period', 'second_child_period',
+                'third_child_period',
+            ] as $field) {
+                if (!self::validMonthPeriods($row[$field] ?? null)) {
+                    throw new \InvalidArgumentException(
+                        'Dítě na řádku 11 nemá platné období uplatnění.',
+                    );
+                }
+            }
+            if ($row['first_child_period'] === ''
+                && $row['second_child_period'] === ''
+                && $row['third_child_period'] === ''
+            ) {
+                throw new \InvalidArgumentException(
+                    'Dítě na řádku 11 nemá žádné období uplatnění.',
+                );
+            }
+        }
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function disabilityTaxCredits(
+        array $rows,
+        PayrollDocumentKind $kind,
+    ): void {
+        if ($kind === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
+            && $rows !== []
+        ) {
+            throw new \InvalidArgumentException(
+                'Srážkové potvrzení nesmí obsahovat slevu na invaliditu nebo ZTP/P.',
+            );
+        }
+        $degrees = ['I. nebo II. stupeň', 'III. stupeň', 'průkaz ZTP/P'];
+        foreach ($rows as $row) {
+            if (array_keys($row) !== ['period', 'degree']
+                || !self::validMonthPeriods($row['period'] ?? null, false)
+                || !in_array($row['degree'] ?? null, $degrees, true)
+            ) {
+                throw new \InvalidArgumentException(
+                    'Sleva na řádku 12 nemá platný druh a období.',
+                );
+            }
+        }
+    }
+
+    /** @param array<string,mixed> $settlement */
+    private static function annualSettlement(
+        array $settlement,
+        PayrollDocumentKind $kind,
+    ): bool {
+        $result = self::annualSettlementResult($settlement);
+        if ($result !== null
+            && $kind !== PayrollDocumentKind::TaxableIncomeAdvanceCertificate
+        ) {
+            throw new \InvalidArgumentException(
+                'Výsledek ročního zúčtování nemá úplnou strukturu řádku 13.',
+            );
+        }
+
+        return $result !== null;
+    }
+
+    /**
+     * @param array<string,mixed> $settlement
+     * @return array{
+     *   tax_overpayment_minor_units:int,
+     *   settlement_supplement_minor_units:int,
+     *   tax_overpayment_after_credit_minor_units:int,
+     *   tax_bonus_difference_minor_units:int,
+     *   taxpayer_product_deductions_minor_units:array{
+     *     pension_supplementary:int,
+     *     supplementary_pension:int,
+     *     pension_insurance:int,
+     *     private_life_insurance:int,
+     *     long_term_investment_product:int
+     *   }
+     * }|null
+     */
+    private static function annualSettlementResult(array $settlement): ?array
+    {
+        if (array_keys($settlement) !== ['performed', 'result']) {
+            throw new \InvalidArgumentException(
+                'Výsledek ročního zúčtování nemá úplnou strukturu řádku 13.',
+            );
+        }
+        $performed = $settlement['performed'];
+        $result = $settlement['result'];
+        if ($performed === false && $result === null) {
+            return null;
+        }
+        if ($performed !== true || !is_array($result) || array_is_list($result)) {
+            throw new \InvalidArgumentException(
+                'Výsledek ročního zúčtování nemá úplnou strukturu řádku 13.',
+            );
+        }
+        $expected = [
+            'tax_overpayment_minor_units',
+            'settlement_supplement_minor_units',
+            'tax_overpayment_after_credit_minor_units',
+            'tax_bonus_difference_minor_units',
+            'taxpayer_product_deductions_minor_units',
+        ];
+        if (array_keys($result) !== $expected) {
+            throw new \InvalidArgumentException(
+                'Výsledek ročního zúčtování nemá úplnou strukturu řádku 13.',
+            );
+        }
+        foreach (array_slice($expected, 0, 3) as $field) {
+            if (!is_int($result[$field])
+                || $result[$field] < 0
+                || $result[$field] % 100 !== 0
+            ) {
+                throw new \InvalidArgumentException(
+                    'Částka ročního zúčtování na řádku 13 není platná.',
+                );
+            }
+        }
+        if (!is_int($result['tax_bonus_difference_minor_units'])
+            || $result['tax_bonus_difference_minor_units'] % 100 !== 0
+        ) {
+            throw new \InvalidArgumentException(
+                'Rozdíl na daňovém bonusu na řádku 13 není platný.',
+            );
+        }
+        $products = $result['taxpayer_product_deductions_minor_units'];
+        if (!is_array($products) || array_keys($products) !== [
+            'pension_supplementary', 'supplementary_pension',
+            'pension_insurance', 'private_life_insurance',
+            'long_term_investment_product',
+        ]) {
+            throw new \InvalidArgumentException(
+                'Odpočty podporovaných produktů na řádku 13 nejsou úplné.',
+            );
+        }
+        foreach ($products as $amount) {
+            if (!is_int($amount) || $amount !== 0) {
+                throw new \InvalidArgumentException(
+                    'Nenulový odpočet produktu vyžaduje podporovaný roční nárok.',
+                );
+            }
+        }
+
+        return [
+            'tax_overpayment_minor_units' =>
+                $result['tax_overpayment_minor_units'],
+            'settlement_supplement_minor_units' =>
+                $result['settlement_supplement_minor_units'],
+            'tax_overpayment_after_credit_minor_units' =>
+                $result['tax_overpayment_after_credit_minor_units'],
+            'tax_bonus_difference_minor_units' =>
+                $result['tax_bonus_difference_minor_units'],
+            'taxpayer_product_deductions_minor_units' => [
+                'pension_supplementary' => $products['pension_supplementary'],
+                'supplementary_pension' => $products['supplementary_pension'],
+                'pension_insurance' => $products['pension_insurance'],
+                'private_life_insurance' => $products['private_life_insurance'],
+                'long_term_investment_product' =>
+                    $products['long_term_investment_product'],
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $settlement
+     * @return array{
+     *   performed:bool,
+     *   result:?array{
+     *     tax_overpayment_czk:int,
+     *     settlement_supplement_czk:int,
+     *     tax_overpayment_after_credit_czk:int,
+     *     tax_bonus_difference_czk:int,
+     *     taxpayer_product_deductions_czk:array<string,int>
+     *   }
+     * }
+     */
+    private static function annualSettlementTemplate(array $settlement): array
+    {
+        $result = self::annualSettlementResult($settlement);
+        if ($result === null) {
+            return ['performed' => false, 'result' => null];
+        }
+        $products = $result['taxpayer_product_deductions_minor_units'];
+
+        return [
+            'performed' => true,
+            'result' => [
+                'tax_overpayment_czk' => self::czk($result['tax_overpayment_minor_units']),
+                'settlement_supplement_czk' => self::czk($result['settlement_supplement_minor_units']),
+                'tax_overpayment_after_credit_czk' => self::czk($result['tax_overpayment_after_credit_minor_units']),
+                'tax_bonus_difference_czk' => self::czk($result['tax_bonus_difference_minor_units']),
+                'taxpayer_product_deductions_czk' => [
+                    'pension_supplementary' =>
+                        self::czk($products['pension_supplementary']),
+                    'supplementary_pension' =>
+                        self::czk($products['supplementary_pension']),
+                    'pension_insurance' =>
+                        self::czk($products['pension_insurance']),
+                    'private_life_insurance' =>
+                        self::czk($products['private_life_insurance']),
+                    'long_term_investment_product' =>
+                        self::czk($products['long_term_investment_product']),
+                ],
+            ],
+        ];
+    }
+
+    private static function validText(mixed $value, int $maxLength): bool
+    {
+        return is_string($value)
+            && trim($value) === $value
+            && $value !== ''
+            && mb_strlen($value) <= $maxLength
+            && preg_match('/[\x00-\x1F\x7F]/u', $value) !== 1;
+    }
+
+    private static function validMonthPeriods(
+        mixed $value,
+        bool $emptyAllowed = true,
+    ): bool {
+        if ($value === '' && $emptyAllowed) {
+            return true;
+        }
+
+        return is_string($value)
+            && preg_match(
+                '/^(?:[1-9]|1[0-2])(?:–(?:[1-9]|1[0-2]))?(?:, (?:[1-9]|1[0-2])(?:–(?:[1-9]|1[0-2]))?)*$/D',
+                $value,
+            ) === 1;
     }
 
     /**

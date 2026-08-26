@@ -15,11 +15,16 @@ const m = vi.hoisted(() => ({
   detail: vi.fn(),
   monthEvidence: vi.fn(),
   dependants: vi.fn(),
-  peopleOptions: vi.fn(),
+  peoplePage: vi.fn(),
+  person: vi.fn(),
   institutionAccounts: vi.fn(),
+  deleteCase: vi.fn(),
+  updateClaim: vi.fn(),
+  deleteClaim: vi.fn(),
   canRead: vi.fn(),
   canWrite: vi.fn(),
   error: vi.fn(),
+  success: vi.fn(),
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -37,8 +42,11 @@ vi.mock('@/api/payrollEnforcement', () => ({
     detail: m.detail,
     create: vi.fn(),
     addClaim: vi.fn(),
+    updateClaim: m.updateClaim,
+    deleteClaim: m.deleteClaim,
     updateEvidence: vi.fn(),
     transition: vi.fn(),
+    deleteCase: m.deleteCase,
     monthEvidence: m.monthEvidence,
     saveMonthEvidence: vi.fn(),
     dependants: m.dependants,
@@ -48,7 +56,8 @@ vi.mock('@/api/payrollEnforcement', () => ({
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
-    peopleOptions: m.peopleOptions,
+    peoplePage: m.peoplePage,
+    person: m.person,
     institutionAccounts: m.institutionAccounts,
   },
 }))
@@ -62,7 +71,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: m.error, success: vi.fn(), warning: vi.fn() }),
+  useToast: () => ({ error: m.error, success: m.success, warning: vi.fn() }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -83,6 +92,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import EnforcementCases from '@/pages/payroll/EnforcementCases.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 function summary(overrides: Partial<EnforcementCaseSummary> = {}): EnforcementCaseSummary {
   return {
@@ -124,6 +134,26 @@ function detailOf(item: EnforcementCaseSummary): EnforcementCaseDetail {
       outstanding_minor: 0,
       remaining_minor: 0,
     },
+  }
+}
+
+function verifiedClaim(): EnforcementCaseDetail['claims'][number] {
+  return {
+    id: 51,
+    case_id: 11,
+    legal_basis: 'statutory',
+    category: 'non_priority',
+    outstanding_minor_units: 250_000,
+    maintenance_weight_minor_units: null,
+    priority_date: '2026-05-01',
+    order_issued_on: '2026-05-01',
+    legal_title_verified: true,
+    order_or_notice_delivered: true,
+    priority_classification_verified: true,
+    agreement_verified: false,
+    due_monetary_claim_verified: true,
+    is_active: true,
+    row_version: 1,
   }
 }
 
@@ -178,14 +208,220 @@ async function expandFirstCase(wrapper: ReturnType<typeof mountPage>) {
 describe('EnforcementCases', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canRead.mockReturnValue(true)
     m.canWrite.mockReturnValue(true)
     m.casesPage.mockResolvedValue(page([summary()]))
     m.detail.mockImplementation(async () => detailOf(summary()))
-    m.peopleOptions.mockResolvedValue([{ id: 3, full_name: 'Syntetický Povinný' }])
+    m.peoplePage.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
+    m.person.mockResolvedValue({ id: 3, full_name: 'Syntetický Povinný' })
     m.institutionAccounts.mockResolvedValue([])
+    m.deleteCase.mockResolvedValue({ deleted: true, id: 11 })
+    m.updateClaim.mockResolvedValue(verifiedClaim())
+    m.deleteClaim.mockResolvedValue({
+      deleted: true,
+      id: 51,
+      case_id: 11,
+      case_row_version: 2,
+    })
     m.monthEvidence.mockResolvedValue(monthEvidenceOf())
     m.dependants.mockResolvedValue([])
+  })
+
+  it('offers deletion for an unused received case even after draft evidence changed', async () => {
+    const unused = summary({
+      claim_count: 0,
+      outstanding_minor_units: 0,
+      recipient_verified: true,
+      row_version: 3,
+    })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const action = wrapper.findComponent({ name: 'ActionBar' })
+      .props('actions').find((item: any) => item.key === 'delete')
+    expect(action).toMatchObject({ variant: 'danger', tier: 'overflow', show: true })
+    wrapper.unmount()
+  })
+
+  it('confirms deletion and sends the current row version', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0, row_version: 3 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const action = wrapper.findComponent({ name: 'ActionBar' })
+      .props('actions').find((item: any) => item.key === 'delete')
+    await action.run()
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledWith('payroll.enforcement.delete_confirm')
+    expect(m.deleteCase).toHaveBeenCalledWith(11, 3)
+    expect(m.success).toHaveBeenCalledWith('payroll.enforcement.case_deleted')
+    expect(wrapper.find('[data-test="enforcement-detail-panel"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('vede nový prázdný případ jediným srozumitelným dalším krokem', async () => {
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.add_claim.title')
+    await wrapper.get('[data-test="enforcement-next-step-action"]').trigger('click')
+
+    expect(wrapper.find('[data-test="enforcement-claim-form"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('nabídne navigační akci i pro neúplnou pohledávku a podklady', async () => {
+    const incompleteClaim = summary({ claim_count: 1 })
+    m.casesPage.mockResolvedValue(page([incompleteClaim]))
+    m.detail.mockResolvedValue({
+      ...detailOf(incompleteClaim),
+      claims: [{ ...verifiedClaim(), priority_date: null }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_claims.title')
+    expect(wrapper.get('[data-test="enforcement-next-step-action"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_claims.action')
+    wrapper.unmount()
+
+    const incompleteEvidence = summary({ claim_count: 1, evidence_complete: false })
+    m.casesPage.mockResolvedValue(page([incompleteEvidence]))
+    m.detail.mockResolvedValue({
+      ...detailOf(incompleteEvidence),
+      claims: [verifiedClaim()],
+    })
+    const evidenceWrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(evidenceWrapper)
+
+    expect(evidenceWrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_evidence.title')
+    expect(evidenceWrapper.get('[data-test="enforcement-next-step-action"]').text())
+      .toContain('payroll.enforcement.next_steps.verify_evidence.action')
+    evidenceWrapper.unmount()
+  })
+
+  it('umožní opravit a smazat rozpracovanou pohledávku před zahájením srážení', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const received = summary({ claim_count: 1 })
+    const claim = verifiedClaim()
+    const initial = { ...detailOf(received), claims: [claim] }
+    const corrected = {
+      ...initial,
+      claims: [{ ...claim, outstanding_minor_units: 123_400 }],
+    }
+    const withoutClaim = {
+      ...detailOf({ ...received, claim_count: 0, outstanding_minor_units: 0 }),
+      claims: [],
+    }
+    m.casesPage.mockResolvedValue(page([received]))
+    m.detail
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(corrected)
+      .mockResolvedValueOnce(withoutClaim)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    await wrapper.get('[data-test="edit-claim-51"]').trigger('click')
+    expect((wrapper.get('[data-test="claim-amount"]').element as HTMLInputElement).value)
+      .toBe('2500')
+    await wrapper.get('[data-test="claim-amount"]').setValue('1234')
+    await wrapper.get('[data-test="enforcement-claim-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.updateClaim).toHaveBeenCalledWith(11, 51, expect.objectContaining({
+      outstanding_minor_units: 123_400,
+      row_version: 1,
+    }))
+    expect(m.success).toHaveBeenCalledWith('payroll.enforcement.claim_updated')
+
+    await wrapper.get('[data-test="delete-claim-51"]').trigger('click')
+    await flushPromises()
+    expect(m.deleteClaim).toHaveBeenCalledWith(11, 51, 1)
+    expect(m.success).toHaveBeenCalledWith('payroll.enforcement.claim_deleted')
+    expect(wrapper.find('[data-test="delete-claim-51"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('schová méně časté stavové změny, ale ponechá je dostupné', async () => {
+    const active = summary({
+      status: 'remit',
+      evidence_complete: true,
+      recipient_verified: true,
+    })
+    m.casesPage.mockResolvedValue(page([active]))
+    m.detail.mockResolvedValue({
+      ...detailOf(active),
+      claims: [verifiedClaim()],
+      recipient_institution_id: 9,
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.get('[data-test="enforcement-next-step"]').text())
+      .toContain('payroll.enforcement.next_steps.monthly_check.title')
+    expect(wrapper.get('[data-test="enforcement-next-step-action"]').text())
+      .toContain('payroll.enforcement.next_steps.monthly_check.action')
+    expect(wrapper.find('[data-test="enforcement-state-actions"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="enforcement-state-actions-toggle"]').trigger('click')
+    expect(wrapper.get('[data-test="enforcement-state-actions"]').text())
+      .toContain('payroll.enforcement.commands.defer_no_withholding')
+    expect(wrapper.get('[data-test="enforcement-state-actions"]').text())
+      .toContain('payroll.enforcement.commands.stop')
+    wrapper.unmount()
+  })
+
+  it('localizes the reason why a used case can no longer be deleted', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0, row_version: 3 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    m.deleteCase.mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            code: 'enforcement_case_delete_blocked',
+            message: 'Případ nelze smazat, protože už vstoupil do výpočtu.',
+            blocker: 'allocation_exists',
+            suggestion: 'stop',
+          },
+        },
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const action = wrapper.findComponent({ name: 'ActionBar' })
+      .props('actions').find((item: any) => item.key === 'delete')
+    await action.run()
+    await flushPromises()
+
+    expect(m.error).toHaveBeenCalledWith(
+      'payroll.enforcement.delete_blocked.allocation_exists',
+    )
+    wrapper.unmount()
   })
 
   /*
@@ -199,6 +435,36 @@ describe('EnforcementCases', () => {
 
     expect(m.casesPage).toHaveBeenCalledTimes(1)
     expect(m.casesPage.mock.calls[0][0]).toEqual({ limit: 20, offset: 0 })
+    wrapper.unmount()
+  })
+
+  it('použije hledací výběr pro filtr i nový případ místo úplného seznamu osob', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.findAllComponents(PayrollPersonSearchSelect)).toHaveLength(1)
+    const filterInput = wrapper.get('[data-test="enforcement-employee-filter"] input')
+    expect((filterInput.element as HTMLInputElement).value).toBe('')
+    expect(filterInput.attributes('placeholder')).toBe('payroll.enforcement.all_employees')
+    await wrapper.get('button[aria-expanded="false"]').trigger('click')
+    expect(wrapper.findAllComponents(PayrollPersonSearchSelect)).toHaveLength(2)
+    expect(wrapper.find('select[data-test="enforcement-employee-filter"]').exists()).toBe(false)
+    const requiredPicker = wrapper.findAllComponents(PayrollPersonSearchSelect)[0]
+    expect(requiredPicker.get('input').attributes('required')).toBeDefined()
+    expect(requiredPicker.get('input').attributes('aria-required')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('zachová deep-link osoby ve filtru i mimo první stránku našeptávače', async () => {
+    m.routeQuery = { person: '87' }
+    m.person.mockResolvedValue({ id: 87, full_name: 'Povinný z odkazu' })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.casesPage).toHaveBeenCalledWith({ employee_id: 87, limit: 20, offset: 0 })
+    expect(m.person).toHaveBeenCalledWith(87)
+    expect((wrapper.get('[data-test="enforcement-employee-filter"] input').element as HTMLInputElement).value)
+      .toBe('Povinný z odkazu')
     wrapper.unmount()
   })
 
@@ -291,19 +557,19 @@ describe('EnforcementCases', () => {
     wrapper.unmount()
   })
 
-  // Lidé jsou doplněk formuláře, ne podmínka výpisu — jejich výpadek nesmí
-  // potopit stránkovaný seznam, jen se o něm musí vědět.
-  it('keeps the paged list when only the people lookup fails', async () => {
-    m.peopleOptions.mockRejectedValue(new Error('network'))
+  // Hledání lidí se načítá až při otevření našeptávače; jeho výpadek nesmí
+  // potopit stránkovaný seznam případů.
+  it('keeps the paged list when only the people search fails', async () => {
+    m.peoplePage.mockRejectedValue(new Error('network'))
 
     const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="enforcement-employee-filter"] input').trigger('focus')
     await flushPromises()
 
     expect(wrapper.find('[data-test="load-failed"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Syntetický Povinný')
-
-    await wrapper.get('[aria-expanded]').trigger('click')
-    expect(wrapper.find('[data-test="support-failed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="enforcement-employee-filter"] [role="alert"]').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -315,6 +581,45 @@ describe('EnforcementCases', () => {
    * nerozhoduje, jen nesmí pobízet k potvrzení, které nic nedokládá.
    */
   describe('rozsah měsíční evidence', () => {
+    it('oddělí běžnou měsíční kontrolu od výjimek a správy vyživovaných osob', async () => {
+      m.monthEvidence.mockResolvedValue(monthEvidenceOf({
+        has_multiple_payers: true,
+        insolvency_mode: 'court_determined_amount',
+        court_determined_amount_minor_units: 12_345,
+      }))
+      m.dependants.mockResolvedValue([dependantOf()])
+
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+
+      expect(wrapper.find('[data-test="month-evidence-claim_register"]').exists()).toBe(true)
+      expect(wrapper.find('[data-test="month-exceptions-panel"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="dependants-panel"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="month-exceptions-summary"]').text())
+        .toContain('payroll.enforcement.monthly_exceptions.summary_active')
+      expect(wrapper.get('[data-test="month-exceptions-values"]').text())
+        .toContain('payroll.enforcement.month_evidence.insolvency_court')
+      expect(wrapper.get('[data-test="dependants-summary"]').text())
+        .toContain('payroll.enforcement.dependants_summary')
+
+      await wrapper.get('[data-test="month-exceptions-toggle"]').trigger('click')
+      const exceptions = wrapper.get('[data-test="month-exceptions-panel"]')
+      expect(exceptions.find('[data-test="month-evidence-multiple-payers"]').exists()).toBe(true)
+      expect(exceptions.get('[data-test="insolvency-mode-impact"]').text())
+        .toContain('payroll.enforcement.month_evidence.insolvency_impact.court_determined_amount')
+      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
+        .toBe('123.45')
+      await exceptions.find('[data-test="month-evidence-court-amount"]').setValue('150')
+      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
+        .toBe('150')
+
+      await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
+      expect(wrapper.get('[data-test="dependants-panel"]').text())
+        .toContain('payroll.enforcement.dependant_kind.dependant')
+      wrapper.unmount()
+    })
+
     it('greys out all three confirmations for a person without a live case', async () => {
       const wrapper = mountPage()
       await flushPromises()

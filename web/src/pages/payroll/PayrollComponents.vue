@@ -37,9 +37,11 @@ import PayrollFileDropzone, {
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import CodeNameFields from '@/components/ui/CodeNameFields.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
+import PayrollRiskySavingsPanel from '@/components/payroll/PayrollRiskySavingsPanel.vue'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -190,6 +192,7 @@ const takenComponentCodes = computed(() => components.value
   .map(item => item.code))
 const recurringEditorOpen = ref(false)
 const editingRecurring = ref<PayrollRecurringComponent | null>(null)
+const recurringEmployeeId = ref<number | null>(null)
 const recurringForm = ref<RecurringForm>(newRecurringForm())
 const inputEditorOpen = ref(false)
 const editingInput = ref<PayrollInput | null>(null)
@@ -213,11 +216,25 @@ const activeRegularComponents = computed(() =>
 const activeOneOffComponents = computed(() =>
   components.value.filter(component => component.is_active && component.frequency_kind === 'one_off'),
 )
-const employmentOptions = computed(() => employments.value.map(item => ({
-  value: item.employment_id,
-  label: employmentLabel(item),
-  secondary: item.code,
-})))
+const personOptions = computed(() => Array.from(
+  new Map(employments.value.map(item => [item.employee_id, {
+    value: item.employee_id,
+    label: item.full_name,
+  }])).values(),
+))
+function employmentOptionsFor(employeeId: number | null) {
+  return employments.value
+    .filter(item => item.employee_id === employeeId)
+    .map(item => ({
+      value: item.employment_id,
+      label: relationLabel(item.relation_type),
+      secondary: item.code,
+    }))
+}
+const recurringEmploymentOptions = computed(() =>
+  employmentOptionsFor(recurringEmployeeId.value))
+const inputEmploymentOptions = computed(() =>
+  employmentOptionsFor(inputForm.value.employee_id))
 const regularComponentOptions = computed(() => activeRegularComponents.value.map(item => ({
   value: item.id,
   label: item.name,
@@ -458,10 +475,6 @@ function relationLabel(type: string): string {
   return t(`payroll.people.relations.${type}`)
 }
 
-function employmentLabel(option: PayrollEmploymentOption): string {
-  return `${option.full_name} · ${relationLabel(option.relation_type)}`
-}
-
 function selectedEmploymentChanged(target: InputForm | RecurringForm) {
   if (!('employee_id' in target)) return
   const selected = employments.value.find(item => item.employment_id === target.employment_id)
@@ -471,6 +484,23 @@ function selectedEmploymentChanged(target: InputForm | RecurringForm) {
 function selectInputEmployment(value: number | null) {
   inputForm.value.employment_id = value
   selectedEmploymentChanged(inputForm.value)
+}
+
+function selectRecurringEmployee(value: number | null) {
+  recurringEmployeeId.value = value
+  const available = employments.value.filter(item => item.employee_id === value)
+  if (!available.some(item => item.employment_id === recurringForm.value.employment_id)) {
+    recurringForm.value.employment_id = available[0]?.employment_id ?? null
+  }
+}
+
+function selectInputEmployee(value: number | null) {
+  inputForm.value.employee_id = value
+  const available = employments.value.filter(item => item.employee_id === value)
+  if (!available.some(item => item.employment_id === inputForm.value.employment_id)) {
+    inputForm.value.employment_id = available[0]?.employment_id ?? null
+  }
+  inputPreview.value = null
 }
 
 function setInclusionTreatment(
@@ -746,15 +776,40 @@ async function saveComponent() {
   }
 }
 
+async function deleteComponent(component: PayrollComponent) {
+  if (!window.confirm(t('payroll.components.catalog.delete_confirm', {
+    name: component.name,
+  }))) return
+  saving.value = true
+  try {
+    await payrollApi.deleteComponent(component.id, component.row_version)
+    components.value = components.value.filter(item => item.id !== component.id)
+    const mappings = { ...jmhzMappings.value }
+    delete mappings[component.id]
+    jmhzMappings.value = mappings
+    if (editingComponent.value?.id === component.id) componentEditorOpen.value = false
+    if (editingJmhzComponent.value?.id === component.id) jmhzEditorOpen.value = false
+    toast.success(t('payroll.components.catalog.deleted'))
+  } catch (error: any) {
+    toast.error(apiErrorMessage(error, t('payroll.components.catalog.delete_failed')))
+  } finally {
+    saving.value = false
+  }
+}
+
 function openNewRecurring() {
   editingRecurring.value = null
   recurringForm.value = newRecurringForm()
+  recurringEmployeeId.value = employments.value.find(
+    item => item.employment_id === recurringForm.value.employment_id,
+  )?.employee_id ?? null
   recurringError.value = ''
   recurringEditorOpen.value = true
 }
 
 function editRecurring(item: PayrollRecurringComponent) {
   editingRecurring.value = item
+  recurringEmployeeId.value = item.employee_id
   recurringForm.value = {
     employment_id: item.employment_id,
     component_id: item.component_id,
@@ -804,10 +859,23 @@ function recurringPayload(): PayrollRecurringComponentPayload | null {
 async function loadRecurringPage() {
   // Zúžení se posílá i při listování stránkami — bez něj se po prvním kliknutí
   // na pager tiše rozšířil seznam zpátky na celou firmu.
-  const page = await payrollApi.recurringComponents(
+  let page = await payrollApi.recurringComponents(
     focusEmploymentId.value ?? undefined,
     { limit: recurringPageSize, offset: recurringOffset.value },
   )
+  if (page.recurring_components.length === 0
+    && page.total > 0
+    && recurringOffset.value >= page.total
+  ) {
+    recurringOffset.value = Math.max(
+      0,
+      (Math.ceil(page.total / recurringPageSize) - 1) * recurringPageSize,
+    )
+    page = await payrollApi.recurringComponents(
+      focusEmploymentId.value ?? undefined,
+      { limit: recurringPageSize, offset: recurringOffset.value },
+    )
+  }
   recurring.value = page.recurring_components
   recurringTotal.value = page.total
 }
@@ -865,6 +933,28 @@ async function saveRecurring() {
     toast.success(t('payroll.components.recurring.saved'))
   } catch (error: any) {
     recurringError.value = apiErrorMessage(error, t('payroll.components.save_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function deleteRecurring(item: PayrollRecurringComponent) {
+  if (!window.confirm(t('payroll.components.recurring.delete_confirm', {
+    component: item.component_name,
+    employee: item.employee_name,
+  }))) return
+  saving.value = true
+  recurringError.value = ''
+  try {
+    await payrollApi.deleteRecurringComponent(item.id, item.row_version)
+    await loadRecurringPage()
+    if (editingRecurring.value?.id === item.id) recurringEditorOpen.value = false
+    toast.success(t('payroll.components.recurring.deleted'))
+  } catch (error: any) {
+    recurringError.value = apiErrorMessage(
+      error,
+      t('payroll.components.recurring.delete_failed'),
+    )
   } finally {
     saving.value = false
   }
@@ -1264,14 +1354,14 @@ onMounted(load)
           <div data-layout="desktop" class="hidden overflow-x-auto md:block">
             <table class="min-w-full divide-y divide-neutral-200 text-sm">
               <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.code') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.name') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.kind') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.frequency') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.jmhz_treatment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead>
-              <tbody class="divide-y divide-neutral-100"><tr v-for="component in components" :key="component.id"><td class="px-4 py-3 font-mono text-xs font-semibold text-neutral-900">{{ component.code }}</td><td class="px-4 py-3">{{ component.name }}</td><td class="px-4 py-3">{{ t(`payroll.components.kind.${component.component_kind}`) }}</td><td class="px-4 py-3">{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="jmhzBadgeClass(component)">{{ t(`payroll.components.jmhz.status.${jmhzState(component).status}`) }}</span><p v-if="jmhzState(component).mapping?.is_active" class="mt-1 font-mono text-xs text-neutral-500">{{ jmhzState(component).mapping?.target_attribute_id }}</p></td><td class="px-4 py-3 text-xs">{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="component.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(component.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && component.jmhz_treatment === 'included'" :class="btnOutlineSm(jmhzState(component).status === 'missing' ? 'warning' : 'neutral')" :disabled="jmhzLoading" @click="openJmhzMapping(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('payroll.components.jmhz.configure') }}</button><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></td></tr></tbody>
+              <tbody class="divide-y divide-neutral-100"><tr v-for="component in components" :key="component.id"><td class="px-4 py-3 font-mono text-xs font-semibold text-neutral-900">{{ component.code }}</td><td class="px-4 py-3">{{ component.name }}</td><td class="px-4 py-3">{{ t(`payroll.components.kind.${component.component_kind}`) }}</td><td class="px-4 py-3">{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="jmhzBadgeClass(component)">{{ t(`payroll.components.jmhz.status.${jmhzState(component).status}`) }}</span><p v-if="jmhzState(component).mapping?.is_active" class="mt-1 font-mono text-xs text-neutral-500">{{ jmhzState(component).mapping?.target_attribute_id }}</p></td><td class="px-4 py-3 text-xs">{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</td><td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="component.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(component.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && component.jmhz_treatment === 'included'" :class="btnOutlineSm(jmhzState(component).status === 'missing' ? 'warning' : 'neutral')" :disabled="jmhzLoading" @click="openJmhzMapping(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('payroll.components.jmhz.configure') }}</button><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite" data-testid="payroll-component-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.catalog.delete') }}</button></div></td></tr></tbody>
             </table>
           </div>
           <div data-layout="mobile" class="space-y-3 p-4 md:hidden">
             <article v-for="component in components" :key="component.id" class="rounded-lg border border-neutral-200 p-4">
               <div class="flex flex-wrap items-start justify-between gap-2"><div><p class="font-mono text-xs font-semibold text-payroll-700">{{ component.code }}</p><h3 class="mt-1 font-semibold text-neutral-900">{{ component.name }}</h3></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="component.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(component.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></div>
               <dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.kind') }}</dt><dd>{{ t(`payroll.components.kind.${component.component_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.frequency') }}</dt><dd>{{ t(`payroll.components.frequency.${component.frequency_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.jmhz_treatment') }}</dt><dd><span class="rounded-full px-2 py-1 text-xs font-medium" :class="jmhzBadgeClass(component)">{{ t(`payroll.components.jmhz.status.${jmhzState(component).status}`) }}</span><span v-if="jmhzState(component).mapping?.is_active" class="ml-2 font-mono text-xs">{{ jmhzState(component).mapping?.target_attribute_id }}</span></dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ component.valid_from }} – {{ component.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl>
-              <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button v-if="component.jmhz_treatment === 'included'" :class="btnOutlineSm(jmhzState(component).status === 'missing' ? 'warning' : 'neutral')" :disabled="jmhzLoading" @click="openJmhzMapping(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('payroll.components.jmhz.configure') }}</button><button :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div>
+              <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button v-if="component.jmhz_treatment === 'included'" :class="btnOutlineSm(jmhzState(component).status === 'missing' ? 'warning' : 'neutral')" :disabled="jmhzLoading" @click="openJmhzMapping(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('payroll.components.jmhz.configure') }}</button><button :class="btnOutlineSm('neutral')" @click="editComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button data-testid="payroll-component-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteComponent(component)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.catalog.delete') }}</button></div>
             </article>
           </div>
         </section>
@@ -1290,7 +1380,8 @@ onMounted(load)
         <section v-if="recurringEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><h3 class="font-semibold text-neutral-900">{{ t(editingRecurring ? 'payroll.components.recurring.edit' : 'payroll.components.recurring.new') }}</h3><button :class="btnOutline('neutral')" @click="recurringEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="recurringForm.employment_id" :options="employmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.employment_id = $event" /></label>
+            <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="recurringEmployeeId" data-test="payroll-recurring-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" @update:model-value="selectRecurringEmployee" /></div>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="recurringForm.employment_id" data-test="payroll-recurring-employment" :options="recurringEmploymentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.employment_id = $event" /></label>
             <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="recurringForm.component_id" :options="regularComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.component_id = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.calculation') }}</span><SearchableSelect data-testid="payroll-recurring-calculation" :model-value="recurringForm.calculation_kind" :options="calculationKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="recurringForm.calculation_kind = $event ?? 'fixed_amount'" /></label>
             <label v-if="recurringForm.calculation_kind === 'fixed_amount'" class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="recurringForm.amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
@@ -1307,8 +1398,8 @@ onMounted(load)
 
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
           <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex"><ColumnPicker :ctrl="recurringTbl" /><DensityToggle :ctrl="recurringTbl" /></div>
-          <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="recurringTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="recurringTbl.isVisible('employment')" class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th v-if="recurringTbl.isVisible('component')" class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3">{{ t('payroll.components.fields.calculation') }}</th><th v-if="recurringTbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th v-if="recurringTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="recurringTbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="item in recurring" :key="item.id"><td v-if="recurringTbl.isVisible('employment')" class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employee_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td><td v-if="recurringTbl.isVisible('component')" class="px-4 py-3"><p>{{ item.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ item.component_code }}</p></td><td v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3"><p>{{ t(`payroll.components.calculation.${item.calculation_kind}`) }}</p><p class="text-xs text-neutral-500">{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</p></td><td v-if="recurringTbl.isVisible('validity')" class="px-4 py-3 text-xs">{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</td><td v-if="recurringTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td v-if="recurringTbl.isVisible('actions')" class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></td></tr></tbody></table></div>
-          <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="item in recurring" :key="item.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ item.employee_name }}</h3><p class="text-xs text-neutral-500">{{ item.employment_code }} · {{ item.component_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ item.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd>{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</dd></div><div class="col-span-2"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl><div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button></div></article></div>
+          <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="recurringTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th v-if="recurringTbl.isVisible('employment')" class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th v-if="recurringTbl.isVisible('component')" class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3">{{ t('payroll.components.fields.calculation') }}</th><th v-if="recurringTbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.components.fields.validity') }}</th><th v-if="recurringTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="recurringTbl.isVisible('actions')" class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="item in recurring" :key="item.id"><td v-if="recurringTbl.isVisible('employment')" class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employee_name }}</p><p class="text-xs text-neutral-500">{{ item.employment_code }}</p></td><td v-if="recurringTbl.isVisible('component')" class="px-4 py-3"><p>{{ item.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ item.component_code }}</p></td><td v-if="recurringTbl.isVisible('calculation')" class="px-4 py-3"><p>{{ t(`payroll.components.calculation.${item.calculation_kind}`) }}</p><p class="text-xs text-neutral-500">{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</p></td><td v-if="recurringTbl.isVisible('validity')" class="px-4 py-3 text-xs">{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</td><td v-if="recurringTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></td><td v-if="recurringTbl.isVisible('actions')" class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite" :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite" data-testid="payroll-recurring-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.recurring.delete') }}</button></div></td></tr></tbody></table></div>
+          <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="item in recurring" :key="item.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ item.employee_name }}</h3><p class="text-xs text-neutral-500">{{ item.employment_code }} · {{ item.component_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="item.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ t(item.is_active ? 'payroll.components.active' : 'payroll.components.inactive') }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ item.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd>{{ item.amount_minor !== null ? formatMoney(item.amount_minor) : item.rate_basis_points !== null ? `${item.rate_basis_points / 100} %` : '—' }}</dd></div><div class="col-span-2"><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.validity') }}</dt><dd>{{ item.valid_from }} – {{ item.valid_to ?? t('payroll.components.open_ended') }}</dd></div></dl><div v-if="canWrite" class="mt-4 flex flex-wrap gap-2"><button :class="btnOutlineSm('neutral')" @click="editRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button data-testid="payroll-recurring-delete" :class="btnOutlineSm('danger')" :disabled="saving" @click="deleteRecurring(item)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.recurring.delete') }}</button></div></article></div>
           <PaginationBar
             embedded
             :page="recurringPage"
@@ -1320,13 +1411,15 @@ onMounted(load)
       </section>
 
       <section v-if="activeTab === 'inputs'" class="space-y-4">
+        <PayrollRiskySavingsPanel :period="period" :employments="employments" />
         <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.inputs.title') }}</h2><p class="text-sm text-neutral-500">{{ t('payroll.components.inputs.hint') }}</p></div><button v-if="canWrite" :class="btnFilled('primary')" @click="openNewInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.inputs.add') }}</button></div>
         <p v-if="inputError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ inputError }}</p>
 
         <section v-if="inputEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold text-neutral-900">{{ t(editingInput ? 'payroll.components.inputs.edit' : 'payroll.components.inputs.new') }}</h3><p class="mt-1 text-xs text-neutral-600">{{ t('payroll.components.inputs.preview_hint') }}</p></div><button :class="btnOutline('neutral')" @click="inputEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" :options="employmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
+            <div class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employee') }}</span><PayrollPersonSearchSelect :model-value="inputForm.employee_id" data-test="payroll-input-person" :candidates="personOptions" :label="t('payroll.components.fields.employee')" :clearable="false" @update:model-value="selectInputEmployee" /></div>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.employment') }}</span><SearchableSelect :model-value="inputForm.employment_id" data-test="payroll-input-employment" :options="inputEmploymentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="selectInputEmployment($event)" /></label>
             <label class="block sm:col-span-2"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.component') }}</span><SearchableSelect :model-value="inputForm.component_id" :options="oneOffComponentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="inputForm.component_id = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.amount') }}</span><input v-model="inputForm.amount" data-testid="payroll-input-amount" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.quantity') }}</span><input v-model="inputForm.quantity" data-testid="payroll-input-quantity" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>

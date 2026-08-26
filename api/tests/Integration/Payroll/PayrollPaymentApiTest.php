@@ -23,6 +23,7 @@ use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
 use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -75,6 +76,11 @@ final class PayrollPaymentApiTest extends TestCase
         $pdo->prepare(
             'UPDATE supplier SET payroll_enabled = 1 WHERE id = ?',
         )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->userId]);
     }
 
     protected function tearDown(): void
@@ -125,6 +131,8 @@ final class PayrollPaymentApiTest extends TestCase
             'period' => '2026-08',
             'allocations' => [],
             'allocations_truncated' => false,
+            'incoming_liabilities' => [],
+            'incoming_liabilities_truncated' => false,
             'offered_limit' => 50,
             'matches' => [],
             'matches_total' => 0,
@@ -173,6 +181,41 @@ final class PayrollPaymentApiTest extends TestCase
         self::assertSame(
             'session_required',
             $this->json($bearer)['error']['code'] ?? null,
+        );
+
+        $invalidIncoming = $this->action->matchIncomingRefund(
+            $this->request('session', 'POST')->withParsedBody([
+                'liability_id' => '1',
+                'amount_minor' => 100,
+                'evidence' => [],
+                'idempotency_key' => 'synthetic-invalid-incoming',
+            ]),
+            new Response(),
+            [],
+        );
+        self::assertSame(422, $invalidIncoming->getStatusCode());
+        self::assertSame(
+            'validation_failed',
+            $this->json($invalidIncoming)['error']['code'] ?? null,
+        );
+
+        $incomingBearer = $this->action->reverseIncomingRefund(
+            $this->request('bearer', 'POST')->withParsedBody([
+                'source_match_id' => 1,
+                'amount_minor' => 100,
+                'evidence' => [
+                    'kind' => 'cash',
+                    'cash_document_id' => 1,
+                ],
+                'idempotency_key' => 'synthetic-incoming-bearer',
+            ]),
+            new Response(),
+            [],
+        );
+        self::assertSame(403, $incomingBearer->getStatusCode());
+        self::assertSame(
+            'session_required',
+            $this->json($incomingBearer)['error']['code'] ?? null,
         );
     }
 
@@ -255,7 +298,9 @@ final class PayrollPaymentApiTest extends TestCase
                 'health_insurance',
                 'social_insurance',
                 'income_tax',
+                'insolvency',
                 'enforcement',
+                'risky_savings',
             ],
             array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
         );
@@ -469,13 +514,20 @@ final class PayrollPaymentApiTest extends TestCase
                 PayrollIncomeTaxLiabilityMaterializer::class,
             ),
             $this->container->get(
+                \MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer::class,
+            ),
+            $this->container->get(
                 PayrollEnforcementLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                PayrollRiskySavingsLiabilityMaterializer::class,
             ),
             $this->container->get(PayrollPersonAccountVerificationService::class),
             $this->container->get(PayrollPaymentBatchBuilder::class),
             $this->container->get(PayrollPaymentExportService::class),
             $this->container->get(PayrollPaymentDownloadGrantService::class),
             $this->container->get(PayrollModuleAccess::class),
+            $this->container->get(\MyInvoice\Service\Payroll\PayrollProductionGate::class),
             $failingLogger,
             $this->container->get(IpMatcher::class),
             $this->db,

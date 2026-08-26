@@ -231,6 +231,182 @@ final class PayrollRunDeductionLedgerApproverTest extends TestCase
         self::assertSame([5_000, -5_000], $this->ledgerAmounts());
     }
 
+    public function testRegularRevisionMayFollowAnUnapprovedCancelledAttempt(): void
+    {
+        $abandonedRevisionId = $this->createRevision(
+            revisionNo: 1,
+            previousRevisionId: null,
+            revisionKind: 'regular',
+            status: 'calculated',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(1_000),
+        );
+        $approvedRevisionId = $this->createRevision(
+            revisionNo: 2,
+            previousRevisionId: $abandonedRevisionId,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(2_000),
+        );
+
+        $this->approver->approve(
+            $this->supplierId,
+            $approvedRevisionId,
+            $this->actorUserId,
+        );
+
+        self::assertSame(2_000, $this->withheldTotal());
+        self::assertSame([2_000], $this->ledgerAmounts());
+    }
+
+    public function testRegularRevisionCannotPointToAnAttemptFromAnotherRun(): void
+    {
+        $originalRunId = $this->runId;
+        $this->runId = $this->createRun(
+            $this->db->pdo(),
+            $this->supplierId,
+            '2026-07-01',
+            '2026-07-31',
+        );
+        $foreignRevisionId = $this->createRevision(
+            revisionNo: 90,
+            previousRevisionId: null,
+            revisionKind: 'regular',
+            status: 'calculated',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(1_000),
+        );
+        $this->runId = $originalRunId;
+        $revisionId = $this->createRevision(
+            revisionNo: 91,
+            previousRevisionId: $foreignRevisionId,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(2_000),
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('stejného mzdového běhu');
+        try {
+            $this->approver->approve(
+                $this->supplierId,
+                $revisionId,
+                $this->actorUserId,
+            );
+        } finally {
+            self::assertSame(0, $this->withheldTotal());
+            self::assertSame([], $this->ledgerAmounts());
+        }
+    }
+
+    public function testRegularRevisionCannotFollowAnApprovedRevision(): void
+    {
+        $previousRevisionId = $this->createRevision(
+            revisionNo: 1,
+            previousRevisionId: null,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(1_000),
+        );
+        $revisionId = $this->createRevision(
+            revisionNo: 2,
+            previousRevisionId: $previousRevisionId,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(2_000),
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('dříve schválené srážky');
+        try {
+            $this->approver->approve(
+                $this->supplierId,
+                $revisionId,
+                $this->actorUserId,
+            );
+        } finally {
+            self::assertSame(0, $this->withheldTotal());
+            self::assertSame([], $this->ledgerAmounts());
+        }
+    }
+
+    public function testRegularRevisionCannotHideCancelledCorrectionLineage(): void
+    {
+        $approvedRevisionId = $this->createRevision(
+            revisionNo: 1,
+            previousRevisionId: null,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(1_000),
+        );
+        $correctionAttemptId = $this->createRevision(
+            revisionNo: 2,
+            previousRevisionId: $approvedRevisionId,
+            revisionKind: 'correction',
+            status: 'calculated',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(2_000),
+        );
+        $invalidRegularId = $this->createRevision(
+            revisionNo: 3,
+            previousRevisionId: $correctionAttemptId,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(3_000),
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('dříve schválené srážky');
+        try {
+            $this->approver->approve(
+                $this->supplierId,
+                $invalidRegularId,
+                $this->actorUserId,
+            );
+        } finally {
+            self::assertSame(0, $this->withheldTotal());
+            self::assertSame([], $this->ledgerAmounts());
+        }
+    }
+
+    public function testRegularRevisionCannotFollowSupersededAttempt(): void
+    {
+        $supersededRevisionId = $this->createRevision(
+            revisionNo: 1,
+            previousRevisionId: null,
+            revisionKind: 'regular',
+            status: 'superseded',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(1_000),
+        );
+        $revisionId = $this->createRevision(
+            revisionNo: 2,
+            previousRevisionId: $supersededRevisionId,
+            revisionKind: 'regular',
+            status: 'approved',
+            inputSnapshot: $this->inputSnapshot(0),
+            resultSnapshot: $this->resultSnapshot(2_000),
+        );
+
+        $this->expectException(\DomainException::class);
+        try {
+            $this->approver->approve(
+                $this->supplierId,
+                $revisionId,
+                $this->actorUserId,
+            );
+        } finally {
+            self::assertSame(0, $this->withheldTotal());
+            self::assertSame([], $this->ledgerAmounts());
+        }
+    }
+
     public function testRevisionCannotBeApprovedAcrossTenantBoundary(): void
     {
         $revisionId = $this->createRevision(
@@ -416,13 +592,18 @@ final class PayrollRunDeductionLedgerApproverTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
-    private function createRun(PDO $pdo, int $supplierId): int
+    private function createRun(
+        PDO $pdo,
+        int $supplierId,
+        string $periodStart = '2026-06-01',
+        string $paymentDate = '2026-06-30',
+    ): int
     {
         $pdo->prepare(
             'INSERT INTO payroll_runs
                 (supplier_id, period_start, payment_date, current_revision_no)
-             VALUES (?, "2026-06-01", "2026-06-30", 0)'
-        )->execute([$supplierId]);
+             VALUES (?, ?, ?, 0)'
+        )->execute([$supplierId, $periodStart, $paymentDate]);
 
         return (int) $pdo->lastInsertId();
     }

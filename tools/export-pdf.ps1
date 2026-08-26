@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Tenký spouštěč nad sdíleným MD2PDF enginem. Sloučí kapitoly manuálu
-    (manual/NN_*.md dle manual/INDEX.md) do jednoho manual/manual.pdf pomocí
+    (manual/NNN_*.md dle manual/INDEX.md) do jednoho manual/manual.pdf pomocí
     tools/md2pdf.config.php. Engine se hledá v $env:MD2PDF_HOME, jinak v
     C:\work\MD2PDF. Zdrojové .md jsou READ-ONLY.
 

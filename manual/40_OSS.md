@@ -234,7 +234,7 @@ podmínek a OSS je vyloučené:
 | Podmínka | Poznámka |
 |---|---|
 | Chybí nebo je nečitelné **datum plnění** | Bez data nejde ověřit ani platnost registrace, ani platnost sazby |
-| Chybí **číselník sazeb členských států** | Nespuštěné migrace — viz [§ 40.2.3](#4023-iselnik-sazeb-clenskych-statu) |
+| Chybí **číselník sazeb členských států** | Nespuštěné migrace — viz [§ 40.2.3](#4023-ciselnik-sazeb-clenskych-statu) |
 | Firma **nemá zapnutý OSS režim** | |
 | Datum plnění leží **mimo platnost registrace** | |
 | Doklad je v režimu **přenesené daňové povinnosti** | |

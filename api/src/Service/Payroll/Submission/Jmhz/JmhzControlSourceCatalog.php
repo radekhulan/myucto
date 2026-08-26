@@ -8,8 +8,8 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzControlSourceCatalog
 {
-    public const CATALOG_KEY = 'jmhz-controls-1.4.2.7-source-v3';
-    public const MANIFEST_SHA256 = '79ae3ab0776f0d5a0e6c89a1bf3e9955a51d7e4da7983700a80a0ad4fa97a122';
+    public const CATALOG_KEY = 'jmhz-controls-1.4.2.8-source-v4';
+    public const MANIFEST_SHA256 = '83ec6a985cf1c6d6e2429657d4ba6d12b09bfb849a32b504fff882383fb03800';
 
     /** @var array<int, JmhzControlDefinition> */
     private array $definitions = [];
@@ -44,6 +44,7 @@ final class JmhzControlSourceCatalog
                 self::strings($row, 'symbolic_attribute_refs'),
                 self::nullableString($row, 'category'),
                 self::nullableString($row, 'area'),
+                self::sourceAnomaly($row),
             );
         }
         ksort($this->definitions);
@@ -127,7 +128,7 @@ final class JmhzControlSourceCatalog
         ) {
             throw new \UnexpectedValueException('Manifest katalogu kontrol JMHZ má neplatný hash.');
         }
-        if (self::string($payload, 'schema_version') !== 'jmhz-control-source-catalog.v3'
+        if (self::string($payload, 'schema_version') !== 'jmhz-control-source-catalog.v4'
             || self::string($payload, 'catalog_key') !== self::CATALOG_KEY
             || self::string($payload, 'spec_package_key') !== ($specManifest['payload']['package_key'] ?? null)
             || self::string($payload, 'spec_manifest_sha256') !== $specManifest['manifest_sha256']
@@ -165,6 +166,7 @@ final class JmhzControlSourceCatalog
         $attributeRefCount = 0;
         $uniqueAttributes = [];
         $symbolicAttributeRefCount = 0;
+        $sourceAnomalyCount = 0;
         $remoteCounts = ['blocking' => 0, 'passable' => 0, 'unavailable' => 0];
         foreach (self::rows($payload, 'controls') as $row) {
             $id = self::positiveInt($row, 'control_id');
@@ -179,6 +181,21 @@ final class JmhzControlSourceCatalog
             $remote = JmhzControlPassability::from(self::string($row, 'remote_passability'));
             ++$remoteCounts[$remote->value];
             self::verifyRowHash($row, "kontrola {$id}");
+            $anomaly = $row['source_anomaly'] ?? null;
+            $expectedAnomaly = $id === 333 ? [
+                'code' => 'official_detail_attribute_mismatch',
+                'source_cells' => ['B188', 'C188', 'L188', 'M188'],
+                'declared_attribute_ids' => ['10006', '10032', '10010', '10011'],
+                'detail_attribute_ids' => ['10016', '10495'],
+                'resolution' => 'fail_closed_not_evaluable',
+            ] : null;
+            if (($anomaly === null || $expectedAnomaly === null)
+                ? $anomaly !== $expectedAnomaly
+                : CanonicalJson::encode($anomaly) !== CanonicalJson::encode($expectedAnomaly)
+            ) {
+                throw new \UnexpectedValueException("Kontrola JMHZ {$id} má neplatně doloženou anomálii.");
+            }
+            $sourceAnomalyCount += $anomaly === null ? 0 : 1;
             $symbolicRefs = self::strings($row, 'symbolic_attribute_refs');
             if (count($symbolicRefs) !== count(array_unique($symbolicRefs))) {
                 throw new \UnexpectedValueException("Kontrola JMHZ {$id} má duplicitní symbolický odkaz.");
@@ -271,6 +288,7 @@ final class JmhzControlSourceCatalog
             'attribute_refs' => $attributeRefCount,
             'unique_attributes' => count($uniqueAttributes),
             'symbolic_attribute_refs' => $symbolicAttributeRefCount,
+            'source_anomalies' => $sourceAnomalyCount,
             'parameters' => count($parameterKeys),
             'parameter_control_refs' => $parameterRefCount,
             'unique_parameter_controls' => count($uniqueParameterControls),
@@ -338,6 +356,20 @@ final class JmhzControlSourceCatalog
         }
 
         return $value;
+    }
+
+    /** @param array<string, mixed> $row */
+    private static function sourceAnomaly(array $row): ?string
+    {
+        $value = $row['source_anomaly'] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_array($value)) {
+            throw new \UnexpectedValueException('Anomálie kontroly JMHZ není objekt.');
+        }
+
+        return self::string($value, 'code');
     }
 
     /** @param array<string, mixed> $row */

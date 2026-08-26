@@ -27,6 +27,9 @@
  */
 import { ref, reactive, computed, onMounted, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PayrollPersonSearchSelect, {
+  type PayrollPersonSearchOption,
+} from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import {
   payrollRetentionApi,
   PAYROLL_RETENTION_HOLD_REASONS,
@@ -353,13 +356,13 @@ async function deletePolicy() {
 const holdForm = reactive({
   open: false,
   saving: false,
-  employeeId: 0,
+  employeeId: null as number | null,
   reason: 'enforcement' as PayrollRetentionHoldReason,
   description: '',
   placedOn: appIsoDate(),
 })
 
-function openHold(employeeId = 0) {
+function openHold(employeeId: number | null = null) {
   holdForm.open = true
   holdForm.saving = false
   holdForm.employeeId = employeeId
@@ -369,7 +372,8 @@ function openHold(employeeId = 0) {
 }
 
 async function saveHold() {
-  if (holdForm.employeeId <= 0) {
+  const employeeId = holdForm.employeeId
+  if (employeeId === null || employeeId <= 0) {
     toast.error(t('payroll.retention.hold_person_required'))
     return
   }
@@ -380,7 +384,7 @@ async function saveHold() {
   holdForm.saving = true
   try {
     await payrollRetentionApi.placeHold({
-      employee_id: holdForm.employeeId,
+      employee_id: employeeId,
       reason: holdForm.reason,
       description: holdForm.description.trim(),
       placed_on: holdForm.placedOn,
@@ -421,6 +425,12 @@ const holdCandidates = computed<PayrollRetentionAssessmentItem[]>(() =>
   [...(assessment.value?.items ?? [])].sort(
     (a, b) => a.full_name.localeCompare(b.full_name, locale.value === 'en' ? 'en' : 'cs'),
   ),
+)
+const holdCandidateOptions = computed<PayrollPersonSearchOption[]>(() =>
+  holdCandidates.value.map(person => ({
+    value: person.employee_id,
+    label: person.full_name,
+  })),
 )
 
 function fmtDate(iso: string | null): string {
@@ -1012,16 +1022,15 @@ onMounted(reloadAll)
           <label class="block text-xs font-medium text-neutral-500 mb-1" :for="`${pageId}-hold-person`">
             {{ t('payroll.retention.col.person') }}
           </label>
-          <select
-            :id="`${pageId}-hold-person`"
-            v-model.number="holdForm.employeeId"
-            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
-          >
-            <option :value="0">{{ t('payroll.retention.hold_person_pick') }}</option>
-            <option v-for="p in holdCandidates" :key="p.employee_id" :value="p.employee_id">
-              {{ p.full_name }}
-            </option>
-          </select>
+          <PayrollPersonSearchSelect
+            v-model="holdForm.employeeId"
+            :input-id="`${pageId}-hold-person`"
+            data-test="retention-hold-person"
+            :label="t('payroll.retention.col.person')"
+            :placeholder="t('payroll.retention.hold_person_pick')"
+            :candidates="holdCandidateOptions"
+            :clearable="false"
+          />
         </div>
 
         <div>

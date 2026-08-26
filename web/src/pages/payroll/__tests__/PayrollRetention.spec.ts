@@ -69,6 +69,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PayrollRetention from '@/pages/payroll/PayrollRetention.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 function category(overrides: Partial<PayrollRetentionCategory> = {}): PayrollRetentionCategory {
   return {
@@ -364,7 +365,10 @@ describe('PayrollRetention', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="retention-hold-new"]').trigger('click')
-    await wrapper.get('[id$="-hold-person"]').setValue('9')
+    const personPicker = wrapper.findComponent(PayrollPersonSearchSelect)
+    expect(personPicker.exists()).toBe(true)
+    personPicker.vm.$emit('update:modelValue', 9)
+    await wrapper.vm.$nextTick()
     await wrapper.get('[data-test="retention-hold-save"]').trigger('click')
     await flushPromises()
 

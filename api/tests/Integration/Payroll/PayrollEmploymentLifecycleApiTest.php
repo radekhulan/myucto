@@ -111,7 +111,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'jmhz_apz_instrument_code' => '2',
             'jmhz_functional_benefits_status' => 'no',
             'jmhz_temporary_assignment_status' => 'yes',
-            'jmhz_relationship_detail_code' => '2',
+            'activity_code' => '2',
             'change_reason' => 'Změna úvazku',
         ]);
         self::assertSame(4, $changed['row_version']);
@@ -122,7 +122,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame('554782', $changed['terms'][0]['jmhz_workplace_municipality_code']);
         self::assertSame('yes', $changed['terms'][0]['jmhz_apz_contribution_status']);
         self::assertSame('yes', $changed['terms'][0]['jmhz_temporary_assignment_status']);
-        self::assertSame('2', $changed['terms'][0]['jmhz_relationship_detail_code']);
+        self::assertSame('2', $changed['terms'][0]['activity_code']);
         self::assertSame('1', $changed['terms'][1]['jmhz_relationship_detail_code']);
         self::assertSame(
             'unverified',
@@ -133,7 +133,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             $changed['timeline'][0]['diff'],
         );
         self::assertArrayHasKey(
-            'jmhz_relationship_detail_code',
+            'activity_code',
             $changed['timeline'][0]['diff'],
         );
         self::assertCount(7, $changed['checklist']);
@@ -335,7 +335,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(['1', '2', '3', '4'], array_column($options['apz_instruments'], 'code'));
         self::assertSame(250, count($options['countries']));
-        self::assertSame('2026-08-13', $options['external_codebooks']['verified_through']);
+        self::assertSame('2026-12-31', $options['external_codebooks']['verified_through']);
 
         $municipalities = $this->action->jmhzMunicipalities(
             $this->request(
@@ -392,7 +392,11 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
                     'code' => $code,
                     'relation_type' => $relationType,
                     'monthly_gross_minor' => 4000000,
-                    'terms' => $this->termsPayload($primary, '2026-01-01'),
+                    'terms' => $this->termsPayload(
+                        $primary,
+                        '2026-01-01',
+                        $relationType,
+                    ),
                 ],
                 $role,
                 $authMethod,
@@ -693,8 +697,18 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function termsPayload(bool $primary, string $effectiveFrom): array
+    private function termsPayload(
+        bool $primary,
+        string $effectiveFrom,
+        string $relationType = 'employment',
+    ): array
     {
+        [$activityCode, $relationshipDetailCode] = match ($relationType) {
+            'dpc' => ['A', null],
+            'dpp' => ['T', null],
+            default => ['1', '1'],
+        };
+
         return [
             'office_id' => $this->officeId,
             'effective_from' => $effectiveFrom,
@@ -713,8 +727,8 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             'jmhz_functional_benefits_status' => 'unverified',
             'jmhz_temporary_assignment_status' => 'unverified',
             'cz_isco_code' => '43111',
-            'activity_code' => '1',
-            'jmhz_relationship_detail_code' => '1',
+            'activity_code' => $activityCode,
+            'jmhz_relationship_detail_code' => $relationshipDetailCode,
             'social_insurance_participation' => 'automatic',
             'health_insurance_participation' => 'automatic',
             'tax_regime' => 'advance',

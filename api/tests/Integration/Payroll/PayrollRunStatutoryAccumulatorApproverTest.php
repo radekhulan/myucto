@@ -376,7 +376,7 @@ final class PayrollRunStatutoryAccumulatorApproverTest extends TestCase
         ]);
         $runId = (int) $pdo->lastInsertId();
         $inputJson = '{"schema_version":"payroll-run-input.v2"}';
-        $resultJson = '{"schema_version":"payroll-run-result.v2","people":[]}';
+        $resultJson = '{"people":[],"schema_version":"payroll-run-result.v2","statutory":{"status":"calculated"}}';
         $pdo->prepare(
             'INSERT INTO payroll_run_revisions
                 (supplier_id, run_id, revision_no, revision_kind, status,

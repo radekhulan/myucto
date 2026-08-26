@@ -15,8 +15,10 @@ use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollStateConflictException;
 use MyInvoice\Repository\Payroll\PayrollStateLockedException;
 use MyInvoice\Service\Accounting\Payroll\PayrollPostingService;
+use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\SupportMatrix;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -32,6 +34,7 @@ final class PayrollFoundationTest extends TestCase
     private PayrollModuleStateRepository $states;
     private PayrollPeriodOwnershipService $ownership;
     private PayrollPostingService $posting;
+    private PayrollModuleActivationService $moduleActivation;
     private PayrollCapabilitiesAction $capabilitiesAction;
     private PayrollActivationAction $activationAction;
     private SettingsAction $settingsAction;
@@ -53,6 +56,7 @@ final class PayrollFoundationTest extends TestCase
             $this->states = $container->get(PayrollModuleStateRepository::class);
             $this->ownership = $container->get(PayrollPeriodOwnershipService::class);
             $this->posting = $container->get(PayrollPostingService::class);
+            $this->moduleActivation = $container->get(PayrollModuleActivationService::class);
             $this->capabilitiesAction = $container->get(PayrollCapabilitiesAction::class);
             $this->activationAction = $container->get(PayrollActivationAction::class);
             $this->settingsAction = $container->get(SettingsAction::class);
@@ -113,7 +117,7 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame('setup', $enabled['status']);
         self::assertSame('2026-06', $enabled['start_period']);
         self::assertSame(1, $enabled['row_version']);
-        self::assertNotNull($enabled['activated_at']);
+        self::assertNull($enabled['activated_at']);
 
         $disabled = $this->states->setActivation(
             $this->supplierId,
@@ -125,6 +129,41 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame('disabled', $disabled['status']);
         self::assertNull($disabled['start_period']);
         self::assertSame(2, $disabled['row_version']);
+    }
+
+    public function testFirstApprovedRunCannotActivateProductionAutomatically(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+
+        $this->moduleActivation->activateAfterApprovedRun(
+            $this->supplierId,
+            $this->userId,
+        );
+
+        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
+    }
+
+    public function testCompletedSetupCannotActivateProductionAutomatically(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+
+        self::assertNull($this->moduleActivation->activateWhenSetupComplete(
+            $this->supplierId,
+            $this->userId,
+        ));
+        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
     }
 
     public function testStaleActivationVersionIsRejected(): void
@@ -395,12 +434,388 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame('disabled', $this->states->get($this->supplierId)['status']);
     }
 
+    public function testProductionQualificationRequiresCurrentSupportMatrix(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $request = $this->request('POST', 'admin')->withParsedBody([
+            'row_version' => 1,
+            'support_matrix_version' => 'stale-matrix',
+            'evidence' => [],
+        ]);
+
+        $response = $this->activationAction->qualify($request, new Response());
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('support_matrix_changed', $this->json($response)['error']['code']);
+        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
+        self::assertSame(
+            0,
+            (int) $this->db->pdo()->query(
+                'SELECT COUNT(*) FROM payroll_production_qualifications
+                  WHERE supplier_id = ' . $this->supplierId
+            )->fetchColumn(),
+        );
+    }
+
+    public function testProductionQualificationRequiresPayrollSettingsWrite(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $request = $this->request('POST', 'accountant')->withParsedBody([
+            'row_version' => 1,
+            'support_matrix_version' => SupportMatrix::VERSION,
+            'evidence' => [],
+        ]);
+
+        $response = $this->activationAction->qualify($request, new Response());
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('forbidden', $this->json($response)['error']['code']);
+        self::assertSame(
+            'setup',
+            $this->states->get($this->supplierId)['status'],
+        );
+    }
+
+    public function testExplicitProductionQualificationStoresEvidenceAndActivates(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state
+                SET status = "qualification_required"
+              WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+        $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
+        $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $evidenceDocumentId = $this->evidenceDocument('qualification');
+        $request = $this->request('POST', 'admin')->withParsedBody([
+            'row_version' => 1,
+            'support_matrix_version' => SupportMatrix::VERSION,
+            'evidence' => [
+                'parallel_runs' => [
+                    [
+                        'payroll_run_id' => $firstRunId,
+                        'document_id' => $evidenceDocumentId,
+                    ],
+                    [
+                        'payroll_run_id' => $correctionRunId,
+                        'document_id' => $evidenceDocumentId,
+                    ],
+                ],
+                'correction_scenario' => [
+                    'payroll_run_id' => $correctionRunId,
+                    'document_id' => $evidenceDocumentId,
+                ],
+                'recovery_drill' => [
+                    'completed_on' => '2026-05-20',
+                    'document_id' => $evidenceDocumentId,
+                ],
+                'expert_approval' => [
+                    'approver_name' => 'Syntetický odborný schvalovatel',
+                    'approver_role' => 'Syntetický odborný garant mezd',
+                    'approved_on' => '2026-05-21',
+                    'document_id' => $evidenceDocumentId,
+                ],
+                'rollback_plan' => [
+                    'verified_on' => '2026-05-22',
+                    'document_id' => $evidenceDocumentId,
+                ],
+                'post_go_live_monitoring' => [
+                    'prepared_on' => '2026-05-23',
+                    'document_id' => $evidenceDocumentId,
+                ],
+            ],
+        ]);
+
+        $response = $this->activationAction->qualify($request, new Response());
+        $body = $this->json($response);
+
+        self::assertSame(200, $response->getStatusCode(), json_encode($body));
+        self::assertSame('active', $body['state']['status']);
+        self::assertSame(2, $body['state']['row_version']);
+        self::assertNotNull($body['state']['activated_at']);
+        self::assertSame(SupportMatrix::VERSION, $body['qualification']['support_matrix_version']);
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT module_state_row_version, support_matrix_version,
+                    support_matrix_sha256, evidence_json, evidence_sha256,
+                    qualified_by
+               FROM payroll_production_qualifications
+              WHERE supplier_id = ?'
+        );
+        $stored->execute([$this->supplierId]);
+        $qualification = $stored->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($qualification);
+        self::assertSame(2, (int) $qualification['module_state_row_version']);
+        self::assertSame(SupportMatrix::VERSION, $qualification['support_matrix_version']);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', (string) $qualification['support_matrix_sha256']);
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', (string) $qualification['evidence_sha256']);
+        self::assertSame($this->userId, (int) $qualification['qualified_by']);
+        $evidence = json_decode((string) $qualification['evidence_json'], true);
+        self::assertIsArray($evidence);
+        self::assertCount(2, $evidence['parallel_runs']);
+        self::assertSame('payroll-production-qualification.v3', $evidence['schema_version']);
+        self::assertSame($evidenceDocumentId, $evidence['parallel_runs'][0]['document_id']);
+        self::assertSame(
+            hash('sha256', "qualification-{$this->supplierId}"),
+            $evidence['parallel_runs'][0]['document_sha256'],
+        );
+        self::assertSame(
+            $correctionRunId,
+            $evidence['correction_scenario']['payroll_run_id'],
+        );
+        self::assertSame('2026-05-20', $evidence['recovery_drill']['completed_on']);
+        self::assertSame(
+            'Syntetický odborný schvalovatel',
+            $evidence['expert_approval']['approver_name'],
+        );
+        self::assertSame('2026-05-22', $evidence['rollback_plan']['verified_on']);
+        self::assertSame(
+            '2026-05-23',
+            $evidence['post_go_live_monitoring']['prepared_on'],
+        );
+        $links = $this->db->pdo()->prepare(
+            'SELECT evidence_key, sequence_no, document_id, document_sha256
+               FROM payroll_production_qualification_documents
+              WHERE supplier_id = ?
+              ORDER BY evidence_key, sequence_no'
+        );
+        $links->execute([$this->supplierId]);
+        self::assertCount(7, $links->fetchAll(\PDO::FETCH_ASSOC));
+
+        $audit = $this->db->pdo()->prepare(
+            'SELECT payload FROM activity_log
+              WHERE supplier_id = ?
+                AND action = "payroll.activation.production_qualified"'
+        );
+        $audit->execute([$this->supplierId]);
+        $payload = $audit->fetchColumn();
+        self::assertIsString($payload);
+        self::assertStringContainsString(SupportMatrix::VERSION, $payload);
+        self::assertStringContainsString((string) $qualification['evidence_sha256'], $payload);
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_production_qualifications
+                    SET support_matrix_version = "tampered"
+                  WHERE supplier_id = ?'
+            )->execute([$this->supplierId]);
+            self::fail('Produkční kvalifikace musí být po aktivaci neměnná.');
+        } catch (\PDOException $e) {
+            self::assertStringContainsString(
+                'Payroll production qualification is immutable',
+                $e->getMessage(),
+            );
+        }
+    }
+
+    public function testProductionQualificationRejectsMissingExpertApproval(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
+        $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $evidenceDocumentId = $this->evidenceDocument('missing-expert');
+        $request = $this->request('POST', 'admin')->withParsedBody([
+            'row_version' => 1,
+            'support_matrix_version' => SupportMatrix::VERSION,
+            'evidence' => [
+                'parallel_runs' => [
+                    [
+                        'payroll_run_id' => $firstRunId,
+                        'document_id' => $evidenceDocumentId,
+                    ],
+                    [
+                        'payroll_run_id' => $correctionRunId,
+                        'document_id' => $evidenceDocumentId,
+                    ],
+                ],
+                'correction_scenario' => [
+                    'payroll_run_id' => $correctionRunId,
+                    'document_id' => $evidenceDocumentId,
+                ],
+                'recovery_drill' => [
+                    'completed_on' => '2026-05-20',
+                    'document_id' => $evidenceDocumentId,
+                ],
+            ],
+        ]);
+
+        $response = $this->activationAction->qualify($request, new Response());
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame('expert_approval_required', $this->json($response)['error']['code']);
+        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
+    }
+
+    public function testProductionQualificationRejectsPersonalDmsDocument(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
+        $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $personalDocumentId = $this->evidenceDocument('personal', 'user');
+        $request = $this->request('POST', 'admin')->withParsedBody([
+            'row_version' => 1,
+            'support_matrix_version' => SupportMatrix::VERSION,
+            'evidence' => $this->completeQualificationEvidence(
+                $firstRunId,
+                $correctionRunId,
+                $personalDocumentId,
+            ),
+        ]);
+
+        $response = $this->activationAction->qualify($request, new Response());
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'company_evidence_document_required',
+            $this->json($response)['error']['code'],
+        );
+        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_production_qualifications WHERE supplier_id = ?'
+        );
+        $count->execute([$this->supplierId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
     private function request(string $method, string $role): \Psr\Http\Message\ServerRequestInterface
     {
         return (new ServerRequestFactory())
             ->createServerRequest($method, '/api/payroll')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
+    }
+
+    private function qualifyingRun(string $periodStart, string $revisionKind): int
+    {
+        $pdo = $this->db->pdo();
+        $run = $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status, current_revision_no,
+                 created_by, updated_by)
+             VALUES (?, ?, LAST_DAY(? + INTERVAL 1 MONTH), "approved", 1, ?, ?)'
+        );
+        $run->execute([
+            $this->supplierId,
+            $periodStart,
+            $periodStart,
+            $this->userId,
+            $this->userId,
+        ]);
+        $runId = (int) $pdo->lastInsertId();
+        $snapshot = '{}';
+        $snapshotHash = hash('sha256', $snapshot);
+        $revision = $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, previous_revision_id,
+                 revision_kind, status, schema_version, ruleset_manifest_hash,
+                 input_snapshot_json, input_snapshot_hash,
+                 result_snapshot_json, result_snapshot_hash,
+                 idempotency_key_hash, approved_by, approved_at)
+             VALUES (?, ?, 1, NULL, ?, "approved", "synthetic.v1", ?,
+                     ?, ?, ?, ?, ?, ?, NOW())'
+        );
+        $revision->execute([
+            $this->supplierId,
+            $runId,
+            $revisionKind,
+            str_repeat('e', 64),
+            $snapshot,
+            $snapshotHash,
+            $snapshot,
+            $snapshotHash,
+            hash('sha256', 'qualification-run:' . $runId, true),
+            $this->userId,
+        ]);
+
+        return $runId;
+    }
+
+    private function evidenceDocument(string $seed, string $scope = 'company'): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, uploaded_by, scope, owner_user_id)
+             VALUES (?, ?, ?, ?, ?, "application/pdf", 128, "pdf", ?, ?, ?)'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            "Kvalifikační důkaz {$seed}",
+            "{$seed}.pdf",
+            "{$seed}.pdf",
+            hash('sha256', "{$seed}-{$this->supplierId}"),
+            $this->userId,
+            $scope,
+            $scope === 'user' ? $this->userId : null,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** @return array<string,mixed> */
+    private function completeQualificationEvidence(
+        int $firstRunId,
+        int $correctionRunId,
+        int $documentId,
+    ): array {
+        return [
+            'parallel_runs' => [
+                ['payroll_run_id' => $firstRunId, 'document_id' => $documentId],
+                ['payroll_run_id' => $correctionRunId, 'document_id' => $documentId],
+            ],
+            'correction_scenario' => [
+                'payroll_run_id' => $correctionRunId,
+                'document_id' => $documentId,
+            ],
+            'recovery_drill' => [
+                'completed_on' => '2026-05-20',
+                'document_id' => $documentId,
+            ],
+            'expert_approval' => [
+                'approver_name' => 'Syntetický odborný schvalovatel',
+                'approver_role' => 'Syntetický odborný garant mezd',
+                'approved_on' => '2026-05-21',
+                'document_id' => $documentId,
+            ],
+            'rollback_plan' => [
+                'verified_on' => '2026-05-22',
+                'document_id' => $documentId,
+            ],
+            'post_go_live_monitoring' => [
+                'prepared_on' => '2026-05-23',
+                'document_id' => $documentId,
+            ],
+        ];
     }
 
     /** @return array<string,mixed> */

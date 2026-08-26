@@ -10,10 +10,12 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\PayrollEmployeeRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -29,6 +31,8 @@ final class PayrollPersonProfileApiTest extends TestCase
     private Connection $db;
     private PayrollPersonProfileAction $action;
     private PayrollPersonProfileValidator $validator;
+    private PayrollRegistrationIdentityRepository $registrationIdentities;
+    private PayrollRegistrationIdentityService $registrationIdentityService;
     private PayrollSensitiveData $sensitiveData;
     private PayrollEmployeeRepository $employees;
     private int $userId;
@@ -50,6 +54,8 @@ final class PayrollPersonProfileApiTest extends TestCase
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPersonProfileAction::class);
             $this->validator = $container->get(PayrollPersonProfileValidator::class);
+            $this->registrationIdentities = $container->get(PayrollRegistrationIdentityRepository::class);
+            $this->registrationIdentityService = $container->get(PayrollRegistrationIdentityService::class);
             $this->sensitiveData = $container->get(PayrollSensitiveData::class);
             $this->employees = $container->get(PayrollEmployeeRepository::class);
         } catch (\Throwable $e) {
@@ -203,6 +209,74 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertStringStartsWith('enc:v2:', (string) $account['bank_account_ciphertext']);
         self::assertSame(32, strlen((string) $account['bank_account_hash']));
         self::assertStringNotContainsString('1000000005', (string) $account['bank_account_ciphertext']);
+    }
+
+    public function testRegistrationIdentityFactsAreSavedInHistoryAndReadableAtEmploymentStart(): void
+    {
+        $employmentId = $this->createEmployment($this->employeeId, 'employment');
+        $payload = $this->completePayload();
+        $payload['identity_history'][0] += [
+            'title_prefix' => 'Ing.',
+            'title_suffix' => 'Ph.D.',
+            'birth_date' => '1990-02-03',
+            'birth_place' => 'Brno',
+            'birth_country_code' => 'cz',
+            'citizenship_country_code' => 'sk',
+            'sex' => 'female',
+        ];
+
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $identity = $this->json($response)['profile']['identity_history'][0];
+        self::assertSame('Ing.', $identity['title_prefix']);
+        self::assertSame('Ph.D.', $identity['title_suffix']);
+        self::assertSame('1990-02-03', $identity['birth_date']);
+        self::assertSame('Brno', $identity['birth_place']);
+        self::assertSame('CZ', $identity['birth_country_code']);
+        self::assertSame('SK', $identity['citizenship_country_code']);
+        self::assertSame('female', $identity['sex']);
+
+        $registrationIdentity = $this->registrationIdentities->identityAt(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-01-01',
+        );
+        self::assertIsArray($registrationIdentity);
+        self::assertSame('SK', $registrationIdentity['citizenship_country_code']);
+        self::assertSame('1990-02-03', $registrationIdentity['birth_date']);
+
+        $snapshotSource = $this->registrationIdentityService->sensitiveSnapshotSourceAt(
+            $this->supplierId,
+            $this->employeeId,
+            $employmentId,
+            'test',
+            '2026-01-01',
+        );
+        self::assertSame('SK', $snapshotSource['identity']['citizenship_country_code']);
+        self::assertSame('CZ', $snapshotSource['identity']['birth_country_code']);
+        self::assertSame('female', $snapshotSource['identity']['sex']);
+
+        $legacyClientResponse = $this->put($this->supplierId, $this->employeeId, [
+            'row_version' => 1,
+            'profile_status' => 'setup',
+            'payout_method' => 'bank',
+            'cash_allocation_basis_points' => 0,
+            'payout_effective_on' => '2026-01-01',
+            'secure_delivery_channel' => 'portal',
+            'identity_history' => [[
+                'id' => $identity['id'],
+                'full_name' => $identity['full_name'],
+                'first_name' => $identity['first_name'],
+                'last_name' => $identity['last_name'],
+                'effective_from' => $identity['effective_from'],
+                'effective_to' => $identity['effective_to'],
+            ]],
+        ]);
+        self::assertSame(200, $legacyClientResponse->getStatusCode());
+        $preservedIdentity = $this->json($legacyClientResponse)['profile']['identity_history'][0];
+        self::assertSame('SK', $preservedIdentity['citizenship_country_code']);
+        self::assertSame('1990-02-03', $preservedIdentity['birth_date']);
     }
 
     /**

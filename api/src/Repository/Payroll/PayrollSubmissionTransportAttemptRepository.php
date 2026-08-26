@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use PDO;
 use PDOException;
 
@@ -66,7 +67,9 @@ final class PayrollSubmissionTransportAttemptRepository
     /** MariaDB kód duplicitního unikátního klíče. */
     private const DUPLICATE_KEY = 1062;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(private readonly Connection $db)
+    {
+    }
 
     public function isAvailable(): bool
     {
@@ -160,7 +163,10 @@ final class PayrollSubmissionTransportAttemptRepository
         $limit = max(1, min($limit, 200));
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::attemptColumns() . ',
-                    obligation.period_start, obligation.period_end
+                    obligation.period_start, obligation.period_end,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id
                FROM ' . self::TABLE . ' attempt
                LEFT JOIN payroll_submissions submission
                       ON submission.supplier_id = attempt.supplier_id
@@ -219,7 +225,10 @@ final class PayrollSubmissionTransportAttemptRepository
 
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::attemptColumns() . ',
-                    obligation.period_start, obligation.period_end
+                    obligation.period_start, obligation.period_end,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id
                FROM ' . self::TABLE . ' attempt
                LEFT JOIN payroll_submissions submission
                       ON submission.supplier_id = attempt.supplier_id
@@ -241,6 +250,110 @@ final class PayrollSubmissionTransportAttemptRepository
         }
 
         return ['items' => $rows, 'total' => $total];
+    }
+
+    /**
+     * Zmrazená JMHZ podání, která jsou připravená, ale ještě nemají pokus o
+     * odeslání. V historii stojí zvlášť od ledgeru: dokud nevznikl pokus,
+     * nesmí se podání tvářit jako odeslané, zároveň ale nesmí po přípravě
+     * opravného či stornovacího podání zmizet bez cesty k odeslání.
+     *
+     * @return list<array{
+     *   submission_id:int,submission_kind:string,submission_status:string,
+     *   corrects_submission_id:?int,period_start:string,period_end:string,
+     *   created_at:string,outbox_id:?int,outbox_dispatch_state:?string,
+     *   outbox_acceptance_state:?string,outbox_external_message_id:?string
+     * }>
+     */
+    public function listReadyJmhzSubmissions(
+        int $supplierId,
+        string $environment,
+        int $limit = 50,
+    ): array {
+        if (!$this->isAvailable()) {
+            return [];
+        }
+        self::assertEnvironment($environment);
+        $limit = max(1, min($limit, 100));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id AS submission_id,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id,
+                    obligation.period_start, obligation.period_end,
+                    submission.created_at,
+                    outbox.id AS outbox_id,
+                    outbox.dispatch_state AS outbox_dispatch_state,
+                    outbox.acceptance_state AS outbox_acceptance_state,
+                    outbox.external_message_id AS outbox_external_message_id
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+               LEFT JOIN ' . self::TABLE . ' attempt
+                 ON attempt.supplier_id = submission.supplier_id
+                AND attempt.environment = submission.environment
+                AND attempt.submission_id = submission.id
+               LEFT JOIN submission_outbox outbox
+                 ON outbox.id = (
+                    SELECT MAX(candidate.id)
+                      FROM submission_outbox candidate
+                      JOIN payroll_submission_artifacts queued_artifact
+                        ON queued_artifact.supplier_id = candidate.supplier_id
+                       AND queued_artifact.environment = candidate.environment
+                       AND queued_artifact.id = candidate.artifact_id
+                       AND queued_artifact.submission_id = submission.id
+                     WHERE candidate.supplier_id = submission.supplier_id
+                       AND candidate.environment = submission.environment
+                       AND candidate.channel = "isds"
+                       AND candidate.agenda_code = obligation.agenda_code
+                       AND candidate.artifact_kind = "payroll_submission"
+                 )
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND submission.status = "ready"
+                AND obligation.agenda_code = ?
+                AND attempt.id IS NULL
+              ORDER BY submission.created_at DESC, submission.id DESC
+              LIMIT ' . $limit,
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+        ]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $rows[] = [
+                'submission_id' => (int) $row['submission_id'],
+                'submission_kind' => (string) $row['submission_kind'],
+                'submission_status' => (string) $row['submission_status'],
+                'corrects_submission_id' => $row['corrects_submission_id'] === null
+                    ? null
+                    : (int) $row['corrects_submission_id'],
+                'period_start' => (string) $row['period_start'],
+                'period_end' => (string) $row['period_end'],
+                'created_at' => (string) $row['created_at'],
+                'outbox_id' => $row['outbox_id'] === null
+                    ? null
+                    : (int) $row['outbox_id'],
+                'outbox_dispatch_state' => $row['outbox_dispatch_state'] === null
+                    ? null
+                    : (string) $row['outbox_dispatch_state'],
+                'outbox_acceptance_state' => $row['outbox_acceptance_state'] === null
+                    ? null
+                    : (string) $row['outbox_acceptance_state'],
+                'outbox_external_message_id' => $row['outbox_external_message_id'] === null
+                    ? null
+                    : (string) $row['outbox_external_message_id'],
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -573,6 +686,10 @@ final class PayrollSubmissionTransportAttemptRepository
      * založené před migrací 1379 termín nemají a vynechat je by znamenalo, že
      * na ně automatika nikdy nesáhne.
      *
+     * Fronta je záměrně jen JMHZ: její worker čte JMHZ identitu a používá
+     * třídu CSSZ_JMHZ. Registrační PREZEC/REGZEC pokusy sdílejí ledger, ale
+     * dotaz na jejich výsledek spouští účetní explicitní transportní akcí.
+     *
      * @return list<array<string,mixed>>
      */
     public function listDuePolls(int $limit = 50): array
@@ -610,6 +727,21 @@ final class PayrollSubmissionTransportAttemptRepository
             'SELECT ' . self::COLUMNS . '
                FROM ' . self::TABLE . '
               WHERE ' . $condition . '
+                AND EXISTS (
+                    SELECT 1
+                      FROM payroll_submissions due_submission
+                      JOIN payroll_obligations due_obligation
+                        ON due_obligation.supplier_id = due_submission.supplier_id
+                       AND due_obligation.environment = due_submission.environment
+                       AND due_obligation.id = due_submission.obligation_id
+                     WHERE due_submission.supplier_id = '
+                        . self::TABLE . '.supplier_id
+                       AND due_submission.environment = '
+                        . self::TABLE . '.environment
+                       AND due_submission.id = '
+                        . self::TABLE . '.submission_id
+                       AND due_obligation.agenda_code IN ("JMHZ", "JMHZ25")
+                )
                 AND (next_retry_at IS NULL OR next_retry_at <= UTC_TIMESTAMP())
               ORDER BY next_retry_at IS NOT NULL, next_retry_at, id
               LIMIT ' . $limit,
@@ -839,23 +971,24 @@ final class PayrollSubmissionTransportAttemptRepository
             [
                 'id', 'supplier_id', 'submission_id', 'attempt_no',
                 'row_version', 'poll_count', 'close_attempts',
-            ]
-            as $field
+            ] as $field
         ) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = (int) $normalized[$field];
             }
         }
-        foreach (['response_http_status', 'created_by'] as $field) {
+        foreach (['response_http_status', 'created_by', 'corrects_submission_id'] as $field) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null
                     : (int) $normalized[$field];
             }
         }
-        // Období přidává jen listRecent() a nese ho LEVÝ join, takže u pokusu
-        // bez podání chybí. Prázdno musí zůstat prázdnem, ne "".
-        foreach (['period_start', 'period_end'] as $field) {
+        // Období a identitu podání přidává jen přehled přes LEVÉ joiny, takže
+        // u osiřelého pokusu chybí. Prázdno musí zůstat prázdnem, ne "".
+        foreach (
+            ['period_start', 'period_end', 'submission_kind', 'submission_status'] as $field
+        ) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null

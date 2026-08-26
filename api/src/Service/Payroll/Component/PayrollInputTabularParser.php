@@ -15,7 +15,7 @@ final class PayrollInputTabularParser
     private const MAX_COLUMNS = 24;
     private const MAX_XLSX_FILES = 200;
     private const MAX_XLSX_UNCOMPRESSED_BYTES = 25_000_000;
-    private const REQUIRED = [
+    private const DEFAULT_REQUIRED = [
         'employment_id',
         'employment_code',
         'component_code',
@@ -24,30 +24,36 @@ final class PayrollInputTabularParser
     ];
 
     /**
+     * @param list<string>|null $required
      * @return array{
      *   rows:list<array<string,string|int>>,
      *   errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string}>
      * }
      */
-    public function parse(string $format, string $content): array
+    public function parse(string $format, string $content, ?array $required = null): array
     {
         if (strlen($content) > self::MAX_BYTES) {
             throw new \InvalidArgumentException('Importní soubor překračuje bezpečný limit 5 MB.');
         }
+        $required ??= self::DEFAULT_REQUIRED;
+        if ($required === [] || count($required) !== count(array_unique($required))) {
+            throw new \LogicException('Povinné sloupce importu musí být neprázdné a jedinečné.');
+        }
         return match ($format) {
-            'csv' => $this->parseCsv($content),
-            'xlsx' => $this->parseXlsx($content),
+            'csv' => $this->parseCsv($content, $required),
+            'xlsx' => $this->parseXlsx($content, $required),
             default => throw new \InvalidArgumentException('Formát musí být csv nebo xlsx.'),
         };
     }
 
     /**
+     * @param list<string> $required
      * @return array{
      *   rows:list<array<string,string|int>>,
      *   errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string}>
      * }
      */
-    private function parseCsv(string $content): array
+    private function parseCsv(string $content, array $required): array
     {
         if (str_contains($content, "\0")) {
             throw new \InvalidArgumentException('CSV obsahuje nepovolené binární znaky.');
@@ -82,7 +88,7 @@ final class PayrollInputTabularParser
             static fn (?string $value): string => trim($value ?? ''),
             $rawHeader,
         );
-        $this->assertHeader($header);
+        $this->assertHeader($header, $required);
 
         $rows = [];
         $errors = [];
@@ -117,12 +123,13 @@ final class PayrollInputTabularParser
     }
 
     /**
+     * @param list<string> $required
      * @return array{
      *   rows:list<array<string,string|int>>,
      *   errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string}>
      * }
      */
-    private function parseXlsx(string $content): array
+    private function parseXlsx(string $content, array $required): array
     {
         if (!str_starts_with($content, "PK\x03\x04")) {
             throw new \InvalidArgumentException('XLSX nemá platnou signaturu OOXML archivu.');
@@ -168,7 +175,7 @@ final class PayrollInputTabularParser
                 for ($column = 1; $column <= $highestColumnIndex; ++$column) {
                     $header[] = trim($this->cellValue($sheet->getCell([$column, 1])));
                 }
-                $this->assertHeader($header);
+                $this->assertHeader($header, $required);
 
                 $rows = [];
                 for ($rowNumber = 2; $rowNumber <= $highestRow; ++$rowNumber) {
@@ -246,8 +253,10 @@ final class PayrollInputTabularParser
         }
     }
 
-    /** @param list<string> $header */
-    private function assertHeader(array $header): void
+    /** @param list<string> $header
+     *  @param list<string> $required
+     */
+    private function assertHeader(array $header, array $required): void
     {
         if (count($header) > self::MAX_COLUMNS) {
             throw new \InvalidArgumentException('Import smí obsahovat nejvýše 24 sloupců.');
@@ -255,10 +264,10 @@ final class PayrollInputTabularParser
         if (count($header) !== count(array_unique($header))) {
             throw new \InvalidArgumentException('Hlavička obsahuje duplicitní názvy sloupců.');
         }
-        foreach (self::REQUIRED as $required) {
-            if (!in_array($required, $header, true)) {
+        foreach ($required as $requiredColumn) {
+            if (!in_array($requiredColumn, $header, true)) {
                 throw new \InvalidArgumentException(
-                    "Hlavička neobsahuje povinný sloupec {$required}."
+                    "Hlavička neobsahuje povinný sloupec {$requiredColumn}."
                 );
             }
         }

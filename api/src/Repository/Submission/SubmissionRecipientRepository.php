@@ -17,7 +17,8 @@ final class SubmissionRecipientRepository
 {
     private const TABLE = 'submission_recipients';
 
-    private const COLUMNS = 'id, supplier_id, code, name, kind, isds_box_id, source_url,
+    private const COLUMNS = 'id, supplier_id, code, name, business_id, address,
+        kind, isds_box_id, source_url,
         source_note, is_active, created_at, updated_at';
 
     public function __construct(private readonly Connection $db) {}
@@ -31,14 +32,23 @@ final class SubmissionRecipientRepository
     public function listVisible(int $supplierId, ?string $kind = null): array
     {
         $this->assertAvailable();
-        $sql = 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
-                 WHERE (supplier_id IS NULL OR supplier_id = ?)';
-        $params = [$supplierId];
+        $sql = 'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' recipient
+                 WHERE (
+                   recipient.supplier_id = ?
+                   OR (
+                     recipient.supplier_id IS NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM ' . self::TABLE . ' own
+                        WHERE own.supplier_id = ? AND own.code = recipient.code
+                     )
+                   )
+                 )';
+        $params = [$supplierId, $supplierId];
         if ($kind !== null) {
-            $sql .= ' AND kind = ?';
+            $sql .= ' AND recipient.kind = ?';
             $params[] = $kind;
         }
-        $sql .= ' ORDER BY kind ASC, name ASC';
+        $sql .= ' ORDER BY recipient.kind ASC, recipient.name ASC';
 
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
@@ -59,7 +69,8 @@ final class SubmissionRecipientRepository
     }
 
     /**
-     * @param array{code:string,name:string,kind:string,isds_box_id:?string,
+     * @param array{code:string,name:string,business_id?:?string,address?:?string,
+     *   kind:string,isds_box_id:?string,
      *   source_url:?string,source_note:?string,is_active:bool} $data
      */
     public function upsertForSupplier(int $supplierId, array $data, ?int $userId): int
@@ -67,10 +78,13 @@ final class SubmissionRecipientRepository
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO ' . self::TABLE . '
-                (supplier_id, code, name, kind, isds_box_id, source_url, source_note, is_active, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (supplier_id, code, name, business_id, address, kind, isds_box_id,
+                 source_url, source_note, is_active, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
-                name = VALUES(name), kind = VALUES(kind), isds_box_id = VALUES(isds_box_id),
+                name = VALUES(name), business_id = VALUES(business_id),
+                address = VALUES(address), kind = VALUES(kind),
+                isds_box_id = VALUES(isds_box_id),
                 source_url = VALUES(source_url), source_note = VALUES(source_note),
                 is_active = VALUES(is_active)'
         );
@@ -78,6 +92,8 @@ final class SubmissionRecipientRepository
             $supplierId,
             $data['code'],
             $data['name'],
+            $data['business_id'] ?? null,
+            $data['address'] ?? null,
             $data['kind'],
             $data['isds_box_id'],
             $data['source_url'],

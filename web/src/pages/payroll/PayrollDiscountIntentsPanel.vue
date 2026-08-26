@@ -26,10 +26,10 @@ import {
 import {
   payrollApi,
   type PayrollEmployment,
-  type PayrollPersonOption,
   type PayrollRegzelEnvironment,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
@@ -40,9 +40,10 @@ const loading = ref(true)
 const busyId = ref<number | null>(null)
 const creating = ref(false)
 const items = ref<PayrollDiscountIntent[]>([])
-const people = ref<PayrollPersonOption[]>([])
 const employments = ref<PayrollEmployment[]>([])
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
 const intentFrom = ref('')
@@ -55,8 +56,6 @@ const error = ref('')
 const success = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
-const personOptions = computed(() =>
-  people.value.map(person => ({ value: person.id, label: person.full_name })))
 const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
@@ -107,14 +106,6 @@ async function load(): Promise<void> {
     error.value = message(cause, t('payroll.discountIntents.errors.loadFailed'))
   } finally {
     loading.value = false
-  }
-}
-
-async function loadPeople(): Promise<void> {
-  try {
-    people.value = await payrollApi.peopleOptions()
-  } catch (cause) {
-    error.value = message(cause, t('payroll.discountIntents.errors.loadFailed'))
   }
 }
 
@@ -341,17 +332,20 @@ function actionsFor(item: PayrollDiscountIntent): ActionItem[] {
 watch(personId, value => {
   if (value !== null) {
     void loadEmployments(value)
+  } else {
+    employments.value = []
+    employmentId.value = null
   }
 })
 watch(environment, () => void load())
 onMounted(async () => {
-  await Promise.all([load(), loadPeople()])
+  await load()
 })
 </script>
 
 <template>
   <div class="space-y-4" data-test="discount-intents-panel">
-    <div class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-700">
+    <div class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-700">
       <h3 class="text-base font-semibold text-neutral-900">
         {{ t('payroll.discountIntents.title') }}
       </h3>
@@ -395,14 +389,19 @@ onMounted(async () => {
       </ul>
     </div>
 
-    <div class="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
+    <div class="space-y-4 rounded-xl border border-neutral-200 bg-surface p-4">
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-        <label class="block text-sm">
+        <div class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.discountIntents.person') }}
           </span>
-          <SearchableSelect v-model="personId" :options="personOptions" />
-        </label>
+          <PayrollPersonSearchSelect
+            v-model="personId"
+            data-test="discount-intent-person"
+            :label="t('payroll.discountIntents.person')"
+            :clearable="false"
+          />
+        </div>
         <label class="block text-sm">
           <span class="mb-1 block font-medium text-neutral-700">
             {{ t('payroll.discountIntents.employment') }}
@@ -416,7 +415,7 @@ onMounted(async () => {
           <input
             v-model="intentFrom"
             type="date"
-            class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+            class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="discount-intent-from"
           >
         </label>
@@ -427,7 +426,7 @@ onMounted(async () => {
           <input
             v-model="employeeInformedOn"
             type="date"
-            class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+            class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
             data-test="discount-intent-informed-on"
           >
           <span class="mt-1 block text-xs text-neutral-500">
@@ -459,7 +458,7 @@ onMounted(async () => {
 
     <div v-if="loading" class="h-48 animate-pulse rounded-xl bg-neutral-100" />
 
-    <div v-else-if="!items.length" class="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-600">
+    <div v-else-if="!items.length" class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm text-neutral-600">
       {{ t('payroll.discountIntents.empty') }}
     </div>
 
@@ -467,7 +466,7 @@ onMounted(async () => {
       <li
         v-for="item in items"
         :key="item.id"
-        class="rounded-xl border border-neutral-200 bg-white p-4 text-sm"
+        class="rounded-xl border border-neutral-200 bg-surface p-4 text-sm"
         :data-test="`discount-intent-${item.id}`"
       >
         <div class="flex flex-wrap items-start justify-between gap-2">
@@ -529,7 +528,7 @@ onMounted(async () => {
             <input
               v-model="acceptedOn[item.id]"
               type="date"
-              class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
               :data-test="`discount-intent-accepted-on-${item.id}`"
             >
           </label>
@@ -541,7 +540,7 @@ onMounted(async () => {
               v-model="rejectionReason[item.id]"
               type="text"
               maxlength="190"
-              class="w-full rounded-lg border border-neutral-300 p-2 text-sm"
+              class="w-full rounded-lg border border-neutral-300 bg-surface p-2 text-sm text-neutral-900"
               :data-test="`discount-intent-reason-${item.id}`"
             >
           </label>

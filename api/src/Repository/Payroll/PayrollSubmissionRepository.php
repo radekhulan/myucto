@@ -87,7 +87,9 @@ final class PayrollSubmissionRepository
 
     private int $savepointSequence = 0;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(private readonly Connection $db)
+    {
+    }
 
     /**
      * @template T
@@ -392,6 +394,98 @@ final class PayrollSubmissionRepository
         ];
     }
 
+    /**
+     * @param list<string> $sourceReferences
+     * @return array<string,array{
+     *   id:int,source_event_hash:string,status:string,duplicate_count:int,
+     *   subject_type:string,subject_reference:string,period_start:string,
+     *   period_end:string,obligation_kind:string,preferred_channel:string,
+     *   request_fingerprint:string,idempotency_key_hash:string,
+     *   earliest_submission_on:?string,
+     *   due_on:?string,calendar_basis:?string,ruleset_id:?string,
+     *   ruleset_hash:?string,trigger_event_hash:?string
+     * }>
+     */
+    public function obligationStatesBySourceReferences(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $sourceEventType,
+        array $sourceReferences,
+    ): array {
+        $result = [];
+        foreach (array_chunk(array_values(array_unique($sourceReferences)), 500) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $statement = $this->db->pdo()->prepare(
+                'SELECT o.id, o.source_event_reference, o.source_event_hash,
+                        o.status, o.subject_type, o.subject_reference,
+                        o.period_start, o.period_end, o.obligation_kind,
+                        o.preferred_channel, o.request_fingerprint,
+                        o.idempotency_key_hash,
+                        d.earliest_submission_on, d.due_on,
+                        d.calendar_basis, d.ruleset_id, d.ruleset_hash,
+                        d.trigger_event_hash
+                   FROM payroll_obligations o
+                   LEFT JOIN payroll_submission_deadlines d
+                     ON d.supplier_id = o.supplier_id
+                    AND d.environment = o.environment
+                    AND d.obligation_id = o.id
+                    AND d.deadline_kind = "regular"
+                  WHERE o.supplier_id = ?
+                    AND o.environment = ?
+                    AND o.agenda_code = ?
+                    AND o.source_event_type = ?
+                    AND o.source_event_reference IN (' . $placeholders . ')
+                  ORDER BY o.id DESC',
+            );
+            $statement->execute([
+                $supplierId,
+                $environment,
+                $agendaCode,
+                $sourceEventType,
+                ...$chunk,
+            ]);
+            while (($row = $statement->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $reference = (string) $row['source_event_reference'];
+                if (isset($result[$reference])) {
+                    $result[$reference]['duplicate_count']++;
+                    continue;
+                }
+                $result[$reference] = [
+                    'id' => (int) $row['id'],
+                    'source_event_hash' => (string) $row['source_event_hash'],
+                    'status' => (string) $row['status'],
+                    'duplicate_count' => 1,
+                    'subject_type' => (string) $row['subject_type'],
+                    'subject_reference' => (string) $row['subject_reference'],
+                    'period_start' => (string) $row['period_start'],
+                    'period_end' => (string) $row['period_end'],
+                    'obligation_kind' => (string) $row['obligation_kind'],
+                    'preferred_channel' => (string) $row['preferred_channel'],
+                    'request_fingerprint' => (string) $row['request_fingerprint'],
+                    'idempotency_key_hash' => (string) $row['idempotency_key_hash'],
+                    'earliest_submission_on' => $row['earliest_submission_on'] === null
+                        ? null : (string) $row['earliest_submission_on'],
+                    'due_on' => $row['due_on'] === null
+                        ? null : (string) $row['due_on'],
+                    'calendar_basis' => $row['calendar_basis'] === null
+                        ? null : (string) $row['calendar_basis'],
+                    'ruleset_id' => $row['ruleset_id'] === null
+                        ? null : (string) $row['ruleset_id'],
+                    'ruleset_hash' => $row['ruleset_hash'] === null
+                        ? null : (string) $row['ruleset_hash'],
+                    'trigger_event_hash' => $row['trigger_event_hash'] === null
+                        ? null : (string) $row['trigger_event_hash'],
+                ];
+            }
+        }
+
+        return $result;
+    }
+
     public function insertObligation(
         int $supplierId,
         string $environment,
@@ -480,6 +574,106 @@ final class PayrollSubmissionRepository
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * @param list<array{
+     *   supplier_id:int,environment:string,agenda_code:string,
+     *   subject_type:string,subject_reference:string,period_start:string,
+     *   period_end:string,obligation_kind:string,preferred_channel:string,
+     *   responsible_user_id:?int,source_event_type:string,
+     *   source_event_reference:string,source_event_hash:string,
+     *   request_fingerprint:string,idempotency_key_hash:string,created_by:?int
+     * }> $rows
+     */
+    public function insertObligationsBatch(array $rows): void
+    {
+        foreach (array_chunk($rows, 200) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $values = [];
+            $parameters = [];
+            foreach ($chunk as $row) {
+                $values[] = '(' . implode(',', array_fill(0, 16, '?')) . ')';
+                array_push(
+                    $parameters,
+                    $row['supplier_id'],
+                    $row['environment'],
+                    $row['agenda_code'],
+                    $row['subject_type'],
+                    $row['subject_reference'],
+                    $row['period_start'],
+                    $row['period_end'],
+                    $row['obligation_kind'],
+                    $row['preferred_channel'],
+                    $row['responsible_user_id'],
+                    $row['source_event_type'],
+                    $row['source_event_reference'],
+                    $row['source_event_hash'],
+                    $row['request_fingerprint'],
+                    $row['idempotency_key_hash'],
+                    $row['created_by'],
+                );
+            }
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_obligations
+                    (supplier_id, environment, agenda_code, subject_type,
+                     subject_reference, period_start, period_end,
+                     obligation_kind, preferred_channel,
+                     responsible_user_id, source_event_type,
+                     source_event_reference, source_event_hash,
+                     request_fingerprint, idempotency_key_hash, created_by)
+                 VALUES ' . implode(',', $values),
+            );
+            $statement->execute($parameters);
+        }
+    }
+
+    /**
+     * @param list<array{
+     *   supplier_id:int,environment:string,obligation_id:int,
+     *   deadline_kind:string,earliest_submission_on:string,due_on:string,
+     *   calendar_basis:string,fiction_delivery_days:?int,ruleset_id:string,
+     *   ruleset_hash:string,trigger_event_hash:string,created_by:?int
+     * }> $rows
+     */
+    public function insertDeadlinesBatch(array $rows): void
+    {
+        foreach (array_chunk($rows, 200) as $chunk) {
+            if ($chunk === []) {
+                continue;
+            }
+            $values = [];
+            $parameters = [];
+            foreach ($chunk as $row) {
+                $values[] = '(' . implode(',', array_fill(0, 12, '?')) . ')';
+                array_push(
+                    $parameters,
+                    $row['supplier_id'],
+                    $row['environment'],
+                    $row['obligation_id'],
+                    $row['deadline_kind'],
+                    $row['earliest_submission_on'],
+                    $row['due_on'],
+                    $row['calendar_basis'],
+                    $row['fiction_delivery_days'],
+                    $row['ruleset_id'],
+                    $row['ruleset_hash'],
+                    $row['trigger_event_hash'],
+                    $row['created_by'],
+                );
+            }
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_submission_deadlines
+                    (supplier_id, environment, obligation_id, deadline_kind,
+                     earliest_submission_on, due_on, calendar_basis,
+                     fiction_delivery_days, ruleset_id, ruleset_hash,
+                     trigger_event_hash, created_by)
+                 VALUES ' . implode(',', $values),
+            );
+            $statement->execute($parameters);
+        }
     }
 
     public function obligationExistsForUpdate(
@@ -647,6 +841,70 @@ final class PayrollSubmissionRepository
             : self::submissionRow(
                 self::associativeRow($row, 'mzdové podání'),
             );
+    }
+
+    /** @return list<array{id:int,status:string,row_version:int}> */
+    public function resolvedCorrectionsForRoot(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, status, row_version
+               FROM payroll_submissions
+              WHERE supplier_id = ? AND environment = ?
+                AND corrects_submission_id = ?
+                AND submission_kind = \'correction\'
+                AND status IN (\'accepted\', \'partially_accepted\')
+              ORDER BY id
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $environment, $regularSubmissionId]);
+
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'návazné opravné podání');
+            $rows[] = [
+                'id' => self::integer($row, 'id'),
+                'status' => self::string($row, 'status'),
+                'row_version' => self::integer($row, 'row_version'),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** @return list<array{id:int,status:string,submission_kind:string}> */
+    public function jmhzChainForRoot(
+        int $supplierId,
+        string $environment,
+        int $regularSubmissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, status, submission_kind
+               FROM payroll_submissions
+              WHERE supplier_id = ? AND environment = ?
+                AND (id = ? OR corrects_submission_id = ?)
+              ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $regularSubmissionId,
+            $regularSubmissionId,
+            $regularSubmissionId,
+        ]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'řetězec podání JMHZ');
+            $rows[] = [
+                'id' => self::integer($row, 'id'),
+                'status' => self::string($row, 'status'),
+                'submission_kind' => self::string($row, 'submission_kind'),
+            ];
+        }
+
+        return $rows;
     }
 
     public function insertSubmission(
@@ -920,18 +1178,53 @@ final class PayrollSubmissionRepository
         string $environment,
         int $submissionId,
     ): ?int {
+        return $this->findOutboundArtifactId(
+            $supplierId,
+            $environment,
+            $submissionId,
+            'outbound_xml',
+        );
+    }
+
+    public function findOutboundPdfArtifactId(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?int {
+        return $this->findOutboundArtifactId(
+            $supplierId,
+            $environment,
+            $submissionId,
+            'outbound_pdf',
+        );
+    }
+
+    private function findOutboundArtifactId(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $artifactKind,
+    ): ?int {
+        if (!in_array($artifactKind, ['outbound_xml', 'outbound_pdf'], true)) {
+            throw new \InvalidArgumentException('Druh odchozího artefaktu není podporovaný.');
+        }
         $statement = $this->db->pdo()->prepare(
             'SELECT id
                FROM payroll_submission_artifacts
               WHERE supplier_id = ?
                 AND environment = ?
                 AND submission_id = ?
-                AND artifact_kind = "outbound_xml"
+                AND artifact_kind = ?
                 AND direction = "outbound"
               ORDER BY id
               LIMIT 1',
         );
-        $statement->execute([$supplierId, $environment, $submissionId]);
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $artifactKind,
+        ]);
         $id = $statement->fetchColumn();
 
         return $id === false ? null : (int) $id;
@@ -1114,6 +1407,143 @@ final class PayrollSubmissionRepository
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    public function insertJmhzProtocolFormOutcome(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        int $artifactId,
+        ?int $partId,
+        string $formGuid,
+        ?int $protocolStatusCode,
+        ?string $protocolStatusName,
+        ?string $remoteStatus,
+        ?string $externalPersonReference,
+        ?string $externalEmploymentReference,
+        int $errorCount,
+        string $errorsCiphertext,
+        string $errorsSha256,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_jmhz_protocol_form_outcomes
+                (supplier_id, environment, submission_id, receipt_id,
+                 artifact_id, part_id, form_guid, protocol_status_code,
+                 protocol_status_name, remote_status,
+                 external_person_reference, external_employment_reference,
+                 error_count, errors_ciphertext, errors_sha256)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+            $artifactId,
+            $partId,
+            $formGuid,
+            $protocolStatusCode,
+            $protocolStatusName,
+            $remoteStatus,
+            $externalPersonReference,
+            $externalEmploymentReference,
+            $errorCount,
+            $errorsCiphertext,
+            $errorsSha256,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listJmhzProtocolFormOutcomes(
+        int $supplierId,
+        string $environment,
+        int $receiptId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, environment, submission_id, receipt_id,
+                    artifact_id, part_id, form_guid, protocol_status_code,
+                    protocol_status_name, remote_status,
+                    external_person_reference, external_employment_reference,
+                    error_count, errors_ciphertext, errors_sha256, created_at
+               FROM payroll_jmhz_protocol_form_outcomes
+              WHERE supplier_id = ? AND environment = ? AND receipt_id = ?
+              ORDER BY id',
+        );
+        $statement->execute([$supplierId, $environment, $receiptId]);
+        $outcomes = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'výsledek formuláře protokolu JMHZ');
+            foreach ([
+                'id', 'supplier_id', 'submission_id', 'receipt_id',
+                'artifact_id', 'error_count',
+            ] as $field) {
+                $row[$field] = self::integer($row, $field);
+            }
+            $row['part_id'] = self::nullableInteger($row, 'part_id');
+            $row['protocol_status_code'] = self::nullableInteger(
+                $row,
+                'protocol_status_code',
+            );
+            $outcomes[] = $row;
+        }
+
+        return $outcomes;
+    }
+
+    /**
+     * @return list<array{
+     *   receipt_id:int,verification_status:string,remote_status:?string,
+     *   protocol_code:string,form_guid:?string,form_remote_status:?string,
+     *   external_person_reference:?string,external_employment_reference:?string
+     * }>
+     */
+    public function listJmhzReceiptEvidenceForSubmission(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT receipt.id AS receipt_id, receipt.verification_status,
+                    receipt.remote_status, receipt.protocol_code,
+                    outcome.form_guid,
+                    outcome.remote_status AS form_remote_status,
+                    outcome.external_person_reference,
+                    outcome.external_employment_reference
+               FROM payroll_submission_receipts receipt
+               LEFT JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.receipt_id = receipt.id
+              WHERE receipt.supplier_id = ? AND receipt.environment = ?
+                AND receipt.submission_id = ?
+              ORDER BY receipt.received_at, receipt.id, outcome.id',
+        );
+        $statement->execute([$supplierId, $environment, $submissionId]);
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $row = self::associativeRow($row, 'důkaz protokolu JMHZ');
+            $rows[] = [
+                'receipt_id' => self::integer($row, 'receipt_id'),
+                'verification_status' => self::string($row, 'verification_status'),
+                'remote_status' => self::nullableString($row, 'remote_status'),
+                'protocol_code' => self::string($row, 'protocol_code'),
+                'form_guid' => self::nullableString($row, 'form_guid'),
+                'form_remote_status' => self::nullableString($row, 'form_remote_status'),
+                'external_person_reference' => self::nullableString(
+                    $row,
+                    'external_person_reference',
+                ),
+                'external_employment_reference' => self::nullableString(
+                    $row,
+                    'external_employment_reference',
+                ),
+            ];
+        }
+
+        return $rows;
     }
 
     public function updateSubmissionStatus(

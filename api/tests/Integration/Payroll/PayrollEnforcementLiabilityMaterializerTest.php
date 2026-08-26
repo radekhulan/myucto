@@ -6,10 +6,12 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementPaymentRepository;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
+use MyInvoice\Repository\Payroll\PayrollInsolvencyPaymentRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentBatchRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentMatchRepository;
@@ -27,13 +29,17 @@ use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentResult;
 use MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyInstruction;
+use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentCalculation;
+use MyInvoice\Service\Payroll\Garnishment\PayrollInsolvencyPaymentInstructionService;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
 use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentBatchBuilder;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -60,6 +66,8 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
     private PayrollEnforcementRepository $enforcement;
     private PayrollEnforcementPaymentRepository $enforcementPayments;
     private PayrollEnforcementLiabilityMaterializer $materializer;
+    private PayrollInsolvencyLiabilityMaterializer $insolvencyMaterializer;
+    private PayrollInstitutionAccountRepository $institutions;
     private PayrollPaymentBatchBuilder $batches;
     private PayrollPaymentReconciliationService $reconciliation;
     private SecretEncryption $encryption;
@@ -67,6 +75,9 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
     private int $supplierId;
     private int $actorId;
     private int $employeeId;
+    private int $employmentId;
+    private int $decisionDocumentId;
+    private int $recipientAccountId;
     private int $runId;
     private int $recipientInstitutionId;
     private int $payerCurrencyId;
@@ -97,7 +108,17 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')
             ->execute([$this->supplierId]);
         $this->actorId = $this->createActor($pdo);
+        $pdo->prepare(
+            'INSERT INTO payroll_module_state
+                (supplier_id, status, start_period, activated_by, activated_at)
+             VALUES (?, "active", "2026-01-01", ?, NOW())',
+        )->execute([$this->supplierId, $this->actorId]);
         $this->employeeId = $this->createEmployee($this->supplierId);
+        $this->employmentId = $this->createEmployment();
+        $this->decisionDocumentId = $this->createDecisionDocument(
+            $this->supplierId,
+            'approved-standard',
+        );
         $institutions = new PayrollInstitutionAccountRepository(
             $connection,
             $sensitive,
@@ -106,6 +127,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
                 new ActivityLogger($connection),
             ),
         );
+        $this->institutions = $institutions;
         $institutions->create($this->supplierId, [
             'institution_type' => 'other_recipient',
             'institution_code' => 'EXEK1',
@@ -122,6 +144,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             'verified_on' => '2026-06-15',
         ], $this->actorId);
         $this->recipientInstitutionId = $this->institutionId('EXEK1');
+        $this->recipientAccountId = $this->institutionAccountId('EXEK1');
         $this->payerCurrencyId = $this->createPayerCurrency($pdo);
         $pdo->prepare(
             'INSERT INTO payroll_runs
@@ -131,13 +154,24 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         )->execute([$this->supplierId, self::PAYMENT_DATE]);
         $this->runId = (int) $pdo->lastInsertId();
 
-        $this->enforcement = new PayrollEnforcementRepository($connection);
+        $this->enforcement = new PayrollEnforcementRepository(
+            $connection,
+            new PayrollInsolvencyPaymentInstructionService(
+                $connection,
+                new DocumentRepository($connection),
+            ),
+        );
         $this->enforcementPayments =
             new PayrollEnforcementPaymentRepository($connection);
         $this->materializer = new PayrollEnforcementLiabilityMaterializer(
             new PayrollPaymentLiabilityRepository($connection),
             $this->enforcementPayments,
             $institutions,
+            $sensitive,
+        );
+        $this->insolvencyMaterializer = new PayrollInsolvencyLiabilityMaterializer(
+            new PayrollPaymentLiabilityRepository($connection),
+            new PayrollInsolvencyPaymentRepository($connection),
             $sensitive,
         );
         $this->batches = new PayrollPaymentBatchBuilder(
@@ -147,6 +181,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             new IbanValidator(),
             new CzechBankAccountValidator(),
             new MockClock('2026-07-01 10:00:00 Europe/Prague'),
+            $container->get(PayrollProductionGate::class),
         );
         $this->reconciliation = new PayrollPaymentReconciliationService(
             new PayrollPaymentMatchRepository($connection),
@@ -212,6 +247,234 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         );
         self::assertSame(300_00, $batch['declared_total_minor']);
         self::assertSame(1, $batch['declared_item_count']);
+    }
+
+    public function testApprovedStandardInsolvencyCreatesExplicitPayableInstruction(): void
+    {
+        $evidence = $this->saveApprovedInsolvencyEvidence();
+        self::assertSame($this->employmentId, $evidence['insolvency_employment_id']);
+        self::assertSame(
+            $this->recipientAccountId,
+            $evidence['insolvency_institution_account_id'],
+        );
+        self::assertSame(
+            $this->decisionDocumentId,
+            $evidence['insolvency_decision_document_id'],
+        );
+        $instruction = $this->enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            self::PAYMENT_DATE,
+        )->insolvency;
+        self::assertTrue($instruction->hasImmutablePaymentInstruction());
+
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeInsolvencyMonthResult(
+            $revisionId,
+            $instruction,
+            325_00,
+            'synthetic-approved-standard-insolvency',
+        );
+        $created = $this->insolvencyMaterializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(1, $created['created_count']);
+        $replayed = $this->insolvencyMaterializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        self::assertSame(0, $replayed['created_count']);
+        self::assertSame($created['liability_ids'], $replayed['liability_ids']);
+
+        $liability = $this->liability($created['liability_ids'][0]);
+        self::assertSame('insolvency', $liability['liability_kind']);
+        self::assertSame('outgoing', $liability['direction']);
+        self::assertSame(325_00, $this->integerValue($liability, 'amount_minor'));
+        self::assertNull($liability['employee_id']);
+        self::assertSame(
+            "insolvency:p{$this->employeeId}:e{$this->employmentId}",
+            $liability['liability_reference'],
+        );
+        $serialized = $this->stringValue($liability, 'source_snapshot_json');
+        self::assertStringContainsString(
+            'payroll-payment-insolvency-source.v1',
+            $serialized,
+        );
+        self::assertStringNotContainsString('1000000005', $serialized);
+        self::assertStringNotContainsString('bank_account_ciphertext', $serialized);
+
+        $batch = $this->batches->build(
+            $this->supplierId,
+            'abo',
+            "currency:{$this->payerCurrencyId}",
+            [[
+                'liability_id' => $created['liability_ids'][0],
+                'amount_minor' => 325_00,
+            ]],
+            $this->actorId,
+        );
+        $payment = $this->batchInstruction($batch['batch_id']);
+        self::assertSame('1234567890', $payment['variable_symbol']);
+        self::assertSame('Srazka pri oddluzeni', $payment['payment_message']);
+
+        $this->expectException(\PDOException::class);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_insolvency_payment_instructions
+                SET institution_code = "CHANGED"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            $this->supplierId,
+            $instruction->paymentInstructionId,
+        ]);
+    }
+
+    public function testInsolvencyTargetSelectionAndChangedAccountFailClosed(): void
+    {
+        $foreignDocument = $this->createDecisionDocument(
+            $this->createIsolatedSupplier(
+                $this->db->pdo(),
+                $this->supplierId,
+            ),
+            'foreign-decision',
+        );
+        try {
+            $this->saveApprovedInsolvencyEvidence($foreignDocument);
+            self::fail('Rozhodnutí jiné firmy nesmí vytvořit platební pokyn.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString(
+                'firemních dokumentech',
+                $exception->getMessage(),
+            );
+        }
+
+        $this->saveApprovedInsolvencyEvidence();
+        $instruction = $this->enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            self::PAYMENT_DATE,
+        )->insolvency;
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeInsolvencyMonthResult(
+            $revisionId,
+            $instruction,
+            200_00,
+            'synthetic-changed-insolvency-target',
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->recipientAccountId]);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('už neodpovídá ověřenému účtu');
+        $this->insolvencyMaterializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+    }
+
+    public function testNonStandardInsolvencyCannotAttachPaymentTarget(): void
+    {
+        $payload = $this->approvedInsolvencyPayload();
+        $payload['insolvency_mode'] = 'alert_only';
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('jen ke standardnímu schválenému oddlužení');
+        $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            null,
+        );
+    }
+
+    public function testApprovedInsolvencyRejectsAccountOutsideReportedMonth(): void
+    {
+        $account = $this->institutions->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'EXPIRED',
+            'institution_name' => 'Syntetický bývalý insolvenční správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => '0558',
+            'valid_from' => '2026-01-01',
+            'valid_to' => '2026-05-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:expired-insolvency-recipient',
+            'verified_on' => '2026-05-31',
+        ], $this->actorId);
+        $payload = $this->approvedInsolvencyPayload();
+        $payload['insolvency_institution_account_id'] = (int) $account['id'];
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nebyl v měsíci účinný');
+        $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            null,
+        );
+    }
+
+    public function testPersonalDocumentCannotAuthorizeCompanyInsolvencyPayment(): void
+    {
+        $personalDocumentId = $this->createDecisionDocument(
+            $this->supplierId,
+            'personal-decision',
+            'user',
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('firemních dokumentech');
+        $this->saveApprovedInsolvencyEvidence($personalDocumentId);
+    }
+
+    public function testNonStandardSnapshotCannotMaterializeEvenWithInstructionId(): void
+    {
+        $this->saveApprovedInsolvencyEvidence();
+        $approved = $this->enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            self::PAYMENT_DATE,
+        )->insolvency;
+        $alert = new InsolvencyInstruction(
+            InsolvencyMode::AlertOnly,
+            true,
+            true,
+            null,
+            $approved->paymentInstructionId,
+            $approved->paymentInstructionHash,
+            $approved->employmentId,
+        );
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeInsolvencyMonthResult(
+            $revisionId,
+            $alert,
+            200_00,
+            'synthetic-alert-with-forged-result',
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('jen z neměnného pokynu schváleného');
+        $this->insolvencyMaterializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
     }
 
     public function testDeferredCaseBlocksMaterializationFailClosed(): void
@@ -855,6 +1118,118 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         );
     }
 
+    private function storeInsolvencyMonthResult(
+        int $revisionId,
+        InsolvencyInstruction $instruction,
+        int $amount,
+        string $idempotencyKey,
+    ): int {
+        $income = $amount + 10_000_00;
+        $request = new EnforcementPersonMonthRequest(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            self::PAYMENT_DATE,
+            [],
+            true,
+        );
+        $input = new GarnishmentInput(
+            self::PERIOD,
+            self::PAYMENT_DATE,
+            new GarnishableIncomeResult(
+                GarnishmentStatus::Supported,
+                $income,
+                0,
+                [],
+                [],
+            ),
+            [],
+            0,
+            true,
+            false,
+            true,
+            PensionEvidence::None,
+            false,
+            null,
+            $instruction,
+            false,
+            true,
+        );
+
+        return $this->enforcement->store(
+            $request,
+            new PayrollGarnishmentCalculation(
+                $this->supplierId,
+                $this->employeeId,
+                $input,
+                new GarnishmentResult(
+                    self::PERIOD,
+                    GarnishmentStatus::Supported,
+                    $income,
+                    5_000_00,
+                    2_000_00,
+                    0,
+                    0,
+                    $amount,
+                    $income - $amount,
+                    false,
+                    true,
+                    [new GarnishmentAllocation(
+                        'insolvency-administrator',
+                        0,
+                        $amount,
+                    )],
+                    [],
+                    [],
+                    'enforcement-2026',
+                    str_repeat('e', 64),
+                ),
+            ),
+            $revisionId,
+            $idempotencyKey,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function saveApprovedInsolvencyEvidence(
+        ?int $decisionDocumentId = null,
+    ): array {
+        $payload = $this->approvedInsolvencyPayload();
+        if ($decisionDocumentId !== null) {
+            $payload['insolvency_decision_document_id'] = $decisionDocumentId;
+        }
+
+        return $this->enforcement->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            self::PERIOD,
+            $payload,
+            $this->actorId,
+            null,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function approvedInsolvencyPayload(): array
+    {
+        return [
+            'claim_register_evidence_complete' => true,
+            'dependants_evidence_complete' => true,
+            'spouse_evidence_complete' => true,
+            'pension_evidence' => 'none',
+            'has_multiple_payers' => false,
+            'protected_amount_override_minor_units' => null,
+            'protected_amount_override_verified' => false,
+            'insolvency_mode' => 'approved_standard',
+            'insolvency_decision_verified' => true,
+            'insolvency_recipient_verified' => true,
+            'insolvency_employment_id' => $this->employmentId,
+            'insolvency_institution_account_id' => $this->recipientAccountId,
+            'insolvency_decision_document_id' => $this->decisionDocumentId,
+            'court_determined_amount_minor_units' => null,
+        ];
+    }
+
     private function countLiabilitiesFor(int $caseId): int
     {
         $statement = $this->db->pdo()->prepare(
@@ -877,6 +1252,26 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         $statement->execute([$this->supplierId, $code]);
 
         return PayrollTimeValue::int($statement->fetchColumn(), 'institution_id');
+    }
+
+    private function institutionAccountId(string $code): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.id
+               FROM payroll_institution_accounts account
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE institution.supplier_id = ?
+                AND institution.institution_type = "other_recipient"
+                AND institution.institution_code = ?',
+        );
+        $statement->execute([$this->supplierId, $code]);
+
+        return PayrollTimeValue::int(
+            $statement->fetchColumn(),
+            'institution_account_id',
+        );
     }
 
     /** @return array<string,mixed> */
@@ -920,6 +1315,44 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
              VALUES (?, "Syntetická povinná osoba", "employee", "hpp",
                      1, 1, 0, 42000, 0, 1)',
         )->execute([$supplierId]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function createEmployment(): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, monthly_gross_minor, is_primary)
+             VALUES (?, ?, "SYN-INS", "employment", "active",
+                     "2026-01-01", "2026-01-01", 4200000, 1)',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function createDecisionDocument(
+        int $supplierId,
+        string $seed,
+        string $scope = 'company',
+    ): int
+    {
+        $hash = hash('sha256', "insolvency-decision:{$supplierId}:{$seed}");
+        $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope, owner_user_id)
+             VALUES (?, "Syntetické rozhodnutí oddlužení", "decision.pdf",
+                     ?, ?, "application/pdf", 1, "pdf", "manual", ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            "{$hash}.pdf",
+            $hash,
+            $this->actorId,
+            $scope,
+            $scope === 'user' ? $this->actorId : null,
+        ]);
 
         return (int) $this->db->pdo()->lastInsertId();
     }

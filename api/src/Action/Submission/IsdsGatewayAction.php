@@ -12,6 +12,8 @@ use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayDispatchService;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
@@ -47,6 +49,7 @@ final class IsdsGatewayAction
         private readonly IsdsGatewaySessionRepository $sessions,
         private readonly SubmissionOutboxRepository $outbox,
         private readonly ActivityLogger $logger,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /**
@@ -94,9 +97,20 @@ final class IsdsGatewayAction
 
         try {
             if ($permission === 'payroll.submissions') {
-                $this->assertPayrollOutbox($supplierId, $id);
+                $environment = $this->assertPayrollOutbox($supplierId, $id);
+                $this->productionGate->assertEnvironmentActive(
+                    $supplierId,
+                    $environment,
+                );
             }
             $result = $this->dispatch->start($supplierId, $id, $userId);
+        } catch (PayrollProductionGateException $e) {
+            return Json::error(
+                $response,
+                PayrollProductionGateException::ERROR_CODE,
+                $e->getMessage(),
+                409,
+            );
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\DomainException $e) {
@@ -321,7 +335,7 @@ final class IsdsGatewayAction
 
     // ───────────────────────── interní ─────────────────────────
 
-    private function assertPayrollOutbox(int $supplierId, int $outboxId): void
+    private function assertPayrollOutbox(int $supplierId, int $outboxId): string
     {
         $row = $this->outbox->find($supplierId, $outboxId);
         if ($row === null) {
@@ -331,13 +345,20 @@ final class IsdsGatewayAction
                 404,
             );
         }
-        if (!str_starts_with(strtoupper((string) $row['agenda_code']), 'JMHZ')) {
+        $agendaCode = strtoupper(trim((string) $row['agenda_code']));
+        $artifactKind = trim((string) $row['artifact_kind']);
+        $allowedAgenda = str_starts_with($agendaCode, 'JMHZ')
+            || $agendaCode === 'PPZ'
+            || str_starts_with($agendaCode, 'PPZ_');
+        if (!$allowedAgenda || $artifactKind !== 'payroll_submission') {
             throw new SubmissionChannelException(
                 'payroll_gateway_outbox_forbidden',
-                'Mzdové oprávnění smí přes ISDS odeslat pouze podání JMHZ.',
+                'Mzdové oprávnění smí přes ISDS odeslat pouze připravené podání JMHZ nebo PPZ.',
                 403,
             );
         }
+
+        return (string) $row['environment'];
     }
 
     private function operatorGuard(

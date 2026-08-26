@@ -2,7 +2,6 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { payrollApi, type PayrollPersonOption } from '@/api/payroll'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   deductionAgreementKinds,
@@ -18,6 +17,7 @@ import {
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
@@ -32,7 +32,6 @@ const auth = useAuthStore()
 const loading = ref(true)
 const saving = ref(false)
 const agreements = ref<DeductionAgreementSummary[]>([])
-const people = ref<PayrollPersonOption[]>([])
 const detail = ref<DeductionAgreementDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const creating = ref(false)
@@ -195,18 +194,14 @@ async function load() {
   loading.value = true
   listError.value = ''
   try {
-    const [page, loadedPeople] = await Promise.all([
-      payrollDeductionsApi.agreementsPage({
-        ...(employeeFilter.value ? { employee_id: employeeFilter.value } : {}),
-        ...(statusFilter.value ? { status: statusFilter.value } : {}),
-        limit: pageSize,
-        offset: offset.value,
-      }),
-      people.value.length ? Promise.resolve(people.value) : payrollApi.peopleOptions().catch(() => []),
-    ])
+    const page = await payrollDeductionsApi.agreementsPage({
+      ...(employeeFilter.value ? { employee_id: employeeFilter.value } : {}),
+      ...(statusFilter.value ? { status: statusFilter.value } : {}),
+      limit: pageSize,
+      offset: offset.value,
+    })
     agreements.value = page.agreements
     total.value = page.total
-    people.value = loadedPeople
   } catch (error: any) {
     listError.value = apiMessage(error, 'payroll.deductions.load_failed')
   } finally {
@@ -403,10 +398,13 @@ onMounted(load)
     <div class="flex flex-wrap items-end gap-3">
       <label class="text-xs font-medium text-neutral-600">
         {{ t('payroll.deductions.employee') }}
-        <select v-model="employeeFilter" data-test="deduction-employee-filter" class="mt-1 block w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-          <option :value="null">{{ t('payroll.deductions.all_employees') }}</option>
-          <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
-        </select>
+        <PayrollPersonSearchSelect
+          v-model="employeeFilter"
+          data-test="deduction-employee-filter"
+          class="mt-1 min-w-64"
+          :label="t('payroll.deductions.employee')"
+          :placeholder="t('payroll.deductions.all_employees')"
+        />
       </label>
       <label class="text-xs font-medium text-neutral-600">
         {{ t('payroll.deductions.status_label') }}
@@ -543,10 +541,14 @@ onMounted(load)
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label v-if="creating" class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.employee') }}
-              <select v-model="form.employee_id" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
-                <option :value="null" disabled>{{ t('payroll.deductions.select_employee') }}</option>
-                <option v-for="person in people" :key="person.id" :value="person.id">{{ person.full_name }}</option>
-              </select>
+              <PayrollPersonSearchSelect
+                v-model="form.employee_id"
+                class="mt-1"
+                :label="t('payroll.deductions.employee')"
+                :placeholder="t('payroll.deductions.select_employee')"
+                :clearable="false"
+                required
+              />
             </label>
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.agreement_title') }}

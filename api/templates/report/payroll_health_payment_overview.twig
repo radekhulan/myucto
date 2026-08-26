@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 10pt; color: #171717; }
+    h1 { font-size: 16pt; margin: 0 0 2mm; }
+    h2 { font-size: 11.5pt; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #444; }
+    .sub { color: #555; margin-bottom: 5mm; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 2mm; border-bottom: 0.5px solid #ddd; vertical-align: top; }
+    td.label { width: 43%; color: #444; }
+    td.value { font-weight: 600; }
+    tr.total td { border-top: 1px solid #333; border-bottom: 1px solid #333; font-weight: bold; }
+    .notice { margin-top: 8mm; padding: 3mm; background: #f4f4f4; font-size: 8.5pt; color: #555; }
+    .signature { height: 22mm; border: 0.5px solid #aaa; padding: 2mm; color: #777; }
+    .footer { margin-top: 5mm; font-size: 8pt; color: #777; }
+</style>
+</head>
+<body>
+    <h1>Přehled o platbě pojistného zaměstnavatele</h1>
+    <div class="sub">
+        Zdravotní pojišťovna {{ insurer_code }}{% if insurer_name %} — {{ insurer_name }}{% endif %}, období {{ month }}/{{ year }}
+    </div>
+
+    <h2>Zaměstnavatel</h2>
+    <table>
+        <tr><td class="label">Název</td><td class="value">{{ employer.name }}</td></tr>
+        <tr><td class="label">Identifikační číslo plátce</td><td class="value">{{ employer.payer_number }}</td></tr>
+        <tr><td class="label">Adresa</td><td class="value">{{ employer.street }} {{ employer.house_number }}, {{ employer.postal_code }} {{ employer.city }}</td></tr>
+        {% if employer.phone %}<tr><td class="label">Telefon</td><td class="value">{{ employer.phone }}</td></tr>{% endif %}
+    </table>
+
+    <h2>Údaje přehledu</h2>
+    <table>
+        <tr><td class="label">Druh přehledu</td><td class="value">{{ overview_kind == 'opravny' ? 'Opravný' : 'Řádný' }}</td></tr>
+        <tr><td class="label">Počet zaměstnanců pojišťovny</td><td class="value">{{ employee_count }}</td></tr>
+        <tr><td class="label">Úhrn vyměřovacích základů</td><td class="value">{{ assessment_base|number_format(2, ',', ' ') }} Kč</td></tr>
+        <tr class="total"><td class="label">Pojistné celkem</td><td class="value">{{ contribution_czk|number_format(0, ',', ' ') }} Kč</td></tr>
+        {% if internal_reference %}<tr><td class="label">Interní reference</td><td class="value">{{ internal_reference }}</td></tr>{% endif %}
+    </table>
+
+    <h2>Datum vyplnění a potvrzení zaměstnavatele</h2>
+    <table>
+        <tr>
+            <td class="label">Vyplněno dne</td>
+            <td class="value">{{ filled_on|cz_date }}</td>
+        </tr>
+        <tr>
+            <td class="label">Potvrzení odpovědné osoby</td>
+            <td class="signature">Jméno, podpis nebo elektronické potvrzení odesílatele</td>
+        </tr>
+    </table>
+
+    <div class="notice">
+        Vytěžitelný PDF podklad vytvořený ze stejného zmrazeného výpočtu jako XML datová věta.
+        Nejde o potvrzení přijetí ani věcného zpracování pojišťovnou. Odeslání datovou schránkou
+        musí výslovně potvrdit uživatel.
+    </div>
+    <div class="footer">Vygenerováno systémem MyÚčto.cz.</div>
+</body>
+</html>

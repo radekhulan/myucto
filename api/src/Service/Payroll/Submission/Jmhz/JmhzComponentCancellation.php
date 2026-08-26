@@ -27,12 +27,12 @@ final readonly class JmhzComponentCancellation
         string $employmentExternalIdentifier,
     ): self {
         if (preg_match(
-            '/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/D',
+            '/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/D',
             $formGuid,
         ) !== 1) {
             throw new JmhzXmlException(
                 'jmhz_envelope_guid_invalid',
-                'GUID stornované součásti musí být UUIDv7 podle RFC 9562.',
+                'GUID stornované součásti musí být kanonický UUID.',
             );
         }
         if (preg_match('/^\d{10}$/D', $personExternalIdentifier) !== 1) {

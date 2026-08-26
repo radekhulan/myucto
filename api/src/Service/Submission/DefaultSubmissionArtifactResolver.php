@@ -98,7 +98,11 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         }
 
         $mime = (string) $row['mime_type'];
-        $extension = str_contains($mime, 'zip') ? 'zip' : 'xml';
+        $extension = match ($mime) {
+            'application/pdf' => 'pdf',
+            'application/zip' => 'zip',
+            default => 'xml',
+        };
 
         return [
             'filename' => 'mzdove-podani-' . (int) $row['submission_id'] . '-' . $id . '.' . $extension,

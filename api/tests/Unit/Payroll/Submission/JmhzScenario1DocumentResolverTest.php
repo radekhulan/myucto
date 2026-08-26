@@ -124,6 +124,45 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
             ['advance_tax_after_credits' => 150, 'tax_bonus' => 0],
             $resolution->candidate?->payload['employer']['summary_totals'],
         );
+        self::assertSame(
+            [
+                'assessment_base_czk' => 1000,
+                'reported_income_czk' => 1000,
+                'paragraph5_letter' => 'a',
+            ],
+            $resolution->candidate?->payload['people'][0]['employments'][0]['social_base'],
+        );
+    }
+
+    public function testUsesFrozenPayslipAllocationForEmployerSocialContribution(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        unset(
+            $payload['people'][0]['person_summary']['statutory']['social_insurance']
+                ['employer_contribution_minor_units'],
+        );
+        $payload['people'][0]['person_summary']['payslip_document'] = [
+            'employer_social_minor_units' => 24_800,
+        ];
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $this->withPayload($preparation, $payload),
+            $this->pvpoj(),
+        );
+
+        self::assertSame(248, $resolution->candidate?->payload['people'][0]
+            ['summary']['employer_social_czk']);
+        self::assertNotContains(
+            'jmhz_scenario1_whole_czk_required',
+            array_column(
+                array_map(
+                    static fn ($blocker): array => $blocker->toArray(),
+                    $resolution->blockers,
+                ),
+                'code',
+            ),
+        );
     }
 
     public function testHistoricalPreparationIsVerifiedButNotNormalized(): void
@@ -478,6 +517,62 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    public function testSelectedRegistrationIgnoresReadinessIssuesFromAnotherOffice(): void
+    {
+        $preparation = $this->multiOfficePreparation();
+        $payload = $preparation->payload;
+        $payload['readiness_issues'] = [
+            ['code' => 'office_four_employment', 'entity_type' => 'employment', 'entity_id' => 101, 'attribute_ids' => []],
+            ['code' => 'office_five_employment', 'entity_type' => 'employment', 'entity_id' => 102, 'attribute_ids' => []],
+            ['code' => 'office_four_person', 'entity_type' => 'person', 'entity_id' => 11, 'attribute_ids' => []],
+            ['code' => 'office_five_person', 'entity_type' => 'person', 'entity_id' => 12, 'attribute_ids' => []],
+            ['code' => 'office_four_registration', 'entity_type' => 'office', 'entity_id' => 4, 'attribute_ids' => []],
+            ['code' => 'office_five_registration', 'entity_type' => 'office', 'entity_id' => 5, 'attribute_ids' => []],
+            ['code' => 'whole_revision', 'entity_type' => 'revision', 'entity_id' => 301, 'attribute_ids' => []],
+        ];
+        $readiness = $preparation->readiness;
+        $readiness['status'] = 'blocked';
+        $readiness['issue_count'] = count($payload['readiness_issues']);
+        $preparation = new JmhzVerifiedPreparationSnapshot(
+            $preparation->id,
+            $preparation->supplierId,
+            $preparation->environment,
+            $preparation->runId,
+            $preparation->sourceRevisionId,
+            $preparation->revisionNo,
+            $preparation->periodStart,
+            $preparation->periodEnd,
+            $preparation->scenarioKey,
+            $preparation->builderVersion,
+            $preparation->sourceManifestSha256,
+            $preparation->readinessSha256,
+            $preparation->snapshotFingerprint,
+            $preparation->manifest,
+            $readiness,
+            $payload,
+        );
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(officeId: 5, variableSymbol: '9990001234'),
+            null,
+            5,
+        );
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+
+        self::assertContains('jmhz_preparation_not_ready', $codes);
+        self::assertContains('office_five_employment', $codes);
+        self::assertContains('office_five_person', $codes);
+        self::assertContains('office_five_registration', $codes);
+        self::assertContains('whole_revision', $codes);
+        self::assertNotContains('office_four_employment', $codes);
+        self::assertNotContains('office_four_person', $codes);
+        self::assertNotContains('office_four_registration', $codes);
+    }
+
     public function testRunWithTwoRegistrationsNeverPicksOneSilently(): void
     {
         $resolution = (new JmhzScenario1DocumentResolver())->resolve(
@@ -713,6 +808,13 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
                     ],
                     'insurance' => [
                         'relationship_id' => 'employment:101',
+                        'kind' => 'employment',
+                        'participation' => [
+                            'relationship_id' => 'employment:101',
+                            'status' => 'participates',
+                            'participation_income_minor_units' => 100_000,
+                        ],
+                        'assessment_base_minor_units' => 100_000,
                         'capped_assessment_base_minor_units' => 100_000,
                         'employer_rate_category' => 'ordinary',
                     ],

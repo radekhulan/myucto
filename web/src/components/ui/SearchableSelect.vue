@@ -32,6 +32,8 @@ const props = withDefaults(defineProps<{
   accent?: 'primary' | 'payroll'
   inputClass?: string
   ariaLabel?: string
+  inputId?: string
+  clearLabel?: string
   /**
    * Nabídku vykreslit do <body> s position:fixed. Nutné uvnitř kontejneru s overflow
    * (např. tabulka položek faktury s overflow-x-auto), který by absolutně polohovaný
@@ -55,6 +57,8 @@ const props = withDefaults(defineProps<{
   accent: 'primary',
   inputClass: '',
   ariaLabel: undefined,
+  inputId: undefined,
+  clearLabel: 'Zrušit výběr',
   teleport: false,
 })
 
@@ -248,6 +252,7 @@ onUnmounted(() => {
       <input
         ref="input"
         v-model="query"
+        :id="inputId"
         type="text"
         role="combobox"
         aria-autocomplete="list"
@@ -277,7 +282,7 @@ onUnmounted(() => {
         type="button"
         @click="clear"
         class="cursor-pointer absolute right-7 top-1/2 -translate-y-1/2 w-6 h-6 inline-flex items-center justify-center text-neutral-400 hover:text-neutral-700 text-lg leading-none"
-        :aria-label="'Zrušit výběr'"
+        :aria-label="clearLabel"
       >×</button>
       <span class="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none text-xs">▼</span>
     </div>

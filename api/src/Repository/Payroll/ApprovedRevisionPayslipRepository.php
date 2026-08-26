@@ -19,11 +19,48 @@ final class ApprovedRevisionPayslipRepository
      *   people:list<array<string,mixed>>
      * }|null
      */
+    public function source(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+    ): ?array {
+        return $this->loadSource($supplierId, $runId, $revisionId, false);
+    }
+
+    /**
+     * @return array{
+     *   period_start:string,
+     *   result_snapshot_json:string,
+     *   result_snapshot_hash:string,
+     *   people:list<array<string,mixed>>
+     * }|null
+     */
     public function lockSource(
         int $supplierId,
         int $runId,
         int $revisionId,
     ): ?array {
+        return $this->loadSource($supplierId, $runId, $revisionId, true);
+    }
+
+    /**
+     * @return array{
+     *   period_start:string,
+     *   result_snapshot_json:string,
+     *   result_snapshot_hash:string,
+     *   people:list<array<string,mixed>>
+     * }|null
+     */
+    private function loadSource(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        bool $forUpdate,
+    ): ?array {
+        $lock = $forUpdate ? ' FOR UPDATE' : '';
+        $statuses = $forUpdate
+            ? '("approved", "superseded")'
+            : '("reviewed", "approved", "superseded")';
         $revision = $this->db->pdo()->prepare(
             'SELECT run.period_start,
                     revision.result_snapshot_json,
@@ -35,10 +72,10 @@ final class ApprovedRevisionPayslipRepository
               WHERE revision.supplier_id = ?
                 AND revision.run_id = ?
                 AND revision.id = ?
-                AND revision.status IN ("approved", "superseded")
+                AND revision.status IN ' . $statuses . '
                 AND revision.result_snapshot_json IS NOT NULL
-                AND revision.result_snapshot_hash IS NOT NULL
-              FOR UPDATE'
+                AND revision.result_snapshot_hash IS NOT NULL'
+            . $lock
         );
         $revision->execute([$supplierId, $runId, $revisionId]);
         $row = $revision->fetch(PDO::FETCH_ASSOC);
@@ -61,8 +98,8 @@ final class ApprovedRevisionPayslipRepository
             'SELECT employee_id, status, result_json, result_hash
                FROM payroll_run_persons
               WHERE supplier_id = ? AND revision_id = ?
-              ORDER BY employee_id
-              FOR UPDATE'
+              ORDER BY employee_id'
+            . $lock
         );
         $people->execute([$supplierId, $revisionId]);
         $personRows = [];

@@ -72,7 +72,7 @@ final class EldpStatementRepository
               WHERE revision.supplier_id = ?
                 AND YEAR(run.period_start) = ?
                 AND revision.status = \'approved\'
-                AND revision.revision_kind = \'regular\'
+                AND revision.revision_kind IN (\'regular\', \'correction\')
                 AND revision.revision_no = run.current_revision_no
               ORDER BY run.period_start, revision.id'
         );

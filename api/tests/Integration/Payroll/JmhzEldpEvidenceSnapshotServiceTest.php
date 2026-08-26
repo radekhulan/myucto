@@ -124,6 +124,83 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
         }
     }
 
+    public function testPreparationAutomaticallyFreezesOrdinaryEldpEvidence(): void
+    {
+        $preparation = $this->preparations->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-preparation-derived-eldp',
+            $this->createdBy,
+        );
+
+        $issueCodes = array_column($preparation['issues'], 'code');
+        self::assertNotContains(
+            'jmhz_eldp_evidence_missing',
+            $issueCodes,
+            CanonicalJson::encode($issueCodes),
+        );
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*)
+               FROM payroll_jmhz_eldp_evidence_snapshots
+              WHERE supplier_id = ? AND environment = "test"
+                AND source_revision_id = ? AND employment_id = ?
+                AND created_by = ?',
+        );
+        $statement->execute([
+            $this->supplierId,
+            $this->revisionId,
+            $this->employmentId,
+            $this->createdBy,
+        ]);
+        self::assertSame(1, (int) $statement->fetchColumn());
+
+        $snapshot = $this->service->snapshotForPreparation(
+            $this->supplierId,
+            'test',
+            $this->revisionId,
+            $this->employmentId,
+        );
+        self::assertIsArray($snapshot);
+        self::assertSame('1++', $snapshot['payload']['eldp_sections'][0]['code']);
+        self::assertSame(10_000, $snapshot['payload']['eldp_sections'][0]['assessment_base_czk']);
+        self::assertSame('', $snapshot['payload']['confirmation']['note']);
+
+        $audit = $this->db->pdo()->prepare(
+            'SELECT payload FROM activity_log
+              WHERE supplier_id = ? AND action = "payroll.jmhz_eldp_evidence.frozen"
+              ORDER BY id DESC LIMIT 1',
+        );
+        $audit->execute([$this->supplierId]);
+        $payload = json_decode((string) $audit->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('derived_from_frozen_payroll_sources', $payload['source_kind']);
+        self::assertSame($this->revisionId, $payload['source_revision_id']);
+        self::assertSame($this->employmentId, $payload['employment_id']);
+    }
+
+    public function testPreparationKeepsAbsenceExceptionFailClosedAndActionable(): void
+    {
+        [, $revisionId] = $this->source($this->db->pdo(), true, '2026-08-01');
+
+        $preparation = $this->preparations->freeze(
+            $this->supplierId,
+            $revisionId,
+            'test',
+            'synthetic-preparation-eldp-absence',
+            $this->createdBy,
+        );
+
+        $issueCodes = array_column($preparation['issues'], 'code');
+        self::assertContains('jmhz_eldp_absences_unsupported', $issueCodes);
+        self::assertNotContains('jmhz_eldp_evidence_missing', $issueCodes);
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_jmhz_eldp_evidence_snapshots
+              WHERE supplier_id = ? AND source_revision_id = ?',
+        );
+        $count->execute([$this->supplierId, $revisionId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
     public function testDifferentConfirmationCannotReplaceFrozenScope(): void
     {
         $this->service->freeze(
@@ -274,7 +351,11 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
     }
 
     /** @return array{int,int} */
-    private function source(PDO $pdo): array
+    private function source(
+        PDO $pdo,
+        bool $withAbsence = false,
+        string $periodStart = '2026-07-01',
+    ): array
     {
         $pdo->prepare(
             'INSERT INTO payroll_employees
@@ -296,13 +377,13 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_runs
                 (supplier_id, period_start, payment_date, status, current_revision_no)
-             VALUES (?, "2026-07-01", "2026-08-10", "approved", 1)',
-        )->execute([$this->supplierId]);
+             VALUES (?, ?, DATE_ADD(?, INTERVAL 40 DAY), "approved", 1)',
+        )->execute([$this->supplierId, $periodStart, $periodStart]);
         $runId = (int) $pdo->lastInsertId();
         $input = [
             'schema_version' => 'payroll-run-input.v2',
             'supplier_id' => $this->supplierId,
-            'period_start' => '2026-07-01',
+            'period_start' => $periodStart,
             'people' => [[
                 'employee' => ['id' => $employeeId],
                 'employments' => [[
@@ -340,7 +421,11 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
                             ],
                         ],
                     ],
-                    'absences' => [],
+                    'absences' => $withAbsence ? [[
+                        'type' => 'sickness',
+                        'date_from' => substr($periodStart, 0, 8) . '10',
+                        'date_to' => substr($periodStart, 0, 8) . '10',
+                    ]] : [],
                     'inputs' => [],
                 ]],
             ]],
@@ -364,6 +449,8 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
                             'participation' => [
                                 'relationship_id' => "employment:{$employmentId}",
                                 'status' => 'participates',
+                                'participation_income_minor_units' => 1_000_000,
+                                'group_income_minor_units' => 1_000_000,
                             ],
                             'assessment_base_minor_units' => 1_000_000,
                             'capped_assessment_base_minor_units' => 1_000_000,
@@ -389,7 +476,7 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
             hash('sha256', $inputJson),
             $resultJson,
             hash('sha256', $resultJson),
-            hash('sha256', "synthetic-eldp:{$this->supplierId}", true),
+            hash('sha256', "synthetic-eldp:{$this->supplierId}:{$periodStart}", true),
         ]);
         $revisionId = (int) $pdo->lastInsertId();
         $emptyJson = CanonicalJson::encode([]);

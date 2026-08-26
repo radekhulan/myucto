@@ -28,6 +28,57 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertTrue($result['terms']['is_primary']);
     }
 
+    public function testLeaveAllowanceOverrideIsOptionalAndMustRespectStatutoryMinimum(): void
+    {
+        $terms = $this->terms();
+        $terms['leave_entitlement_weeks_override'] = 5;
+        self::assertSame(5, $this->validator()->terms($terms)['leave_entitlement_weeks_override']);
+
+        $terms['leave_entitlement_weeks_override'] = 3;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nejméně 4 týdny');
+        $this->validator()->terms($terms);
+    }
+
+    public function testAcceptsActivityFamilyMatchingAgreement(): void
+    {
+        foreach ([['dpc', 'A'], ['dpp', 'T']] as [$relationType, $activityCode]) {
+            $terms = $this->terms();
+            $terms['activity_code'] = $activityCode;
+            $terms['jmhz_relationship_detail_code'] = null;
+
+            $result = $this->validator()->create([
+                'code' => strtoupper($relationType) . '-1',
+                'relation_type' => $relationType,
+                'monthly_gross_minor' => 640_000,
+                'terms' => $terms,
+            ]);
+
+            self::assertSame($activityCode, $result['terms']['activity_code']);
+        }
+    }
+
+    public function testRejectsActivityFamilyMismatchingRelation(): void
+    {
+        foreach ([['dpc', 'T'], ['dpp', 'A'], ['dpp', '1']] as [$relationType, $activityCode]) {
+            $terms = $this->terms();
+            $terms['activity_code'] = $activityCode;
+            $terms['jmhz_relationship_detail_code'] = null;
+
+            try {
+                $this->validator()->create([
+                    'code' => strtoupper($relationType) . '-1',
+                    'relation_type' => $relationType,
+                    'monthly_gross_minor' => 640_000,
+                    'terms' => $terms,
+                ]);
+                self::fail("Kód {$activityCode} pro vztah {$relationType} měl být odmítnut.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('neodpovídá druhu pracovního vztahu', $exception->getMessage());
+            }
+        }
+    }
+
     public function testForeignModeRequiresCountry(): void
     {
         $terms = $this->terms();
@@ -81,7 +132,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertSame('CZ', $result['jmhz_workplace_country_code']);
         self::assertSame('3', $result['jmhz_apz_instrument_code']);
         self::assertSame(
-            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            JmhzExternalCodebookCatalog::AUGUST_2026_MANIFEST_SHA256,
             $result['jmhz_external_codebook_manifest_sha256'],
         );
     }
@@ -93,7 +144,12 @@ final class PayrollEmploymentValidatorTest extends TestCase
         $future['work_place'] = 'Hlavní město Praha';
         $future['jmhz_workplace_municipality_code'] = '554782';
         $future['jmhz_workplace_country_code'] = 'CZ';
-        self::assertSame('554782', $this->validator()->terms($future)['jmhz_workplace_municipality_code']);
+        $futureResult = $this->validator()->terms($future);
+        self::assertSame('554782', $futureResult['jmhz_workplace_municipality_code']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            $futureResult['jmhz_external_codebook_manifest_sha256'],
+        );
 
         $past = $future;
         $past['effective_from'] = '2025-12-31';

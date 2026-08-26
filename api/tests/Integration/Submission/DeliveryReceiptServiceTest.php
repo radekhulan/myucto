@@ -107,6 +107,7 @@ final class DeliveryReceiptServiceTest extends TestCase
             $this->stubArtifacts(),
             new SubmissionArtifactValidator(new XmlSchemaValidator()),
             new NullLogger(),
+            null,
         );
 
         $this->inbox = new SubmissionInboxRepository($db);

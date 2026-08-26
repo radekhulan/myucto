@@ -374,6 +374,19 @@ final class JmhzProtocolParserTest extends TestCase
         }
     }
 
+    public function testPartialProtocolFormReferenceMustBeAGuid(): void
+    {
+        try {
+            $this->parser()->parse(JmhzTransportSample::partialProtocol(
+                'OK',
+                [['guid' => 'FORM-1', 'result' => 'OK']],
+            ));
+            self::fail('Neplatný GUID formuláře nesmí projít do evidence výsledků.');
+        } catch (JmhzTransportException $e) {
+            self::assertSame('jmhz_protocol_form_unidentified', $e->errorCode);
+        }
+    }
+
     public function testUnknownQualifierIsRefused(): void
     {
         try {

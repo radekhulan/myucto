@@ -30,7 +30,12 @@ final class PayrollPaymentReconciliationQueryService
     public const PICKER_DEFAULT_LIMIT = 20;
     public const PICKER_MAX_LIMIT = 50;
 
-    public const PICKER_KINDS = ['allocations', 'bank_evidence', 'cash_evidence'];
+    public const PICKER_KINDS = [
+        'allocations',
+        'incoming_liabilities',
+        'bank_evidence',
+        'cash_evidence',
+    ];
     public const PICKER_USAGES = ['match', 'reversal'];
 
     public function __construct(private readonly Connection $db) {}
@@ -60,6 +65,16 @@ final class PayrollPaymentReconciliationQueryService
 
         $allocations = $this->trim(
             $this->allocations($supplierId, $from, $to, [], self::OFFERED_LIMIT + 1),
+            self::OFFERED_LIMIT,
+        );
+        $incomingLiabilities = $this->trim(
+            $this->incomingLiabilities(
+                $supplierId,
+                $from,
+                $to,
+                [],
+                self::OFFERED_LIMIT + 1,
+            ),
             self::OFFERED_LIMIT,
         );
         $bankEvidence = $evidenceRange === null
@@ -94,6 +109,9 @@ final class PayrollPaymentReconciliationQueryService
             // další volání; kdo ne, hledá přes /reconciliation/options.
             'allocations' => $allocations['items'],
             'allocations_truncated' => $allocations['truncated'],
+            'incoming_liabilities' => $incomingLiabilities['items'],
+            'incoming_liabilities_truncated' =>
+                $incomingLiabilities['truncated'],
             'offered_limit' => self::OFFERED_LIMIT,
             'matches' => $this->matches(
                 $supplierId,
@@ -172,6 +190,20 @@ final class PayrollPaymentReconciliationQueryService
         if ($kind === 'allocations') {
             $page = $this->trim(
                 $this->allocations($supplierId, $from, $to, $filters, $limit + 1),
+                $limit,
+            );
+
+            return $page + ['limit' => $limit];
+        }
+        if ($kind === 'incoming_liabilities') {
+            $page = $this->trim(
+                $this->incomingLiabilities(
+                    $supplierId,
+                    $from,
+                    $to,
+                    $filters,
+                    $limit + 1,
+                ),
                 $limit,
             );
 
@@ -383,6 +415,120 @@ final class PayrollPaymentReconciliationQueryService
         return $result;
     }
 
+    /**
+     * @param array<string,mixed> $filters
+     * @return list<array<string,mixed>>
+     */
+    private function incomingLiabilities(
+        int $supplierId,
+        string $from,
+        string $to,
+        array $filters,
+        int $limit,
+    ): array {
+        $search = trim((string) ($filters['search'] ?? ''));
+        $currency = trim((string) ($filters['currency'] ?? ''));
+        $searchClause = $search === ''
+            ? ''
+            : ' AND (employee.full_name LIKE ?
+                     OR liability.liability_reference LIKE ?
+                     OR liability.liability_kind LIKE ?)';
+        $currencyClause = $currency === ''
+            ? ''
+            : ' AND liability.currency_code = ?';
+        $statement = $this->db->pdo()->prepare(
+            'SELECT liability.id, liability.liability_reference,
+                    liability.liability_kind, liability.direction,
+                    liability.due_on, liability.currency_code,
+                    liability.amount_minor,
+                    employee.full_name AS employee_name,
+                    COALESCE(SUM(payment_match.amount_minor), 0)
+                      AS settled_minor
+               FROM payroll_payment_liabilities liability
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+          LEFT JOIN payroll_employees employee
+                 ON employee.supplier_id = liability.supplier_id
+                AND employee.id = liability.employee_id
+          LEFT JOIN payroll_payment_matches payment_match
+                 ON payment_match.supplier_id = liability.supplier_id
+                AND payment_match.liability_id = liability.id
+                AND payment_match.allocation_id IS NULL
+              WHERE liability.supplier_id = ?
+                AND liability.direction = "incoming"
+                AND run.period_start >= ?
+                AND run.period_start < ?'
+            . $currencyClause
+            . $searchClause
+            . ' GROUP BY liability.id, liability.liability_reference,
+                       liability.liability_kind, liability.direction,
+                       liability.due_on, liability.currency_code,
+                       liability.amount_minor, employee.full_name
+              HAVING liability.amount_minor
+                     - COALESCE(SUM(payment_match.amount_minor), 0) > 0
+              ORDER BY liability.due_on, employee.full_name, liability.id
+              LIMIT ?',
+        );
+        $position = 0;
+        $statement->bindValue(++$position, $supplierId, PDO::PARAM_INT);
+        $statement->bindValue(++$position, $from, PDO::PARAM_STR);
+        $statement->bindValue(++$position, $to, PDO::PARAM_STR);
+        if ($currency !== '') {
+            $statement->bindValue(++$position, $currency, PDO::PARAM_STR);
+        }
+        if ($search !== '') {
+            $term = self::likeTerm($search);
+            for ($i = 0; $i < 3; ++$i) {
+                $statement->bindValue(++$position, $term, PDO::PARAM_STR);
+            }
+        }
+        $statement->bindValue(++$position, $limit, PDO::PARAM_INT);
+        $statement->execute();
+
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $rawRow) {
+            $row = self::row($rawRow, 'příchozí mzdový závazek');
+            $amount = self::integer($row, 'amount_minor');
+            $settled = self::integer($row, 'settled_minor');
+            if ($amount <= 0 || $settled < 0 || $settled > $amount) {
+                throw new \UnexpectedValueException(
+                    'Součet přijatých vratek závazku je mimo povolené meze.',
+                );
+            }
+            $result[] = [
+                'id' => self::integer($row, 'id'),
+                'liability_reference' => self::text(
+                    $row,
+                    'liability_reference',
+                ),
+                'liability_kind' => self::text($row, 'liability_kind'),
+                'direction' => self::enum(
+                    $row,
+                    'direction',
+                    ['incoming'],
+                ),
+                'due_on' => self::date($row, 'due_on'),
+                'currency_code' => self::currency(
+                    $row,
+                    'currency_code',
+                ),
+                'employee_name' => self::nullableText(
+                    $row,
+                    'employee_name',
+                ),
+                'amount_minor' => $amount,
+                'settled_minor' => $settled,
+                'remaining_minor' => $amount - $settled,
+            ];
+        }
+
+        return $result;
+    }
+
     private function matchCount(
         int $supplierId,
         string $from,
@@ -391,12 +537,9 @@ final class PayrollPaymentReconciliationQueryService
         $statement = $this->db->pdo()->prepare(
             'SELECT COUNT(*)
                FROM payroll_payment_matches payment_match
-               JOIN payroll_payment_allocations allocation
-                 ON allocation.supplier_id = payment_match.supplier_id
-                AND allocation.id = payment_match.allocation_id
                JOIN payroll_payment_liabilities liability
-                 ON liability.supplier_id = allocation.supplier_id
-                AND liability.id = allocation.liability_id
+                 ON liability.supplier_id = payment_match.supplier_id
+                AND liability.id = payment_match.liability_id
                JOIN payroll_run_revisions revision
                  ON revision.supplier_id = liability.supplier_id
                 AND revision.id = liability.revision_id
@@ -423,6 +566,7 @@ final class PayrollPaymentReconciliationQueryService
     ): array {
         $statement = $this->db->pdo()->prepare(
             'SELECT payment_match.id, payment_match.allocation_id,
+                    payment_match.liability_id,
                     payment_match.event_kind,
                     payment_match.source_match_id,
                     payment_match.amount_minor,
@@ -452,18 +596,18 @@ final class PayrollPaymentReconciliationQueryService
                       ELSE 0
                     END AS reversible_minor
                FROM payroll_payment_matches payment_match
-               JOIN payroll_payment_allocations allocation
+          LEFT JOIN payroll_payment_allocations allocation
                  ON allocation.supplier_id = payment_match.supplier_id
                 AND allocation.id = payment_match.allocation_id
-               JOIN payroll_payment_items payment_item
+          LEFT JOIN payroll_payment_items payment_item
                  ON payment_item.supplier_id = allocation.supplier_id
                 AND payment_item.id = allocation.item_id
-               JOIN payroll_payment_batches payment_batch
+          LEFT JOIN payroll_payment_batches payment_batch
                  ON payment_batch.supplier_id = payment_item.supplier_id
                 AND payment_batch.id = payment_item.batch_id
                JOIN payroll_payment_liabilities liability
-                 ON liability.supplier_id = allocation.supplier_id
-                AND liability.id = allocation.liability_id
+                 ON liability.supplier_id = payment_match.supplier_id
+                AND liability.id = payment_match.liability_id
                JOIN payroll_run_revisions revision
                  ON revision.supplier_id = liability.supplier_id
                 AND revision.id = liability.revision_id
@@ -521,10 +665,11 @@ final class PayrollPaymentReconciliationQueryService
             );
             $result[] = [
                 'id' => self::integer($row, 'id'),
-                'allocation_id' => self::integer(
+                'allocation_id' => self::nullableInteger(
                     $row,
                     'allocation_id',
                 ),
+                'liability_id' => self::integer($row, 'liability_id'),
                 'event_kind' => $eventKind,
                 'source_match_id' => self::nullableInteger(
                     $row,
@@ -559,7 +704,7 @@ final class PayrollPaymentReconciliationQueryService
                     $row,
                     'evidence_fact_hash',
                 ),
-                'batch_reference' => self::text(
+                'batch_reference' => self::nullableText(
                     $row,
                     'batch_reference',
                 ),

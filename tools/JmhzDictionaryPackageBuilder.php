@@ -14,7 +14,7 @@ final class JmhzDictionaryPackageBuilder
     private const DICTIONARY_SHA256 =
         'e794a56d3baa48dd876ad45a0deb5b1bb77c17a0cb44a3511e8ef4028be69743';
     private const CONTROL_CATALOG_SHA256 =
-        'fbc87a3aab479af1c58bd44aa710e43f5a522d5ebca5de6eec9bbb690ad8a440';
+        '8c861badbd6229e9185482b0caaf19d6ded4797b27bf37f8b53dcb3b31151b49';
     private const CODEBOOK_ALIASES = [
         'klasifikace_zamestnani' => 'klasifikace_v_zamestnani',
         'klasifikace_postaveni_v_zamestnani' => 'klasifikace_v_zamestnani',
@@ -51,14 +51,14 @@ final class JmhzDictionaryPackageBuilder
             $codebookAliases,
         );
 
-        $packageKey = 'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1';
+        $packageKey = 'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1';
         $payload = [
             'schema_version' => 'jmhz-spec-package.v1',
             'package_key' => $packageKey,
             'versions' => [
                 'xsd' => '1.4.3.4',
                 'dictionary' => '1.4.1.6',
-                'control_catalog' => '1.4.2.7',
+                'control_catalog' => '1.4.2.8',
                 'process' => '1.4.0.2',
                 'instructions' => '1.4.13',
             ],

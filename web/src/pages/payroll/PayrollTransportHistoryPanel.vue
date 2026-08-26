@@ -4,9 +4,10 @@
  *
  * Odesílací cesta i ledger pokusů existovaly dřív než tahle obrazovka, takže
  * odpověď na otázku „co jsem podal a v jakém je to stavu" žila jen v databázi.
- * Tady se čte a doptává; ODESÍLÁ se jinde — odeslání patří ke zmrazení podání,
- * ne k seznamu stavů, a tlačítko „odeslat" v přehledu by svádělo k druhému
- * podání za totéž období.
+ * Historické pokusy se tu jen čtou a doptávají. Výjimkou jsou přesně určená
+ * zmrazená podání ve stavu `ready`, která ještě nemají žádný pokus: ta se tu
+ * dají odeslat podle vlastního ID, aby opravné či stornovací podání po přípravě
+ * nezmizelo a UI omylem nehledalo jiné podání za stejné období.
  *
  * Tři rozlišení, na kterých celá obrazovka stojí:
  *
@@ -26,13 +27,18 @@
  * aplikace nezná datovou větu, nemůže se doptat na stav ani uzavřít transakci,
  * a tvářit se, že ano, by bylo horší než ho neukázat.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
+import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollApi,
+  type PayrollJmhzContentCorrectionForm,
+  type PayrollJmhzContentCorrectionPreparation,
   type PayrollJmhzImportedProtocol,
+  type PayrollJmhzIsdsEnqueueResult,
   type PayrollJmhzProtocolError,
+  type PayrollJmhzReadySubmission,
   type PayrollJmhzTransportAttempt,
   type PayrollJmhzTransportEnvironment,
   type PayrollJmhzTransportPoll,
@@ -40,6 +46,7 @@ import {
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -47,9 +54,12 @@ const auth = useAuthStore()
 
 const ENVIRONMENTS: PayrollJmhzTransportEnvironment[] = ['production', 'test']
 
-const environment = ref<PayrollJmhzTransportEnvironment>('production')
+const environment = defineModel<PayrollJmhzTransportEnvironment>('environment', {
+  default: 'production',
+})
 const loading = ref(false)
 const attempts = ref<PayrollJmhzTransportAttempt[]>([])
+const readySubmissions = ref<PayrollJmhzReadySubmission[]>([])
 const imported = ref<PayrollJmhzImportedProtocol[]>([])
 const importing = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -69,6 +79,20 @@ const copiedId = ref<number | null>(null)
 /** Podání, u kterého uživatel právě potvrzuje storno. Storno je nevratné. */
 const cancellingId = ref<number | null>(null)
 const cancelPendingId = ref<number | null>(null)
+const correctingId = ref<number | null>(null)
+const correctionPendingId = ref<number | null>(null)
+const correctionLoadingId = ref<number | null>(null)
+const correctionPreparationLoadingId = ref<number | null>(null)
+const correctableComponents = ref<PayrollJmhzContentCorrectionForm[]>([])
+const correctionPreparations = ref<PayrollJmhzContentCorrectionPreparation[]>([])
+const selectedCorrectionGuids = ref<string[]>([])
+const correctionPreparationId = ref<number | null>(null)
+const correctionCandidatesLoaded = ref(false)
+const correctionQuery = ref('')
+const correctionImpactConfirmed = ref(false)
+const readyDispatchPending = ref<{ id: number; channel: 'isds' | 'vrep' } | null>(null)
+const readyIsdsResults = ref<Record<number, PayrollJmhzIsdsEnqueueResult>>({})
+const readyGateways = ref<Record<number, GatewayStart>>({})
 
 /** Výsledky doptání, klíčované ID pokusu — zůstávají do dalšího načtení. */
 const polls = ref<Record<number, PayrollJmhzTransportPoll>>({})
@@ -151,7 +175,11 @@ const busy = computed(() =>
   || importing.value
   || pollingId.value !== null
   || closingId.value !== null
-  || cancelPendingId.value !== null,
+  || cancelPendingId.value !== null
+  || correctionPendingId.value !== null
+  || correctionLoadingId.value !== null
+  || correctionPreparationLoadingId.value !== null
+  || readyDispatchPending.value !== null,
 )
 
 const variableSymbolValid = computed(() =>
@@ -163,6 +191,9 @@ interface AttemptGroup {
   /** Období hlášení; nese ho každý řádek ledgeru, uvnitř skupiny je stejné. */
   periodStart: string | null
   periodEnd: string | null
+  submissionKind: string | null
+  submissionStatus: string | null
+  correctsSubmissionId: number | null
   attempts: PayrollJmhzTransportAttempt[]
 }
 
@@ -180,6 +211,9 @@ const groups = computed<AttemptGroup[]>(() => {
         submissionId: attempt.submission_id,
         periodStart: attempt.period_start,
         periodEnd: attempt.period_end,
+        submissionKind: attempt.submission_kind,
+        submissionStatus: attempt.submission_status,
+        correctsSubmissionId: attempt.corrects_submission_id,
         attempts: [],
       }
       byId.set(attempt.submission_id, group)
@@ -189,6 +223,70 @@ const groups = computed<AttemptGroup[]>(() => {
   }
   return ordered
 })
+
+const correctionGroup = computed(() =>
+  groups.value.find(group => group.submissionId === correctingId.value) ?? null,
+)
+
+function protocolErrorMatchesComponent(
+  error: PayrollJmhzProtocolError,
+  component: PayrollJmhzContentCorrectionForm,
+): boolean {
+  if (error.id_ppv) return error.id_ppv === component.employment_external_identifier
+  if (error.ik_mpsv) return error.ik_mpsv === component.person_external_identifier
+  return false
+}
+
+const protocolErrorComponentGuids = computed(() => {
+  const matched = new Set<string>()
+  const group = correctionGroup.value
+  if (!group) return matched
+
+  const errors = group.attempts.flatMap(attempt => polls.value[attempt.id]?.report?.errors ?? [])
+  for (const component of correctableComponents.value) {
+    if (errors.some(error => protocolErrorMatchesComponent(error, component))) {
+      matched.add(component.employment_external_identifier)
+    }
+  }
+  return matched
+})
+
+const visibleCorrectionComponents = computed(() => {
+  const query = correctionQuery.value.trim().toLocaleLowerCase()
+  const rows = query === ''
+    ? correctableComponents.value
+    : correctableComponents.value.filter(component => [
+      component.employee_name ?? '',
+      component.employment_external_identifier,
+      component.person_external_identifier,
+    ].some(value => value.toLocaleLowerCase().includes(query)))
+
+  return [...rows].sort((left, right) => {
+    const leftHasError = protocolErrorComponentGuids.value.has(left.employment_external_identifier) ? 0 : 1
+    const rightHasError = protocolErrorComponentGuids.value.has(right.employment_external_identifier) ? 0 : 1
+    if (leftHasError !== rightHasError) return leftHasError - rightHasError
+    return (left.employee_name ?? left.employment_external_identifier).localeCompare(
+      right.employee_name ?? right.employment_external_identifier,
+      'cs',
+      { numeric: true },
+    )
+  })
+})
+
+const correctionPreparationOptions = computed(() => correctionPreparations.value.map(preparation => ({
+  value: preparation.id,
+  label: t('payroll.submissions.transport.correction.preparation_option', {
+    revision: preparation.revision_no,
+    created: preparation.created_at,
+  }),
+  secondary: t('payroll.submissions.transport.correction.preparation_period', {
+    period: preparation.period_start,
+  }),
+})))
+
+watch(selectedCorrectionGuids, () => {
+  correctionImpactConfirmed.value = false
+}, { deep: true })
 
 type TimelineEntry =
   | { source: 'app'; key: string; sortKey: string; group: AttemptGroup }
@@ -289,7 +387,36 @@ function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
  * neopustilo aplikaci, u ČSSZ neexistuje a rušit se u něj nemá co.
  */
 function canCancel(group: AttemptGroup): boolean {
-  return canWrite.value && group.attempts.some(attempt => attempt.sent_at !== null)
+  return canWrite.value
+    && group.submissionKind === 'regular'
+    && ['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
+    && group.attempts.some(attempt => attempt.sent_at !== null)
+}
+
+/**
+ * Druh O smí navázat až na konečný protokol. Samotné převzetí zprávy branou
+ * nic neříká o tom, které součásti ČSSZ přijala, a výběr před výsledkem by byl
+ * jen odhad. Definitivní způsobilost ještě ověří server nad stavem podání.
+ */
+function canCorrect(group: AttemptGroup): boolean {
+  if (
+    !canWrite.value
+    || group.submissionKind !== 'regular'
+    || !['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
+    || !group.attempts.some(attempt => attempt.status === 'completed')
+  ) {
+    return false
+  }
+  const latestKnownReport = group.attempts
+    .map(attempt => polls.value[attempt.id]?.report)
+    .find(report => report !== null && report !== undefined)
+  if (!latestKnownReport) return true
+
+  return [
+    'ProcessedAndComplete',
+    'ContainsPassableErrors',
+    'PartiallyAccepted',
+  ].includes(latestKnownReport.status)
 }
 
 /**
@@ -389,6 +516,7 @@ async function load() {
       }),
     ])
     attempts.value = history.attempts ?? []
+    readySubmissions.value = history.ready_submissions ?? []
     attemptsTotal.value = history.total ?? 0
     imported.value = protocols.protocols ?? []
     importedTotal.value = protocols.total ?? 0
@@ -396,6 +524,7 @@ async function load() {
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
+    readySubmissions.value = []
     attemptsTotal.value = 0
     imported.value = []
     importedTotal.value = 0
@@ -447,8 +576,12 @@ async function importProtocol(event: Event) {
 
 async function switchEnvironment(next: PayrollJmhzTransportEnvironment) {
   if (next === environment.value || busy.value) return
+  cancellingId.value = null
+  closeCorrection()
   environment.value = next
   polls.value = {}
+  readyIsdsResults.value = {}
+  readyGateways.value = {}
   // Jiné prostředí = jiné seznamy, takže stránky musí zpět na začátek.
   attemptsOffset.value = 0
   importedOffset.value = 0
@@ -467,6 +600,10 @@ function replaceAttempt(updated: PayrollJmhzTransportAttempt) {
         ...updated,
         period_start: updated.period_start ?? attempt.period_start,
         period_end: updated.period_end ?? attempt.period_end,
+        submission_kind: updated.submission_kind ?? attempt.submission_kind,
+        submission_status: updated.submission_status ?? attempt.submission_status,
+        corrects_submission_id:
+          updated.corrects_submission_id ?? attempt.corrects_submission_id,
       }
       : attempt),
   )
@@ -497,9 +634,124 @@ async function poll(attempt: PayrollJmhzTransportAttempt) {
 
 function askToCancel(submissionId: number) {
   if (busy.value) return
+  closeCorrection()
   cancellingId.value = submissionId
   actionError.value = ''
   success.value = ''
+}
+
+async function askToCorrect(submissionId: number) {
+  if (!canWrite.value || busy.value) return
+  cancellingId.value = null
+  correctingId.value = submissionId
+  correctableComponents.value = []
+  correctionPreparations.value = []
+  selectedCorrectionGuids.value = []
+  correctionPreparationId.value = null
+  correctionCandidatesLoaded.value = false
+  correctionQuery.value = ''
+  correctionImpactConfirmed.value = false
+  actionError.value = ''
+  success.value = ''
+  correctionPreparationLoadingId.value = submissionId
+  let autoSelected: number | null = null
+  try {
+    const result = await payrollApi.jmhzContentCorrectionPreparations(
+      submissionId,
+      environment.value,
+    )
+    if (correctingId.value !== submissionId) return
+    correctionPreparations.value = result.preparations
+    correctionPreparationId.value = result.auto_selected_preparation_id
+    autoSelected = result.auto_selected_preparation_id
+  } catch (exception: unknown) {
+    correctingId.value = null
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.preparation_load_failed'),
+    )
+  } finally {
+    correctionPreparationLoadingId.value = null
+  }
+  if (autoSelected !== null && correctingId.value === submissionId) {
+    await loadContentCorrectionCandidates(submissionId)
+  }
+}
+
+async function loadContentCorrectionCandidates(submissionId: number) {
+  const preparationId = correctionPreparationId.value
+  if (preparationId === null || !Number.isInteger(preparationId) || preparationId <= 0 || busy.value) return
+  correctionLoadingId.value = submissionId
+  correctionCandidatesLoaded.value = false
+  try {
+    const result = await payrollApi.jmhzContentCorrectionCandidates(
+      submissionId,
+      preparationId,
+      environment.value,
+    )
+    correctableComponents.value = result.forms
+    correctionCandidatesLoaded.value = true
+  } catch (exception: unknown) {
+    correctingId.value = null
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.load_failed'),
+    )
+  } finally {
+    correctionLoadingId.value = null
+  }
+}
+
+function closeCorrection() {
+  correctingId.value = null
+  correctableComponents.value = []
+  correctionPreparations.value = []
+  selectedCorrectionGuids.value = []
+  correctionQuery.value = ''
+  correctionImpactConfirmed.value = false
+  correctionPreparationId.value = null
+  correctionCandidatesLoaded.value = false
+}
+
+function selectProtocolErrors() {
+  selectedCorrectionGuids.value = [...protocolErrorComponentGuids.value]
+}
+
+async function confirmCorrection(submissionId: number) {
+  if (
+    !canWrite.value
+    || busy.value
+    || selectedCorrectionGuids.value.length === 0
+    || !correctionImpactConfirmed.value
+  ) return
+  const employmentIdentifiers = [...new Set(selectedCorrectionGuids.value)]
+  const preparationId = correctionPreparationId.value
+  if (employmentIdentifiers.length === 0 || preparationId === null
+    || !Number.isInteger(preparationId) || preparationId <= 0
+  ) return
+  correctionPendingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.freezeJmhzContentCorrection(
+      submissionId,
+      preparationId,
+      environment.value,
+      employmentIdentifiers,
+    )
+    closeCorrection()
+    await load()
+    success.value = result.created
+      ? t('payroll.submissions.transport.correction.frozen', { id: result.submission_id })
+      : t('payroll.submissions.transport.correction.already', { id: result.submission_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.correction.failed'),
+    )
+  } finally {
+    correctionPendingId.value = null
+  }
 }
 
 /**
@@ -527,6 +779,82 @@ async function confirmCancel(submissionId: number) {
   } finally {
     cancelPendingId.value = null
   }
+}
+
+function readyPeriodLabel(submission: PayrollJmhzReadySubmission): string {
+  return t('payroll.submissions.transport.group.period', {
+    start: submission.period_start,
+    end: submission.period_end,
+  })
+}
+
+async function dispatchReady(
+  submission: PayrollJmhzReadySubmission,
+  channel: 'isds' | 'vrep',
+) {
+  if (
+    !canWrite.value
+    || busy.value
+    || submission.outbox_id !== null
+    || (channel === 'vrep' && !variableSymbolValid.value)
+  ) return
+
+  readyDispatchPending.value = { id: submission.submission_id, channel }
+  actionError.value = ''
+  success.value = ''
+  try {
+    if (channel === 'vrep') {
+      await payrollApi.sendJmhzTransport(
+        submission.submission_id,
+        variableSymbol.value.trim(),
+        environment.value,
+        crypto.randomUUID(),
+      )
+      await load()
+      success.value = t('payroll.submissions.transport.ready.vrep_started', {
+        id: submission.submission_id,
+      })
+      return
+    }
+
+    const queued = await payrollApi.enqueueJmhzIsds(
+      submission.submission_id,
+      environment.value,
+    )
+    readyIsdsResults.value = {
+      ...readyIsdsResults.value,
+      [submission.submission_id]: queued,
+    }
+    if (queued.transport.automatic) {
+      try {
+        const gateway = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
+        readyGateways.value = {
+          ...readyGateways.value,
+          [submission.submission_id]: gateway,
+        }
+      } catch (exception: unknown) {
+        actionError.value = apiErrorMessage(
+          exception,
+          t('payroll.submissions.transport.ready.gateway_start_failed'),
+        )
+      }
+    }
+    success.value = queued.created
+      ? t('payroll.submissions.transport.ready.isds_queued', { id: queued.outbox_id })
+      : t('payroll.submissions.transport.ready.isds_already_queued', { id: queued.outbox_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.transport.ready.dispatch_failed'),
+    )
+  } finally {
+    readyDispatchPending.value = null
+  }
+}
+
+function continueReadyGateway(submissionId: number) {
+  const gateway = readyGateways.value[submissionId]
+  if (gateway) window.location.assign(gateway.redirect_url)
 }
 
 async function close(attempt: PayrollJmhzTransportAttempt) {
@@ -740,8 +1068,135 @@ onMounted(loadVariableSymbols)
         {{ success }}
       </p>
 
+      <section
+        v-if="readySubmissions.length > 0"
+        class="overflow-hidden rounded-xl border border-payroll-500/30 bg-payroll-50"
+        data-test="transport-ready-submissions"
+      >
+        <div class="border-b border-payroll-500/20 p-4 sm:p-6">
+          <h3 class="text-base font-semibold text-neutral-900">
+            {{ t('payroll.submissions.transport.ready.title') }}
+          </h3>
+          <p class="mt-1 max-w-3xl text-sm text-neutral-600">
+            {{ t('payroll.submissions.transport.ready.description') }}
+          </p>
+        </div>
+        <div class="divide-y divide-payroll-500/20">
+          <article
+            v-for="submission in readySubmissions"
+            :key="submission.submission_id"
+            class="p-4 sm:p-6"
+            :data-test="`transport-ready-${submission.submission_id}`"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h4 class="font-semibold text-neutral-900">
+                    {{ readyPeriodLabel(submission) }}
+                  </h4>
+                  <span class="rounded-full bg-payroll-100 px-2.5 py-1 text-xs font-medium text-payroll-800">
+                    {{ t(`payroll.submissions.transport.ready.kind.${submission.submission_kind}`) }}
+                  </span>
+                </div>
+                <p class="mt-1 text-xs text-neutral-600">
+                  {{ t('payroll.submissions.transport.ready.submission', {
+                    id: submission.submission_id,
+                  }) }}
+                  <template v-if="submission.corrects_submission_id">
+                    · {{ t('payroll.submissions.transport.ready.corrects', {
+                      id: submission.corrects_submission_id,
+                    }) }}
+                  </template>
+                </p>
+              </div>
+              <div v-if="canWrite" class="flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  :data-test="`transport-ready-vrep-${submission.submission_id}`"
+                  :class="btnOutline('neutral')"
+                  :disabled="busy || !variableSymbolValid || submission.outbox_id !== null"
+                  @click="dispatchReady(submission, 'vrep')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.cycle" />
+                  </svg>
+                  {{ readyDispatchPending?.id === submission.submission_id
+                    && readyDispatchPending.channel === 'vrep'
+                    ? t('payroll.submissions.transport.ready.sending')
+                    : t('payroll.submissions.transport.ready.send_vrep') }}
+                </button>
+                <button
+                  type="button"
+                  :data-test="`transport-ready-isds-${submission.submission_id}`"
+                  :class="btnFilled('primary')"
+                  :disabled="busy || submission.outbox_id !== null"
+                  @click="dispatchReady(submission, 'isds')"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.send" />
+                  </svg>
+                  {{ readyDispatchPending?.id === submission.submission_id
+                    && readyDispatchPending.channel === 'isds'
+                    ? t('payroll.submissions.transport.ready.sending')
+                    : t('payroll.submissions.transport.ready.send_isds') }}
+                </button>
+              </div>
+            </div>
+            <p class="mt-3 text-xs text-neutral-600">
+              {{ t('payroll.submissions.transport.ready.user_action_note') }}
+            </p>
+            <div
+              v-if="submission.outbox_id !== null
+                && !readyIsdsResults[submission.submission_id]"
+              class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-info-500/30 bg-info-50 p-3 text-sm text-neutral-700"
+              :data-test="`transport-ready-existing-outbox-${submission.submission_id}`"
+            >
+              <p>
+                {{ t('payroll.submissions.transport.ready.existing_outbox', {
+                  id: submission.outbox_id,
+                  state: t(`payroll.submissions.transport.ready.outbox_state.${submission.outbox_dispatch_state ?? 'ready'}`),
+                }) }}
+              </p>
+              <a
+                href="/admin/databox?tab=outbox"
+                :class="btnOutline('neutral')"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.send" />
+                </svg>
+                {{ t('payroll.submissions.transport.ready.open_outbox') }}
+              </a>
+            </div>
+            <div
+              v-if="readyIsdsResults[submission.submission_id]"
+              class="mt-3 rounded-lg border border-payroll-500/30 bg-surface p-3 text-sm text-neutral-700"
+              :data-test="`transport-ready-isds-result-${submission.submission_id}`"
+            >
+              <p>
+                {{ t('payroll.submissions.transport.ready.outbox', {
+                  id: readyIsdsResults[submission.submission_id]!.outbox_id,
+                }) }}
+              </p>
+              <button
+                v-if="readyGateways[submission.submission_id]"
+                type="button"
+                class="mt-3"
+                :class="btnFilled('primary')"
+                :data-test="`transport-ready-gateway-${submission.submission_id}`"
+                @click="continueReadyGateway(submission.submission_id)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.send" />
+                </svg>
+                {{ t('payroll.submissions.transport.ready.continue_isds') }}
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
       <div
-        v-if="timeline.length === 0"
+        v-if="timeline.length === 0 && readySubmissions.length === 0"
         data-test="transport-empty"
         class="rounded-xl border border-dashed border-neutral-300 bg-surface p-6 text-sm text-neutral-600"
       >
@@ -783,6 +1238,19 @@ onMounted(loadVariableSymbols)
                 }) }}
               </span>
               <button
+                v-if="canCorrect(entry.group) && correctingId !== entry.group.submissionId"
+                type="button"
+                :data-test="`transport-correct-${entry.group.submissionId}`"
+                :class="btnOutlineSm('warning')"
+                :disabled="busy"
+                @click="askToCorrect(entry.group.submissionId)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.edit" />
+                </svg>
+                {{ t('payroll.submissions.transport.correction.action') }}
+              </button>
+              <button
                 v-if="canCancel(entry.group) && cancellingId !== entry.group.submissionId"
                 type="button"
                 :data-test="`transport-cancel-${entry.group.submissionId}`"
@@ -794,6 +1262,215 @@ onMounted(loadVariableSymbols)
                   <path :d="ICONS.x" />
                 </svg>
                 {{ t('payroll.submissions.transport.storno.action') }}
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="correctingId === entry.group.submissionId"
+            :data-test="`transport-correct-form-${entry.group.submissionId}`"
+            class="border-b border-warning-500/30 bg-warning-50 p-4 sm:p-6"
+          >
+            <p class="text-sm font-semibold text-warning-800">
+              {{ t('payroll.submissions.transport.correction.title', {
+                period: periodLabel(entry.group),
+              }) }}
+            </p>
+            <p class="mt-1 text-sm text-warning-800">
+              {{ t('payroll.submissions.transport.correction.description') }}
+            </p>
+            <div
+              v-if="correctionPreparationLoadingId === entry.group.submissionId"
+              data-test="transport-correct-preparation-loading"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-600"
+              role="status"
+            >
+              {{ t('payroll.submissions.transport.correction.preparation_loading') }}
+            </div>
+            <div
+              v-else-if="correctionPreparations.length === 0"
+              data-test="transport-correct-preparation-empty"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-700"
+            >
+              {{ t('payroll.submissions.transport.correction.preparation_empty') }}
+            </div>
+            <div
+              v-else-if="correctionPreparations.length > 1"
+              class="mt-4 flex flex-wrap items-end gap-3"
+            >
+              <label class="min-w-64 flex-1 text-sm font-medium text-neutral-800">
+                {{ t('payroll.submissions.transport.correction.preparation_label') }}
+                <SearchableSelect
+                  v-model="correctionPreparationId"
+                  :options="correctionPreparationOptions"
+                  :clearable="false"
+                  accent="payroll"
+                  data-test="transport-correct-preparation-select"
+                  class="mt-1"
+                  :placeholder="t('payroll.submissions.transport.correction.preparation_placeholder')"
+                  :no-results-label="t('payroll.submissions.transport.correction.preparation_no_results')"
+                />
+              </label>
+              <button
+                type="button"
+                :class="btnOutline('warning')"
+                :disabled="busy || correctionPreparationId === null"
+                data-test="transport-correct-load"
+                @click="loadContentCorrectionCandidates(entry.group.submissionId)"
+              >
+                {{ t('payroll.submissions.transport.correction.load') }}
+              </button>
+            </div>
+            <p
+              v-else
+              data-test="transport-correct-preparation-auto"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-3 text-sm text-neutral-700"
+            >
+              {{ t('payroll.submissions.transport.correction.preparation_auto', {
+                preparation: correctionPreparationOptions[0]?.label ?? '',
+              }) }}
+            </p>
+            <div
+              v-if="correctionLoadingId === entry.group.submissionId"
+              data-test="transport-correct-loading"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-600"
+              role="status"
+            >
+              {{ t('payroll.submissions.transport.correction.loading') }}
+            </div>
+            <div
+              v-else-if="correctionCandidatesLoaded && correctableComponents.length === 0"
+              data-test="transport-correct-empty"
+              class="mt-4 rounded-lg border border-warning-500/30 bg-surface p-4 text-sm text-neutral-700"
+            >
+              {{ t('payroll.submissions.transport.correction.empty') }}
+            </div>
+            <template v-else-if="correctableComponents.length > 0">
+              <div class="mt-4 flex flex-wrap items-end justify-between gap-3">
+                <label class="min-w-64 flex-1 text-sm font-medium text-neutral-800">
+                  {{ t('payroll.submissions.transport.correction.search_label') }}
+                  <input
+                    v-model="correctionQuery"
+                    type="search"
+                    autocomplete="off"
+                    data-test="transport-correct-search"
+                    class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
+                    :placeholder="t('payroll.submissions.transport.correction.search_placeholder')"
+                  >
+                </label>
+                <p class="pb-2 text-xs text-neutral-600" data-test="transport-correct-count">
+                  {{ t('payroll.submissions.transport.correction.selection_count', {
+                    selected: selectedCorrectionGuids.length,
+                    total: correctableComponents.length,
+                  }) }}
+                </p>
+              </div>
+
+              <div
+                v-if="protocolErrorComponentGuids.size > 0"
+                data-test="transport-correct-protocol-hint"
+                class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3"
+              >
+                <p class="text-sm text-danger-700">
+                  {{ t('payroll.submissions.transport.correction.protocol_errors', {
+                    count: protocolErrorComponentGuids.size,
+                  }) }}
+                </p>
+                <button
+                  type="button"
+                  :class="btnOutlineSm('danger')"
+                  :disabled="busy"
+                  data-test="transport-correct-select-errors"
+                  @click="selectProtocolErrors"
+                >
+                  {{ t('payroll.submissions.transport.correction.select_errors') }}
+                </button>
+              </div>
+
+              <div
+                v-if="visibleCorrectionComponents.length > 0"
+                class="mt-3 max-h-96 space-y-2 overflow-y-auto pr-1"
+              >
+                <label
+                  v-for="component in visibleCorrectionComponents"
+                  :key="component.employment_external_identifier"
+                  :data-test="`transport-correct-component-${component.employment_external_identifier}`"
+                  class="flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-surface p-3"
+                >
+                  <input
+                    v-model="selectedCorrectionGuids"
+                    type="checkbox"
+                    :value="component.employment_external_identifier"
+                    class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                  >
+                  <span class="min-w-0 flex-1">
+                    <span class="flex flex-wrap items-center gap-2">
+                      <span class="text-sm font-medium text-neutral-900">
+                        {{ component.employee_name
+                          ?? t('payroll.submissions.transport.correction.employee_unknown') }}
+                      </span>
+                      <span
+                        v-if="protocolErrorComponentGuids.has(component.employment_external_identifier)"
+                        class="rounded-full bg-danger-100 px-2 py-0.5 text-xs font-medium text-danger-700"
+                      >
+                        {{ t('payroll.submissions.transport.correction.flagged_by_protocol') }}
+                      </span>
+                      <span class="rounded-full bg-info-100 px-2 py-0.5 text-xs font-medium text-info-700">
+                        {{ t(`payroll.submissions.transport.correction.action_kind.${component.action}`) }}
+                      </span>
+                    </span>
+                    <span class="mt-0.5 block text-xs text-neutral-600">
+                      {{ t('payroll.submissions.transport.correction.technical_identity', {
+                        employment: component.employment_external_identifier,
+                        person: component.person_external_identifier,
+                      }) }}
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <p
+                v-else
+                data-test="transport-correct-no-results"
+                class="mt-3 rounded-lg border border-neutral-200 bg-surface p-4 text-sm text-neutral-600"
+              >
+                {{ t('payroll.submissions.transport.correction.no_results') }}
+              </p>
+
+              <label
+                class="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/40 bg-surface p-4"
+              >
+                <input
+                  v-model="correctionImpactConfirmed"
+                  type="checkbox"
+                  data-test="transport-correct-impact"
+                  class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                >
+                <span class="text-sm text-neutral-800">
+                  {{ t('payroll.submissions.transport.correction.impact_confirmation') }}
+                </span>
+              </label>
+            </template>
+            <div class="mt-4 flex flex-wrap gap-2 border-t border-warning-500/30 pt-4">
+              <button
+                type="button"
+                :data-test="`transport-correct-submit-${entry.group.submissionId}`"
+                :class="btnFilled('warning')"
+                :disabled="busy
+                  || correctionPreparationId === null
+                  || selectedCorrectionGuids.length === 0
+                  || !correctionImpactConfirmed"
+                @click="confirmCorrection(entry.group.submissionId)"
+              >
+                {{ t('payroll.submissions.transport.correction.confirm') }}
+              </button>
+              <button
+                type="button"
+                :data-test="`transport-correct-abort-${entry.group.submissionId}`"
+                :class="btnOutline('neutral')"
+                :disabled="busy"
+                @click="closeCorrection"
+              >
+                {{ t('payroll.submissions.transport.correction.cancel') }}
               </button>
             </div>
           </div>

@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollRiskySavingsRepository;
 use MyInvoice\Service\Payroll\Run\PayrollRunInputSnapshot;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Tests\Fixtures\Payroll\PayrollRunScaleFixture;
@@ -32,6 +33,7 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
     private Connection $db;
     private PayrollRunSnapshotBuilder $builder;
     private PayrollEmployerPolicyRepository $policies;
+    private PayrollRiskySavingsRepository $riskySavings;
     private int $sourceSupplierId;
     private int $supplierId;
     private int $actorId;
@@ -46,15 +48,18 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         $db = $container->get(Connection::class);
         $builder = $container->get(PayrollRunSnapshotBuilder::class);
         $policies = $container->get(PayrollEmployerPolicyRepository::class);
+        $riskySavings = $container->get(PayrollRiskySavingsRepository::class);
         if (!$db instanceof Connection
             || !$builder instanceof PayrollRunSnapshotBuilder
             || !$policies instanceof PayrollEmployerPolicyRepository
+            || !$riskySavings instanceof PayrollRiskySavingsRepository
         ) {
             $this->markTestSkipped('Služby mzdového běhu nejsou dostupné.');
         }
         $this->db = $db;
         $this->builder = $builder;
         $this->policies = $policies;
+        $this->riskySavings = $riskySavings;
         foreach ([
             'payroll_employments',
             'payroll_statutory_accumulator_openings',
@@ -106,6 +111,7 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
             'balance_rounding_mode' => 'exact_minor_units',
             'home_office_policy' => 'not_used',
             'travel_expense_policy' => 'not_used',
+            'leave_entitlement_weeks' => 4,
             'four_eyes_required' => true,
             'automatic_calculation_enabled' => true,
             'automatic_posting_enabled' => true,
@@ -139,7 +145,7 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         $pdo = $this->db->pdo();
         $counts = [];
         $people = [];
-        foreach ([1, 10, 100] as $headcount) {
+        foreach ([1, 10, 100, 500] as $headcount) {
             if ($headcount > 1) {
                 $this->newTenant();
             }
@@ -150,7 +156,7 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
             $people[$headcount] = count($snapshot->data['people']);
         }
 
-        self::assertSame([1 => 1, 10 => 10, 100 => 100], $people);
+        self::assertSame([1 => 1, 10 => 10, 100 => 100, 500 => 500], $people);
         self::assertSame(
             $counts[1],
             $counts[10],
@@ -161,15 +167,20 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
             $counts[100],
             'Snapshot sta osob smí stát tolik dotazů co snapshot jedné.',
         );
-        // Horní mez: dávka má 500 ID, takže do 500 osob nepřibude ani jeden dotaz.
+        self::assertSame(
+            $counts[1],
+            $counts[500],
+            'Snapshot pěti set osob smí stát tolik dotazů co snapshot jedné.',
+        );
+        // Horní mez: dávka má 1 000 ID, takže ani 500 osob s více vztahy
+        // nepřidá další dotaz.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
-        // 82 od chvíle, kdy snapshot dotahuje i doložené záměry uplatňovat
-        // slevu (OZUSPOJ). Je to JEDNA dávka na celý běh, ne dotaz ve smyčce;
-        // rovnost počtů výš to hlídá.
+        // Doložené záměry OZUSPOJ mají vlastní množinovou dávku; risky savings
+        // evidence se veze v kořenovém dotazu pracovních vztahů, takže zůstává 82.
         self::assertLessThanOrEqual(
             82,
-            $counts[100],
-            'Snapshot sta osob se musí vejít do 82 round-tripů.',
+            $counts[500],
+            'Snapshot pěti set osob se musí vejít do 82 round-tripů.',
         );
     }
 
@@ -446,6 +457,222 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         $dimensions = $this->build()->data['people'][0]['employments'][0]['dimensions'];
 
         self::assertSame([], $dimensions);
+    }
+
+    /** Pozdější změna číselníku nesmí změnit už sestavený historický snapshot. */
+    public function testDimensionAccountChangeAffectsOnlyNewSnapshots(): void
+    {
+        $this->seed(1);
+        $employmentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $dimensionId = $this->seedDimension('cost_center', 'VYROBA', '521.100');
+        $this->assignDimension($employmentId, $dimensionId);
+
+        $frozen = $this->build();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_dimensions
+                SET default_account_code = "521.200", row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $dimensionId]);
+        $current = $this->build();
+
+        self::assertSame(
+            '521.100',
+            $frozen->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertSame(
+            '521.200',
+            $current->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertNotSame($frozen->hash, $current->hash);
+        self::assertSame(hash('sha256', $frozen->json), $frozen->hash);
+    }
+
+    /** Stejný kód dimenze ve dvou firmách se nikdy nesmí promíchat. */
+    public function testDimensionSnapshotIsTenantScoped(): void
+    {
+        $this->seed(1);
+        $firstEmploymentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $firstDimensionId = $this->seedDimension('cost_center', 'SPOLECNY', '521.100');
+        $this->assignDimension($firstEmploymentId, $firstDimensionId);
+        $first = $this->build();
+
+        $this->newTenant();
+        $this->seed(1);
+        $secondEmploymentId = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        $secondDimensionId = $this->seedDimension('cost_center', 'SPOLECNY', '521.900');
+        $this->assignDimension($secondEmploymentId, $secondDimensionId);
+        $second = $this->build();
+
+        self::assertSame(
+            '521.100',
+            $first->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertSame(
+            '521.900',
+            $second->data['people'][0]['employments'][0]['dimensions'][0][
+                'default_account_code'
+            ],
+        );
+        self::assertNotSame($first->data['supplier_id'], $second->data['supplier_id']);
+    }
+
+    public function testLatestRiskySavingsEvidenceIsFrozenWithoutTenantBleed(): void
+    {
+        $this->seed(2);
+        $employmentIds = $this->ids(
+            'SELECT id FROM payroll_employments WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        );
+        $accountId = $this->seedInstitutionAccount();
+        $target = $this->riskySavings->paymentTarget(
+            $this->supplierId,
+            $accountId,
+            PayrollRunScaleFixture::PAYMENT_DATE,
+        );
+        $approved = $this->riskySavings->saveEvidence(
+            $this->supplierId,
+            $employmentIds[0],
+            PayrollRunScaleFixture::PERIOD_START,
+            $this->riskySavingsEvidence($target, 24, null, null),
+            $this->actorId,
+        );
+        $draft = $this->riskySavings->saveEvidence(
+            $this->supplierId,
+            $employmentIds[0],
+            PayrollRunScaleFixture::PERIOD_START,
+            $this->riskySavingsEvidence(
+                $target,
+                32,
+                (int) $approved['id'],
+                (int) $approved['row_version'],
+                'draft',
+            ),
+            $this->actorId,
+        );
+
+        $firstSupplierId = $this->supplierId;
+        $byEmployment = [];
+        $snapshot = $this->build();
+        foreach ($snapshot->data['people'] as $person) {
+            foreach ($person['employments'] as $employment) {
+                $byEmployment[(int) $employment['employment']['id']] =
+                    $employment['risky_savings_evidence'];
+            }
+        }
+        $frozen = $byEmployment[$employmentIds[0]];
+        self::assertIsArray($frozen);
+        self::assertSame((int) $draft['id'], $frozen['id']);
+        self::assertSame(2, $frozen['revision_no']);
+        self::assertSame(32, $frozen['qualifying_shift_eighths']);
+        self::assertSame('draft', $frozen['status']);
+        self::assertSame(
+            $target['institution_account_hash'],
+            $frozen['institution_account_hash'],
+        );
+        self::assertSame(
+            $target['institution_account_hash'],
+            $frozen['current_institution_account_hash'],
+        );
+        foreach (array_slice($employmentIds, 1) as $employmentId) {
+            self::assertNull($byEmployment[$employmentId]);
+        }
+        self::assertContains(
+            'risky_savings_evidence_not_approved',
+            array_map(
+                static fn ($validation): string => $validation->code,
+                $snapshot->validations,
+            ),
+        );
+
+        $this->newTenant();
+        $this->seed(1);
+        self::assertNotSame($firstSupplierId, $this->supplierId);
+        self::assertNull(
+            $this->build()->data['people'][0]['employments'][0][
+                'risky_savings_evidence'
+            ],
+        );
+    }
+
+    private function seedInstitutionAccount(): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_institutions
+                (supplier_id, institution_type, institution_code)
+             VALUES (?, "other_recipient", "SYN-SNAPSHOT-PENSION")',
+        )->execute([$this->supplierId]);
+        $institutionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_institution_accounts
+                (supplier_id, institution_id, institution_name,
+                 bank_account_ciphertext, bank_account_hash,
+                 bank_account_masked, currency_code, variable_symbol,
+                 valid_from, source_kind, source_reference, verified_on,
+                 verified_by, created_by)
+             VALUES (?, ?, "Syntetická penzijní společnost",
+                     "enc:v2:synthetic", UNHEX(?), "******0005 / 0100",
+                     "CZK", "123456", "2026-01-01", "user_verified",
+                     "synthetic:snapshot", "2026-01-01", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $institutionId,
+            str_repeat('b', 64),
+            $this->actorId,
+            $this->actorId,
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /**
+     * @param array<string,mixed> $target
+     * @return array<string,mixed>
+     */
+    private function riskySavingsEvidence(
+        array $target,
+        int $eighths,
+        ?int $sourceId,
+        ?int $rowVersion,
+        string $status = 'approved',
+    ): array {
+        return [
+            'status' => $status,
+            'source_evidence_id' => $sourceId,
+            'row_version' => $rowVersion,
+            'risk_factor' => 'vibration',
+            'work_category' => 3,
+            'qualifying_shift_eighths' => $eighths,
+            'right_claimed_on' => '2026-05-31',
+            'employee_informed_on' => '2026-05-01',
+            'pension_company' => 'Syntetická penzijní společnost',
+            'institution_account_id' => $target['institution_account_id'],
+            'institution_account_row_version' =>
+                $target['institution_account_row_version'],
+            'institution_account_hash' => $target['institution_account_hash'],
+            'institution_account_masked' =>
+                $target['institution_account_masked'],
+            'product_reference' => 'SYNTHETIC-SNAPSHOT-PRODUCT',
+            'variable_symbol' => '123456',
+            'specific_symbol' => null,
+            'payment_message' => 'Syntetická platba',
+            'evidence_reference' => 'synthetic:snapshot',
+        ];
     }
 
     private function seedDimension(string $type, string $code, ?string $account): int

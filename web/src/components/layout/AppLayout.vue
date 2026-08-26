@@ -33,6 +33,7 @@ import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/com
 import { usesClientNavigation } from '@/security/clientRoutePolicy'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { manualChapter } from '@/config/manualChapters'
 
 const { t, locale } = useI18n()
 
@@ -1111,88 +1112,9 @@ const paletteNavItems = computed(() =>
   })))
 )
 
-const MANUAL_CHAPTERS: Array<[RegExp, string]> = [
-  [/^\/templates(?:\/|$)/, '61_Sablony'],
-  [/^\/purchase-invoices\/payment-orders(?:\/|$)/, '26_Platebni_prikazy'],
-  [/^\/purchase-invoices\/ai-import(?:\/|$)/, '25_AI_extrakce'],
-  [/^\/purchase-invoices\/export(?:\/|$)/, '24_Export_prijatych'],
-  [/^\/purchase-invoices\/import(?:\/|$)/, '21_Importy'],
-  [/^\/purchase-invoices(?:\/|$)/, '23_Prijate_faktury'],
-  [/^\/invoices\/ai-import(?:\/|$)/, '21_Importy'],
-  [/^\/invoices\/export(?:\/|$)/, '20_Exporty'],
-  [/^\/invoices\/import(?:\/|$)/, '21_Importy'],
-  [/^\/invoices\/new(?:\/|$)/, '15_Faktura_editor'],
-  [/^\/invoices\/\d+(?:\/|$)/, '16_Faktura_PDF'],
-  [/^\/invoices(?:\/|$)/, '14_Faktury'],
-  [/^\/recurring(?:\/|$)/, '17_Pravidelne_fakturace'],
-  [/^\/clients(?:\/|$)/, '18_Klienti'],
-  [/^\/projects(?:\/|$)/, '19_Zakazky'],
-  [/^\/bank(?:\/|$)/, '28_Banka'],
-  [/^\/accounting\/cash(?:\/|$)/, '30_Pokladna'],
-  [/^\/documents(?:\/|$)|^\/document-requests(?:\/|$)/, '31_Dokumenty'],
-  [/^\/logbook(?:\/|$)/, '32_Kniha_jizd'],
-  [/^\/stock(?:\/|$)/, '33_Sklad'],
-  [/^\/eshop(?:\/|$)/, '34_Eshop'],
-  [/^\/reports\/dph-book(?:\/|$)/, '37_Kniha_DPH'],
-  [/^\/reports\/shv(?:\/|$)/, '39_Souhrnne_hlaseni'],
-  [/^\/reports\/oss(?:\/|$)/, '40_OSS'],
-  [/^\/reports\/income-tax(?:\/|$)/, '38_Dan_z_prijmu'],
-  [/^\/reports\/submissions(?:\/|$)/, '70_Archiv_podani_a_rekonciliace'],
-  [/^\/reports\/monthly-export(?:\/|$)/, '42_Hromadny_export'],
-  [/^\/reports\/(?:dph|kh|s74b|vat-corrections)(?:\/|$)/, '36_Vykazy_DPH'],
-  [/^\/tax(?:\/|$)/, '41_Danovy_optimalizator'],
-  [/^\/portfolio(?:\/|$)/, '44_Prehled_firem'],
-  [/^\/automation(?:\/|$)/, '46_Automat'],
-  [/^\/accounting\/manual-posting-queue(?:\/|$)/, '47_Rucni_fronta_doctovani'],
-  [/^\/accounting\/general-ledger(?:\/|$)/, '48_Hlavni_kniha'],
-  [/^\/accounting\/trial-balance(?:\/|$)/, '49_Obratova_predvaha'],
-  [/^\/accounting\/balance-sheet(?:\/|$)/, '50_Rozvaha'],
-  [/^\/accounting\/income-statement-by-function(?:\/|$)/, '52_Vysledovka_ucelova'],
-  [/^\/accounting\/income-statement(?:\/|$)/, '51_Vysledovka_druhova'],
-  [/^\/accounting\/saldo(?:\/|$)/, '53_Saldokonto'],
-  [/^\/accounting\/document-completeness(?:\/|$)/, '54_Uplnost_dokladu'],
-  [/^\/accounting\/monthly-check(?:\/|$)/, '55_Mesicni_kontrola'],
-  [/^\/accounting\/monthly-report(?:\/|$)/, '56_Mesicni_report'],
-  [/^\/payroll\/absences(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/payroll\/travel(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/payroll\/quick-inputs(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/payroll\/components(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/payroll\/enforcement(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/payroll\/documents(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/payroll(?:\/|$)/, '58_Uplne_mzdy'],
-  [/^\/accounting\/payroll(?:\/|$)/, '57_Mzdy'],
-  [/^\/accounting\/assets(?:\/|$)|^\/accounting\/small-assets(?:\/|$)/, '59_Majetek'],
-  [/^\/accounting\/accounts(?:\/|$)/, '62_Ucetni_osnova'],
-  [/^\/accounting\/offsets(?:\/|$)/, '63_Zapocty'],
-  [/^\/admin\/accounting-activation(?:\/|$)/, '64_Aktivace_ucetnictvi'],
-  [/^\/accounting\/balance-inventory(?:\/|$)/, '65_Inventarizace_rozvahovych_uctu'],
-  [/^\/accounting\/section18-statements(?:\/|$)/, '66_Vykazy_podle_paragrafu_18'],
-  [/^\/reports\/related-parties(?:\/|$)/, '67_Propojene_osoby'],
-  [/^\/accounting\/periods(?:\/|$)/, '68_Uzaverka'],
-  [/^\/accounting\/journal(?:\/|$)/, '45_Ucetni_denik'],
-  [/^\/accounting(?:\/|$)|^\/utilities(?:\/|$)/, '69_Ucetni_nastroje'],
-  [/^\/tax-evidence(?:\/|$)/, '71_Danova_evidence'],
-  [/^\/admin\/suppliers(?:\/|$)/, '72_Multi_supplier'],
-  [/^\/admin\/electronic-signatures(?:\/|$)/, '74_Elektronicke_podpisy'],
-  [/^\/admin\/tax-constants(?:\/|$)/, '75_Danove_konstanty'],
-  [/^\/admin\/(?:users|roles|activity-log|cron-jobs)(?:\/|$)/, '76_Bezpecnost'],
-  [/^\/admin\/update(?:\/|$)/, '77_Aktualizace'],
-  [/^\/admin\/(?:diagnostics|support)(?:\/|$)/, '99_Reseni_problemu'],
-  [/^\/profile\/mcp-server(?:\/|$)/, '80_MCP_server'],
-  [/^\/profile\/api-tokens(?:\/|$)/, '78_API'],
-  [/^\/activation(?:\/|$)/, '79_Licence_a_aktivace'],
-  [/^\/admin(?:\/|$)/, '73_Nastaveni'],
-  [/^\/profile(?:\/|$)/, '76_Bezpecnost'],
-  [/^\/portal(?:\/|$)/, '09_Klientsky_portal'],
-  [/^\/crm(?:\/|$)/, '11_Zisk'],
-  [/^\/stats(?:\/|$)/, '12_Trzby'],
-  [/^\/purchase-stats(?:\/|$)/, '13_Naklady'],
-  [/^\/$/, '10_Prehled'],
-]
-
 const manualHref = computed(() => {
-  const match = MANUAL_CHAPTERS.find(([pattern]) => pattern.test(activeRoute.value.path))
-  const path = match ? `/manual?ch=${match[1]}` : '/manual'
+  const chapter = manualChapter(activeRoute.value.path)
+  const path = chapter ? `/manual?ch=${chapter}` : '/manual'
   const canonicalBaseUrl = auth.domainContext?.canonical_base_url
   if (!auth.domainContext?.locked || !canonicalBaseUrl) return path
 

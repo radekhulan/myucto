@@ -141,6 +141,31 @@ final class PayrollComponentDefinitionTest extends TestCase
         self::assertSame('not_subject_to_tax', $snapshot['exemption_basis']);
     }
 
+    public function testDottedAnalyticalAccountsAreAccepted(): void
+    {
+        $definition = new PayrollComponentDefinition(
+            code: 'SYNTHETIC',
+            name: 'Syntetická mzdová složka',
+            kind: PayrollComponentKind::BONUS,
+            valueKind: PayrollComponentValueKind::MONETARY,
+            frequency: PayrollComponentFrequency::ONE_OFF,
+            taxTreatment: PayrollComponentTaxTreatment::INCLUDED,
+            socialParticipationTreatment: PayrollComponentInclusion::INCLUDED,
+            socialTreatment: PayrollComponentInclusion::INCLUDED,
+            healthParticipationTreatment: PayrollComponentInclusion::INCLUDED,
+            healthTreatment: PayrollComponentInclusion::INCLUDED,
+            averageEarningTreatment: PayrollComponentInclusion::INCLUDED,
+            enforcementTreatment: PayrollComponentInclusion::INCLUDED,
+            jmhzTreatment: PayrollComponentInclusion::INCLUDED,
+            statisticsTreatment: PayrollComponentInclusion::INCLUDED,
+            accountingDebitCode: '521.100',
+            accountingCreditCode: '331.100',
+        );
+
+        self::assertSame('521.100', $definition->accountingDebitCode);
+        self::assertSame('331.100', $definition->accountingCreditCode);
+    }
+
     private function definition(
         PayrollComponentKind $kind = PayrollComponentKind::BENEFIT_MEAL,
         PayrollComponentValueKind $valueKind = PayrollComponentValueKind::MONETARY,

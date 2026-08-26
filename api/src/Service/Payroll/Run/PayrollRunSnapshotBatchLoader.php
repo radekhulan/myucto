@@ -26,10 +26,11 @@ use PDO;
 final class PayrollRunSnapshotBatchLoader
 {
     /**
-     * Velikost dávky. Drží počet parametrů dotazu hluboko pod limitem serveru
-     * i pod hranicí, kde optimalizátor přestává používat range scan nad IN.
+     * Velikost dávky. Pět set zaměstnanců může mít více pracovních vztahů;
+     * tisíc ID je stále hluboko pod limitem serveru a udrží takový běh v jedné
+     * množinové dávce.
      */
-    public const CHUNK_SIZE = 500;
+    public const CHUNK_SIZE = 1_000;
 
     /** Alias skupinového klíče — nesmí kolidovat se sloupcem žádné z tabulek. */
     private const GROUP_KEY = 'snapshot_group_key';

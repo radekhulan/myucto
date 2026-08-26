@@ -38,7 +38,7 @@ final class RegzelXmlGenerator
         $vendor->setAttribute('productName', 'MyÚčto.cz');
         $vendor->setAttribute(
             'productVersion',
-            RegzelPayloadSnapshot::MAPPING_VERSION,
+            $snapshot->mappingVersion,
         );
         $root->appendChild($vendor);
 

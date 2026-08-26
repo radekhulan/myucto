@@ -61,6 +61,11 @@ final readonly class EnforcementPersonMonthEvidence
                 'recipient_verified' => $this->insolvency->recipientVerified,
                 'court_determined_amount_minor_units' =>
                     $this->insolvency->courtDeterminedAmountMinorUnits,
+                'payment_instruction_id' =>
+                    $this->insolvency->paymentInstructionId,
+                'payment_instruction_hash' =>
+                    $this->insolvency->paymentInstructionHash,
+                'employment_id' => $this->insolvency->employmentId,
             ],
         ];
     }
@@ -103,6 +108,12 @@ final readonly class EnforcementPersonMonthEvidence
                     $insolvency,
                     'court_determined_amount_minor_units',
                 ),
+                self::nullableInt($insolvency, 'payment_instruction_id'),
+                self::nullableString(
+                    $insolvency,
+                    'payment_instruction_hash',
+                ),
+                self::nullableInt($insolvency, 'employment_id'),
             ),
         );
     }
@@ -152,6 +163,19 @@ final readonly class EnforcementPersonMonthEvidence
         if ($value !== null && !is_int($value)) {
             throw new InvalidArgumentException("{$key} must be a nullable integer.");
         }
+        return $value;
+    }
+
+    /** @param array<string,mixed> $data */
+    private static function nullableString(array $data, string $key): ?string
+    {
+        $value = $data[$key] ?? null;
+        if ($value !== null && !is_string($value)) {
+            throw new InvalidArgumentException(
+                "{$key} must be a nullable string.",
+            );
+        }
+
         return $value;
     }
 

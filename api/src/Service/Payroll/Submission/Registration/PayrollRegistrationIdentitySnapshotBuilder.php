@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\PayrollVcp;
+
 final class PayrollRegistrationIdentitySnapshotBuilder
 {
     private const IDENTIFIER_TYPES = [
@@ -303,11 +305,11 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             }
         }
         if ($identifiers['vcp'] !== null
-            && preg_match('/^[1-9][0-9]{8}$/D', $identifiers['vcp']) !== 1
+            && !PayrollVcp::isValid($identifiers['vcp'])
         ) {
             $this->invalid(
                 'registration_identity_identifier_invalid',
-                'VČP musí obsahovat přesně 9 číslic a nesmí začínat nulou.',
+                'VČP musí obsahovat přesně devět číslic a začínat číslicí 6.',
             );
         }
     }
@@ -684,4 +686,3 @@ final class PayrollRegistrationIdentitySnapshotBuilder
         throw new PayrollRegistrationIdentitySnapshotException($code, $message);
     }
 }
-

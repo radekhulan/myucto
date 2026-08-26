@@ -46,14 +46,46 @@ final readonly class JmhzOrdinaryEvidenceService
             $evidences = [];
             $confirmed = [];
             foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
-                $evidences[] = $this->publicResult($stored, $this->verifyStored($stored), false);
-                $confirmed[(int) $stored['employment_id']] = true;
+                $evidence = $this->publicResult($stored, $this->verifyStored($stored), false);
+                $evidences[] = $evidence;
+                $confirmed[(int) $stored['employment_id']] = $evidence;
             }
             $scopes = [];
             foreach ($this->frozenScopes($source) as $scope) {
-                $scopes[] = $scope + [
-                    'confirmed' => isset($confirmed[$scope['employment_id']]),
-                ];
+                $stored = $confirmed[$scope['employment_id']] ?? null;
+                if (is_array($stored)) {
+                    $scopes[] = $scope + [
+                        'confirmed' => true,
+                        'resolution' => 'confirmed',
+                        'attention_code' => null,
+                        'attention_message' => null,
+                    ];
+                    continue;
+                }
+                try {
+                    $this->builder->build(
+                        $supplierId,
+                        $source,
+                        $scope['employment_id'],
+                        $this->ordinaryFacts(),
+                        1,
+                        '2000-01-01T00:00:00Z',
+                        'derived_from_frozen_payroll_sources',
+                    );
+                    $scopes[] = $scope + [
+                        'confirmed' => false,
+                        'resolution' => 'automatic_on_preparation',
+                        'attention_code' => null,
+                        'attention_message' => null,
+                    ];
+                } catch (JmhzOrdinaryEvidenceException $exception) {
+                    $scopes[] = $scope + [
+                        'confirmed' => false,
+                        'resolution' => 'attention_required',
+                        'attention_code' => $exception->validationCode,
+                        'attention_message' => $exception->getMessage(),
+                    ];
+                }
             }
             return ['scopes' => $scopes, 'evidences' => $evidences];
         });
@@ -130,6 +162,7 @@ final readonly class JmhzOrdinaryEvidenceService
         int $confirmedBy,
         ?string $ip,
         ?string $userAgent,
+        string $sourceKind = 'explicit_confirmation',
     ): array {
         if ($supplierId <= 0 || $revisionId <= 0 || $confirmedBy <= 0 || $employmentId <= 0) {
             throw new \InvalidArgumentException('Firma, revize, vztah a potvrzující uživatel musí být kladná čísla.');
@@ -147,6 +180,7 @@ final readonly class JmhzOrdinaryEvidenceService
                 'source_revision_id' => $revisionId,
                 'employment_id' => $employmentId,
                 'facts' => $facts,
+                'source_kind' => $sourceKind,
             ]),
             'jmhz-ordinary-confirmation',
             $supplierId,
@@ -162,6 +196,7 @@ final readonly class JmhzOrdinaryEvidenceService
             $confirmedBy,
             $ip,
             $userAgent,
+            $sourceKind,
         ): array {
             $source = $this->repository->lockSource($supplierId, $revisionId);
             if ($source === null) {
@@ -174,6 +209,7 @@ final readonly class JmhzOrdinaryEvidenceService
                 $facts,
                 $confirmedBy,
                 '2000-01-01T00:00:00Z',
+                $sourceKind,
             );
             $scope = $preview->payload['scope'];
             if (!is_array($scope) || array_is_list($scope)) {
@@ -222,6 +258,7 @@ final readonly class JmhzOrdinaryEvidenceService
                 $facts,
                 $confirmedBy,
                 $confirmedAt,
+                $sourceKind,
             );
             $plaintext = $snapshot->canonicalJson();
             $fingerprint = $this->sensitiveData->keyedFingerprint(
@@ -310,8 +347,46 @@ final readonly class JmhzOrdinaryEvidenceService
      *
      * @return array<int,array<string,mixed>>
      */
-    public function snapshotsForPreparation(int $supplierId, int $revisionId): array
+    public function snapshotsForPreparation(
+        int $supplierId,
+        int $revisionId,
+        ?int $confirmedBy = null,
+    ): array
     {
+        if ($confirmedBy !== null) {
+            $state = $this->evidence($supplierId, $revisionId);
+            foreach ($state['scopes'] as $scope) {
+                if (($scope['confirmed'] ?? false) === true) {
+                    continue;
+                }
+                $employmentId = (int) ($scope['employment_id'] ?? 0);
+                if ($employmentId <= 0) {
+                    continue;
+                }
+                try {
+                    $this->confirm(
+                        $supplierId,
+                        $revisionId,
+                        $employmentId,
+                        $this->ordinaryFacts(),
+                        "jmhz-ordinary-derived-v1:{$revisionId}:{$employmentId}",
+                        $confirmedBy,
+                        null,
+                        null,
+                        'derived_from_frozen_payroll_sources',
+                    );
+                } catch (JmhzOrdinaryEvidenceException $exception) {
+                    if (!in_array($exception->validationCode, [
+                        'jmhz_ordinary_evidence_profile_missing',
+                        'jmhz_ordinary_evidence_profile_incomplete',
+                        'jmhz_ordinary_evidence_monthly_exception_required',
+                        'jmhz_ordinary_evidence_deduction_conflict',
+                    ], true)) {
+                        throw $exception;
+                    }
+                }
+            }
+        }
         $sources = [];
         foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
             $sources[(int) $stored['employment_id']] = [
@@ -325,6 +400,18 @@ final readonly class JmhzOrdinaryEvidenceService
         }
         ksort($sources, SORT_NUMERIC);
         return $sources;
+    }
+
+    /** @return array<string,false> */
+    private function ordinaryFacts(): array
+    {
+        return [
+            'reportable_wage_deductions_recorded' => false,
+            'employee_social_discount_claimed' => false,
+            'specific_legal_fact_occurred' => false,
+            'ozp_employment_support_claimed' => false,
+            'deep_mining_work_occurred' => false,
+        ];
     }
 
     /**
@@ -418,12 +505,18 @@ final readonly class JmhzOrdinaryEvidenceService
             'schema_reference' => $stored['schema_reference'],
             'source_manifest_sha256' => $stored['source_manifest_sha256'],
             'facts' => [
-                'reportable_wage_deductions_recorded' => false,
-                'employee_social_discount_claimed' => false,
-                'specific_legal_fact_occurred' => false,
-                'ozp_employment_support_claimed' => false,
-                'deep_mining_work_occurred' => false,
+                'reportable_wage_deductions_recorded' =>
+                    $payload['attribute_values']['10116'] ?? null,
+                'employee_social_discount_claimed' =>
+                    $payload['attribute_values']['10546'] ?? null,
+                'specific_legal_fact_occurred' =>
+                    $payload['interaction_decisions'][0]['triggered'] ?? null,
+                'ozp_employment_support_claimed' =>
+                    $payload['interaction_decisions'][1]['triggered'] ?? null,
+                'deep_mining_work_occurred' =>
+                    $payload['interaction_decisions'][2]['triggered'] ?? null,
             ],
+            'source_kind' => $payload['confirmation']['source_kind'],
             'confirmed_at' => $payload['confirmation']['confirmed_at'],
             'created_at' => $stored['created_at'],
             'created' => $created,

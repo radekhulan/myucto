@@ -4,9 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
+  type PayrollJmhzTransportAttempt,
+  type PayrollJmhzTransportPoll,
+  type PayrollJmhzTransportEnvironment,
   type PayrollRegistrationPreview,
   type PayrollRegistrationSubmission,
 } from '@/api/payroll'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
@@ -22,6 +26,10 @@ const error = ref('')
 const preview = ref<PayrollRegistrationPreview | null>(null)
 const submission = ref<PayrollRegistrationSubmission | null>(null)
 const showXml = ref(false)
+const environment = ref<PayrollJmhzTransportEnvironment>('test')
+const transport = ref<PayrollJmhzTransportPoll | null>(null)
+const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
+const transportMessage = ref('')
 
 /**
  * Jedna plná primární akce podle stavu: dokud není náhled, je hlavní krok
@@ -47,19 +55,101 @@ const deadline = computed(
   () => submission.value?.deadline ?? preview.value?.deadline ?? null,
 )
 
+const transportAttempt = computed<PayrollJmhzTransportAttempt | null>(
+  () => transport.value?.attempt ?? null,
+)
+
+const canPoll = computed(
+  () => transportAttempt.value?.status === 'awaiting_protocol',
+)
+
+const canClose = computed(
+  () => transport.value?.settled === true
+    && transportAttempt.value?.closed_at == null,
+)
+
+const canSend = computed(() => transportAttempt.value === null || [
+  'prepared',
+  'failed',
+  'expired',
+].includes(transportAttempt.value.status))
+
+const transportActions = computed<ActionItem[]>(() => {
+  if (!submission.value) return []
+
+  return [
+    {
+      key: 'registration-send',
+      label: t(`payroll.people.registration.send_${environment.value}`),
+      icon: 'send',
+      tier: 'primary',
+      variant: 'primary',
+      show: canSend.value,
+      disabled: !props.canWrite || transportBusy.value !== null,
+      disabledReason: !props.canWrite
+        ? t('payroll.people.registration.write_required')
+        : undefined,
+      loading: transportBusy.value === 'send',
+      run: send,
+    },
+    {
+      key: 'registration-poll',
+      label: t('payroll.people.registration.poll'),
+      icon: 'cycle',
+      tier: 'primary',
+      variant: 'primary',
+      show: canPoll.value,
+      disabled: !props.canWrite || transportBusy.value !== null,
+      disabledReason: !props.canWrite
+        ? t('payroll.people.registration.write_required')
+        : undefined,
+      loading: transportBusy.value === 'poll',
+      run: poll,
+    },
+    {
+      key: 'registration-close',
+      label: t('payroll.people.registration.close'),
+      icon: 'check',
+      tier: 'primary',
+      variant: 'success',
+      show: canClose.value,
+      disabled: !props.canWrite || transportBusy.value !== null,
+      disabledReason: !props.canWrite
+        ? t('payroll.people.registration.write_required')
+        : undefined,
+      loading: transportBusy.value === 'close',
+      run: close,
+    },
+  ]
+})
+
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true
   error.value = ''
   try {
     if (action === 'preview') {
       submission.value = null
+      transport.value = null
+      transportMessage.value = ''
       preview.value = await payrollApi.previewEmploymentRegistration(
         props.employmentId,
+        environment.value,
       )
     } else {
       submission.value = await payrollApi.prepareEmploymentRegistration(
         props.employmentId,
+        environment.value,
       )
+      const status = await payrollApi.employmentRegistrationTransportStatus(
+        submission.value.submission_id,
+        environment.value,
+      )
+      transport.value = status.attempt === null ? null : {
+        attempt: status.attempt,
+        acknowledgement: null,
+        settled: status.attempt.status === 'completed',
+        report: null,
+      }
     }
   } catch (exception) {
     // Hláška ze serveru jmenuje konkrétní chybějící údaj — nesmí ji přebít
@@ -70,6 +160,80 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
     )
   } finally {
     busy.value = false
+  }
+}
+
+async function send(): Promise<void> {
+  if (!submission.value || !props.canWrite) return
+  transportBusy.value = 'send'
+  error.value = ''
+  transportMessage.value = ''
+  try {
+    const result = await payrollApi.sendEmploymentRegistrationTransport(
+      submission.value.submission_id,
+      environment.value,
+      crypto.randomUUID(),
+    )
+    transport.value = {
+      attempt: result.attempt,
+      acknowledgement: result.acknowledgement,
+      settled: result.settled,
+      report: null,
+    }
+  } catch (exception) {
+    error.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.send_failed'),
+    )
+  } finally {
+    transportBusy.value = null
+  }
+}
+
+async function poll(): Promise<void> {
+  if (!transportAttempt.value || !props.canWrite) return
+  transportBusy.value = 'poll'
+  error.value = ''
+  transportMessage.value = ''
+  try {
+    transport.value = await payrollApi.pollEmploymentRegistrationTransportAttempt(
+      transportAttempt.value.id,
+      environment.value,
+    )
+  } catch (exception) {
+    error.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.poll_failed'),
+    )
+  } finally {
+    transportBusy.value = null
+  }
+}
+
+async function close(): Promise<void> {
+  if (!transportAttempt.value || !props.canWrite) return
+  transportBusy.value = 'close'
+  error.value = ''
+  transportMessage.value = ''
+  try {
+    const result = await payrollApi.closeEmploymentRegistrationTransportAttempt(
+      transportAttempt.value.id,
+      environment.value,
+    )
+    transport.value = {
+      ...transport.value!,
+      attempt: result.attempt,
+    }
+    transportMessage.value = t('payroll.people.registration.closed', {
+      id: result.attempt.id,
+    })
+  } catch (exception) {
+    error.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.close_failed'),
+    )
+  } finally {
+    transportBusy.value = null
   }
 }
 
@@ -93,6 +257,18 @@ async function copyXml(): Promise<void> {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <label class="flex items-center gap-2 text-xs text-neutral-600">
+          <span>{{ t('payroll.people.registration.environment_label') }}</span>
+          <select
+            v-model="environment"
+            class="rounded-md border border-neutral-300 bg-surface px-2 py-1.5 text-xs text-neutral-900 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+            :disabled="busy || submission !== null"
+            data-test="registration-environment"
+          >
+            <option value="test">{{ t('payroll.people.registration.environment.test') }}</option>
+            <option value="production">{{ t('payroll.people.registration.environment.production') }}</option>
+          </select>
+        </label>
         <button
           v-if="primaryAction !== 'preview'"
           type="button"
@@ -104,10 +280,9 @@ async function copyXml(): Promise<void> {
           {{ t('payroll.people.registration.preview') }}
         </button>
         <button
+          v-if="primaryAction !== 'done'"
           type="button"
-          :class="primaryAction === 'done'
-            ? btnOutline('primary')
-            : btnFilled('primary')"
+          :class="btnFilled('primary')"
           :disabled="busy || (primaryAction !== 'preview' && !canWrite)"
           :data-test="`registration-${primaryAction === 'preview' ? 'preview' : 'prepare'}`"
           @click="run(primaryAction === 'preview' ? 'preview' : 'prepare')"
@@ -173,6 +348,35 @@ async function copyXml(): Promise<void> {
       </p>
       <p class="mt-1 break-all font-mono text-xs text-success-700">
         {{ submission.artifact_sha256.slice(0, 16) }}…
+      </p>
+
+      <div class="mt-3 border-t border-success-500/20 pt-3" data-test="registration-transport-actions">
+        <ActionBar :actions="transportActions" />
+      </div>
+    </div>
+
+    <div
+      v-if="transportAttempt"
+      class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
+      data-test="registration-transport-result"
+    >
+      <p class="font-medium">
+        {{ t('payroll.people.registration.attempt', {
+          id: transportAttempt.id,
+          status: t(`payroll.submissions.transport.status.${transportAttempt.status}`),
+        }) }}
+      </p>
+      <p v-if="transportAttempt.status === 'awaiting_protocol'" class="mt-1 text-xs">
+        {{ t('payroll.people.registration.awaiting_protocol') }}
+      </p>
+      <p v-if="transport?.report" class="mt-1 text-xs">
+        {{ t('payroll.people.registration.protocol', {
+          status: t(`payroll.submissions.transport.protocol_status.${transport.report.status}`),
+          errors: transport.report.errors.length,
+        }) }}
+      </p>
+      <p v-if="transportMessage" class="mt-1 text-xs text-success-800">
+        {{ transportMessage }}
       </p>
     </div>
 

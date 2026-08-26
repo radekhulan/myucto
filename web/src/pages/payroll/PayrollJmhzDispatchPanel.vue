@@ -68,7 +68,7 @@ function obligation(preview: PayrollJmhzPvpojPreview): PayrollSubmissionOverview
 
 function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
   const item = obligation(preview)
-  if (!item) return t('payroll.submissions.overview.jmhz_dispatch_obligation_missing')
+  if (!item) return null
   if (props.environment === 'production' && item.deadline.phase === 'not_open') {
     return t('payroll.submissions.overview.jmhz_dispatch_not_open', {
       date: item.earliest_submission_on,
@@ -85,8 +85,7 @@ function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
 
 async function submissionId(preview: PayrollJmhzPvpojPreview): Promise<number> {
   const item = obligation(preview)
-  if (!item) throw new Error(t('payroll.submissions.overview.jmhz_dispatch_obligation_missing'))
-  if (item.latest_submission?.status === 'ready') return item.latest_submission.id
+  if (item?.latest_submission?.status === 'ready') return item.latest_submission.id
 
   const preparation = await payrollApi.freezeJmhzPreparation(
     preview.revision_id,
@@ -95,7 +94,7 @@ async function submissionId(preview: PayrollJmhzPvpojPreview): Promise<number> {
   )
   const frozen = await payrollApi.freezeJmhzSubmission(
     preparation.id,
-    item.id,
+    item?.id ?? null,
     props.environment,
     preview.office.office_id,
   )

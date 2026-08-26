@@ -8,9 +8,13 @@ use DOMDocument;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPvpojPreview;
@@ -18,18 +22,24 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -53,6 +63,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     private Connection $db;
     private Config $config;
+    private JmhzPreparationSnapshotRepository $preparations;
+    private PayrollPeopleRepository $people;
     private PayrollSubmissionRepository $submissionRepository;
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
@@ -71,6 +83,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         }
         $this->db = $db;
         $this->config = $config;
+        $this->preparations = $container->get(JmhzPreparationSnapshotRepository::class);
+        $this->people = $container->get(PayrollPeopleRepository::class);
         foreach ([
             'payroll_obligations',
             'payroll_submission_deadlines',
@@ -210,6 +224,475 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertSame(hash('sha256', $xml), $result['artifact_sha256']);
     }
 
+    #[DataProvider('annualSettlementPeriods')]
+    public function testFrozenAnnualSettlementEvidenceProducesReadyImmutableSubmission(
+        string $periodStart,
+        string $periodEnd,
+        string $requestStatus,
+        ?array $settlement,
+        array $expectedFragments,
+        array $unexpectedFragments,
+    ): void {
+        $payload = $this->payloadForPeriod($periodStart, $periodEnd);
+        $payload['people'][0]['annual_evidence'] = [
+            'tax_year' => 2025,
+            'request' => [
+                'id' => 701,
+                'row_version' => 1,
+                'status' => $requestStatus,
+                'requested_on' => $requestStatus === 'requested' ? '2026-02-10' : null,
+                'annual_claims' => 'none',
+                'evidence_sha256' => str_repeat('8', 64),
+            ],
+            'request_evidence' => [
+                'present' => true,
+                'proof' => 'verified_request_row_under_unique_key_lock',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'settlement' => $settlement,
+            'settlement_evidence' => [
+                'performed' => $settlement !== null,
+                'proof' => $settlement === null
+                    ? 'outcome_absent_under_unique_key_lock'
+                    : 'verified_annual_outcome_and_document_revision',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'withholding_certificate' => substr($periodStart, 5, 2) === '01'
+                ? [
+                    'revision_id' => 801,
+                    'snapshot_hash' => str_repeat('9', 64),
+                    'paid_income_minor_units' => 125_000,
+                    'withholding_tax_minor_units' => 18_000,
+                ]
+                : null,
+        ];
+
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: substr($periodStart, 0, 7)),
+            $payload,
+            periodStart: $periodStart,
+            periodEnd: $periodEnd,
+        );
+        self::assertNotContains(
+            'jmhz_scenario1_annual_fields_unsupported',
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+                $resolution->blockers,
+            ),
+        );
+        self::assertSame('resolved', $resolution->status());
+
+        $bridge = $this->bridge(
+            $resolution,
+            '2027-01-05 11:30:00 Europe/Prague',
+        );
+        $created = $bridge->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        self::assertTrue($created['created']);
+        self::assertSame('ready', $created['status']);
+        $frozenBytes = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $created['artifact_id'],
+        );
+        foreach ($expectedFragments as $fragment) {
+            self::assertStringContainsString($fragment, $frozenBytes);
+        }
+        foreach ($unexpectedFragments as $fragment) {
+            self::assertStringNotContainsString($fragment, $frozenBytes);
+        }
+
+        $replayed = $bridge->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        self::assertFalse($replayed['created']);
+        self::assertSame('ready', $replayed['status']);
+        self::assertSame($created['submission_id'], $replayed['submission_id']);
+        self::assertSame($created['artifact_sha256'], $replayed['artifact_sha256']);
+        self::assertSame(
+            $frozenBytes,
+            $this->submissions->artifactBytes(
+                $this->supplierId,
+                $replayed['artifact_id'],
+            ),
+        );
+    }
+
+    /** @return iterable<string,array{string,string,string,?array<string,mixed>,list<string>,list<string>}> */
+    public static function annualSettlementPeriods(): iterable
+    {
+        yield 'leden: nepožádáno a neprovedeno' => [
+            '2026-01-01',
+            '2026-01-31',
+            'not_requested',
+            null,
+            [
+                '<form:prijemSrazkDanZvlSazba>1250</form:prijemSrazkDanZvlSazba>',
+                '<form:danSrazenaZvlSazba>180</form:danSrazenaZvlSazba>',
+                '<form:rocniZuctovaniZadost>false</form:rocniZuctovaniZadost>',
+                '<form:rocniZuctovaniProvedeno>false</form:rocniZuctovaniProvedeno>',
+            ],
+            ['<form:vysledekRocnihoZuctovani>'],
+        ];
+        yield 'únor: požádáno a dosud neprovedeno' => [
+            '2026-02-01',
+            '2026-02-28',
+            'requested',
+            null,
+            [
+                '<form:rocniZuctovaniZadost>true</form:rocniZuctovaniZadost>',
+                '<form:rocniZuctovaniProvedeno>false</form:rocniZuctovaniProvedeno>',
+            ],
+            [
+                '<form:prijemSrazkDanZvlSazba>',
+                '<form:vysledekRocnihoZuctovani>',
+            ],
+        ];
+        yield 'březen: požádáno, dosud neprovedeno' => [
+            '2026-03-01',
+            '2026-03-31',
+            'requested',
+            null,
+            ['<form:rocniZuctovaniProvedeno>false</form:rocniZuctovaniProvedeno>'],
+            [
+                '<form:rocniZuctovaniZadost>',
+                '<form:vysledekRocnihoZuctovani>',
+            ],
+        ];
+    }
+
+    public function testPerformedSettlementUsesCompleteAnnualSourcesAndSignedBonus(): void
+    {
+        $payload = $this->payloadForPeriod('2026-02-01', '2026-02-28');
+        $payload['people'][0]['annual_evidence'] = [
+            'tax_year' => 2025,
+            'request' => [
+                'id' => 701,
+                'row_version' => 1,
+                'status' => 'requested',
+                'requested_on' => '2026-02-10',
+                'annual_claims' => 'none',
+                'evidence_sha256' => str_repeat('8', 64),
+            ],
+            'request_evidence' => [
+                'present' => true,
+                'proof' => 'verified_request_row_under_unique_key_lock',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'settlement' => [
+                'revision_id' => 802,
+                'snapshot_hash' => str_repeat('a', 64),
+                'settled_on' => '2026-02-16',
+                'performed' => true,
+                'tax_difference_minor_units' => 12_300,
+                'bonus_difference_minor_units' => -2_300,
+                'settlement_difference_minor_units' => 10_000,
+                'credit_rows' => [],
+                'child_rows' => [],
+            ],
+            'settlement_evidence' => [
+                'performed' => true,
+                'proof' => 'verified_annual_outcome_and_document_revision',
+                'supplier_id' => 7,
+                'employee_id' => 11,
+                'tax_year' => 2025,
+            ],
+            'withholding_certificate' => null,
+        ];
+
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-02'),
+            $payload,
+            periodStart: '2026-02-01',
+            periodEnd: '2026-02-28',
+        );
+        self::assertSame('resolved', $resolution->status());
+        $codes = array_map(
+            static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+        self::assertNotContains('jmhz_annual_settlement_request_source_inconsistent', $codes);
+        self::assertNotContains('jmhz_annual_settlement_child_details_unsupported', $codes);
+        self::assertNotContains('jmhz_scenario1_annual_fields_unsupported', $codes);
+
+        $created = $this->bridge($resolution, '2026-03-05 Europe/Prague')->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $created['artifact_id'],
+        );
+        self::assertStringContainsString('<form:preplatekRok>100</form:preplatekRok>', $xml);
+        self::assertStringContainsString('<form:danPreplatekRok>123</form:danPreplatekRok>', $xml);
+        self::assertStringContainsString(
+            '<form:danBonusPreplatekRok>-23</form:danBonusPreplatekRok>',
+            $xml,
+        );
+
+        $payload['people'][0]['annual_evidence']['settlement']['child_rows'] = [[
+            'label' => '1. dítě',
+            'months' => 12,
+            'amount_minor_units' => 152_040_00,
+        ]];
+        $childResolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-02'),
+            $payload,
+            periodStart: '2026-02-01',
+            periodEnd: '2026-02-28',
+        );
+        self::assertSame('blocked', $childResolution->status());
+        self::assertContains(
+            'jmhz_annual_settlement_child_details_unsupported',
+            array_map(
+                static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+                $childResolution->blockers,
+            ),
+        );
+    }
+
+    public function testDecemberUsesSpecificSourceBlockersInsteadOfBlanketAnnualBlocker(): void
+    {
+        $payload = $this->payloadForPeriod('2026-12-01', '2026-12-31');
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-12'),
+            $payload,
+            periodStart: '2026-12-01',
+            periodEnd: '2026-12-31',
+        );
+
+        self::assertSame('blocked', $resolution->status());
+        $codes = array_map(
+            static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
+            $resolution->blockers,
+        );
+        self::assertNotContains('jmhz_scenario1_annual_fields_unsupported', $codes);
+        self::assertContains('jmhz_december_collective_agreement_source_missing', $codes);
+        self::assertContains('jmhz_december_ownership_form_source_missing', $codes);
+        self::assertContains('jmhz_december_ozp_annual_source_missing', $codes);
+    }
+
+    public function testContentCorrectionFreezesFullAcceptedFormWithSameGuidAndReplaysImmutableArtifact(): void
+    {
+        $resolution = $this->resolutionWithEmployeeName('Jana Syntetická');
+        $original = $this->bridge($resolution)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalXml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $original['artifact_id'],
+        );
+        $formGuid = $this->firstFormGuid($originalXml);
+        $this->acceptWithFormOutcome($original, $formGuid, 'accepted');
+
+        $service = $this->contentCorrections($resolution);
+        $candidates = $service->candidates(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+        );
+        self::assertCount(1, $candidates['forms']);
+        self::assertSame('correct_values', $candidates['forms'][0]['action']);
+        self::assertSame('Jana Syntetická', $candidates['forms'][0]['employee_name']);
+        $employment = (string) $candidates['forms'][0]['employment_external_identifier'];
+
+        $correction = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            [$employment],
+            $this->userId,
+        );
+        self::assertTrue($correction['created']);
+        self::assertSame('ready', $correction['status']);
+        self::assertSame('correction', $correction['submission_kind']);
+        self::assertSame($original['submission_id'], $correction['corrects_submission_id']);
+        $correctionXml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $correction['artifact_id'],
+        );
+        self::assertStringContainsString('<typPodani>O</typPodani>', $correctionXml);
+        self::assertStringContainsString('<typFormulare>O</typFormulare>', $correctionXml);
+        self::assertSame($formGuid, $this->firstFormGuid($correctionXml));
+        self::assertStringContainsString('<form:bezPriznaku', $correctionXml);
+        self::assertStringContainsString('<so:souhrn>', $correctionXml);
+        self::assertStringContainsString('<pvpoj:PVPOJ>', $correctionXml);
+
+        $replayed = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            [$employment],
+            $this->userId,
+        );
+        self::assertFalse($replayed['created']);
+        self::assertSame($correction['submission_id'], $replayed['submission_id']);
+        self::assertSame($correction['artifact_id'], $replayed['artifact_id']);
+        self::assertSame(
+            $correctionXml,
+            $this->submissions->artifactBytes($this->supplierId, $replayed['artifact_id']),
+        );
+    }
+
+    public function testContentCorrectionAddsMissingFormWithNewGuidAndWholeCompanyPvpoj(): void
+    {
+        $original = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $this->registerObligation(),
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $originalGuid = $this->firstFormGuid($this->submissions->artifactBytes(
+            $this->supplierId,
+            $original['artifact_id'],
+        ));
+        $this->acceptWithFormOutcome($original, $originalGuid, 'accepted');
+
+        $service = $this->contentCorrections($this->resolutionWithSecondPerson());
+        $candidates = $service->candidates(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+        );
+        self::assertCount(2, $candidates['forms']);
+        $missing = array_values(array_filter(
+            $candidates['forms'],
+            static fn (array $form): bool => $form['action'] === 'complete_form',
+        ));
+        self::assertCount(1, $missing);
+
+        $correction = $service->freeze(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['submission_id'],
+            self::PREPARATION_ID,
+            [(string) $missing[0]['employment_external_identifier']],
+            $this->userId,
+        );
+        $xml = $this->submissions->artifactBytes($this->supplierId, $correction['artifact_id']);
+        self::assertStringContainsString('<typPodani>O</typPodani>', $xml);
+        self::assertStringContainsString('<typFormulare>R</typFormulare>', $xml);
+        self::assertNotSame($originalGuid, $this->firstFormGuid($xml));
+        self::assertMatchesRegularExpression(
+            '/<idFormulare>[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}<\/idFormulare>/',
+            $xml,
+        );
+        self::assertStringContainsString('<pvpoj:pojistneZamestnavateleCelkem>496</pvpoj:pojistneZamestnavateleCelkem>', $xml);
+        self::assertStringContainsString('<pvpoj:pojistneZamestnance>142</pvpoj:pojistneZamestnance>', $xml);
+        self::assertStringContainsString('<pvpoj:pojistneCelkem>638</pvpoj:pojistneCelkem>', $xml);
+        self::assertStringContainsString('<form:idPpv>2000000000000000000002</form:idPpv>', $xml);
+        self::assertStringNotContainsString('<form:idPpv>2000000000000000000001</form:idPpv>', $xml);
+    }
+
+    public function testDecemberCorrectionObligationUsesFollowingJanuaryDueYear(): void
+    {
+        $documents = $this->createStub(JmhzScenario1DocumentService::class);
+        $documents->method('resolve')->willReturn($this->resolution());
+        $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        $service = new JmhzContentCorrectionSubmissionService(
+            $documents,
+            new JmhzScenario1XmlValidator(),
+            JmhzScenario1ControlValidator::create(),
+            new JmhzSubmissionGuidFactory(),
+            new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
+            $frozen,
+            $this->preparations,
+            $this->people,
+            $this->submissionRepository,
+            $this->submissions,
+            $this->obligations,
+            new MockClock('2037-12-31 11:30:00 Europe/Prague'),
+        );
+        $method = new \ReflectionMethod($service, 'correctionObligation');
+        $method->invoke(
+            $service,
+            $this->supplierId,
+            self::ENVIRONMENT,
+            [
+                'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+                'subject_type' => 'payroll_run',
+                'subject_reference' => 'payroll_run:' . self::RUN_ID,
+                'period_start' => '2026-12-01',
+                'period_end' => '2026-12-31',
+            ],
+            9001,
+            self::PREPARATION_ID,
+            str_repeat('a', 64),
+            $this->userId,
+        );
+
+        $deadline = $this->row(
+            'SELECT deadline.due_on
+               FROM payroll_submission_deadlines deadline
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = deadline.supplier_id
+                AND obligation.environment = deadline.environment
+                AND obligation.id = deadline.obligation_id
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = ?
+                AND obligation.obligation_kind = ?',
+            [$this->supplierId, self::ENVIRONMENT, 'correction'],
+        );
+        self::assertSame('2037-12-31', $deadline['due_on']);
+    }
+
+    public function testRegistersMissingRegularObligationDuringFreeze(): void
+    {
+        $result = $this->bridge()->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+
+        self::assertTrue($result['created']);
+        self::assertSame('ready', $result['status']);
+        self::assertSame(1, $this->countRows('payroll_obligations'));
+        $obligation = $this->row(
+            'SELECT agenda_code, subject_type, subject_reference,
+                    period_start, period_end, obligation_kind,
+                    preferred_channel, status
+               FROM payroll_obligations
+              WHERE supplier_id = ?',
+            [$this->supplierId],
+        );
+        self::assertSame(JmhzSubmissionBridgeService::AGENDA_CODE, $obligation['agenda_code']);
+        self::assertSame('payroll_run', $obligation['subject_type']);
+        self::assertSame('payroll_run:' . self::RUN_ID, $obligation['subject_reference']);
+        self::assertSame(self::PERIOD_START, $obligation['period_start']);
+        self::assertSame(self::PERIOD_END, $obligation['period_end']);
+        self::assertSame('regular', $obligation['obligation_kind']);
+        self::assertSame('vrep_apep', $obligation['preferred_channel']);
+        self::assertSame('prepared', $obligation['status']);
+    }
+
     /**
      * Jádro celé vrstvy. Opakované volání nesmí XML postavit znovu — nové GUIDy
      * by pod tímtéž podáním vyrobily jiný dokument a duplicitu přijatého podání
@@ -338,6 +821,22 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::assertSame(
                 'jmhz_submission_preparation_blocked',
                 $exception->validationCode,
+            );
+            self::assertStringContainsString(
+                'Není doloženo prohlášení poplatníka.',
+                $exception->getMessage(),
+            );
+            self::assertStringContainsString(
+                'Mzdy → Zaměstnanci',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'jmhz_taxpayer_declaration_unresolved',
+                $exception->getMessage(),
+            );
+            self::assertStringNotContainsString(
+                'person 11',
+                $exception->getMessage(),
             );
         }
 
@@ -545,11 +1044,105 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->submissionRepository,
             $this->submissions,
             new MockClock('2026-08-05 11:30:00 Europe/Prague'),
+            $this->obligations,
         );
+    }
+
+    /** @param array<string,mixed> $submission */
+    private function acceptWithFormOutcome(array $submission, string $formGuid, string $status): void
+    {
+        $submitted = $this->submissions->transition(
+            $this->supplierId,
+            (int) $submission['submission_id'],
+            (int) $submission['row_version'],
+            'submitted',
+            'VREP-CONTENT-CORRECTION-ROOT',
+        );
+        $verifier = new class ($formGuid, $status) implements PayrollReceiptVerifierInterface {
+            public function __construct(
+                private readonly string $formGuid,
+                private readonly string $status,
+            ) {}
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    $this->status,
+                    $expectedCorrelationReference,
+                    [],
+                    [new PayrollVerifiedReceiptFormOutcome(
+                        $this->formGuid,
+                        null,
+                        $this->status === 'accepted' ? 1 : 3,
+                        $this->status === 'accepted' ? 'ProcessedAndComplete' : 'Rejected',
+                        $this->status,
+                        '1000000001',
+                        '2000000000000000000001',
+                        [],
+                    )],
+                );
+            }
+        };
+        $result = $this->submissions->importReceipt(
+            $this->supplierId,
+            (int) $submission['submission_id'],
+            $submitted['row_version'],
+            null,
+            '<signed-jmhz-protocol/>',
+            'receipt:content-correction-root',
+            'VREP-CONTENT-CORRECTION-ROOT',
+            'CSSZ_JMHZ',
+            $status,
+            'vrep_apep',
+            'receipt-content-correction-root',
+            $this->userId,
+            $verifier,
+        );
+        self::assertSame($status, $result['submission_status']);
+    }
+
+    private function contentCorrections(JmhzScenario1Resolution $resolution): JmhzContentCorrectionSubmissionService
+    {
+        $documents = $this->createMock(JmhzScenario1DocumentService::class);
+        $documents->expects(self::exactly(2))->method('resolve')->willReturn($resolution);
+        $frozen = new JmhzFrozenPayloadReader($this->submissionRepository, $this->submissions);
+        $clock = new MockClock('2026-08-05 11:30:00 Europe/Prague');
+
+        return new JmhzContentCorrectionSubmissionService(
+            $documents,
+            new JmhzScenario1XmlValidator(),
+            JmhzScenario1ControlValidator::create(),
+            new JmhzSubmissionGuidFactory(),
+            new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
+            $frozen,
+            $this->preparations,
+            $this->people,
+            $this->submissionRepository,
+            $this->submissions,
+            $this->obligations,
+            $clock,
+        );
+    }
+
+    private function firstFormGuid(string $xml): string
+    {
+        $dom = new DOMDocument();
+        self::assertTrue($dom->loadXML($xml));
+        $xpath = new \DOMXPath($dom);
+        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $node = $xpath->query('/p:jmhz/p:formulareOsob/p:formularOsoby[1]/p:hlavicka/p:idFormulare')->item(0);
+        self::assertNotNull($node);
+
+        return trim($node->textContent);
     }
 
     private function bridge(
         ?JmhzScenario1Resolution $resolution = null,
+        string $now = '2026-08-05 11:30:00 Europe/Prague',
     ): JmhzSubmissionBridgeService {
         $documents = $this->createStub(JmhzScenario1DocumentService::class);
         $documents->method('resolve')->willReturn(
@@ -563,7 +1156,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             new JmhzSubmissionGuidFactory(),
             $this->submissionRepository,
             $this->submissions,
-            new MockClock('2026-08-05 11:30:00 Europe/Prague'),
+            new MockClock($now),
+            $this->obligations,
         );
     }
 
@@ -604,6 +1198,22 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         return $this->resolutionFor($this->pvpoj());
     }
 
+    private function resolutionWithEmployeeName(string $employeeName): JmhzScenario1Resolution
+    {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees (supplier_id, full_name) VALUES (?, ?)',
+        );
+        $statement->execute([$this->supplierId, $employeeName]);
+        $employeeId = (int) $this->db->pdo()->lastInsertId();
+        $payload = $this->resolution()->requireResolvedDocument()->payload;
+        $payload['people'][0]['employee_id'] = $employeeId;
+
+        return new JmhzScenario1Resolution(
+            new JmhzScenario1NormalizedDocument($payload),
+            [],
+        );
+    }
+
     /**
      * Zaměstnavatelské pojistné v PVPOJ o korunu nižší, než kolik vychází ze
      * součástí. Tvar zůstává platný, rozvaha ne.
@@ -611,6 +1221,34 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
     private function resolutionWithBrokenPvpoj(): JmhzScenario1Resolution
     {
         return $this->resolutionFor($this->pvpoj(employerTotal: 247));
+    }
+
+    private function resolutionWithSecondPerson(): JmhzScenario1Resolution
+    {
+        $payload = $this->payload();
+        $second = $payload['people'][0];
+        $second['employee_id'] = 12;
+        $second['employments'][0]['employment_id'] = 102;
+        $second['employments'][0]['identity']['person_external_identifier']['value'] = '1000000012';
+        $second['employments'][0]['identity']['jmhz_employment_external_identifier']['value']
+            = '2000000000000000000002';
+        $second['employments'][0]['insurance']['relationship_id'] = 'employment:102';
+        $second['person_summary']['statutory']['net_pay']['relationships'] = [
+            ['relationship_id' => 'employment:102'],
+        ];
+        $payload['people'][] = $second;
+        $payload['ordinary_evidence'][] = [
+            'scope' => ['employee_id' => 12, 'employment_id' => 102],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ];
+        $payload['source_versions']['ordinary_evidence'][] = [
+            'employment_id' => 102,
+            'id' => 602,
+            'source_manifest_sha256' => str_repeat('6', 64),
+            'snapshot_fingerprint' => str_repeat('7', 64),
+        ];
+
+        return $this->resolutionFor($this->pvpoj(employerTotal: 496, people: 2), $payload);
     }
 
     /**
@@ -674,6 +1312,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         JmhzPvpojPreview $pvpoj,
         ?array $payload = null,
         ?int $officeId = null,
+        string $periodStart = self::PERIOD_START,
+        string $periodEnd = self::PERIOD_END,
     ): JmhzScenario1Resolution {
         $preparation = new JmhzVerifiedPreparationSnapshot(
             self::PREPARATION_ID,
@@ -682,8 +1322,8 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::RUN_ID,
             301,
             1,
-            self::PERIOD_START,
-            self::PERIOD_END,
+            $periodStart,
+            $periodEnd,
             'scenario_1',
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
             str_repeat('1', 64),
@@ -712,13 +1352,15 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         int $employerTotal = 248,
         int $officeId = 4,
         string $variableSymbol = '1234567890',
+        int $people = 1,
+        ?string $period = null,
     ): JmhzPvpojPreview {
         return new JmhzPvpojPreview(
             7,
             self::RUN_ID,
             301,
             1,
-            '2026-07',
+            $period ?? '2026-07',
             [
                 'office_id' => $officeId,
                 'code' => 'UC' . $officeId,
@@ -727,22 +1369,25 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             ],
             [[
                 'office_id' => $officeId,
-                'employee_contribution_minor_units' => 7_100,
-                'employer_contribution_minor_units' => 24_800,
-                'amount_minor_units' => 31_900,
+                'employee_contribution_minor_units' => 7_100 * $people,
+                'employer_contribution_minor_units' => 24_800 * $people,
+                'amount_minor_units' => 31_900 * $people,
             ]],
             ['revision_input_hash' => str_repeat('d', 64)],
             [
                 'pojistne' => [
-                    'zakladZamestnavateleA' => 1_000,
+                    'zakladZamestnavateleA' => 1_000 * $people,
                     'pojistneZamestnavateleA' => $employerTotal,
                     'pojistneZamestnavateleCelkem' => $employerTotal,
-                    'pojistneZamestnance' => 71,
-                    'pojistneCelkem' => $employerTotal + 71,
+                    'pojistneZamestnance' => 71 * $people,
+                    'pojistneCelkem' => $employerTotal + (71 * $people),
                 ],
-                'pojistneUhrada' => $employerTotal + 71,
+                'pojistneUhrada' => $employerTotal + (71 * $people),
             ],
-            [['employee_id' => 11]],
+            array_map(
+                static fn (int $offset): array => ['employee_id' => 11 + $offset],
+                range(0, $people - 1),
+            ),
         );
     }
 
@@ -920,6 +1565,25 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             'readiness_issue_codes' => [],
             'readiness_issues' => [],
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function payloadForPeriod(string $periodStart, string $periodEnd): array
+    {
+        $payload = $this->payload();
+        $payload['scope']['period_start'] = $periodStart;
+        $payload['scope']['period_end'] = $periodEnd;
+        $employment = &$payload['people'][0]['employments'][0];
+        $employment['eldp']['insurance_interval']['insurance_from'] = $periodStart;
+        $employment['eldp']['insurance_interval']['insurance_to'] = $periodEnd;
+        $employment['eldp']['eldp_sections'][0]['valid_from'] = $periodStart;
+        $employment['eldp']['eldp_sections'][0]['valid_to'] = $periodEnd;
+        $days = (int) (new \DateTimeImmutable($periodEnd))->format('d');
+        $employment['eldp']['eldp_sections'][0]['insurance_days'] = $days;
+        $employment['work_month']['jmhz_work_summary']['values']['evidence_days'] = $days;
+        unset($employment);
+
+        return $payload;
     }
 
     /** @return array<string,mixed> */

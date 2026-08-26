@@ -16,10 +16,12 @@ final class JmhzControlCatalogBundleTest extends TestCase
         $counts = $manifest['payload']['counts'];
 
         self::assertSame(JmhzControlSourceCatalog::MANIFEST_SHA256, $manifest['manifest_sha256']);
+        self::assertSame('1.4.2.8', $manifest['payload']['version']);
         self::assertSame(199, $counts['controls']);
-        self::assertSame(826, $counts['attribute_refs']);
+        self::assertSame(825, $counts['attribute_refs']);
         self::assertSame(219, $counts['unique_attributes']);
         self::assertSame(1, $counts['symbolic_attribute_refs']);
+        self::assertSame(1, $counts['source_anomalies']);
         self::assertSame(22, $counts['parameters']);
         self::assertSame(30, $counts['parameter_control_refs']);
         self::assertSame(10, $counts['missing_parameter_control_refs']);
@@ -68,5 +70,37 @@ final class JmhzControlCatalogBundleTest extends TestCase
 
         self::assertSame(['OZUSPOJ'], $definition->symbolicAttributeRefs);
         self::assertCount(6, $definition->attributeIds);
+    }
+
+    public function testOfficialChangesToControls164And290ArePinnedVerbatim(): void
+    {
+        $definitions = JmhzControlSourceCatalog::load()->definitions();
+
+        self::assertSame(['10032', '10006', '10010', '10011'], $definitions[164]->attributeIds);
+        self::assertSame('unavailable', $definitions[164]->portalSystem->value);
+        self::assertStringContainsString('rozhodná období od 04/2026 dál', $definitions[164]->detail);
+        self::assertSame(['10032', '10006', '10010', '10011'], $definitions[290]->attributeIds);
+        self::assertStringContainsString('jehož pojistná část byla akceptována', $definitions[290]->detail);
+    }
+
+    public function testOfficialControl333AnomalyIsRecordedWithoutInventingAResolution(): void
+    {
+        $catalog = JmhzControlSourceCatalog::load();
+        $manifest = $catalog->manifest();
+        $definitions = $catalog->definitions();
+        $row = array_column($manifest['payload']['controls'], null, 'control_id')[333];
+
+        self::assertSame(
+            'official_detail_attribute_mismatch',
+            $row['source_anomaly']['code'],
+        );
+        self::assertSame(['B188', 'C188', 'L188', 'M188'], $row['source_anomaly']['source_cells']);
+        self::assertSame(
+            ['10006', '10032', '10010', '10011'],
+            $row['source_anomaly']['declared_attribute_ids'],
+        );
+        self::assertSame(['10016', '10495'], $row['source_anomaly']['detail_attribute_ids']);
+        self::assertSame('fail_closed_not_evaluable', $row['source_anomaly']['resolution']);
+        self::assertSame('official_detail_attribute_mismatch', $definitions[333]->sourceAnomaly);
     }
 }

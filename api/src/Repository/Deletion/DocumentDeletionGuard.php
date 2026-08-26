@@ -63,6 +63,17 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                 'references' => [
                     ['table' => 'payroll_enforcement_case_documents', 'column' => 'dms_document_id'],
                     ['table' => 'payroll_enforcement_events', 'column' => 'decision_document_id'],
+                    ['table' => 'payroll_insolvency_payment_instructions', 'column' => 'decision_document_id'],
+                ],
+            ],
+            'payroll_production_qualification' => [
+                'message' => 'Doklad prokazuje připravenost firmy k ostrému provozu mezd '
+                    . '(%d vazeb). Je součástí neměnné kvalifikační stopy a nelze ho odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_production_qualification_documents',
+                        'column' => 'document_id',
+                    ],
                 ],
             ],
             'tax_submission_artifact' => [

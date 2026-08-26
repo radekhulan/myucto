@@ -356,7 +356,7 @@ export function applyFieldChange(
 const DEFAULT_VALUES: Readonly<
   Record<PayrollStatutoryEvidenceSection, Readonly<Record<string, string | null>>>
 > = {
-  tax_declarations: { status: 'signed', evidence_reference: null },
+  tax_declarations: { status: 'not-signed', evidence_reference: null },
   tax_residences: { residence: 'czech-resident', country_code: 'CZ', evidence_reference: null },
   social_jurisdictions: {
     jurisdiction: 'czech_regime_verified',

@@ -31,6 +31,8 @@ describe('SearchableSelect', () => {
         invalid: true,
         required: true,
         ariaLabel: 'Mzda — Má dáti',
+        inputId: 'payroll-debit-account',
+        clearLabel: 'Zrušit účet',
         inputClass: 'font-mono',
       },
     })
@@ -41,6 +43,8 @@ describe('SearchableSelect', () => {
     expect(payrollInput.attributes('aria-required')).toBe('true')
     expect(payrollInput.attributes('required')).toBeDefined()
     expect(payrollInput.attributes('aria-label')).toBe('Mzda — Má dáti')
+    expect(payrollInput.attributes('id')).toBe('payroll-debit-account')
+    expect(payrollWrapper.get('button').attributes('aria-label')).toBe('Zrušit účet')
     payrollWrapper.unmount()
   })
 

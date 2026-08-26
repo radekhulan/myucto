@@ -90,12 +90,14 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
+use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
 use MyInvoice\Action\Payroll\PayrollHealthNotificationAction;
 use MyInvoice\Action\Payroll\PayrollInputImportsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
+use MyInvoice\Action\Payroll\PayrollJmhzIdentityAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzPvpojPreviewAction;
 use MyInvoice\Action\Payroll\PayrollJmhzOrdinaryEvidenceAction;
@@ -107,6 +109,8 @@ use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzXmlDryRunAction;
 use MyInvoice\Action\Payroll\PayrollNetResultAction;
 use MyInvoice\Action\Payroll\PayrollPaymentAction;
+use MyInvoice\Action\Payroll\PayrollPeriodExportAction;
+use MyInvoice\Action\Payroll\PayrollRiskySavingsAction;
 use MyInvoice\Action\Payroll\PayrollPayoutRulesAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
@@ -117,6 +121,7 @@ use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollPostingReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollQuickInputsAction;
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
+use MyInvoice\Action\Payroll\PayrollRegistrationTransportAction;
 use MyInvoice\Action\Payroll\PayrollRegzelAction;
 use MyInvoice\Action\Payroll\PayrollRecurringComponentsAction;
 use MyInvoice\Action\Payroll\PayrollRetentionAction;
@@ -727,6 +732,8 @@ final class Routes
             // Smazat jde jen NIKDY NEPOUŽITÁ verze složky; u použité zůstává
             // deaktivace a ukončení platnosti přes PUT výše.
             $g->delete('/components/{id:[0-9]+}', [PayrollComponentsAction::class, 'delete']);
+            $g->get('/risky-savings', [PayrollRiskySavingsAction::class, 'list']);
+            $g->put('/risky-savings/evidence', [PayrollRiskySavingsAction::class, 'save']);
             $g->get('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'list']);
             $g->post('/deduction-agreements', [PayrollDeductionAgreementAction::class, 'create']);
             $g->get(
@@ -744,7 +751,16 @@ final class Routes
             $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
             $g->post('/enforcement/cases', [PayrollEnforcementAction::class, 'create']);
             $g->get('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'detail']);
+            $g->delete('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'delete']);
             $g->post('/enforcement/cases/{id:[0-9]+}/claims', [PayrollEnforcementAction::class, 'addClaim']);
+            $g->put(
+                '/enforcement/cases/{id:[0-9]+}/claims/{claimId:[0-9]+}',
+                [PayrollEnforcementAction::class, 'updateClaim'],
+            );
+            $g->delete(
+                '/enforcement/cases/{id:[0-9]+}/claims/{claimId:[0-9]+}',
+                [PayrollEnforcementAction::class, 'deleteClaim'],
+            );
             $g->put('/enforcement/cases/{id:[0-9]+}/evidence', [PayrollEnforcementAction::class, 'updateEvidence']);
             $g->post(
                 '/enforcement/cases/{id:[0-9]+}/commands/{command:[a-z_]+}',
@@ -821,6 +837,14 @@ final class Routes
             $g->post('/payments/reconciliation/matches', [PayrollPaymentAction::class, 'matchPayment']);
             $g->post('/payments/reconciliation/reversals', [PayrollPaymentAction::class, 'reversePayment']);
             $g->post(
+                '/payments/reconciliation/incoming-refunds',
+                [PayrollPaymentAction::class, 'matchIncomingRefund'],
+            );
+            $g->post(
+                '/payments/reconciliation/incoming-refund-reversals',
+                [PayrollPaymentAction::class, 'reverseIncomingRefund'],
+            );
+            $g->post(
                 '/payments/batches/{batchId:[0-9]+}/exports',
                 [PayrollPaymentAction::class, 'generateExport'],
             );
@@ -875,6 +899,22 @@ final class Routes
             );
             $g->get('/documents', [PayrollDocumentAction::class, 'list']);
             $g->get('/documents/annual', [PayrollDocumentAction::class, 'listAnnual']);
+            $g->post(
+                '/exports/monthly/{period:[0-9]{4}-[0-9]{2}}',
+                [PayrollPeriodExportAction::class, 'createMonthly'],
+            );
+            $g->post(
+                '/exports/annual/{year:[0-9]{4}}',
+                [PayrollPeriodExportAction::class, 'createAnnual'],
+            );
+            $g->post(
+                '/exports/{exportId:[0-9]+}/download-grants',
+                [PayrollPeriodExportAction::class, 'grant'],
+            );
+            $g->post(
+                '/exports/download',
+                [PayrollPeriodExportAction::class, 'download'],
+            );
             $g->post(
                 '/people/{employeeId:[0-9]+}/documents/payroll-sheet/{year:[0-9]{4}}',
                 [PayrollDocumentAction::class, 'generatePayrollSheet'],
@@ -948,6 +988,14 @@ final class Routes
             $g->get(
                 '/jmhz/municipalities',
                 [PayrollEmploymentAction::class, 'jmhzMunicipalities'],
+            );
+            $g->get(
+                '/jmhz/identities/{employmentId:[0-9]+}',
+                [PayrollJmhzIdentityAction::class, 'show'],
+            );
+            $g->put(
+                '/jmhz/identities/{employmentId:[0-9]+}',
+                [PayrollJmhzIdentityAction::class, 'put'],
             );
             // Našeptávač klasifikace zaměstnání ČSÚ — hledání běží na serveru,
             // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).
@@ -1121,6 +1169,22 @@ final class Routes
                 '/submissions/registration/{employmentId:[0-9]+}',
                 [PayrollRegistrationAction::class, 'prepare'],
             );
+            $g->post(
+                '/submissions/registration-transport/{submissionId:[0-9]+}',
+                [PayrollRegistrationTransportAction::class, 'send'],
+            );
+            $g->get(
+                '/submissions/registration-transport/{submissionId:[0-9]+}',
+                [PayrollRegistrationTransportAction::class, 'status'],
+            );
+            $g->post(
+                '/submissions/registration-transport/{attemptId:[0-9]+}/poll',
+                [PayrollRegistrationTransportAction::class, 'poll'],
+            );
+            $g->post(
+                '/submissions/registration-transport/{attemptId:[0-9]+}/close',
+                [PayrollRegistrationTransportAction::class, 'close'],
+            );
             // Oznámení záměru uplatňovat slevu na pojistném (OZUSPOJ).
             // Vlastní podání s vlastní lhůtou: sleva podle § 7a bez doručeného
             // záměru nenáleží, i když se v měsíčním hlášení vykáže.
@@ -1199,9 +1263,25 @@ final class Routes
                 '/submissions/{submissionId:[0-9]+}/jmhz-cancel',
                 [PayrollJmhzCorrectionAction::class, 'cancel'],
             );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/jmhz-cancel-components',
+                [PayrollJmhzCorrectionAction::class, 'components'],
+            );
             $g->post(
                 '/submissions/{submissionId:[0-9]+}/jmhz-cancel-components',
                 [PayrollJmhzCorrectionAction::class, 'cancelComponents'],
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/jmhz-content-correction-preparations',
+                [PayrollJmhzCorrectionAction::class, 'contentCorrectionPreparations'],
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/jmhz-content-correction',
+                [PayrollJmhzCorrectionAction::class, 'contentCorrection'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-content-correction',
+                [PayrollJmhzCorrectionAction::class, 'freezeContentCorrection'],
             );
             $g->get(
                 '/submissions/jmhz-protocol-import',
@@ -1245,6 +1325,10 @@ final class Routes
                 '/submissions/health-notifications/duties',
                 [PayrollHealthNotificationAction::class, 'periodDuties'],
             );
+            $g->post(
+                '/submissions/health-notifications/duties/obligations',
+                [PayrollHealthNotificationAction::class, 'registerPeriodObligations'],
+            );
             $g->get(
                 '/submissions/health-notifications/duties/{employmentId:[0-9]+}',
                 [PayrollHealthNotificationAction::class, 'duties'],
@@ -1256,6 +1340,10 @@ final class Routes
             $g->post(
                 '/submissions/health-notifications/payment-overview/{revisionId:[0-9]+}/{insurerCode:[0-9]{3}}/prepare',
                 [PayrollHealthNotificationAction::class, 'preparePaymentOverview'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/health-isds/{insurerCode:[0-9]{3}}',
+                [PayrollHealthInsuranceIsdsAction::class, 'enqueue'],
             );
             $g->get('/time/month', [PayrollTimeAction::class, 'month']);
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);
@@ -1281,6 +1369,10 @@ final class Routes
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/reopen', [PayrollTimeAction::class, 'reopen']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
+            $g->post(
+                '/settings/activation/production-qualification',
+                [PayrollActivationAction::class, 'qualify'],
+            );
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
@@ -1327,6 +1419,14 @@ final class Routes
             $g->post('/time/leave-ledger', [PayrollAbsenceAction::class, 'createLeaveEntry']);
             $g->delete('/time/leave-ledger/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteLeaveEntry']);
             $g->post('/time/leave-entitlements', [PayrollAbsenceAction::class, 'createEntitlement']);
+            $g->get(
+                '/time/leave-entitlement-candidates',
+                [PayrollAbsenceAction::class, 'leaveEntitlementCandidates'],
+            );
+            $g->post(
+                '/time/leave-entitlements/bulk',
+                [PayrollAbsenceAction::class, 'createAutomaticEntitlements'],
+            );
             $g->delete('/time/leave-entitlements/{id:[0-9]+}', [PayrollAbsenceAction::class, 'deleteEntitlement']);
 
             // Retence osobních údajů, zadržení výmazu a výmaz jako NÁVRH ke schválení.
@@ -1993,6 +2093,9 @@ final class Routes
         // přehledy ZP…). Systémový certifikát je vždy nastavení aktuální firmy.
         $app->get    ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'list']);
         $app->post   ('/api/settings/databox',             [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'save']);
+        $app->get    ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'mobileKeyProfile']);
+        $app->post   ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'saveMobileKeyProfile']);
+        $app->delete ('/api/settings/databox/mobile-key/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'deleteMobileKeyProfile']);
         $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
         // Registrace odesílací brány je věc PROVOZOVATELE, ne zákazníka:
         // certifikát je jeden pro celou službu a zákazník k odeslání přes bránu
@@ -2034,6 +2137,11 @@ final class Routes
         $app->post   ('/api/submissions/receipts/{id:[0-9]+}/match',   [\MyInvoice\Action\Submission\SubmissionReceiptAction::class, 'match']);
         $app->get    ('/api/submissions/inbox',            [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'list']);
         $app->post   ('/api/submissions/inbox/poll',       [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'poll']);
+        $app->post   ('/api/submissions/inbox/poll/password', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'pollWithPassword']);
+        $app->post   ('/api/submissions/inbox/mobile-key/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'mobileKeyStart']);
+        $app->post   ('/api/submissions/inbox/mobile-key/status', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'mobileKeyStatus']);
+        $app->post   ('/api/submissions/inbox/sms/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsStart']);
+        $app->post   ('/api/submissions/inbox/sms/complete', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsComplete']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
         // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
         // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4

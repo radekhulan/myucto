@@ -62,6 +62,51 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         self::assertSame('336', $document['insurance_liability_account']);
     }
 
+    /** Účtová osnova běžně používá analytiky s tečkou (např. 522.100). */
+    public function testAcceptsAnalyticalAccountCodesWithDot(): void
+    {
+        $snapshot = $this->inputSnapshot();
+        foreach ($snapshot['employer']['accounting_accounts'] as $key => $value) {
+            $snapshot['employer']['accounting_accounts'][$key] = $value . '.100';
+        }
+        foreach ($snapshot['people'][0]['employments'][0]['inputs'] as &$input) {
+            $input['component']['accounting_debit_code'] = null;
+            $input['component']['accounting_credit_code'] = null;
+        }
+        unset($input);
+
+        $result = $this->calculatedResult();
+        foreach ($result['people'][0]['employments'][0]['inputs'] as &$inputResult) {
+            $inputResult['accounting']['debit_code'] = null;
+            $inputResult['accounting']['credit_code'] = null;
+        }
+        unset($inputResult);
+
+        $document = (new PayslipDocumentSnapshotMapper())
+            ->attach($snapshot, $result)['people'][0]['payslip_document'];
+
+        self::assertSame('521.100', $document['gross_expense_account']);
+        self::assertSame('331.100', $document['gross_liability_account']);
+        self::assertSame('524.100', $document['insurance_expense_account']);
+        self::assertSame('336.100', $document['insurance_liability_account']);
+    }
+
+    public function testAcceptsAnalyticalAccountsFrozenOnIndividualInputs(): void
+    {
+        $result = $this->calculatedResult();
+        foreach ($result['people'][0]['employments'][0]['inputs'] as &$inputResult) {
+            $inputResult['accounting']['debit_code'] = '521.200';
+            $inputResult['accounting']['credit_code'] = '331.200';
+        }
+        unset($inputResult);
+
+        $document = (new PayslipDocumentSnapshotMapper())
+            ->attach($this->inputSnapshot(), $result)['people'][0]['payslip_document'];
+
+        self::assertSame('521.200', $document['gross_expense_account']);
+        self::assertSame('331.200', $document['gross_liability_account']);
+    }
+
     public function testAllocatesAggregateEmployerSocialDeterministically(): void
     {
         $snapshot = $this->inputSnapshot();

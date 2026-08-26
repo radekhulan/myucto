@@ -90,9 +90,9 @@ final class JmhzVaultEnvelopeSignerTest extends TestCase
             'credential' => ['serial_hex' => '176B96F'],
         ]);
 
-        // 0x176B96F = 24 554 607
+        // 0x176B96F = 24 557 935
         $this->expectSigningAttempt();
-        $this->signer($vault, registeredSerial: '12345678')->sign('<jmhz/>');
+        $this->signer($vault, registeredSerial: '24557935')->sign('<jmhz/>');
     }
 
     public function testCertificateWithoutSerialCannotBeVerified(): void

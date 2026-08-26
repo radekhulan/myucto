@@ -9,6 +9,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use Psr\Clock\ClockInterface;
@@ -22,6 +23,8 @@ final class PayrollPaymentBatchBuilder
         'advance_tax',
         'withholding_tax',
         'enforcement',
+        'insolvency',
+        'risky_savings',
     ];
 
     public function __construct(
@@ -31,6 +34,7 @@ final class PayrollPaymentBatchBuilder
         private readonly IbanValidator $ibanValidator,
         private readonly CzechBankAccountValidator $czechBankAccountValidator,
         private readonly ClockInterface $clock,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     /**
@@ -66,6 +70,7 @@ final class PayrollPaymentBatchBuilder
                 'Uživatel platební dávky není platný.',
             );
         }
+        $this->productionGate->assertActive($supplierId);
         if (!in_array($exportFormat, ['abo', 'sepa', 'manual'], true)) {
             throw new \InvalidArgumentException(
                 'Formát mzdové platební dávky není podporovaný.',
@@ -538,6 +543,8 @@ final class PayrollPaymentBatchBuilder
                 'payroll-payment-social-insurance-source.v1',
                 'payroll-payment-income-tax-source.v1',
                 'payroll-payment-enforcement-source.v1',
+                'payroll-payment-insolvency-source.v1',
+                'payroll-payment-risky-savings-source.v1',
             ], true)
             || ($source['recipient_reference'] ?? null)
                 !== $liability['recipient_reference']
@@ -574,6 +581,14 @@ final class PayrollPaymentBatchBuilder
             ],
             'enforcement' => [
                 'payroll-payment-enforcement-source.v1',
+                'other_recipient',
+            ],
+            'insolvency' => [
+                'payroll-payment-insolvency-source.v1',
+                'other_recipient',
+            ],
+            'risky_savings' => [
+                'payroll-payment-risky-savings-source.v1',
                 'other_recipient',
             ],
             default => null,
@@ -978,6 +993,18 @@ final class PayrollPaymentBatchBuilder
                 'institution_code' => null,
                 'message' => 'Srazka ze mzdy',
             ],
+            'insolvency' => [
+                'type' => 'other_recipient',
+                'reference_code' => '[A-Z0-9][A-Z0-9._-]{0,31}',
+                'institution_code' => null,
+                'message' => 'Srazka pri oddluzeni',
+            ],
+            'risky_savings' => [
+                'type' => 'other_recipient',
+                'reference_code' => '[A-Z0-9][A-Z0-9._-]{0,31}',
+                'institution_code' => null,
+                'message' => 'Povinne sporeni rizikova prace',
+            ],
             default => null,
         };
         if ($definition === null) {
@@ -1024,6 +1051,24 @@ final class PayrollPaymentBatchBuilder
         array $account,
         array $source,
     ): array {
+        if (($source['schema_reference'] ?? null)
+                === 'payroll-payment-risky-savings-source.v1'
+        ) {
+            return [
+                'variable_symbol' => $this->nullableTextValue(
+                    $source['variable_symbol'] ?? null,
+                    'variabilní symbol povinného spoření',
+                ),
+                'specific_symbol' => $this->nullableTextValue(
+                    $source['specific_symbol'] ?? null,
+                    'specifický symbol povinného spoření',
+                ),
+                'constant_symbol' => $this->nullableTextValue(
+                    $source['constant_symbol'] ?? null,
+                    'konstantní symbol povinného spoření',
+                ),
+            ];
+        }
         if ($institutionType !== 'social_security') {
             return [
                 'variable_symbol' => $this->nullableTextValue(

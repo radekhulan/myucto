@@ -4,17 +4,26 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   capability: vi.fn(),
   duties: vi.fn(),
+  registerPeriod: vi.fn(),
   prepare: vi.fn(),
+  enqueueIsds: vi.fn(),
+  gatewayStart: vi.fn(),
   runs: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
+}))
+
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: { gatewayStartPayroll: m.gatewayStart },
 }))
 
 vi.mock('@/api/payrollHealthNotifications', () => ({
   payrollHealthNotificationApi: {
     capability: m.capability,
     duties: m.duties,
+    registerPeriodObligations: m.registerPeriod,
     preparePaymentOverview: m.prepare,
+    enqueuePaymentOverviewIsds: m.enqueueIsds,
   },
 }))
 
@@ -82,10 +91,44 @@ const CHANNEL_111 = {
   kind: 'own_portal',
   data_box_id: 'i48ae3q',
   portal_url: null,
+  isds_attachment_format: 'none',
+  isds_attachment_rules: [],
   accepts_shared_data_message: false,
   automated_dispatch_documented: false,
-  undocumented_reason_code: 'zp_shared_data_message_acceptance_unconfirmed',
-  note: 'Přijetí jednotné datové věty se nepodařilo doložit.',
+  undocumented_reason_code: 'zp_transport_envelope_undocumented',
+  note: 'Formát přílohy PPZ pro ISDS není doložený.',
+}
+
+const CHANNEL_205 = {
+  insurer_code: '205',
+  insurer_name: 'ČPZP',
+  kind: 'shared_portal',
+  data_box_id: 'mk5ab8i',
+  portal_url: 'https://portal.cpzp.cz',
+  isds_attachment_format: 'xml',
+  isds_attachment_rules: [{ from: '2026-01-01', to: null, format: 'xml' }],
+  accepts_shared_data_message: true,
+  automated_dispatch_documented: false,
+  undocumented_reason_code: 'zp_portal_gateway_description_on_request',
+  note: 'XML lze podat E-přepážkou nebo datovou schránkou.',
+}
+
+const CHANNEL_209 = {
+  insurer_code: '209',
+  insurer_name: 'ZP Škoda',
+  kind: 'shared_portal',
+  data_box_id: '5kpadkp',
+  portal_url: 'https://portal.zpskoda.cz',
+  isds_attachment_format: 'text_pdf',
+  isds_attachment_rules: [{
+    from: '2026-01-01',
+    to: null,
+    format: 'text_pdf',
+  }],
+  accepts_shared_data_message: false,
+  automated_dispatch_documented: false,
+  undocumented_reason_code: 'zp_transport_envelope_undocumented',
+  note: 'Datová schránka přijímá vytěžitelné PDF.',
 }
 
 const RULE = {
@@ -105,6 +148,7 @@ const RULE = {
 function dutyItem(overrides: Record<string, unknown> = {}) {
   return {
     id: 'payroll_health_notification:9:employment_start:2026-06-03',
+    obligation_id: null,
     employment_id: 9,
     employee_id: 4,
     full_name: 'Syntetická osoba',
@@ -161,10 +205,15 @@ function setup() {
     schema_reference: 'payroll-health-submission-capability.v1',
     shared_data_message_since: '2026-01-01',
     documents: {},
-    channels: { 111: CHANNEL_111 },
+    channels: { 111: CHANNEL_111, 205: CHANNEL_205, 209: CHANNEL_209 },
     automated_dispatch: {
       supported: false,
       reason_code: 'zp_transport_envelope_undocumented',
+    },
+    isds_dispatch: {
+      supported: true,
+      requires_user_confirmation: true,
+      automatic_inbox: false,
     },
     change_codes: {
       total: 25,
@@ -181,6 +230,15 @@ function setup() {
     verification_reference: 'private/Mzdy/21-ZP-PODANI-RESERSE.md',
   })
   m.duties.mockResolvedValue(dutyPage())
+  m.registerPeriod.mockResolvedValue({
+    items: [{
+      duty_id: 'employment_start:9:2026-06-03',
+      obligation_id: 71,
+      created: true,
+    }],
+    total: 1,
+    created: 1,
+  })
   m.runs.mockResolvedValue([{
     id: 3,
     period_start: '2026-06-01',
@@ -188,6 +246,15 @@ function setup() {
     revision_no: 1,
     revision_status: 'approved',
   }])
+  m.gatewayStart.mockResolvedValue({
+    session_id: 1,
+    app_token: 'token',
+    redirect_url: 'https://www.datovka.gov.cz/as/login',
+    login_guidance: 'Přihlaste se metodou, kterou nabízí ISDS.',
+    login_policy_documented: true,
+    expires_at: '2026-08-25 15:00:00',
+    resumed: false,
+  })
 }
 
 describe('PayrollHealthNotificationPanel', () => {
@@ -444,6 +511,264 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(result.text()).toContain('payroll.health_notifications.prepare.valid')
     // Platnost NEZNAMENÁ, že se odešle — přiznání zůstává i u zelené věty.
     expect(result.text()).toContain('Odeslání pojišťovně 111 není doložené.')
+  })
+
+  it('HOZ pouze výslovně synchronizuje do inboxu a netvrdí sestavení ani odeslání', async () => {
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+
+    expect(m.registerPeriod).not.toHaveBeenCalled()
+    m.duties.mockResolvedValue(dutyPage({
+      items: [dutyItem({ obligation_id: 71 })],
+    }))
+    const syncButton = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.health_notifications.hoz_sync.action'),
+    )
+    expect(syncButton).toBeDefined()
+    await syncButton!.trigger('click')
+    await flushPromises()
+
+    expect(m.registerPeriod).toHaveBeenCalledTimes(1)
+    expect(m.registerPeriod).toHaveBeenCalledWith(localPayrollPeriod())
+    const result = wrapper.get('[data-test="health-hoz-sync-result"]')
+    expect(result.text()).toContain('payroll.health_notifications.hoz_sync.done')
+    const row = wrapper.get('[data-test="health-notification-row"]')
+    expect(row.text()).toContain(
+      'payroll.health_notifications.state.obligation_registered',
+    )
+    expect(wrapper.get('[data-test="health-hoz-sync"]').text())
+      .not.toContain('payroll.health_notifications.prepare.isds_ready')
+  })
+
+  it('po obnovení stránky načte evidovaný stav HOZ ze serveru', async () => {
+    m.duties.mockResolvedValue(dutyPage({
+      items: [dutyItem({ obligation_id: 71 })],
+    }))
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+
+    expect(m.registerPeriod).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="health-notification-row"]').text()).toContain(
+      'payroll.health_notifications.state.obligation_registered',
+    )
+  })
+
+  it('platnou větu připraví do ISDS, ale netvrdí, že byla odeslána', async () => {
+    m.prepare.mockResolvedValue({
+      submission_id: 57,
+      obligation_id: 7,
+      part_id: 8,
+      artifact_id: 11,
+      status: 'ready',
+      row_version: 4,
+      insurer_code: '205',
+      period: '2026-06',
+      agenda_code: 'PPZ_2026',
+      artifact_sha256: 'd'.repeat(64),
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-30',
+        due_on: '2026-07-20',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 25 odst. 3 zákona č. 592/1992 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: true,
+      dispatch: {
+        supported: false,
+        reason_code: 'zp_portal_gateway_description_on_request',
+        reason: 'Automatické portálové API není doložené.',
+        channel: CHANNEL_205,
+      },
+    })
+  m.enqueueIsds.mockResolvedValue({
+      outbox_id: 91,
+      created: true,
+      recipient: { box_id: 'mk5ab8i', name: 'ČPZP (205)' },
+      subject: 'Přehled pojistného 2026-06 — zdravotní pojišťovna 205',
+      attachment: {
+        filename: 'mzdove-podani-57-11.xml',
+        mime: 'application/xml',
+        sha256: 'd'.repeat(64),
+        bytes: 512,
+        format: 'xml',
+      },
+      transport: {
+        automatic: false,
+        channel: 'manual_upload',
+        reason: 'isds_gateway_unavailable',
+      },
+      outbox_url: '/admin/databox?tab=outbox',
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-revision', 12)
+    pick(wrapper, 'health-prepare-insurer', '205')
+    await flushPromises()
+
+    const prepareButton = wrapper.findAll('button')
+      .find(button => button.text()
+        .includes('payroll.health_notifications.prepare.action'))
+    await prepareButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="health-prepare-result"]').text())
+      .toContain('payroll.submissions.overview.status.ready')
+
+    const isdsButton = wrapper.get('[data-test="health-prepare-isds"]')
+    expect(isdsButton.attributes('disabled')).toBeUndefined()
+    await isdsButton.trigger('click')
+    await flushPromises()
+
+    expect(m.enqueueIsds).toHaveBeenCalledWith(57, '205')
+    const result = wrapper.get('[data-test="health-prepare-isds-result"]')
+    expect(result.text()).toContain('payroll.health_notifications.prepare.isds_ready')
+    expect(result.text()).toContain('mk5ab8i')
+    expect(result.text()).not.toContain('odesláno')
+    expect(wrapper.get('[data-test="health-prepare-isds"]').attributes('disabled'))
+      .toBeDefined()
+    await wrapper.get('[data-test="health-prepare-isds"]').trigger('click')
+    expect(m.enqueueIsds).toHaveBeenCalledTimes(1)
+  })
+
+  it('po zařazení PPZ zahájí dostupnou bránu a přesměruje až po potvrzení', async () => {
+    const assign = vi.fn()
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { assign },
+    })
+    m.prepare.mockResolvedValue({
+      submission_id: 57,
+      obligation_id: 7,
+      artifact_id: 11,
+      status: 'ready',
+      row_version: 4,
+      insurer_code: '205',
+      period: '2026-06',
+      agenda_code: 'PPZ_2026',
+      artifact_sha256: 'd'.repeat(64),
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-30',
+        due_on: '2026-07-20',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 25 odst. 3 zákona č. 592/1992 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: true,
+      dispatch: {
+        supported: false,
+        reason_code: 'zp_portal_gateway_description_on_request',
+        reason: 'Automatické portálové API není doložené.',
+        channel: CHANNEL_205,
+      },
+    })
+    m.enqueueIsds.mockResolvedValue({
+      outbox_id: 91,
+      created: true,
+      recipient: { box_id: 'mk5ab8i', name: 'ČPZP (205)' },
+      subject: 'PPPZ 2026-06 — zdravotní pojišťovna 205',
+      attachment: {
+        filename: 'mzdove-podani-57-11.xml',
+        mime: 'application/xml',
+        sha256: 'd'.repeat(64),
+        bytes: 512,
+        format: 'xml',
+      },
+      transport: { automatic: true, channel: 'gateway', reason: null },
+      outbox_url: '/admin/databox?tab=outbox',
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-revision', 12)
+    pick(wrapper, 'health-prepare-insurer', '205')
+    await flushPromises()
+    const prepareButton = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.health_notifications.prepare.action'),
+    )
+    await prepareButton!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="health-prepare-isds"]').trigger('click')
+    await flushPromises()
+
+    expect(m.gatewayStart).toHaveBeenCalledWith(91)
+    expect(assign).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="health-prepare-isds-gateway"]').text())
+      .toContain('Přihlaste se metodou, kterou nabízí ISDS.')
+    await wrapper.get('[data-test="health-prepare-isds-continue"]').trigger('click')
+    expect(assign).toHaveBeenCalledWith('https://www.datovka.gov.cz/as/login')
+  })
+
+  it('pro ZP Škoda stáhne a připraví do ISDS vytěžitelné PDF', async () => {
+    m.prepare.mockResolvedValue({
+      submission_id: 58,
+      obligation_id: 7,
+      part_id: 8,
+      artifact_id: 12,
+      pdf_artifact_id: 13,
+      status: 'ready',
+      row_version: 5,
+      insurer_code: '209',
+      period: '2026-06',
+      agenda_code: 'PPZ_2026',
+      artifact_sha256: 'e'.repeat(64),
+      pdf_artifact_sha256: 'f'.repeat(64),
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-30',
+        due_on: '2026-07-20',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 25 odst. 3 zákona č. 592/1992 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: true,
+      dispatch: {
+        supported: false,
+        reason_code: 'zp_transport_envelope_undocumented',
+        reason: 'Automatické portálové API není doložené.',
+        channel: CHANNEL_209,
+      },
+    })
+    m.submissionDetail.mockResolvedValue({
+      submission: { id: 58 },
+      parts: [],
+      artifacts: [
+        { id: 12, mime_type: 'application/xml', byte_size: 512 },
+        { id: 13, mime_type: 'application/pdf', byte_size: 1024 },
+      ],
+      issues: [],
+      receipts: [],
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-revision', 12)
+    pick(wrapper, 'health-prepare-insurer', '209')
+    await flushPromises()
+
+    const prepareButton = wrapper.findAll('button')
+      .find(button => button.text()
+        .includes('payroll.health_notifications.prepare.action'))
+    await prepareButton!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="health-prepare-download"]').trigger('click')
+    await flushPromises()
+
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(
+      58,
+      expect.objectContaining({ id: 13, mime_type: 'application/pdf' }),
+    )
+    expect(wrapper.get('[data-test="health-prepare-isds"]')
+      .attributes('disabled')).toBeUndefined()
   })
 
   it('konkrétní důvod selhání sestavení se propíše na obrazovku', async () => {

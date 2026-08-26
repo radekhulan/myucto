@@ -582,6 +582,7 @@ final class PayrollRetentionCatalog
                 'payroll_enforcement_dependants',
                 'payroll_enforcement_month_results',
                 'payroll_enforcement_person_month_evidence',
+                'payroll_insolvency_payment_instructions',
                 'payroll_deduction_agreements',
             ],
             'employment_tables' => [],

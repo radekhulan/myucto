@@ -71,72 +71,31 @@ final class PayrollObligationService
         ?int $fictionDeliveryDays = null,
         string $environment = 'production',
     ): array {
-        $this->assertPositive($supplierId, 'Firma povinnosti');
-        $this->assertActor($responsibleUserId);
-        $this->assertActor($createdBy);
-        $this->assertCode($agendaCode, 48, 'Agenda');
-        $this->assertCode($sourceEventType, 64, 'Zdrojová událost');
-        $this->assertReference($subjectReference);
-        $this->assertReference($sourceEventReference);
-        $this->assertHash($sourceEventHash, 'Otisk zdrojové události');
-        $this->assertHash($rulesetHash, 'Otisk rulesetu');
-        $this->assertCode($rulesetId, 96, 'Ruleset');
-        $this->assertDateInterval($periodStart, $periodEnd, 'Období');
-        $this->assertDateInterval(
+        $registration = $this->registrationRows(
+            $supplierId,
+            $agendaCode,
+            $subjectType,
+            $subjectReference,
+            $periodStart,
+            $periodEnd,
+            $obligationKind,
+            $channel,
+            $sourceEventType,
+            $sourceEventReference,
+            $sourceEventHash,
             $earliestSubmissionOn,
             $dueOn,
-            'Lhůta',
-        );
-        $this->assertAllowed($subjectType, self::SUBJECT_TYPES, 'Subjekt');
-        $this->assertAllowed(
-            $obligationKind,
-            self::OBLIGATION_KINDS,
-            'Druh povinnosti',
-        );
-        $this->assertAllowed($channel, self::CHANNELS, 'Kanál');
-        $this->assertAllowed(
             $calendarBasis,
-            self::CALENDAR_BASES,
-            'Kalendář lhůty',
-        );
-        $this->assertAllowed(
+            $rulesetId,
+            $rulesetHash,
+            $idempotencyKey,
+            $responsibleUserId,
+            $createdBy,
+            $fictionDeliveryDays,
             $environment,
-            self::ENVIRONMENTS,
-            'Prostředí podání',
         );
-        if ($fictionDeliveryDays !== null
-            && ($fictionDeliveryDays < 0 || $fictionDeliveryDays > 366)
-        ) {
-            throw new \InvalidArgumentException(
-                'Počet dnů fikce doručení není platný.',
-            );
-        }
-        $idempotencyHash = $this->idempotencyHash($idempotencyKey);
-        $requestFingerprint = hash(
-            'sha256',
-            CanonicalJson::encode([
-                'schema_reference' => 'payroll-obligation-register.v1',
-                'supplier_id' => $supplierId,
-                'environment' => $environment,
-                'agenda_code' => $agendaCode,
-                'subject_type' => $subjectType,
-                'subject_reference' => $subjectReference,
-                'period_start' => $periodStart,
-                'period_end' => $periodEnd,
-                'obligation_kind' => $obligationKind,
-                'channel' => $channel,
-                'source_event_type' => $sourceEventType,
-                'source_event_reference' => $sourceEventReference,
-                'source_event_hash' => $sourceEventHash,
-                'earliest_submission_on' => $earliestSubmissionOn,
-                'due_on' => $dueOn,
-                'calendar_basis' => $calendarBasis,
-                'ruleset_id' => $rulesetId,
-                'ruleset_hash' => $rulesetHash,
-                'responsible_user_id' => $responsibleUserId,
-                'fiction_delivery_days' => $fictionDeliveryDays,
-            ]),
-        );
+        $idempotencyHash = $registration['obligation']['idempotency_key_hash'];
+        $requestFingerprint = $registration['obligation']['request_fingerprint'];
 
         return $this->repository->transaction(function () use (
             $supplierId,
@@ -230,6 +189,138 @@ final class PayrollObligationService
                 'created' => true,
             ];
         });
+    }
+
+    /**
+     * @return array{
+     *   obligation:array<string,int|string|null>,
+     *   deadline:array<string,int|string|null>
+     * }
+     */
+    public function registrationRows(
+        int $supplierId,
+        string $agendaCode,
+        string $subjectType,
+        string $subjectReference,
+        string $periodStart,
+        string $periodEnd,
+        string $obligationKind,
+        string $channel,
+        string $sourceEventType,
+        string $sourceEventReference,
+        string $sourceEventHash,
+        string $earliestSubmissionOn,
+        string $dueOn,
+        string $calendarBasis,
+        string $rulesetId,
+        string $rulesetHash,
+        string $idempotencyKey,
+        ?int $responsibleUserId = null,
+        ?int $createdBy = null,
+        ?int $fictionDeliveryDays = null,
+        string $environment = 'production',
+    ): array {
+        $this->assertPositive($supplierId, 'Firma povinnosti');
+        $this->assertActor($responsibleUserId);
+        $this->assertActor($createdBy);
+        $this->assertCode($agendaCode, 48, 'Agenda');
+        $this->assertCode($sourceEventType, 64, 'Zdrojová událost');
+        $this->assertReference($subjectReference);
+        $this->assertReference($sourceEventReference);
+        $this->assertHash($sourceEventHash, 'Otisk zdrojové události');
+        $this->assertHash($rulesetHash, 'Otisk rulesetu');
+        $this->assertCode($rulesetId, 96, 'Ruleset');
+        $this->assertDateInterval($periodStart, $periodEnd, 'Období');
+        $this->assertDateInterval(
+            $earliestSubmissionOn,
+            $dueOn,
+            'Lhůta',
+        );
+        $this->assertAllowed($subjectType, self::SUBJECT_TYPES, 'Subjekt');
+        $this->assertAllowed(
+            $obligationKind,
+            self::OBLIGATION_KINDS,
+            'Druh povinnosti',
+        );
+        $this->assertAllowed($channel, self::CHANNELS, 'Kanál');
+        $this->assertAllowed(
+            $calendarBasis,
+            self::CALENDAR_BASES,
+            'Kalendář lhůty',
+        );
+        $this->assertAllowed(
+            $environment,
+            self::ENVIRONMENTS,
+            'Prostředí podání',
+        );
+        if ($fictionDeliveryDays !== null
+            && ($fictionDeliveryDays < 0 || $fictionDeliveryDays > 366)
+        ) {
+            throw new \InvalidArgumentException(
+                'Počet dnů fikce doručení není platný.',
+            );
+        }
+        $idempotencyHash = $this->idempotencyHash($idempotencyKey);
+        $requestFingerprint = hash(
+            'sha256',
+            CanonicalJson::encode([
+                'schema_reference' => 'payroll-obligation-register.v1',
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'agenda_code' => $agendaCode,
+                'subject_type' => $subjectType,
+                'subject_reference' => $subjectReference,
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'obligation_kind' => $obligationKind,
+                'channel' => $channel,
+                'source_event_type' => $sourceEventType,
+                'source_event_reference' => $sourceEventReference,
+                'source_event_hash' => $sourceEventHash,
+                'earliest_submission_on' => $earliestSubmissionOn,
+                'due_on' => $dueOn,
+                'calendar_basis' => $calendarBasis,
+                'ruleset_id' => $rulesetId,
+                'ruleset_hash' => $rulesetHash,
+                'responsible_user_id' => $responsibleUserId,
+                'fiction_delivery_days' => $fictionDeliveryDays,
+            ]),
+        );
+
+        return [
+            'obligation' => [
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'agenda_code' => $agendaCode,
+                'subject_type' => $subjectType,
+                'subject_reference' => $subjectReference,
+                'period_start' => $periodStart,
+                'period_end' => $periodEnd,
+                'obligation_kind' => $obligationKind,
+                'preferred_channel' => $channel,
+                'responsible_user_id' => $responsibleUserId,
+                'source_event_type' => $sourceEventType,
+                'source_event_reference' => $sourceEventReference,
+                'source_event_hash' => $sourceEventHash,
+                'request_fingerprint' => $requestFingerprint,
+                'idempotency_key_hash' => $idempotencyHash,
+                'created_by' => $createdBy,
+            ],
+            'deadline' => [
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'obligation_id' => 0,
+                'deadline_kind' => 'regular',
+                'earliest_submission_on' => $earliestSubmissionOn,
+                'due_on' => $dueOn,
+                'calendar_basis' => $calendarBasis,
+                'fiction_delivery_days' => $fictionDeliveryDays,
+                'ruleset_id' => $rulesetId,
+                'ruleset_hash' => $rulesetHash,
+                'trigger_event_hash' => $sourceEventHash,
+                'created_by' => $createdBy,
+            ],
+        ];
     }
 
     public function registerAgendaMatrix(

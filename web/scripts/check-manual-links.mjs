@@ -1,20 +1,14 @@
-// Brána proti odkazu na neexistující kapitolu manuálu.
+// Brána proti odkazům na neexistující kapitoly a kotvy manuálu.
 //
-// Kapitoly se přečíslovávají nástrojem `tools/renumberManual.php`. Ten přepíše
-// křížové odkazy v `manual/*.md`, v INDEX.md a v obou README — o odkazech ve
-// frontendu ale neví. Kontextová nápověda (mapa `MANUAL_CHAPTERS` v AppLayout.vue)
-// a přímé odkazy `/manual?ch=…` se tím tiše rozejdou: uživateli se otevře
-// rozcestník místo kapitoly, nic se nezaloguje, build projde.
-//
-// Stalo se to dvakrát (naposledy při vyčlenění kapitoly o mzdách), proto tenhle
-// guard. Hledá staticky dva tvary a ověřuje, že soubor kapitoly existuje:
-//   - `'NN_Nazev'` / `'NNa_Nazev'` v .ts a .vue (mapa kontextové nápovědy)
-//   - `?ch=NN_Nazev` v odkazech
+// Ověřuje kontextovou nápovědu ve frontendu, přímé odkazy `/manual?ch=…`
+// a lokální Markdown odkazy mezi kapitolami. Kotvy počítá stejnými pravidly
+// jako `tools/generateManualHtml.php`.
 //
 // Spouští se z `npm run build`; samostatně `npm run check:manual`.
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join, dirname, relative } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -39,11 +33,11 @@ if (!existsSync(manualDir)) {
 // souboru propadl i skutečně rozbitý odkaz.
 const NOT_A_CHAPTER = new Set(['9_ending'])
 
-const chapters = new Set(
-  readdirSync(manualDir)
-    .filter(f => /^\d+[a-z]?_.+\.md$/.test(f))
-    .map(f => f.replace(/\.md$/, '')),
-)
+const manualFiles = readdirSync(manualDir)
+  .filter(file => file.endsWith('.md'))
+  .map(file => join(manualDir, file))
+const chapterFiles = manualFiles.filter(file => /^\d+[a-z]?_.+\.md$/.test(basename(file)))
+const chapters = new Set(chapterFiles.map(file => basename(file, '.md')))
 
 if (chapters.size === 0) {
   console.error('check-manual-links: v manual/ nejsou žádné kapitoly — sken je rozbitý, ne kód.')
@@ -64,39 +58,213 @@ function walk(dir) {
   return out
 }
 
+function markdownSlug(value) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function markdownAnchors(file) {
+  const anchors = new Set()
+  let inFence = false
+
+  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence
+      continue
+    }
+    if (inFence) continue
+
+    const heading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
+    if (!heading) continue
+    const anchor = markdownSlug(heading[1])
+    if (anchor !== '') anchors.add(anchor)
+  }
+
+  return anchors
+}
+
+function decoded(value) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+const anchorsByFile = new Map(manualFiles.map(file => [resolve(file), markdownAnchors(file)]))
 const REFERENCE = /(?:'|")(\d+[a-z]?_[A-Za-z0-9_]+)(?:'|")|ch=(\d+[a-z]?_[A-Za-z0-9_]+)/g
+const MARKDOWN_LINK = /(!?)\[[^\]]*\]\(([^)]+)\)/g
+const MANUAL_QUERY = /\/manual\?ch=(\d+[a-z]?_[A-Za-z0-9_]+)(?:#([A-Za-z0-9_-]+))?/g
+const MANUAL_FILE = /manual[\\/](\d+[a-z]?_[A-Za-z0-9_]+\.md)(?:#([A-Za-z0-9_-]+))?/g
 const broken = []
-let seen = 0
+let frontendSeen = 0
+let markdownSeen = 0
+let repositorySeen = 0
+
+function trackedTextFiles() {
+  try {
+    const listed = execFileSync('git', ['ls-files', '-z'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return listed
+      .split('\0')
+      .filter(Boolean)
+      .filter(file => /\.(?:md|php|ts|vue|js|mjs|json|ya?ml|ps1|cmd|txt)$/i.test(file))
+      .map(file => join(repoRoot, file))
+      .filter(file => existsSync(file))
+  } catch {
+    return [...walk(srcDir), ...manualFiles]
+  }
+}
+
+function validateChapterAnchor(kind, file, line, chapter, anchor = '') {
+  repositorySeen++
+  if (!chapters.has(chapter)) {
+    broken.push({ kind, file: relative(repoRoot, file), line, ref: chapter })
+    return
+  }
+  if (anchor === '') return
+  const target = resolve(manualDir, `${chapter}.md`)
+  const anchors = anchorsByFile.get(target) ?? markdownAnchors(target)
+  if (!anchors.has(decoded(anchor).toLowerCase())) {
+    broken.push({
+      kind: `${kind} — kotva`,
+      file: relative(repoRoot, file),
+      line,
+      ref: `${chapter}#${anchor}`,
+    })
+  }
+}
 
 for (const file of walk(srcDir)) {
   const src = readFileSync(file, 'utf8')
   const lines = src.split(/\r?\n/)
   lines.forEach((line, i) => {
-    for (const m of line.matchAll(REFERENCE)) {
-      const ref = m[1] ?? m[2]
+    for (const match of line.matchAll(REFERENCE)) {
+      const ref = match[1] ?? match[2]
       if (NOT_A_CHAPTER.has(ref)) continue
-      seen++
+      frontendSeen++
       if (!chapters.has(ref)) {
-        broken.push({ file: relative(repoRoot, file), line: i + 1, ref })
+        broken.push({ kind: 'kapitola frontendu', file: relative(repoRoot, file), line: i + 1, ref })
       }
     }
   })
 }
 
-if (seen === 0) {
-  console.error('check-manual-links: nenašel jsem ani jeden odkaz na kapitolu — sken je rozbitý, ne kód.')
+for (const file of trackedTextFiles()) {
+  const lines = readFileSync(file, 'utf8').split(/\r?\n/)
+  lines.forEach((line, index) => {
+    for (const match of line.matchAll(MANUAL_QUERY)) {
+      validateChapterAnchor(
+        'URL manuálu v repozitáři',
+        file,
+        index + 1,
+        match[1],
+        match[2] ?? '',
+      )
+    }
+    for (const match of line.matchAll(MANUAL_FILE)) {
+      const chapter = basename(match[1], '.md')
+      validateChapterAnchor(
+        'soubor manuálu v repozitáři',
+        file,
+        index + 1,
+        chapter,
+        match[2] ?? '',
+      )
+    }
+  })
+}
+
+for (const file of manualFiles) {
+  const lines = readFileSync(file, 'utf8').split(/\r?\n/)
+  let inFence = false
+
+  lines.forEach((line, index) => {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence
+      return
+    }
+    if (inFence) return
+
+    for (const match of line.matchAll(MARKDOWN_LINK)) {
+      if (match[1] === '!') continue
+
+      const rawHref = match[2].trim().replace(/\s+["'][^"']*["']\s*$/, '')
+      if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(rawHref) || rawHref.startsWith('/')) continue
+
+      const hashAt = rawHref.indexOf('#')
+      const rawTarget = hashAt >= 0 ? rawHref.slice(0, hashAt) : rawHref
+      const rawAnchor = hashAt >= 0 ? rawHref.slice(hashAt + 1) : ''
+      const targetName = decoded(rawTarget)
+      const anchor = decoded(rawAnchor).toLowerCase()
+
+      if (targetName === '' && anchor === '') continue
+      if (targetName !== '' && extname(targetName).toLowerCase() !== '.md') {
+        if (/^\d+[a-z]?_/i.test(targetName)) {
+          markdownSeen++
+          broken.push({ kind: 'Markdown cíl bez .md', file: relative(repoRoot, file), line: index + 1, ref: rawHref })
+        }
+        continue
+      }
+
+      const target = resolve(dirname(file), targetName || basename(file))
+      markdownSeen++
+      if (!existsSync(target)) {
+        broken.push({ kind: 'Markdown cíl', file: relative(repoRoot, file), line: index + 1, ref: rawHref })
+        continue
+      }
+
+      if (anchor !== '') {
+        const anchors = anchorsByFile.get(target) ?? markdownAnchors(target)
+        if (!anchors.has(anchor)) {
+          broken.push({ kind: 'Markdown kotva', file: relative(repoRoot, file), line: index + 1, ref: rawHref })
+        }
+      }
+    }
+  })
+}
+
+if (frontendSeen === 0) {
+  console.error('check-manual-links: nenašel jsem ani jeden frontendový odkaz na kapitolu — sken je rozbitý, ne kód.')
+  process.exit(1)
+}
+
+if (markdownSeen === 0) {
+  console.error('check-manual-links: nenašel jsem ani jeden Markdown odkaz — sken je rozbitý, ne kód.')
+  process.exit(1)
+}
+
+if (repositorySeen === 0) {
+  console.error('check-manual-links: nenašel jsem žádný přímý odkaz v repozitáři — sken je rozbitý, ne kód.')
   process.exit(1)
 }
 
 if (broken.length > 0) {
-  console.error(`check-manual-links: ${broken.length} odkazů míří na neexistující kapitolu manuálu.\n`)
-  for (const b of broken) {
-    const stem = b.ref.replace(/^\d+[a-z]?_/, '')
-    const suggestion = [...chapters].find(c => c.replace(/^\d+[a-z]?_/, '') === stem)
-    console.error(`  ${b.file}:${b.line}  ${b.ref}${suggestion ? `  →  ${suggestion}` : '  (kapitola se stejným názvem neexistuje)'}`)
+  console.error(`check-manual-links: ${broken.length} neplatných odkazů manuálu.\n`)
+  for (const item of broken) {
+    let suggestion = ''
+    if (item.kind === 'kapitola frontendu') {
+      const stem = item.ref.replace(/^\d+[a-z]?_/, '')
+      const replacement = [...chapters].find(chapter => chapter.replace(/^\d+[a-z]?_/, '') === stem)
+      if (replacement) suggestion = `  →  ${replacement}`
+    }
+    console.error(`  ${item.file}:${item.line}  [${item.kind}] ${item.ref}${suggestion}`)
   }
-  console.error('\nKapitoly se přečíslovávají přes tools/renumberManual.php — ten frontend nepřepisuje, oprav ho ručně.')
+  console.error('\nKapitoly se přečíslovávají přes tools/renumberManual.php; frontendové odkazy je nutné opravit ručně.')
   process.exit(1)
 }
 
-console.log(`check-manual-links: OK — ${seen} odkazů, všechny na existující kapitolu.`)
+console.log(
+  `check-manual-links: OK — ${frontendSeen} frontendových, ${markdownSeen} Markdown `
+  + `a ${repositorySeen} přímých odkazů v repozitáři.`,
+)

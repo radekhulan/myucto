@@ -34,37 +34,37 @@ final class PayrollPostingReconciliationService
      */
     private const CATEGORIES = [
         'gross_wages' => [
-            'prefixes' => ['521', '522', '523'],
+            'prefixes' => PayrollPostingAccountPolicy::GROSS_WAGE_PREFIXES,
             'dimension' => null,
             'nature' => 'expense',
         ],
         'employer_contributions' => [
-            'prefixes' => ['524'],
+            'prefixes' => PayrollPostingAccountPolicy::EMPLOYER_CONTRIBUTION_PREFIXES,
             'dimension' => null,
             'nature' => 'expense',
         ],
         'social_health_insurance' => [
-            'prefixes' => ['336'],
+            'prefixes' => PayrollPostingAccountPolicy::SOCIAL_HEALTH_INSURANCE_PREFIXES,
             'dimension' => null,
             'nature' => 'liability',
         ],
         'income_tax' => [
-            'prefixes' => ['342'],
+            'prefixes' => PayrollPostingAccountPolicy::INCOME_TAX_PREFIXES,
             'dimension' => null,
             'nature' => 'liability',
         ],
         'other_deductions' => [
-            'prefixes' => ['379'],
+            'prefixes' => PayrollPostingAccountPolicy::OTHER_DEDUCTION_PREFIXES,
             'dimension' => 'deduction',
             'nature' => 'liability',
         ],
         'enforcement' => [
-            'prefixes' => ['379'],
+            'prefixes' => PayrollPostingAccountPolicy::OTHER_DEDUCTION_PREFIXES,
             'dimension' => 'enforcement',
             'nature' => 'liability',
         ],
         'net_wage' => [
-            'prefixes' => ['331', '366'],
+            'prefixes' => PayrollPostingAccountPolicy::NET_WAGE_PREFIXES,
             'dimension' => null,
             'nature' => 'liability',
         ],
@@ -189,6 +189,7 @@ final class PayrollPostingReconciliationService
         $journalByCategory = $journalState === 'posted'
             ? $this->journalByCategory(
                 $this->repository->journalTotals($supplierId, $revisionIds),
+                $this->repository->grossDebitAccounts($supplierId, $revisionIds),
             )
             : [];
 
@@ -359,15 +360,24 @@ final class PayrollPostingReconciliationService
     }
 
     /**
-     * @param list<array{prefix:string,dimension:string,side:string,amount_minor:int}> $rows
+     * @param list<array{account_code:string,prefix:string,dimension:string,side:string,amount_minor:int}> $rows
+     * @param list<string> $grossDebitAccounts
      * @return array<string,int>
      */
-    private function journalByCategory(array $rows): array
+    private function journalByCategory(array $rows, array $grossDebitAccounts): array
     {
         $result = array_fill_keys(array_keys(self::CATEGORIES), 0);
+        $grossDebitAccountSet = array_fill_keys($grossDebitAccounts, true);
+        foreach ($grossDebitAccounts as $account) {
+            PayrollPostingAccountPolicy::assertGrossCostAccountIsUnambiguous($account);
+        }
         foreach ($rows as $row) {
             foreach (self::CATEGORIES as $key => $definition) {
-                if (!in_array($row['prefix'], $definition['prefixes'], true)) {
+                $matchesGrossAllocation = $key === 'gross_wages'
+                    && isset($grossDebitAccountSet[$row['account_code']]);
+                if (!$matchesGrossAllocation
+                    && !in_array($row['prefix'], $definition['prefixes'], true)
+                ) {
                     continue;
                 }
                 if ($definition['dimension'] !== null

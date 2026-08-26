@@ -17,6 +17,8 @@ final class JmhzScenario1DocumentResolver
         JmhzPreparationSnapshotBuilder::PREVIOUS_V4_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V5_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V6_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V7_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V8_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
     ];
 
@@ -78,15 +80,32 @@ final class JmhzScenario1DocumentResolver
         }
 
         $blockers = [];
-        if (($preparation->readiness['status'] ?? null) !== 'source_ready') {
+        $scope = $this->object($preparation->payload['scope'] ?? null);
+        $sourceRevision = $this->object(
+            $preparation->payload['source_revision'] ?? null,
+        );
+        $ordinaryEvidence = $this->ordinaryEvidenceByEmployment($preparation);
+        $people = $this->officePeople(
+            $this->rows($preparation->payload['people'] ?? null),
+            $officeId,
+        );
+        $readinessIssues = $this->rows(
+            $preparation->payload['readiness_issues'] ?? null,
+        );
+        $scopedReadinessIssues = $this->readinessIssuesForOffice(
+            $readinessIssues,
+            $people,
+            $officeId,
+        );
+        if (($preparation->readiness['status'] ?? null) !== 'source_ready'
+            && ($scopedReadinessIssues !== [] || $readinessIssues === [])
+        ) {
             $blockers[] = $this->blocker(
                 'jmhz_preparation_not_ready',
                 'preparation',
                 $preparation->id,
             );
-            foreach ($this->rows(
-                $preparation->payload['readiness_issues'] ?? null,
-            ) as $issue) {
+            foreach ($scopedReadinessIssues as $issue) {
                 $attributeIds = $issue['attribute_ids'] ?? [];
                 $blockers[] = $this->blocker(
                     is_string($issue['code'] ?? null)
@@ -105,19 +124,10 @@ final class JmhzScenario1DocumentResolver
             }
         }
 
-        $scope = $this->object($preparation->payload['scope'] ?? null);
-        $sourceRevision = $this->object(
-            $preparation->payload['source_revision'] ?? null,
-        );
-        $ordinaryEvidence = $this->ordinaryEvidenceByEmployment($preparation);
         $registration = $this->registration(
             $preparation,
             $officeId,
             $blockers,
-        );
-        $people = $this->officePeople(
-            $this->rows($preparation->payload['people'] ?? null),
-            $officeId,
         );
         if (count($people) > 1500) {
             $blockers[] = $this->blocker(
@@ -128,11 +138,24 @@ final class JmhzScenario1DocumentResolver
             );
         }
         $month = (int) substr($preparation->periodStart, 5, 2);
-        if ($month <= 3 || $month === 12) {
+        if ($month === 12) {
             $blockers[] = $this->blocker(
-                'jmhz_scenario1_annual_fields_unsupported',
+                'jmhz_december_collective_agreement_source_missing',
                 'revision',
                 $preparation->sourceRevisionId,
+                ['10214'],
+            );
+            $blockers[] = $this->blocker(
+                'jmhz_december_ownership_form_source_missing',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10220'],
+            );
+            $blockers[] = $this->blocker(
+                'jmhz_december_ozp_annual_source_missing',
+                'revision',
+                $preparation->sourceRevisionId,
+                ['10038', '10039', '10452'],
             );
         }
 
@@ -167,7 +190,14 @@ final class JmhzScenario1DocumentResolver
                 );
             }
             $personSummary = $this->object($person['person_summary'] ?? null);
+            $annual = $this->annualSummary(
+                $person['annual_evidence'] ?? null,
+                $preparation->periodStart,
+                $employeeId,
+                $blockers,
+            );
             $statutory = $this->object($personSummary['statutory'] ?? null);
+            $payslip = $this->object($personSummary['payslip_document'] ?? null);
             if (($statutory['status'] ?? null) !== 'calculated') {
                 $blockers[] = $this->blocker(
                     'jmhz_scenario1_statutory_result_not_calculated',
@@ -349,9 +379,7 @@ final class JmhzScenario1DocumentResolver
                         $blockers,
                     ),
                     'employer_social_czk' => $this->wholeCzk(
-                        is_int($social['employer_contribution_minor_units'] ?? null)
-                            ? $social['employer_contribution_minor_units']
-                            : null,
+                        $this->employerSocialMinor($social, $payslip),
                         '10481',
                         'person',
                         $employeeId,
@@ -363,6 +391,7 @@ final class JmhzScenario1DocumentResolver
                     'taxpayer_declaration_signed' => $declarationSigned,
                     'advance_tax_czk' => $advanceTaxCzk,
                     'tax_credits_czk' => $taxCreditsCzk,
+                    'annual' => $annual,
                 ],
                 'employments' => $normalizedEmployments,
             ];
@@ -393,9 +422,9 @@ final class JmhzScenario1DocumentResolver
             // proti součtu součástí) by srovnávala dvě různé populace —
             // a to je přesně ten rozdíl, který se ve zmrazeném XML nedohledá.
             || ($officeId !== null
-                && ($pvpoj->office['office_id'] ?? null) !== $officeId)
+                && $pvpoj->office['office_id'] !== $officeId)
             || ($registration['id'] !== null
-                && ($pvpoj->office['office_id'] ?? null) !== $registration['id'])
+                && $pvpoj->office['office_id'] !== $registration['id'])
         ) {
             $blockers[] = $this->blocker(
                 'jmhz_scenario1_pvpoj_source_mismatch',
@@ -414,12 +443,13 @@ final class JmhzScenario1DocumentResolver
         /*
          * Variabilní symbol REGISTRACE, za kterou se podává.
          *
-         * Přednost má přehled o výši pojistného: jeho variabilní symbol je
-         * jediný, který se ověřuje proti závazku ČSSZ (viz
-         * `JmhzPvpojPreviewBuilder::assertLiability()`), takže hlášení a platba
-         * jdou prokazatelně pod tutéž registraci. Neresolvovaná registrace
-         * variabilní symbol NEDOSTANE — bez ní není za co podat a doplnit ho
-         * z libovolného přehledu by znamenalo vykázat lidi pod cizím číslem.
+         * Přednost má přehled o výši pojistného, protože jeho variabilní symbol
+         * patří přesně registraci vybrané ze zmrazené účtárny. Platební účet
+         * ČSSZ není zákonným vstupem JMHZ a může se nastavit až při přípravě
+         * plateb; sestavení hlášení proto na platebním závazku nezávisí.
+         * Neresolvovaná registrace variabilní symbol NEDOSTANE — bez ní není za
+         * co podat a doplnit ho z libovolného přehledu by znamenalo vykázat
+         * lidi pod cizím číslem.
          */
         $variableSymbol = $registration['variable_symbol'];
         if ($pvpojPayload !== null && $registration['id'] !== null) {
@@ -642,6 +672,55 @@ final class JmhzScenario1DocumentResolver
     }
 
     /**
+     * @param list<array<string,mixed>> $issues
+     * @param list<array<string,mixed>> $people
+     * @return list<array<string,mixed>>
+     */
+    private function readinessIssuesForOffice(
+        array $issues,
+        array $people,
+        ?int $officeId,
+    ): array {
+        if ($officeId === null) {
+            return $issues;
+        }
+        $employeeIds = [];
+        $employmentIds = [];
+        foreach ($people as $person) {
+            $employeeId = $person['employee_id'] ?? null;
+            if (is_int($employeeId)) {
+                $employeeIds[$employeeId] = true;
+            }
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                $employmentId = $employment['employment_id'] ?? null;
+                if (is_int($employmentId)) {
+                    $employmentIds[$employmentId] = true;
+                }
+            }
+        }
+
+        return array_values(array_filter(
+            $issues,
+            static function (array $issue) use (
+                $employeeIds,
+                $employmentIds,
+                $officeId,
+            ): bool {
+                $entityType = $issue['entity_type'] ?? null;
+                $entityId = $issue['entity_id'] ?? null;
+                return match ($entityType) {
+                    'employment' => is_int($entityId)
+                        && isset($employmentIds[$entityId]),
+                    'person', 'employee' => is_int($entityId)
+                        && isset($employeeIds[$entityId]),
+                    'office' => $entityId === $officeId,
+                    default => true,
+                };
+            },
+        ));
+    }
+
+    /**
      * @param list<JmhzScenario1Blocker> $blockers
      * @param list<string> $attributeIds
      * @return array<string,mixed>
@@ -695,7 +774,7 @@ final class JmhzScenario1DocumentResolver
         if ($relationship === []) {
             return null;
         }
-        $base = $this->wholeCzk(
+        $cappedBase = $this->wholeCzk(
             is_int($relationship['capped_assessment_base_minor_units'] ?? null)
                 ? $relationship['capped_assessment_base_minor_units']
                 : null,
@@ -704,13 +783,24 @@ final class JmhzScenario1DocumentResolver
             $employmentId,
             $blockers,
         );
-        $letter = match ($relationship['employer_rate_category'] ?? null) {
+        $participation = $this->object($relationship['participation'] ?? null);
+        $reportedIncome = $this->wholeCzk(
+            is_int($participation['participation_income_minor_units'] ?? null)
+                ? $participation['participation_income_minor_units']
+                : null,
+            '10476',
+            'employment',
+            $employmentId,
+            $blockers,
+        );
+        $base = $cappedBase === 0 ? null : $cappedBase;
+        $letter = $base === null ? null : match ($relationship['employer_rate_category'] ?? null) {
             'ordinary' => 'a',
             'rescue_and_company_fire_service' => 'b',
             'risk_employment' => 'c',
             default => null,
         };
-        if ($letter === null) {
+        if ($base !== null && $letter === null) {
             $blockers[] = $this->blocker(
                 'jmhz_employer_rate_category_unverified',
                 'employment',
@@ -721,6 +811,7 @@ final class JmhzScenario1DocumentResolver
 
         return [
             'assessment_base_czk' => $base,
+            'reported_income_czk' => $reportedIncome,
             'paragraph5_letter' => $letter,
         ];
     }
@@ -1183,6 +1274,183 @@ final class JmhzScenario1DocumentResolver
         }
     }
 
+    /**
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function annualSummary(
+        mixed $value,
+        string $periodStart,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?array {
+        $month = (int) substr($periodStart, 5, 2);
+        if ($month < 1 || $month > 3) {
+            return null;
+        }
+        $evidence = $this->object($value);
+        $expectedTaxYear = (int) substr($periodStart, 0, 4) - 1;
+        if (($evidence['tax_year'] ?? null) !== $expectedTaxYear) {
+            $blockers[] = $this->blocker(
+                'jmhz_annual_evidence_source_missing',
+                'person',
+                $employeeId,
+                $month <= 2 ? ['10319', '10320'] : ['10320'],
+            );
+            return null;
+        }
+
+        $request = $this->object($evidence['request'] ?? null);
+        $requestEvidence = $this->object($evidence['request_evidence'] ?? null);
+        $requestLocked = $request !== []
+            && ($requestEvidence['present'] ?? null) === true
+            && ($requestEvidence['proof'] ?? null)
+                === 'verified_request_row_under_unique_key_lock'
+            && ($requestEvidence['tax_year'] ?? null) === $expectedTaxYear;
+        $requestStatus = is_string($request['status'] ?? null)
+            ? $request['status']
+            : null;
+        $requested = null;
+        if ($month <= 2) {
+            $requested = $requestLocked ? match ($requestStatus) {
+                'requested' => true,
+                'not_requested' => false,
+                default => null,
+            } : null;
+            if ($requested === null) {
+                $blockers[] = $this->blocker(
+                    $request === []
+                        ? 'jmhz_annual_request_source_missing'
+                        : 'jmhz_annual_request_status_unresolved',
+                    'person',
+                    $employeeId,
+                    ['10319'],
+                );
+            }
+        }
+
+        $settlement = $this->object($evidence['settlement'] ?? null);
+        $settlementEvidence = $this->object($evidence['settlement_evidence'] ?? null);
+        $frozenNotPerformed = $settlement === []
+            && ($settlementEvidence['performed'] ?? null) === false
+            && ($settlementEvidence['proof'] ?? null)
+                === 'outcome_absent_under_unique_key_lock'
+            && ($settlementEvidence['tax_year'] ?? null) === $expectedTaxYear;
+        if ($settlement === [] && !$frozenNotPerformed) {
+            $blockers[] = $this->blocker(
+                'jmhz_annual_settlement_performance_source_missing',
+                'person',
+                $employeeId,
+                ['10320'],
+            );
+            return null;
+        }
+        if ($settlement !== [] && $requestStatus === 'not_requested') {
+            $blockers[] = $this->blocker(
+                'jmhz_annual_settlement_source_inconsistent',
+                'person',
+                $employeeId,
+                ['10319', '10320'],
+            );
+            return null;
+        }
+
+        $performed = $settlement !== []
+            && ($settlement['performed'] ?? null) === true
+            && is_string($settlement['settled_on'] ?? null)
+            && substr($settlement['settled_on'], 0, 7) === substr($periodStart, 0, 7);
+        $result = null;
+        if ($performed) {
+            if (!$requestLocked
+                || $requestStatus !== 'requested'
+                || ($request['annual_claims'] ?? null) !== 'none'
+            ) {
+                $blockers[] = $this->blocker(
+                    'jmhz_annual_settlement_request_source_inconsistent',
+                    'person',
+                    $employeeId,
+                    ['10319', '10320', '10420'],
+                );
+            }
+            $childRows = $this->rows($settlement['child_rows'] ?? null);
+            $childClaimed = $childRows !== [];
+            if ($childClaimed) {
+                $blockers[] = $this->blocker(
+                    'jmhz_annual_settlement_child_details_unsupported',
+                    'person',
+                    $employeeId,
+                    ['10441', '10442', '10443', '10444', '10445', '10446',
+                        '10447', '10448', '10449', '10450', '10451', '10454', '10455'],
+                );
+            }
+            $taxDifference = is_int($settlement['tax_difference_minor_units'] ?? null)
+                ? $settlement['tax_difference_minor_units']
+                : null;
+            $bonusDifference = is_int($settlement['bonus_difference_minor_units'] ?? null)
+                ? $settlement['bonus_difference_minor_units']
+                : null;
+            $result = [
+                'settlement_difference_czk' => $this->wholeCzk(
+                    $taxDifference === null || $bonusDifference === null
+                        ? null
+                        : max(0, $taxDifference) + $bonusDifference,
+                    '10321', 'person', $employeeId, $blockers,
+                ),
+                'tax_difference_czk' => $this->wholeCzk(
+                    $taxDifference === null ? null : max(0, $taxDifference),
+                    '10322', 'person', $employeeId, $blockers,
+                ),
+                'bonus_difference_czk' => $this->wholeCzk(
+                    $bonusDifference,
+                    '10323', 'person', $employeeId, $blockers,
+                ),
+                'spouse_credit_claimed' => $requestLocked
+                    && $requestStatus === 'requested'
+                    && ($request['annual_claims'] ?? null) === 'none'
+                        ? false
+                        : null,
+                'child_credit_claimed' => $childClaimed,
+            ];
+            if (in_array(null, $result, true)) {
+                $blockers[] = $this->blocker(
+                    'jmhz_annual_settlement_result_incomplete',
+                    'person',
+                    $employeeId,
+                    ['10321', '10322', '10323', '10420', '10454'],
+                );
+            }
+        }
+
+        $certificate = $this->object($evidence['withholding_certificate'] ?? null);
+        $withholding = null;
+        if ($month === 1 && $certificate !== []) {
+            $withholding = [
+                'paid_income_czk' => $this->wholeCzk(
+                    is_int($certificate['paid_income_minor_units'] ?? null)
+                        ? $certificate['paid_income_minor_units']
+                        : null,
+                    '10311', 'person', $employeeId, $blockers,
+                ),
+                'withholding_tax_czk' => $this->wholeCzk(
+                    is_int($certificate['withholding_tax_minor_units'] ?? null)
+                        ? $certificate['withholding_tax_minor_units']
+                        : null,
+                    '10312', 'person', $employeeId, $blockers,
+                ),
+            ];
+            if (in_array(null, $withholding, true)) {
+                $withholding = null;
+            }
+        }
+
+        return [
+            'requested' => $requested,
+            'performed' => $performed,
+            'result' => $result,
+            'withholding' => $withholding,
+        ];
+    }
+
     /** @param list<JmhzScenario1Blocker> $blockers */
     private function wholeCzk(
         ?int $minor,
@@ -1226,6 +1494,21 @@ final class JmhzScenario1DocumentResolver
     private function object(mixed $value): array
     {
         return is_array($value) && !array_is_list($value) ? $value : [];
+    }
+
+    /**
+     * @param array<string,mixed> $social
+     * @param array<string,mixed> $payslip
+     */
+    private function employerSocialMinor(array $social, array $payslip): ?int
+    {
+        $legacy = $social['employer_contribution_minor_units'] ?? null;
+        if (is_int($legacy)) {
+            return $legacy;
+        }
+        $allocated = $payslip['employer_social_minor_units'] ?? null;
+
+        return is_int($allocated) ? $allocated : null;
     }
 
     /** @return array<int|string,int> */

@@ -12,12 +12,11 @@ namespace MyInvoice\Service\Payroll\Submission;
  * je oprava cesta k duplicitnímu podání — a to se u agend s okamžitým
  * protokolem (EPO) pozná až u správce daně, kdy se s tím nedá nic dělat.
  *
- * **Rozšíření je vždy jmenovité a s důvodem.** Agenda, u které protokol chodí
- * asynchronně a lhůta na opravu je přitom pevná, by při přísné sadě neměla jak
- * podat opravu včas: čekala by na rozhodnutí, které přijde až po lhůtě. Taková
- * agenda se proto vypisuje do {@see PENDING_PREDECESSOR_AGENDAS} spolu s větou,
- * proč to u ní neplatí. Bez důvodu se sem nesmí přidat nic — {@see reason()}
- * ho vrací a test nad katalogem ho vyžaduje.
+ * **Odchylka je vždy jmenovitá.** JMHZ má užší pravidlo než obecná platforma:
+ * O/S navazuje jen na řádné podání s konečným výsledkem accepted nebo
+ * partially_accepted. Zamítnuté řádné podání nemá platný kořen a následuje po
+ * něm nové R s novým GUID. Výjimka pro pending predecessor se zapisuje zvlášť
+ * a musí mít důvod.
  *
  * PROČ KATALOG V KÓDU, A NE SLOUPEC V DATABÁZI: jestli protokol chodí hned nebo
  * za dva dny, je vlastnost agendy dané zákonem a provozem úřadu, ne nastavení
@@ -28,9 +27,14 @@ namespace MyInvoice\Service\Payroll\Submission;
  */
 final class PayrollAgendaCorrectionPolicy
 {
+    /** @var array<string,list<string>> */
+    private const AGENDA_STATUSES = [
+        'JMHZ25' => ['accepted', 'partially_accepted'],
+    ];
+
     /**
-     * Rozhodnutá podání. Sem patří i `rejected` — zamítnuté hlášení je
-     * rozhodnuté a další podání je na něj správná reakce.
+     * Obecná sada rozhodnutých podání. Konkrétní agenda ji může zpřísnit přes
+     * {@see AGENDA_STATUSES}.
      *
      * @var list<string>
      */
@@ -63,12 +67,7 @@ final class PayrollAgendaCorrectionPolicy
      *
      * @var array<string,string>
      */
-    private const PENDING_PREDECESSOR_AGENDAS = [
-        'JMHZ25' => 'Protokol ČSSZ chodí asynchronně (i s odstupem dnů), kdežto'
-            . ' lhůta pro storno měsíčního hlášení končí pevně 20. dne'
-            . ' následujícího měsíce. Čekat na rozhodnutí by znamenalo, že chybu,'
-            . ' o které zaměstnavatel ví hned, nelze opravit včas.',
-    ];
+    private const PENDING_PREDECESSOR_AGENDAS = [];
 
     /**
      * Stavy původního podání, na které se u téhle agendy smí navázat oprava.
@@ -77,6 +76,9 @@ final class PayrollAgendaCorrectionPolicy
      */
     public static function correctableStatuses(string $agendaCode): array
     {
+        if (isset(self::AGENDA_STATUSES[$agendaCode])) {
+            return self::AGENDA_STATUSES[$agendaCode];
+        }
         if (!self::allowsPendingPredecessor($agendaCode)) {
             return self::DECIDED_STATUSES;
         }
@@ -104,5 +106,23 @@ final class PayrollAgendaCorrectionPolicy
     public static function declarations(): array
     {
         return self::PENDING_PREDECESSOR_AGENDAS;
+    }
+
+    public static function supersedesPredecessorOnAcceptance(
+        string $agendaCode,
+        string $submissionKind,
+    ): bool {
+        return $agendaCode !== 'JMHZ25' || $submissionKind !== 'correction';
+    }
+
+    /**
+     * Přijaté celé storno JMHZ ruší výsledek za celé období, tedy i všechny
+     * dříve přijaté dílčí opravy navázané na stejný řádný kořen.
+     */
+    public static function supersedesCorrectionChainOnAcceptance(
+        string $agendaCode,
+        string $submissionKind,
+    ): bool {
+        return $agendaCode === 'JMHZ25' && $submissionKind === 'cancellation';
     }
 }

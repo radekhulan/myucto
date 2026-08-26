@@ -60,6 +60,8 @@ export interface SubmissionRecipient {
   supplier_id: number | null
   code: string
   name: string
+  business_id: string | null
+  address: string | null
   kind: RecipientKind
   isds_box_id: string | null
   source_url: string | null
@@ -390,6 +392,41 @@ export interface GatewayStart {
   resumed: boolean
 }
 
+export interface InboxPollResult {
+  fetched: number
+  stored: number
+  skipped: number
+  failed: number
+  unclassified: number
+  error?: string | null
+}
+
+export interface MobileKeyInboxStart {
+  flow_token: string
+  state: number
+  description: string
+  expires_at: string
+}
+
+export interface MobileKeyInboxStatus {
+  state: number
+  description: string
+  result: InboxPollResult | null
+}
+
+export interface IsdsMobileCredentialProfile {
+  id?: number
+  saved: boolean
+  username: string | null
+  environment: 'production' | 'test'
+}
+
+export interface SmsInboxStart {
+  flow_token: string
+  description: string
+  expires_at: string
+}
+
 export interface IsdsGatewayCapability {
   environment: 'production' | 'test'
   available: boolean
@@ -431,6 +468,21 @@ export const dataBoxApi = {
 
   deleteCredential: (environment: string) =>
     api.delete(`/settings/databox/${environment}`).then(r => r.data),
+
+  mobileKeyProfile: (environment: 'production' | 'test') =>
+    api.get<IsdsMobileCredentialProfile>('/settings/databox/mobile-key', {
+      params: { environment },
+    }).then(r => r.data),
+
+  saveMobileKeyProfile: (environment: 'production' | 'test', username: string, communicationCode: string) =>
+    api.post<IsdsMobileCredentialProfile>('/settings/databox/mobile-key', {
+      environment,
+      username,
+      communication_code: communicationCode,
+    }).then(r => r.data),
+
+  deleteMobileKeyProfile: (environment: 'production' | 'test') =>
+    api.delete<{ deleted: boolean }>(`/settings/databox/mobile-key/${environment}`).then(r => r.data),
 
   recipients: (kind?: RecipientKind) =>
     api.get<{ items: SubmissionRecipient[] }>('/submissions/recipients', {
@@ -533,10 +585,48 @@ export const dataBoxApi = {
     }).then(r => r.data),
 
   pollInbox: (environment: string) =>
-    api.post<{ fetched: number; stored: number; skipped: number; failed: number; unclassified: number }>(
+    api.post<InboxPollResult>(
       '/submissions/inbox/poll',
       { environment, acknowledged: true },
     ).then(r => r.data),
+
+  pollInboxWithPassword: (environment: string, username: string, password: string) =>
+    api.post<InboxPollResult>('/submissions/inbox/poll/password', {
+      environment,
+      username,
+      password,
+      acknowledged: true,
+    }).then(r => r.data),
+
+  startMobileKeyInbox: (environment: string, username: string, communicationCode: string, useSaved = false) =>
+    api.post<MobileKeyInboxStart>('/submissions/inbox/mobile-key/start', {
+      environment,
+      username,
+      communication_code: communicationCode,
+      use_saved_credentials: useSaved,
+      acknowledged: true,
+    }).then(r => r.data),
+
+  mobileKeyInboxStatus: (flowToken: string, environment: string) =>
+    api.post<MobileKeyInboxStatus>('/submissions/inbox/mobile-key/status', {
+      flow_token: flowToken,
+      environment,
+    }).then(r => r.data),
+
+  startSmsInbox: (environment: string, username: string, password: string) =>
+    api.post<SmsInboxStart>('/submissions/inbox/sms/start', {
+      environment,
+      username,
+      password,
+      acknowledged: true,
+    }).then(r => r.data),
+
+  completeSmsInbox: (flowToken: string, smsCode: string, environment: string) =>
+    api.post<InboxPollResult>('/submissions/inbox/sms/complete', {
+      flow_token: flowToken,
+      sms_code: smsCode,
+      environment,
+    }).then(r => r.data),
 
   classify: (id: number, classification: InboxClassification, outboxId: number | null) =>
     api.post(`/submissions/inbox/${id}/classify`, { classification, outbox_id: outboxId }).then(r => r.data),

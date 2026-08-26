@@ -11,14 +11,16 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
  * generování GUID ani čtení hodin uvnitř serializéru by rozbilo bajtovou
  * stabilitu i replay.
  *
- * GUIDy se drží RFC 9562 UUIDv7 (kap. 9 pravidel podání): na první pozici
- * třetí skupiny musí být číslice 7. Na vstupu se přijímají obě velikosti
- * písmen, ven jde vždy verzálky, protože DIS je tak vrací.
+ * Nově vytvářené GUIDy se drží RFC 9562 UUIDv7. Opravné podání ale přebírá
+ * existující GUID přijatý ČSSZ, který podle XSD může být libovolný kanonický
+ * UUID. Na vstupu se přijímají obě velikosti písmen, ven jde vždy verzálka.
  */
 final readonly class JmhzSubmissionEnvelope
 {
     private const GUID_PATTERN =
         '/^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/D';
+    private const REFERENCE_GUID_PATTERN =
+        '/^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/D';
 
     /** @param array<int,string> $formGuids klíčem je employment_id */
     private function __construct(
@@ -41,7 +43,56 @@ final readonly class JmhzSubmissionEnvelope
         int $packageOrdinal = 1,
         int $packageCount = 1,
     ): self {
-        $normalizedSubmission = self::guid($submissionGuid, 'podání');
+        return self::build(
+            $submissionGuid,
+            $formGuids,
+            $filledAt,
+            $productName,
+            $productVersion,
+            $packageOrdinal,
+            $packageCount,
+            false,
+        );
+    }
+
+    /** @param array<array-key,string> $formGuids */
+    public static function createForExistingSubmission(
+        string $submissionGuid,
+        array $formGuids,
+        string $filledAt,
+        string $productName,
+        string $productVersion,
+        int $packageOrdinal = 1,
+        int $packageCount = 1,
+    ): self {
+        return self::build(
+            $submissionGuid,
+            $formGuids,
+            $filledAt,
+            $productName,
+            $productVersion,
+            $packageOrdinal,
+            $packageCount,
+            true,
+        );
+    }
+
+    /** @param array<array-key,string> $formGuids */
+    private static function build(
+        string $submissionGuid,
+        array $formGuids,
+        string $filledAt,
+        string $productName,
+        string $productVersion,
+        int $packageOrdinal,
+        int $packageCount,
+        bool $existingReferences,
+    ): self {
+        $normalizedSubmission = self::guid(
+            $submissionGuid,
+            'podání',
+            $existingReferences,
+        );
         $normalizedForms = [];
         foreach ($formGuids as $employmentId => $guid) {
             if (!is_int($employmentId) || $employmentId <= 0) {
@@ -50,7 +101,11 @@ final readonly class JmhzSubmissionEnvelope
                     'GUID formuláře musí být svázaný s konkrétním pracovním vztahem.',
                 );
             }
-            $normalizedForms[$employmentId] = self::guid($guid, 'formuláře');
+            $normalizedForms[$employmentId] = self::guid(
+                $guid,
+                'formuláře',
+                $existingReferences,
+            );
         }
         // Sdílený GUID by z podání a jeho součásti udělal tentýž záznam;
         // duplicitu přijatého podání přitom nelze nikdy zopakovat.
@@ -104,13 +159,22 @@ final readonly class JmhzSubmissionEnvelope
         return $guid;
     }
 
-    private static function guid(string $value, string $subject): string
+    private static function guid(
+        string $value,
+        string $subject,
+        bool $existingReference,
+    ): string
     {
         $normalized = strtoupper($value);
-        if (preg_match(self::GUID_PATTERN, $normalized) !== 1) {
+        $pattern = $existingReference
+            ? self::REFERENCE_GUID_PATTERN
+            : self::GUID_PATTERN;
+        if (preg_match($pattern, $normalized) !== 1) {
             throw new JmhzXmlException(
                 'jmhz_envelope_guid_invalid',
-                "GUID {$subject} musí být UUIDv7 podle RFC 9562.",
+                $existingReference
+                    ? "GUID {$subject} musí být kanonický UUID."
+                    : "GUID {$subject} musí být UUIDv7 podle RFC 9562.",
             );
         }
 

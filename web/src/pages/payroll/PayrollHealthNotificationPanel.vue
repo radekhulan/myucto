@@ -3,10 +3,10 @@
  * MZ-23 — podání zdravotním pojišťovnám.
  *
  * Obrazovka stojí na jednom rozhodnutí: **co modul neumí, se říká nahoře, ne
- * až v chybové hlášce.** Ani jedna ze sedmi pojišťoven nemá veřejně popsanou
- * transportní obálku a u tří druhů oznamovací povinnosti neplyne ze schématu
- * kód změny. Kdyby se to uživatel dozvěděl až po kliknutí na „Sestavit", už
- * by měl rozpracovanou práci, kterou nemá jak dokončit.
+ * až v chybové hlášce.** Portálové API bez doložené obálky nevolá; u
+ * pojišťoven s doloženým formátem přílohy ale umí předat PPZ do obecné ISDS
+ * fronty, kde odeslání vždy potvrzuje uživatel. HOZ zůstává ruční: aplikace
+ * eviduje povinnost a lhůtu, nevydává nedoložený artefakt.
  *
  * Filtry i stránkování jsou serverové. Půl na půl (filtr u sebe, stránka na
  * serveru) by znamenalo, že počet nahoře popisuje jiný seznam než tabulka.
@@ -14,6 +14,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
+import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import {
   payrollHealthNotificationApi,
   type HealthCapability,
@@ -21,6 +22,7 @@ import {
   type HealthDutyKind,
   type HealthDutySummary,
   type HealthPreparedOverview,
+  type HealthIsdsEnqueueResult,
   type HealthUnresolvedEmployment,
 } from '@/api/payrollHealthNotifications'
 import {
@@ -35,11 +37,12 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { formatDate } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
 import { appIsoDate } from '@/utils/date'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const DUTY_KINDS: HealthDutyKind[] = [
   'employment_start',
@@ -66,6 +69,7 @@ const COLUMNS: ColumnDef[] = [
 const PAGE_SIZE = 50
 
 const { t } = useI18n()
+const { submissionStatusLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const tbl = useTablePrefs('payroll-health-notifications', COLUMNS)
 
@@ -102,6 +106,13 @@ const prepared = ref<HealthPreparedOverview | null>(null)
 const prepareError = ref('')
 const downloading = ref(false)
 const downloadError = ref('')
+const isdsBusy = ref(false)
+const isdsError = ref('')
+const isdsResult = ref<HealthIsdsEnqueueResult | null>(null)
+const isdsGateway = ref<GatewayStart | null>(null)
+const syncingObligations = ref(false)
+const obligationSyncError = ref('')
+const synchronizedObligationCount = ref<number | null>(null)
 
 const currentPage = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
 
@@ -155,6 +166,24 @@ const canPrepare = computed(() =>
   && prepareInsurer.value !== null
   && !preparing.value,
 )
+
+const preparedChannel = computed(() => {
+  const insurerCode = prepared.value?.insurer_code
+  return insurerCode
+    ? capability.value?.channels[insurerCode] ?? null
+    : null
+})
+
+const canQueueIsds = computed(() => Boolean(
+  canWrite.value
+  && prepared.value?.schema_validated
+  && prepared.value.status === 'ready'
+  && preparedChannel.value
+  && preparedChannel.value.isds_attachment_format !== 'none'
+  && preparedChannel.value.data_box_id
+  && !isdsBusy.value
+  && isdsResult.value === null
+))
 
 function deadlineClass(item: HealthDutyItem): string {
   if (!item.reported_by_employer) return 'bg-neutral-100 text-neutral-600'
@@ -231,6 +260,9 @@ async function prepare() {
   if (prepareRevisionId.value === null || prepareInsurer.value === null) return
   prepareError.value = ''
   downloadError.value = ''
+  isdsError.value = ''
+  isdsResult.value = null
+  isdsGateway.value = null
   prepared.value = null
   preparing.value = true
   try {
@@ -251,8 +283,67 @@ async function prepare() {
   }
 }
 
+async function enqueueIsds() {
+  const result = prepared.value
+  if (!result || !canQueueIsds.value) return
+  isdsError.value = ''
+  isdsResult.value = null
+  isdsGateway.value = null
+  isdsBusy.value = true
+  try {
+    const queued = await payrollHealthNotificationApi.enqueuePaymentOverviewIsds(
+      result.submission_id,
+      result.insurer_code,
+    )
+    isdsResult.value = queued
+    if (queued.transport.automatic) {
+      try {
+        isdsGateway.value = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
+      } catch (exception) {
+        isdsError.value = apiErrorMessage(
+          exception,
+          t('payroll.health_notifications.prepare.gateway_failed'),
+        )
+      }
+    }
+  } catch (exception) {
+    isdsError.value = apiErrorMessage(
+      exception,
+      t('payroll.health_notifications.prepare.isds_failed'),
+    )
+  } finally {
+    isdsBusy.value = false
+  }
+}
+
+async function synchronizeObligations() {
+  if (!canWrite.value || syncingObligations.value) return
+  syncingObligations.value = true
+  obligationSyncError.value = ''
+  synchronizedObligationCount.value = null
+  try {
+    const result = await payrollHealthNotificationApi
+      .registerPeriodObligations(period.value)
+    synchronizedObligationCount.value = result.total
+    await load()
+  } catch (exception) {
+    obligationSyncError.value = apiErrorMessage(
+      exception,
+      t('payroll.health_notifications.hoz_sync.failed'),
+    )
+  } finally {
+    syncingObligations.value = false
+  }
+}
+
+function continueIsdsGateway() {
+  if (isdsGateway.value) {
+    window.location.assign(isdsGateway.value.redirect_url)
+  }
+}
+
 /**
- * Stažení XML se NESCHOVÁVÁ za `schema_validated`. Artefakt vzniká i tehdy,
+ * Stažení podkladu se NESCHOVÁVÁ za `schema_validated`. XML i PDF vznikají,
  * když podání zůstalo v `draft` s blokující výhradou — a právě tam ho účetní
  * potřebuje vidět, aby poznala, co se vyrobilo a proč to neprošlo.
  */
@@ -262,19 +353,24 @@ async function downloadArtifact() {
   // na null uprostřed běhu.
   const result = prepared.value
   if (!result) return
+  const format = preparedChannel.value?.isds_attachment_format ?? 'xml'
+  const artifactId = format === 'text_pdf'
+    ? result.pdf_artifact_id
+    : result.artifact_id
+  const mimeType = format === 'text_pdf'
+    ? 'application/pdf'
+    : 'application/xml'
   downloadError.value = ''
   downloading.value = true
   try {
     const detail: PayrollSubmissionDetail = await payrollApi.submissionDetail(
       result.submission_id,
     )
-    // Opakované sestavení téhož přehledu se jen přehraje a `artifact_id`
-    // nevrátí — tam se sáhne po uloženém XML podání, které je totéž.
-    const artifact = (result.artifact_id !== undefined
-      ? detail.artifacts.find(candidate => candidate.id === result.artifact_id)
+    const artifact = (artifactId !== undefined
+      ? detail.artifacts.find(candidate => candidate.id === artifactId)
       : undefined)
       ?? detail.artifacts.find(
-        candidate => candidate.mime_type === 'application/xml',
+        candidate => candidate.mime_type === mimeType,
       )
     if (!artifact) {
       downloadError.value = t('payroll.health_notifications.prepare.artifact_missing')
@@ -309,6 +405,19 @@ const actions = computed<ActionItem[]>(() => [
     run: () => void prepare(),
   },
   {
+    key: 'sync-obligations',
+    label: t('payroll.health_notifications.hoz_sync.action'),
+    icon: 'cycle',
+    tier: 'secondary',
+    variant: 'neutral',
+    disabled: !canWrite.value || loading.value || syncingObligations.value,
+    disabledReason: canWrite.value
+      ? t('payroll.health_notifications.hoz_sync.wait_for_load')
+      : t('payroll.health_notifications.read_only'),
+    loading: syncingObligations.value,
+    run: () => void synchronizeObligations(),
+  },
+  {
     key: 'reload',
     label: t('common.refresh'),
     icon: 'cycle',
@@ -337,7 +446,12 @@ watch([period, filterInsurer, filterKind, filterReported, filterUndocumented], (
 })
 watch(period, () => {
   prepared.value = null
+  isdsResult.value = null
+  isdsError.value = ''
+  isdsGateway.value = null
   prepareRevisionId.value = null
+  synchronizedObligationCount.value = null
+  obligationSyncError.value = ''
   void loadRuns()
 })
 
@@ -363,6 +477,35 @@ onMounted(() => {
         <ActionBar :actions="actions" />
       </div>
     </div>
+
+    <section
+      class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      data-test="health-hoz-sync"
+    >
+      <h3 class="text-sm font-semibold text-neutral-900">
+        {{ t('payroll.health_notifications.hoz_sync.title') }}
+      </h3>
+      <p class="mt-1 max-w-3xl text-sm text-neutral-600">
+        {{ t('payroll.health_notifications.hoz_sync.description') }}
+      </p>
+      <p
+        v-if="synchronizedObligationCount !== null"
+        class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+        data-test="health-hoz-sync-result"
+      >
+        {{ t('payroll.health_notifications.hoz_sync.done', {
+          count: synchronizedObligationCount,
+        }) }}
+      </p>
+      <p
+        v-if="obligationSyncError"
+        class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+        role="alert"
+        data-test="health-hoz-sync-error"
+      >
+        {{ obligationSyncError }}
+      </p>
+    </section>
 
     <!--
       Omezení stojí NAD seznamem, ne pod ním: uživatel musí vědět, že modul
@@ -412,8 +555,20 @@ onMounted(() => {
           <span class="font-semibold text-neutral-900">
             {{ channel.insurer_code }} — {{ channel.insurer_name }}
           </span>
+          <span
+            class="mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold"
+            :class="channel.isds_attachment_format !== 'none'
+              ? 'bg-success-100 text-success-800'
+              : 'bg-neutral-100 text-neutral-700'"
+          >
+            {{ t(channel.isds_attachment_format === 'xml'
+              ? 'payroll.health_notifications.isds_xml_supported'
+              : channel.isds_attachment_format === 'text_pdf'
+                ? 'payroll.health_notifications.isds_pdf_supported'
+                : 'payroll.health_notifications.alternative_route') }}
+          </span>
           <span class="mt-1 block text-neutral-500">
-            {{ t(`payroll.health_notifications.reason.${channel.undocumented_reason_code}`) }}
+            {{ channel.note }}
           </span>
           <span
             v-if="channel.data_box_id"
@@ -660,7 +815,11 @@ onMounted(() => {
                   >{{ t('payroll.health_notifications.source_unverified') }}</span>
                 </td>
                 <td v-if="tbl.isVisible('state')" class="px-4 py-3 text-xs text-neutral-600">
-                  {{ t('payroll.health_notifications.state.manual_only') }}
+                  {{ t(!item.reported_by_employer
+                    ? 'payroll.health_notifications.state.insured_reports'
+                    : item.obligation_id !== null
+                      ? 'payroll.health_notifications.state.obligation_registered'
+                      : 'payroll.health_notifications.state.needs_sync') }}
                 </td>
               </tr>
             </tbody>
@@ -710,6 +869,18 @@ onMounted(() => {
                     ? item.change_code.code
                     : (item.change_code.reason
                       ?? t('payroll.health_notifications.code_undocumented')) }}
+                </dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-neutral-500">
+                  {{ t('payroll.health_notifications.table.state') }}
+                </dt>
+                <dd class="mt-0.5 text-neutral-800">
+                  {{ t(!item.reported_by_employer
+                    ? 'payroll.health_notifications.state.insured_reports'
+                    : item.obligation_id !== null
+                      ? 'payroll.health_notifications.state.obligation_registered'
+                      : 'payroll.health_notifications.state.needs_sync') }}
                 </dd>
               </div>
             </dl>
@@ -803,7 +974,7 @@ onMounted(() => {
         <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
           <div>
             <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.status') }}</dt>
-            <dd class="mt-0.5 font-medium text-neutral-900">{{ prepared.status }}</dd>
+            <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(prepared.status) }}</dd>
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare.period') }}</dt>
@@ -833,21 +1004,101 @@ onMounted(() => {
         >
           {{ downloadError }}
         </p>
-        <button
-          type="button"
-          class="mt-3"
-          :class="btnOutlineSm('neutral')"
-          :disabled="downloading"
-          data-test="health-prepare-download"
-          @click="downloadArtifact"
+        <p
+          v-if="isdsError"
+          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="health-prepare-isds-error"
         >
-          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.download" />
-          </svg>
-          {{ downloading
-            ? t('payroll.health_notifications.prepare.downloading')
-            : t('payroll.health_notifications.prepare.download') }}
-        </button>
+          {{ isdsError }}
+        </p>
+        <div
+          v-if="isdsResult"
+          class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+          data-test="health-prepare-isds-result"
+        >
+          <p class="font-semibold">
+            {{ isdsResult.created
+              ? t('payroll.health_notifications.prepare.isds_ready')
+              : t('payroll.health_notifications.prepare.isds_already_ready') }}
+          </p>
+          <p class="mt-1">
+            {{ t('payroll.health_notifications.prepare.isds_recipient', {
+              name: isdsResult.recipient.name,
+              id: isdsResult.recipient.box_id,
+            }) }}
+          </p>
+          <a
+            v-if="!isdsResult.transport.automatic"
+            :href="isdsResult.outbox_url"
+            class="mt-2 inline-flex font-semibold underline"
+          >
+            {{ t('payroll.health_notifications.prepare.open_outbox') }}
+          </a>
+        </div>
+        <div
+          v-if="isdsGateway"
+          class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
+          data-test="health-prepare-isds-gateway"
+        >
+          <p class="font-semibold">
+            {{ t('payroll.health_notifications.prepare.gateway_title') }}
+          </p>
+          <p class="mt-1">{{ isdsGateway.login_guidance }}</p>
+          <p class="mt-2 text-xs">
+            {{ t('payroll.health_notifications.prepare.gateway_credentials') }}
+          </p>
+          <button
+            type="button"
+            :class="[btnFilledSm('primary'), 'mt-3']"
+            data-test="health-prepare-isds-continue"
+            @click="continueIsdsGateway"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            {{ t('payroll.health_notifications.prepare.gateway_continue') }}
+          </button>
+        </div>
+        <p
+          v-if="prepared.schema_validated && !canQueueIsds && !isdsBusy && !isdsResult"
+          class="mt-3 text-xs text-neutral-600"
+          data-test="health-prepare-isds-unavailable"
+        >
+          {{ preparedChannel?.data_box_id && preparedChannel?.isds_attachment_format !== 'none'
+            ? t('payroll.health_notifications.read_only')
+            : t('payroll.health_notifications.prepare.isds_unavailable') }}
+        </p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            :class="btnOutlineSm('neutral')"
+            :disabled="downloading"
+            data-test="health-prepare-download"
+            @click="downloadArtifact"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.download" />
+            </svg>
+            {{ downloading
+              ? t('payroll.health_notifications.prepare.downloading')
+              : t('payroll.health_notifications.prepare.download') }}
+          </button>
+          <button
+            type="button"
+            :class="btnFilledSm('primary')"
+            :disabled="!canQueueIsds"
+            data-test="health-prepare-isds"
+            @click="enqueueIsds"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            {{ isdsBusy
+              ? t('payroll.health_notifications.prepare.isds_preparing')
+              : t('payroll.health_notifications.prepare.isds_action') }}
+          </button>
+        </div>
       </div>
     </section>
   </section>

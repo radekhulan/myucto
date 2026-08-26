@@ -214,6 +214,65 @@ final class AnnualTaxCertificateDocumentDataTest extends TestCase
         );
     }
 
+    public function testAdvanceCertificateRendersCommonDocumentedVariants(): void
+    {
+        $data = self::documentWithCommonVariants();
+        $artifact = (new AnnualTaxCertificatePdfRenderer())->render($data);
+
+        $text = preg_replace(
+            '/\s+/u',
+            ' ',
+            (new Parser())->parseContent(
+                $artifact->bytes,
+            )->getText(),
+        ) ?? '';
+
+        self::assertStringContainsString('Daňový rezident ČR (CZ)', $text);
+        self::assertStringContainsString('Dítě Syntetické', $text);
+        self::assertStringContainsString('1. 2. 2020', $text);
+        self::assertStringContainsString('III. stupeň', $text);
+        self::assertStringContainsString('průkaz ZTP/P', $text);
+        self::assertStringContainsString('bylo provedeno s tímto výsledkem', $text);
+        self::assertStringContainsString('Přeplatek na dani', $text);
+        self::assertStringContainsString('1 200', $text);
+        self::assertStringContainsString('1 500', $text);
+        self::assertStringContainsString('1 700', $text);
+
+        $qaOutput = getenv('MYINVOICE_ANNUAL_TAX_CERTIFICATE_QA_OUTPUT');
+        if (is_string($qaOutput) && $qaOutput !== '') {
+            $directory = dirname($qaOutput);
+            if (!is_dir($directory)) {
+                mkdir($directory, 0755, true);
+            }
+            file_put_contents($qaOutput, $artifact->bytes);
+        }
+    }
+
+    public function testAdvanceCertificateRendersDocumentedNonresidentInsurance(): void
+    {
+        $data = self::document(
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            taxResidenceStatus: 'non-resident',
+            taxResidenceCountryCode: 'SK',
+            identifierLabel: 'Datum narození',
+            identifierValue: '1. 1. 1990',
+            employeeAddress: 'Modelová 2, 811 01 Bratislava, SK',
+            nonresidentInsuranceMinorUnits: 4_130_000,
+        );
+
+        $text = preg_replace(
+            '/\s+/u',
+            ' ',
+            (new Parser())->parseContent(
+                (new AnnualTaxCertificatePdfRenderer())->render($data)->bytes,
+            )->getText(),
+        ) ?? '';
+
+        self::assertStringContainsString('Daňový nerezident ČR (SK)', $text);
+        self::assertStringContainsString('Povinné pojistné', $text);
+        self::assertStringContainsString('41 300', $text);
+    }
+
     /**
      * @return iterable<string,array{PayrollDocumentKind,string,int,int,int}>
      */
@@ -239,6 +298,12 @@ final class AnnualTaxCertificateDocumentDataTest extends TestCase
         PayrollDocumentKind $kind,
         int $accruedIncomeMinorUnits = 42_000_000,
         ?string $replacesIssuedAt = null,
+        string $taxResidenceStatus = 'czech-resident',
+        string $taxResidenceCountryCode = 'CZ',
+        string $identifierLabel = 'Rodné číslo',
+        string $identifierValue = '0001010009',
+        string $employeeAddress = 'Modelová 2, 602 00 Brno, CZ',
+        ?int $nonresidentInsuranceMinorUnits = null,
     ): AnnualTaxCertificateDocumentData {
         return new AnnualTaxCertificateDocumentData(
             sourceSnapshotSha256: str_repeat('b', 64),
@@ -250,9 +315,9 @@ final class AnnualTaxCertificateDocumentDataTest extends TestCase
             employeeFirstName: 'Syntetická',
             employeeLastName: 'Osoba',
             previousNames: ['Dřívější Syntetická'],
-            personalIdentifierLabel: 'Rodné číslo',
-            personalIdentifierValue: '0001010009',
-            employeeAddress: 'Modelová 2, 602 00 Brno, CZ',
+            personalIdentifierLabel: $identifierLabel,
+            personalIdentifierValue: $identifierValue,
+            employeeAddress: $employeeAddress,
             months: [1, 2, 3, 5],
             taxDeclarationStatus: $kind
                 === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
@@ -262,8 +327,8 @@ final class AnnualTaxCertificateDocumentDataTest extends TestCase
                 === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
                     ? [1, 2, 3, 5]
                     : [],
-            taxResidenceStatus: 'czech-resident',
-            taxResidenceCountryCode: 'CZ',
+            taxResidenceStatus: $taxResidenceStatus,
+            taxResidenceCountryCode: $taxResidenceCountryCode,
             issuedAt: '2026-08-05 09:15:00',
             replacesIssuedAt: $replacesIssuedAt === null
                 ? null
@@ -275,7 +340,7 @@ final class AnnualTaxCertificateDocumentDataTest extends TestCase
             childTaxBenefits: [],
             disabilityTaxCredits: [],
             annualSettlement: ['performed' => false, 'result' => null],
-            nonresidentInsuranceMinorUnits: null,
+            nonresidentInsuranceMinorUnits: $nonresidentInsuranceMinorUnits,
             accruedIncomeMinorUnits: $accruedIncomeMinorUnits,
             paidIncomeMinorUnits: 42_000_000,
             advanceTaxMinorUnits: $kind
@@ -286,6 +351,75 @@ final class AnnualTaxCertificateDocumentDataTest extends TestCase
                 === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
                     ? 6_300_000
                     : 0,
+            taxBonusMinorUnits: 0,
+            paymentEvidenceCutoff: '2027-01-31',
+            lastProvenPaymentDate: '2026-04-15',
+        );
+    }
+
+    private static function documentWithCommonVariants(): AnnualTaxCertificateDocumentData
+    {
+        return new AnnualTaxCertificateDocumentData(
+            sourceSnapshotSha256: str_repeat('d', 64),
+            kind: PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            taxYear: 2026,
+            form: AnnualTaxCertificateFormCatalog::resolve(
+                2026,
+                PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            ),
+            employer: self::employer(),
+            employeeName: 'Rezident Syntetický',
+            employeeFirstName: 'Rezident',
+            employeeLastName: 'Syntetický',
+            previousNames: [],
+            personalIdentifierLabel: 'Rodné číslo',
+            personalIdentifierValue: '0001010009',
+            employeeAddress: 'Modelová 2, 602 00 Brno, CZ',
+            months: [1, 2, 3],
+            taxDeclarationStatus: 'signed',
+            taxDeclarationSignedMonths: [1, 2, 3],
+            taxResidenceStatus: 'czech-resident',
+            taxResidenceCountryCode: 'CZ',
+            issuedAt: '2027-01-15 09:15:00',
+            replacesIssuedAt: null,
+            correctionReason: null,
+            employerProductContributionsMinorUnits: self::products(),
+            childTaxBenefits: [[
+                'name' => 'Dítě Syntetické',
+                'identifier' => '1. 2. 2020',
+                'ztpp_period' => '2–3',
+                'first_child_period' => '1–3',
+                'second_child_period' => '',
+                'third_child_period' => '',
+            ]],
+            disabilityTaxCredits: [[
+                'period' => '1–2',
+                'degree' => 'III. stupeň',
+            ], [
+                'period' => '3',
+                'degree' => 'průkaz ZTP/P',
+            ]],
+            annualSettlement: [
+                'performed' => true,
+                'result' => [
+                    'tax_overpayment_minor_units' => 120_000,
+                    'settlement_supplement_minor_units' => 170_000,
+                    'tax_overpayment_after_credit_minor_units' => 150_000,
+                    'tax_bonus_difference_minor_units' => 20_000,
+                    'taxpayer_product_deductions_minor_units' => [
+                        'pension_supplementary' => 0,
+                        'supplementary_pension' => 0,
+                        'pension_insurance' => 0,
+                        'private_life_insurance' => 0,
+                        'long_term_investment_product' => 0,
+                    ],
+                ],
+            ],
+            nonresidentInsuranceMinorUnits: null,
+            accruedIncomeMinorUnits: 42_000_000,
+            paidIncomeMinorUnits: 42_000_000,
+            advanceTaxMinorUnits: 5_250_000,
+            withholdingTaxMinorUnits: 0,
             taxBonusMinorUnits: 0,
             paymentEvidenceCutoff: '2027-01-31',
             lastProvenPaymentDate: '2026-04-15',

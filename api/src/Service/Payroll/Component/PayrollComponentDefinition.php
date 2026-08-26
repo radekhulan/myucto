@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
+use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\Calculation\Money;
 
 final readonly class PayrollComponentDefinition
@@ -39,7 +40,7 @@ final readonly class PayrollComponentDefinition
             'MD' => $accountingDebitCode,
             'Dal' => $accountingCreditCode,
         ] as $side => $account) {
-            if ($account !== null && preg_match('/^[0-9]{3,16}$/D', $account) !== 1) {
+            if ($account !== null && !PayrollAccountCode::isValid($account)) {
                 throw new \InvalidArgumentException("Účet {$side} mzdové složky není platný.");
             }
         }

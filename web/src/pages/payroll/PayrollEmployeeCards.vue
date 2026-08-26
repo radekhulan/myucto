@@ -1,9 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
-import { payrollApi, type PayrollQuickInputRow } from '@/api/payroll'
-import { payrollAbsenceApi, type PayrollAbsence } from '@/api/payrollAbsences'
+import {
+  payrollApi,
+  type PayrollEmployeeCardAbsence,
+  type PayrollEmployeeCardRow,
+  type PayrollEmployeeCardStatusFilter,
+} from '@/api/payroll'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoneyMinor } from '@/composables/useFormat'
 import { employmentCodeLabel } from './employmentLifecycleUi'
@@ -16,9 +21,9 @@ import { employmentCodeLabel } from './employmentLifecycleUi'
  * tři věci, kvůli kterým se do sekce chodí: kdo to je, kolik má tenhle měsíc
  * dostat a jestli není pryč.
  *
- * Data jdou ze dvou existujících volání, ne z nového endpointu:
- *  - `quickInputs(period)` — jméno, vztah, stav, částky, blokátory (1 request),
- *  - `absences(od, do)` — kdo má v období schválenou/požadovanou nepřítomnost.
+ * Interní kartový pohled rychlých vstupů vrací nejvýše 25 vztahů na stránku,
+ * souhrny za celý měsíc a absence jen pro právě viditelné vztahy. Hledání a
+ * stavový filtr proto probíhají na serveru a fungují i pro stovky zaměstnanců.
  *
  * Zůstatek dovolené karta neukazuje záměrně: `leaveLedger` je per-vztah, takže
  * by to znamenalo jeden request na zaměstnance (viz private/Mzdy/18-UX-PAYROLL.md).
@@ -29,16 +34,20 @@ const props = defineProps<{
   period: string
 }>()
 
-type StatusFilter = 'all' | 'active' | 'away' | 'attention'
-
 const { t } = useI18n()
+const pageSize = 25
 const loading = ref(true)
 const failed = ref(false)
-const rows = ref<PayrollQuickInputRow[]>([])
-const absences = ref<PayrollAbsence[]>([])
-const headcount = ref(0)
+const rows = ref<PayrollEmployeeCardRow[]>([])
+const total = ref(0)
+const offset = ref(0)
+const companyHeadcount = ref(0)
+const summary = ref({ people: 0, gross_preview_minor: 0, away: 0, attention: 0 })
 const search = ref('')
-const statusFilter = ref<StatusFilter>('active')
+const statusFilter = ref<PayrollEmployeeCardStatusFilter>('active')
+const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let requestSequence = 0
 
 const filterOptions = computed(() => ([
   { value: 'active' as const, label: t('payroll.employee_cards.filters.active') },
@@ -47,86 +56,29 @@ const filterOptions = computed(() => ([
   { value: 'all' as const, label: t('payroll.employee_cards.filters.all') },
 ]))
 
-function normalize(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .trim()
-    .toLocaleLowerCase()
+function absencesOf(row: PayrollEmployeeCardRow): PayrollEmployeeCardAbsence[] {
+  return row.absences
 }
-
-function periodRange(period: string): { from: string; to: string } {
-  const [year, month] = period.split('-').map(Number)
-  const last = new Date(year, month, 0).getDate()
-  return {
-    from: `${period}-01`,
-    to: `${period}-${String(last).padStart(2, '0')}`,
-  }
-}
-
-/** Nepřítomnosti podle pracovního vztahu — zrušené a zamítnuté nezajímají. */
-const absencesByEmployment = computed(() => {
-  const map = new Map<number, PayrollAbsence[]>()
-  for (const item of absences.value) {
-    if (item.status !== 'approved' && item.status !== 'requested') continue
-    const bucket = map.get(item.employment_id)
-    if (bucket) bucket.push(item)
-    else map.set(item.employment_id, [item])
-  }
-  return map
-})
-
-function absencesOf(row: PayrollQuickInputRow): PayrollAbsence[] {
-  return absencesByEmployment.value.get(row.employment_id) ?? []
-}
-
-function needsAttention(row: PayrollQuickInputRow): boolean {
-  return row.blockers.length > 0
-    || row.base_conflict
-    || row.overtime_conflict
-    || row.bonus_conflict
-    || row.base_requires_entry
-}
-
-const visibleRows = computed(() => {
-  const query = normalize(search.value)
-  return rows.value.filter((row) => {
-    const matchesQuery = query === ''
-      || normalize(row.full_name).includes(query)
-      || normalize(row.employment_code).includes(query)
-    if (!matchesQuery) return false
-    if (statusFilter.value === 'all') return true
-    if (statusFilter.value === 'away') return absencesOf(row).length > 0
-    if (statusFilter.value === 'attention') return needsAttention(row)
-    return row.effective_status === 'active' && !row.suspended_in_month
-  })
-})
-
-const totalGrossMinor = computed(() =>
-  rows.value.reduce((sum, row) => sum + row.gross_preview_minor, 0))
-const attentionCount = computed(() => rows.value.filter(needsAttention).length)
-const awayCount = computed(() =>
-  rows.value.filter(row => absencesOf(row).length > 0).length)
 
 function money(minor: number): string {
   return formatMoneyMinor(minor)
 }
 
-function relationLabel(row: PayrollQuickInputRow): string {
+function relationLabel(row: PayrollEmployeeCardRow): string {
   return t(`payroll.people.relations.${row.relation_type}`)
 }
 
 /** Pravidlo žije v `employmentLifecycleUi.ts` — karta zaměstnance ho sdílí. */
-function employmentCodeLabelOf(row: PayrollQuickInputRow): string {
+function employmentCodeLabelOf(row: PayrollEmployeeCardRow): string {
   return employmentCodeLabel(row.employment_code)
 }
 
-function statusLabel(row: PayrollQuickInputRow): string {
+function statusLabel(row: PayrollEmployeeCardRow): string {
   if (row.suspended_in_month) return t('payroll.quick_inputs.suspended_in_month')
   return t(`payroll.people.employment_status.${row.effective_status}`)
 }
 
-function statusClass(row: PayrollQuickInputRow): string {
+function statusClass(row: PayrollEmployeeCardRow): string {
   if (row.suspended_in_month || row.effective_status === 'suspended') {
     return 'bg-warning-50 text-warning-700'
   }
@@ -139,7 +91,7 @@ function statusClass(row: PayrollQuickInputRow): string {
 }
 
 /** „5. 8. – 9. 8." — den v období stačí, měsíc je v hlavičce stránky. */
-function absenceRange(item: PayrollAbsence): string {
+function absenceRange(item: PayrollEmployeeCardAbsence): string {
   const day = (value: string) => value.slice(8).replace(/^0/, '')
   const month = (value: string) => value.slice(5, 7).replace(/^0/, '')
   const from = `${day(item.date_from)}. ${month(item.date_from)}.`
@@ -147,57 +99,80 @@ function absenceRange(item: PayrollAbsence): string {
   return from === to ? from : `${from} – ${to}`
 }
 
-function absenceLabel(item: PayrollAbsence): string {
+function absenceLabel(item: PayrollEmployeeCardAbsence): string {
   return `${t(`payroll_absence.types.${item.absence_type}`)} ${absenceRange(item)}`
 }
 
-function vacationLink(row: PayrollQuickInputRow) {
+function vacationLink(row: PayrollEmployeeCardRow) {
   return {
     name: 'payroll-absences',
     query: { employment: String(row.employment_id), type: 'vacation' },
   }
 }
 
-function absenceLink(row: PayrollQuickInputRow) {
+function absenceLink(row: PayrollEmployeeCardRow) {
   return {
     name: 'payroll-absences',
     query: { employment: String(row.employment_id) },
   }
 }
 
-function personLink(row: PayrollQuickInputRow) {
+function personLink(row: PayrollEmployeeCardRow) {
   return { name: 'payroll-people', query: { person: String(row.employee_id) } }
 }
 
 async function load() {
+  const sequence = ++requestSequence
   loading.value = true
   failed.value = false
-  const range = periodRange(props.period)
   try {
-    const [month, monthAbsences, people] = await Promise.all([
-      payrollApi.quickInputs(props.period),
-      // Nepřítomnosti jsou doplněk, ne podmínka — když je uživatel nesmí číst,
-      // karty se stejně vykreslí, jen bez odznaku „je pryč".
-      payrollAbsenceApi.absences(range.from, range.to).catch(() => [] as PayrollAbsence[]),
-      // Kolik lidí firma vůbec má. Bez toho přehled tvrdil „Zatím žádný
-      // zaměstnanec" i firmě, která zaměstnance má — jen žádný z nich nebyl
-      // v tomhle měsíci na výplatní listině.
-      payrollApi.peopleOptions().catch(() => []),
-    ])
+    const month = await payrollApi.employeeCards(
+      props.period,
+      { limit: pageSize, offset: offset.value },
+      { search: search.value.trim(), status: statusFilter.value },
+    )
+    if (sequence !== requestSequence) return
     rows.value = month.items
-    absences.value = monthAbsences
-    headcount.value = people.length
+    total.value = month.total
+    companyHeadcount.value = month.company_headcount
+    summary.value = month.summary
   } catch {
+    if (sequence !== requestSequence) return
     failed.value = true
     rows.value = []
-    absences.value = []
+    total.value = 0
   } finally {
-    loading.value = false
+    if (sequence === requestSequence) loading.value = false
   }
 }
 
-watch(() => props.period, load)
+function setStatus(value: PayrollEmployeeCardStatusFilter) {
+  if (statusFilter.value === value) return
+  statusFilter.value = value
+  offset.value = 0
+  void load()
+}
+
+function goToPage(page: number) {
+  offset.value = Math.max(0, (page - 1) * pageSize)
+  void load()
+}
+
+watch(() => props.period, () => {
+  offset.value = 0
+  void load()
+})
+watch(search, () => {
+  if (searchTimer !== null) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    offset.value = 0
+    void load()
+  }, 250)
+})
 onMounted(load)
+onBeforeUnmount(() => {
+  if (searchTimer !== null) clearTimeout(searchTimer)
+})
 </script>
 
 <template>
@@ -237,20 +212,20 @@ onMounted(load)
       na listině" vypadaly stejně, takže přehled tvrdil, že zaměstnanci nejsou,
       i když byli — jen měli vztah ve stavu plánovaný nebo archivovaný.
     -->
-    <div v-else-if="rows.length === 0" class="mt-4 rounded-lg border border-dashed border-neutral-300 p-8 text-center" data-test="employee-cards-empty">
+    <div v-else-if="summary.people === 0" class="mt-4 rounded-lg border border-dashed border-neutral-300 p-8 text-center" data-test="employee-cards-empty">
       <h3 class="text-base font-semibold text-neutral-900">
-        {{ headcount === 0
+        {{ companyHeadcount === 0
           ? t('payroll.employee_cards.empty_title')
           : t('payroll.employee_cards.none_active_title') }}
       </h3>
       <p class="mt-1 text-sm text-neutral-500">
-        {{ headcount === 0
+        {{ companyHeadcount === 0
           ? t('payroll.employee_cards.empty_hint')
           : t('payroll.employee_cards.none_active_hint') }}
       </p>
       <RouterLink :to="{ name: 'payroll-people' }" :class="[btnOutline('primary'), 'mt-4']">
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="headcount === 0 ? ICONS.plus : ICONS.user" /></svg>
-        {{ headcount === 0
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="companyHeadcount === 0 ? ICONS.plus : ICONS.user" /></svg>
+        {{ companyHeadcount === 0
           ? t('payroll.employee_cards.empty_action')
           : t('payroll.employee_cards.none_active_action') }}
       </RouterLink>
@@ -260,20 +235,20 @@ onMounted(load)
       <dl class="mt-4 grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
         <div class="rounded-lg bg-neutral-50 p-3">
           <dt class="text-xs text-neutral-500">{{ t('payroll.employee_cards.summary.people') }}</dt>
-          <dd class="mt-1 font-semibold text-neutral-900" data-test="employee-count">{{ rows.length }}</dd>
+          <dd class="mt-1 font-semibold text-neutral-900" data-test="employee-count">{{ summary.people }}</dd>
         </div>
         <div class="rounded-lg bg-neutral-50 p-3">
           <dt class="text-xs text-neutral-500">{{ t('payroll.employee_cards.summary.gross') }}</dt>
-          <dd class="mt-1 font-semibold text-neutral-900" data-test="employee-total-gross">{{ money(totalGrossMinor) }}</dd>
+          <dd class="mt-1 font-semibold text-neutral-900" data-test="employee-total-gross">{{ money(summary.gross_preview_minor) }}</dd>
         </div>
         <div class="rounded-lg bg-neutral-50 p-3">
           <dt class="text-xs text-neutral-500">{{ t('payroll.employee_cards.summary.away') }}</dt>
-          <dd class="mt-1 font-semibold text-neutral-900">{{ awayCount }}</dd>
+          <dd class="mt-1 font-semibold text-neutral-900">{{ summary.away }}</dd>
         </div>
         <div class="rounded-lg bg-neutral-50 p-3">
           <dt class="text-xs text-neutral-500">{{ t('payroll.employee_cards.summary.attention') }}</dt>
-          <dd class="mt-1 font-semibold" :class="attentionCount > 0 ? 'text-warning-700' : 'text-neutral-900'">
-            {{ attentionCount }}
+          <dd class="mt-1 font-semibold" :class="summary.attention > 0 ? 'text-warning-700' : 'text-neutral-900'">
+            {{ summary.attention }}
           </dd>
         </div>
       </dl>
@@ -303,7 +278,7 @@ onMounted(load)
             :class="statusFilter === option.value
               ? 'border-payroll-500 bg-payroll-50 text-payroll-700'
               : 'border-neutral-300 text-neutral-600 hover:bg-neutral-50'"
-            @click="statusFilter = option.value"
+            @click="setStatus(option.value)"
           >
             {{ option.label }}
           </button>
@@ -311,7 +286,7 @@ onMounted(load)
       </div>
 
       <p
-        v-if="visibleRows.length === 0"
+        v-if="total === 0"
         class="mt-4 rounded-lg border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500"
       >
         {{ t('payroll.employee_cards.no_results') }}
@@ -319,7 +294,7 @@ onMounted(load)
 
       <div v-else class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
         <article
-          v-for="row in visibleRows"
+          v-for="row in rows"
           :key="row.employment_id"
           class="flex min-w-0 flex-col rounded-xl border border-neutral-200 p-4 transition hover:border-payroll-500/50 hover:shadow-sm"
           :data-test="`employee-card-${row.employment_id}`"
@@ -396,6 +371,13 @@ onMounted(load)
           </div>
         </article>
       </div>
+      <PaginationBar
+        class="mt-4"
+        :page="currentPage"
+        :per-page="pageSize"
+        :total="total"
+        @update:page="goToPage"
+      />
     </template>
   </section>
 </template>

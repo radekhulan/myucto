@@ -71,7 +71,14 @@ function profile(): PayrollPersonProfile {
       full_name: 'Testovací Zaměstnanec',
       first_name: 'Testovací',
       last_name: 'Zaměstnanec',
+      title_prefix: null,
+      title_suffix: null,
       birth_surname_masked: 'T•••••••',
+      birth_date: null,
+      birth_place: null,
+      birth_country_code: null,
+      citizenship_country_code: null,
+      sex: null,
       effective_from: '2026-01-01',
       effective_to: null,
       row_version: 1,
@@ -231,10 +238,53 @@ describe('PayrollPersonProfilePanel', () => {
     expect(wrapper.get<HTMLInputElement>('[data-test="bank-account-plaintext"]').element.value).toBe('')
   })
 
+  it('nezobrazuje uživateli technickou row_version', async () => {
+    const wrapper = await mountedPanel()
+
+    expect(wrapper.text()).not.toContain('payroll.people.profile.version')
+  })
+
   it('používá pro všechny adresy společný číselník států', async () => {
     const wrapper = await mountedPanel()
 
     expect(wrapper.find('[data-test="profile-country-code"] input').exists()).toBe(true)
+  })
+
+  it('zpřístupní registrační identitu v rozbalitelné části a odešle ji s historií', async () => {
+    const loaded = profile()
+    Object.assign(loaded.identity_history[0], {
+      title_prefix: 'Ing.',
+      title_suffix: 'Ph.D.',
+      birth_date: '1990-02-03',
+      birth_place: 'Brno',
+      birth_country_code: 'CZ',
+      citizenship_country_code: 'SK',
+      sex: 'female',
+    })
+    mocks.personProfile.mockResolvedValue(loaded)
+
+    const wrapper = await mountedPanel()
+
+    expect(wrapper.find('[data-test="registration-identity-details"]').exists()).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-test="identity-birth-date"]').element.value)
+      .toBe('1990-02-03')
+    expect(wrapper.find('[data-test="identity-birth-country"] input').exists()).toBe(true)
+    expect(wrapper.find('[data-test="identity-citizenship-country"] input').exists()).toBe(true)
+
+    await wrapper.get('[data-test="save-profile"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.savePersonProfile).toHaveBeenCalledWith(17, expect.objectContaining({
+      identity_history: [expect.objectContaining({
+        title_prefix: 'Ing.',
+        title_suffix: 'Ph.D.',
+        birth_date: '1990-02-03',
+        birth_place: 'Brno',
+        birth_country_code: 'CZ',
+        citizenship_country_code: 'SK',
+        sex: 'female',
+      })],
+    }))
   })
 
   it('používá pro přidávací akce plné primární tlačítko', async () => {

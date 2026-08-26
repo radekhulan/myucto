@@ -147,11 +147,14 @@ function detail(
   }
 }
 
-async function mountPage(groups: PayrollRulesetDomainGroup[]) {
+async function mountPage(
+  groups: PayrollRulesetDomainGroup[],
+  degradedReason: string | null = null,
+) {
   const overview: PayrollRulesetOverview = {
     domains: groups,
     override_storage_available: true,
-    degraded_reason: null,
+    degraded_reason: degradedReason,
     generated_at: '2026-08-15 10:00:00',
   }
   m.overview.mockResolvedValue(overview)
@@ -193,6 +196,18 @@ describe('PayrollRulesets', () => {
     const hint = wrapper.get('[data-test="ruleset-status-hint-deadlines"]').text()
     expect(hint).toContain('payroll.rulesets.status_hint.manual_review')
     expect(hint).toContain('Lhůty hlídá stránka Podání.')
+  })
+
+  it('schová technickou výjimku degradace za bezpečnou českou zprávu', async () => {
+    const technical = 'Ruleset synthetic canonical checksum mismatch.'
+    const wrapper = await mountPage([group()], technical)
+
+    const alert = wrapper.get('[data-test="ruleset-degraded"]')
+    const message = alert.get('[data-test="ruleset-degraded-message"]')
+    expect(message.text()).toBe('payroll.rulesets.degraded')
+    expect(message.text()).not.toContain(technical)
+    expect(alert.get('[data-test="ruleset-degraded-technical"]').text())
+      .toContain(technical)
   })
 
   it('shows how many parameters manual judgement actually affects', async () => {

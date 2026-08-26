@@ -242,6 +242,9 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
                     InsolvencyMode::ApprovedStandard,
                     true,
                     true,
+                    paymentInstructionId: 101,
+                    paymentInstructionHash: str_repeat('a', 64),
+                    employmentId: 202,
                 )
                 : InsolvencyInstruction::none(),
         );

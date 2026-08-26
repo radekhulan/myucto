@@ -95,6 +95,35 @@ final class PayrollJmhzProtocolReceiptTest extends TestCase
             'rejected',
             $this->submissions->get($this->supplierId, $submission['id'])['status'],
         );
+        $outcomes = $this->submissions->jmhzProtocolFormOutcomes(
+            $this->supplierId,
+            'production',
+            (int) $receipt['id'],
+        );
+        self::assertCount(1, $outcomes);
+        self::assertSame(JmhzTransportSample::FORM_GUID, $outcomes[0]['form_guid']);
+        self::assertSame(3, $outcomes[0]['protocol_status_code']);
+        self::assertSame('Rejected', $outcomes[0]['protocol_status_name']);
+        self::assertSame('rejected', $outcomes[0]['remote_status']);
+        self::assertSame(1, $outcomes[0]['error_count']);
+        self::assertStringStartsWith('enc:v2:', (string) $this->db->pdo()->query(
+            'SELECT errors_ciphertext FROM payroll_jmhz_protocol_form_outcomes'
+                . ' WHERE id = ' . (int) $outcomes[0]['id'],
+        )->fetchColumn());
+        self::assertSame(20118, $outcomes[0]['errors'][0]['code']);
+        self::assertSame('dis', $outcomes[0]['errors'][0]['origin']);
+        self::assertSame(118, $outcomes[0]['errors'][0]['control_id']);
+
+        $replayed = $this->import($submission, $protocol, 'rejected');
+        self::assertFalse($replayed['created']);
+        self::assertCount(
+            1,
+            $this->submissions->jmhzProtocolFormOutcomes(
+                $this->supplierId,
+                'production',
+                (int) $receipt['id'],
+            ),
+        );
     }
 
     public function testSignedAcceptanceProtocolClosesTheSubmission(): void
@@ -155,6 +184,14 @@ final class PayrollJmhzProtocolReceiptTest extends TestCase
 
         self::assertFalse($receipt['trusted']);
         self::assertSame('submitted', $receipt['submission_status']);
+        self::assertSame(
+            [],
+            $this->submissions->jmhzProtocolFormOutcomes(
+                $this->supplierId,
+                'production',
+                (int) $receipt['id'],
+            ),
+        );
     }
 
     /**
@@ -189,7 +226,14 @@ final class PayrollJmhzProtocolReceiptTest extends TestCase
     {
         return JmhzTransportSample::partialProtocol(
             $result,
-            [['guid' => JmhzTransportSample::FORM_GUID, 'result' => $result]],
+            [[
+                'guid' => JmhzTransportSample::FORM_GUID,
+                'result' => $result,
+                'errMsg' => $result === 'OK'
+                    ? ''
+                    : 'JMHZ25_LT: 20118 - Chybná hodnota',
+                'errNum' => $result === 'OK' ? '' : '20118',
+            ]],
             errMsg: $result === 'OK' ? '' : 'JMHZ25_LT: 20118 - Chybná hodnota',
             errNumber: $result === 'OK' ? '0' : '20118',
             generalResult: $result,

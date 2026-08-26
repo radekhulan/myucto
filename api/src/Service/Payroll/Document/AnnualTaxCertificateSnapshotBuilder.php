@@ -8,6 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\IncomeTax\EuropeanEconomicAreaCountries;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
+use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -15,8 +18,8 @@ use PDO;
 
 class AnnualTaxCertificateSnapshotBuilder
 {
-    public const SCHEMA_VERSION = 'annual-tax-certificate-snapshot.v4';
-    public const MAPPING_VERSION = 'annual-tax-certificate-2026-mapping.v4';
+    public const SCHEMA_VERSION = 'annual-tax-certificate-snapshot.v5';
+    public const MAPPING_VERSION = 'annual-tax-certificate-2026-mapping.v5';
 
     public function __construct(
         private readonly Connection $db,
@@ -67,16 +70,6 @@ class AnnualTaxCertificateSnapshotBuilder
                 . 'zaměstnance v daném roce.',
             );
         }
-        $this->assertAnnualSettlementAbsent(
-            $supplierId,
-            $employeeId,
-            $taxYear,
-        );
-        $profile = $this->profileSnapshot(
-            $supplierId,
-            $employeeId,
-            $taxYear,
-        );
         $employer = ($this->employers)($supplierId);
         $cutoff = ($taxYear + 1) . '-01-31';
         [
@@ -89,6 +82,9 @@ class AnnualTaxCertificateSnapshotBuilder
             'payment_evidence' => $paymentEvidence,
             'tax_declaration' => $taxDeclaration,
             'tax_residence' => $taxResidence,
+            'disability_tax_credits' => $disabilityTaxCredits,
+            'child_claim_months' => $childClaimMonths,
+            'nonresident_insurance_minor_units' => $nonresidentInsuranceMinorUnits,
         ] = $this->certificateAmounts(
             $sources,
             $supplierId,
@@ -101,6 +97,24 @@ class AnnualTaxCertificateSnapshotBuilder
                 'Pro zvolený druh potvrzení neexistuje doložený zdanitelný příjem.',
             );
         }
+        $profile = $this->profileSnapshot(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            $taxResidence,
+        );
+        $childTaxBenefits = $this->childTaxBenefits(
+            $supplierId,
+            $employeeId,
+            $childClaimMonths,
+        );
+        $annualSettlementEvidence = $this->annualSettlementResult(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            $kind,
+        );
+        $annualSettlement = $annualSettlementEvidence['value'];
 
         $formSnapshot = self::formSnapshot($form);
         $profileHash = $this->fingerprint(
@@ -150,7 +164,7 @@ class AnnualTaxCertificateSnapshotBuilder
         ];
         $manifest = [
             'schema_version' =>
-                'annual-tax-certificate-source-manifest.v2',
+                'annual-tax-certificate-source-manifest.v3',
             'document_schema_version' =>
                 AnnualTaxCertificateDocumentData::SCHEMA_VERSION,
             'renderer_version' => AnnualTaxCertificatePdfRenderer::VERSION,
@@ -163,6 +177,7 @@ class AnnualTaxCertificateSnapshotBuilder
             'profile_snapshot_hash' => $profileHash,
             'employer_snapshot_hash' => $employerHash,
             'sources' => $manifestSources,
+            'annual_settlement_source' => $annualSettlementEvidence['source'],
             'issuance' => $issuanceManifest,
         ];
         $manifestJson = CanonicalJson::encode($manifest);
@@ -250,13 +265,11 @@ class AnnualTaxCertificateSnapshotBuilder
                 'private_life_insurance' => 0,
                 'long_term_investment_product' => 0,
             ],
-            'child_tax_benefits' => [],
-            'disability_tax_credits' => [],
-            'annual_settlement' => [
-                'performed' => false,
-                'result' => null,
-            ],
-            'nonresident_insurance_minor_units' => null,
+            'child_tax_benefits' => $childTaxBenefits,
+            'disability_tax_credits' => $disabilityTaxCredits,
+            'annual_settlement' => $annualSettlement,
+            'nonresident_insurance_minor_units' =>
+                $nonresidentInsuranceMinorUnits,
             'accrued_income_minor_units' => $incomeMinorUnits,
             'paid_income_minor_units' => $incomeMinorUnits,
             'advance_tax_minor_units' =>
@@ -343,7 +356,10 @@ class AnnualTaxCertificateSnapshotBuilder
      *       effective_to:?string
      *     }>
      *   },
-     *   tax_residence:array{status:string,country_code:string}
+     *   tax_residence:array{status:string,country_code:string},
+     *   disability_tax_credits:list<array{period:string,degree:string}>,
+     *   child_claim_months:array<string,array<int,array{order:int,ztp_p:bool}>>,
+     *   nonresident_insurance_minor_units:?int
      * }
      */
     private function certificateAmounts(
@@ -362,6 +378,9 @@ class AnnualTaxCertificateSnapshotBuilder
         $paymentEvidence = [];
         $declarationEvidence = [];
         $taxResidence = null;
+        $creditMonths = [];
+        $childClaimMonths = [];
+        $nonresidentInsurance = 0;
         foreach ($sources as $source) {
             $inputJson = $this->text($source, 'input_snapshot_json');
             $resultJson = $this->text($source, 'result_snapshot_json');
@@ -443,6 +462,27 @@ class AnnualTaxCertificateSnapshotBuilder
                     );
                 }
                 $taxResidence = $monthResidence;
+                foreach ($monthTaxEvidence['credit_claims'] as $claim) {
+                    $creditMonths[$claim['credit_kind']][$monthNumber] = true;
+                }
+                foreach ($monthTaxEvidence['child_claims'] as $claim) {
+                    $reference = $claim['child_reference'];
+                    if (isset($childClaimMonths[$reference][$monthNumber])) {
+                        throw new \DomainException(
+                            'Dítě je v jednom měsíci daňového potvrzení uplatněno vícekrát.',
+                        );
+                    }
+                    $childClaimMonths[$reference][$monthNumber] = [
+                        'order' => $claim['child_order'],
+                        'ztp_p' => $claim['ztp_p'],
+                    ];
+                }
+                if ($monthResidence['status'] === TaxResidence::NonResident->value) {
+                    $nonresidentInsurance = $this->add(
+                        $nonresidentInsurance,
+                        $this->nonresidentInsurance($storedPerson),
+                    );
+                }
                 if ($kind
                     === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
                 ) {
@@ -531,6 +571,14 @@ class AnnualTaxCertificateSnapshotBuilder
             'payment_evidence' => $paymentEvidence,
             'tax_declaration' => $taxDeclaration,
             'tax_residence' => $taxResidence,
+            'disability_tax_credits' =>
+                self::disabilityTaxCredits($creditMonths),
+            'child_claim_months' => $childClaimMonths,
+            'nonresident_insurance_minor_units' =>
+                $kind === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
+                    && $taxResidence['status'] === TaxResidence::NonResident->value
+                    ? $nonresidentInsurance
+                    : null,
         ];
     }
 
@@ -548,7 +596,13 @@ class AnnualTaxCertificateSnapshotBuilder
      *       effective_from:string,
      *       effective_to:?string
      *     },
-     *     residence:array{status:string,country_code:string}
+     *     residence:array{status:string,country_code:string},
+     *     credit_claims:list<array{credit_kind:string}>,
+     *     child_claims:list<array{
+     *       child_reference:string,
+     *       child_order:int,
+     *       ztp_p:bool
+     *     }>
      *   }
      * }
      */
@@ -653,6 +707,8 @@ class AnnualTaxCertificateSnapshotBuilder
                     'status' => 'czech-resident',
                     'country_code' => 'CZ',
                 ],
+                'credit_claims' => [],
+                'child_claims' => [],
             ],
         ];
     }
@@ -665,7 +721,13 @@ class AnnualTaxCertificateSnapshotBuilder
      *     effective_from:string,
      *     effective_to:?string
      *   },
-     *   residence:array{status:string,country_code:string}
+     *   residence:array{status:string,country_code:string},
+     *   credit_claims:list<array{credit_kind:string}>,
+     *   child_claims:list<array{
+     *     child_reference:string,
+     *     child_order:int,
+     *     ztp_p:bool
+     *   }>
      * }
      */
     private function supportedInputEvidence(
@@ -684,12 +746,30 @@ class AnnualTaxCertificateSnapshotBuilder
             $incomeTax['residence'] ?? null,
             'statutory_evidence.income_tax.residence',
         );
-        if (($residence['residence'] ?? null) !== 'czech-resident'
-            || ($residence['country_code'] ?? null) !== 'CZ'
+        $residenceValue = $residence['residence'] ?? null;
+        $residenceStatus = is_string($residenceValue)
+            ? TaxResidence::tryFrom($residenceValue)
+            : null;
+        $countryCode = $residence['country_code'] ?? null;
+        if (!$residenceStatus instanceof TaxResidence
+            || $residenceStatus === TaxResidence::Unverified
+            || !is_string($countryCode)
+            || preg_match('/^[A-Z]{2}$/D', $countryCode) !== 1
+            || ($residenceStatus === TaxResidence::CzechResident
+                && $countryCode !== 'CZ')
+            || ($residenceStatus === TaxResidence::NonResident
+                && $countryCode === 'CZ')
         ) {
             throw new \DomainException(
-                'Daňové potvrzení nerezidenta vyžaduje rozšířená pole, '
-                . 'která tato verze nevymýšlí.',
+                'Daňové potvrzení nemá platně doloženou daňovou rezidenci.',
+            );
+        }
+        if ($kind === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
+            && $residenceStatus === TaxResidence::NonResident
+            && !EuropeanEconomicAreaCountries::contains($countryCode)
+        ) {
+            throw new \DomainException(
+                'Srážkové potvrzení lze vystavit jen nerezidentovi EU nebo EHP.',
             );
         }
         $declaration = null;
@@ -725,37 +805,143 @@ class AnnualTaxCertificateSnapshotBuilder
                 'effective_to' => $effectiveTo,
             ];
         }
+        $creditClaims = [];
         foreach ($this->list(
             $incomeTax['credit_claims'] ?? null,
             'statutory_evidence.income_tax.credit_claims',
         ) as $claim) {
             $claim = $this->object($claim, 'credit_claims[]');
-            if (($claim['credit_kind'] ?? null) !== 'taxpayer'
-                || ($claim['evidence_status'] ?? null) !== 'verified'
-            ) {
+            $creditKindValue = $claim['credit_kind'] ?? null;
+            $creditKind = is_string($creditKindValue)
+                ? TaxCreditKind::tryFrom($creditKindValue)
+                : null;
+            if (!$creditKind instanceof TaxCreditKind
+                || ($claim['evidence_status'] ?? null) !== 'verified') {
                 throw new \DomainException(
-                    'Daňové potvrzení s invalidní, ZTP/P nebo jinou '
-                    . 'rozšířenou slevou vyžaduje samostatné mapování formuláře.',
+                    'Daňová sleva nemá doložený podporovaný druh.',
                 );
             }
+            $creditClaims[] = ['credit_kind' => $creditKind->value];
         }
-        if ($this->list(
+        $childClaims = [];
+        foreach ($this->list(
             $incomeTax['child_claims'] ?? null,
             'statutory_evidence.income_tax.child_claims',
-        ) !== []) {
+        ) as $claim) {
+            $claim = $this->object($claim, 'child_claims[]');
+            $reference = $claim['child_reference'] ?? null;
+            $order = $claim['child_order'] ?? null;
+            if (!is_string($reference)
+                || preg_match('/^dependant-[1-9][0-9]*$/D', $reference) !== 1
+                || !is_int($order)
+                || $order < 1
+                || !is_bool($claim['ztp_p'] ?? null)
+                || ($claim['evidence_status'] ?? null) !== 'verified'
+                || ($claim['shared_household_confirmed'] ?? null) !== true
+                || ($claim['other_claimant_excluded'] ?? null) !== true
+            ) {
+                throw new \DomainException(
+                    'Daňové zvýhodnění na dítě nemá úplné doložené údaje.',
+                );
+            }
+            $childClaims[] = [
+                'child_reference' => $reference,
+                'child_order' => $order,
+                'ztp_p' => $claim['ztp_p'],
+            ];
+        }
+        if ($residenceStatus === TaxResidence::NonResident
+            && (array_filter(
+                $creditClaims,
+                static fn (array $claim): bool =>
+                    $claim['credit_kind'] !== TaxCreditKind::Taxpayer->value,
+            ) !== [] || $childClaims !== [])
+        ) {
             throw new \DomainException(
-                'Daňové potvrzení s daňovým zvýhodněním na dítě vyžaduje '
-                . 'identitu dítěte, kterou mzdový snapshot neobsahuje.',
+                'Daňový nerezident nemůže v měsíčním potvrzení uplatnit invaliditu, ZTP/P ani dítě.',
             );
         }
 
         return [
             'declaration' => $declaration,
             'residence' => [
-                'status' => 'czech-resident',
-                'country_code' => 'CZ',
+                'status' => $residenceStatus->value,
+                'country_code' => $countryCode,
             ],
+            'credit_claims' => $creditClaims,
+            'child_claims' => $childClaims,
         ];
+    }
+
+    /** @param array<string,mixed> $person */
+    private function nonresidentInsurance(array $person): int
+    {
+        $statutory = $this->object($person['statutory'] ?? null, 'statutory');
+        $social = $this->object(
+            $statutory['social_insurance'] ?? null,
+            'statutory.social_insurance',
+        );
+        $health = $this->object(
+            $statutory['health_insurance'] ?? null,
+            'statutory.health_insurance',
+        );
+
+        return $this->add(
+            $this->nonNegativeInt($social, 'employee_contribution_minor_units'),
+            $this->nonNegativeInt($health, 'employee_contribution_minor_units'),
+        );
+    }
+
+    /**
+     * @param array<string,array<int,bool>> $creditMonths
+     * @return list<array{period:string,degree:string}>
+     */
+    private static function disabilityTaxCredits(array $creditMonths): array
+    {
+        $rows = [];
+        foreach ([
+            TaxCreditKind::DisabilityBasic->value => 'I. nebo II. stupeň',
+            TaxCreditKind::DisabilityExtended->value => 'III. stupeň',
+            TaxCreditKind::ZtpP->value => 'průkaz ZTP/P',
+        ] as $kind => $degree) {
+            $months = array_map('intval', array_keys($creditMonths[$kind] ?? []));
+            sort($months, SORT_NUMERIC);
+            if ($months !== []) {
+                $rows[] = [
+                    'period' => self::monthRanges($months),
+                    'degree' => $degree,
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    /** @param list<int> $months */
+    private static function monthRanges(array $months): string
+    {
+        if ($months === []) {
+            return '';
+        }
+        $ranges = [];
+        $start = $months[0];
+        $previous = $start;
+        foreach (array_slice($months, 1) as $month) {
+            if ($month === $previous + 1) {
+                $previous = $month;
+                continue;
+            }
+            $ranges[] = $start === $previous
+                ? (string) $start
+                : "{$start}–{$previous}";
+            $start = $month;
+            $previous = $month;
+        }
+        $ranges[] = $start === $previous
+            ? (string) $start
+            : "{$start}–{$previous}";
+
+        return implode(', ', $ranges);
     }
 
     /** @param array<string,mixed> $inputPerson */
@@ -799,11 +985,23 @@ class AnnualTaxCertificateSnapshotBuilder
         }
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * @param array{status:string,country_code:string} $taxResidence
+     * @return array{
+     *   name:string,
+     *   first_name:string,
+     *   last_name:string,
+     *   previous_names:list<string>,
+     *   identifier_label:string,
+     *   identifier_value:string,
+     *   address:string
+     * }
+     */
     private function profileSnapshot(
         int $supplierId,
         int $employeeId,
         int $taxYear,
+        array $taxResidence,
     ): array {
         $from = sprintf('%04d-01-01', $taxYear);
         $to = sprintf('%04d-12-31', $taxYear);
@@ -866,10 +1064,12 @@ class AnnualTaxCertificateSnapshotBuilder
             );
         }
         $addressRow = $this->associativeRow($fetchedAddress);
-        if (($addressRow['country_code'] ?? null) !== 'CZ') {
+        $addressCountry = $addressRow['country_code'] ?? null;
+        if (!is_string($addressCountry)
+            || preg_match('/^[A-Z]{2}$/D', $addressCountry) !== 1
+        ) {
             throw new \DomainException(
-                'Daňové potvrzení zahraniční osoby vyžaduje rozšířenou '
-                . 'identitu, kterou tato verze nevymýšlí.',
+                'Adresa daňového potvrzení nemá platný kód země.',
             );
         }
         $identifier = $this->db->pdo()->prepare(
@@ -882,25 +1082,48 @@ class AnnualTaxCertificateSnapshotBuilder
         );
         $identifier->execute([$supplierId, $employeeId]);
         $fetchedIdentifier = $identifier->fetch(PDO::FETCH_ASSOC);
-        if ($fetchedIdentifier === false) {
+        if ($fetchedIdentifier === false
+            && $taxResidence['status'] === TaxResidence::CzechResident->value
+        ) {
             throw new \DomainException(
                 'Pro daňové potvrzení českého rezidenta chybí rodné číslo.',
             );
         }
-        $identifierRow = $this->associativeRow($fetchedIdentifier);
+        $identifierLabel = 'Rodné číslo';
+        if ($fetchedIdentifier !== false) {
+            $identifierRow = $this->associativeRow($fetchedIdentifier);
+            $identifierValue = $this->sensitiveData->reveal(
+                $this->text($identifierRow, 'value_ciphertext'),
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $supplierId,
+                $this->positiveInt($identifierRow, 'id'),
+            );
+        } else {
+            $birth = $this->db->pdo()->prepare(
+                'SELECT birth_date FROM payroll_employees
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE',
+            );
+            $birth->execute([$supplierId, $employeeId]);
+            $birthDate = $birth->fetchColumn();
+            if (!is_string($birthDate)
+                || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $birthDate) !== 1
+            ) {
+                throw new \DomainException(
+                    'Pro daňové potvrzení nerezidenta chybí rodné číslo i datum narození.',
+                );
+            }
+            $identifierLabel = 'Datum narození';
+            $identifierValue = self::displayDate($birthDate);
+        }
 
         return [
             'name' => $currentName,
             'first_name' => $firstName,
             'last_name' => $lastName,
             'previous_names' => array_keys($names),
-            'identifier_label' => 'Rodné číslo',
-            'identifier_value' => $this->sensitiveData->reveal(
-                $this->text($identifierRow, 'value_ciphertext'),
-                PayrollSensitiveField::PERSONAL_IDENTIFIER,
-                $supplierId,
-                $this->positiveInt($identifierRow, 'id'),
-            ),
+            'identifier_label' => $identifierLabel,
+            'identifier_value' => $identifierValue,
             'address' => implode(', ', [
                 $this->text($addressRow, 'street_line'),
                 trim(
@@ -908,33 +1131,252 @@ class AnnualTaxCertificateSnapshotBuilder
                     . ' '
                     . $this->text($addressRow, 'city'),
                 ),
-                'CZ',
+                $addressCountry,
             ]),
         ];
     }
 
-    private function assertAnnualSettlementAbsent(
+    /**
+     * @param array<string,array<int,array{order:int,ztp_p:bool}>> $claims
+     * @return list<array<string,string>>
+     */
+    private function childTaxBenefits(
+        int $supplierId,
+        int $employeeId,
+        array $claims,
+    ): array {
+        ksort($claims);
+        $rows = [];
+        foreach ($claims as $reference => $months) {
+            if (preg_match('/^dependant-([1-9][0-9]*)$/D', $reference, $match) !== 1) {
+                throw new \DomainException(
+                    'Odkaz dítěte v daňovém potvrzení není platný.',
+                );
+            }
+            $dependantId = (int) $match[1];
+            $statement = $this->db->pdo()->prepare(
+                'SELECT id, full_name, birth_date, birth_number_ciphertext
+                   FROM payroll_dependants
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ?
+                  FOR UPDATE',
+            );
+            $statement->execute([$supplierId, $employeeId, $dependantId]);
+            $fetched = $statement->fetch(PDO::FETCH_ASSOC);
+            if ($fetched === false) {
+                throw new \DomainException(
+                    'Pro řádek 11 chybí identita uplatněného dítěte.',
+                );
+            }
+            $dependant = $this->associativeRow($fetched);
+            $identifier = $dependant['birth_number_ciphertext'] === null
+                ? self::displayDate($this->text($dependant, 'birth_date'))
+                : $this->sensitiveData->reveal(
+                    $this->text($dependant, 'birth_number_ciphertext'),
+                    PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                    $supplierId,
+                    $dependantId,
+                );
+            $orders = [1 => [], 2 => [], 3 => []];
+            $ztpP = [];
+            ksort($months, SORT_NUMERIC);
+            foreach ($months as $month => $claim) {
+                $bucket = min(3, $claim['order']);
+                $orders[$bucket][] = (int) $month;
+                if ($claim['ztp_p']) {
+                    $ztpP[] = (int) $month;
+                }
+            }
+            $rows[] = [
+                'name' => $this->text($dependant, 'full_name'),
+                'identifier' => $identifier,
+                'ztpp_period' => self::monthRanges($ztpP),
+                'first_child_period' => self::monthRanges($orders[1]),
+                'second_child_period' => self::monthRanges($orders[2]),
+                'third_child_period' => self::monthRanges($orders[3]),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @return array{
+     *   value:array{performed:bool,result:?array<string,mixed>},
+     *   source:?array{revision_id:int,snapshot_hash:string,performed:bool}
+     * }
+     */
+    private function annualSettlementResult(
         int $supplierId,
         int $employeeId,
         int $taxYear,
-    ): void {
-        $statement = $this->db->pdo()->prepare(
-            'SELECT id
-               FROM payroll_annual_document_revisions
-              WHERE supplier_id = ?
-                AND employee_id = ?
-                AND tax_year = ?
-                AND purpose = "annual_settlement_result"
-              LIMIT 1
-              FOR UPDATE',
+        PayrollDocumentKind $kind,
+    ): array {
+        if ($kind !== PayrollDocumentKind::TaxableIncomeAdvanceCertificate) {
+            return [
+                'value' => ['performed' => false, 'result' => null],
+                'source' => null,
+            ];
+        }
+        $revision = $this->annualRevisions->latest(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            AnnualSettlementSnapshotBuilder::PURPOSE,
         );
-        $statement->execute([$supplierId, $employeeId, $taxYear]);
-        if ($statement->fetchColumn() !== false) {
+        if ($revision === null) {
+            return [
+                'value' => ['performed' => false, 'result' => null],
+                'source' => null,
+            ];
+        }
+        $json = $this->encryption->decryptFor(
+            $this->text($revision, 'snapshot_ciphertext'),
+            implode(':', [
+                'payroll-annual-document',
+                (string) $supplierId,
+                (string) $employeeId,
+                (string) $taxYear,
+                AnnualSettlementSnapshotBuilder::PURPOSE,
+                $this->hash($revision, 'source_manifest_hash'),
+            ]),
+        );
+        $snapshotHash = $this->hash($revision, 'snapshot_hash');
+        if (!hash_equals(
+            $snapshotHash,
+            $this->sensitiveData->keyedFingerprint(
+                $json,
+                AnnualSettlementSnapshotBuilder::SNAPSHOT_FINGERPRINT_DOMAIN,
+                $supplierId,
+            ),
+        )) {
             throw new \DomainException(
-                'Schválené roční zúčtování vyžaduje mapování dalších řádků '
-                . 'potvrzení a nelze je tiše vynechat.',
+                'Otisk revize ročního zúčtování nesouhlasí s jejím obsahem.',
             );
         }
+        $snapshot = $this->decodeObject($json, 'Roční zúčtování');
+        if (($snapshot['schema_version'] ?? null)
+            !== AnnualSettlementSnapshotBuilder::SCHEMA_VERSION
+        ) {
+            throw new \DomainException(
+                'Revize ročního zúčtování má nepodporované schéma.',
+            );
+        }
+        $result = $this->object($snapshot['result'] ?? null, 'result');
+        $performed = $result['performed'] ?? null;
+        if ($performed === false) {
+            $blockers = $this->list($result['blockers'] ?? null, 'result.blockers');
+            if ($blockers === []) {
+                throw new \DomainException(
+                    'Neprovedené roční zúčtování nemá doložený důvod.',
+                );
+            }
+            foreach ($blockers as $blocker) {
+                if (!is_string($blocker) || trim($blocker) === '') {
+                    throw new \DomainException(
+                        'Důvod neprovedeného ročního zúčtování není platný.',
+                    );
+                }
+            }
+
+            return [
+                'value' => ['performed' => false, 'result' => null],
+                'source' => [
+                    'revision_id' => $this->positiveInt($revision, 'id'),
+                    'snapshot_hash' => $snapshotHash,
+                    'performed' => false,
+                ],
+            ];
+        }
+        if ($performed !== true) {
+            throw new \DomainException(
+                'Schválená revize nemá platný stav ročního zúčtování.',
+            );
+        }
+        $trace = $this->object($result['trace'] ?? null, 'result.trace');
+        $taxBeforeCredits = $this->nonNegativeInt(
+            $result,
+            'tax_before_credits_minor_units',
+        );
+        $appliedCredits = $this->nonNegativeInt(
+            $result,
+            'applied_credits_minor_units',
+        );
+        $childCredit = $this->nonNegativeInt(
+            $result,
+            'child_credit_minor_units',
+        );
+        $taxAfterAllCredits = $this->nonNegativeInt(
+            $result,
+            'tax_after_all_credits_minor_units',
+        );
+        if ($appliedCredits > $taxBeforeCredits
+            || $childCredit > $taxBeforeCredits - $appliedCredits
+            || $taxAfterAllCredits
+                !== $taxBeforeCredits - $appliedCredits - $childCredit
+        ) {
+            throw new \DomainException(
+                'Roční zúčtování nemá průkazný rozklad daně a slev.',
+            );
+        }
+        $totalAdvanceTax = $this->nonNegativeInt(
+            $trace,
+            'total_advance_tax_minor_units',
+        );
+        $taxDifference = $this->int($result, 'tax_difference_minor_units');
+        $bonusDifference = $this->int($result, 'bonus_difference_minor_units');
+        if ($taxDifference !== $totalAdvanceTax - $taxAfterAllCredits) {
+            throw new \DomainException(
+                'Přeplatek na dani neodpovídá doloženým zálohám a slevám.',
+            );
+        }
+        $settlementDifference = $this->int(
+            $result,
+            'settlement_difference_minor_units',
+        );
+        $payable = $this->nonNegativeInt($result, 'payable_minor_units');
+        $payoutThreshold = $this->nonNegativeInt(
+            $trace,
+            'payout_threshold_minor_units',
+        );
+        if ($settlementDifference !== $taxDifference + $bonusDifference
+            || $payable !== ($settlementDifference > $payoutThreshold
+                ? $settlementDifference
+                : 0)
+        ) {
+            throw new \DomainException(
+                'Doplatek ročního zúčtování neodpovídá daňové a bonusové části.',
+            );
+        }
+
+        return [
+            'value' => [
+                'performed' => true,
+                'result' => [
+                    'tax_overpayment_minor_units' => max(
+                        0,
+                        $totalAdvanceTax
+                            - ($taxBeforeCredits - $appliedCredits),
+                    ),
+                    'settlement_supplement_minor_units' =>
+                        $payable,
+                    'tax_overpayment_after_credit_minor_units' =>
+                        max(0, $taxDifference),
+                    'tax_bonus_difference_minor_units' => $bonusDifference,
+                    'taxpayer_product_deductions_minor_units' => [
+                        'pension_supplementary' => 0,
+                        'supplementary_pension' => 0,
+                        'pension_insurance' => 0,
+                        'private_life_insurance' => 0,
+                        'long_term_investment_product' => 0,
+                    ],
+                ],
+            ],
+            'source' => [
+                'revision_id' => $this->positiveInt($revision, 'id'),
+                'snapshot_hash' => $snapshotHash,
+                'performed' => true,
+            ],
+        ];
     }
 
     /** @param array<string,mixed> $root
@@ -1331,6 +1773,23 @@ class AnnualTaxCertificateSnapshotBuilder
         return $value;
     }
 
+    private static function displayDate(string $value): string
+    {
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        if ($date === false || $date->format('Y-m-d') !== $value) {
+            throw new \DomainException(
+                'Datum osobního identifikátoru není platné.',
+            );
+        }
+
+        return sprintf(
+            '%d. %d. %s',
+            (int) $date->format('d'),
+            (int) $date->format('m'),
+            $date->format('Y'),
+        );
+    }
+
     /** @param array<string,mixed> $source */
     private function nullableText(array $source, string $key): ?string
     {
@@ -1391,15 +1850,25 @@ class AnnualTaxCertificateSnapshotBuilder
             $snapshot['annual_settlement'] ?? null,
             'annual_settlement',
         );
-        if (($settlement['performed'] ?? null) !== false
-            || ($settlement['result'] ?? null) !== null
+        $performed = $settlement['performed'] ?? null;
+        $result = $settlement['result'] ?? null;
+        if (!is_bool($performed)
+            || !array_key_exists('result', $settlement)
+            || (($performed === false && $result !== null)
+                || ($performed === true
+                    && (!is_array($result) || array_is_list($result))))
         ) {
             throw new \DomainException(
-                'Roční zúčtování v daňovém snapshotu není podporované.',
+                'Roční zúčtování v daňovém snapshotu nemá platnou strukturu.',
             );
         }
 
-        return ['performed' => false, 'result' => null];
+        return [
+            'performed' => $performed,
+            'result' => $performed
+                ? $this->object($result, 'annual_settlement.result')
+                : null,
+        ];
     }
 
     /** @param array<string,mixed> $source */

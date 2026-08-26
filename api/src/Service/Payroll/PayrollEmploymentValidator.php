@@ -13,6 +13,7 @@ namespace MyInvoice\Service\Payroll;
  *   actual_start_on:?string,
  *   fixed_term_end_on:?string,
  *   weekly_hours:?string,
+ *   leave_entitlement_weeks_override:?int,
  *   workload_basis_points:int,
  *   work_place:?string,
  *   regular_workplace:?string,
@@ -24,6 +25,10 @@ namespace MyInvoice\Service\Payroll;
  *   jmhz_apz_instrument_code:?string,
  *   jmhz_functional_benefits_status:string,
  *   jmhz_temporary_assignment_status:string,
+ *   jmhz_orchard_discount_eligible:bool,
+ *   jmhz_specific_legal_fact_applies:bool,
+ *   jmhz_ozp_employment_support_applies:bool,
+ *   jmhz_deep_mining_work_applies:bool,
  *   cz_isco_code:?string,
  *   activity_code:?string,
  *   jmhz_relationship_detail_code:?string,
@@ -136,7 +141,7 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException('Chybí počáteční smluvní podmínky.');
         }
 
-        $terms = $this->terms($this->stringKeyed($input['terms']));
+        $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType);
         if ($terms['actual_start_on'] !== null) {
             throw new \InvalidArgumentException(
                 'Skutečný nástup se zaznamenává přechodem pracovního vztahu do aktivního stavu.'
@@ -162,12 +167,15 @@ final class PayrollEmploymentValidator
      *        zápisová cesta: obrazovky, které o poli nevědí (rychlá editace,
      *        založení vztahu ze seznamu), posílají podmínky bez něj a nesmí ho
      *        tím zahodit — viz {@see otherWithholdingEligibility()}.
+     * @param ?string $relationType Druh vztahu načtený serverem nebo právě
+     *        validovaný při založení; váže rodinu činností JMHZ k právnímu typu.
      * @return TermsInput
      */
     public function terms(
         array $input,
         ?string $storedCzIscoCode = null,
         ?string $storedOtherWithholdingEligibility = null,
+        ?string $relationType = null,
     ): array {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
@@ -249,7 +257,7 @@ final class PayrollEmploymentValidator
         }
         $externalCodebook = $municipalityCode === null
             ? null
-            : $this->jmhzEvidence->externalCodebookProvenance();
+            : $this->jmhzEvidence->externalCodebookProvenance($effectiveFrom);
 
         $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
         $apzCode = $this->optionalText($input, 'jmhz_apz_instrument_code', 8);
@@ -283,6 +291,9 @@ final class PayrollEmploymentValidator
                 );
             }
         }
+        if ($relationType !== null) {
+            $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
+        }
 
         return [
             'office_id' => $officeId,
@@ -292,6 +303,9 @@ final class PayrollEmploymentValidator
             'actual_start_on' => $this->optionalDate($input, 'actual_start_on'),
             'fixed_term_end_on' => $fixedEnd,
             'weekly_hours' => $hours === null ? null : (string) $hours,
+            'leave_entitlement_weeks_override' => $this->leaveWeeksOverride(
+                $input['leave_entitlement_weeks_override'] ?? null,
+            ),
             'workload_basis_points' => $workload,
             'work_place' => $workPlace,
             'regular_workplace' => $this->optionalText($input, 'regular_workplace', 255),
@@ -303,6 +317,26 @@ final class PayrollEmploymentValidator
             'jmhz_apz_instrument_code' => $apzCode,
             'jmhz_functional_benefits_status' => $functionalBenefits,
             'jmhz_temporary_assignment_status' => $temporaryAssignment,
+            'jmhz_orchard_discount_eligible' => $this->requiredBool(
+                $input,
+                'jmhz_orchard_discount_eligible',
+                false,
+            ),
+            'jmhz_specific_legal_fact_applies' => $this->requiredBool(
+                $input,
+                'jmhz_specific_legal_fact_applies',
+                false,
+            ),
+            'jmhz_ozp_employment_support_applies' => $this->requiredBool(
+                $input,
+                'jmhz_ozp_employment_support_applies',
+                false,
+            ),
+            'jmhz_deep_mining_work_applies' => $this->requiredBool(
+                $input,
+                'jmhz_deep_mining_work_applies',
+                false,
+            ),
             'cz_isco_code' => $this->optionalCzIscoCode($input, 'cz_isco_code', $storedCzIscoCode),
             'activity_code' => $activityCode,
             'jmhz_relationship_detail_code' => $relationshipDetailCode,
@@ -325,6 +359,41 @@ final class PayrollEmploymentValidator
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
         ];
+    }
+
+    private function leaveWeeksOverride(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_int($value) || $value < 4 || $value > 12) {
+            throw new \InvalidArgumentException(
+                'Výjimka výměry dovolené musí mít nejméně 4 týdny a nejvýše 12 týdnů.',
+            );
+        }
+
+        return $value;
+    }
+
+    private function assertRelationActivityFamily(
+        string $relationType,
+        ?string $activityCode,
+        ?string $relationshipDetailCode,
+    ): void {
+        if ($activityCode === null) {
+            return;
+        }
+        if (PayrollEmploymentJmhzActivityFamily::appliesTo($relationType)
+            && !PayrollEmploymentJmhzActivityFamily::matches(
+                $relationType,
+                $activityCode,
+                $relationshipDetailCode,
+            )
+        ) {
+            throw new \InvalidArgumentException(
+                'Druh činnosti nebo bližší určení neodpovídá druhu pracovního vztahu.',
+            );
+        }
     }
 
     /** @param array<string,mixed> $input

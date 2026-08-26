@@ -1,12 +1,18 @@
 84af3a344b421d462ea96233ae4267e524345750b84dbf1b95813f2bc47f6224  cssz-2025/DIS.CSSZ.2025.pem
-fbc87a3aab479af1c58bd44aa710e43f5a522d5ebca5de6eec9bbb690ad8a440  dictionary-1.4.1.6/Katalog kontrol MH(public)_1.4.2.7.xlsx
-3d53053426256e81f8a94c351a2bd62392a75d1c9beb5fc201e857850fd8bac1  dictionary-1.4.1.6/control-manifest.json
+8c861badbd6229e9185482b0caaf19d6ded4797b27bf37f8b53dcb3b31151b49  dictionary-1.4.1.6/Katalog kontrol MH(public)_1.4.2.8.xlsx
+70aa04ef7d04930e4102ab0e39eab2c8ef9e9208b838be606786f705224bc794  dictionary-1.4.1.6/control-manifest.json
 cc282115d58a3744348b500a2dcc6eec4a5899b12753ec756f01fe261fd7ff37  dictionary-1.4.1.6/datove_scenare_interakce_povinnosti_MH_1.4.0.2.xlsx
 e794a56d3baa48dd876ad45a0deb5b1bb77c17a0cb44a3511e8ef4028be69743  dictionary-1.4.1.6/datovy_slovnik_1.4.1.6.xlsx
-d67c85c9a07c39f7e96597a9927f252d48a852351031bd120282c0f7d5db95c5  dictionary-1.4.1.6/manifest.json
-50d21aa989c86477ca3f3d3f1cccf9ed85327fdfe958ec14410c261ba41ff3cc  dictionary-1.4.1.6/scenario-requirement-manifest.json
+66d25f821a332923713e286bff1dbe38148dda3c74100aa42c3ccae9252d0330  dictionary-1.4.1.6/manifest.json
+edd561c55bd7df53062e44a03ea086d89999b40b768bf7a7ff20e4ff71058583  dictionary-1.4.1.6/scenario-requirement-manifest.json
 11a35b83dd761d5d0a7cb466d74c74e5ee8c6de36970c58edde3e0d63f2c268f  examples-2026-04-13/classification-decisions.json
-cf06acd1ca39db1e88942fceb420b844ef84b010c14a8a5c1079fe64bc2f8abd  examples-2026-04-13/manifest.json
+136d14ac2b76f8e4db282df371c5949f23634f2943bdfb82cdf735b80117a79f  examples-2026-04-13/manifest.json
 940d3ebef6d42294da79c7611654a59aef5beead3a48ffbdffdac9d0f1c58886  external-codebooks-2026-08-13/CIS1186_CS_2026-08-13.csv
-f213bc6fa4b61ac014fa60e90147ec6d10e29d5a85d20b8caa08fffdcb8688e3  external-codebooks-2026-08-13/manifest.json
+901c68267729b6d1dc7fa8290bf2e9203b7214dd389698f6581e84a9c69e3bfa  external-codebooks-2026-08-13/manifest.json
 b4f130984c94904d083306b19e47f146e6e703847d315219daf97589a7526d44  external-codebooks-2026-08-13/sb-2025-511-priloha-2-fragment-1093782.ttl
+940d3ebef6d42294da79c7611654a59aef5beead3a48ffbdffdac9d0f1c58886  external-codebooks-2026-08-31/CIS1186_CS_2026-08-13.csv
+6e70f06dadc82853ff9302a25f93c1247e4a50a3c9ee3d5874d72174fa96d4cf  external-codebooks-2026-08-31/manifest.json
+b4f130984c94904d083306b19e47f146e6e703847d315219daf97589a7526d44  external-codebooks-2026-08-31/sb-2025-511-priloha-2-fragment-1093782.ttl
+940d3ebef6d42294da79c7611654a59aef5beead3a48ffbdffdac9d0f1c58886  external-codebooks-2026-09-01/CIS1186_CS_2026-08-26.csv
+ac65835fee9c7324dff018c50544375bcba5dcadc70b9963f89048664e868d13  external-codebooks-2026-09-01/manifest.json
+2263cd58c4dc589e42bc48f13f30db464ffce16e611762364c73f6a1c5bbc003  external-codebooks-2026-09-01/sb-2026-145-priloha-2-fragment-1836642.ttl

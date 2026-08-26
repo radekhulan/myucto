@@ -103,6 +103,12 @@ final readonly class PayrollRegistrationIdentityService
                     'Pracovní vztah nepatří stejné firmě a osobě.',
                 );
             }
+            if ($employment['start_date'] === null) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'registration_identity_employment_scope_mismatch',
+                    'Pracovní vztah nemá doplněné datum nástupu.',
+                );
+            }
             if ($onDate < $employment['start_date']
                 || ($employment['end_date'] !== null
                     && $onDate > $employment['end_date'])
@@ -239,6 +245,12 @@ final readonly class PayrollRegistrationIdentityService
                 throw new PayrollRegistrationIdentitySnapshotException(
                     'jmhz_identity_employment_scope_mismatch',
                     'Pracovní vztah nepatří stejné firmě a osobě.',
+                );
+            }
+            if ($employment['start_date'] === null) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'jmhz_identity_employment_scope_mismatch',
+                    'Pracovní vztah nemá doplněné datum nástupu.',
                 );
             }
             if ($onDate < $employment['start_date']
@@ -397,6 +409,196 @@ final readonly class PayrollRegistrationIdentityService
             'identifiers' => $identifiers,
             'identifier_sources' => $identifierSources,
         ];
+    }
+
+    /**
+     * Bezpečný stav pro UI: identifikátory nikdy nevrací v otevřené podobě.
+     *
+     * @return array{
+     *   employee_id:int,employment_id:int,environment:string,on_date:string,
+     *   person_external_identifier:?array{
+     *     id:int,value_masked:string,valid_from:string,valid_to:?string,
+     *     source_kind:string,row_version:int
+     *   },
+     *   employment_external_identifier:?array{
+     *     id:int,value_masked:string,valid_from:string,valid_to:?string,
+     *     source_kind:string,row_version:int
+     *   }
+     * }
+     */
+    public function jmhzIdentityStatusAt(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        string $onDate,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $this->date($onDate, 'Rozhodné datum');
+
+        $employment = $this->repository->employment(
+            $supplierId,
+            $employmentId,
+        );
+        if ($employment === null) {
+            throw new \OutOfBoundsException(
+                'Pracovní vztah nebyl nalezen ve stejné firmě.',
+            );
+        }
+        if ($employment['start_date'] === null) {
+            throw new \InvalidArgumentException(
+                'Pracovní vztah nemá doplněné datum nástupu.',
+            );
+        }
+        if ($onDate < $employment['start_date']
+            || ($employment['end_date'] !== null
+                && $onDate > $employment['end_date'])
+        ) {
+            throw new \InvalidArgumentException(
+                'Rozhodné datum neleží v období pracovního vztahu.',
+            );
+        }
+
+        $person = $this->repository->personExternalIdAt(
+            $supplierId,
+            $employment['employee_id'],
+            $environment,
+            'ik_mpsv',
+            $onDate,
+        );
+        $employmentExternal = $this->repository->externalIdAt(
+            $supplierId,
+            $employmentId,
+            $environment,
+            'id_ppv',
+            $onDate,
+        );
+
+        return [
+            'employee_id' => $employment['employee_id'],
+            'employment_id' => $employmentId,
+            'environment' => $environment,
+            'on_date' => $onDate,
+            'person_external_identifier' => $person === null
+                ? null
+                : $this->maskedExternalIdentifier($person),
+            'employment_external_identifier' => $employmentExternal === null
+                ? null
+                : $this->maskedExternalIdentifier($employmentExternal),
+        ];
+    }
+
+    /**
+     * Ruční doplnění z karty vztahu. Obě hodnoty se ukládají v jedné
+     * transakci; již existující část dvojice lze vynechat.
+     *
+     * @return array{
+     *   person_external_identifier:?array<string,mixed>,
+     *   employment_external_identifier:?array<string,mixed>
+     * }
+     */
+    public function assignManualJmhzIdentity(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        ?string $personIdentifier,
+        ?string $employmentIdentifier,
+        string $validFrom,
+        ?string $sourceReference,
+        bool $evidenceConfirmed,
+        ?int $createdBy,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $this->date($validFrom, 'Platnost identifikátorů');
+        $this->optionalPositive($createdBy, 'Uživatel');
+        if (!$evidenceConfirmed) {
+            throw new \InvalidArgumentException(
+                'Potvrďte, že jste identifikátory ověřili v podkladu ČSSZ.',
+            );
+        }
+        $personIdentifier = $this->nullableText($personIdentifier);
+        $employmentIdentifier = $this->nullableText($employmentIdentifier);
+        if ($personIdentifier === null && $employmentIdentifier === null) {
+            throw new \InvalidArgumentException(
+                'Doplňte OIČ / IK MPSV nebo ID PPV.',
+            );
+        }
+        $personIdentifier = $personIdentifier === null
+            ? null
+            : self::oic($personIdentifier);
+        $employmentIdentifier = $employmentIdentifier === null
+            ? null
+            : self::idPpv($employmentIdentifier);
+        $reference = $this->evidenceReference(
+            $this->nullableText($sourceReference)
+                ?? "manual-jmhz-identity:employment:{$employmentId}",
+        );
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $environment,
+            $personIdentifier,
+            $employmentIdentifier,
+            $validFrom,
+            $reference,
+            $createdBy,
+        ): array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null) {
+                throw new \OutOfBoundsException(
+                    'Pracovní vztah nebyl nalezen ve stejné firmě.',
+                );
+            }
+            if ($employment['start_date'] === null) {
+                throw new \InvalidArgumentException(
+                    'Pracovní vztah nemá doplněné datum nástupu.',
+                );
+            }
+            if ($validFrom < $employment['start_date']
+                || ($employment['end_date'] !== null
+                    && $validFrom > $employment['end_date'])
+            ) {
+                throw new \InvalidArgumentException(
+                    'Platnost identifikátorů neleží v období pracovního vztahu.',
+                );
+            }
+
+            return [
+                'person_external_identifier' => $personIdentifier === null
+                    ? null
+                    : $this->assignPersonExternalId(
+                        $supplierId,
+                        $employment['employee_id'],
+                        $environment,
+                        $personIdentifier,
+                        $validFrom,
+                        'verified_manual_import',
+                        $reference,
+                        null,
+                        $createdBy,
+                    ),
+                'employment_external_identifier' => $employmentIdentifier === null
+                    ? null
+                    : $this->assignEmploymentExternalId(
+                        $supplierId,
+                        $employmentId,
+                        $environment,
+                        $employmentIdentifier,
+                        $validFrom,
+                        'verified_manual_import',
+                        $reference,
+                        null,
+                        $createdBy,
+                    ),
+            ];
+        });
     }
 
     /**
@@ -665,6 +867,11 @@ final readonly class PayrollRegistrationIdentityService
             if ($employment === null) {
                 throw new \DomainException(
                     'Pracovní vztah nebyl nalezen ve stejné firmě.',
+                );
+            }
+            if ($employment['start_date'] === null) {
+                throw new \DomainException(
+                    'Pracovní vztah nemá doplněné datum nástupu.',
                 );
             }
             if ($validFrom < $employment['start_date']
@@ -941,7 +1148,18 @@ final readonly class PayrollRegistrationIdentityService
     }
 
     /**
-     * @param array<string,mixed> $stored
+     * @param array{
+     *   id:int,employee_id:int,environment:string,identifier_type:string,
+     *   value_ciphertext:string,value_hash:string,value_masked:string,
+     *   valid_from:string,valid_to:?string,source_kind:string,
+     *   source_receipt_id:?int,source_reference_hash:string,row_version:int
+     * }|array{
+     *   id:int,employee_id:int,employment_id:int,environment:string,
+     *   identifier_type:string,value_ciphertext:string,value_hash:string,
+     *   value_masked:string,valid_from:string,valid_to:?string,
+     *   source_kind:string,source_receipt_id:?int,
+     *   source_reference_hash:string,row_version:int
+     * } $stored
      * @return array{
      *   id:int,identifier_type:string,value:string,valid_from:string,
      *   valid_to:?string,source_kind:string,source_receipt_id:?int,
@@ -983,6 +1201,30 @@ final readonly class PayrollRegistrationIdentityService
                 ? null
                 : (int) $stored['source_receipt_id'],
             'source_reference_hash' => (string) $stored['source_reference_hash'],
+            'row_version' => (int) $stored['row_version'],
+        ];
+    }
+
+    /**
+     * @param array{
+     *   id:int,value_masked:string,valid_from:string,valid_to:?string,
+     *   source_kind:string,row_version:int
+     * } $stored
+     * @return array{
+     *   id:int,value_masked:string,valid_from:string,valid_to:?string,
+     *   source_kind:string,row_version:int
+     * }
+     */
+    private function maskedExternalIdentifier(array $stored): array
+    {
+        return [
+            'id' => (int) $stored['id'],
+            'value_masked' => (string) $stored['value_masked'],
+            'valid_from' => (string) $stored['valid_from'],
+            'valid_to' => $stored['valid_to'] === null
+                ? null
+                : (string) $stored['valid_to'],
+            'source_kind' => (string) $stored['source_kind'],
             'row_version' => (int) $stored['row_version'],
         ];
     }

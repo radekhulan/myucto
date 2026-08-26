@@ -20,6 +20,7 @@ import PayrollFileDropzone, {
   type PayrollFileRejectReason,
 } from '@/components/payroll/PayrollFileDropzone.vue'
 import Modal from '@/components/ui/Modal.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import {
@@ -100,6 +101,7 @@ const importFormat = ref<'csv' | 'xlsx'>('csv')
 const importContent = ref('')
 const importFileError = ref('')
 const importPreview = ref<PayrollTimeImportPreview | null>(null)
+const IMPORT_MAX_BYTES = 5_000_000
 const selectedEmploymentIds = ref<number[]>([])
 const approvalItem = ref<PayrollTimeOverviewItem | null>(null)
 const approvalStandardFund = ref('')
@@ -141,6 +143,11 @@ const selected = computed(() =>
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
 const visibleItems = computed(() => overview.value?.items ?? [])
+const employmentOptions = computed(() => visibleItems.value.map(item => ({
+  value: item.employment.id,
+  label: item.employment.full_name,
+  secondary: `${relationLabel(item.employment.relation_type)} · ${item.employment.code}`,
+})))
 const focusMissing = computed(() =>
   focusEmploymentId.value !== null
   && overview.value !== null
@@ -832,6 +839,10 @@ function clearImportSelection() {
 }
 
 async function loadImportFile(file: File) {
+  if (file.size > IMPORT_MAX_BYTES) {
+    rejectImportFile('file_too_large')
+    return
+  }
   importFileError.value = ''
   importName.value = file.name
   importFormat.value = file.name.toLowerCase().endsWith('.xlsx') ? 'xlsx' : 'csv'
@@ -841,10 +852,21 @@ async function loadImportFile(file: File) {
     if (importFormat.value === 'csv') {
       importContent.value = await file.text()
     } else {
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      let binary = ''
-      for (const byte of bytes) binary += String.fromCharCode(byte)
-      importContent.value = btoa(binary)
+      const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(reader.error ?? new Error('file_read_failed'))
+        reader.onload = () => {
+          if (reader.result instanceof ArrayBuffer) resolve(reader.result)
+          else reject(new Error('file_read_failed'))
+        }
+        reader.readAsArrayBuffer(file)
+      })
+      const bytes = new Uint8Array(buffer)
+      const chunks: string[] = []
+      for (let offset = 0; offset < bytes.length; offset += 32_768) {
+        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32_768)))
+      }
+      importContent.value = btoa(chunks.join(''))
     }
   } catch {
     clearImportSelection()
@@ -958,11 +980,14 @@ onMounted(load)
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.employment') }}</span>
-          <select v-model="employmentId" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
-            <option v-for="item in overview?.items" :key="item.employment.id" :value="item.employment.id">
-              {{ item.employment.full_name }} · {{ relationLabel(item.employment.relation_type) }} ({{ item.employment.code }})
-            </option>
-          </select>
+          <SearchableSelect
+            v-model="employmentId"
+            :options="employmentOptions"
+            :clearable="false"
+            accent="payroll"
+            data-test="payroll-time-employment"
+            :aria-label="t('payroll.time.editor.employment')"
+          />
         </label>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.type') }}</span>
@@ -1064,7 +1089,7 @@ onMounted(load)
       </div>
       <div v-if="importPreview" class="mt-4 rounded-lg bg-neutral-50 p-4 text-sm">
         <p>{{ t('payroll.time.import.summary', importPreview) }}</p>
-        <p v-if="!importPreview.supported" class="mt-2 text-warning-700">{{ t('payroll.time.import.xlsx_manual') }}</p>
+        <p v-if="importFormat === 'xlsx'" class="mt-2 text-neutral-600">{{ t('payroll.time.import.xlsx_security') }}</p>
         <ul v-if="importPreview.errors.length" class="mt-3 space-y-1 text-danger-600">
           <li v-for="error in importPreview.errors" :key="`${error.row_number}-${error.error_code}`">
             {{ t('payroll.time.import.row_error', { row: error.row_number, message: error.error_message }) }}

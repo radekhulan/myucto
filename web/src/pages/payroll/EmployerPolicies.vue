@@ -71,7 +71,8 @@ function newPolicy(): PayrollEmployerPolicyPayload {
     balance_rounding_mode: 'exact_minor_units',
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
-    four_eyes_required: true,
+    leave_entitlement_weeks: 5,
+    four_eyes_required: false,
     automatic_calculation_enabled: false,
     automatic_posting_enabled: false,
     automatic_payments_enabled: false,
@@ -112,6 +113,9 @@ const valid = computed(() => {
     || form.value.payday_day > 31) {
     return false
   }
+  if (!Number.isInteger(form.value.leave_entitlement_weeks)
+    || form.value.leave_entitlement_weeks < 4
+    || form.value.leave_entitlement_weeks > 12) return false
   if ((form.value.source_reference?.length ?? 0) > 255) return false
   if (form.value.delivery_channel === 'disabled') {
     return form.value.delivery_verified_on === null
@@ -155,7 +159,6 @@ const knownCheckCodes = new Set([
   'effective_policy',
   'home_office_policy',
   'travel_expense_policy',
-  'four_eyes',
   'automatic_calculation',
   'automatic_posting',
   'automatic_payments',
@@ -206,7 +209,8 @@ function edit(policy: PayrollEmployerPolicy) {
     balance_rounding_mode: policy.balance_rounding_mode,
     home_office_policy: policy.home_office_policy,
     travel_expense_policy: policy.travel_expense_policy,
-    four_eyes_required: policy.four_eyes_required,
+    leave_entitlement_weeks: policy.leave_entitlement_weeks,
+    four_eyes_required: false,
     automatic_calculation_enabled: policy.automatic_calculation_enabled,
     automatic_posting_enabled: policy.automatic_posting_enabled,
     automatic_payments_enabled: policy.automatic_payments_enabled,
@@ -720,6 +724,13 @@ onMounted(load)
             @update:model-value="form.home_office_policy = $event ?? 'not_used'"
           />
         </div>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">
+            {{ t('payroll.employer.policies.leave_entitlement_weeks') }}
+          </span>
+          <input v-model.number="form.leave_entitlement_weeks" type="number" min="4" max="12" step="1" :disabled="!canWrite" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20">
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.employer.policies.leave_entitlement_weeks_hint') }}</span>
+        </label>
         <div>
           <span class="mb-1 block text-sm font-medium text-neutral-700">
             {{ t('payroll.employer.policies.travel_expenses') }}
@@ -739,11 +750,7 @@ onMounted(load)
         <legend class="text-sm font-semibold text-neutral-900">
           {{ t('payroll.employer.policies.automation_title') }}
         </legend>
-        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <label class="flex items-start gap-2">
-            <input v-model="form.four_eyes_required" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
-            <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.four_eyes') }}</span>
-          </label>
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <label class="flex items-start gap-2">
             <input v-model="form.automatic_calculation_enabled" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
             <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.automatic_calculation') }}</span>

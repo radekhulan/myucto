@@ -228,7 +228,8 @@ final class SubmissionOutboxInvariantsTest extends TestCase
         // v repozitáři a seznam Finanční správy je z roku 2023, takže není
         // zdrojem pravdy. Seznam se smí rozšířit jen spolu s dokladem.
         $documented = [
-            'zp_vzp_111', 'zp_cpzp_205', 'zp_ozp_207', 'zp_zpmvcr_211',
+            'zp_vzp_111', 'zp_vozp_201', 'zp_cpzp_205', 'zp_ozp_207',
+            'zp_zpskoda_209', 'zp_zpmvcr_211', 'zp_rbp_213',
             'cssz_epodani_jmhz', 'cssz_epodani_obecna', 'cssz_epodani_test',
         ];
 

@@ -291,7 +291,7 @@ vyplnit, než začneš fakturovat. Vidí ho každý, kdo smí zapisovat.
 | Číselné řady a doklady | Nastavení → Fakturace (`/admin/settings?tab=documents`) |
 | Číselné řady deníku | Jen podvojné účetnictví — [Účetní nástroje](69_Ucetni_nastroje.md) |
 | Avíza plateb z e-mailů | [Banka → Bankovní avíza z e-mailu](28_Banka.md) (`/bank?tab=email`) |
-| Datová schránka | Systém → Datová schránka (`/admin/databox`) |
+| Datová schránka | [Firma → Datová schránka](73_Nastaveni.md#7317-datova-schranka) (`/admin/databox`) |
 | Uživatelé a role | [Uživatelé](73_Nastaveni.md#732-uzivatele) |
 | První klient / první faktura | [Klienti](18_Klienti.md) · [Faktury](14_Faktury.md) |
 

@@ -133,6 +133,97 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
         );
     }
 
+    public function testAcceptsDocumentedDisabilityAndChildEvidence(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'supportedInputEvidence',
+        );
+        $input = self::inputPerson();
+        $input['statutory_evidence']['income_tax']['credit_claims'][] = [
+            'credit_kind' => 'disability-extended',
+            'evidence_status' => 'verified',
+        ];
+        $input['statutory_evidence']['income_tax']['child_claims'][] = [
+            'child_reference' => 'dependant-7',
+            'child_order' => 1,
+            'ztp_p' => true,
+            'evidence_status' => 'verified',
+            'shared_household_confirmed' => true,
+            'other_claimant_excluded' => true,
+        ];
+
+        $evidence = $method->invoke(
+            $builder,
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+        );
+
+        self::assertSame([
+            'status' => 'czech-resident',
+            'country_code' => 'CZ',
+        ], $evidence['residence']);
+        self::assertSame(
+            ['taxpayer', 'disability-extended'],
+            array_column($evidence['credit_claims'], 'credit_kind'),
+        );
+        self::assertSame('dependant-7', $evidence['child_claims'][0]['child_reference']);
+    }
+
+    public function testAcceptsDocumentedEeaNonresidentWithoutResidentOnlyCredits(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'supportedInputEvidence',
+        );
+        $input = self::inputPerson();
+        $input['statutory_evidence']['income_tax']['residence'] = [
+            'residence' => 'non-resident',
+            'country_code' => 'SK',
+        ];
+
+        $evidence = $method->invoke(
+            $builder,
+            $input,
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+        );
+
+        self::assertSame([
+            'status' => 'non-resident',
+            'country_code' => 'SK',
+        ], $evidence['residence']);
+    }
+
+    public function testWithholdingCertificateRejectsNonresidentOutsideEuAndEea(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'supportedInputEvidence',
+        );
+        $input = self::inputPerson();
+        $input['statutory_evidence']['income_tax']['residence'] = [
+            'residence' => 'non-resident',
+            'country_code' => 'US',
+        ];
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('EU nebo EHP');
+        $method->invoke(
+            $builder,
+            $input,
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+        );
+    }
+
     /** @return array<string,mixed> */
     private static function person(): array
     {

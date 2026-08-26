@@ -8,7 +8,6 @@ const m = vi.hoisted(() => ({
   prepare: vi.fn(),
   requestEnd: vi.fn(),
   recordReceipt: vi.fn(),
-  peopleOptions: vi.fn(),
   person: vi.fn(),
 }))
 
@@ -25,8 +24,16 @@ vi.mock('@/api/payrollDiscountIntents', () => ({
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
-    peopleOptions: m.peopleOptions,
     person: m.person,
+  },
+}))
+
+vi.mock('@/components/payroll/PayrollPersonSearchSelect.vue', () => ({
+  default: {
+    name: 'PayrollPersonSearchSelect',
+    props: ['modelValue'],
+    emits: ['update:modelValue'],
+    template: '<select data-test="person-search" role="combobox" />',
   },
 }))
 
@@ -78,9 +85,21 @@ function intent(overrides: IntentOverrides = {}): Record<string, unknown> {
 describe('PayrollDiscountIntentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    m.peopleOptions.mockResolvedValue([])
     m.person.mockResolvedValue({ employments: [] })
     m.list.mockResolvedValue([])
+  })
+
+  it('používá dark-mode tokeny na kartách a datumových polích', async () => {
+    const wrapper = mount(PayrollDiscountIntentsPanel)
+    await flushPromises()
+
+    expect(wrapper.html()).not.toContain('bg-white')
+    expect(wrapper.get('[data-test="discount-intent-from"]').classes())
+      .toContain('bg-surface')
+    expect(wrapper.get('[data-test="discount-intent-informed-on"]').classes())
+      .toContain('bg-surface')
+    expect(wrapper.findComponent({ name: 'PayrollPersonSearchSelect' }).exists())
+      .toBe(true)
   })
 
   /**

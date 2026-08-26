@@ -100,6 +100,7 @@ final class PayrollPaymentReconciliationService
             $matchId = $this->matches->insert(
                 $command->supplierId,
                 $command->allocationId,
+                $allocation['liability_id'],
                 'matched',
                 null,
                 $command->amountMinor,
@@ -120,6 +121,254 @@ final class PayrollPaymentReconciliationService
             }
 
             return $this->result($stored, false);
+        });
+    }
+
+    public function matchIncomingRefund(
+        PayrollIncomingRefundReconciliationCommand $command,
+    ): PayrollIncomingRefundReconciliationResult {
+        $this->assertCommand(
+            $command->supplierId,
+            $command->amountMinor,
+            $command->idempotencyKey,
+            $command->matchedBy,
+        );
+        if ($command->liabilityId <= 0) {
+            throw new \InvalidArgumentException(
+                'Příchozí mzdový závazek musí být kladné číslo.',
+            );
+        }
+        $this->assertEvidenceReference($command->evidence);
+        $idempotencyHash = hash('sha256', $command->idempotencyKey, true);
+
+        return $this->matches->transaction(function () use (
+            $command,
+            $idempotencyHash,
+        ): PayrollIncomingRefundReconciliationResult {
+            $existing = $this->matches->findByIdempotency(
+                $command->supplierId,
+                $idempotencyHash,
+            );
+            if ($existing !== null) {
+                return $this->replayIncomingRefund(
+                    $existing,
+                    $command->liabilityId,
+                    'matched',
+                    null,
+                    $command->amountMinor,
+                    $command->evidence,
+                );
+            }
+
+            $liability = $this->matches->lockIncomingLiability(
+                $command->supplierId,
+                $command->liabilityId,
+            );
+            if ($liability === null) {
+                throw new DomainException(
+                    'Příchozí mzdový závazek nebyl nalezen v aktuální firmě.',
+                );
+            }
+            if ($liability['direction'] !== 'incoming') {
+                throw new DomainException(
+                    'Bez platební dávky lze doložit pouze skutečně přijatou mzdovou vratku.',
+                );
+            }
+            $existing = $this->matches->findByIdempotency(
+                $command->supplierId,
+                $idempotencyHash,
+            );
+            if ($existing !== null) {
+                return $this->replayIncomingRefund(
+                    $existing,
+                    $command->liabilityId,
+                    'matched',
+                    null,
+                    $command->amountMinor,
+                    $command->evidence,
+                );
+            }
+
+            $evidenceAmount = $this->assertEvidence(
+                $command->supplierId,
+                $liability['direction'],
+                $liability['currency_code'],
+                'matched',
+                $command->evidence,
+                null,
+            );
+            $this->assertIncomingRefundCapacity(
+                $command->supplierId,
+                $liability,
+                'matched',
+                $command->amountMinor,
+                $command->evidence,
+                $evidenceAmount,
+            );
+
+            $matchId = $this->matches->insert(
+                $command->supplierId,
+                null,
+                $command->liabilityId,
+                'matched',
+                null,
+                $command->amountMinor,
+                $command->evidence->bankStatementId,
+                $command->evidence->bankTransactionId,
+                $command->evidence->cashDocumentId,
+                $idempotencyHash,
+                $command->matchedBy,
+            );
+            $stored = $this->matches->lockMatch(
+                $command->supplierId,
+                $matchId,
+            );
+            if ($stored === null) {
+                throw new \RuntimeException(
+                    'Uloženou přijatou mzdovou vratku nelze načíst.',
+                );
+            }
+
+            return $this->incomingRefundResult($stored, false);
+        });
+    }
+
+    public function reverseIncomingRefund(
+        PayrollPaymentReversalCommand $command,
+    ): PayrollIncomingRefundReconciliationResult {
+        $this->assertCommand(
+            $command->supplierId,
+            $command->amountMinor,
+            $command->idempotencyKey,
+            $command->matchedBy,
+        );
+        if ($command->sourceMatchId <= 0) {
+            throw new \InvalidArgumentException(
+                'Zdrojová přijatá vratka musí být kladné číslo.',
+            );
+        }
+        $this->assertEvidenceReference($command->evidence);
+        $idempotencyHash = hash('sha256', $command->idempotencyKey, true);
+
+        return $this->matches->transaction(function () use (
+            $command,
+            $idempotencyHash,
+        ): PayrollIncomingRefundReconciliationResult {
+            $existing = $this->matches->findByIdempotency(
+                $command->supplierId,
+                $idempotencyHash,
+            );
+            if ($existing !== null) {
+                return $this->replayIncomingRefund(
+                    $existing,
+                    $existing['liability_id'],
+                    'reversed',
+                    $command->sourceMatchId,
+                    -$command->amountMinor,
+                    $command->evidence,
+                );
+            }
+
+            $source = $this->matches->lockMatch(
+                $command->supplierId,
+                $command->sourceMatchId,
+            );
+            if ($source === null
+                || $source['event_kind'] !== 'matched'
+                || $source['allocation_id'] !== null
+            ) {
+                throw new DomainException(
+                    'Zdrojová přijatá vratka nebyla nalezena nebo není přímý příjem.',
+                );
+            }
+            $liability = $this->matches->lockIncomingLiability(
+                $command->supplierId,
+                $source['liability_id'],
+            );
+            if ($liability === null || $liability['direction'] !== 'incoming') {
+                throw new DomainException(
+                    'Příchozí mzdový závazek zdrojové vratky nebyl nalezen.',
+                );
+            }
+            $existing = $this->matches->findByIdempotency(
+                $command->supplierId,
+                $idempotencyHash,
+            );
+            if ($existing !== null) {
+                return $this->replayIncomingRefund(
+                    $existing,
+                    $source['liability_id'],
+                    'reversed',
+                    $command->sourceMatchId,
+                    -$command->amountMinor,
+                    $command->evidence,
+                );
+            }
+            $sourceEvidenceKind = $source['bank_transaction_id'] === null
+                ? 'cash'
+                : 'bank';
+            $this->assertChannel($sourceEvidenceKind, $command->evidence);
+            if ($command->evidence->kind === 'cash'
+                && $source['cash_document_id']
+                    !== $command->evidence->cashDocumentId
+            ) {
+                throw new DomainException(
+                    'Reverze hotovosti musí použít původní pokladní doklad.',
+                );
+            }
+            $remaining = $source['amount_minor'] + $source['reversed_minor'];
+            if ($remaining <= 0 || $command->amountMinor > $remaining) {
+                throw new DomainException(
+                    'Reverze přesahuje dosud nereverzovanou část přijaté vratky.',
+                );
+            }
+
+            $evidenceAmount = $this->assertEvidence(
+                $command->supplierId,
+                $liability['direction'],
+                $liability['currency_code'],
+                'reversed',
+                $command->evidence,
+                $source,
+            );
+            $this->assertIncomingRefundCapacity(
+                $command->supplierId,
+                $liability,
+                'reversed',
+                $command->amountMinor,
+                $command->evidence,
+                $evidenceAmount,
+            );
+            if ($liability['settled_minor'] < $command->amountMinor) {
+                throw new DomainException(
+                    'Reverze by snížila přijaté vratky závazku pod nulu.',
+                );
+            }
+
+            $matchId = $this->matches->insert(
+                $command->supplierId,
+                null,
+                $source['liability_id'],
+                'reversed',
+                $command->sourceMatchId,
+                -$command->amountMinor,
+                $command->evidence->bankStatementId,
+                $command->evidence->bankTransactionId,
+                $command->evidence->cashDocumentId,
+                $idempotencyHash,
+                $command->matchedBy,
+            );
+            $stored = $this->matches->lockMatch(
+                $command->supplierId,
+                $matchId,
+            );
+            if ($stored === null) {
+                throw new \RuntimeException(
+                    'Uloženou reverzi přijaté mzdové vratky nelze načíst.',
+                );
+            }
+
+            return $this->incomingRefundResult($stored, false);
         });
     }
 
@@ -153,6 +402,11 @@ final class PayrollPaymentReconciliationService
                 $idempotencyHash,
             );
             if ($existing !== null) {
+                if ($existing['allocation_id'] === null) {
+                    throw new DomainException(
+                        'Idempotentní klíč už používá přijatá mzdová vratka.',
+                    );
+                }
                 return $this->replay(
                     $existing,
                     $existing['allocation_id'],
@@ -172,6 +426,11 @@ final class PayrollPaymentReconciliationService
                     'Zdrojové spárování nebylo nalezeno nebo není platba.',
                 );
             }
+            if ($source['allocation_id'] === null) {
+                throw new DomainException(
+                    'Přijatou mzdovou vratku lze reverzovat pouze vratkovou cestou.',
+                );
+            }
             $allocation = $this->matches->lockAllocation(
                 $command->supplierId,
                 $source['allocation_id'],
@@ -186,6 +445,11 @@ final class PayrollPaymentReconciliationService
                 $idempotencyHash,
             );
             if ($existing !== null) {
+                if ($existing['allocation_id'] === null) {
+                    throw new DomainException(
+                        'Idempotentní klíč už používá přijatá mzdová vratka.',
+                    );
+                }
                 return $this->replay(
                     $existing,
                     $source['allocation_id'],
@@ -240,6 +504,7 @@ final class PayrollPaymentReconciliationService
             $matchId = $this->matches->insert(
                 $command->supplierId,
                 $source['allocation_id'],
+                $source['liability_id'],
                 'reversed',
                 $command->sourceMatchId,
                 -$command->amountMinor,
@@ -266,6 +531,7 @@ final class PayrollPaymentReconciliationService
     /**
      * @param array{
      *   id:int,
+     *   liability_id:int,
      *   channel:string,
      *   amount_minor:int,
      *   direction:string,
@@ -289,6 +555,56 @@ final class PayrollPaymentReconciliationService
                 'Platba by překročila částku platební alokace.',
             );
         }
+        $this->assertEvidenceCapacity(
+            $supplierId,
+            $eventKind,
+            $amountMinor,
+            $evidence,
+            $evidenceAmount,
+        );
+    }
+
+    /**
+     * @param array{
+     *   id:int,
+     *   amount_minor:int,
+     *   direction:string,
+     *   currency_code:string,
+     *   settled_minor:int
+     * } $liability
+     */
+    private function assertIncomingRefundCapacity(
+        int $supplierId,
+        array $liability,
+        string $eventKind,
+        int $amountMinor,
+        PayrollPaymentEvidenceReference $evidence,
+        int $evidenceAmount,
+    ): void {
+        if ($eventKind === 'matched'
+            && $liability['settled_minor'] + $amountMinor
+                > $liability['amount_minor']
+        ) {
+            throw new DomainException(
+                'Přijatá vratka by překročila příchozí mzdový závazek.',
+            );
+        }
+        $this->assertEvidenceCapacity(
+            $supplierId,
+            $eventKind,
+            $amountMinor,
+            $evidence,
+            $evidenceAmount,
+        );
+    }
+
+    private function assertEvidenceCapacity(
+        int $supplierId,
+        string $eventKind,
+        int $amountMinor,
+        PayrollPaymentEvidenceReference $evidence,
+        int $evidenceAmount,
+    ): void {
         $used = $this->matches->evidenceUsedMinor(
             $supplierId,
             $eventKind,
@@ -308,7 +624,8 @@ final class PayrollPaymentReconciliationService
     /**
      * @param array{
      *   id:int,
-     *   allocation_id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
      *   event_kind:string,
      *   source_match_id:?int,
      *   amount_minor:int,
@@ -539,7 +856,8 @@ final class PayrollPaymentReconciliationService
     /**
      * @param array{
      *   id:int,
-     *   allocation_id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
      *   event_kind:string,
      *   source_match_id:?int,
      *   amount_minor:int,
@@ -581,7 +899,52 @@ final class PayrollPaymentReconciliationService
     /**
      * @param array{
      *   id:int,
-     *   allocation_id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
+     *   event_kind:string,
+     *   source_match_id:?int,
+     *   amount_minor:int,
+     *   bank_statement_id:?int,
+     *   bank_transaction_id:?int,
+     *   cash_document_id:?int,
+     *   actual_payment_date:string,
+     *   evidence_amount_minor:int,
+     *   evidence_currency_code:string,
+     *   evidence_fact_hash:string,
+     *   reversed_minor:int
+     * } $stored
+     */
+    private function replayIncomingRefund(
+        array $stored,
+        int $liabilityId,
+        string $eventKind,
+        ?int $sourceMatchId,
+        int $amountMinor,
+        PayrollPaymentEvidenceReference $evidence,
+    ): PayrollIncomingRefundReconciliationResult {
+        if ($stored['allocation_id'] !== null
+            || $stored['liability_id'] !== $liabilityId
+            || $stored['event_kind'] !== $eventKind
+            || $stored['source_match_id'] !== $sourceMatchId
+            || $stored['amount_minor'] !== $amountMinor
+            || $stored['bank_statement_id'] !== $evidence->bankStatementId
+            || $stored['bank_transaction_id']
+                !== $evidence->bankTransactionId
+            || $stored['cash_document_id'] !== $evidence->cashDocumentId
+        ) {
+            throw new DomainException(
+                'Idempotentní replay neodpovídá uložené přijaté mzdové vratce.',
+            );
+        }
+
+        return $this->incomingRefundResult($stored, true);
+    }
+
+    /**
+     * @param array{
+     *   id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
      *   event_kind:string,
      *   source_match_id:?int,
      *   amount_minor:int,
@@ -599,9 +962,62 @@ final class PayrollPaymentReconciliationService
         array $stored,
         bool $replayed,
     ): PayrollPaymentReconciliationResult {
+        if ($stored['allocation_id'] === null) {
+            throw new \LogicException(
+                'Výsledek odchozí úhrady nemá platební alokaci.',
+            );
+        }
+
         return new PayrollPaymentReconciliationResult(
             $stored['id'],
             $stored['allocation_id'],
+            $stored['event_kind'],
+            $stored['source_match_id'],
+            $stored['amount_minor'],
+            $stored['bank_transaction_id'] === null ? 'cash' : 'bank',
+            $stored['bank_statement_id'],
+            $stored['bank_transaction_id'],
+            $stored['cash_document_id'],
+            $stored['actual_payment_date'],
+            $stored['evidence_amount_minor'],
+            $stored['evidence_currency_code'],
+            $stored['evidence_fact_hash'],
+            $replayed,
+        );
+    }
+
+    /**
+     * @param array{
+     *   id:int,
+     *   allocation_id:?int,
+     *   liability_id:int,
+     *   event_kind:string,
+     *   source_match_id:?int,
+     *   amount_minor:int,
+     *   bank_statement_id:?int,
+     *   bank_transaction_id:?int,
+     *   cash_document_id:?int,
+     *   actual_payment_date:string,
+     *   evidence_amount_minor:int,
+     *   evidence_currency_code:string,
+     *   evidence_fact_hash:string,
+     *   reversed_minor:int
+     * } $stored
+     */
+    private function incomingRefundResult(
+        array $stored,
+        bool $replayed,
+    ): PayrollIncomingRefundReconciliationResult {
+        if ($stored['allocation_id'] !== null) {
+            throw new \LogicException(
+                'Výsledek přijaté mzdové vratky nesmí mít platební alokaci.',
+            );
+        }
+
+        return new PayrollIncomingRefundReconciliationResult(
+            $stored['id'],
+            $stored['liability_id'],
+            null,
             $stored['event_kind'],
             $stored['source_match_id'],
             $stored['amount_minor'],

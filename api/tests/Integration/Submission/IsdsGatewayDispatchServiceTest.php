@@ -127,6 +127,7 @@ final class IsdsGatewayDispatchServiceTest extends TestCase
             $this->stubArtifacts(),
             new SubmissionArtifactValidator(new XmlSchemaValidator()),
             new NullLogger(),
+            null,
         );
 
         $this->service = new IsdsGatewayDispatchService(
@@ -139,6 +140,7 @@ final class IsdsGatewayDispatchServiceTest extends TestCase
             $this->stubArtifacts(),
             new SubmissionArtifactValidator(new XmlSchemaValidator()),
             new NullLogger(),
+            null,
         );
     }
 

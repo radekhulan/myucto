@@ -21,6 +21,8 @@ final readonly class PayrollVerifiedReceipt
         public ?string $correlationReference,
         /** @var array<int,string> */
         public array $partStatuses = [],
+        /** @var list<PayrollVerifiedReceiptFormOutcome> */
+        public array $formOutcomes = [],
     ) {
         if (!in_array($remoteStatus, self::STATUSES, true)) {
             throw new \InvalidArgumentException(
@@ -43,6 +45,13 @@ final readonly class PayrollVerifiedReceipt
             ) {
                 throw new \InvalidArgumentException(
                     'Ověřený dílčí stav není platný.',
+                );
+            }
+        }
+        foreach ($formOutcomes as $outcome) {
+            if (!$outcome instanceof PayrollVerifiedReceiptFormOutcome) {
+                throw new \InvalidArgumentException(
+                    'Ověřený výsledek formuláře nemá platný tvar.',
                 );
             }
         }

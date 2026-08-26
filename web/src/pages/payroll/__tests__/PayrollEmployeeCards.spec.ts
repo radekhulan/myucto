@@ -1,20 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import type { PayrollQuickInputRow } from '@/api/payroll'
+import type { PayrollEmployeeCardMonth, PayrollQuickInputRow } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
-  quickInputs: vi.fn(),
-  absences: vi.fn(),
-  peopleOptions: vi.fn(),
+  employeeCards: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
-  payrollApi: { quickInputs: m.quickInputs, peopleOptions: m.peopleOptions },
-}))
-
-vi.mock('@/api/payrollAbsences', () => ({
-  payrollAbsenceApi: { absences: m.absences },
+  payrollApi: { employeeCards: m.employeeCards },
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -69,6 +63,25 @@ function row(overrides: Partial<PayrollQuickInputRow> = {}): PayrollQuickInputRo
   }
 }
 
+function cardMonth(
+  items: PayrollQuickInputRow[],
+  overrides: Partial<PayrollEmployeeCardMonth> = {},
+): PayrollEmployeeCardMonth {
+  return {
+    period: '2026-08',
+    items: items.map(item => ({ ...item, absences: [] })),
+    total: items.length,
+    company_headcount: items.length,
+    summary: {
+      people: new Set(items.map(item => item.employee_id)).size,
+      gross_preview_minor: items.reduce((sum, item) => sum + item.gross_preview_minor, 0),
+      away: 0,
+      attention: 0,
+    },
+    ...overrides,
+  }
+}
+
 function mountCards(period = '2026-08') {
   return mount(PayrollEmployeeCards, {
     props: { period },
@@ -86,11 +99,47 @@ function mountCards(period = '2026-08') {
 describe('PayrollEmployeeCards', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    m.quickInputs.mockResolvedValue({ period: '2026-08', items: [row()] })
-    m.absences.mockResolvedValue([])
-    m.peopleOptions.mockResolvedValue([
-      { id: 5, full_name: 'Alfa Aktivní', is_active: true, needs_setup: false },
-    ])
+    m.employeeCards.mockResolvedValue(cardMonth([row()]))
+  })
+
+  it('u 501 vztahů vykreslí nejvýš stránku 25 a použije celofiremní souhrn', async () => {
+    const page = Array.from({ length: 25 }, (_, index) => row({
+      employee_id: index + 1,
+      employment_id: index + 1,
+      full_name: `Zaměstnanec ${String(index + 1).padStart(3, '0')}`,
+    }))
+    m.employeeCards.mockResolvedValue(cardMonth(page, {
+      total: 501,
+      company_headcount: 501,
+      summary: {
+        people: 501,
+        gross_preview_minor: 2_254_500_000,
+        away: 17,
+        attention: 9,
+      },
+    }))
+
+    const wrapper = mountCards()
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test^="employee-card-"]')).toHaveLength(25)
+    expect(wrapper.get('[data-test="employee-count"]').text()).toBe('501')
+    expect(wrapper.text()).toContain('1 / 21')
+    expect(m.employeeCards).toHaveBeenCalledWith(
+      '2026-08',
+      { limit: 25, offset: 0 },
+      { search: '', status: 'active' },
+    )
+
+    const next = wrapper.findAll('button').find(button => button.text().includes('common.next'))
+    expect(next).toBeDefined()
+    await next!.trigger('click')
+    await flushPromises()
+    expect(m.employeeCards).toHaveBeenLastCalledWith(
+      '2026-08',
+      { limit: 25, offset: 25 },
+      { search: '', status: 'active' },
+    )
   })
 
   it('shows name, employment type, status and pay on one scannable card', async () => {
@@ -105,14 +154,16 @@ describe('PayrollEmployeeCards', () => {
     expect(wrapper.get('[data-test="employee-gross-12"]').text()).toContain('45')
   })
 
-  it('reads the whole month in one request pair, not per employee', async () => {
+  it('žádá jen serverovou stránku 25 karet, ne celý měsíc ani osobní volání', async () => {
     mountCards('2026-02')
     await flushPromises()
 
-    expect(m.quickInputs).toHaveBeenCalledTimes(1)
-    expect(m.quickInputs).toHaveBeenCalledWith('2026-02')
-    // Únor 2026 má 28 dnů — rozsah se počítá, nenatvrdo 30/31.
-    expect(m.absences).toHaveBeenCalledWith('2026-02-01', '2026-02-28')
+    expect(m.employeeCards).toHaveBeenCalledTimes(1)
+    expect(m.employeeCards).toHaveBeenCalledWith(
+      '2026-02',
+      { limit: 25, offset: 0 },
+      { search: '', status: 'active' },
+    )
   })
 
   it('links the quick actions to the existing absence flow with the person preselected', async () => {
@@ -128,10 +179,15 @@ describe('PayrollEmployeeCards', () => {
   })
 
   it('marks who is away this month from approved and requested absences', async () => {
-    m.absences.mockResolvedValue([
-      { id: 1, employment_id: 12, absence_type: 'vacation', date_from: '2026-08-05', date_to: '2026-08-09', status: 'approved' },
-      { id: 2, employment_id: 12, absence_type: 'dpn', date_from: '2026-08-20', date_to: '2026-08-20', status: 'cancelled' },
-    ])
+    m.employeeCards.mockResolvedValue(cardMonth([row()], {
+      items: [{
+        ...row(),
+        absences: [
+          { id: 1, employment_id: 12, absence_type: 'vacation', date_from: '2026-08-05', date_to: '2026-08-09', status: 'approved' },
+        ],
+      }],
+      summary: { people: 1, gross_preview_minor: 4_500_000, away: 1, attention: 0 },
+    }))
     const wrapper = mountCards()
     await flushPromises()
 
@@ -141,20 +197,21 @@ describe('PayrollEmployeeCards', () => {
   })
 
   it('filters to people who need attention and renders their blockers', async () => {
-    m.quickInputs.mockResolvedValue({
-      period: '2026-08',
-      items: [
-        row(),
-        row({
+    const attention = row({
           employee_id: 6,
           employment_id: 13,
           full_name: 'Beta Rozpracovaná',
           employment_code: 'SYNTH-DPC',
           base_requires_entry: true,
           blockers: ['partial_month_base_required'],
-        }),
-      ],
-    })
+        })
+    m.employeeCards
+      .mockResolvedValueOnce(cardMonth([row(), attention], {
+        summary: { people: 2, gross_preview_minor: 9_000_000, away: 0, attention: 1 },
+      }))
+      .mockResolvedValueOnce(cardMonth([attention], {
+        summary: { people: 2, gross_preview_minor: 9_000_000, away: 0, attention: 1 },
+      }))
     const wrapper = mountCards()
     await flushPromises()
 
@@ -164,33 +221,31 @@ describe('PayrollEmployeeCards', () => {
       .toBe('payroll.employee_cards.base_missing')
 
     await wrapper.get('[data-test="employee-filter-attention"]').trigger('click')
+    await flushPromises()
     expect(wrapper.find('[data-test="employee-card-13"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="employee-card-12"]').exists()).toBe(false)
+    expect(m.employeeCards).toHaveBeenLastCalledWith(
+      '2026-08',
+      { limit: 25, offset: 0 },
+      { search: '', status: 'attention' },
+    )
   })
 
-  it('searches by name and by employment code', async () => {
-    m.quickInputs.mockResolvedValue({
-      period: '2026-08',
-      items: [row(), row({ employment_id: 13, employee_id: 6, full_name: 'Beta Druhá', employment_code: 'SYNTH-DPC' })],
-    })
+  it('hledá jméno a kód na serveru, ne jen v aktuální stránce', async () => {
+    vi.useFakeTimers()
+    m.employeeCards.mockResolvedValue(cardMonth([row()]))
     const wrapper = mountCards()
     await flushPromises()
 
     await wrapper.get('[data-test="employee-search"]').setValue('dpc')
-    expect(wrapper.find('[data-test="employee-card-13"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="employee-card-12"]').exists()).toBe(false)
-
-    await wrapper.get('[data-test="employee-search"]').setValue('alfa aktivni')
-    expect(wrapper.find('[data-test="employee-card-12"]').exists()).toBe(true)
-  })
-
-  it('still renders the cards when absences cannot be read', async () => {
-    m.absences.mockRejectedValue(new Error('403'))
-    const wrapper = mountCards()
+    await vi.advanceTimersByTimeAsync(250)
     await flushPromises()
-
-    expect(wrapper.find('[data-test="employee-card-12"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="employee-cards-failed"]').exists()).toBe(false)
+    expect(m.employeeCards).toHaveBeenLastCalledWith(
+      '2026-08',
+      { limit: 25, offset: 0 },
+      { search: 'dpc', status: 'active' },
+    )
+    vi.useRealTimers()
   })
 
   /**
@@ -199,16 +254,13 @@ describe('PayrollEmployeeCards', () => {
    * rozlišit „nikoho nemáte" od „nikdo tenhle měsíc neběží".
    */
   it('rozliší firmu bez lidí od firmy, které nikdo v tomhle měsíci neběží', async () => {
-    m.quickInputs.mockResolvedValue({ period: '2026-08', items: [] })
-    m.peopleOptions.mockResolvedValue([])
+    m.employeeCards.mockResolvedValue(cardMonth([], { company_headcount: 0 }))
     const nobody = mountCards()
     await flushPromises()
     expect(nobody.get('[data-test="employee-cards-empty"]').text())
       .toContain('payroll.employee_cards.empty_title')
 
-    m.peopleOptions.mockResolvedValue([
-      { id: 5, full_name: 'Alfa Aktivní', is_active: true, needs_setup: false },
-    ])
+    m.employeeCards.mockResolvedValue(cardMonth([], { company_headcount: 1 }))
     const idle = mountCards()
     await flushPromises()
     const text = idle.get('[data-test="employee-cards-empty"]').text()
@@ -216,20 +268,8 @@ describe('PayrollEmployeeCards', () => {
     expect(text).not.toContain('payroll.employee_cards.empty_title')
   })
 
-  /** Výpadek počtu lidí nesmí shodit celý přehled — je to jen upřesnění hlášky. */
-  it('bez seznamu osob se prázdný stav vrátí k původní hlášce', async () => {
-    m.quickInputs.mockResolvedValue({ period: '2026-08', items: [] })
-    m.peopleOptions.mockRejectedValue(new Error('403'))
-    const wrapper = mountCards()
-    await flushPromises()
-
-    expect(wrapper.get('[data-test="employee-cards-empty"]').text())
-      .toContain('payroll.employee_cards.empty_title')
-    expect(wrapper.find('[data-test="employee-cards-failed"]').exists()).toBe(false)
-  })
-
   it('explains the failure instead of showing an empty list', async () => {
-    m.quickInputs.mockRejectedValue(new Error('500'))
+    m.employeeCards.mockRejectedValue(new Error('500'))
     const wrapper = mountCards()
     await flushPromises()
 

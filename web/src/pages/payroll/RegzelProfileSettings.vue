@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
@@ -14,14 +14,32 @@ const { t } = useI18n()
 const loading = ref(true)
 const saving = ref(false)
 const profile = ref<PayrollRegzelProfile | null>(null)
+const workplaceSuggestion = ref<string | null>(null)
 const error = ref('')
 const success = ref('')
+const taxOfficeCodes = new Set([
+  '2000', '2100', '2200', '2300', '2400', '2500', '2600', '2700',
+  '2800', '2900', '3000', '3100', '3200', '3300', '4000',
+])
 const form = reactive({
   row_version: 0,
   social_enterprise: false,
   employment_agency: false,
   protected_labor_market: false,
+  tax_office_code: '',
+  tax_office_workplace_code: '',
+  payer_reference_number: '',
   evidence_confirmed: false,
+})
+const workplaceRequired = computed(() => form.tax_office_code.trim() !== '4000')
+const compatibleWorkplaceSuggestion = computed(() => {
+  const officeCode = form.tax_office_code.trim()
+  const suggestion = workplaceSuggestion.value
+  return suggestion
+    && workplaceRequired.value
+    && suggestion.slice(0, 2) === officeCode.slice(0, 2)
+    ? suggestion
+    : null
 })
 
 function fill(value: PayrollRegzelProfile | null) {
@@ -30,6 +48,9 @@ function fill(value: PayrollRegzelProfile | null) {
   form.social_enterprise = value?.social_enterprise ?? false
   form.employment_agency = value?.employment_agency ?? false
   form.protected_labor_market = value?.protected_labor_market ?? false
+  form.tax_office_code = value?.tax_office_code ?? ''
+  form.tax_office_workplace_code = value?.tax_office_workplace_code ?? ''
+  form.payer_reference_number = value?.payer_reference_number ?? ''
   form.evidence_confirmed = false
 }
 
@@ -47,7 +68,9 @@ async function load() {
   error.value = ''
   success.value = ''
   try {
-    fill(await payrollApi.regzelProfile())
+    const response = await payrollApi.regzelProfile()
+    workplaceSuggestion.value = response.suggested_tax_office_workplace_code
+    fill(response.profile)
   } catch (exception: unknown) {
     error.value = apiMessage(exception, t('payroll.regzel.profile.load_failed'))
   } finally {
@@ -62,9 +85,41 @@ async function save() {
     error.value = t('payroll.regzel.profile.confirmation_required')
     return
   }
+  if (!taxOfficeCodes.has(form.tax_office_code.trim())) {
+    error.value = t('payroll.regzel.profile.tax_office_code_invalid')
+    return
+  }
+  if (workplaceRequired.value && form.tax_office_workplace_code.trim() === '') {
+    error.value = t('payroll.regzel.profile.tax_office_workplace_code_required')
+    return
+  }
+  const workplaceCode = form.tax_office_workplace_code.trim()
+  if (workplaceCode !== '' && !/^\d{4}$/.test(workplaceCode)) {
+    error.value = t('payroll.regzel.profile.tax_office_workplace_code_invalid')
+    return
+  }
+  if (!workplaceRequired.value && workplaceCode !== '') {
+    error.value = t('payroll.regzel.profile.tax_office_workplace_code_forbidden')
+    return
+  }
+  if (workplaceRequired.value
+    && workplaceCode.slice(0, 2) !== form.tax_office_code.trim().slice(0, 2)) {
+    error.value = t('payroll.regzel.profile.tax_office_workplace_code_mismatch')
+    return
+  }
+  if (form.payer_reference_number.trim() !== ''
+    && !/^6\d{8}$/.test(form.payer_reference_number.trim())) {
+    error.value = t('payroll.regzel.profile.payer_reference_number_invalid')
+    return
+  }
   saving.value = true
   try {
-    fill(await payrollApi.saveRegzelProfile({ ...form }))
+    fill(await payrollApi.saveRegzelProfile({
+      ...form,
+      tax_office_code: form.tax_office_code.trim(),
+      tax_office_workplace_code: workplaceCode || null,
+      payer_reference_number: form.payer_reference_number.trim() || null,
+    }))
     success.value = t('payroll.regzel.profile.saved')
   } catch (exception: unknown) {
     error.value = apiMessage(exception, t('payroll.regzel.profile.save_failed'))
@@ -89,11 +144,11 @@ onMounted(load)
       </div>
       <span
         class="rounded-full px-2.5 py-1 text-xs font-medium"
-        :class="profile
+        :class="profile?.is_complete
           ? 'bg-success-50 text-success-700'
           : 'bg-warning-50 text-warning-700'"
       >
-        {{ t(profile
+        {{ t(profile?.is_complete
           ? 'payroll.regzel.profile.confirmed'
           : 'payroll.regzel.profile.not_confirmed') }}
       </span>
@@ -121,6 +176,70 @@ onMounted(load)
         <legend class="text-sm font-medium text-neutral-700">
           {{ t('payroll.regzel.profile.flags_legend') }}
         </legend>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t('payroll.regzel.profile.tax_office_code') }}
+            </span>
+            <input
+              v-model="form.tax_office_code"
+              data-test="regzel-tax-office-code"
+              type="text"
+              inputmode="numeric"
+              maxlength="4"
+              autocomplete="off"
+              class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            >
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.regzel.profile.tax_office_code_hint') }}
+            </span>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t('payroll.regzel.profile.tax_office_workplace_code') }}
+              <span v-if="workplaceRequired" class="text-danger-600" aria-hidden="true">*</span>
+            </span>
+            <input
+              v-model="form.tax_office_workplace_code"
+              data-test="regzel-tax-office-workplace-code"
+              type="text"
+              inputmode="numeric"
+              maxlength="4"
+              autocomplete="off"
+              class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            >
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.regzel.profile.tax_office_workplace_code_hint') }}
+            </span>
+            <button
+              v-if="compatibleWorkplaceSuggestion && !form.tax_office_workplace_code"
+              type="button"
+              data-test="regzel-use-workplace-suggestion"
+              class="mt-2 text-xs font-medium text-payroll-700 underline decoration-payroll-400 underline-offset-2"
+              @click="form.tax_office_workplace_code = compatibleWorkplaceSuggestion ?? ''"
+            >
+              {{ t('payroll.regzel.profile.use_workplace_suggestion', { code: compatibleWorkplaceSuggestion }) }}
+            </button>
+          </label>
+          <label class="block">
+            <span class="mb-1 block text-sm font-medium text-neutral-700">
+              {{ t('payroll.regzel.profile.payer_reference_number') }}
+            </span>
+            <input
+              v-model="form.payer_reference_number"
+              data-test="regzel-payer-reference-number"
+              type="text"
+              inputmode="numeric"
+              maxlength="9"
+              autocomplete="off"
+              class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
+            >
+            <span class="mt-1 block text-xs text-neutral-500">
+              {{ t('payroll.regzel.profile.payer_reference_number_hint') }}
+            </span>
+          </label>
+        </div>
+
         <label class="flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-3">
           <input
             v-model="form.social_enterprise"

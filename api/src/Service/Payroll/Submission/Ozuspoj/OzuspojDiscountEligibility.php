@@ -12,7 +12,7 @@ namespace MyInvoice\Service\Payroll\Submission\Ozuspoj;
  * ponížené. § 7c odst. 3 z toho udělá dluh na pojistném. Proto se stejná úvaha
  * musí udělat DŘÍV, u nás, a musí končit neuplatněním.
  *
- * Doslovné znění kontroly 291 (katalog kontrol MH 1.4.2.7):
+ * Doslovné znění kontroly 291 (katalog kontrol MH 1.4.2.8):
  *
  * 1. „Trvání zaměstnání (10223, 10224) v průběhu vykazovaného měsíce (10010,
  *    10011), ze kterého je uplatňována sleva … musí spadat do období, na které

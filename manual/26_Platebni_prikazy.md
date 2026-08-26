@@ -138,7 +138,7 @@ formát pro platby v **EUR** — přijímají ho banky napříč Evropou, včetn
 (ČS, KB, ČSOB, Raiffeisenbank a další). Použij ho pro dodavatele v zahraničí
 (zálohy, faktury v EUR), kde ABO (tuzemský CZK styk) nefunguje.
 
-- Vyber **účet plátce v EUR** (viz [§ 26.1](#261-cet-platce)) — tlačítko **Export
+- Vyber **účet plátce v EUR** (viz [§ 26.1](#261-ucet-platce)) — tlačítko **Export
   SEPA** se zpřístupní jen pro EUR příkaz.
 - Plátce i **každý příjemce v dávce musí mít vyplněný IBAN** (doplníš ho stejně jako
   tuzemský účet, viz [§ 26.3](#263-doplneni-a-uprava-uctu-prijemce)). BIC je nepovinný

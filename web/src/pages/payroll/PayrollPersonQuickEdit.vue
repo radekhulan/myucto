@@ -316,6 +316,13 @@ function profilePayload(): PayrollPersonProfilePayload {
           last_name: row.id === identity?.id && !appendIdentityVersion
             ? form.last_name.trim()
             : (row.last_name ?? ''),
+          title_prefix: row.title_prefix,
+          title_suffix: row.title_suffix,
+          birth_date: row.birth_date,
+          birth_place: row.birth_place,
+          birth_country_code: row.birth_country_code,
+          citizenship_country_code: row.citizenship_country_code,
+          sex: row.sex,
           effective_from: row.effective_from,
           effective_to: row.id === identity?.id && appendIdentityVersion
             ? previousDayIso(changeDate)
@@ -326,9 +333,16 @@ function profilePayload(): PayrollPersonProfilePayload {
           full_name: fullName,
           first_name: form.first_name.trim(),
           last_name: form.last_name.trim(),
+          title_prefix: identity?.title_prefix ?? null,
+          title_suffix: identity?.title_suffix ?? null,
           ...(identity?.birth_surname_masked
             ? { birth_surname_source_id: identity.id }
             : {}),
+          birth_date: identity?.birth_date ?? null,
+          birth_place: identity?.birth_place ?? null,
+          birth_country_code: identity?.birth_country_code ?? null,
+          citizenship_country_code: identity?.citizenship_country_code ?? null,
+          sex: identity?.sex ?? null,
           effective_from: changeDate,
           effective_to: null,
         }]

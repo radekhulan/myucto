@@ -12,11 +12,11 @@ require dirname(__DIR__) . '/api/vendor/autoload.php';
 final class JmhzControlCatalogPackageBuilder
 {
     private const SOURCE_SHA256 =
-        'fbc87a3aab479af1c58bd44aa710e43f5a522d5ebca5de6eec9bbb690ad8a440';
+        '8c861badbd6229e9185482b0caaf19d6ded4797b27bf37f8b53dcb3b31151b49';
     private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1';
+        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1';
     private const SPEC_MANIFEST_SHA256 =
-        'f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b';
+        '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205';
 
     public function build(string $sourcePath, string $outputPath): void
     {
@@ -41,9 +41,9 @@ final class JmhzControlCatalogPackageBuilder
         $parameterControlRefs = array_merge(...array_column($parameters, 'control_refs'));
         $parameterValues = array_merge(...array_column($parameters, 'values'));
         $payload = [
-            'schema_version' => 'jmhz-control-source-catalog.v3',
-            'catalog_key' => 'jmhz-controls-1.4.2.7-source-v3',
-            'version' => '1.4.2.7',
+            'schema_version' => 'jmhz-control-source-catalog.v4',
+            'catalog_key' => 'jmhz-controls-1.4.2.8-source-v4',
+            'version' => '1.4.2.8',
             'spec_package_key' => self::SPEC_PACKAGE_KEY,
             'spec_manifest_sha256' => self::SPEC_MANIFEST_SHA256,
             'source' => [
@@ -58,6 +58,10 @@ final class JmhzControlCatalogPackageBuilder
                 'symbolic_attribute_refs' => array_sum(array_map(
                     static fn (array $row): int => count($row['symbolic_attribute_refs']),
                     $controls,
+                )),
+                'source_anomalies' => count(array_filter(
+                    $controls,
+                    static fn (array $row): bool => ($row['source_anomaly'] ?? null) !== null,
                 )),
                 'parameters' => count($parameters),
                 'parameter_control_refs' => count($parameterControlRefs),
@@ -134,6 +138,19 @@ final class JmhzControlCatalogPackageBuilder
             ) ?? '', $symbolMatches);
             $detailCell = $sheet->getCell("L{$row}");
             $messageCell = $sheet->getCell("M{$row}");
+            $detailText = $this->requiredCachedText($detailCell);
+            preg_match_all('/(?<![0-9])[0-9]{5}(?![0-9])/', $detailText, $detailMatches);
+            $detailAttributeIds = array_values(array_unique($detailMatches[0]));
+            $sourceAnomaly = match ([$controlId, array_column($attributeRefs, 'attribute_id'), $detailAttributeIds]) {
+                [333, ['10006', '10032', '10010', '10011'], ['10016', '10495']] => [
+                    'code' => 'official_detail_attribute_mismatch',
+                    'source_cells' => ["B{$row}", "C{$row}", "L{$row}", "M{$row}"],
+                    'declared_attribute_ids' => ['10006', '10032', '10010', '10011'],
+                    'detail_attribute_ids' => ['10016', '10495'],
+                    'resolution' => 'fail_closed_not_evaluable',
+                ],
+                default => null,
+            };
             $record = [
                 'control_id' => $controlId,
                 'source_row' => $row,
@@ -152,14 +169,17 @@ final class JmhzControlCatalogPackageBuilder
                     $this->requiredText($sheet->getCell("J{$row}")),
                 ),
                 'category' => $this->text($sheet->getCell("K{$row}")),
-                'detail_text' => $this->requiredCachedText($detailCell),
+                'detail_text' => $detailText,
                 'detail_formula' => $this->formula($detailCell),
                 'error_message' => $this->requiredCachedText($messageCell),
                 'error_message_formula' => $this->formula($messageCell),
                 'source_label' => $this->requiredText($sheet->getCell("N{$row}")),
                 'note' => $this->text($sheet->getCell("O{$row}")),
-                'attribute_refs' => $attributeRefs,
             ];
+            if ($sourceAnomaly !== null) {
+                $record['source_anomaly'] = $sourceAnomaly;
+            }
+            $record['attribute_refs'] = $attributeRefs;
             $record['row_hash'] = hash('sha256', CanonicalJson::encode($record));
             $result[] = $record;
         }

@@ -26,6 +26,7 @@ import { localPayrollPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 /*
  * `mode` je zároveň `agenda_group` pro server. Skupina `other` je záchytná:
@@ -38,11 +39,24 @@ const props = defineProps<{
 }>()
 
 const { locale, t } = useI18n()
+const {
+  artifactKindLabel,
+  issueSeverityLabel,
+  submissionChannelLabel,
+  submissionIssueMessage,
+  submissionIssueRemediation,
+  submissionKindLabel,
+  submissionStatusLabel,
+  validationStageLabel,
+  verificationStatusLabel,
+} = usePayrollLabels()
 const loading = ref(true)
 const error = ref('')
 const healthError = ref('')
 const period = ref(localPayrollPeriod())
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 // Server filtruje podle `agenda_group`, takže `items` je rovnou to, co panel
 // ukazuje — žádné doufiltrovávání na klientovi.
 const items = ref<PayrollSubmissionOverviewItem[]>([])
@@ -132,18 +146,6 @@ function statusClass(status: string): string {
   }
   if (status === 'cancelled') return 'bg-neutral-100 text-neutral-600'
   return 'bg-payroll-50 text-payroll-700'
-}
-
-function statusLabel(status: string): string {
-  const key = `payroll.submissions.overview.status.${status}`
-  const translated = t(key)
-  return translated === key ? status : translated
-}
-
-function channelLabel(channel: string): string {
-  const key = `payroll.submissions.overview.channel.${channel}`
-  const translated = t(key)
-  return translated === key ? channel : translated
 }
 
 function deadlineClass(item: PayrollSubmissionOverviewItem): string {
@@ -528,10 +530,10 @@ onMounted(load)
                       {{ deadlineLabel(item) }}
                     </span>
                   </td>
-                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ channelLabel(item.preferred_channel) }}</td>
+                  <td v-if="tbl.isVisible('channel')" class="px-4 py-3 text-neutral-700">{{ submissionChannelLabel(item.preferred_channel) }}</td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
-                      {{ statusLabel(item.status) }}
+                      {{ submissionStatusLabel(item.status) }}
                     </span>
                   </td>
                   <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
@@ -564,7 +566,7 @@ onMounted(load)
                 <p class="mt-1 text-xs text-neutral-500">{{ item.subject_reference }}</p>
               </div>
               <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="statusClass(item.status)">
-                {{ statusLabel(item.status) }}
+                {{ submissionStatusLabel(item.status) }}
               </span>
             </div>
             <dl class="mt-3 grid grid-cols-2 gap-3 text-xs">
@@ -581,7 +583,7 @@ onMounted(load)
               </div>
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
-                <dd class="mt-0.5 text-neutral-800">{{ channelLabel(item.preferred_channel) }}</dd>
+                <dd class="mt-0.5 text-neutral-800">{{ submissionChannelLabel(item.preferred_channel) }}</dd>
               </div>
             </dl>
             <button
@@ -637,7 +639,7 @@ onMounted(load)
                 class="rounded-full px-2.5 py-1 text-xs font-medium"
                 :class="statusClass(detail.submission.status)"
               >
-                {{ statusLabel(detail.submission.status) }}
+                {{ submissionStatusLabel(detail.submission.status) }}
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">
@@ -656,11 +658,11 @@ onMounted(load)
         <dl class="grid grid-cols-2 gap-4 border-b border-neutral-200 p-4 text-sm sm:grid-cols-4 sm:p-6">
           <div>
             <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_kind') }}</dt>
-            <dd class="mt-1 font-medium text-neutral-900">{{ detail.submission.submission_kind }}</dd>
+            <dd class="mt-1 font-medium text-neutral-900">{{ submissionKindLabel(detail.submission.submission_kind) }}</dd>
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.submissions.overview.channel_label') }}</dt>
-            <dd class="mt-1 font-medium text-neutral-900">{{ channelLabel(detail.submission.channel) }}</dd>
+            <dd class="mt-1 font-medium text-neutral-900">{{ submissionChannelLabel(detail.submission.channel) }}</dd>
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.submissions.overview.detail_created') }}</dt>
@@ -687,7 +689,7 @@ onMounted(load)
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <span class="font-medium text-neutral-900">{{ part.agenda_code }} · {{ part.part_reference }}</span>
                   <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="statusClass(part.status)">
-                    {{ statusLabel(part.status) }}
+                    {{ submissionStatusLabel(part.status) }}
                   </span>
                 </div>
                 <p class="mt-1 text-xs text-neutral-500">{{ part.subject_reference }}</p>
@@ -714,7 +716,7 @@ onMounted(load)
               <li v-for="artifact in detail.artifacts" :key="artifact.id" class="py-3 first:pt-0 last:pb-0">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <span class="font-medium text-neutral-900">{{ artifact.artifact_kind }}</span>
+                    <span class="font-medium text-neutral-900">{{ artifactKindLabel(artifact.artifact_kind) }}</span>
                     <span class="ml-2 text-xs text-neutral-500">{{ readableBytes(artifact.byte_size) }}</span>
                   </div>
                   <button
@@ -752,7 +754,10 @@ onMounted(load)
             <ul v-else class="mt-3 divide-y divide-neutral-100">
               <li v-for="issue in detail.issues" :key="issue.id" class="py-3 first:pt-0 last:pb-0">
                 <div class="flex flex-wrap items-center justify-between gap-2">
-                  <span class="font-medium text-neutral-900">{{ issue.issue_code }}</span>
+                  <span
+                    class="font-medium text-neutral-900"
+                    data-test="submission-issue-message"
+                  >{{ submissionIssueMessage(issue.issue_code) }}</span>
                   <span
                     class="rounded-full px-2 py-0.5 text-xs font-medium"
                     :class="issue.is_resolved
@@ -761,10 +766,20 @@ onMounted(load)
                   >
                     {{ issue.is_resolved
                       ? t('payroll.submissions.overview.detail_resolved')
-                      : issue.severity }}
+                      : issueSeverityLabel(issue.severity) }}
                   </span>
                 </div>
-                <p class="mt-1 text-xs text-neutral-500">{{ issue.validation_stage }}</p>
+                <p class="mt-1 text-xs text-neutral-500">{{ validationStageLabel(issue.validation_stage) }}</p>
+                <p
+                  class="mt-2 text-xs text-neutral-600"
+                  data-test="submission-issue-remediation"
+                >
+                  {{ submissionIssueRemediation(issue.validation_stage) }}
+                </p>
+                <details class="mt-2 text-xs text-neutral-500" data-test="submission-issue-technical">
+                  <summary class="cursor-pointer">{{ t('payroll.submissions.overview.issue_technical') }}</summary>
+                  <p class="mt-1 break-all font-mono">{{ issue.issue_code }}</p>
+                </details>
               </li>
             </ul>
           </article>
@@ -780,10 +795,12 @@ onMounted(load)
               <li v-for="receipt in detail.receipts" :key="receipt.id" class="py-3 first:pt-0 last:pb-0">
                 <div class="flex flex-wrap items-center justify-between gap-2">
                   <span class="font-medium text-neutral-900">{{ receipt.protocol_code }}</span>
-                  <span class="text-xs text-neutral-500">{{ receipt.verification_status }}</span>
+                  <span class="text-xs text-neutral-500">{{ verificationStatusLabel(receipt.verification_status) }}</span>
                 </div>
                 <p class="mt-1 break-all text-xs text-neutral-500">
-                  {{ receipt.receipt_reference }} · {{ receipt.remote_status || '—' }}
+                  {{ receipt.receipt_reference }} · {{ receipt.remote_status
+                    ? submissionStatusLabel(receipt.remote_status)
+                    : '—' }}
                 </p>
               </li>
             </ul>

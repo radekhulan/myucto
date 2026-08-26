@@ -76,7 +76,11 @@ final class PayrollModuleStateRepository
                 throw new PayrollStateConflictException($currentVersion);
             }
             $currentStatus = is_array($current) ? (string) $current['status'] : null;
-            if (!$enabled && in_array($currentStatus, ['active', 'suspended'], true)) {
+            if (!$enabled && in_array(
+                $currentStatus,
+                ['qualification_required', 'active', 'suspended'],
+                true,
+            )) {
                 throw new PayrollStateLockedException();
             }
             // Překlopení do `active` je jednosměrné. Uložení nastavení
@@ -84,7 +88,11 @@ final class PayrollModuleStateRepository
             // se badge „Probíhá nastavení" vracel a zámek proti vypnutí by
             // šel obejít cyklem uložení nastavení → vypnout.
             $nextStatus = $enabled
-                ? (in_array($currentStatus, ['active', 'suspended'], true)
+                ? (in_array(
+                    $currentStatus,
+                    ['qualification_required', 'active', 'suspended'],
+                    true,
+                )
                     ? $currentStatus
                     : 'setup')
                 : 'disabled';
@@ -93,31 +101,24 @@ final class PayrollModuleStateRepository
                 $insert = $pdo->prepare(
                     'INSERT INTO payroll_module_state
                         (supplier_id, status, start_period, row_version, activated_by, activated_at)
-                     VALUES (?, ?, ?, 1, ?, ?)'
+                     VALUES (?, ?, ?, 1, NULL, NULL)'
                 );
                 $insert->execute([
                     $supplierId,
                     $nextStatus,
                     $enabled ? $startPeriod : null,
-                    $enabled ? $userId : null,
-                    $enabled ? date('Y-m-d H:i:s') : null,
                 ]);
             } else {
                 $update = $pdo->prepare(
                     'UPDATE payroll_module_state
                         SET status = ?,
                             start_period = ?,
-                            row_version = row_version + 1,
-                            activated_by = CASE WHEN ? = 1 THEN ? ELSE activated_by END,
-                            activated_at = CASE WHEN ? = 1 THEN COALESCE(activated_at, NOW()) ELSE activated_at END
+                            row_version = row_version + 1
                       WHERE supplier_id = ? AND row_version = ?'
                 );
                 $update->execute([
                     $nextStatus,
                     $enabled ? $startPeriod : null,
-                    $enabled ? 1 : 0,
-                    $userId,
-                    $enabled ? 1 : 0,
                     $supplierId,
                     $expectedVersion,
                 ]);
@@ -133,8 +134,8 @@ final class PayrollModuleStateRepository
             // `inTransaction()` tu není nadbytečné: když selže samotný commit,
             // transakce už neběží a rollBack by vyhodil druhou výjimku, která
             // by tu původní — jedinou, která něco vysvětluje — zamaskovala.
-            if ($ownsTransaction && $pdo->inTransaction()) {
-                $pdo->rollBack();
+            if ($ownsTransaction) {
+                self::rollBackIfActive($pdo);
             }
             throw $e;
         }
@@ -143,21 +144,26 @@ final class PayrollModuleStateRepository
     }
 
     /**
-     * Jednosměrné překlopení `setup` → `active`. Volá se ze dvou nezávislých
-     * spouští (dokončený setup-check, první schválený mzdový běh) — vyhrává
-     * ta, která nastane dřív, druhá je pak no-op. Zámek `FOR UPDATE` a
-     * podmínka `status = "setup"` v UPDATE drží idempotenci i při souběhu.
-     *
-     * Z `disabled` se nepřeklápí: tam mzdový běh ani setup vůbec neexistují a
-     * modul musí nejdřív projít vědomým zapnutím v nastavení.
+     * Jednosměrné interní překlopení `setup` → `active` po úspěšné produkční
+     * kvalifikaci. Automatické spouště setup/approve ho od MZ-27-W10 nevolají.
+     * Zámek `FOR UPDATE`, očekávaná verze a `status = "setup"` drží souběh.
      *
      * @return array{
      *   supplier_id:int,status:string,start_period:?string,row_version:int,
      *   activated_at:?string,suspended_at:?string,created_at:?string,updated_at:?string
      * }|null null = stav se nezměnil (modul nebyl v `setup`)
      */
-    public function promoteToActive(int $supplierId, ?int $userId): ?array
+    public function promoteToActive(
+        int $supplierId,
+        int $userId,
+        ?int $expectedVersion = null,
+    ): ?array
     {
+        if ($supplierId <= 0 || $userId <= 0) {
+            throw new \InvalidArgumentException(
+                'Firma a uživatel produkční aktivace musí být kladná čísla.',
+            );
+        }
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -172,27 +178,34 @@ final class PayrollModuleStateRepository
             );
             $select->execute([$supplierId]);
             $current = $select->fetch(PDO::FETCH_ASSOC);
-            if (!is_array($current) || (string) $current['status'] !== 'setup') {
+            if (!is_array($current) || !in_array(
+                (string) $current['status'],
+                ['setup', 'qualification_required'],
+                true,
+            )) {
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
 
                 return null;
             }
-            $expectedVersion = (int) $current['row_version'];
+            $currentVersion = (int) $current['row_version'];
+            if ($expectedVersion !== null && $expectedVersion !== $currentVersion) {
+                throw new PayrollStateConflictException($currentVersion);
+            }
             $update = $pdo->prepare(
                 'UPDATE payroll_module_state
                     SET status = "active",
                         row_version = row_version + 1,
-                        activated_by = COALESCE(activated_by, ?),
-                        activated_at = COALESCE(activated_at, NOW())
+                        activated_by = ?,
+                        activated_at = NOW()
                   WHERE supplier_id = ?
                     AND row_version = ?
-                    AND status = "setup"'
+                    AND status IN ("setup", "qualification_required")'
             );
-            $update->execute([$userId, $supplierId, $expectedVersion]);
+            $update->execute([$userId, $supplierId, $currentVersion]);
             if ($update->rowCount() !== 1) {
-                throw new PayrollStateConflictException($expectedVersion);
+                throw new PayrollStateConflictException($currentVersion);
             }
             $state = $this->get($supplierId);
             if ($ownsTransaction) {
@@ -201,8 +214,8 @@ final class PayrollModuleStateRepository
 
             return $state;
         } catch (\Throwable $e) {
-            if ($ownsTransaction && $pdo->inTransaction()) {
-                $pdo->rollBack();
+            if ($ownsTransaction) {
+                self::rollBackIfActive($pdo);
             }
             throw $e;
         }
@@ -227,5 +240,12 @@ final class PayrollModuleStateRepository
             'created_at' => $row['created_at'] === null ? null : (string) $row['created_at'],
             'updated_at' => $row['updated_at'] === null ? null : (string) $row['updated_at'],
         ];
+    }
+
+    private static function rollBackIfActive(PDO $pdo): void
+    {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
     }
 }

@@ -7,6 +7,7 @@ namespace MyInvoice\Repository\Payroll;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunInputSnapshot;
+use MyInvoice\Service\Payroll\Run\PayrollRunValidationMessageFormatter;
 use PDO;
 
 final class PayrollRunRepository
@@ -78,6 +79,7 @@ final class PayrollRunRepository
         $sql = 'SELECT run.*,
                        revision.id AS revision_id,
                        revision.revision_no,
+                       revision.revision_kind,
                        revision.status AS revision_status,
                        revision.calculated_by,
                        revision.reviewed_by,
@@ -125,6 +127,7 @@ final class PayrollRunRepository
             $run['revision_no'] = $row['revision_no'] === null
                 ? null
                 : (int) $row['revision_no'];
+            $run['revision_kind'] = $row['revision_kind'];
             $run['revision_status'] = $row['revision_status'];
             $run['payment_materialization_supported'] =
                 (bool) (int) $row['payment_materialization_supported'];
@@ -159,6 +162,7 @@ final class PayrollRunRepository
             'SELECT run.*,
                     revision.id AS revision_id,
                     revision.revision_no,
+                    revision.revision_kind,
                     revision.status AS revision_status,
                     revision.result_snapshot_json,
                     revision.input_snapshot_json,
@@ -181,6 +185,7 @@ final class PayrollRunRepository
         $run = self::castRun($row);
         $run['revision_id'] = $row['revision_id'] === null ? null : (int) $row['revision_id'];
         $run['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
+        $run['revision_kind'] = $row['revision_kind'];
         $run['revision_status'] = $row['revision_status'];
         $inputSnapshot = $row['input_snapshot_json'] === null
             ? null
@@ -1042,6 +1047,30 @@ final class PayrollRunRepository
         return $row === false ? null : self::castRevision($row);
     }
 
+    /** @return array<string,mixed>|null */
+    public function latestApprovedRevision(
+        int $supplierId,
+        int $runId,
+        ?int $beforeRevisionNo = null,
+    ): ?array
+    {
+        $beforeSql = $beforeRevisionNo === null ? '' : ' AND revision_no < ?';
+        $params = [$supplierId, $runId];
+        if ($beforeRevisionNo !== null) {
+            $params[] = $beforeRevisionNo;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_run_revisions
+              WHERE supplier_id = ? AND run_id = ? AND status = "approved"'
+                . $beforeSql . '
+              ORDER BY revision_no DESC
+              LIMIT 1'
+        );
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::castRevision($row);
+    }
+
     /** @return list<array<string,mixed>> */
     public function revisions(int $supplierId, int $runId): array
     {
@@ -1273,13 +1302,14 @@ final class PayrollRunRepository
                 continue;
             }
             $issues = $enforcementResult['issues'] ?? [];
-            $message = 'Exekuční srážka vyžaduje doplnění nebo kontrolu podkladů.';
-            if (is_array($issues) && $issues !== []) {
-                $message .= ' ' . implode(', ', array_filter(
-                    $issues,
-                    static fn (mixed $issue): bool => is_string($issue),
-                ));
-            }
+            $message = PayrollRunValidationMessageFormatter::enforcement(
+                is_array($issues)
+                    ? array_values(array_filter(
+                        $issues,
+                        static fn (mixed $issue): bool => is_string($issue),
+                    ))
+                    : [],
+            );
             $insert->execute([
                 $supplierId,
                 $revisionId,
@@ -1308,13 +1338,14 @@ final class PayrollRunRepository
             return;
         }
         $issues = $statutory['issues'] ?? [];
-        $message = 'Zákonný výpočet pojistného, daně nebo čisté mzdy vyžaduje kontrolu.';
-        if (is_array($issues) && $issues !== []) {
-            $message .= ' ' . implode(', ', array_filter(
-                $issues,
-                static fn (mixed $issue): bool => is_string($issue),
-            ));
-        }
+        $message = PayrollRunValidationMessageFormatter::statutory(
+            is_array($issues)
+                ? array_values(array_filter(
+                    $issues,
+                    static fn (mixed $issue): bool => is_string($issue),
+                ))
+                : [],
+        );
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_validations
                 (supplier_id, revision_id, severity, code, entity_type,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Run;
 
 use MyInvoice\Service\Payroll\Document\PayslipDocumentSnapshotMapper;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsApprover;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class PayrollRunCalculationPipeline
@@ -20,6 +21,7 @@ final class PayrollRunCalculationPipeline
             $statutoryAccumulatorApprover = null,
         private readonly ?PayrollRunDeductionLedgerApprover
             $deductionLedgerApprover = null,
+        private readonly ?PayrollRiskySavingsApprover $riskySavingsApprover = null,
     ) {
         $this->payslipDocuments = new PayslipDocumentSnapshotMapper();
     }
@@ -87,6 +89,11 @@ final class PayrollRunCalculationPipeline
         array $result,
     ): void {
         $this->garnishments->storeApproved(
+            $supplierId,
+            $revisionId,
+            self::object($result, 'result'),
+        );
+        $this->riskySavingsApprover?->storeApproved(
             $supplierId,
             $revisionId,
             self::object($result, 'result'),

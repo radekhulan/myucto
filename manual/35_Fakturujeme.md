@@ -224,7 +224,7 @@ vystaví jako koncept automaticky (bankovní párování) nebo na klik:
 
 **Daňový doklad k platbě se nevystavuje** u neplátce, u plnění v přenesené
 daňové povinnosti (u RC se záloha nedaní — daň vzniká až k DUZP plnění) a
-[v režimu OSS](40_OSS.md#407-ctovani-oss-dane) (daň se přiznává ke dni přijetí
+[v režimu OSS](40_OSS.md#407-uctovani-oss-dane) (daň se přiznává ke dni přijetí
 úplaty přímo v OSS přiznání). Podrobně
 [§ 16.1.2](16_Faktura_PDF.md#zalohova-faktura-danovy-doklad-k-prijate-platbe) a
 [§ 15.8](15_Faktura_editor.md#158-zalohova-faktura-danovy-doklad).
@@ -290,7 +290,7 @@ směrnice 2006/112/ES". EU plnění se současně vykáže v
 > [!NOTE]
 > RC checkbox je v editoru skrytý, když je dodavatel **neplátce DPH** — neplátce
 > RC vystavit nemůže (nemá DPH co přenášet). Výjimkou je **identifikovaná osoba**
-> ([§ 35.1.4](#3514-identifikovana-osoba-6g-6l-zdph)), které se RC u EU klienta
+> ([§ 35.1.4](#3514-identifikovana-osoba-6g6l-zdph)), které se RC u EU klienta
 > s DIČ zapne automaticky.
 
 RC doklad v cizí měně má vlastní pravidla přepočtu pro výkazy — viz
@@ -412,7 +412,8 @@ s místní účetní.
 - **Mzdy** — [úplný mzdový modul](58_Uplne_mzdy.md) (osobní karty, pracovní
   vztahy, docházka, absence a dovolená, mzdové složky, mzdový běh, srážky a
   exekuce, výplatní pásky, mzdový list, platby odvodů a účetní můstek)
-  i jednodušší [Mzdovou rekapitulaci](57_Mzdy.md); k ostrému spuštění viz níže
+  i jednodušší [Mzdovou rekapitulaci](57_Mzdy.md); úplné mzdy zatím používejte
+  ve zkušebním provozu podle upozornění níže
 - XML pro EPO portál MFČR: **přiznání k DPH (DPHDP3), kontrolní hlášení
   (DPHKH1), souhrnné hlášení (DPHSHV), daň z příjmů (DPFO/DPPO — řádné,
   opravné i dodatečné, vč. hospodářského roku)** a **OSS přiznání (OSSEI1)**
@@ -430,19 +431,19 @@ s místní účetní.
 
 ### MyÚčto **nedělá**
 
-- **Produkční mzdy — zatím.** [Mzdový modul](58_Uplne_mzdy.md) je funkčně
-  hotový, ale do **ostrého spuštění plánovaného na září 2026** běží ve
-  zkušebním provozu: výsledek, odvody, dokumenty i podání je nutné ověřit proti
-  jinému důvěryhodnému zdroji a modul nemá být jediným podkladem pro výplatu
-  ani pro zákonné podání. Zákonná hlášení se navíc zatím jen připravují a
-  stahují — aplikace je neodesílá
+- **Produkční mzdy jako jediný zdroj — zatím.** [Mzdový modul](58_Uplne_mzdy.md)
+  běží ve zkušebním provozu: výsledek, odvody, dokumenty i podání je nutné
+  ověřit proti jinému důvěryhodnému zdroji a modul nemá být jediným podkladem
+  pro výplatu ani pro zákonné podání
 - **IOSS ani režim mimo EU** — vede se pouze **režim EU** OSS
 - **Podání OSS přes EPO** — `OSSEI1` se podává v samostatné aplikaci
   **MOSS/OSS** Daňového portálu, přímý ani asistovaný kanál ho proto nenabízí
   ([§ 40.8.5](40_OSS.md#4085-kde-se-oss-priznani-podava))
-- **Podání na ePortál ČSSZ a na portály zdravotních pojišťoven** — XML pro
-  ČSSZ vytvoří, odeslání je na uživateli; zdravotní pojišťovny nemají jednotné
-  rozhraní, k dispozici je PDF pomůcka
+- **Jednotné automatické odeslání všech mzdových podání** — JMHZ lze po
+  výslovném potvrzení řízeně odeslat přes VREP nebo ISDS a následně evidovat
+  stav a protokol. Ostatní výstupy se podle druhu připraví ke stažení nebo se
+  jejich splnění pouze zaeviduje; kanály zdravotních pojišťoven nejsou jednotné
+  a část postupu zůstává ruční
 - **Podání bez tvého potvrzení** — ani přímý kanál nic neodešle sám; kontrola
   částek a rozhodnutí podat zůstává na člověku
 - **Výrobu a kusovníky** (marži lze spočítat, ale výrobní zakázky ne)

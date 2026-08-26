@@ -36,20 +36,30 @@ final class PayrollQuickInputsAction
             return $error;
         }
         $query = $request->getQueryParams();
+        $cardsView = ($query['view'] ?? null) === 'cards';
         // Strop je tvrdý, ne jen výchozí — z URL ho zvednout nejde. Řádek je
         // pracovní vztah, takže seznam roste s velikostí firmy.
-        $limit = self::pageLimit($query);
+        $limit = $cardsView ? self::cardPageLimit($query) : self::pageLimit($query);
         $offset = max(0, (int) ($query['offset'] ?? 0));
         $employmentId = self::narrowingId($query, 'employment_id');
         try {
             $period = $this->validator->period($query['period'] ?? null);
-            $month = $this->quickInputs->month(
-                $this->currentSupplierId($request),
-                $period,
-                $limit,
-                $offset,
-                $employmentId,
-            );
+            $month = $cardsView
+                ? $this->quickInputs->employeeCards(
+                    $this->currentSupplierId($request),
+                    $period,
+                    $limit,
+                    $offset,
+                    self::cardSearch($query),
+                    self::cardStatus($query),
+                )
+                : $this->quickInputs->month(
+                    $this->currentSupplierId($request),
+                    $period,
+                    $limit,
+                    $offset,
+                    $employmentId,
+                );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -64,6 +74,7 @@ final class PayrollQuickInputsAction
             'limit' => $limit,
             'offset' => $offset,
             'employment_id' => $employmentId,
+            ...($cardsView ? ['view' => 'cards'] : []),
         ]);
     }
 
@@ -139,6 +150,45 @@ final class PayrollQuickInputsAction
             PayrollQuickInputRepository::LIST_MAX_LIMIT,
             (int) ($query['limit'] ?? PayrollQuickInputRepository::LIST_DEFAULT_LIMIT),
         ));
+    }
+
+    /** @param array<array-key,mixed> $query */
+    private static function cardPageLimit(array $query): int
+    {
+        return max(1, min(
+            PayrollQuickInputRepository::CARD_PAGE_LIMIT,
+            (int) ($query['limit'] ?? PayrollQuickInputRepository::CARD_PAGE_LIMIT),
+        ));
+    }
+
+    /** @param array<array-key,mixed> $query */
+    private static function cardSearch(array $query): string
+    {
+        $search = $query['search'] ?? '';
+        if (!is_string($search)) {
+            throw new \InvalidArgumentException('Hledaný text musí být řetězec.');
+        }
+        $search = trim($search);
+        if (mb_strlen($search, 'UTF-8') > 120) {
+            throw new \InvalidArgumentException('Hledaný text může mít nejvýše 120 znaků.');
+        }
+
+        return $search;
+    }
+
+    /** @param array<array-key,mixed> $query */
+    private static function cardStatus(array $query): string
+    {
+        $status = $query['status'] ?? 'active';
+        if (!is_string($status) || !in_array(
+            $status,
+            ['active', 'away', 'attention', 'all'],
+            true,
+        )) {
+            throw new \InvalidArgumentException('Neplatný filtr stavu zaměstnanců.');
+        }
+
+        return $status;
     }
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response

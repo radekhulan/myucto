@@ -4,7 +4,7 @@
  *
  * URL: /manual                    → INDEX.html (rozcestník)
  * URL: /manual?ch=01_Uvod         → kapitola
- * URL: /manual?ch=01_Uvod#1.2     → kapitola se skokem na sekci
+ * URL: /manual?ch=01_Uvod#12-vystavovani-dokladu → kapitola se skokem na sekci
  *
  * Bez auth (manuál je veřejný — není v něm citlivý obsah; pokud chceš
  * auth-gate, doplň session check níže).
@@ -288,6 +288,20 @@ $ICON_DARK  = 'M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-
     }
     toggle.addEventListener('click', () => setOpen(!sidebar.classList.contains('open')));
     backdrop.addEventListener('click', () => setOpen(false));
+})();
+
+// ── Aktivní kapitola musí být po otevření vidět v levém obsahu ──
+(function () {
+    const nav = document.querySelector('#sidebar > nav');
+    const active = nav && nav.querySelector('.nav-item.active');
+    if (!nav || !active) return;
+    requestAnimationFrame(() => {
+        const navBox = nav.getBoundingClientRect();
+        const activeBox = active.getBoundingClientRect();
+        const top = nav.scrollTop + activeBox.top - navBox.top
+            - (nav.clientHeight - activeBox.height) / 2;
+        nav.scrollTop = Math.max(0, top);
+    });
 })();
 
 // ── Světlé screenshoty → kandidáti na dark inverzi ──

@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormError;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 
 /**
  * Napojení protokolů JMHZ na platformu podání.
@@ -135,31 +137,104 @@ final readonly class JmhzReceiptVerifier implements PayrollReceiptVerifierInterf
             );
         }
 
+        $formOutcomes = $this->formOutcomes($report);
+
         return new PayrollVerifiedReceipt(
             $report->status->payrollRemoteStatus(),
             $report->correlationReference,
-            $this->partStatuses($report),
+            $this->partStatuses($formOutcomes),
+            $formOutcomes,
         );
     }
 
-    /** @return array<int,string> */
-    private function partStatuses(JmhzProtocolReport $report): array
+    /**
+     * @param list<PayrollVerifiedReceiptFormOutcome> $outcomes
+     * @return array<int,string>
+     */
+    private function partStatuses(array $outcomes): array
     {
         if ($this->formPartIds === []) {
             return [];
         }
         $statuses = [];
-        foreach ($report->formStatuses as $guid => $status) {
-            $partId = $this->formPartIds[strtoupper($guid)] ?? null;
-            if ($partId === null) {
+        foreach ($outcomes as $outcome) {
+            if ($outcome->partId !== null && $outcome->remoteStatus !== null) {
+                $statuses[$outcome->partId] = $outcome->remoteStatus;
+            }
+        }
+
+        return $statuses;
+    }
+
+    /** @return list<PayrollVerifiedReceiptFormOutcome> */
+    private function formOutcomes(JmhzProtocolReport $report): array
+    {
+        /** @var array<string,array{part_id:?int,status:?JmhzSubmissionStatus,ik:?string,id_ppv:?string,errors:list<PayrollVerifiedReceiptFormError>}> $byGuid */
+        $byGuid = [];
+        foreach ($report->parts as $part) {
+            if ($part->kind !== JmhzProtocolPartKind::Form || $part->formGuid === null) {
+                continue;
+            }
+            $guid = strtoupper($part->formGuid);
+            $partId = $this->formPartIds[$guid] ?? null;
+            if ($this->formPartIds !== [] && $partId === null) {
                 throw new JmhzTransportException(
                     'jmhz_protocol_form_unmapped',
                     'Protokol nese GUID formuláře, který k tomuhle podání nepatří.',
                 );
             }
-            $statuses[$partId] = $status->payrollRemoteStatus();
+            $status = $report->kind === JmhzProtocolKind::PartialSubmission
+                ? $part->status
+                : null;
+            $errors = array_map(
+                static fn (JmhzProtocolError $error): PayrollVerifiedReceiptFormError
+                    => new PayrollVerifiedReceiptFormError(
+                        $error->code,
+                        $error->message,
+                        $error->origin->value,
+                        $error->controlId?->value,
+                    ),
+                $part->errors,
+            );
+            $existing = $byGuid[$guid] ?? null;
+            if ($existing === null) {
+                $byGuid[$guid] = [
+                    'part_id' => $partId,
+                    'status' => $status,
+                    'ik' => $part->ikMpsv,
+                    'id_ppv' => $part->idPpv,
+                    'errors' => $errors,
+                ];
+                continue;
+            }
+            if ($existing['part_id'] !== $partId
+                || $existing['status'] !== $status
+                || $existing['ik'] !== $part->ikMpsv
+                || $existing['id_ppv'] !== $part->idPpv
+            ) {
+                throw new JmhzTransportException(
+                    'jmhz_protocol_form_outcome_conflict',
+                    'Protokol uvádí pro tentýž formulář rozporný výsledek nebo identitu.',
+                );
+            }
+            $byGuid[$guid]['errors'] = [...$existing['errors'], ...$errors];
         }
 
-        return $statuses;
+        $outcomes = [];
+        foreach ($byGuid as $guid => $outcome) {
+            $status = $outcome['status'];
+            $outcomes[] = new PayrollVerifiedReceiptFormOutcome(
+                $guid,
+                $outcome['part_id'],
+                $status?->value,
+                $status?->name,
+                $status?->payrollRemoteStatus(),
+                $outcome['ik'],
+                $outcome['id_ppv'],
+                $outcome['errors'],
+            );
+        }
+
+        return $outcomes;
     }
 }

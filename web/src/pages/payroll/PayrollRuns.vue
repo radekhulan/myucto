@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollRun,
@@ -22,6 +23,7 @@ import { useToast } from '@/composables/useToast'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 
 const { t } = useI18n()
+const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
 const loading = ref(false)
@@ -63,6 +65,115 @@ const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
  * stejně, tohle je jen to, aby se nenabízelo tlačítko, které skončí 403.
  */
 const canOverride = computed(() => auth.canWrite('payroll.approve'))
+
+type DisplayValidation = PayrollRunValidation & {
+  group_key: string
+  display_message: string
+  entity_labels: string[]
+}
+
+const GROUPED_VALIDATION_CODES = new Set([
+  'draft_inputs_present',
+  'enforcement_manual_review',
+])
+const ENFORCEMENT_NET_PAY_ISSUE = 'income:net_pay_result_missing_or_unverified'
+
+/** Starší revize mohou nést technický kód z doby před serverovým překladačem. */
+function containsInternalIssueCode(message: string): boolean {
+  return /(?:[a-z][a-z0-9]*[_-]){2,}[a-z0-9_-]+|(?:employee|employment):\d+|[a-z_]+:[a-z0-9_-]+:/iu.test(message)
+}
+
+function legacyEnforcementIssues(message: string): { netPay: boolean, other: boolean } {
+  const netPay = message.includes(ENFORCEMENT_NET_PAY_ISSUE)
+  const remainder = message.replaceAll(ENFORCEMENT_NET_PAY_ISSUE, '')
+  return { netPay, other: containsInternalIssueCode(remainder) }
+}
+
+function validationGroupingKey(validation: PayrollRunValidation): string {
+  if (validation.code === 'draft_inputs_present') return validation.code
+  if (validation.code !== 'enforcement_manual_review') return `validation-${validation.id}`
+  if (!containsInternalIssueCode(validation.message)) {
+    return `${validation.code}:message:${validation.message}`
+  }
+  const issues = legacyEnforcementIssues(validation.message)
+  return `${validation.code}:legacy:${issues.netPay ? 'net-pay' : 'no-net-pay'}:${issues.other ? 'other' : 'only'}`
+}
+
+function validationDisplayMessage(validation: PayrollRunValidation, count = 1): string {
+  if (validation.code === 'draft_inputs_present') {
+    return t(
+      `payroll.runs.validation.draft_inputs_${count === 1 ? 'one' : 'many'}`,
+      { count },
+    )
+  }
+  if (validation.code === 'enforcement_manual_review') {
+    if (!containsInternalIssueCode(validation.message)) return validation.message
+    const issues = legacyEnforcementIssues(validation.message)
+    const parts: string[] = []
+    if (issues.netPay) {
+      parts.push(t(
+        `payroll.runs.validation.enforcement_net_pay_${count === 1 ? 'one' : 'many'}`,
+        { count },
+      ))
+    }
+    if (issues.other || !issues.netPay) {
+      parts.push(t('payroll.runs.validation.requires_attention'))
+    }
+    return parts.join(' ')
+  }
+  if (validation.code === 'statutory_calculation_manual_review'
+    && containsInternalIssueCode(validation.message)) {
+    return t('payroll.runs.validation.statutory_incomplete')
+  }
+  return containsInternalIssueCode(validation.message)
+    ? t('payroll.runs.validation.requires_attention')
+    : validation.message
+}
+
+function validationGroups(validations: PayrollRunValidation[]): DisplayValidation[] {
+  const groups: Array<{ primary: PayrollRunValidation, items: PayrollRunValidation[] }> = []
+  const grouped = new Map<string, { primary: PayrollRunValidation, items: PayrollRunValidation[] }>()
+
+  for (const validation of validations) {
+    const canGroup = !validation.requires_override
+      && GROUPED_VALIDATION_CODES.has(validation.code)
+    const key = canGroup ? validationGroupingKey(validation) : `validation-${validation.id}`
+    let group = grouped.get(key)
+    if (!group) {
+      group = { primary: validation, items: [] }
+      grouped.set(key, group)
+      groups.push(group)
+    }
+    group.items.push(validation)
+  }
+
+  return groups.map(({ primary, items }) => {
+    const entityLabels = Array.from(new Set(items.flatMap((item) => {
+      if (item.entity_type === 'employee' && item.entity_id !== null) {
+        return personNames.value[item.entity_id] ? [personNames.value[item.entity_id]] : []
+      }
+      const namedEmployment = item.message.match(/^(.+?): pracovní vztah/u)
+      return namedEmployment?.[1] ? [namedEmployment[1]] : []
+    })))
+
+    const displayMessage = validationDisplayMessage(primary, items.length)
+
+    return {
+      ...primary,
+      group_key: GROUPED_VALIDATION_CODES.has(primary.code)
+        ? primary.code
+        : `validation-${primary.id}`,
+      display_message: displayMessage,
+      entity_labels: entityLabels,
+    }
+  })
+}
+
+function entityLabelSummary(labels: string[]): string {
+  const visible = labels.slice(0, 5).join(', ')
+  if (labels.length <= 5) return visible
+  return `${visible} · ${t('payroll.runs.validation.and_more', { count: labels.length - 5 })}`
+}
 
 /** Stavy, ve kterých se s výjimkou ještě smí hýbat — po schválení běhu už ne. */
 const OVERRIDE_EDITABLE_STATUSES: PayrollRun['status'][] = [
@@ -132,6 +243,7 @@ const PRIMARY_COMMAND: Partial<Record<PayrollRun['status'], PayrollRunCommand>> 
   payment_ready: 'mark_paid',
   paid: 'close',
   correction_pending: 'reopen',
+  cancelled: 'reopen',
 }
 
 const KNOWN_COMMANDS: PayrollRunCommand[] = [
@@ -148,7 +260,10 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'close',
 ]
 
-function commandLabel(command: PayrollRunCommand): string {
+function commandLabel(command: PayrollRunCommand, run?: PayrollRun): string {
+  if (command === 'reopen' && run?.status === 'cancelled') {
+    return t('payroll.runs.commands.reopen_cancelled')
+  }
   return t(`payroll.runs.commands.${command}`)
 }
 
@@ -313,8 +428,28 @@ async function submitCommand(
     commandReason.value = ''
     commandError.value = ''
     await load()
+    if (command === 'prepare_payments'
+      && outcome !== 'payments_not_applicable'
+    ) {
+      void router.push({
+        name: 'payroll-payments',
+        query: {
+          period: run.period_start.slice(0, 7),
+          run: String(run.id),
+          focus: 'bank-order',
+        },
+      })
+    }
   } catch (error: any) {
-    const message = error?.response?.data?.error?.message || t('payroll.runs.command_failed')
+    const failure = error?.response?.data?.error
+    const paymentFailureKey = failure?.code === 'payroll_payments_unsettled'
+      ? 'payroll.runs.payments_unsettled'
+      : failure?.code === 'payroll_incoming_refund_unresolved'
+        ? 'payroll.runs.incoming_refund_unresolved'
+        : null
+    const message = command === 'mark_paid' && paymentFailureKey !== null
+      ? t(paymentFailureKey)
+      : failure?.message || t('payroll.runs.command_failed')
     if (pendingCommand.value) commandError.value = message
     // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
     // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle
@@ -561,7 +696,7 @@ onMounted(load)
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path :d="commandIcon(command)" />
               </svg>
-              {{ commandLabel(command) }}
+              {{ commandLabel(command, run) }}
             </button>
             <button
               v-if="canWrite && run.can_delete"
@@ -664,13 +799,31 @@ onMounted(load)
         <div v-if="run.validations.length" class="mt-4 space-y-2">
           <p class="text-sm font-medium text-warning-700">{{ t('payroll.runs.validations') }}</p>
           <div
-            v-for="validation in run.validations"
+            v-for="validation in validationGroups(run.validations)"
             :key="validation.id"
             :data-testid="`payroll-validation-${validation.id}`"
+            :data-test="`payroll-validation-group-${validation.group_key}`"
             class="rounded-lg border px-3 py-2 text-sm"
             :class="validationClass(validation)"
           >
-            <p>{{ validation.message }}</p>
+            <p>{{ validation.display_message }}</p>
+            <p
+              v-if="validation.entity_labels.length"
+              class="mt-1 text-xs font-medium"
+            >
+              {{ entityLabelSummary(validation.entity_labels) }}
+            </p>
+            <a
+              v-if="validation.remediation_path"
+              :href="validation.remediation_path"
+              data-test="payroll-validation-remediation"
+              :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.link" />
+              </svg>
+              {{ t('payroll.runs.validation.open_remediation') }}
+            </a>
 
             <!--
               Varování, které čeká na člověka. Bez téhle věty uživatel vidí jen
@@ -754,7 +907,7 @@ onMounted(load)
 
     <Modal
       v-if="pendingCommand"
-      :title="commandLabel(pendingCommand.command)"
+      :title="commandLabel(pendingCommand.command, pendingCommand.run)"
       width-class="max-w-lg"
       @close="pendingCommand = null"
     >
@@ -788,7 +941,7 @@ onMounted(load)
             :disabled="saving"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="commandIcon(pendingCommand.command)" /></svg>
-            {{ commandLabel(pendingCommand.command) }}
+            {{ commandLabel(pendingCommand.command, pendingCommand.run) }}
           </button>
         </div>
       </form>
@@ -802,7 +955,7 @@ onMounted(load)
     >
       <form class="space-y-4" data-test="run-override-dialog" @submit.prevent="confirmOverride">
         <p class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800">
-          {{ pendingOverride.validation.message }}
+          {{ validationDisplayMessage(pendingOverride.validation) }}
         </p>
         <label class="block text-sm font-medium text-neutral-700">
           {{ t('payroll.runs.override.reason_prompt') }}

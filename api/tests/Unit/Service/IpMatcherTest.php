@@ -83,7 +83,7 @@ final class IpMatcherTest extends TestCase
         // podvrhnout. Tenhle scénář nezachrání žádná logika nad chainem — proto
         // clientIpFromRequest() preferuje nepodvrhnutelný MYUCTO_CLIENT_IP
         // (viz testTrustedServerParamWinsOverForgedHeader) a docker/nginx.conf ho
-        // nastavuje. Předpoklad je zdokumentovaný v manual/55_Bezpecnost.md.
+        // nastavuje. Předpoklad je zdokumentovaný v manual/76_Bezpecnost.md.
         self::assertSame(
             '203.0.113.7',
             $this->m->clientIp($this->params('10.0.0.1', '203.0.113.7'), ['10.0.0.0/8']),

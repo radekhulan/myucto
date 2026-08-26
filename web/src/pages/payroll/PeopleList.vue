@@ -339,6 +339,31 @@ function statusLabel(isActive: boolean): string {
   return t(isActive ? 'payroll.people.status.active' : 'payroll.people.status.inactive')
 }
 
+/**
+ * Jeden další krok místo obecného „Chybí". Pořadí kopíruje skutečný pracovní
+ * postup: bez vztahu není co zpracovat, potom se doplní zákonná identita,
+ * bydliště a nakonec kontakt. Server zůstává autoritou pro samotné mezery.
+ */
+const setupGapPriority: PayrollPersonSetupGap[] = [
+  'employment',
+  'name',
+  'identifier',
+  'residence',
+  'contact',
+]
+
+function personNextStep(person: PayrollPersonListItem): PayrollPersonSetupGap | 'ready' {
+  return setupGapPriority.find(gap => person.setup_gaps.includes(gap)) ?? 'ready'
+}
+
+function nextStepLabel(person: PayrollPersonListItem): string {
+  return t(`payroll.people.next_step.${personNextStep(person)}`)
+}
+
+function nextStepActionLabel(person: PayrollPersonListItem): string {
+  return t(`payroll.people.next_step.action.${personNextStep(person)}`)
+}
+
 async function load() {
   loading.value = true
   loadFailed.value = false
@@ -677,7 +702,22 @@ function toggleAdvancedProfile(event: Event) {
  * cizí id nic neotevře.
  */
 async function openFromQuery() {
-  const raw = Array.isArray(route.query.person) ? route.query.person[0] : route.query.person
+  const employmentRaw = Array.isArray(route.query.employment)
+    ? route.query.employment[0]
+    : route.query.employment
+  let raw = Array.isArray(route.query.person) ? route.query.person[0] : route.query.person
+  if ((typeof raw !== 'string' || raw === '')
+    && typeof employmentRaw === 'string' && employmentRaw !== ''
+  ) {
+    const employmentId = Number(employmentRaw)
+    if (!Number.isInteger(employmentId) || employmentId <= 0) return
+    try {
+      const summary = await payrollApi.employmentAgendaSummary(employmentId)
+      raw = String(summary.employee_id)
+    } catch {
+      return
+    }
+  }
   if (typeof raw !== 'string' || raw === '') return
   const id = Number(raw)
   if (!Number.isInteger(id) || id <= 0) return
@@ -940,7 +980,7 @@ onMounted(async () => {
         <nav class="text-xs text-neutral-500" aria-label="breadcrumb" data-test="person-breadcrumbs">
           <ol class="flex flex-wrap items-center gap-1">
             <li>
-              <RouterLink :to="{ name: 'payroll' }" class="hover:text-neutral-700 hover:underline">
+              <RouterLink :to="{ name: 'payroll-dashboard' }" class="hover:text-neutral-700 hover:underline">
                 {{ t('payroll.people.breadcrumbs.payroll') }}
               </RouterLink>
             </li>
@@ -1084,6 +1124,7 @@ onMounted(async () => {
           :key="employment.id"
           :employment="employment"
           :can-write="auth.canWrite('payroll.employment.write')"
+          :can-write-person="auth.canWrite('payroll.person.write')"
           :can-read-documents="auth.canRead('payroll.documents')"
           :can-write-documents="auth.canWrite('payroll.documents')"
           :payroll-start-period="payrollStartPeriod"
@@ -1149,7 +1190,14 @@ onMounted(async () => {
             <tbody class="divide-y divide-neutral-100">
               <template v-for="person in people" :key="person.id">
                 <tr class="align-top">
-                  <td v-if="tbl.isVisible('person')" class="px-4 py-3 font-medium text-neutral-900">{{ person.full_name }}</td>
+                  <td v-if="tbl.isVisible('person')" class="px-4 py-3">
+                    <p class="font-medium text-neutral-900">{{ person.full_name }}</p>
+                    <p
+                      v-if="person.needs_setup"
+                      class="mt-1 max-w-sm text-xs leading-snug text-warning-700"
+                      :data-test="`person-next-step-${person.id}`"
+                    >{{ nextStepLabel(person) }}</p>
+                  </td>
                   <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                     <div class="flex flex-wrap gap-1.5">
                       <span class="rounded-full px-2 py-1 text-xs font-medium" :class="person.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ statusLabel(person.is_active) }}</span>
@@ -1159,11 +1207,11 @@ onMounted(async () => {
                   <td v-if="tbl.isVisible('relations')" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
                   <td v-if="tbl.isVisible('count')" class="px-4 py-3 text-right text-neutral-700">{{ person.employment_count }}</td>
                   <td v-if="tbl.isVisible('detail')" class="px-4 py-3 text-right">
-                    <button :class="btnOutline('neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
+                    <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
                       <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="ICONS.user" />
+                        <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
                       </svg>
-                      {{ t('payroll.people.edit_person') }}
+                      {{ nextStepActionLabel(person) }}
                     </button>
                   </td>
                 </tr>
@@ -1186,11 +1234,16 @@ onMounted(async () => {
               <div><dt class="text-xs text-neutral-500">{{ t('payroll.people.columns.relations') }}</dt><dd class="mt-0.5 text-neutral-800">{{ person.relation_types.map(relationLabel).join(', ') }}</dd></div>
               <div><dt class="text-xs text-neutral-500">{{ t('payroll.people.columns.count') }}</dt><dd class="mt-0.5 text-neutral-800">{{ person.employment_count }}</dd></div>
             </dl>
-            <button :class="[btnOutline('neutral'), 'mt-4']" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
+            <p
+              v-if="person.needs_setup"
+              class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs leading-snug text-warning-700"
+              :data-test="`person-next-step-${person.id}`"
+            >{{ nextStepLabel(person) }}</p>
+            <button :class="[btnOutline(person.needs_setup ? 'warning' : 'neutral'), 'mt-4']" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path :d="ICONS.user" />
+                <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
               </svg>
-              {{ t('payroll.people.edit_person') }}
+              {{ nextStepActionLabel(person) }}
             </button>
           </article>
         </div>

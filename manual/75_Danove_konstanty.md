@@ -22,9 +22,9 @@ Konstanty zahrnují zejména:
 - zákonné termíny podání.
 
 Mzdové hodnoty na této stránce používá především základní **Mzdová
-rekapitulace**. Testovací alfa modul **Úplné mzdy** má oddělené,
-auditovatelné legislativní rulesety v **Mzdy → Legislativní pravidla**; jejich
-stav a schvalování popisuje [§ 58.18](58_Uplne_mzdy.md#5818-legislativni-pravidla-mezd).
+rekapitulace**. Zkušební agenda **Úplné mzdy** má oddělené, auditovatelné
+legislativní sady v **Mzdy → Legislativní pravidla**; jejich stav a schvalování
+popisuje kapitola [Legislativní pravidla mezd](58q_Legislativni_pravidla_mezd.md).
 
 ## 75.2 Vlastní přepis
 

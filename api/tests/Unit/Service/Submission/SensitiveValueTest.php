@@ -131,20 +131,23 @@ final class SensitiveValueTest extends TestCase
         serialize($credentials);
     }
 
-    /**
-     * Přihlašovací jméno a heslo do datové schránky se v modelu pověření
-     * nesmí objevit — § 9 odst. 2 zák. 300/2008 Sb. je zakazuje předat
-     * aplikaci třetí strany. Jediná průchozí cesta je systémový certifikát.
-     */
-    public function testCredentialModelHasNoPlaceForLoginAndPassword(): void
+    /** Jednorázové přihlášení smí existovat jen v neredukovatelném tajném obalu. */
+    public function testTransientLoginCredentialsAreSensitiveAndCannotBeSerialized(): void
     {
-        $properties = array_map(
-            static fn (\ReflectionProperty $p): string => $p->getName(),
-            (new \ReflectionClass(ChannelCredentials::class))->getProperties(),
+        $credentials = new ChannelCredentials(
+            boxId: '',
+            authMode: 'password',
+            username: SensitiveValue::fromProducer(static fn (): string => 'isds-user'),
+            password: SensitiveValue::fromProducer(static fn (): string => self::SECRET),
         );
 
-        self::assertNotContains('login', $properties);
-        self::assertNotContains('password', $properties);
-        self::assertContains('certificate', $properties);
+        foreach ([print_r($credentials, true), var_export($credentials, true), (string) json_encode($credentials)] as $rendered) {
+            self::assertStringNotContainsString('isds-user', $rendered);
+            self::assertStringNotContainsString(self::SECRET, $rendered);
+        }
+        self::assertSame(['box_id' => '', 'auth_mode' => 'password'], $credentials->toLogContext());
+
+        $this->expectException(\LogicException::class);
+        serialize($credentials);
     }
 }

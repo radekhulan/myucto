@@ -15,9 +15,9 @@ final class JmhzOfficialExamplePackageBuilder
     private const XML_COUNT = 35;
     private const UNCOMPRESSED_BYTES = 286380;
     private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1';
+        'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1';
     private const SPEC_MANIFEST_SHA256 =
-        'f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b';
+        '429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205';
     private const XSD_INVENTORY_SHA256 =
         '72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c';
 

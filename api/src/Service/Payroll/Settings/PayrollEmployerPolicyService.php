@@ -125,6 +125,12 @@ final class PayrollEmployerPolicyService
             'valid_to' => $validTo,
             'payday_day' => $paydayDay,
             'payday_month_offset' => $paydayMonthOffset,
+            'leave_entitlement_weeks' => $this->integer(
+                $input + ['leave_entitlement_weeks' => 4],
+                'leave_entitlement_weeks',
+                4,
+                12,
+            ),
         ];
         foreach (self::ENUMS as $field => $allowed) {
             $rawValue = $input[$field] ?? null;
@@ -141,8 +147,8 @@ final class PayrollEmployerPolicyService
             }
             $result[$field] = $value;
         }
+        $result['four_eyes_required'] = false;
         foreach ([
-            'four_eyes_required',
             'automatic_calculation_enabled',
             'automatic_posting_enabled',
             'automatic_payments_enabled',

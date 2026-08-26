@@ -623,13 +623,17 @@ final class PayrollRunPersistenceTest extends TestCase
                     jmhz_apz_contribution_status = "yes",
                     jmhz_apz_instrument_code = "4",
                     jmhz_functional_benefits_status = "no",
-                    jmhz_temporary_assignment_status = "unverified"
+                    jmhz_temporary_assignment_status = "unverified",
+                    jmhz_orchard_discount_eligible = 0,
+                    jmhz_specific_legal_fact_applies = 0,
+                    jmhz_ozp_employment_support_applies = 0,
+                    jmhz_deep_mining_work_applies = 1
                     , activity_code = "1"
                     , jmhz_relationship_detail_code = "1"
               WHERE supplier_id = ? AND employment_id = ?'
         )->execute([
-            JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
-            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            JmhzExternalCodebookCatalog::HISTORICAL_OVERLAY_KEY,
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
             $this->supplierId,
             $this->employmentId,
         ]);
@@ -642,22 +646,46 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('554782', $term['jmhz_workplace_municipality_code']);
         self::assertSame('CZ', $term['jmhz_workplace_country_code']);
         self::assertSame(
-            JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
+            JmhzExternalCodebookCatalog::HISTORICAL_MANIFEST_SHA256,
             $term['jmhz_external_codebook_manifest_sha256'],
         );
         self::assertTrue($term['jmhz_external_codebooks_verified_for_period']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY,
+            $term['jmhz_validation_external_codebook_overlay_key'],
+        );
         self::assertSame('yes', $term['jmhz_apz_contribution_status']);
         self::assertSame('4', $term['jmhz_apz_instrument_code']);
         self::assertSame('no', $term['jmhz_functional_benefits_status']);
         self::assertSame('unverified', $term['jmhz_temporary_assignment_status']);
         self::assertSame('1', $term['activity_code']);
         self::assertSame('1', $term['jmhz_relationship_detail_code']);
+        self::assertSame([
+            'source_term_id' => $term['id'],
+            'source_term_row_version' => $term['row_version'],
+            'orchard_discount_eligible' => false,
+            'specific_legal_fact_applies' => false,
+            'ozp_employment_support_applies' => false,
+            'deep_mining_work_applies' => true,
+        ], $snapshot->data['people'][0]['employments'][0]['ordinary_evidence_profile']);
 
-        $futureSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
-            ->build($this->supplierId, '2026-09-01', '2026-10-15');
-        self::assertFalse(
-            $futureSnapshot->data['people'][0]['employments'][0]['term']
-                ['jmhz_external_codebooks_verified_for_period'],
+        $augustPaidInSeptemberSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-08-01', '2026-09-15');
+        $augustPaidInSeptemberTerm =
+            $augustPaidInSeptemberSnapshot->data['people'][0]['employments'][0]['term'];
+        self::assertTrue($augustPaidInSeptemberTerm['jmhz_external_codebooks_verified_for_period']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::AUGUST_2026_OVERLAY_KEY,
+            $augustPaidInSeptemberTerm['jmhz_validation_external_codebook_overlay_key'],
+        );
+
+        $septemberSnapshot = $this->container->get(PayrollRunSnapshotBuilder::class)
+            ->build($this->supplierId, '2026-09-01', '2026-09-30');
+        $septemberTerm = $septemberSnapshot->data['people'][0]['employments'][0]['term'];
+        self::assertTrue($septemberTerm['jmhz_external_codebooks_verified_for_period']);
+        self::assertSame(
+            JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
+            $septemberTerm['jmhz_validation_external_codebook_overlay_key'],
         );
     }
 
@@ -1262,21 +1290,34 @@ final class PayrollRunPersistenceTest extends TestCase
 
     public function testProductionPipelineBlocksApprovalUntilRulesetIsActive(): void
     {
-        $run = $this->productionService->createRun(
+        $approvedPosting = $this->createStub(
+            PayrollApprovedRevisionPostingService::class,
+        );
+        $approvedPosting->method('post')->willReturn([]);
+        $productionService = new PayrollRunCommandService(
+            $this->db,
+            $this->runs,
+            $this->container->get(PayrollRunSnapshotBuilder::class),
+            $this->container->get(PayrollRunCalculationPipeline::class),
+            $this->container->get(PayrollRunWorkflow::class),
+            $this->container->get(PayrollPeriodOwnershipService::class),
+            $approvedPosting,
+        );
+        $run = $productionService->createRun(
             $this->supplierId,
             '2026-06-01',
             '2026-07-15',
             null,
             $this->actors[0],
         );
-        $locked = $this->productionService->lockInputs(
+        $locked = $productionService->lockInputs(
             $this->supplierId,
             (int) $run['id'],
             (int) $run['row_version'],
             'production-ruleset-lock',
             $this->actors[0],
         );
-        $calculated = $this->productionService->calculate(
+        $calculated = $productionService->calculate(
             $this->supplierId,
             (int) $run['id'],
             (int) $locked->run['row_version'],
@@ -1299,7 +1340,7 @@ final class PayrollRunPersistenceTest extends TestCase
             ),
         );
 
-        $reviewed = $this->productionService->review(
+        $reviewed = $productionService->review(
             $this->supplierId,
             (int) $run['id'],
             (int) $calculated->run['row_version'],
@@ -1309,7 +1350,7 @@ final class PayrollRunPersistenceTest extends TestCase
 
         $this->expectException(\DomainException::class);
         $this->expectExceptionMessage('blokující validace');
-        $this->productionService->approve(
+        $productionService->approve(
             $this->supplierId,
             (int) $run['id'],
             (int) $reviewed->run['row_version'],
@@ -1364,11 +1405,21 @@ final class PayrollRunPersistenceTest extends TestCase
             'runtime-enforcement-lock',
             $this->actors[0],
         );
-        $this->db->pdo()->prepare(
-            'UPDATE payroll_enforcement_claims
-                SET outstanding_minor_units = 0
-              WHERE supplier_id = ? AND case_id = ?'
-        )->execute([$this->supplierId, $caseId]);
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_enforcement_claims
+                    SET outstanding_minor_units = 0
+                  WHERE supplier_id = ? AND case_id = ?'
+            )->execute([$this->supplierId, $caseId]);
+            self::fail(
+                'Pohledávku použitou ve zmrazeném vstupu nesmí jít změnit.',
+            );
+        } catch (PDOException $exception) {
+            self::assertStringContainsString(
+                'retained footprint',
+                $exception->getMessage(),
+            );
+        }
         $calculated = $this->service->calculate(
             $this->supplierId,
             (int) $run['id'],
@@ -1645,6 +1696,110 @@ final class PayrollRunPersistenceTest extends TestCase
                 $event['event_type'] === 'request_correction',
         ))[0];
         self::assertSame('Doplatek syntetické prémie.', $correctionEvent['reason']);
+    }
+
+    public function testCancelledUnapprovedRunReopensFromCurrentInputsAsRegularRevision(): void
+    {
+        $run = $this->createRun();
+        $locked = $this->service->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'lock-before-cancelled-reopen',
+            $this->actors[0],
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'calculate-before-cancelled-reopen',
+            $this->actors[0],
+        );
+        $cancelled = $this->service->cancel(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'cancel-before-fresh-reopen',
+            $this->actors[0],
+            'Po uzamčení byly opraveny mzdové vstupy.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $cancelled->run['row_version'],
+            'fresh-reopen-after-cancel',
+            $this->actors[1],
+            'Zakládám nový snapshot z opravených vstupů.',
+        );
+
+        self::assertSame('reopened', $reopened->run['status']);
+        self::assertSame(2, $reopened->revision['revision_no']);
+        self::assertSame('regular', $reopened->revision['revision_kind']);
+
+        $recalculated = $this->service->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reopened->run['row_version'],
+            'calculate-fresh-reopen',
+            $this->actors[0],
+        );
+        self::assertSame(
+            120_000,
+            $recalculated->revision['result_snapshot']['totals']['source_amount_minor'],
+        );
+    }
+
+    public function testCancelledCorrectionReopensAgainstApprovedBaselineAsCorrection(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $approvedRevisionId = (int) $approved->revision['id'];
+        $this->approvedInput(10_000, 'CORRECTION_RETRY', 'correction');
+
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'request-correction-before-cancel',
+            $this->actors[2],
+            'Oprava podkladů.',
+        );
+        $firstAttempt = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            'first-correction-before-cancel',
+            $this->actors[1],
+            'První pokus opravy.',
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            $runId,
+            (int) $firstAttempt->run['row_version'],
+            'calculate-correction-before-cancel',
+            $this->actors[0],
+        );
+        $cancelled = $this->service->cancel(
+            $this->supplierId,
+            $runId,
+            (int) $calculated->run['row_version'],
+            'cancel-correction-attempt',
+            $this->actors[0],
+            'Podklady korekce je nutné znovu upravit.',
+        );
+
+        $retried = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $cancelled->run['row_version'],
+            'retry-correction-after-cancel',
+            $this->actors[1],
+            'Opakovaný pokus opravy.',
+        );
+
+        self::assertSame('correction', $retried->revision['revision_kind']);
+        self::assertSame($approvedRevisionId, $retried->revision['previous_revision_id']);
+        self::assertSame(3, $retried->revision['revision_no']);
     }
 
     public function testSnapshotValidationBlocksApprovalWithoutChangingReviewedRun(): void

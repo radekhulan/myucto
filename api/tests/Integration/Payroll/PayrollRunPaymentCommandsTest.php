@@ -11,14 +11,16 @@ use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStateLockedException;
-use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomeTaxLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollSocialInsuranceLiabilityMaterializer;
+use MyInvoice\Service\Payroll\Payment\PayrollRiskySavingsLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingPreview;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -32,9 +34,6 @@ use MyInvoice\Service\Payroll\Run\PayrollRunPaymentPreparationService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentSettlementService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
-use MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService;
-use MyInvoice\Service\Payroll\Settings\PayrollSetupFeatures;
-use MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -196,6 +195,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             ),
         );
 
+        $this->activateForProduction();
         $prepared = $service->preparePayments(
             $this->supplierId,
             $runId,
@@ -213,7 +213,14 @@ final class PayrollRunPaymentCommandsTest extends TestCase
 
         // Nepokrytý zbytek musí `mark_paid` zablokovat i s vyčíslením.
         $first = $liabilities[0];
-        $this->allocate($first['id'], $first['amount_minor'] - 1_500);
+        $firstAllocationId = $this->allocate(
+            $first['id'],
+            $first['amount_minor'] - 1_500,
+        );
+        $this->settleAllocation(
+            $firstAllocationId,
+            $first['amount_minor'] - 1_500,
+        );
         try {
             $service->markPaid(
                 $this->supplierId,
@@ -235,9 +242,17 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             (string) $this->runs->find($this->supplierId, $runId)['status'],
         );
 
-        $this->allocate($first['id'], 1_500);
+        $remainderAllocationId = $this->allocate($first['id'], 1_500);
+        $this->settleAllocation($remainderAllocationId, 1_500);
         foreach (array_slice($liabilities, 1) as $liability) {
-            $this->allocate($liability['id'], $liability['amount_minor']);
+            $allocationId = $this->allocate(
+                $liability['id'],
+                $liability['amount_minor'],
+            );
+            $this->settleAllocation(
+                $allocationId,
+                $liability['amount_minor'],
+            );
         }
 
         $paid = $service->markPaid(
@@ -404,6 +419,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $this->actors[2],
         );
 
+        $this->activateForProduction();
         try {
             $service->preparePayments(
                 $this->supplierId,
@@ -459,6 +475,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $this->actors[2],
         );
 
+        $this->activateForProduction();
         try {
             $service->preparePayments(
                 $this->supplierId,
@@ -505,6 +522,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             'synthetic-post-settlement',
             $this->actors[2],
         );
+        $this->activateForProduction();
         $prepared = $service->preparePayments(
             $this->supplierId,
             $runId,
@@ -540,39 +558,16 @@ final class PayrollRunPaymentCommandsTest extends TestCase
         );
     }
 
-    public function testFirstApprovedRunActivatesModuleAndSecondApprovalDoesNot(): void
+    public function testFirstApprovedRunDoesNotActivateProduction(): void
     {
         self::assertSame('setup', $this->moduleState->get($this->supplierId)['status']);
         $service = $this->commandService();
         $this->approve($service);
 
         $state = $this->moduleState->get($this->supplierId);
-        self::assertSame('active', $state['status']);
+        self::assertSame('setup', $state['status']);
         self::assertSame(
-            1,
-            (int) $this->scalar(
-                'SELECT COUNT(*) FROM activity_log
-                  WHERE supplier_id = ? AND action = "payroll.activation.activated"',
-                [$this->supplierId],
-            ),
-        );
-        self::assertStringContainsString(
-            'first_approved_run',
-            (string) $this->scalar(
-                'SELECT payload FROM activity_log
-                  WHERE supplier_id = ? AND action = "payroll.activation.activated"',
-                [$this->supplierId],
-            ),
-        );
-
-        // Druhý běh stav ani auditní stopu nemění.
-        $this->approve($service, '2026-07-01', '2026-08-15', 'second');
-        self::assertSame(
-            $state['row_version'],
-            $this->moduleState->get($this->supplierId)['row_version'],
-        );
-        self::assertSame(
-            1,
+            0,
             (int) $this->scalar(
                 'SELECT COUNT(*) FROM activity_log
                   WHERE supplier_id = ? AND action = "payroll.activation.activated"',
@@ -581,7 +576,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
         );
     }
 
-    public function testCompletedSetupCheckActivatesModuleOnceAndIrreversibly(): void
+    public function testCompletedSetupCheckDoesNotActivateProduction(): void
     {
         $activation = $this->activationService(false);
         self::assertNull(
@@ -600,56 +595,26 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $this->supplierId,
             $this->actors[0],
         );
-        self::assertSame('active', $state['status'] ?? null);
-        self::assertStringContainsString(
-            'setup_complete',
-            (string) $this->scalar(
-                'SELECT payload FROM activity_log
-                  WHERE supplier_id = ? AND action = "payroll.activation.activated"',
-                [$this->supplierId],
-            ),
-        );
-
-        // Idempotence: druhé vyhodnocení nic nemění.
-        self::assertNull(
-            $ready->activateWhenSetupComplete(
-                $this->supplierId,
-                $this->actors[0],
-            ),
-        );
+        self::assertNull($state);
+        self::assertSame('setup', $this->moduleState->get($this->supplierId)['status']);
         self::assertSame(
-            1,
+            0,
             (int) $this->scalar(
                 'SELECT COUNT(*) FROM activity_log
                   WHERE supplier_id = ? AND action = "payroll.activation.activated"',
                 [$this->supplierId],
             ),
         );
-
-        // Jednosměrnost: pozdější blokátor stav zpátky do `setup` nevrátí.
-        $this->activationService(false)->activateWhenSetupComplete(
-            $this->supplierId,
-            $this->actors[0],
-        );
-        self::assertSame(
-            'active',
-            $this->moduleState->get($this->supplierId)['status'],
-        );
     }
 
-    /**
-     * Spouště jsou dvě a vyhrává ta dřívější — druhá pak nesmí stav ani
-     * auditní stopu měnit, jinak by se firma v přehledu aktivit „aktivovala"
-     * dvakrát.
-     */
-    public function testApprovalAfterSetupCompleteChangesNothing(): void
+    public function testApprovalAfterSetupCompleteStillDoesNotActivateProduction(): void
     {
         $this->activationService(true)->activateWhenSetupComplete(
             $this->supplierId,
             $this->actors[0],
         );
         $state = $this->moduleState->get($this->supplierId);
-        self::assertSame('active', $state['status']);
+        self::assertSame('setup', $state['status']);
 
         $this->approve($this->commandService());
 
@@ -658,7 +623,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $this->moduleState->get($this->supplierId)['row_version'],
         );
         self::assertSame(
-            1,
+            0,
             (int) $this->scalar(
                 'SELECT COUNT(*) FROM activity_log
                   WHERE supplier_id = ? AND action = "payroll.activation.activated"',
@@ -669,10 +634,11 @@ final class PayrollRunPaymentCommandsTest extends TestCase
 
     public function testActiveModuleCannotBeDisabledNorDowngradedToSetup(): void
     {
-        $this->activationService(true)->activateWhenSetupComplete(
-            $this->supplierId,
-            $this->actors[0],
-        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state
+                SET status = "active", activated_by = ?, activated_at = NOW()
+              WHERE supplier_id = ?'
+        )->execute([$this->actors[0], $this->supplierId]);
         $state = $this->moduleState->get($this->supplierId);
         self::assertSame('active', $state['status']);
 
@@ -755,9 +721,37 @@ final class PayrollRunPaymentCommandsTest extends TestCase
                 PayrollIncomeTaxLiabilityMaterializer::class,
             ),
             $this->emptyMaterializer(
+                \MyInvoice\Service\Payroll\Payment\PayrollInsolvencyLiabilityMaterializer::class,
+            ),
+            $this->emptyMaterializer(
                 PayrollEnforcementLiabilityMaterializer::class,
             ),
+            $this->container->get(
+                PayrollRiskySavingsLiabilityMaterializer::class,
+            ),
+            $this->container->get(PayrollProductionGate::class),
         );
+    }
+
+    public function testUnqualifiedModuleCannotMaterializePayments(): void
+    {
+        $this->expectException(PayrollProductionGateException::class);
+
+        $this->preparation()->prepare(
+            $this->supplierId,
+            1,
+            $this->actors[2],
+            [],
+        );
+    }
+
+    private function activateForProduction(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state
+                SET status = "active", activated_by = ?, activated_at = NOW()
+              WHERE supplier_id = ?',
+        )->execute([$this->actors[2], $this->supplierId]);
     }
 
     /**
@@ -777,44 +771,9 @@ final class PayrollRunPaymentCommandsTest extends TestCase
     }
 
     private function activationService(
-        bool $setupReady,
+        bool $_setupReady,
     ): PayrollModuleActivationService {
-        $features = $this->createStub(PayrollSetupFeaturesResolver::class);
-        $features->method('resolve')->willReturn(
-            new PayrollSetupFeatures(
-                homeOffice: false,
-                travelExpenses: false,
-                fourEyes: false,
-                automaticCalculation: false,
-                automaticPosting: false,
-                automaticPayments: false,
-                secureDelivery: false,
-                jmhz: false,
-                activeApproverCount: 0,
-                jmhzRegistryReady: false,
-                jmhzCertificateReady: false,
-                sourceBlockers: [],
-            ),
-        );
-        $setupCheck = $this->createStub(PayrollSetupCheckService::class);
-        $setupCheck->method('check')->willReturn([
-            'ready' => $setupReady,
-            'effective_on' => '2026-06-01',
-            'policy_id' => $this->employerPolicyId,
-            'checks' => [],
-            'blockers' => $setupReady
-                ? []
-                : ['employer_settings'],
-        ]);
-        $logger = $this->container->get(ActivityLogger::class);
-        self::assertInstanceOf(ActivityLogger::class, $logger);
-
-        return new PayrollModuleActivationService(
-            $this->moduleState,
-            $logger,
-            $features,
-            $setupCheck,
-        );
+        return new PayrollModuleActivationService();
     }
 
     private function approve(
@@ -911,7 +870,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
      * brána příkazu `mark_paid` nad ledgerem, ne generování platebního souboru
      * (to má vlastní testy).
      */
-    private function allocate(int $liabilityId, int $amountMinor): void
+    private function allocate(int $liabilityId, int $amountMinor): int
     {
         $pdo = $this->db->pdo();
         $reference = 'synthetic-' . bin2hex(random_bytes(6));
@@ -960,6 +919,58 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $liabilityId,
             $amountMinor,
             hash('sha256', "synthetic-allocation-key:{$reference}"),
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function settleAllocation(int $allocationId, int $amountMinor): void
+    {
+        $pdo = $this->db->pdo();
+        $reference = 'synthetic-settlement-' . bin2hex(random_bytes(6));
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number, bank_code,
+                 currency, statement_date, source)
+             VALUES (?, ?, ?, "1000000005", "0100", "CZK",
+                     "2026-07-31", "gpc")',
+        )->execute([
+            $this->supplierId,
+            "{$reference}.gpc",
+            hash('sha256', "synthetic-statement:{$reference}"),
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $amount = sprintf(
+            '-%d.%02d',
+            intdiv($amountMinor, 100),
+            $amountMinor % 100,
+        );
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, "2026-07-15", ?, "CZK", ?, ?)',
+        )->execute([
+            $statementId,
+            $amount,
+            "Syntetická úhrada {$reference}",
+            hash('sha256', "synthetic-transaction:{$reference}"),
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id,
+                 idempotency_key_hash, matched_by)
+             VALUES (?, ?, "matched", ?, ?, ?, UNHEX(?), ?)',
+        )->execute([
+            $this->supplierId,
+            $allocationId,
+            $amountMinor,
+            $statementId,
+            $transactionId,
+            hash('sha256', "synthetic-match:{$reference}"),
+            $this->actors[2],
         ]);
     }
 
@@ -1156,7 +1167,8 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             'balance_rounding_mode' => 'exact_minor_units',
             'home_office_policy' => 'not_used',
             'travel_expense_policy' => 'not_used',
-            'four_eyes_required' => true,
+            'leave_entitlement_weeks' => 4,
+            'four_eyes_required' => false,
             'automatic_calculation_enabled' => true,
             // Vypnuté automatické zaúčtování je právě ten případ, kdy dosud
             // neexistovala žádná cesta, jak mzdy zaúčtovat.

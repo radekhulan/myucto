@@ -4,7 +4,7 @@
 #
 # Tenký spouštěč nad sdíleným MD2PDF enginem (Linux/macOS, příp. Git-Bash na
 # Windows; ekvivalent tools/export-pdf.ps1). Sloučí kapitoly manuálu
-# (manual/NN_*.md dle manual/INDEX.md) do jednoho manual/manual.pdf pomocí
+# (manual/NNN_*.md dle manual/INDEX.md) do jednoho manual/manual.pdf pomocí
 # tools/md2pdf.config.php. Zdrojové .md jsou READ-ONLY.
 #
 # Engine se hledá v $MD2PDF_HOME, jinak v obvyklých umístěních (viz níže).

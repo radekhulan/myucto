@@ -13,6 +13,7 @@ use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
+use MyInvoice\Service\Submission\Channel\SubmissionInboxChannel;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -88,17 +89,56 @@ final readonly class SubmissionInboxService
         ?int $actorUserId = null,
     ): array
     {
+        $this->assertInteractivePollingAllowed(
+            $context->supplierId,
+            $channelCode,
+            $context->environment,
+            $actorUserId,
+        );
+        return $this->pollUsing(
+            $context,
+            $channelCode,
+            $this->channels->inbox($channelCode),
+            $folderId,
+            $limit,
+            $actorUserId,
+        );
+    }
+
+    /**
+     * Ruční vyzvednutí přes právě ověřenou jednorázovou relaci.
+     *
+     * Přístupové údaje se neukládají do repository; kanál i context platí jen
+     * pro toto synchronní volání vyvolané konkrétním uživatelem.
+     *
+     * @return array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string}
+     */
+    public function pollWithChannel(
+        ChannelContext $context,
+        string $channelCode,
+        SubmissionInboxChannel $channel,
+        ?int $folderId = null,
+        int $limit = 50,
+        ?int $actorUserId = null,
+    ): array {
+        $this->assertActorPresent($actorUserId);
+        return $this->pollUsing($context, $channelCode, $channel, $folderId, $limit, $actorUserId);
+    }
+
+    /**
+     * @return array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string}
+     */
+    private function pollUsing(
+        ChannelContext $context,
+        string $channelCode,
+        SubmissionInboxChannel $channel,
+        ?int $folderId,
+        int $limit,
+        ?int $actorUserId,
+    ): array {
         $supplierId = $context->supplierId;
         $environment = $context->environment;
         $result = ['fetched' => 0, 'stored' => 0, 'skipped' => 0, 'failed' => 0, 'unclassified' => 0, 'error' => null];
-
-        $this->assertInteractivePollingAllowed(
-            $supplierId,
-            $channelCode,
-            $environment,
-            $actorUserId,
-        );
-        $channel = $this->channels->inbox($channelCode);
 
         // Auditní stopa se zapisuje PŘED voláním, ne po něm: doručení nastane
         // okamžikem přihlášení, i když se pak spojení přeruší. Záznam až po
@@ -129,9 +169,6 @@ final readonly class SubmissionInboxService
             return $result;
         }
 
-        // Úspěch se zapisuje i při nula zprávách — právě tenhle záznam odlišuje
-        // „schránka je prázdná" od „na schránku se nedovoláme".
-        $this->inbox->recordPollSuccess($supplierId, $channelCode, $environment, $listing->count());
         $result['fetched'] = $listing->count();
 
         $boxKinds = $this->recipientBoxKinds($supplierId);
@@ -149,7 +186,7 @@ final readonly class SubmissionInboxService
             }
 
             try {
-                $stored = $this->ingest($context, $channelCode, $header, $boxKinds, $folderId);
+                $stored = $this->ingest($context, $channelCode, $channel, $header, $boxKinds, $folderId);
                 $result['stored']++;
                 if ($stored['classification'] === InboxMessageClassifier::UNCLASSIFIED) {
                     $result['unclassified']++;
@@ -164,6 +201,21 @@ final readonly class SubmissionInboxService
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        if ($result['failed'] > 0) {
+            $result['error'] = 'isds_inbox_message_ingest_failed';
+            $this->inbox->recordPollFailure(
+                $supplierId,
+                $channelCode,
+                $environment,
+                $result['error'],
+                'Některé zprávy se nepodařilo stáhnout nebo uložit (' . $result['failed'] . ' z ' . $result['fetched'] . ').',
+            );
+        } else {
+            // Úspěch se zapisuje i při nula zprávách — právě tenhle záznam odlišuje
+            // „schránka je prázdná" od „na schránku se nedovoláme".
+            $this->inbox->recordPollSuccess($supplierId, $channelCode, $environment, $listing->count());
         }
 
         return $result;
@@ -218,18 +270,23 @@ final readonly class SubmissionInboxService
         ?int $actorUserId,
     ): void
     {
-        if ($actorUserId === null || $actorUserId <= 0) {
-            throw new SubmissionChannelException(
-                'interactive_action_required',
-                'Datovou schránku lze vyzvednout jen výslovnou akcí přihlášeného uživatele.',
-                409,
-            );
-        }
+        $this->assertActorPresent($actorUserId);
         $credential = $this->credentials->findPublic($supplierId, $channelCode, $environment);
         if ($credential === null) {
             throw new SubmissionChannelException(
                 'credentials_missing',
                 'Přístup k datové schránce není nastavený. Doplňte systémový certifikát v Firma → Datová schránka.',
+                409,
+            );
+        }
+    }
+
+    private function assertActorPresent(?int $actorUserId): void
+    {
+        if ($actorUserId === null || $actorUserId <= 0) {
+            throw new SubmissionChannelException(
+                'interactive_action_required',
+                'Datovou schránku lze vyzvednout jen výslovnou akcí přihlášeného uživatele.',
                 409,
             );
         }
@@ -242,11 +299,11 @@ final readonly class SubmissionInboxService
     private function ingest(
         ChannelContext $context,
         string $channelCode,
+        SubmissionInboxChannel $channel,
         InboxMessageHeader $header,
         array $boxKinds,
         ?int $folderId,
     ): array {
-        $channel = $this->channels->inbox($channelCode);
         $bytes = $channel->download($header->externalMessageId, $context);
 
         $ingested = $this->documents->ingestZfoBytes(

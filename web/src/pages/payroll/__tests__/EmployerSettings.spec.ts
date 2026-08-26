@@ -153,7 +153,10 @@ async function mountPage(value = settings()) {
     checks: [],
     blockers: ['effective_policy'],
   })
-  m.regzelProfile.mockResolvedValue(null)
+  m.regzelProfile.mockResolvedValue({
+    profile: null,
+    suggested_tax_office_workplace_code: null,
+  })
   m.saveEmployerSettings.mockResolvedValue(value)
   const wrapper = mount(EmployerSettings, { attachTo: document.body })
   await flushPromises()

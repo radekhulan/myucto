@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
 use MyInvoice\Service\Payroll\Insurance\EmployerSocialInsuranceAllocation;
@@ -903,7 +904,7 @@ final class PayslipDocumentSnapshotMapper
     private function account(array $row, string $field): string
     {
         $value = $this->requiredText($row, $field);
-        if (preg_match('/^[0-9]{3,10}$/D', $value) !== 1) {
+        if (!PayrollAccountCode::isValid($value)) {
             throw new \DomainException("Účet {$field} není platný.");
         }
 
@@ -917,7 +918,7 @@ final class PayslipDocumentSnapshotMapper
         if ($value === null) {
             return null;
         }
-        if (!is_string($value) || preg_match('/^[0-9]{3,10}$/D', $value) !== 1) {
+        if (!is_string($value) || !PayrollAccountCode::isValid($value)) {
             throw new \DomainException("Účet {$field} není platný.");
         }
 

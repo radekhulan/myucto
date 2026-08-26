@@ -554,11 +554,7 @@ final class PayrollRunValidationOverrideTest extends TestCase
         )->execute([(int) $event['id']]);
     }
 
-    /**
-     * Čtyři oči jsou politika, ne blokace: výjimku smí schválit i ten, kdo běh
-     * počítal, ale audit to zaznamená. Tvrdý zámek zůstává na `review`
-     * a `approve`, kudy stejně musí projít někdo další.
-     */
+    /** Jedna účetní smí vypočítat běh, povolit výjimku i jej schválit. */
     public function testCalculatorMayOverrideButItIsRecordedAsNotFourEyed(): void
     {
         $locked = $this->lockedRun();

@@ -101,4 +101,33 @@ final class PayrollImportedJmhzProtocolsMigrationTest extends TestCase
         // Šest doložených stavů hlášení; sedmý by znamenal dopočítaný stav.
         self::assertStringContainsString('status_code BETWEEN 1 AND 6', $sql);
     }
+
+    public function testVerifiedFormOutcomesHaveAnImmutableReceiptScopedLedger(): void
+    {
+        $path = dirname(__DIR__, 4)
+            . '/db/migrations/1550_payroll_jmhz_protocol_form_outcomes.sql';
+        $sql = file_get_contents($path);
+        self::assertIsString($sql);
+
+        self::assertStringContainsString(
+            'CREATE TABLE IF NOT EXISTS payroll_jmhz_protocol_form_outcomes',
+            $sql,
+        );
+        self::assertStringContainsString(
+            'UNIQUE KEY uq_payroll_jmhz_form_outcome_receipt_form',
+            $sql,
+        );
+        self::assertStringContainsString(
+            'REFERENCES payroll_submission_receipts',
+            $sql,
+        );
+        self::assertStringContainsString(
+            'REFERENCES payroll_submission_artifacts',
+            $sql,
+        );
+        self::assertStringContainsString('errors_ciphertext', $sql);
+        self::assertStringContainsString("errors_ciphertext LIKE 'enc:v2:%'", $sql);
+        self::assertStringContainsString('protocol_status_code IS NULL', $sql);
+        self::assertStringContainsString('jmhz protocol form outcomes are immutable', $sql);
+    }
 }

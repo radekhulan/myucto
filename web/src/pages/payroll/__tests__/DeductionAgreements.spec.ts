@@ -8,7 +8,8 @@ const m = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   agreementsPage: vi.fn(),
   agreement: vi.fn(),
-  peopleOptions: vi.fn(),
+  peoplePage: vi.fn(),
+  person: vi.fn(),
   canWrite: vi.fn(),
 }))
 
@@ -34,7 +35,7 @@ vi.mock('@/api/payrollDeductions', () => ({
 }))
 
 vi.mock('@/api/payroll', () => ({
-  payrollApi: { peopleOptions: m.peopleOptions },
+  payrollApi: { peoplePage: m.peoplePage, person: m.person },
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -59,6 +60,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import DeductionAgreements from '@/pages/payroll/DeductionAgreements.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 function summary(overrides: Partial<DeductionAgreementSummary> = {}): DeductionAgreementSummary {
   return {
@@ -100,10 +102,12 @@ function detailOf(item: DeductionAgreementSummary): DeductionAgreementDetail {
 describe('DeductionAgreements', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
     m.agreementsPage.mockResolvedValue(page([summary()]))
     m.agreement.mockImplementation(async () => detailOf(summary()))
-    m.peopleOptions.mockResolvedValue([{ id: 3, full_name: 'Syntetická Srážková' }])
+    m.peoplePage.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
+    m.person.mockResolvedValue({ id: 3, full_name: 'Syntetická Srážková' })
   })
 
   /*
@@ -117,6 +121,60 @@ describe('DeductionAgreements', () => {
 
     expect(m.agreementsPage).toHaveBeenCalledTimes(1)
     expect(m.agreementsPage.mock.calls[0][0]).toEqual({ limit: 20, offset: 0 })
+    wrapper.unmount()
+  })
+
+  it('použije hledací výběr pro filtr i formulář místo úplného seznamu osob', async () => {
+    const wrapper = mount(DeductionAgreements)
+    await flushPromises()
+
+    expect(wrapper.findAllComponents(PayrollPersonSearchSelect)).toHaveLength(1)
+    const filterInput = wrapper.get('[data-test="deduction-employee-filter"] input')
+    expect((filterInput.element as HTMLInputElement).value).toBe('')
+    expect(filterInput.attributes('placeholder')).toBe('payroll.deductions.all_employees')
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.findAllComponents(PayrollPersonSearchSelect)).toHaveLength(2)
+    expect(wrapper.find('select[data-test="deduction-employee-filter"]').exists()).toBe(false)
+    const requiredPicker = wrapper.findAllComponents(PayrollPersonSearchSelect)[1]
+    expect(requiredPicker.get('input').attributes('required')).toBeDefined()
+    expect(requiredPicker.get('input').attributes('aria-required')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('zachová deep-link osoby ve filtru i mimo první stránku našeptávače', async () => {
+    m.routeQuery = { person: '93' }
+    m.person.mockResolvedValue({ id: 93, full_name: 'Osoba z odkazu' })
+    const wrapper = mount(DeductionAgreements)
+    await flushPromises()
+
+    expect(m.agreementsPage).toHaveBeenCalledWith({ employee_id: 93, limit: 20, offset: 0 })
+    expect(m.person).toHaveBeenCalledWith(93)
+    expect((wrapper.get('[data-test="deduction-employee-filter"] input').element as HTMLInputElement).value)
+      .toBe('Osoba z odkazu')
+    wrapper.unmount()
+  })
+
+  it('u 500 zaměstnanců načte do filtru jen omezenou stránku výsledků', async () => {
+    m.peoplePage.mockResolvedValue({
+      items: Array.from({ length: 25 }, (_, index) => ({
+        id: index + 1,
+        full_name: `Syntetická osoba ${index + 1}`,
+      })),
+      total: 500,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(DeductionAgreements)
+    await flushPromises()
+
+    const input = wrapper.get('[data-test="deduction-employee-filter"] input[role="combobox"]')
+    await input.trigger('focus')
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenCalledWith({ limit: 25, offset: 0, q: '' })
+    expect(wrapper.findAll('[role="option"]')).toHaveLength(25)
+    expect(wrapper.find('[data-test="searchable-select-truncated"]').exists()).toBe(true)
+    expect(wrapper.find('select[data-test="deduction-employee-filter"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

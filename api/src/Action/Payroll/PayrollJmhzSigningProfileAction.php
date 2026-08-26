@@ -13,6 +13,7 @@ use MyInvoice\Service\Epo\EpoSigningCredentialService;
 use MyInvoice\Service\Epo\EpoStepUpService;
 use MyInvoice\Service\Epo\EpoSubmissionException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\CsszCertificateSerialNumber;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -270,9 +271,12 @@ final class PayrollJmhzSigningProfileAction
                     ],
                 );
             }
-            // Ukládá se kanonický hex zvoleného certifikátu: sloupec má CHECK na
-            // hex zápis a po ověřené shodě je to táž hodnota, jen bez oddělovačů.
-            $storedSerial = is_string($certificate['serial_hex']) ? $certificate['serial_hex'] : null;
+            // Ukládá se ověřený údaj tak, jak ho uživatel opsal z oznámení ČSSZ.
+            // Oddělovače a velikost písmen nejsou významné, vedoucí nula ale
+            // zůstává viditelná pro kontrolu proti formuláři a auditní stopu.
+            $storedSerial = CsszCertificateSerialNumber::normalizeRegisteredInput(
+                $claimedSerialRaw,
+            );
             if ($storedSerial !== null && strlen($storedSerial) > self::SERIAL_MAX_LENGTH) {
                 return Json::error(
                     $response,
@@ -493,9 +497,9 @@ final class PayrollJmhzSigningProfileAction
         $validTo = $this->timestamp($credential['valid_to'] ?? null);
         $expired = $validTo !== null && $validTo < $now;
         $notYetValid = $validFrom !== null && $validFrom > $now;
-        $serialHex = $this->canonicalHex(
+        $serialHex = CsszCertificateSerialNumber::canonicalCertificateHex(
             is_scalar($credential['serial_hex'] ?? null) ? (string) $credential['serial_hex'] : '',
-        );
+        ) ?? '';
 
         return [
             'id' => (int) ($credential['id'] ?? 0),
@@ -529,7 +533,9 @@ final class PayrollJmhzSigningProfileAction
             'credential_id' => (int) ($row['credential_id'] ?? 0),
             'owner_user_id' => (int) ($row['owner_user_id'] ?? 0),
             'cssz_registered_serial' => is_scalar($registeredSerial)
-                ? (string) $registeredSerial
+                ? CsszCertificateSerialNumber::formatRegisteredForDisplay(
+                    (string) $registeredSerial,
+                )
                 : null,
             'row_version' => (int) ($row['row_version'] ?? 0),
             'created_at' => isset($row['created_at']) && is_scalar($row['created_at'])
@@ -605,51 +611,19 @@ final class PayrollJmhzSigningProfileAction
      */
     private function compareSerial(?string $certificateSerialHex, string $claimed): string
     {
-        $certificate = $this->canonicalHex((string) $certificateSerialHex);
-        if ($certificate === '') {
+        if (CsszCertificateSerialNumber::normalizeRegisteredInput(
+            (string) $certificateSerialHex,
+        ) === null) {
             return self::SERIAL_CERTIFICATE_UNKNOWN;
         }
-        $normalized = $this->stripSerialSeparators($claimed);
-        if ($normalized === '' || preg_match('/^[0-9a-f]+$/', $normalized) !== 1) {
+        if (CsszCertificateSerialNumber::normalizeRegisteredInput($claimed) === null) {
             return self::SERIAL_INPUT_UNREADABLE;
         }
-        if ($this->stripLeadingZeros($normalized) === $certificate) {
-            return self::SERIAL_MATCH;
-        }
-        if (
-            ctype_digit($normalized)
-            && $this->stripLeadingZeros($normalized) === $this->hexToDecimal($certificate)
-        ) {
-            return self::SERIAL_MATCH;
-        }
 
-        return self::SERIAL_MISMATCH;
-    }
-
-    /** Kanonický hex: malá písmena, bez oddělovačů a bez vedoucích nul. */
-    private function canonicalHex(string $value): string
-    {
-        $normalized = $this->stripSerialSeparators($value);
-        if ($normalized === '' || preg_match('/^[0-9a-f]+$/', $normalized) !== 1) {
-            return '';
-        }
-
-        return $this->stripLeadingZeros($normalized);
-    }
-
-    private function stripSerialSeparators(string $value): string
-    {
-        $value = strtolower(trim($value));
-        $value = (string) preg_replace('/^0x/', '', $value);
-
-        return (string) preg_replace('/[\s:.\-_]/', '', $value);
-    }
-
-    private function stripLeadingZeros(string $value): string
-    {
-        $trimmed = ltrim($value, '0');
-
-        return $trimmed === '' ? '0' : $trimmed;
+        return CsszCertificateSerialNumber::matches(
+            (string) $certificateSerialHex,
+            $claimed,
+        ) ? self::SERIAL_MATCH : self::SERIAL_MISMATCH;
     }
 
     /**
@@ -659,52 +633,7 @@ final class PayrollJmhzSigningProfileAction
      */
     private function hexToDecimal(string $hex): string
     {
-        $decimal = '0';
-        foreach (str_split(strtolower($hex)) as $character) {
-            $digit = strpos('0123456789abcdef', $character);
-            if ($digit === false) {
-                return '';
-            }
-            $decimal = $this->addDecimal($this->multiplyDecimal($decimal, 16), (string) $digit);
-        }
-
-        return $this->stripLeadingZeros($decimal);
-    }
-
-    private function multiplyDecimal(string $value, int $factor): string
-    {
-        $result = '';
-        $carry = 0;
-        for ($i = strlen($value) - 1; $i >= 0; $i--) {
-            $product = ((int) $value[$i]) * $factor + $carry;
-            $result = (string) ($product % 10) . $result;
-            $carry = intdiv($product, 10);
-        }
-        while ($carry > 0) {
-            $result = (string) ($carry % 10) . $result;
-            $carry = intdiv($carry, 10);
-        }
-
-        return $result === '' ? '0' : $result;
-    }
-
-    private function addDecimal(string $left, string $right): string
-    {
-        $result = '';
-        $carry = 0;
-        $i = strlen($left) - 1;
-        $j = strlen($right) - 1;
-        while ($i >= 0 || $j >= 0 || $carry > 0) {
-            $sum = $carry
-                + ($i >= 0 ? (int) $left[$i] : 0)
-                + ($j >= 0 ? (int) $right[$j] : 0);
-            $result = (string) ($sum % 10) . $result;
-            $carry = intdiv($sum, 10);
-            $i--;
-            $j--;
-        }
-
-        return $result === '' ? '0' : $result;
+        return CsszCertificateSerialNumber::hexToDecimal($hex);
     }
 
     private function timestamp(mixed $value): ?int

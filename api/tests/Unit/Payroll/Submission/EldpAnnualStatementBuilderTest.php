@@ -69,6 +69,19 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         );
     }
 
+    public function testCurrentApprovedCorrectiveRevisionIsAcceptedAsSource(): void
+    {
+        $revisions = $this->wholeYear(2025);
+        $revisions[7]['revision_no'] = 2;
+        $revisions[7]['current_revision_no'] = 2;
+        $revisions[7]['revision_kind'] = 'correction';
+
+        $statement = $this->build($revisions);
+
+        self::assertSame(408, $statement->payload['source_revisions'][7]['revision_id']);
+        self::assertSame('2025-08-01', $statement->payload['source_revisions'][7]['period_start']);
+    }
+
     public function testExcludedDaysAreTraceableToTheAbsenceTheyComeFrom(): void
     {
         $revisions = $this->wholeYear(2025);
@@ -241,6 +254,99 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertSame(
             'transitional_participation_ended_before_april_2026',
             $statement->payload['eligibility']['rule'],
+        );
+    }
+
+    public function testAuthorityRequestDuringYearEndsAtLastAccountedMonth(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+        $confirmation['authority_request_received_on'] = '2026-08-25';
+
+        $statement = (new EldpAnnualStatementBuilder())->build(
+            self::SUPPLIER_ID,
+            self::EMPLOYMENT_ID,
+            2026,
+            $this->months(2026, 1, 8),
+            $confirmation,
+        );
+
+        self::assertSame('2026-08-31', $statement->scope()['period_to']);
+        self::assertSame(243, $statement->sections()[0]['insurance_days']);
+        self::assertSame(80_000, $statement->sections()[0]['assessment_base_czk']);
+        self::assertSame(
+            'on_authority_request',
+            $statement->payload['eligibility']['rule'],
+        );
+        self::assertSame(
+            'cz-eldp-deadlines.authority-request.v1',
+            $statement->payload['deadline']['ruleset_id'],
+        );
+        self::assertSame(
+            '2026-08-25',
+            $statement->payload['deadline']['earliest_submission_on'],
+        );
+        self::assertSame('2026-09-02', $statement->payload['deadline']['due_on']);
+    }
+
+    public function testAuthorityRequestFromFollowingYearStillRequiresWholeYear(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+        $confirmation['authority_request_received_on'] = '2027-01-10';
+
+        try {
+            (new EldpAnnualStatementBuilder())->build(
+                self::SUPPLIER_ID,
+                self::EMPLOYMENT_ID,
+                2026,
+                $this->months(2026, 1, 8),
+                $confirmation,
+            );
+            self::fail('Výzva po skončení roku nesmí zakrýt chybějící měsíce.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_source_incomplete', $exception->validationCode);
+            self::assertStringContainsString('září 2026', $exception->getMessage());
+        }
+    }
+
+    public function testAuthorityRequestStillBlocksMissingMonthInsideReportedPeriod(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+        $confirmation['authority_request_received_on'] = '2026-08-25';
+        $revisions = $this->months(2026, 1, 8);
+        unset($revisions[4]);
+
+        try {
+            (new EldpAnnualStatementBuilder())->build(
+                self::SUPPLIER_ID,
+                self::EMPLOYMENT_ID,
+                2026,
+                array_values($revisions),
+                $confirmation,
+            );
+            self::fail('Chybějící měsíc uvnitř období musí výzvu zablokovat.');
+        } catch (EldpValidationException $exception) {
+            self::assertSame('eldp_source_incomplete', $exception->validationCode);
+            self::assertStringContainsString('květen 2026', $exception->getMessage());
+            self::assertStringNotContainsString('září 2026', $exception->getMessage());
+        }
+    }
+
+    public function testAuthorityRequestRequiresItsReceiptDate(): void
+    {
+        $confirmation = $this->confirmation();
+        $confirmation['requested_by_authority'] = true;
+
+        $this->expectException(EldpValidationException::class);
+        $this->expectExceptionMessage('datum doručení výzvy');
+        (new EldpAnnualStatementBuilder())->build(
+            self::SUPPLIER_ID,
+            self::EMPLOYMENT_ID,
+            2026,
+            $this->months(2026, 1, 8),
+            $confirmation,
         );
     }
 

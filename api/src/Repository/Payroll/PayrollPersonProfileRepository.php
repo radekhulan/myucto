@@ -70,7 +70,9 @@ final class PayrollPersonProfileRepository
         $row = $this->normalizeRow($fetched);
 
         $identity = $this->rows(
-            'SELECT id, full_name, first_name, last_name, birth_surname,
+            'SELECT id, full_name, first_name, last_name,
+                    title_prefix, title_suffix, birth_surname, birth_date,
+                    birth_place, birth_country_code, citizenship_country_code, sex,
                     effective_from, effective_to, row_version
                FROM payroll_person_identity_history
               WHERE supplier_id = ? AND employee_id = ?
@@ -82,9 +84,28 @@ final class PayrollPersonProfileRepository
                 'full_name' => (string) $item['full_name'],
                 'first_name' => (string) $item['first_name'],
                 'last_name' => (string) $item['last_name'],
+                'title_prefix' => $item['title_prefix'] === null
+                    ? null
+                    : (string) $item['title_prefix'],
+                'title_suffix' => $item['title_suffix'] === null
+                    ? null
+                    : (string) $item['title_suffix'],
                 'birth_surname_masked' => $item['birth_surname'] === null
                     ? null
                     : $this->maskName((string) $item['birth_surname']),
+                'birth_date' => $item['birth_date'] === null
+                    ? null
+                    : (string) $item['birth_date'],
+                'birth_place' => $item['birth_place'] === null
+                    ? null
+                    : (string) $item['birth_place'],
+                'birth_country_code' => $item['birth_country_code'] === null
+                    ? null
+                    : (string) $item['birth_country_code'],
+                'citizenship_country_code' => $item['citizenship_country_code'] === null
+                    ? null
+                    : (string) $item['citizenship_country_code'],
+                'sex' => $item['sex'] === null ? null : (string) $item['sex'],
                 'effective_from' => (string) $item['effective_from'],
                 'effective_to' => $item['effective_to'] === null ? null : (string) $item['effective_to'],
                 'row_version' => (int) $item['row_version'],
@@ -382,15 +403,24 @@ final class PayrollPersonProfileRepository
         $insert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_person_identity_history
                 (supplier_id, employee_id, full_name, first_name, last_name,
-                 birth_surname, effective_from, effective_to)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                 title_prefix, title_suffix, birth_surname, birth_date, birth_place,
+                 birth_country_code, citizenship_country_code, sex,
+                 effective_from, effective_to)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $update = $this->db->pdo()->prepare(
             'UPDATE payroll_person_identity_history
                 SET full_name = ?,
                     first_name = ?,
                     last_name = ?,
+                    title_prefix = CASE WHEN ? = 1 THEN ? ELSE title_prefix END,
+                    title_suffix = CASE WHEN ? = 1 THEN ? ELSE title_suffix END,
                     birth_surname = CASE WHEN ? = 1 THEN ? ELSE birth_surname END,
+                    birth_date = CASE WHEN ? = 1 THEN ? ELSE birth_date END,
+                    birth_place = CASE WHEN ? = 1 THEN ? ELSE birth_place END,
+                    birth_country_code = CASE WHEN ? = 1 THEN ? ELSE birth_country_code END,
+                    citizenship_country_code = CASE WHEN ? = 1 THEN ? ELSE citizenship_country_code END,
+                    sex = CASE WHEN ? = 1 THEN ? ELSE sex END,
                     effective_from = ?, effective_to = ?,
                     row_version = row_version + 1
               WHERE supplier_id = ? AND employee_id = ? AND id = ?'
@@ -424,7 +454,14 @@ final class PayrollPersonProfileRepository
                     $row['full_name'],
                     $row['first_name'],
                     $row['last_name'],
+                    $row['title_prefix'],
+                    $row['title_suffix'],
                     $birthSurname,
+                    $row['birth_date'],
+                    $row['birth_place'],
+                    $row['birth_country_code'],
+                    $row['citizenship_country_code'],
+                    $row['sex'],
                     $row['effective_from'],
                     $row['effective_to'],
                 ]);
@@ -434,8 +471,22 @@ final class PayrollPersonProfileRepository
                 $row['full_name'],
                 $row['first_name'],
                 $row['last_name'],
+                (int) $row['title_prefix_present'],
+                $row['title_prefix'],
+                (int) $row['title_suffix_present'],
+                $row['title_suffix'],
                 (int) $row['birth_surname_present'],
                 $row['birth_surname'],
+                (int) $row['birth_date_present'],
+                $row['birth_date'],
+                (int) $row['birth_place_present'],
+                $row['birth_place'],
+                (int) $row['birth_country_code_present'],
+                $row['birth_country_code'],
+                (int) $row['citizenship_country_code_present'],
+                $row['citizenship_country_code'],
+                (int) $row['sex_present'],
+                $row['sex'],
                 $row['effective_from'],
                 $row['effective_to'],
                 $supplierId,

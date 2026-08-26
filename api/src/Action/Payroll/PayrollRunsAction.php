@@ -15,6 +15,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
+use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -313,6 +314,25 @@ final class PayrollRunsAction
                 'idempotency_conflict',
                 $e->getMessage(),
                 409,
+            );
+        } catch (PayrollRunPaymentsUnsettledException $e) {
+            $hasIncomingRefund =
+                $e->coverage['incoming_unsettled_count'] > 0;
+            return Json::error(
+                $response,
+                $hasIncomingRefund
+                    ? 'payroll_incoming_refund_unresolved'
+                    : 'payroll_payments_unsettled',
+                $e->getMessage(),
+                422,
+                [
+                    'required_minor' => $e->coverage['required_minor'],
+                    'settled_minor' => $e->coverage['settled_minor'],
+                    'uncovered_count' => count($e->coverage['uncovered']),
+                    'incoming_unsettled_count' =>
+                        $e->coverage['incoming_unsettled_count'],
+                    'liability_count' => $e->coverage['liability_count'],
+                ],
             );
         } catch (\OutOfBoundsException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);

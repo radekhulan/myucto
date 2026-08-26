@@ -163,6 +163,65 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
         );
     }
 
+    /**
+     * idPodani označuje celý řetězec řádného, opravného a stornovacího podání,
+     * ne jeden konkrétní doručený protokol. Dva různé doklady se stejným
+     * idPodani se proto nesmí navzájem přepsat.
+     */
+    public function testDifferentProtocolsWithSameSubmissionGuidRemainSeparate(): void
+    {
+        $this->givenOfficeVariableSymbol('9990000001');
+        $service = new JmhzProtocolImportService(
+            $this->repository,
+            new JmhzProtocolExplainer(),
+        );
+        $firstXml = self::protocolXml('9990000001');
+        $secondXml = str_replace(
+            [
+                '2026-07-02T16:20:20.382+02:00',
+                'AAAA1111BBBB2222CCCC3333DDDD4444',
+            ],
+            [
+                '2026-07-03T09:10:11.123+02:00',
+                'EEEE5555FFFF6666AAAA7777BBBB8888',
+            ],
+            $firstXml,
+        );
+
+        $first = $service->import(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $firstXml,
+            'PROTOKOL-R.xml',
+            null,
+        );
+        $second = $service->import(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $secondXml,
+            'PROTOKOL-O.xml',
+            null,
+        );
+
+        self::assertTrue($first['created']);
+        self::assertTrue($second['created']);
+        self::assertNotSame($first['protocol']['id'], $second['protocol']['id']);
+        self::assertSame(
+            2,
+            $service->history($this->supplierId, self::ENVIRONMENT)['total'],
+        );
+
+        $replayed = $service->import(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $secondXml,
+            'PROTOKOL-O-kopie.xml',
+            null,
+        );
+        self::assertFalse($replayed['created']);
+        self::assertSame($second['protocol']['id'], $replayed['protocol']['id']);
+    }
+
     /** Chyby se počítají z uloženého originálu, ne z uložené interpretace. */
     public function testHistoryExplainsErrorsFromTheStoredOriginal(): void
     {

@@ -17,6 +17,8 @@ use MyInvoice\Service\Payroll\Net\PayrollNetInputAssembler;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsCalculator;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerCategoryResult;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator;
@@ -28,6 +30,7 @@ final class PayrollRunStatutoryCalculationService
     private readonly MonthlyEmploymentIncomeTaxCalculator $tax;
     private readonly PayrollNetInputAssembler $netInputs;
     private readonly PayrollNetCalculator $net;
+    private readonly PayrollRiskySavingsCalculator $riskySavings;
 
     public function __construct(
         private readonly PayrollRulesetProvider $rulesets,
@@ -40,6 +43,9 @@ final class PayrollRunStatutoryCalculationService
         $this->tax = new MonthlyEmploymentIncomeTaxCalculator($rulesets);
         $this->netInputs = new PayrollNetInputAssembler();
         $this->net = new PayrollNetCalculator();
+        $this->riskySavings = new PayrollRiskySavingsCalculator(
+            new PayrollRiskySavingsPolicy(),
+        );
     }
 
     /**
@@ -121,6 +127,11 @@ final class PayrollRunStatutoryCalculationService
         }
 
         $social = $this->social->calculate($bundle->socialInsurance);
+        $riskySavings = $this->riskySavingsResults(
+            $snapshot,
+            $social,
+            $periodStart,
+        );
         $health = $this->health->calculate($bundle->healthInsurance);
         $taxByEmployee = [];
         foreach ($bundle->incomeTax as $taxInput) {
@@ -280,6 +291,12 @@ final class PayrollRunStatutoryCalculationService
                     $ok && !$result instanceof PayrollStatutoryBlockedPerson,
                 true,
             )
+            && array_reduce(
+                $riskySavings,
+                static fn (bool $ok, array $result): bool =>
+                    $ok && ($result['status'] ?? null) !== 'manual_review',
+                true,
+            )
             ? 'calculated'
             : 'manual_review';
         $people = [];
@@ -338,8 +355,72 @@ final class PayrollRunStatutoryCalculationService
                 )
                 : [],
             'result_set_ids' => $ids,
+            'risky_savings_period_start' => $periodStart,
+            'risky_savings' => $riskySavings,
             'people' => $people,
         ];
+    }
+
+    /**
+     * @param array<string,mixed> $snapshot
+     * @return list<array<string,mixed>>
+     */
+    private function riskySavingsResults(
+        array $snapshot,
+        \MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthResult $social,
+        string $periodStart,
+    ): array {
+        $bases = [];
+        foreach ($social->people as $person) {
+            foreach ($person->relationships as $relationship) {
+                $employmentId = self::referenceId(
+                    $relationship->relationshipId,
+                    'employment',
+                );
+                $bases[$employmentId] = $relationship->assessmentBaseMinorUnits;
+            }
+        }
+        $results = [];
+        foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
+            foreach (self::rows(
+                $person['employments'] ?? null,
+                'snapshot.employments',
+            ) as $employmentSnapshot) {
+                $evidence = $employmentSnapshot['risky_savings_evidence'] ?? null;
+                if ($evidence === null) {
+                    continue;
+                }
+                $employment = self::object(
+                    $employmentSnapshot['employment'] ?? null,
+                    'snapshot.employment',
+                );
+                $employmentId = self::positiveInt($employment, 'id');
+                if (!is_array($evidence) || array_is_list($evidence)
+                    || !array_key_exists($employmentId, $bases)
+                ) {
+                    $results[] = [
+                        'employment_id' => $employmentId,
+                        'status' => 'manual_review',
+                        'issues' => ['risky_savings_assessment_base_missing'],
+                        'assessment_base_minor' => null,
+                        'contribution_minor' => null,
+                    ];
+                    continue;
+                }
+                $results[] = $this->riskySavings->calculate(
+                    $employmentId,
+                    $periodStart,
+                    $bases[$employmentId],
+                    $evidence,
+                );
+            }
+        }
+        usort(
+            $results,
+            static fn (array $left, array $right): int =>
+                (int) $left['employment_id'] <=> (int) $right['employment_id'],
+        );
+        return $results;
     }
 
     /**
@@ -409,6 +490,8 @@ final class PayrollRunStatutoryCalculationService
             'employer_social_minor_units' => null,
             'employer_social_categories' => [],
             'result_set_ids' => [],
+            'risky_savings_period_start' => null,
+            'risky_savings' => [],
             'people' => [],
         ];
     }

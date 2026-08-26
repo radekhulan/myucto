@@ -516,6 +516,54 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
     }
 
+    /** Účet jiné mzdové kategorie nesmí dimenze podsunout jako hrubou mzdu. */
+    public function testReservedPayrollAccountCannotBeUsedAsDimensionCostAccount(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'VYROBA', '524'),
+        ];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('kolizní');
+        $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
+    /** Stejná ochrana platí i pro výslovný nákladový účet mzdové složky. */
+    public function testReservedPayrollAccountCannotBeUsedAsExplicitGrossDebit(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_debit_code'
+        ] = '524';
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_credit_code'
+        ] = '331';
+        $result = $this->calculatedResult();
+        $result['people'][0]['employments'][0]['inputs'][0]['accounting'] = [
+            'debit_code' => '524',
+            'credit_code' => '331',
+            'amount_minor' => 100_000,
+        ];
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('kolizní');
+        $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
     /**
      * `04-UCETNI-MUSTEK.md` slibuje analytiku 524 podle střediska; kód účtoval
      * jednu firemní dvojici 524/336 a středisko neznal vůbec.

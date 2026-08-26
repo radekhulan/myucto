@@ -94,8 +94,6 @@ final class PayrollRegzelSubmissionBridgeTest extends TestCase
         $pdo->prepare(
             'UPDATE supplier
                 SET company_name = "Syntetický REGZEL bridge",
-                    financial_office_code = "2001",
-                    workplace_code = "2002",
                     data_box_id = "abc1234"
               WHERE id = ?',
         )->execute([$this->supplierId]);
@@ -114,8 +112,9 @@ final class PayrollRegzelSubmissionBridgeTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_regzel_employer_profiles
                 (supplier_id, social_enterprise, employment_agency,
-                 protected_labor_market, evidence_confirmed_by)
-             VALUES (?, 1, 0, 1, ?)',
+                 protected_labor_market, tax_office_code,
+                 tax_office_workplace_code, evidence_confirmed_by)
+             VALUES (?, 1, 0, 1, "2000", "2002", ?)',
         )->execute([$this->supplierId, $this->userId]);
 
         $regzelRepository = new PayrollRegzelRepository($db);

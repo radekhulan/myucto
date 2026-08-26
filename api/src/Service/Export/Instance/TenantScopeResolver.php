@@ -65,6 +65,13 @@ final class TenantScopeResolver
         'oss_member_state_rates',
         'ai_embeddings', 'document_embeddings',
         'epo_signing_credentials', 'epo_signing_credential_suppliers',
+        'submission_channel_credentials',
+        'submission_isds_mobile_credentials', 'submission_isds_auth_flows',
+        'payroll_ruleset_audit',
+        'payroll_submission_signing_profiles',
+        'payroll_document_download_grants',
+        'payroll_payment_export_download_grants',
+        'payroll_submission_artifact_download_grants',
     ];
 
     /**
@@ -89,6 +96,7 @@ final class TenantScopeResolver
     private const SECRET_COLUMN_PATTERNS = [
         '_enc', 'password', 'secret', 'access_token', 'refresh_token',
         'api_key', 'private_key', 'token_hash', 'totp_', 'ai_pseudo_salt',
+        'certificate_ciphertext', 'pfx_ciphertext', 'passphrase',
     ];
 
     /**

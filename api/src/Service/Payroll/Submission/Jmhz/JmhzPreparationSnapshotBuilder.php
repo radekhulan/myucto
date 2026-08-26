@@ -15,7 +15,9 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V4_BUILDER_VERSION = 'jmhz-preparation-source.v4';
     public const PREVIOUS_V5_BUILDER_VERSION = 'jmhz-preparation-source.v5';
     public const PREVIOUS_V6_BUILDER_VERSION = 'jmhz-preparation-source.v6';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v7';
+    public const PREVIOUS_V7_BUILDER_VERSION = 'jmhz-preparation-source.v7';
+    public const PREVIOUS_V8_BUILDER_VERSION = 'jmhz-preparation-source.v8';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v9';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -31,6 +33,8 @@ final class JmhzPreparationSnapshotBuilder
      *        {@see JmhzOrdinaryEvidenceBuilder::build()}). Revize přes dvě
      *        mzdové účtárny má vždy ≥2 vztahy, takže jediná evidence na revizi
      *        by víceúčtárenské podání znemožnila.
+     * @param array<int,array<string,mixed>>|null $annualEvidenceSources roční
+     *        skutečnosti podle `employee_id`, načtené ve stejné transakci
      */
     public function build(
         int $supplierId,
@@ -41,6 +45,7 @@ final class JmhzPreparationSnapshotBuilder
         array $sourceIssues = [],
         array $eldpSources = [],
         array $ordinaryEvidenceSources = [],
+        ?array $annualEvidenceSources = null,
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -98,21 +103,38 @@ final class JmhzPreparationSnapshotBuilder
         $resultPeople = $this->indexResultPeople($result);
 
         $issues = $sourceIssues;
-        if (($revision['revision_kind'] ?? null) !== 'regular') {
-            $issues[] = $this->issue(
-                'jmhz_correction_revision_unsupported',
-                'revision',
-                $revisionId,
-            );
-        }
 
         $normalizedPeople = [];
         $sourceVersions = [];
         $seenEmployments = [];
         $usedOrdinaryEvidence = [];
+        $usedAnnualEvidence = [];
+        $annualEvidenceProvided = $annualEvidenceSources !== null;
+        $annualEvidenceSources ??= [];
         foreach ($this->rows($input['people'] ?? null, 'input.people') as $personIndex => $person) {
             $employee = $this->object($person['employee'] ?? null, "input.people.{$personIndex}.employee");
             $employeeId = $this->positiveInt($employee['id'] ?? null, 'employee.id');
+            $annualEvidence = $annualEvidenceSources[$employeeId] ?? null;
+            if (!$annualEvidenceProvided && $annualEvidence === null) {
+                $annualEvidence = [
+                    'tax_year' => (int) substr($periodStart, 0, 4) - 1,
+                    'request' => null,
+                    'request_evidence' => null,
+                    'settlement' => null,
+                    'settlement_evidence' => null,
+                    'withholding_certificate' => null,
+                ];
+            }
+            if (!is_array($annualEvidence)
+                || ($annualEvidence['tax_year'] ?? null)
+                    !== ((int) substr($periodStart, 0, 4) - 1)
+            ) {
+                $this->invalid(
+                    'jmhz_annual_evidence_scope_mismatch',
+                    'Roční evidence neodpovídá osobě a předchozímu zdaňovacímu období.',
+                );
+            }
+            $usedAnnualEvidence[$employeeId] = $annualEvidence;
             $personResult = $resultPeople[$employeeId] ?? null;
             if (!is_array($personResult)) {
                 $this->invalid(
@@ -185,13 +207,15 @@ final class JmhzPreparationSnapshotBuilder
                     : null;
                 $eldp = $eldpSources[$employmentId] ?? null;
                 if (!is_array($eldp)) {
-                    $issues[] = $this->issue('jmhz_eldp_evidence_missing', 'employment', $employmentId, [
-                        '10240', '10241', '10242', '10245', '10354', '10355',
-                        '10356', '10357', '10358', '10359', '10360', '10362',
-                        '10536', '10366', '10375', '10462', '10463', '10464',
-                        '10465', '10466', '10468', '10469', '10473', '10474',
-                        '10475',
-                    ]);
+                    if (!$this->hasSpecificEldpIssue($sourceIssues, $employmentId)) {
+                        $issues[] = $this->issue('jmhz_eldp_evidence_missing', 'employment', $employmentId, [
+                            '10240', '10241', '10242', '10245', '10354', '10355',
+                            '10356', '10357', '10358', '10359', '10360', '10362',
+                            '10536', '10366', '10375', '10462', '10463', '10464',
+                            '10465', '10466', '10468', '10469', '10473', '10474',
+                            '10475',
+                        ]);
+                    }
                     $eldp = null;
                 } else {
                     $this->assertEldpSource(
@@ -232,11 +256,17 @@ final class JmhzPreparationSnapshotBuilder
                         $revision,
                         $employeeId,
                         $employmentId,
+                        $term,
                     );
                     $usedOrdinaryEvidence[$employmentId] = $ordinary;
                 }
                 $componentMappings = [];
-                $earnings = [];
+                $earnings = [
+                    '10328' => 0,
+                    '10329' => 0,
+                    '10330' => 0,
+                    '10331' => 0,
+                ];
                 foreach ($this->rows($entry['inputs'] ?? null, 'employment.inputs') as $inputRow) {
                     $component = $this->object($inputRow['component'] ?? null, 'input.component');
                     $componentId = $this->positiveInt($component['component_id'] ?? null, 'component.component_id');
@@ -434,6 +464,7 @@ final class JmhzPreparationSnapshotBuilder
             $normalizedPeople[] = [
                 'employee_id' => $employeeId,
                 'person_summary' => $personResult,
+                'annual_evidence' => $annualEvidence,
                 'employments' => $normalizedEmployments,
             ];
         }
@@ -455,6 +486,13 @@ final class JmhzPreparationSnapshotBuilder
                 'Ordinary evidence patri k pracovnimu vztahu mimo pripravovanou revizi.',
             );
         }
+        $foreignAnnualEvidence = array_diff_key($annualEvidenceSources, $usedAnnualEvidence);
+        if ($foreignAnnualEvidence !== []) {
+            $this->invalid(
+                'jmhz_annual_evidence_scope_mismatch',
+                'Roční evidence patří k osobě mimo připravovanou revizi.',
+            );
+        }
         ksort($usedOrdinaryEvidence, SORT_NUMERIC);
         $ordinaryPayloads = [];
         $ordinaryVersions = [];
@@ -465,6 +503,21 @@ final class JmhzPreparationSnapshotBuilder
                 'id' => $ordinary['id'] ?? null,
                 'source_manifest_sha256' => $ordinary['source_manifest_sha256'] ?? null,
                 'snapshot_fingerprint' => $ordinary['snapshot_fingerprint'] ?? null,
+            ];
+        }
+        $annualVersions = [];
+        foreach ($usedAnnualEvidence as $employeeId => $evidence) {
+            $annualVersions[] = [
+                'employee_id' => $employeeId,
+                'tax_year' => $evidence['tax_year'],
+                'request_id' => $evidence['request']['id'] ?? null,
+                'request_row_version' => $evidence['request']['row_version'] ?? null,
+                'settlement_revision_id' => $evidence['settlement']['revision_id'] ?? null,
+                'settlement_snapshot_hash' => $evidence['settlement']['snapshot_hash'] ?? null,
+                'withholding_revision_id' =>
+                    $evidence['withholding_certificate']['revision_id'] ?? null,
+                'withholding_snapshot_hash' =>
+                    $evidence['withholding_certificate']['snapshot_hash'] ?? null,
             ];
         }
         $registrations = $this->officeRegistrations(
@@ -518,10 +571,11 @@ final class JmhzPreparationSnapshotBuilder
             'people' => $normalizedPeople,
             'ordinary_evidence' => $ordinaryPayloads,
             'source_versions' => [
-                'office_id' => is_array($office) ? ($office['id'] ?? null) : null,
+                'office_id' => is_array($office) ? $office['id'] : null,
                 'office_ids' => array_column($registrations, 'id'),
                 'employments' => $sourceVersions,
                 'ordinary_evidence' => $ordinaryVersions,
+                'annual_evidence' => $annualVersions,
             ],
             'readiness_issue_codes' => array_column($issues, 'code'),
             'readiness_issues' => $issues,
@@ -643,6 +697,7 @@ final class JmhzPreparationSnapshotBuilder
     /**
      * @param array<string,mixed> $evidence
      * @param array<string,mixed> $revision
+     * @param array<string,mixed> $term
      */
     private function assertOrdinaryEvidence(
         array $evidence,
@@ -655,6 +710,7 @@ final class JmhzPreparationSnapshotBuilder
         array $revision,
         int $employeeId,
         int $employmentId,
+        array $term,
     ): void {
         $this->positiveInt($evidence['id'] ?? null, 'ordinary_evidence.id');
         $this->hash(
@@ -751,13 +807,24 @@ final class JmhzPreparationSnapshotBuilder
                 'row_sha256' => $catalog->interaction($interactionId)->rowHash,
             ];
         }
-        if (($payload['interaction_decisions'] ?? null) !== $expectedInteractions
-            || ($payload['derived_interactions'] ?? null) !== [[
-                'interaction_id' => 'IN36',
-                'triggered' => false,
-                'source_attribute_id' => '10546',
-                'row_sha256' => $catalog->interaction('IN36')->rowHash,
-            ]]
+        $expectedDerivedInteractions = [[
+            'interaction_id' => 'IN36',
+            'triggered' => false,
+            'source_attribute_id' => '10546',
+            'row_sha256' => $catalog->interaction('IN36')->rowHash,
+        ]];
+        $actualInteractions = $this->rows(
+            $payload['interaction_decisions'] ?? null,
+            'ordinary_evidence.interaction_decisions',
+        );
+        $actualDerivedInteractions = $this->rows(
+            $payload['derived_interactions'] ?? null,
+            'ordinary_evidence.derived_interactions',
+        );
+        if (CanonicalJson::encode(['rows' => $actualInteractions])
+                !== CanonicalJson::encode(['rows' => $expectedInteractions])
+            || CanonicalJson::encode(['rows' => $actualDerivedInteractions])
+                !== CanonicalJson::encode(['rows' => $expectedDerivedInteractions])
         ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_interaction_mismatch',
@@ -768,7 +835,13 @@ final class JmhzPreparationSnapshotBuilder
             $payload['confirmation'] ?? null,
             'ordinary_evidence.confirmation',
         );
-        if (($confirmation['source_kind'] ?? null) !== 'explicit_confirmation'
+        $sourceKind = $confirmation['source_kind'] ?? null;
+        $sourceIsValid = $sourceKind === 'explicit_confirmation';
+        if ($sourceKind === 'derived_from_frozen_payroll_sources') {
+            $sourceIsValid = ($confirmation['source_term_id'] ?? null) === ($term['id'] ?? null)
+                && ($confirmation['source_term_row_version'] ?? null) === ($term['row_version'] ?? null);
+        }
+        if (!$sourceIsValid
             || !is_int($confirmation['confirmed_by_user_id'] ?? null)
             || $confirmation['confirmed_by_user_id'] <= 0
             || !is_string($confirmation['confirmed_at'] ?? null)
@@ -1296,6 +1369,24 @@ final class JmhzPreparationSnapshotBuilder
     {
         sort($attributeIds, SORT_STRING);
         return ['code' => $code, 'entity_type' => $entityType, 'entity_id' => $entityId, 'attribute_ids' => $attributeIds];
+    }
+
+    /**
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $sourceIssues
+     */
+    private function hasSpecificEldpIssue(array $sourceIssues, int $employmentId): bool
+    {
+        foreach ($sourceIssues as $issue) {
+            if ($issue['entity_type'] === 'employment'
+                && $issue['entity_id'] === $employmentId
+                && str_starts_with($issue['code'], 'jmhz_eldp_')
+                && $issue['code'] !== 'jmhz_eldp_evidence_missing'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

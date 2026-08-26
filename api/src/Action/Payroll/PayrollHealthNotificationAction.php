@@ -39,7 +39,10 @@ final class PayrollHealthNotificationAction
             return $this->guardFailure($error);
         }
 
-        return Json::ok($response, $this->service->capability());
+        return Json::ok(
+            $response,
+            $this->service->capability($this->currentSupplierId($request)),
+        );
     }
 
     /** @param array{employmentId:string} $args */
@@ -188,6 +191,41 @@ final class PayrollHealthNotificationAction
         }
 
         return Json::ok($response, ['items' => $items]);
+    }
+
+    public function registerPeriodObligations(
+        Request $request,
+        Response $response,
+    ): Response {
+        if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        try {
+            $result = $this->service->registerPeriodObligations(
+                $this->currentSupplierId($request),
+                'production',
+                $this->period($request->getQueryParams()),
+                $this->userId($request),
+            );
+        } catch (HealthNotificationException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, $result)
+            ->withHeader('Cache-Control', 'private, no-store');
     }
 
     /** @param array{revisionId:string,insurerCode:string} $args */

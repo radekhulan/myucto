@@ -182,9 +182,39 @@ final class PayrollRunDeductionLedgerApprover
                     $previousAgreements,
                 );
             } elseif ($previousRevisionId !== null) {
-                throw new \DomainException(
-                    'Běžná revize nesmí měnit dříve schválené srážky.',
+                $previous = $this->runs->revision(
+                    $supplierId,
+                    self::positiveInt(
+                        $previousRevisionId,
+                        'revision.previous_revision_id',
+                    ),
                 );
+                if ($previous === null
+                    || ($previous['run_id'] ?? null) !== $runId
+                ) {
+                    throw new \DomainException(
+                        'Běžná revize nenavazuje na předchozí pokus stejného mzdového běhu.',
+                    );
+                }
+                if (($previous['revision_kind'] ?? null) !== 'regular'
+                    || !in_array(
+                        $previous['status'] ?? null,
+                        ['snapshot', 'calculated', 'reviewed'],
+                        true,
+                    )
+                    || $this->runs->latestApprovedRevision(
+                        $supplierId,
+                        $runId,
+                        self::positiveInt(
+                            $revision['revision_no'] ?? null,
+                            'revision.revision_no',
+                        ),
+                    ) !== null
+                ) {
+                    throw new \DomainException(
+                        'Běžná revize nesmí měnit dříve schválené srážky.',
+                    );
+                }
             }
 
             $keys = array_unique([

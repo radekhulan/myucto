@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 
 /**
- * Počáteční stavy mzdových kumulací pro zaměstnance převzatého z jiného zpracování.
+ * Počáteční stavy mzdových kumulací.
  *
  * Zaměstnanec, který nastoupil dřív, než firma začala vést mzdy v MyÚčtu, nemá
  * za uzavřené měsíce žádnou revizi. Bez počátečního stavu vypadne z dávky
@@ -33,6 +34,8 @@ use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
  */
 final readonly class PayrollOpeningBalanceService
 {
+    private const SAVEPOINT = 'payroll_opening_balance';
+
     /**
      * Zdravotní pojištění tu schválně není. `calculation_kind` ho od migrace 1401
      * zná, ale akumulační cesta pro něj neexistuje (chybí sada polí, větev ve
@@ -55,6 +58,7 @@ final readonly class PayrollOpeningBalanceService
 
     public function __construct(
         private PayrollStatutoryAccumulatorRepository $accumulators,
+        private Connection $db,
     ) {}
 
     /**
@@ -103,9 +107,10 @@ final readonly class PayrollOpeningBalanceService
         ?int $actorUserId,
     ): array {
         $sourceReference = trim($sourceReference);
-        if ($months === []) {
-            throw new \InvalidArgumentException('Doplňte aspoň jeden měsíc předchozího zpracování.');
-        }
+        $months = $this->continuousMonths($months);
+        // Prázdný rozpis je záměrný a auditovatelný nulový počátek nového
+        // zaměstnance. Nesmíme z ledna až měsíce nástupu vyrábět fiktivně
+        // „dokončené" měsíce, protože by zkreslily roční daňovou kumulaci.
         /*
          * Kumulace nese `completed_months` a repozitář ho u openingu omezuje na 11 —
          * dvanáctý měsíc už není „před obdobím", ale celý rok.
@@ -135,47 +140,132 @@ final readonly class PayrollOpeningBalanceService
 
         $evidence = ['months' => array_values($months)];
         $values = ['social_insurance' => $social, 'income_tax' => $tax];
-        foreach (self::KINDS as $kind) {
-            $previous = $this->accumulators->openingBalance($supplierId, $employeeId, $year, $kind);
-            /*
-             * Beze změny se nic nezapisuje.
-             *
-             * Tabulka je append-only, takže druhé uložení týchž čísel by jinak
-             * založilo verzi, která nic neopravuje — a v historii by po pár
-             * kliknutích stál řetěz shodných záznamů. Idempotence repozitáře
-             * to nepokryje: klíč se počítá z dat, ale `record_hash` nese
-             * i předchůdce, který se mezitím změnil z `null` na id první verze.
-             */
-            if ($previous !== null
-                && $previous['values'] == $values[$kind]
-                && $previous['evidence'] == $evidence
-                && (string) $previous['source_reference'] === $sourceReference
-            ) {
-                continue;
-            }
-            $this->accumulators->appendOpeningBalance(
-                $supplierId,
-                $employeeId,
-                $year,
-                $kind,
-                $values[$kind],
-                $sourceReference,
-                $evidence,
-                $this->idempotencyKey(
+        $this->transactional(function () use (
+            $supplierId,
+            $employeeId,
+            $year,
+            $values,
+            $sourceReference,
+            $evidence,
+            $actorUserId,
+        ): void {
+            foreach (self::KINDS as $kind) {
+                $previous = $this->accumulators->openingBalance(
+                    $supplierId,
+                    $employeeId,
+                    $year,
+                    $kind,
+                );
+                /*
+                 * Beze změny se nic nezapisuje.
+                 *
+                 * Tabulka je append-only, takže druhé uložení týchž čísel by jinak
+                 * založilo verzi, která nic neopravuje — a v historii by po pár
+                 * kliknutích stál řetěz shodných záznamů. Idempotence repozitáře
+                 * to nepokryje: klíč se počítá z dat, ale `record_hash` nese
+                 * i předchůdce, který se mezitím změnil z `null` na id první verze.
+                 */
+                if ($previous !== null
+                    && $previous['values'] == $values[$kind]
+                    && $previous['evidence'] == $evidence
+                    && (string) $previous['source_reference'] === $sourceReference
+                ) {
+                    continue;
+                }
+                $this->accumulators->appendOpeningBalance(
+                    $supplierId,
                     $employeeId,
                     $year,
                     $kind,
                     $values[$kind],
-                    $evidence,
                     $sourceReference,
+                    $evidence,
+                    $this->idempotencyKey(
+                        $employeeId,
+                        $year,
+                        $kind,
+                        $values[$kind],
+                        $evidence,
+                        $sourceReference,
+                        $previous['id'] ?? null,
+                    ),
                     $previous['id'] ?? null,
-                ),
-                $previous['id'] ?? null,
-                $actorUserId,
+                    $actorUserId,
+                );
+            }
+        });
+
+        return $this->current($supplierId, $employeeId, $year);
+    }
+
+    /**
+     * Počet dokončených měsíců smí vzniknout jen ze souvislého intervalu.
+     * První měsíc je záměrně explicitní: převzatý zaměstnanec, který nastoupil
+     * až v březnu, má před srpnovou aktivací pět měsíců (3–7), ne sedm.
+     *
+     * @param list<OpeningMonth> $months
+     * @return list<OpeningMonth>
+     */
+    private function continuousMonths(array $months): array
+    {
+        $byMonth = [];
+        foreach ($months as $row) {
+            $month = $row['month'] ?? null;
+            if (!is_int($month) || $month < 1 || $month > 12) {
+                throw new \InvalidArgumentException(
+                    'Měsíc počátečního stavu musí být číslo 1 až 12.',
+                );
+            }
+            if (isset($byMonth[$month])) {
+                throw new \InvalidArgumentException(
+                    "Měsíc {$month} je v počátečních stavech dvakrát.",
+                );
+            }
+            $byMonth[$month] = $row;
+        }
+        if ($byMonth === []) {
+            return [];
+        }
+
+        ksort($byMonth, SORT_NUMERIC);
+        $numbers = array_keys($byMonth);
+        $first = $numbers[0];
+        $last = $numbers[count($numbers) - 1];
+        if (count($numbers) !== $last - $first + 1) {
+            throw new \InvalidArgumentException(
+                'Měsíce počátečního stavu musí tvořit souvislou řadu.',
             );
         }
 
-        return $this->current($supplierId, $employeeId, $year);
+        return array_values($byMonth);
+    }
+
+    /** @param callable():void $callback */
+    private function transactional(callable $callback): void
+    {
+        $pdo = $this->db->pdo();
+        $nested = $pdo->inTransaction();
+        if ($nested) {
+            $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
+        } else {
+            $pdo->beginTransaction();
+        }
+        try {
+            $callback();
+            if ($nested) {
+                $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+            } else {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($nested) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::SAVEPOINT);
+                $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+            } elseif ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**

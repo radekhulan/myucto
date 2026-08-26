@@ -9,14 +9,20 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellation;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormStateResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
+use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
+use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -41,6 +47,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private const ENVIRONMENT = 'test';
     private const SUBMISSION_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEE';
     private const FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF';
+    private const SECOND_FORM_GUID = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0';
     private const VARIABLE_SYMBOL = '9990000001';
 
     private Connection $db;
@@ -48,7 +55,9 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
     private JmhzCorrectiveSubmissionService $corrections;
+    private JmhzEffectiveFormLedgerResolver $effectiveForms;
     private PayrollSubmissionTransportAttemptRepository $attempts;
+    private MockClock $clock;
     private int $supplierId;
     private int $month;
     private int $year;
@@ -73,20 +82,29 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         $this->year = (int) $today->format('Y');
 
         $this->repository = new PayrollSubmissionRepository($connection);
-        $clock = new MockClock($today->format('Y-m-d') . ' 10:00:00 Europe/Prague');
-        $this->obligations = new PayrollObligationService($this->repository, $clock);
+        $submissionDay = $today->modify('first day of next month')->modify('+1 day');
+        $this->clock = new MockClock(
+            $submissionDay->format('Y-m-d') . ' 10:00:00 Europe/Prague',
+        );
+        $this->obligations = new PayrollObligationService($this->repository, $this->clock);
         $this->submissions = new PayrollSubmissionService(
             $this->repository,
             new PayrollSubmissionStateMachine(),
             $encryption,
-            $clock,
+            $this->clock,
         );
+        $frozen = new JmhzFrozenPayloadReader($this->repository, $this->submissions);
         $this->corrections = new JmhzCorrectiveSubmissionService(
             $this->repository,
             $this->submissions,
             $this->obligations,
-            new JmhzFrozenPayloadReader($this->repository, $this->submissions),
-            $clock,
+            $frozen,
+            $this->clock,
+        );
+        $this->effectiveForms = new JmhzEffectiveFormLedgerResolver(
+            $this->repository,
+            $frozen,
+            new JmhzEffectiveFormStateResolver(),
         );
         $this->attempts = new PayrollSubmissionTransportAttemptRepository($connection);
         if (!$this->attempts->isAvailable()) {
@@ -108,7 +126,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
      */
     public function testWholeSubmissionCancellationCarriesTheOriginalGuidAndLink(): void
     {
-        $original = $this->submittedRegularSubmission();
+        $original = $this->acceptedRegularSubmission();
 
         $storno = $this->corrections->cancelSubmission(
             $this->supplierId,
@@ -135,6 +153,41 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertStringNotContainsString('formulareOsob', $xml);
     }
 
+    public function testCorrectableComponentsComeFromFrozenRegularPayload(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+
+        self::assertSame([
+            [
+                'form_guid' => self::FORM_GUID,
+                'person_external_identifier' => '1234567890',
+                'employment_external_identifier' => '987654321',
+            ],
+            [
+                'form_guid' => self::SECOND_FORM_GUID,
+                'person_external_identifier' => '1234567891',
+                'employment_external_identifier' => '987654322',
+            ],
+        ], $this->corrections->correctableComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+        ));
+    }
+
+    public function testCorrectableComponentsWaitForFinalCsszResult(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('úplném přijetí');
+        $this->corrections->correctableComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+        );
+    }
+
     /**
      * Opravné podání stornující jmenované součásti: typ podání O, součást typu
      * S a jen její hlavička — datová část by tvrdila, že se něco vykazuje,
@@ -142,13 +195,13 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
      */
     public function testComponentCancellationIsAnAmendmentWithHeaderOnlyForms(): void
     {
-        $original = $this->submittedRegularSubmission();
+        $original = $this->acceptedRegularSubmission();
 
         $amendment = $this->corrections->cancelComponents(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
-            [JmhzComponentCancellation::create(self::FORM_GUID, '1234567890', '987654321')],
+            [self::FORM_GUID],
         );
 
         self::assertTrue($amendment['created']);
@@ -162,6 +215,21 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertStringContainsString('<typFormulare>S</typFormulare>', $xml);
     }
 
+    public function testComponentCancellationAfterTheDeadlineIsRefused(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $this->clock->modify('+25 days');
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('Lhůta pro storno');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+    }
+
     /**
      * Druhé kliknutí nesmí založit druhé storno. XML se nestaví znovu — jinak
      * by pod týmž podáním vznikl jiný dokument, a duplicitu přijatého podání
@@ -169,13 +237,14 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
      */
     public function testRepeatedCancellationReturnsTheSameFrozenSubmission(): void
     {
-        $original = $this->submittedRegularSubmission();
+        $original = $this->acceptedRegularSubmission();
 
         $first = $this->corrections->cancelSubmission(
             $this->supplierId,
             self::ENVIRONMENT,
             $original['id'],
         );
+        $this->clock->modify('+1 second');
         $second = $this->corrections->cancelSubmission(
             $this->supplierId,
             self::ENVIRONMENT,
@@ -189,6 +258,54 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertSame($first['artifact_sha256'], $second['artifact_sha256']);
     }
 
+    public function testComponentCancellationRejectsUnknownOrAllFrozenForms(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+
+        try {
+            $this->corrections->cancelComponents(
+                $this->supplierId,
+                self::ENVIRONMENT,
+                $original['id'],
+                ['AAAABBBB-1111-7222-8333-CCCCDDDDFFFF'],
+            );
+            self::fail('Cizí GUID formuláře nesmí projít.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_cancellation_component_not_frozen', $exception->validationCode);
+        }
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('storno celého podání');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID, self::SECOND_FORM_GUID],
+        );
+    }
+
+    public function testRepeatedComponentCancellationIsStableAcrossTimeAndOrder(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $first = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+        $this->clock->modify('+2 seconds');
+        $second = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+
+        self::assertFalse($second['created']);
+        self::assertSame($first['submission_id'], $second['submission_id']);
+        self::assertSame($first['artifact_sha256'], $second['artifact_sha256']);
+    }
+
     /**
      * Ledger pokusů má trigger vyžadující shodu kanálu pokusu s kanálem podání,
      * takže tenhle test dokazuje, že storno je pro transportní vrstvu plnohodnotné
@@ -196,7 +313,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
      */
     public function testCancellationTravelsThroughTheSameTransportLedger(): void
     {
-        $original = $this->submittedRegularSubmission();
+        $original = $this->acceptedRegularSubmission();
         $storno = $this->corrections->cancelSubmission(
             $this->supplierId,
             self::ENVIRONMENT,
@@ -244,6 +361,304 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         );
     }
 
+    #[DataProvider('ineligibleFinalStateProvider')]
+    public function testPendingOrRejectedRegularSubmissionCannotBeCorrected(
+        string $status,
+    ): void {
+        $original = $this->regularSubmissionInStatus($status);
+
+        $this->expectException(\DomainException::class);
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function ineligibleFinalStateProvider(): iterable
+    {
+        yield 'submitted is not final' => ['submitted'];
+        yield 'processing is not final' => ['processing'];
+        yield 'rejected has no valid regular root' => ['rejected'];
+    }
+
+    public function testPartiallyAcceptedRegularSubmissionWaitsForFormOutcomes(): void
+    {
+        $original = $this->regularSubmissionInStatus('partially_accepted');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('úplný protokol ČSSZ');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+    }
+
+    public function testRejectedRegularSubmissionIsReplacedByANewUnlinkedRegular(): void
+    {
+        $rejected = $this->regularSubmissionInStatus('rejected');
+        $replacementGuid = 'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0';
+        $replacement = $this->regularSubmission($replacementGuid, '-replacement');
+        $stored = $this->repository->findSubmission(
+            $this->supplierId,
+            $replacement['id'],
+        );
+
+        self::assertIsArray($stored);
+        self::assertNotSame($rejected['id'], $replacement['id']);
+        self::assertSame('regular', $stored['submission_kind']);
+        self::assertNull($stored['corrects_submission_id']);
+    }
+
+    public function testAcceptedCorrectionCannotBeFollowedByCancellingLastRemainingForm(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $first = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+        $this->acceptPreparedSubmission(
+            $first['submission_id'],
+            'VREP-CORRECTION-0001',
+        );
+
+        $storedRoot = $this->repository->findSubmission(
+            $this->supplierId,
+            $original['id'],
+        );
+        self::assertIsArray($storedRoot);
+        self::assertSame('accepted', $storedRoot['status']);
+
+        $replay = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+        self::assertFalse($replay['created']);
+        self::assertSame($first['submission_id'], $replay['submission_id']);
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('storno celého podání');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::SECOND_FORM_GUID],
+        );
+    }
+
+    public function testAcceptedWholeCancellationSupersedesTheEntireCorrectionChain(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $correction = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+        $this->acceptPreparedSubmission(
+            $correction['submission_id'],
+            'VREP-CORRECTION-CHAIN-0001',
+        );
+        $cancellation = $this->corrections->cancelSubmission(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+        );
+        $this->acceptPreparedSubmission(
+            $cancellation['submission_id'],
+            'VREP-CANCELLATION-CHAIN-0001',
+        );
+
+        self::assertSame(
+            'superseded',
+            $this->repository->findSubmission(
+                $this->supplierId,
+                $original['id'],
+            )['status'] ?? null,
+        );
+        self::assertSame(
+            'superseded',
+            $this->repository->findSubmission(
+                $this->supplierId,
+                $correction['submission_id'],
+            )['status'] ?? null,
+        );
+        self::assertSame(
+            'accepted',
+            $this->repository->findSubmission(
+                $this->supplierId,
+                $cancellation['submission_id'],
+            )['status'] ?? null,
+        );
+    }
+
+    public function testCorrectionCanReferenceCanonicalNonV7Guids(): void
+    {
+        $regularGuid = 'AAAABBBB-1111-4222-8333-CCCCDDDDEEEE';
+        $original = $this->regularSubmissionInStatus('accepted', $regularGuid);
+
+        $correction = $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $correction['artifact_id'],
+        );
+        self::assertSame($regularGuid, $this->headerValue($xml, 'idPodani'));
+    }
+
+    public function testEffectiveFormLedgerUsesSignedOutcomesAndKeepsTenantAndEnvironmentBoundaries(): void
+    {
+        $original = $this->regularSubmissionInStatus(
+            'submitted',
+            self::SUBMISSION_GUID,
+        );
+        $acknowledgement = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<trusted-vrep-acknowledgement/>',
+            'receipt:effective-state-ack',
+            'VREP-ORIGINAL-0001',
+            'VREP_ACK',
+            'processing',
+            self::CHANNEL,
+            'receipt-effective-state-ack',
+            null,
+            $this->trustedVerifier('processing'),
+        );
+        $receipt = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $acknowledgement['submission_row_version'],
+            null,
+            '<signed-jmhz-protocol/>',
+            'receipt:effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'partially_accepted',
+            self::CHANNEL,
+            'receipt-effective-state',
+            null,
+            $this->trustedFormVerifier(),
+        );
+        self::assertSame('partially_accepted', $receipt['submission_status']);
+
+        $set = $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321', '987654322', '987654323'],
+        );
+        self::assertSame('accepted', $set->forEmployment('987654321')->state);
+        self::assertSame(self::FORM_GUID, $set->forEmployment('987654321')->formGuid);
+        self::assertSame('rejected', $set->forEmployment('987654322')->state);
+        self::assertNull($set->forEmployment('987654322')->formGuid);
+        self::assertSame('missing', $set->forEmployment('987654323')->state);
+
+        foreach ([
+            [$this->supplierId + 999999, self::ENVIRONMENT],
+            [$this->supplierId, 'production'],
+        ] as [$supplierId, $environment]) {
+            try {
+                $this->effectiveForms->resolve(
+                    $supplierId,
+                    $environment,
+                    $original['id'],
+                    ['987654321'],
+                );
+                self::fail('Cizí tenant nebo prostředí nesmí zpřístupnit efektivní stav.');
+            } catch (JmhzXmlException $exception) {
+                self::assertSame('jmhz_effective_state_root_invalid', $exception->validationCode);
+            }
+        }
+    }
+
+    public function testEffectiveFormLedgerFailsClosedForUnverifiedProtocol(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+        $receipt = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<unverified-jmhz-protocol/>',
+            'receipt:unverified-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'accepted',
+            self::CHANNEL,
+            'receipt-unverified-effective-state',
+        );
+        self::assertFalse($receipt['trusted']);
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('podepsaným protokolem');
+        $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321'],
+        );
+    }
+
+    public function testEffectiveFormLedgerFailsClosedForConflictingSignedProtocols(): void
+    {
+        $original = $this->regularSubmissionInStatus('submitted');
+        $accepted = $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $original['row_version'],
+            null,
+            '<accepted-jmhz-protocol/>',
+            'receipt:accepted-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'accepted',
+            self::CHANNEL,
+            'receipt-accepted-effective-state',
+            null,
+            $this->trustedVerifier('accepted'),
+        );
+        $this->submissions->importReceipt(
+            $this->supplierId,
+            $original['id'],
+            $accepted['submission_row_version'],
+            null,
+            '<rejected-jmhz-protocol/>',
+            'receipt:rejected-effective-state',
+            'VREP-ORIGINAL-0001',
+            'CSSZ_JMHZ',
+            'rejected',
+            self::CHANNEL,
+            'receipt-rejected-effective-state',
+            null,
+            $this->trustedVerifier('rejected'),
+        );
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('rozporný konečný stav');
+        $this->effectiveForms->resolve(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            ['987654321'],
+        );
+    }
+
     /** @return array{id:int,row_version:int} */
     private function submittedRegularSubmission(): array
     {
@@ -260,8 +675,149 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
     }
 
     /** @return array{id:int,row_version:int} */
-    private function regularSubmission(): array
+    private function acceptedRegularSubmission(): array
     {
+        return $this->regularSubmissionInStatus('accepted');
+    }
+
+    /** @return array{id:int,row_version:int} */
+    private function regularSubmissionInStatus(
+        string $status,
+        string $submissionGuid = self::SUBMISSION_GUID,
+    ): array {
+        $submission = $this->regularSubmission($submissionGuid);
+        $submittedState = $this->submissions->transition(
+            $this->supplierId,
+            $submission['id'],
+            $submission['row_version'],
+            'submitted',
+            'VREP-ORIGINAL-0001',
+        );
+        $submitted = [
+            'id' => $submission['id'],
+            'row_version' => $submittedState['row_version'],
+        ];
+        if ($status === 'submitted') {
+            return $submitted;
+        }
+
+        $receipt = $this->submissions->importReceipt(
+            $this->supplierId,
+            $submitted['id'],
+            $submitted['row_version'],
+            null,
+            '<receipt status="' . $status . '"/>',
+            'receipt:regular:' . $status,
+            'VREP-ORIGINAL-0001',
+            'JMHZ_FINAL',
+            $status,
+            self::CHANNEL,
+            'receipt-regular-' . $status,
+            null,
+            $this->trustedVerifier($status),
+        );
+
+        return [
+            'id' => $submitted['id'],
+            'row_version' => $receipt['submission_row_version'],
+        ];
+    }
+
+    private function acceptPreparedSubmission(int $submissionId, string $correlation): void
+    {
+        $stored = $this->repository->findSubmission($this->supplierId, $submissionId);
+        self::assertIsArray($stored);
+        $submitted = $this->submissions->transition(
+            $this->supplierId,
+            $submissionId,
+            $stored['row_version'],
+            'submitted',
+            $correlation,
+        );
+        $receipt = $this->submissions->importReceipt(
+            $this->supplierId,
+            $submissionId,
+            $submitted['row_version'],
+            null,
+            '<receipt status="accepted"/>',
+            'receipt:correction:' . $submissionId,
+            $correlation,
+            'JMHZ_FINAL',
+            'accepted',
+            self::CHANNEL,
+            'receipt-correction-' . $submissionId,
+            null,
+            $this->trustedVerifier('accepted'),
+        );
+        self::assertSame('accepted', $receipt['submission_status']);
+    }
+
+    private function trustedVerifier(string $status): PayrollReceiptVerifierInterface
+    {
+        return new class ($status) implements PayrollReceiptVerifierInterface {
+            public function __construct(private readonly string $status)
+            {
+            }
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    $this->status,
+                    $expectedCorrelationReference,
+                );
+            }
+        };
+    }
+
+    private function trustedFormVerifier(): PayrollReceiptVerifierInterface
+    {
+        return new class implements PayrollReceiptVerifierInterface {
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    'partially_accepted',
+                    $expectedCorrelationReference,
+                    [],
+                    [
+                        new PayrollVerifiedReceiptFormOutcome(
+                            'AAAABBBB-1111-7222-8333-CCCCDDDDEEEF',
+                            null,
+                            1,
+                            'ProcessedAndComplete',
+                            'accepted',
+                            '1234567890',
+                            '987654321',
+                            [],
+                        ),
+                        new PayrollVerifiedReceiptFormOutcome(
+                            'AAAABBBB-1111-7222-8333-CCCCDDDDEEF0',
+                            null,
+                            3,
+                            'Rejected',
+                            'rejected',
+                            '1234567891',
+                            '987654322',
+                            [],
+                        ),
+                    ],
+                );
+            }
+        };
+    }
+
+    /** @return array{id:int,row_version:int} */
+    private function regularSubmission(
+        string $submissionGuid = self::SUBMISSION_GUID,
+        string $keySuffix = '',
+    ): array {
         $periodStart = sprintf('%04d-%02d-01', $this->year, $this->month);
         $periodEnd = (new \DateTimeImmutable($periodStart))
             ->modify('last day of this month')
@@ -279,16 +835,16 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             'regular',
             self::CHANNEL,
             'payroll_run_approved',
-            'run:synthetic:' . $this->year . '-' . $this->month,
-            str_repeat('c', 64),
+            'run:synthetic:' . $this->year . '-' . $this->month . $keySuffix,
+            hash('sha256', 'source' . $keySuffix),
             // Podání smí odejít od prvního dne období: test jinak nemá jak se
             // dostat do stavu `submitted`, který je předpokladem storna.
             $periodStart,
             $due,
             'calendar_days',
             'jmhz-corrective-test',
-            str_repeat('d', 64),
-            'obligation-jmhz-corrective',
+            hash('sha256', 'trigger' . $keySuffix),
+            'obligation-jmhz-corrective' . $keySuffix,
             null,
             null,
             null,
@@ -301,7 +857,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             'regular',
             self::CHANNEL,
             $snapshotHash,
-            'jmhz-corrective-regular',
+            'jmhz-corrective-regular' . $keySuffix,
             null,
             null,
             null,
@@ -315,7 +871,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             'JMHZ25',
             'payroll_run:5',
             'jmhz_preparation',
-            'jmhz_preparation:1',
+            'jmhz_preparation:1' . $keySuffix,
             $snapshotHash,
         );
         $artifact = $this->submissions->storeArtifact(
@@ -326,11 +882,11 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             'outbound_xml',
             'outbound',
             'application/xml',
-            $this->frozenPayload(),
+            $this->frozenPayload($submissionGuid),
             JmhzSchemaCatalog::PACKAGE_KEY,
             'jmhz-controls-test',
             self::CHANNEL,
-            'jmhz-corrective-artifact',
+            'jmhz-corrective-artifact' . $keySuffix,
             null,
         );
         $validated = $this->submissions->transition(
@@ -349,17 +905,33 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         return ['id' => $submission['id'], 'row_version' => $ready['row_version']];
     }
 
-    private function frozenPayload(): string
+    private function frozenPayload(string $submissionGuid = self::SUBMISSION_GUID): string
     {
         return '<?xml version="1.0" encoding="UTF-8"?>'
-            . '<jmhz xmlns="' . JmhzSchemaCatalog::NS_PODANI . '" verze="1.4.3.4">'
+            . '<jmhz xmlns="' . JmhzSchemaCatalog::NS_PODANI . '"'
+            . ' xmlns:form="' . JmhzSchemaCatalog::NS_FORM . '" verze="1.4.3.4">'
             . '<hlavicka>'
-            . '<idPodani>' . self::SUBMISSION_GUID . '</idPodani>'
+            . '<idPodani>' . $submissionGuid . '</idPodani>'
             . '<typPodani>R</typPodani>'
             . '<variabilniSymbol>' . self::VARIABLE_SYMBOL . '</variabilniSymbol>'
             . '<mesic>' . $this->month . '</mesic>'
             . '<rok>' . $this->year . '</rok>'
-            . '</hlavicka></jmhz>';
+            . '</hlavicka>'
+            . '<formulareOsob><formularOsoby><hlavicka>'
+            . '<idFormulare>' . self::FORM_GUID . '</idFormulare>'
+            . '<typFormulare>R</typFormulare>'
+            . '</hlavicka><form:bezPriznaku><form:identifikace>'
+            . '<form:ikMpsv>1234567890</form:ikMpsv>'
+            . '<form:idPpv>987654321</form:idPpv>'
+            . '</form:identifikace></form:bezPriznaku>'
+            . '</formularOsoby><formularOsoby><hlavicka>'
+            . '<idFormulare>' . self::SECOND_FORM_GUID . '</idFormulare>'
+            . '<typFormulare>R</typFormulare>'
+            . '</hlavicka><form:bezPriznaku><form:identifikace>'
+            . '<form:ikMpsv>1234567891</form:ikMpsv>'
+            . '<form:idPpv>987654322</form:idPpv>'
+            . '</form:identifikace></form:bezPriznaku>'
+            . '</formularOsoby></formulareOsob></jmhz>';
     }
 
     private function headerValue(string $xml, string $element): string

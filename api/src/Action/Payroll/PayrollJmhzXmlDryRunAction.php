@@ -15,7 +15,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Nácvik měsíčního hlášení nad zmrazeným preparation snapshotem. Jen čtení —
+ * Test měsíčního hlášení nad zmrazeným preparation snapshotem. Jen čtení —
  * endpoint nic neodesílá, nic neukládá a nezakládá podání. Je záměrně
  * session-only, protože vrací celý obsah hlášení včetně identifikátorů osob.
  */

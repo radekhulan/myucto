@@ -126,7 +126,7 @@ final class PayrollJmhzWorkMonthConditionalMigrationRuntimeTest extends TestCase
                  control_manifest_sha256)
              VALUES ('jmhz-work-month.v2', 168000, 160000, '" . str_repeat('d', 64)
                 . "', 1, 1, 1, 80000, 0, 80000, 80000,
-                    'jmhz-controls-1.4.2.7-source-v3', '" . str_repeat('e', 64) . "')",
+                    'jmhz-controls-1.4.2.8-source-v4', '" . str_repeat('e', 64) . "')",
         );
         $count = $db->query('SELECT COUNT(*) FROM payroll_jmhz_work_month_revisions');
         self::assertInstanceOf(\PDOStatement::class, $count);

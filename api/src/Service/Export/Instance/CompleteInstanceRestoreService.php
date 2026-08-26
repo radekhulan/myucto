@@ -11,8 +11,15 @@ use ZipArchive;
 final class CompleteInstanceRestoreService
 {
     private const FORMAT = 'myucto-instance-export';
-    private const VERSION = 3;
+    private const VERSION = 5;
+    private const SUPPORTED_VERSIONS = [3, 4, self::VERSION];
     private const DISABLED_PASSWORD_HASH = '$2y$10$K6q6A1qORRMi5gzg1me.bO4w0NqJGb9jY36Tv1azcLYtKpIwZxjua';
+    private const RESTORED_RULESET_REASON = 'Obnoveno z úplného exportu firmy bez globální správcovské provenance.';
+
+    /** @var array<string,list<string>> potomek => rodiče ověřované triggerem bez FK */
+    private const TRIGGER_DEPENDENCIES = [
+        'payroll_payment_liabilities' => ['payroll_run_persons'],
+    ];
 
     public function __construct(
         private readonly PDO $pdo,
@@ -55,11 +62,16 @@ final class CompleteInstanceRestoreService
             $this->pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
             $this->pdo->beginTransaction();
             try {
+                foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
+                    $this->restoreSharedEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
+                }
                 $identity = (array) ($manifest['sections']['data']['identity']['entries'] ?? []);
                 foreach (['roles', 'role_permissions', 'users'] as $table) {
                     $this->restoreEntry($dir, $table, $identity[$table]['entry'] ?? null, $counts, $table === 'roles' || $table === 'role_permissions');
                 }
-                foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
+                $tables = (array) ($manifest['sections']['data']['tables'] ?? []);
+                foreach ($this->restoreTableOrder(array_keys($tables)) as $table) {
+                    $info = (array) ($tables[$table] ?? []);
                     $this->restoreEntry($dir, (string) $table, $info['entry'] ?? null, $counts);
                 }
                 $this->restoreEntry($dir, 'user_suppliers', $identity['user_suppliers']['entry'] ?? null, $counts);
@@ -95,12 +107,173 @@ final class CompleteInstanceRestoreService
         }
     }
 
+    /**
+     * FOREIGN_KEY_CHECKS dovolí vložit potomka před rodičem, databázové triggery
+     * ale běží dál. Pořadí JSONL v archivu proto nestačí: přímo tenantové tabulky
+     * mají v resolveru stejnou hloubku a starší archiv mohl uvést například
+     * payroll_generated_documents před payroll_run_revisions. Cílové schéma je
+     * autoritativní zdroj vazeb a rodiče řadí před potomky i pro archiv verze 3/4.
+     *
+     * @param list<int|string> $tables
+     * @return list<string>
+     */
+    private function restoreTableOrder(array $tables): array
+    {
+        $orderedInput = array_values(array_unique(array_map('strval', $tables)));
+        $included = array_fill_keys($orderedInput, true);
+        $position = array_flip($orderedInput);
+        $children = array_fill_keys($orderedInput, []);
+        $edges = [];
+        $foreignKeyStatement = $this->pdo->query(
+            'SELECT TABLE_NAME, REFERENCED_TABLE_NAME
+               FROM information_schema.KEY_COLUMN_USAGE
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND REFERENCED_TABLE_NAME IS NOT NULL',
+        );
+        $foreignKeys = $foreignKeyStatement === false
+            ? []
+            : ($foreignKeyStatement->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        foreach ($foreignKeys as $foreignKey) {
+            $child = (string) $foreignKey['TABLE_NAME'];
+            $parent = (string) $foreignKey['REFERENCED_TABLE_NAME'];
+            if ($child === $parent || !isset($included[$child], $included[$parent])) {
+                continue;
+            }
+            $edge = $parent . "\0" . $child;
+            if (isset($edges[$edge])) {
+                continue;
+            }
+            $edges[$edge] = true;
+            $children[$parent][] = $child;
+        }
+        foreach (self::TRIGGER_DEPENDENCIES as $child => $parents) {
+            foreach ($parents as $parent) {
+                if (!isset($included[$child], $included[$parent])) {
+                    continue;
+                }
+                $edge = $parent . "\0" . $child;
+                if (isset($edges[$edge])) {
+                    continue;
+                }
+                $edges[$edge] = true;
+                $children[$parent][] = $child;
+            }
+        }
+
+        // Tenantové schéma obsahuje skutečné cykly (typicky firma ↔ její výchozí
+        // číselník). Nejdřív je proto stáhneme do silně souvislých komponent a
+        // topologicky seřadíme až jejich acyklický graf. Potomci komponenty se tak
+        // nedostanou před ni jen proto, že jeden její člen odkazuje zpět.
+        $nextIndex = 0;
+        $indices = [];
+        $lowLinks = [];
+        $stack = [];
+        $onStack = [];
+        $components = [];
+        $visit = function (string $table) use (
+            &$visit,
+            &$nextIndex,
+            &$indices,
+            &$lowLinks,
+            &$stack,
+            &$onStack,
+            &$components,
+            $children,
+        ): void {
+            $indices[$table] = $nextIndex;
+            $lowLinks[$table] = $nextIndex;
+            $nextIndex++;
+            $stack[] = $table;
+            $onStack[$table] = true;
+            foreach ($children[$table] as $child) {
+                if (!array_key_exists($child, $indices)) {
+                    $visit($child);
+                    $lowLinks[$table] = min($lowLinks[$table], $lowLinks[$child]);
+                } elseif (isset($onStack[$child])) {
+                    $lowLinks[$table] = min($lowLinks[$table], $indices[$child]);
+                }
+            }
+            if ($lowLinks[$table] !== $indices[$table]) {
+                return;
+            }
+            $component = [];
+            do {
+                $member = array_pop($stack);
+                if (!is_string($member)) {
+                    throw new \LogicException('Graf pořadí obnovy obsahuje neúplnou komponentu.');
+                }
+                unset($onStack[$member]);
+                $component[] = $member;
+            } while ($member !== $table);
+            $components[] = $component;
+        };
+        foreach ($orderedInput as $table) {
+            if (!array_key_exists($table, $indices)) {
+                $visit($table);
+            }
+        }
+
+        $componentOf = [];
+        $componentPosition = [];
+        foreach ($components as $componentId => &$component) {
+            usort($component, static fn (string $left, string $right): int => $position[$left] <=> $position[$right]);
+            $componentPosition[$componentId] = min(array_map(
+                static fn (string $table): int => $position[$table],
+                $component,
+            ));
+            foreach ($component as $table) {
+                $componentOf[$table] = $componentId;
+            }
+        }
+        unset($component);
+
+        $componentChildren = array_fill(0, count($components), []);
+        $componentInDegree = array_fill(0, count($components), 0);
+        $componentEdges = [];
+        foreach ($children as $parent => $childTables) {
+            foreach ($childTables as $child) {
+                $from = $componentOf[$parent];
+                $to = $componentOf[$child];
+                if ($from === $to || isset($componentEdges[$from . ':' . $to])) {
+                    continue;
+                }
+                $componentEdges[$from . ':' . $to] = true;
+                $componentChildren[$from][] = $to;
+                $componentInDegree[$to]++;
+            }
+        }
+        $ready = array_keys(array_filter(
+            $componentInDegree,
+            static fn (int $degree): bool => $degree === 0,
+        ));
+        usort($ready, static fn (int $left, int $right): int => $componentPosition[$left] <=> $componentPosition[$right]);
+        $result = [];
+        while ($ready !== []) {
+            $componentId = array_shift($ready);
+            array_push($result, ...$components[$componentId]);
+            foreach ($componentChildren[$componentId] as $childId) {
+                $componentInDegree[$childId]--;
+                if ($componentInDegree[$childId] === 0) {
+                    $ready[] = $childId;
+                }
+            }
+            usort($ready, static fn (int $left, int $right): int => $componentPosition[$left] <=> $componentPosition[$right]);
+        }
+        if (count($result) !== count($orderedInput)) {
+            throw new \LogicException(
+                'Graf pořadí obnovy nepokryl všechny tabulky archivu.',
+            );
+        }
+        return $result;
+    }
+
     private function manifest(string $dir): array
     {
         $path = $dir . DIRECTORY_SEPARATOR . 'manifest.json';
         $manifest = is_file($path) ? json_decode((string) file_get_contents($path), true) : null;
-        if (!is_array($manifest) || ($manifest['format'] ?? null) !== self::FORMAT || (int) ($manifest['version'] ?? 0) !== self::VERSION) {
-            throw new InstanceExportException('restore_format_invalid', 'Archiv není kompletní obnovitelný export aktuálního formátu.');
+        if (!is_array($manifest) || ($manifest['format'] ?? null) !== self::FORMAT
+            || !in_array((int) ($manifest['version'] ?? 0), self::SUPPORTED_VERSIONS, true)) {
+            throw new InstanceExportException('restore_format_invalid', 'Archiv není kompletní obnovitelný export podporovaného formátu.');
         }
         if (($manifest['restore']['available'] ?? false) !== true || !isset($manifest['sections']['data']['tables'])) {
             throw new InstanceExportException('restore_incomplete', 'Archiv neobsahuje obnovitelná data; při exportu zvolte „Úplný obnovitelný archiv“.');
@@ -120,6 +293,9 @@ final class CompleteInstanceRestoreService
         }
         $counts = [];
         foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
+            $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
+        }
+        foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
             $counts[(string) $table] = $this->validateJsonl($dir, $info['entry'] ?? null, (int) ($info['rows'] ?? 0), (string) $table);
         }
         foreach ((array) ($manifest['sections']['data']['identity']['entries'] ?? []) as $table => $info) {
@@ -177,6 +353,7 @@ final class CompleteInstanceRestoreService
             if (!is_array($row)) {
                 continue;
             }
+            $row = InstanceExportBinaryCodec::decodeRow($row);
             if ($table === 'users') {
                 $row['password_hash'] = self::DISABLED_PASSWORD_HASH;
                 $row['totp_enabled'] = 0;
@@ -193,6 +370,79 @@ final class CompleteInstanceRestoreService
             $this->pdo->prepare($sql)->execute(array_values($row));
         }
         fclose($fh);
+    }
+
+    /** @param array<string,int> $counts */
+    private function restoreSharedEntry(string $dir, string $table, mixed $entry, array &$counts): void
+    {
+        if ($entry === null || !isset($counts[$table])) {
+            return;
+        }
+        if (!in_array($table, InstanceExportService::SHARED_PAYROLL_TABLES, true)) {
+            throw new InstanceExportException('restore_shared_table_invalid', 'Archiv obsahuje nepovolenou globální mzdovou tabulku.');
+        }
+        $columns = $this->tableColumns($table);
+        $primary = $this->primaryKeyColumns($table);
+        if ($primary === []) {
+            throw new InstanceExportException('restore_shared_primary_key_missing', 'Globální mzdová tabulka nemá primární klíč: ' . $table);
+        }
+        $fh = fopen($this->entryPath($dir, (string) $entry), 'rb');
+        if ($fh === false) {
+            throw new InstanceExportException('restore_jsonl_missing', 'Chybí JSONL tabulky ' . $table . '.');
+        }
+        try {
+            while (($line = fgets($fh)) !== false) {
+                $row = json_decode($line, true);
+                if (!is_array($row)) {
+                    continue;
+                }
+                $row = InstanceExportBinaryCodec::decodeRow($row);
+                $row = array_intersect_key($row, $columns);
+                foreach ($primary as $column) {
+                    if (!array_key_exists($column, $row)) {
+                        throw new InstanceExportException('restore_shared_primary_key_missing', 'V archivu chybí primární klíč ' . $table . '.' . $column . '.');
+                    }
+                }
+                $where = implode(' AND ', array_map(static fn (string $column): string => '`' . $column . '` = ?', $primary));
+                $lookup = $this->pdo->prepare('SELECT * FROM `' . $table . '` WHERE ' . $where);
+                $lookup->execute(array_map(static fn (string $column): mixed => $row[$column], $primary));
+                $existing = $lookup->fetch(PDO::FETCH_ASSOC);
+                if ($existing !== false) {
+                    $existingComparable = array_intersect_key($existing, $row);
+                    if ($table === 'payroll_rulesets') {
+                        foreach ([
+                            'created_by', 'updated_by', 'reviewed_by', 'approved_by',
+                            'activated_by', 'superseded_by',
+                        ] as $column) {
+                            if (($row[$column] ?? null) === 0 || ($row[$column] ?? null) === '0') {
+                                $existingComparable[$column] = $existing[$column] === null ? null : 0;
+                            }
+                        }
+                    }
+                    if (!$this->sameDatabaseRow($row, $existingComparable)) {
+                        throw new InstanceExportException('restore_shared_conflict', 'Cílová instalace má odlišný globální mzdový podklad: ' . $table . '.');
+                    }
+                    continue;
+                }
+                $names = array_keys($row);
+                if ($table === 'payroll_rulesets' && !array_key_exists('reason', $row)) {
+                    $row['reason'] = self::RESTORED_RULESET_REASON;
+                    $names[] = 'reason';
+                }
+                $sql = 'INSERT INTO `' . $table . '` (`' . implode('`, `', $names) . '`) VALUES ('
+                    . implode(', ', array_fill(0, count($names), '?')) . ')';
+                try {
+                    $this->pdo->prepare($sql)->execute(array_values($row));
+                } catch (\Throwable) {
+                    throw new InstanceExportException(
+                        'restore_shared_conflict',
+                        'Globální mzdový podklad nelze bezpečně sloučit: ' . $table . '.',
+                    );
+                }
+            }
+        } finally {
+            fclose($fh);
+        }
     }
 
     /** @param list<array<string,mixed>> $assets */
@@ -275,6 +525,11 @@ final class CompleteInstanceRestoreService
     /** @param array<string,mixed> $manifest */
     private function assertTargetSchema(array $manifest): void
     {
+        foreach ((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? []) as $table => $info) {
+            if ((int) ($info['rows'] ?? 0) > 0) {
+                $this->tableColumns((string) $table);
+            }
+        }
         foreach ((array) ($manifest['sections']['data']['tables'] ?? []) as $table => $info) {
             // Prázdná tabulka ze starší instance nemusí v cílové novější verzi
             // existovat; není co ztratit. Řádky ale nikdy tiše nezahodíme.
@@ -361,6 +616,7 @@ final class CompleteInstanceRestoreService
     private function nullReferencesToOmittedSecrets(array $manifest): void
     {
         $included = array_fill_keys(array_keys((array) ($manifest['sections']['data']['tables'] ?? [])), true);
+        $included += array_fill_keys(array_keys((array) ($manifest['sections']['data']['shared_payroll_tables'] ?? [])), true);
         $included += array_fill_keys(['roles', 'role_permissions', 'users', 'user_suppliers'], true);
         $sql = 'SELECT k.TABLE_NAME, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, c.IS_NULLABLE
                   FROM information_schema.KEY_COLUMN_USAGE k
@@ -385,6 +641,45 @@ final class CompleteInstanceRestoreService
             }
             $this->pdo->exec("UPDATE `{$child}` SET `{$column}` = NULL WHERE `{$column}` IS NOT NULL");
         }
+    }
+
+    /** @return list<string> */
+    private function primaryKeyColumns(string $table): array
+    {
+        if (!$this->safeIdentifier($table)) {
+            return [];
+        }
+        $stmt = $this->pdo->prepare(
+            'SELECT COLUMN_NAME FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_KEY = "PRI"
+              ORDER BY ORDINAL_POSITION'
+        );
+        $stmt->execute([$table]);
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    /** @param array<string,mixed> $left @param array<string,mixed> $right */
+    private function sameDatabaseRow(array $left, array $right): bool
+    {
+        if (count($left) !== count($right)) {
+            return false;
+        }
+        foreach ($left as $column => $value) {
+            if (!array_key_exists($column, $right)) {
+                return false;
+            }
+            $other = $right[$column];
+            if ($value === null || $other === null) {
+                if ($value !== null || $other !== null) {
+                    return false;
+                }
+                continue;
+            }
+            if ((string) $value !== (string) $other) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private function extract(string $archivePath): string

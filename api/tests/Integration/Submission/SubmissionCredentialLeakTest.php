@@ -105,6 +105,28 @@ final class SubmissionCredentialLeakTest extends TestCase
         self::assertStringNotContainsString(self::PASSPHRASE, (string) $raw['certificate_passphrase_ciphertext']);
     }
 
+    public function testCertificateWithoutPrivateKeyIsRejectedBeforeStorage(): void
+    {
+        [, $pem] = $this->syntheticCertificate();
+
+        try {
+            $this->service->save(
+                $this->supplierId,
+                'test',
+                'Certifikát bez klíče',
+                'abcdefg',
+                $pem,
+                null,
+                $this->userId,
+            );
+            self::fail('Holý veřejný certifikát nesmí být uložen jako funkční systémový přístup.');
+        } catch (SubmissionChannelException $e) {
+            self::assertSame('invalid_certificate', $e->errorCode);
+        }
+
+        self::assertNull($this->repository->findPublic($this->supplierId, 'isds', 'test'));
+    }
+
     public function testUnlockedSecretsDoNotLeakThroughDumpingOrLogContext(): void
     {
         [$pfx] = $this->syntheticCertificate();
@@ -169,9 +191,9 @@ final class SubmissionCredentialLeakTest extends TestCase
     }
 
     /**
-     * Jméno a heslo do datové schránky se do trezoru nesmí dostat ani
-     * omylem — § 9 odst. 2 zák. 300/2008 Sb. je zakazuje předat aplikaci
-     * třetí strany. Tabulka pro ně nemá sloupce.
+     * Firemní trezor certifikátu nesmí omylem získat osobní login ani běžné
+     * heslo. Volitelný Mobilní klíč má vlastní uživatelsky a tenantově vázanou
+     * tabulku; běžné heslo ani SMS kód se do ní neukládají.
      */
     public function testTableHasNoColumnsForLoginAndPassword(): void
     {
@@ -185,7 +207,7 @@ final class SubmissionCredentialLeakTest extends TestCase
         self::assertContains('certificate_ciphertext', $columns);
     }
 
-    /** @return array{0:string} PKCS#12 bajty */
+    /** @return array{0:string,1:string} PKCS#12 bajty, veřejný PEM certifikát */
     private function syntheticCertificate(): array
     {
         $config = self::opensslConfigArgs();
@@ -200,6 +222,9 @@ final class SubmissionCredentialLeakTest extends TestCase
         $pfx = '';
         self::assertTrue(openssl_pkcs12_export($cert, $pfx, $key, self::PASSPHRASE));
 
-        return [$pfx];
+        $pem = '';
+        self::assertTrue(openssl_x509_export($cert, $pem));
+
+        return [$pfx, $pem];
     }
 }

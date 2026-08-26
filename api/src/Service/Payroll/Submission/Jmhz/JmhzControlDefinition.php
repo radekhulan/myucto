@@ -24,6 +24,7 @@ final readonly class JmhzControlDefinition
         public array $symbolicAttributeRefs,
         public ?string $category,
         public ?string $area,
+        public ?string $sourceAnomaly,
     ) {}
 
     /**

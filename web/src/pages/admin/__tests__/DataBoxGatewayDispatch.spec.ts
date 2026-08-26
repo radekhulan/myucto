@@ -19,6 +19,7 @@ const m = vi.hoisted(() => ({
   recipients: vi.fn(),
   outbox: vi.fn(),
   inbox: vi.fn(),
+  mobileKeyProfile: vi.fn(),
   unmatchedReceipts: vi.fn(),
   defectNotices: vi.fn(),
   gatewayCapabilities: vi.fn(),
@@ -36,6 +37,7 @@ vi.mock('@/api/dataBox', () => ({
     recipients: m.recipients,
     outbox: m.outbox,
     inbox: m.inbox,
+    mobileKeyProfile: m.mobileKeyProfile,
     unmatchedReceipts: m.unmatchedReceipts,
     defectNotices: m.defectNotices,
     gatewayCapabilities: m.gatewayCapabilities,
@@ -115,6 +117,7 @@ beforeEach(() => {
   m.outbox.mockResolvedValue([submission()])
   m.inbox.mockResolvedValue({ items: [], state: null })
   m.unmatchedReceipts.mockResolvedValue([])
+  m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
   m.defectNotices.mockResolvedValue({ items: [], supported: true, notice: null })
   m.gatewayCapabilities.mockResolvedValue([{ environment: 'production', available: true }])
 
@@ -163,6 +166,7 @@ describe('odesílací brána na obrazovce datové schránky', () => {
     expect(wrapper.text()).not.toContain('databox.gateway.prepare')
     // Ruční cesta zůstává — uživatel nesmí zůstat bez možnosti podat.
     expect(wrapper.text()).toContain('databox.outbox.markSent')
+    expect(wrapper.text()).not.toContain('databox.outbox.confirmSend')
   })
 
   /**

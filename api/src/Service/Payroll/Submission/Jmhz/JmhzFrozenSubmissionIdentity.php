@@ -45,7 +45,7 @@ final readonly class JmhzFrozenSubmissionIdentity
         $guid = self::textAt($xpath, '/p:jmhz/p:hlavicka/p:idPodani');
         $variableSymbol = self::textAt($xpath, '/p:jmhz/p:hlavicka/p:variabilniSymbol');
         if (preg_match(
-            '/^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/D',
+            '/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/D',
             $guid,
         ) !== 1
             || preg_match('/^\d{10}$/D', $variableSymbol) !== 1
@@ -67,7 +67,7 @@ final readonly class JmhzFrozenSubmissionIdentity
         }
 
         return new self(
-            $guid,
+            strtoupper($guid),
             $variableSymbol,
             (int) $month,
             (int) $year,

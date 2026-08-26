@@ -27,6 +27,7 @@ final class PayrollSubmissionService
     ];
     private const ARTIFACT_KINDS = [
         'outbound_xml',
+        'outbound_pdf',
         'outbound_zip',
         'validation_protocol',
         'receipt_original',
@@ -232,11 +233,9 @@ final class PayrollSubmissionService
                         $obligation,
                         $correctedObligation,
                     )
-                    // Způsobilé stavy rozhoduje AGENDA, ne tahle služba: u agend
-                    // s okamžitým protokolem se čeká na rozhodnutí, u agend
-                    // s asynchronním protokolem a pevnou lhůtou stačí doložené
-                    // odeslání. Výchozí sada je přísná, rozšíření jmenovité
-                    // a s důvodem — viz PayrollAgendaCorrectionPolicy. Stavy
+                    // Způsobilé stavy rozhoduje AGENDA, ne tahle služba.
+                    // Výchozí sada je přísná a JMHZ ji zužuje jen na konečně
+                    // přijatý nebo částečně přijatý řádný kořen. Stavy
                     // `draft`…`ready` nejsou způsobilé nikdy: u nich úřad nemá
                     // co rušit a oprava by se vázala na dokument, který nikdy
                     // neopustil aplikaci.
@@ -826,12 +825,9 @@ final class PayrollSubmissionService
                     )
                     || !in_array(
                         $predecessor['status'],
-                        [
-                            'accepted',
-                            'partially_accepted',
-                            'rejected',
-                            'correction_required',
-                        ],
+                        PayrollAgendaCorrectionPolicy::correctableStatuses(
+                            (string) $obligation['agenda_code'],
+                        ),
                         true,
                     )
                 ) {
@@ -839,15 +835,46 @@ final class PayrollSubmissionService
                         'Předchůdce přijaté opravy už není způsobilý k nahrazení.',
                     );
                 }
-                $this->repository->updateSubmissionStatus(
-                    $supplierId,
-                    $predecessor['id'],
-                    $predecessor['row_version'],
-                    'superseded',
-                    null,
-                    null,
-                    $now,
-                );
+                if (PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
+                    (string) $obligation['agenda_code'],
+                    (string) $submission['submission_kind'],
+                )) {
+                    $supersedesCorrectionChain = PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+                            (string) $obligation['agenda_code'],
+                            (string) $submission['submission_kind'],
+                        );
+                    $correctionChain = $supersedesCorrectionChain
+                        ? $this->repository->resolvedCorrectionsForRoot(
+                            $supplierId,
+                            $submission['environment'],
+                            $predecessor['id'],
+                        )
+                        : [];
+                    $this->repository->updateSubmissionStatus(
+                        $supplierId,
+                        $predecessor['id'],
+                        $predecessor['row_version'],
+                        'superseded',
+                        null,
+                        null,
+                        $now,
+                    );
+                    foreach ($correctionChain as $correction) {
+                        $this->stateMachine->assertTransition(
+                            $correction['status'],
+                            'superseded',
+                        );
+                        $this->repository->updateSubmissionStatus(
+                            $supplierId,
+                            $correction['id'],
+                            $correction['row_version'],
+                            'superseded',
+                            null,
+                            null,
+                            $now,
+                        );
+                    }
+                }
             }
 
             return [
@@ -989,6 +1016,13 @@ final class PayrollSubmissionService
                         $verifiedCorrelation,
                     'trusted_part_statuses' =>
                         $verified === null ? [] : $verified->partStatuses,
+                    'trusted_form_outcomes' => $verified === null
+                        ? []
+                        : array_map(
+                            static fn (PayrollVerifiedReceiptFormOutcome $outcome): array
+                                => $outcome->fingerprintData(),
+                            $verified->formOutcomes,
+                        ),
                     'channel' => $channel,
                 ]),
             );
@@ -1195,6 +1229,48 @@ final class PayrollSubmissionService
                 $this->now(),
                 $importedBy,
             );
+            if ($verified !== null && $verified->formOutcomes !== []) {
+                if ($protocolCode !== 'CSSZ_JMHZ') {
+                    throw new \DomainException(
+                        'Výsledky formulářů lze uložit jen k protokolu JMHZ.',
+                    );
+                }
+                foreach ($verified->formOutcomes as $outcome) {
+                    $errorsJson = CanonicalJson::encode(array_map(
+                        static fn (PayrollVerifiedReceiptFormError $error): array
+                            => $error->fingerprintData(),
+                        $outcome->errors,
+                    ));
+                    $errorsHash = hash('sha256', $errorsJson);
+                    $this->repository->insertJmhzProtocolFormOutcome(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $receiptId,
+                        $artifact['id'],
+                        $outcome->partId,
+                        $outcome->formReference,
+                        $outcome->protocolStatusCode,
+                        $outcome->protocolStatusName,
+                        $outcome->remoteStatus,
+                        $outcome->externalPersonReference,
+                        $outcome->externalEmploymentReference,
+                        count($outcome->errors),
+                        $this->encryption->encryptFor(
+                            $errorsJson,
+                            self::formOutcomeErrorsContext(
+                                $supplierId,
+                                $submission['environment'],
+                                $submissionId,
+                                $receiptId,
+                                $outcome->formReference,
+                                $errorsHash,
+                            ),
+                        ),
+                        $errorsHash,
+                    );
+                }
+            }
 
             return [
                 'id' => $receiptId,
@@ -1206,6 +1282,56 @@ final class PayrollSubmissionService
                 'trusted' => $trusted,
             ];
         });
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function jmhzProtocolFormOutcomes(
+        int $supplierId,
+        string $environment,
+        int $receiptId,
+    ): array {
+        $this->assertPositive($supplierId, 'Firma protokolu');
+        $this->assertPositive($receiptId, 'Protokol');
+        $this->assertAllowed($environment, self::ENVIRONMENTS, 'Prostředí protokolu');
+        $rows = $this->repository->listJmhzProtocolFormOutcomes(
+            $supplierId,
+            $environment,
+            $receiptId,
+        );
+        foreach ($rows as &$row) {
+            $errorsJson = $this->encryption->decryptFor(
+                (string) $row['errors_ciphertext'],
+                self::formOutcomeErrorsContext(
+                    $supplierId,
+                    $environment,
+                    (int) $row['submission_id'],
+                    (int) $row['receipt_id'],
+                    (string) $row['form_guid'],
+                    (string) $row['errors_sha256'],
+                ),
+            );
+            if (!hash_equals((string) $row['errors_sha256'], hash('sha256', $errorsJson))) {
+                throw new \UnexpectedValueException(
+                    'Otisk chyb formuláře protokolu JMHZ nesouhlasí.',
+                );
+            }
+            $decoded = json_decode($errorsJson, true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($decoded) || !array_is_list($decoded)) {
+                throw new \UnexpectedValueException(
+                    'Uložené chyby formuláře protokolu JMHZ nemají platný tvar.',
+                );
+            }
+            if (count($decoded) !== (int) $row['error_count']) {
+                throw new \UnexpectedValueException(
+                    'Počet uložených chyb formuláře protokolu JMHZ nesouhlasí.',
+                );
+            }
+            $row['errors'] = $decoded;
+            unset($row['errors_ciphertext']);
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /**
@@ -1527,6 +1653,28 @@ final class PayrollSubmissionService
         return \DateTimeImmutable::createFromInterface($this->clock->now())
             ->setTimezone(new \DateTimeZone('UTC'))
             ->format('Y-m-d H:i:s');
+    }
+
+    private static function formOutcomeErrorsContext(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        string $formReference,
+        string $errorsHash,
+    ): string {
+        return 'payroll-jmhz-protocol-form-errors:' . hash(
+            'sha256',
+            CanonicalJson::encode([
+                'schema_reference' => 'payroll-jmhz-protocol-form-errors-aad.v1',
+                'supplier_id' => $supplierId,
+                'environment' => $environment,
+                'submission_id' => $submissionId,
+                'receipt_id' => $receiptId,
+                'form_reference' => $formReference,
+                'errors_hash' => $errorsHash,
+            ]),
+        );
     }
 
     private function idempotencyHash(string $key): string

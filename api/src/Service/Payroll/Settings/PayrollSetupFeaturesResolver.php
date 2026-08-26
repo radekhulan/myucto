@@ -41,7 +41,7 @@ final class PayrollSetupFeaturesResolver
                     $policy,
                     'travel_expense_policy',
                 ) !== 'not_used',
-            fourEyes: $this->bool($policy, 'four_eyes_required'),
+            fourEyes: false,
             automaticCalculation: $this->bool(
                 $policy,
                 'automatic_calculation_enabled',

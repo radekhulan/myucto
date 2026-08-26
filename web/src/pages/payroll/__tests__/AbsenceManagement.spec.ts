@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
@@ -12,6 +12,8 @@ const m = vi.hoisted(() => ({
   createAverage: vi.fn(),
   createEntitlement: vi.fn(),
   createLeaveEntry: vi.fn(),
+  leaveEntitlementCandidates: vi.fn(),
+  createAutomaticEntitlements: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -34,6 +36,8 @@ vi.mock('@/api/payrollAbsences', () => ({
     approveAverage: vi.fn(),
     createLeaveEntry: m.createLeaveEntry,
     createEntitlement: m.createEntitlement,
+    leaveEntitlementCandidates: m.leaveEntitlementCandidates,
+    createAutomaticEntitlements: m.createAutomaticEntitlements,
   },
 }))
 
@@ -56,6 +60,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 }))
 
 import AbsenceManagement from '@/pages/payroll/AbsenceManagement.vue'
+import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 
 function absence(overrides: Record<string, unknown> = {}) {
   return {
@@ -137,6 +142,10 @@ describe('AbsenceManagement', () => {
     m.createAverage.mockResolvedValue({ id: 9 })
     m.createEntitlement.mockResolvedValue({ id: 10 })
     m.createLeaveEntry.mockResolvedValue({ id: 11 })
+    m.leaveEntitlementCandidates.mockResolvedValue({
+      items: [], total: 0, limit: 25, offset: 0,
+    })
+    m.createAutomaticEntitlements.mockResolvedValue([])
   })
 
   it('explains itself instead of pulsing forever when the company has no employee', async () => {
@@ -269,6 +278,55 @@ describe('AbsenceManagement', () => {
     wrapper.unmount()
   })
 
+  it('filters employment choices by the selected employee', async () => {
+    m.context.mockResolvedValue([{
+      id: 12,
+      employee_id: 5,
+      code: 'SYNTH-HPP',
+      relation_type: 'employment',
+      status: 'active',
+      full_name: 'Syntetická osoba',
+    }, {
+      id: 14,
+      employee_id: 5,
+      code: 'SYNTH-DPP',
+      relation_type: 'dpp',
+      status: 'active',
+      full_name: 'Syntetická osoba',
+    }, {
+      id: 13,
+      employee_id: 6,
+      code: 'SYNTH-DPC',
+      relation_type: 'dpc',
+      status: 'active',
+      full_name: 'Druhá syntetická osoba',
+    }])
+
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+
+    const employment = wrapper.findComponent('[data-test="absence-employment"]') as VueWrapper<any>
+    expect(employment.props('options')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: 12 }),
+      expect.objectContaining({ value: 14 }),
+    ]))
+    expect(employment.props('options')).toHaveLength(2)
+
+    wrapper.findComponent(PayrollPersonSearchSelect)
+      .vm.$emit('update:modelValue', 6)
+    await flushPromises()
+
+    expect(employment.props('options')).toEqual([
+      expect.objectContaining({ value: 13 }),
+    ])
+    expect(m.absencesPage).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      13,
+      expect.any(Object),
+    )
+  })
+
   it('does not submit an absence requiring an approved average without one', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
@@ -320,8 +378,8 @@ describe('AbsenceManagement', () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
 
-    const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
-    selectors[1].vm.$emit('update:modelValue', 8)
+    ;(wrapper.findComponent('[data-test="absence-average"]') as VueWrapper<any>)
+      .vm.$emit('update:modelValue', 8)
     await wrapper.find('[data-test="absence-partial-first-hours"]').setValue('2.5')
     await wrapper.find('[data-test="absence-partial-last-hours"]').setValue('1.25')
     await wrapper.find('[data-test="absence-form"]').trigger('submit')
@@ -400,9 +458,10 @@ describe('AbsenceManagement', () => {
     await flushPromises()
 
     expect(m.absencesPage.mock.calls[0][2]).toBe(13)
-    const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
-    expect(selectors[0].props('modelValue')).toBe(13)
-    expect(selectors[1].props('modelValue')).toBe('dpn')
+    expect((wrapper.findComponent('[data-test="absence-employment"]') as VueWrapper<any>)
+      .props('modelValue')).toBe(13)
+    expect((wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>)
+      .props('modelValue')).toBe('dpn')
     wrapper.unmount()
   })
 
@@ -413,8 +472,8 @@ describe('AbsenceManagement', () => {
     await flushPromises()
 
     expect(m.absencesPage.mock.calls[0][2]).toBe(12)
-    const selectors = wrapper.findAllComponents({ name: 'SearchableSelect' })
-    expect(selectors[1].props('modelValue')).toBe('vacation')
+    expect((wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>)
+      .props('modelValue')).toBe('vacation')
     wrapper.unmount()
   })
 
@@ -483,8 +542,8 @@ describe('AbsenceManagement', () => {
 
     expect(lastPageArgs()).toEqual({ limit: 12, offset: 24 })
 
-    wrapper.findAllComponents({ name: 'SearchableSelect' })[0]
-      .vm.$emit('update:modelValue', 13)
+    wrapper.findComponent({ name: 'PayrollPersonSearchSelect' })
+      .vm.$emit('update:modelValue', 6)
     await flushPromises()
 
     expect(m.absencesPage.mock.calls.at(-1)![2]).toBe(13)

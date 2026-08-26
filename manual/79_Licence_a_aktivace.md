@@ -213,4 +213,4 @@ se licence prodlužuje sama a kdy je **další platba**. Tlačítkem
 | **Komerční moduly zmizely z menu** | Vypršelo předplatné (nebo skončil trial). Bezplatné funkce zůstávají plně dostupné. Komerční funkce obnovíš aktivací licence na stránce **Zakoupení**; jejich data zůstávají v databázi beze změny. |
 
 Další diagnostika a časté chyby jsou v kapitole
-[99. Řešení problémů](99_Reseni_problemu.md).
+[999. Řešení problémů](999_Reseni_problemu.md).

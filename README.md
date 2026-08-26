@@ -291,7 +291,7 @@ Uživatelský manuál pokrývá celý pracovní cyklus v 58 kapitolách:
 - [Daňové výkazy](manual/36_Vykazy_DPH.md) · [Daň z příjmů](manual/38_Dan_z_prijmu.md) · [Režim OSS](manual/40_OSS.md)
 - [Kontroly a inventarizace](manual/60_Ucetni_kontroly_a_inventarizace.md) · [Uzávěrka](manual/68_Uzaverka.md)
 - [Daňová evidence](manual/71_Danova_evidence.md) · [Více firem](manual/72_Multi_supplier.md)
-- [Řešení problémů](manual/99_Reseni_problemu.md)
+- [Řešení problémů](manual/999_Reseni_problemu.md)
 
 Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).
 

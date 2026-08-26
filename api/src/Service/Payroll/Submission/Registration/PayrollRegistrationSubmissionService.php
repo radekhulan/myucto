@@ -84,7 +84,7 @@ final readonly class PayrollRegistrationSubmissionService
     ) {}
 
     /**
-     * Nácvik: ukáže, co by se podalo, a nezaloží nic. GUIDy jsou zahozené,
+     * Test: ukáže, co by se podalo, a nezaloží nic. GUIDy jsou zahozené,
      * proto se výsledek nesmí použít jako doklad o podání.
      *
      * @return array{
@@ -119,7 +119,7 @@ final readonly class PayrollRegistrationSubmissionService
             'employer_registration' => $resolved['employer_deadline'],
             'official_submission' => [
                 'supported' => false,
-                'reason' => 'Tohle je nácvik: podání se nezakládá a nic se neodesílá.',
+                'reason' => 'Tohle je test: podání se nezakládá a nic se neodesílá.',
             ],
         ];
     }

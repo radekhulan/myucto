@@ -118,7 +118,7 @@ final class PayrollPostingReconciliationRepository
      * teprve součet přes revize odpovídá aktuálnímu stavu mzdy.
      *
      * @param list<int> $revisionIds
-     * @return list<array{prefix:string,dimension:string,side:string,amount_minor:int}>
+     * @return list<array{account_code:string,prefix:string,dimension:string,side:string,amount_minor:int}>
      */
     public function journalTotals(int $supplierId, array $revisionIds): array
     {
@@ -127,7 +127,8 @@ final class PayrollPostingReconciliationRepository
         }
         $placeholders = implode(',', array_fill(0, count($revisionIds), '?'));
         $statement = $this->db->pdo()->prepare(
-            "SELECT LEFT(account.account_code, 3) AS prefix,
+            "SELECT account.account_code AS account_code,
+                    LEFT(account.account_code, 3) AS prefix,
                     CASE
                       WHEN line.cost_center LIKE 'MZ-EX-%' THEN 'enforcement'
                       WHEN line.cost_center LIKE 'MZ-SR-%' THEN 'deduction'
@@ -146,13 +147,15 @@ final class PayrollPostingReconciliationRepository
                 AND entry.source_type = 'payroll'
                 AND entry.source_id IN ({$placeholders})
                 AND entry.posted_at IS NOT NULL
-              GROUP BY prefix, dimension, line.side"
+              GROUP BY account.account_code, dimension, line.side
+              ORDER BY account.account_code, dimension, line.side"
         );
         $statement->execute([$supplierId, ...$revisionIds]);
 
         $result = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $result[] = [
+                'account_code' => (string) $row['account_code'],
                 'prefix' => (string) $row['prefix'],
                 'dimension' => (string) $row['dimension'],
                 'side' => (string) $row['side'],
@@ -161,6 +164,44 @@ final class PayrollPostingReconciliationRepository
         }
 
         return $result;
+    }
+
+    /**
+     * Účty použité na debetní straně hrubé mzdy podle zmrazených cílových
+     * alokací můstku. Nestačí syntetiky 521/522/523: explicitní předkontace
+     * složky i výchozí účet mzdové dimenze mohou náklad vést například na 518.
+     *
+     * Berou se všechny účinně zaúčtované revize běhu. Opravná revize může starý
+     * účet kreditovat a nový debitovat, takže pro správné zařazení obou stran
+     * musí v množině zůstat i účet dřívější revize.
+     *
+     * @param list<int> $revisionIds
+     * @return list<string>
+     */
+    public function grossDebitAccounts(int $supplierId, array $revisionIds): array
+    {
+        if ($revisionIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($revisionIds), '?'));
+        $statement = $this->db->pdo()->prepare(
+            "SELECT DISTINCT allocation.account_code
+               FROM payroll_posting_allocations allocation
+               JOIN payroll_posting_batches batch
+                 ON batch.supplier_id = allocation.supplier_id
+                AND batch.id = allocation.batch_id
+              WHERE allocation.supplier_id = ?
+                AND batch.revision_id IN ({$placeholders})
+                AND batch.status IN ('posted', 'no_change')
+                AND allocation.allocation_key LIKE 'gross:%:debit'
+              ORDER BY allocation.account_code"
+        );
+        $statement->execute([$supplierId, ...$revisionIds]);
+
+        return array_map(
+            static fn (mixed $account): string => (string) $account,
+            $statement->fetchAll(PDO::FETCH_COLUMN),
+        );
     }
 
     /**

@@ -95,20 +95,6 @@ final class PayrollSetupCheckService
                     : 'Zapnuté cestovní náhrady vyžadují dokončenou politiku.',
             );
         }
-        if ($features->fourEyes) {
-            $ready = ($policy['four_eyes_required'] ?? false) === true
-                && $features->activeApproverCount >= 2;
-            $this->addCheck(
-                $checks,
-                $blockers,
-                'four_eyes',
-                $ready,
-                $ready
-                    ? 'Čtyři oči mají alespoň dva aktivní schvalovatele.'
-                    : 'Čtyři oči vyžadují politiku a alespoň dva aktivní schvalovatele.',
-            );
-        }
-
         $this->featureFlagCheck(
             $checks,
             $blockers,

@@ -76,6 +76,50 @@ describe('payroll document downloads', () => {
     )
   })
 
+  it('creates a period archive and keeps its one-time token in a POST body', async () => {
+    m.post
+      .mockResolvedValueOnce({
+        data: {
+          id: 91,
+          scope: 'monthly',
+          period_start: '2026-08-01',
+          period_end: '2026-08-31',
+          file_sha256: 'e'.repeat(64),
+          size_bytes: 12345,
+          suggested_filename: 'mzdy-2026-08-abcdef123456.zip',
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          grant_id: 92,
+          export_id: 91,
+          token: 'one-time-secret',
+          expires_at: '2026-08-03T12:02:00+00:00',
+        },
+      })
+      .mockResolvedValueOnce({ data: new Blob(['synthetic zip']) })
+
+    await payrollApi.downloadPeriodExport('monthly', '2026-08')
+
+    expect(m.post).toHaveBeenNthCalledWith(
+      1,
+      '/payroll/exports/monthly/2026-08',
+      {},
+    )
+    expect(m.post).toHaveBeenNthCalledWith(
+      2,
+      '/payroll/exports/91/download-grants',
+      { ttl_seconds: 120 },
+    )
+    expect(m.post).toHaveBeenNthCalledWith(
+      3,
+      '/payroll/exports/download',
+      { token: 'one-time-secret' },
+      { responseType: 'blob' },
+    )
+    expect(m.post.mock.calls[2][0]).not.toContain('token=')
+  })
+
   it('uses dedicated exit-document endpoints and an idempotency header', async () => {
     m.get.mockResolvedValueOnce({
       data: {

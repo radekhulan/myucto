@@ -251,12 +251,35 @@ final class GarnishmentCalculatorTest extends TestCase
                 InsolvencyMode::ApprovedStandard,
                 decisionVerified: true,
                 recipientVerified: true,
+                paymentInstructionId: 101,
+                paymentInstructionHash: str_repeat('a', 64),
+                employmentId: 202,
             ),
         );
 
         self::assertTrue($result->insolvencyApplied);
         self::assertSame(1_726_400, $result->totalWithheldMinorUnits);
         self::assertSame(1_726_400, $result->allocationFor('insolvency-administrator')?->totalMinorUnits);
+    }
+
+    public function testApprovedInsolvencyWithoutImmutablePaymentInstructionFailsClosed(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [],
+            insolvency: new InsolvencyInstruction(
+                InsolvencyMode::ApprovedStandard,
+                decisionVerified: true,
+                recipientVerified: true,
+            ),
+        );
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertContains(
+            'insolvency_payment_instruction_missing',
+            $result->issues,
+        );
+        self::assertSame([], $result->allocations);
     }
 
     public function testIncompleteEvidenceFailsClosedWithoutAnyAllocation(): void

@@ -4,12 +4,20 @@ import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({
   preview: vi.fn(),
   prepare: vi.fn(),
+  send: vi.fn(),
+  status: vi.fn(),
+  poll: vi.fn(),
+  close: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     previewEmploymentRegistration: m.preview,
     prepareEmploymentRegistration: m.prepare,
+    sendEmploymentRegistrationTransport: m.send,
+    employmentRegistrationTransportStatus: m.status,
+    pollEmploymentRegistrationTransportAttempt: m.poll,
+    closeEmploymentRegistrationTransportAttempt: m.close,
   },
 }))
 
@@ -47,7 +55,7 @@ const preview = {
   xml_sha256: 'a'.repeat(64),
   deadline,
   employer_registration: null,
-  official_submission: { supported: false, reason: 'Nácvik.' },
+  official_submission: { supported: false, reason: 'Test.' },
 }
 
 function mountPanel(canWrite = true) {
@@ -59,7 +67,15 @@ function mountPanel(canWrite = true) {
 describe('EmploymentRegistrationPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => '00000000-0000-4000-8000-000000000001'),
+    })
     m.preview.mockResolvedValue(preview)
+    m.status.mockResolvedValue({
+      agenda_code: 'PREZEC26',
+      submission_class: 'CSSZ_PREZEC',
+      attempt: null,
+    })
   })
 
   it('shows the deadline window and which form will be filed', async () => {
@@ -140,5 +156,112 @@ describe('EmploymentRegistrationPanel', () => {
     expect(
       wrapper.find('[data-test="registration-prepare"]').attributes('disabled'),
     ).toBeDefined()
+  })
+
+  it('sends, fetches the result and closes only after explicit clicks', async () => {
+    m.prepare.mockResolvedValue({
+      submission_id: 12,
+      obligation_id: 3,
+      part_id: 4,
+      artifact_id: 6,
+      status: 'ready',
+      row_version: 3,
+      environment: 'test',
+      agenda_code: 'PREZEC26',
+      interaction: 'limited_pre_registration',
+      artifact_sha256: 'b'.repeat(64),
+      created: true,
+      deadline,
+    })
+    m.send.mockResolvedValue({
+      agenda_code: 'PREZEC26',
+      submission_class: 'CSSZ_PREZEC',
+      payload_sha256: 'b'.repeat(64),
+      acknowledgement: { correlation_id: 'CID-1', poll_interval_seconds: 30, gateway_timestamp: null },
+      settled: false,
+      attempt: { id: 87, status: 'awaiting_protocol', closed_at: null },
+    })
+    m.poll.mockResolvedValue({
+      acknowledgement: null,
+      settled: true,
+      report: { status: 'ProcessedAndComplete', errors: [] },
+      attempt: { id: 87, status: 'completed', closed_at: null },
+    })
+    m.close.mockResolvedValue({
+      closed: true,
+      already_closed: false,
+      attempt: { id: 87, status: 'completed', closed_at: '2026-08-26 12:00:00' },
+    })
+
+    const wrapper = mountPanel()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    const actions = wrapper.get('[data-test="registration-transport-actions"]')
+    await actions.get('button').trigger('click')
+    await flushPromises()
+
+    expect(m.send).toHaveBeenCalledWith(
+      12,
+      'test',
+      '00000000-0000-4000-8000-000000000001',
+    )
+    expect(m.poll).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="registration-transport-result"]').text())
+      .toContain('registration.awaiting_protocol')
+
+    await actions.get('button').trigger('click')
+    await flushPromises()
+    expect(m.poll).toHaveBeenCalledWith(87, 'test')
+    expect(m.close).not.toHaveBeenCalled()
+
+    await actions.get('button').trigger('click')
+    await flushPromises()
+    expect(m.close).toHaveBeenCalledWith(87, 'test')
+    expect(wrapper.get('[data-test="registration-transport-result"]').text())
+      .toContain('registration.closed')
+  })
+
+  it('uses the selected production environment throughout the manual flow', async () => {
+    const wrapper = mountPanel()
+    await wrapper.get('[data-test="registration-environment"]').setValue('production')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(m.preview).toHaveBeenCalledWith(5, 'production')
+  })
+
+  it('after reload resumes the stored attempt without sending it again', async () => {
+    m.prepare.mockResolvedValue({
+      submission_id: 12,
+      obligation_id: 3,
+      part_id: 4,
+      artifact_id: 6,
+      status: 'submitted',
+      row_version: 4,
+      environment: 'test',
+      agenda_code: 'PREZEC26',
+      interaction: 'limited_pre_registration',
+      artifact_sha256: 'b'.repeat(64),
+      created: false,
+      deadline,
+    })
+    m.status.mockResolvedValue({
+      agenda_code: 'PREZEC26',
+      submission_class: 'CSSZ_PREZEC',
+      attempt: { id: 87, status: 'awaiting_protocol', closed_at: null },
+    })
+    const wrapper = mountPanel()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.status).toHaveBeenCalledWith(12, 'test')
+    expect(m.send).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="registration-transport-actions"]').text())
+      .toContain('registration.poll')
   })
 })

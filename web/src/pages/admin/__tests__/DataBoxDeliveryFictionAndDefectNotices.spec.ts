@@ -25,6 +25,7 @@ const m = vi.hoisted(() => ({
   recipients: vi.fn(),
   outbox: vi.fn(),
   inbox: vi.fn(),
+  mobileKeyProfile: vi.fn(),
   unmatchedReceipts: vi.fn(),
   defectNotices: vi.fn(),
   refreshDelivery: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/api/dataBox', () => ({
     recipients: m.recipients,
     outbox: m.outbox,
     inbox: m.inbox,
+    mobileKeyProfile: m.mobileKeyProfile,
     unmatchedReceipts: m.unmatchedReceipts,
     defectNotices: m.defectNotices,
     refreshDelivery: m.refreshDelivery,
@@ -147,6 +149,7 @@ async function mountWith(options: {
   m.outbox.mockResolvedValue([])
   m.inbox.mockResolvedValue({ items: options.messages ?? [], state: null })
   m.unmatchedReceipts.mockResolvedValue([])
+  m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
   m.defectNotices.mockResolvedValue(options.noticesResult ?? {
     supported: true,
     items: options.notices ?? [],
@@ -241,6 +244,7 @@ describe('DataBox — výzvy k odstranění vad', () => {
     m.outbox.mockResolvedValue([])
     m.inbox.mockResolvedValue({ items: [], state: null })
     m.unmatchedReceipts.mockResolvedValue([])
+    m.mobileKeyProfile.mockResolvedValue({ saved: false, username: null, environment: 'production' })
     m.defectNotices.mockRejectedValue(new Error('spojení selhalo'))
 
     const wrapper = mount(DataBox, { global: { stubs: { EmptyState: true } } })

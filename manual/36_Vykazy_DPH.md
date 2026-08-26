@@ -54,7 +54,7 @@ odmítne nebo bude generovat formálně neúplný výkaz.
 | Pole v UI | XML atribut | Hodnoty | Kdy použít |
 |---|---|---|---|
 | **Typ poplatníka** | `typ_ds` ve VetaP | `F` (FO/OSVČ) / `P` (PO/s.r.o.) | Podle právní formy. |
-| **Typ plátce DPH** | `typ_platce` ve VetaD | `P` (plátce) / `I` (identifikovaná osoba) | `I` se nastaví automaticky, když je firma k rozhodnému datu vedená v historii plátcovství jako **Identifikovaná osoba** (viz [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g-6l-zdph)). Perioda (měsíc/kvartál) jde zvlášť atributy `mesic`/`ctvrt` dle `vat_period`. |
+| **Typ plátce DPH** | `typ_platce` ve VetaD | `P` (plátce) / `I` (identifikovaná osoba) | `I` se nastaví automaticky, když je firma k rozhodnému datu vedená v historii plátcovství jako **Identifikovaná osoba** (viz [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g6l-zdph)). Perioda (měsíc/kvartál) jde zvlášť atributy `mesic`/`ctvrt` dle `vat_period`. |
 
 > 🛈 **Identifikovaná osoba**: přiznání obsahuje jen řádky samovyměření
 > z přeshraničních přijatých plnění (ř. 3–6, 12–13) **bez zrcadlového odpočtu
@@ -240,7 +240,7 @@ vysvětluje [§ 40.4](40_OSS.md#404-plneni-k-rucnimu-posouzeni).
 
 Účtování OSS daně na vlastní účet **345.100** je důvod, proč **zůstatek 343 jde
 s přiznáním k DPH srovnat** — podrobně
-[§ 40.7](40_OSS.md#407-ctovani-oss-dane).
+[§ 40.7](40_OSS.md#407-uctovani-oss-dane).
 
 ## DPH přiznání (DPHDP3)
 
@@ -484,7 +484,7 @@ haléřových součtů proto nemusí být totožný.
 > RC § 92a — jen mezi plátci) IO věcně nemá. Cokoli dalšího, co z klasifikací
 > vyjde (tuzemské ř. 1/2, oddíl C, odpočty ř. 40+), se vynechá **s upozorněním
 > v náhledu**, ať je vidět, co a proč vypadlo. Kvartální volba se ignoruje —
-> IO podává vždy měsíčně. Podrobnosti [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g-6l-zdph).
+> IO podává vždy měsíčně. Podrobnosti [§ 35.1.4](35_Fakturujeme.md#3514-identifikovana-osoba-6g6l-zdph).
 
 #### Krácený odpočet § 76 (koeficient)
 

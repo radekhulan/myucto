@@ -52,7 +52,7 @@ final class PayrollJmhzControlCatalogRepositoryTest extends TestCase
             str_repeat('0', 64),
         ));
         self::assertSame(199, $this->countRows('payroll_jmhz_control_definitions', $catalogId));
-        self::assertSame(826, $this->countRows('payroll_jmhz_control_attribute_refs', $catalogId));
+        self::assertSame(825, $this->countRows('payroll_jmhz_control_attribute_refs', $catalogId));
         self::assertSame(22, $this->countRows('payroll_jmhz_control_parameters', $catalogId));
         self::assertSame(30, $this->countRows('payroll_jmhz_control_parameter_refs', $catalogId));
         self::assertSame(50, $this->countRows('payroll_jmhz_control_parameter_values', $catalogId));

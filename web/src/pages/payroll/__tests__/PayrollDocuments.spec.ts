@@ -6,10 +6,13 @@ const m = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   listDocuments: vi.fn(),
   listAnnualDocuments: vi.fn(),
-  peopleOptions: vi.fn(),
+  peoplePage: vi.fn(),
+  person: vi.fn(),
   generatePayrollSheet: vi.fn(),
   generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
+  generateDocumentBatch: vi.fn(),
+  downloadPeriodExport: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -27,10 +30,13 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     listDocuments: m.listDocuments,
     listAnnualDocuments: m.listAnnualDocuments,
-    peopleOptions: m.peopleOptions,
+    peoplePage: m.peoplePage,
+    person: m.person,
     generatePayrollSheet: m.generatePayrollSheet,
     generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
+    generateDocumentBatch: m.generateDocumentBatch,
+    downloadPeriodExport: m.downloadPeriodExport,
     downloadDocument: m.downloadDocument,
   },
 }))
@@ -51,7 +57,11 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
-      params ? `${key}:${JSON.stringify(params)}` : key,
+      key === 'payroll.people.exit_documents.blockers.weekly_hours_evidence_missing'
+        ? 'Chybí doložená týdenní pracovní doba.'
+        : params ? `${key}:${JSON.stringify(params)}` : key,
+    te: (key: string) => key
+      === 'payroll.people.exit_documents.blockers.weekly_hours_evidence_missing',
   }),
 }))
 
@@ -81,6 +91,7 @@ function deferred<T>(): {
 describe('PayrollDocuments', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.listDocuments.mockResolvedValue({
       period: '2026-07',
       revisions: [{
@@ -125,6 +136,7 @@ describe('PayrollDocuments', () => {
           created_at: '2026-08-01 08:05:00',
         },
       ],
+      total: 2,
     })
     m.generateMonthlyBundle.mockResolvedValue({
       id: 22,
@@ -133,16 +145,52 @@ describe('PayrollDocuments', () => {
       file_sha256: 'b'.repeat(64),
       size_bytes: 9876,
     })
+    m.generateDocumentBatch.mockResolvedValue({
+      run_id: 11,
+      revision_id: 12,
+      period_start: '2026-07-01',
+      period_end: '2026-07-31',
+      complete: false,
+      payslips: { required: 1, archived: 1 },
+      employment_exits: [{
+        employment_id: 73,
+        employee_id: 31,
+        employee_name: null,
+        end_date: '2026-07-31',
+        relation_type: 'employment',
+        documents: {
+          employment_certificate: {
+            required: true,
+            archived: false,
+            document_id: null,
+            available: false,
+            readiness_code: 'weekly_hours_evidence_missing',
+          },
+        },
+      }],
+    })
     m.listAnnualDocuments.mockResolvedValue({
       year: 2026,
       items: [],
+      total: 0,
     })
-    m.peopleOptions.mockResolvedValue([{
+    m.peoplePage.mockResolvedValue({
+      items: [{
+        id: 31,
+        full_name: 'Testovací Zaměstnanec',
+        is_active: true,
+        needs_setup: false,
+      }],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    m.person.mockResolvedValue({
       id: 31,
       full_name: 'Testovací Zaměstnanec',
       is_active: true,
       needs_setup: false,
-    }])
+    })
     m.generatePayrollSheet.mockResolvedValue({
       id: 41,
       document_kind: 'payroll_sheet',
@@ -152,6 +200,15 @@ describe('PayrollDocuments', () => {
       document_kind: 'taxable_income_advance_certificate',
     })
     m.downloadDocument.mockResolvedValue(undefined)
+    m.downloadPeriodExport.mockResolvedValue({
+      id: 91,
+      scope: 'monthly',
+      period_start: '2026-07-01',
+      period_end: '2026-07-31',
+      file_sha256: 'e'.repeat(64),
+      size_bytes: 12345,
+      suggested_filename: 'mzdy-2026-07-abcdef123456.zip',
+    })
   })
 
   it('renders responsive document cards and a desktop table without exposing hashes as names', async () => {
@@ -174,6 +231,7 @@ describe('PayrollDocuments', () => {
     await flushPromises()
 
     await wrapper.get('[data-test="generate-bundle"]').trigger('click')
+    await flushPromises()
     expect(m.generateMonthlyBundle).toHaveBeenCalledWith(11, 12, expect.any(String))
 
     const buttons = wrapper.findAll('[data-test="download-document"]')
@@ -181,6 +239,94 @@ describe('PayrollDocuments', () => {
     expect(m.downloadDocument).toHaveBeenCalledWith(
       expect.objectContaining({ id: 21, mime_type: 'application/pdf' }),
     )
+  })
+
+  it('v dávkovém výsledku přeloží blokaci a nepoužije interní ID jako jméno', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="generate-document-batch"]').trigger('click')
+    await flushPromises()
+
+    const report = wrapper.get('[data-test="document-batch-report"]')
+    expect(report.text()).toContain('Chybí doložená týdenní pracovní doba.')
+    expect(report.text()).toContain('payroll.documents.batch_exit_employee_unknown')
+    expect(report.text()).not.toContain('weekly_hours_evidence_missing')
+    expect(report.text()).not.toContain('73')
+  })
+
+  it('exports monthly and annual archives without loading the employee list', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const archiveTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.archive')
+    expect(archiveTab).toBeDefined()
+    await archiveTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="period-export-panel"]').exists()).toBe(true)
+    expect(m.peoplePage).not.toHaveBeenCalled()
+    expect(m.listAnnualDocuments).not.toHaveBeenCalled()
+
+    await wrapper.get<HTMLInputElement>('[data-test="period-export-month"]')
+      .setValue('2026-08')
+    await wrapper.get('[data-test="download-monthly-period-export"]')
+      .trigger('click')
+    await flushPromises()
+    expect(m.downloadPeriodExport).toHaveBeenCalledWith('monthly', '2026-08')
+
+    await wrapper.get<HTMLInputElement>('[data-test="period-export-year"]')
+      .setValue('2025')
+    await wrapper.get('[data-test="download-annual-period-export"]')
+      .trigger('click')
+    await flushPromises()
+    expect(m.downloadPeriodExport).toHaveBeenCalledWith('annual', 2025)
+    expect(m.toastSuccess).toHaveBeenCalledWith(expect.stringContaining(
+      'mzdy-2026-07-abcdef123456.zip',
+    ))
+  })
+
+  it('opens the archive directly without loading document or employee lists', async () => {
+    m.routeQuery = { tab: 'archive' }
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="period-export-panel"]').exists()).toBe(true)
+    expect(m.listDocuments).not.toHaveBeenCalled()
+    expect(m.listAnnualDocuments).not.toHaveBeenCalled()
+    expect(m.peoplePage).not.toHaveBeenCalled()
+  })
+
+  it('ke generování ročních dokumentů načítá jen omezenou stránku hledaných zaměstnanců', async () => {
+    m.peoplePage.mockResolvedValue({
+      items: Array.from({ length: 25 }, (_, index) => ({
+        id: index + 1,
+        full_name: `Syntetický zaměstnanec ${String(index + 1).padStart(3, '0')}`,
+        is_active: true,
+        needs_setup: false,
+      })),
+      total: 500,
+      limit: 25,
+      offset: 0,
+    })
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+    const annualTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')
+    await annualTab!.trigger('click')
+    await flushPromises()
+
+    const personSelect = wrapper.get('[data-test="payroll-documents-person"]')
+    await personSelect.get('input[role="combobox"]').trigger('focus')
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenCalledWith({ limit: 25, offset: 0, q: '' })
+    expect(personSelect.findAll('[role="option"]')).toHaveLength(25)
+    expect(personSelect.get('[data-test="searchable-select-truncated"]').text())
+      .toBe('payroll.person_search.truncated')
   })
 
   it('ignores an older period response that arrives after a newer request', async () => {
@@ -234,6 +380,12 @@ describe('PayrollDocuments', () => {
     expect(annualTab).toBeDefined()
     await annualTab!.trigger('click')
     await flushPromises()
+
+    const personSelect = wrapper.get('[data-test="payroll-documents-person"]')
+    await personSelect.get('input[role="combobox"]').trigger('focus')
+    await flushPromises()
+    expect(m.peoplePage).toHaveBeenCalledWith({ limit: 25, offset: 0, q: '' })
+    await personSelect.get('[role="option"]').trigger('click')
 
     const advanceButton = wrapper.findAll('button').find(button =>
       button.text() === 'payroll.documents.generate_tax_certificate_advance')
@@ -297,6 +449,11 @@ describe('PayrollDocuments', () => {
       .find(button => button.text() === 'payroll.documents.tabs.annual')
     await annualTab!.trigger('click')
     await flushPromises()
+
+    const personSelect = wrapper.get('[data-test="payroll-documents-person"]')
+    await personSelect.get('input[role="combobox"]').trigger('focus')
+    await flushPromises()
+    await personSelect.get('[role="option"]').trigger('click')
 
     const advanceButton = wrapper.findAll('button').find(button =>
       button.text() === 'payroll.documents.generate_tax_certificate_advance')

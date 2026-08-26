@@ -21,7 +21,9 @@ final readonly class EmployerRegistrationService
     /**
      * @return array{
      *   supplier_id:int,social_enterprise:bool,employment_agency:bool,
-     *   protected_labor_market:bool,evidence_confirmed_at:string,
+     *   protected_labor_market:bool,tax_office_code:?string,
+     *   tax_office_workplace_code:?string,payer_reference_number:?string,
+     *   is_complete:bool,evidence_confirmed_at:string,
      *   row_version:int,updated_at:string
      * }|null
      */
@@ -31,10 +33,19 @@ final readonly class EmployerRegistrationService
         return $profile === null ? null : $this->publicProfile($profile);
     }
 
+    public function taxOfficeWorkplaceSuggestion(int $supplierId): ?string
+    {
+        return RegzelTaxOfficeCode::suggestion(
+            $this->repository->taxOfficeWorkplaceSuggestion($supplierId),
+        );
+    }
+
     /**
      * @return array{
      *   supplier_id:int,social_enterprise:bool,employment_agency:bool,
-     *   protected_labor_market:bool,evidence_confirmed_at:string,
+     *   protected_labor_market:bool,tax_office_code:string,
+     *   tax_office_workplace_code:?string,payer_reference_number:?string,
+     *   is_complete:bool,evidence_confirmed_at:string,
      *   row_version:int,updated_at:string
      * }
      */
@@ -45,6 +56,9 @@ final readonly class EmployerRegistrationService
         bool $socialEnterprise,
         bool $employmentAgency,
         bool $protectedLaborMarket,
+        mixed $taxOfficeCode,
+        mixed $taxOfficeWorkplaceCode,
+        mixed $payerReferenceNumber,
         bool $evidenceConfirmed,
     ): array {
         if (!$evidenceConfirmed) {
@@ -56,6 +70,17 @@ final readonly class EmployerRegistrationService
         if ($supplierId <= 0 || $userId <= 0 || $expectedVersion < 0) {
             throw new \InvalidArgumentException('REGZEL profil nemá platný rozsah nebo verzi.');
         }
+        $taxOfficeCode = RegzelTaxOfficeCode::required($taxOfficeCode);
+        $taxOfficeWorkplaceCode = RegzelTaxOfficeCode::optional(
+            $taxOfficeWorkplaceCode,
+        );
+        RegzelTaxOfficeCode::validatePair(
+            $taxOfficeCode,
+            $taxOfficeWorkplaceCode,
+        );
+        $payerReferenceNumber = RegzelPayerReferenceNumber::optional(
+            $payerReferenceNumber,
+        );
 
         $profile = $this->repository->transaction(function () use (
             $supplierId,
@@ -64,6 +89,9 @@ final readonly class EmployerRegistrationService
             $socialEnterprise,
             $employmentAgency,
             $protectedLaborMarket,
+            $taxOfficeCode,
+            $taxOfficeWorkplaceCode,
+            $payerReferenceNumber,
         ): array {
             if (!$this->repository->lockSupplier($supplierId)) {
                 throw new \DomainException('Firma REGZEL nebyla nalezena.');
@@ -73,6 +101,9 @@ final readonly class EmployerRegistrationService
                 $socialEnterprise,
                 $employmentAgency,
                 $protectedLaborMarket,
+                $taxOfficeCode,
+                $taxOfficeWorkplaceCode,
+                $payerReferenceNumber,
                 $userId,
                 $expectedVersion,
             );
@@ -139,7 +170,7 @@ final readonly class EmployerRegistrationService
                     'document_type' => 'REGZELDOPL25',
                     'interaction_code' => $snapshot->interaction,
                     'mapping_version' =>
-                        RegzelPayloadSnapshot::MAPPING_VERSION,
+                        $snapshot->mappingVersion,
                     'xsd_version' => RegzelPayloadSnapshot::XSD_VERSION,
                     'source_snapshot_hash' => $sourceHash,
                     'xml_sha256' => $xmlHash,
@@ -179,7 +210,7 @@ final readonly class EmployerRegistrationService
                 'document_type' => 'REGZELDOPL25',
                 'interaction_code' => $snapshot->interaction,
                 'mapping_version' =>
-                    RegzelPayloadSnapshot::MAPPING_VERSION,
+                    $snapshot->mappingVersion,
                 'xsd_version' => RegzelPayloadSnapshot::XSD_VERSION,
                 'source_snapshot_hash' => $sourceHash,
                 'source_versions' => [
@@ -206,7 +237,7 @@ final readonly class EmployerRegistrationService
                 'document_type' => 'REGZELDOPL25',
                 'interaction_code' => $snapshot->interaction,
                 'mapping_version' =>
-                    RegzelPayloadSnapshot::MAPPING_VERSION,
+                    $snapshot->mappingVersion,
                 'xsd_version' => RegzelPayloadSnapshot::XSD_VERSION,
                 'source_manifest_json' => $manifest,
                 'snapshot_ciphertext' => $ciphertext,
@@ -299,6 +330,8 @@ final readonly class EmployerRegistrationService
             || $snapshot->officeId !== $row['office_id']
             || $snapshot->environment !== $environment
             || $snapshot->interaction !== $row['interaction_code']
+            || $snapshot->mappingVersion !== $row['mapping_version']
+            || $row['xsd_version'] !== RegzelPayloadSnapshot::XSD_VERSION
             || $row['document_type'] !== 'REGZELDOPL25'
         ) {
             throw new \RuntimeException('REGZEL snapshot neodpovídá archivním metadatům.');
@@ -346,7 +379,7 @@ final readonly class EmployerRegistrationService
             'document_type' => 'REGZELDOPL25',
             'interaction_code' => $snapshot->interaction,
             'mapping_version' =>
-                RegzelPayloadSnapshot::MAPPING_VERSION,
+                $snapshot->mappingVersion,
             'xsd_version' => RegzelPayloadSnapshot::XSD_VERSION,
             'source_snapshot_hash' => $sourceHash,
             'xml_sha256' => $xmlHash,
@@ -386,12 +419,16 @@ final readonly class EmployerRegistrationService
     /**
      * @param array{
      *   supplier_id:int,social_enterprise:bool,employment_agency:bool,
-     *   protected_labor_market:bool,evidence_confirmed_by:int,
+     *   protected_labor_market:bool,tax_office_code:?string,
+     *   tax_office_workplace_code:?string,payer_reference_number:?string,
+     *   evidence_confirmed_by:int,
      *   evidence_confirmed_at:string,row_version:int,updated_at:string
      * } $profile
      * @return array{
      *   supplier_id:int,social_enterprise:bool,employment_agency:bool,
-     *   protected_labor_market:bool,evidence_confirmed_at:string,
+     *   protected_labor_market:bool,tax_office_code:?string,
+     *   tax_office_workplace_code:?string,payer_reference_number:?string,
+     *   is_complete:bool,evidence_confirmed_at:string,
      *   row_version:int,updated_at:string
      * }
      */
@@ -402,6 +439,14 @@ final readonly class EmployerRegistrationService
             'social_enterprise' => $profile['social_enterprise'],
             'employment_agency' => $profile['employment_agency'],
             'protected_labor_market' => $profile['protected_labor_market'],
+            'tax_office_code' => $profile['tax_office_code'],
+            'tax_office_workplace_code' =>
+                $profile['tax_office_workplace_code'],
+            'payer_reference_number' => $profile['payer_reference_number'],
+            'is_complete' => $profile['tax_office_code'] !== null
+                && (!RegzelTaxOfficeCode::requiresWorkplace(
+                    $profile['tax_office_code'],
+                ) || $profile['tax_office_workplace_code'] !== null),
             'evidence_confirmed_at' => $profile['evidence_confirmed_at'],
             'row_version' => $profile['row_version'],
             'updated_at' => $profile['updated_at'],
@@ -444,6 +489,13 @@ final readonly class EmployerRegistrationService
     /** @param array<string,mixed> $payload */
     private function snapshotFromArray(array $payload): RegzelPayloadSnapshot
     {
+        if ($this->stringValue($payload, 'xsd_version')
+            !== RegzelPayloadSnapshot::XSD_VERSION
+        ) {
+            throw new \RuntimeException(
+                'REGZEL snapshot obsahuje nepodporovanou verzi XSD.',
+            );
+        }
         $header = $this->stringKeyedArray(
             $payload['header'] ?? null,
             'header',
@@ -486,6 +538,10 @@ final readonly class EmployerRegistrationService
             profileRowVersion: $this->intValue($versions, 'profile_row_version'),
             supplierUpdatedAt:
                 $this->stringValue($versions, 'supplier_updated_at'),
+            schemaReference:
+                $this->stringValue($payload, 'schema_reference'),
+            mappingVersion:
+                $this->stringValue($payload, 'mapping_version'),
         );
     }
 

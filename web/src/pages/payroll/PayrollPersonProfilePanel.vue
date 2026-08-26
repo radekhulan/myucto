@@ -18,6 +18,7 @@ import {
   type PayrollPersonIdentifierType,
   type PayrollPersonProfile,
   type PayrollPersonProfilePayload,
+  type PayrollPersonSex,
   type PayrollRelationType,
   type PayrollSecureDeliveryChannel,
 } from '@/api/payroll'
@@ -48,8 +49,15 @@ interface IdentityFormRow {
   full_name: string
   first_name: string
   last_name: string
+  title_prefix: string
+  title_suffix: string
   birth_surname_masked: string | null
   birth_surname: string
+  birth_date: string
+  birth_place: string
+  birth_country_code: string
+  citizenship_country_code: string
+  sex: PayrollPersonSex | null
   effective_from: string
   effective_to: string
 }
@@ -224,6 +232,11 @@ const identifierTypeOptions = computed<SelectOption<PayrollPersonIdentifierType>
   { value: 'ecp', label: t('payroll.people.profile.identifier_type.ecp') },
   { value: 'vcp', label: t('payroll.people.profile.identifier_type.vcp') },
   { value: 'foreign_tax_identifier', label: t('payroll.people.profile.identifier_type.foreign_tax_identifier') },
+])
+const sexOptions = computed<SelectOption<PayrollPersonSex>[]>(() => [
+  { value: 'female', label: t('payroll.people.profile.sex.female') },
+  { value: 'male', label: t('payroll.people.profile.sex.male') },
+  { value: 'unspecified', label: t('payroll.people.profile.sex.unspecified') },
 ])
 const verificationSourceOptions = computed<SelectOption<PayrollPersonAccountVerificationSource>[]>(() => [
   { value: 'employee_confirmation', label: t('payroll.people.profile.verification_source.employee_confirmation') },
@@ -545,8 +558,15 @@ function hydrate(value: PayrollPersonProfile) {
     full_name: row.full_name,
     first_name: row.first_name ?? '',
     last_name: row.last_name ?? '',
+    title_prefix: row.title_prefix ?? '',
+    title_suffix: row.title_suffix ?? '',
     birth_surname_masked: row.birth_surname_masked,
     birth_surname: '',
+    birth_date: row.birth_date ?? '',
+    birth_place: row.birth_place ?? '',
+    birth_country_code: row.birth_country_code ?? '',
+    citizenship_country_code: row.citizenship_country_code ?? '',
+    sex: row.sex ?? null,
     effective_from: row.effective_from,
     effective_to: row.effective_to ?? '',
   }))
@@ -649,9 +669,16 @@ function payload(): PayrollPersonProfilePayload {
       full_name: row.full_name,
       first_name: row.first_name,
       last_name: row.last_name,
+      title_prefix: optionalValue(row.title_prefix) ?? null,
+      title_suffix: optionalValue(row.title_suffix) ?? null,
       ...(optionalValue(row.birth_surname) !== undefined
         ? { birth_surname: optionalValue(row.birth_surname) }
         : {}),
+      birth_date: optionalValue(row.birth_date) ?? null,
+      birth_place: optionalValue(row.birth_place) ?? null,
+      birth_country_code: optionalValue(row.birth_country_code) ?? null,
+      citizenship_country_code: optionalValue(row.citizenship_country_code) ?? null,
+      sex: row.sex,
       effective_from: row.effective_from,
       effective_to: optionalValue(row.effective_to) ?? null,
     })),
@@ -765,13 +792,32 @@ function accountHasUnsavedChanges(account: AccountFormRow): boolean {
     || account.is_active !== stored.is_active
 }
 
+function hasRegistrationIdentity(row: IdentityFormRow): boolean {
+  return [
+    row.title_prefix,
+    row.title_suffix,
+    row.birth_date,
+    row.birth_place,
+    row.birth_country_code,
+    row.citizenship_country_code,
+    row.sex,
+  ].some(value => value !== null && value.trim() !== '')
+}
+
 function addIdentity() {
   form.identity_history.unshift({
     full_name: profile.value?.full_name ?? '',
     first_name: '',
     last_name: '',
+    title_prefix: '',
+    title_suffix: '',
     birth_surname_masked: null,
     birth_surname: '',
+    birth_date: '',
+    birth_place: '',
+    birth_country_code: '',
+    citizenship_country_code: '',
+    sex: null,
     effective_from: todayIso(),
     effective_to: '',
   })
@@ -861,7 +907,7 @@ onMounted(load)
       {{ t('payroll.people.profile.load_failed') }}
     </div>
     <form v-else class="p-4 sm:p-6" @submit.prevent="save">
-      <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
         <label :class="labelClass">
           {{ t('payroll.people.profile.profile_status') }}
           <SearchableSelect
@@ -884,10 +930,6 @@ onMounted(load)
             accent="payroll"
           />
         </label>
-        <div class="rounded-lg bg-neutral-50 px-3 py-2">
-          <span class="text-xs text-neutral-500">{{ t('payroll.people.profile.version') }}</span>
-          <p class="mt-1 text-sm font-medium text-neutral-800">{{ form.row_version }}</p>
-        </div>
       </div>
 
       <nav class="mb-5 mt-6 flex flex-wrap gap-1 border-b border-neutral-200" :aria-label="t('payroll.people.profile.tabs.label')">
@@ -933,6 +975,79 @@ onMounted(load)
                 </div>
                 <label v-if="canWrite" :class="[labelClass, 'lg:col-span-2']">{{ t('payroll.people.profile.new_birth_surname') }}<input v-model="row.birth_surname" autocomplete="off" :class="inputClass" :placeholder="t('payroll.people.profile.keep_masked')"></label>
               </div>
+              <details
+                class="group mt-3 rounded-md border border-payroll-200 bg-neutral-50"
+                data-test="registration-identity-details"
+              >
+                <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <span class="flex min-w-0 items-start gap-2">
+                    <svg class="mt-0.5 h-4 w-4 shrink-0 text-neutral-500 transition-transform group-open:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+                    <span class="min-w-0">
+                      <span class="block text-xs font-semibold text-neutral-900">{{ t('payroll.people.profile.registration_identity_title') }}</span>
+                      <span class="mt-0.5 block text-xs text-neutral-500">{{ t('payroll.people.profile.registration_identity_hint') }}</span>
+                    </span>
+                  </span>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="hasRegistrationIdentity(row) ? 'bg-success-50 text-success-700' : 'bg-neutral-100 text-neutral-600'"
+                  >{{ t(hasRegistrationIdentity(row)
+                    ? 'payroll.people.profile.registration_identity_filled'
+                    : 'payroll.people.profile.registration_identity_empty') }}</span>
+                </summary>
+                <div class="grid grid-cols-1 gap-3 border-t border-neutral-200 p-3 md:grid-cols-2 lg:grid-cols-4">
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.title_prefix') }}
+                    <input v-model="row.title_prefix" autocomplete="honorific-prefix" maxlength="64" :disabled="!canWrite" :class="inputClass">
+                  </label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.title_suffix') }}
+                    <input v-model="row.title_suffix" autocomplete="honorific-suffix" maxlength="64" :disabled="!canWrite" :class="inputClass">
+                  </label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.birth_date') }}
+                    <input v-model="row.birth_date" type="date" :max="todayIso()" :disabled="!canWrite" :class="inputClass" data-test="identity-birth-date">
+                  </label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.sex_label') }}
+                    <SearchableSelect
+                      v-model="row.sex"
+                      class="mt-1"
+                      :options="sexOptions"
+                      :clearable="true"
+                      :disabled="!canWrite"
+                      accent="payroll"
+                      data-test="identity-sex"
+                    />
+                  </label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.birth_place') }}
+                    <input v-model="row.birth_place" maxlength="128" :disabled="!canWrite" :class="inputClass">
+                  </label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.birth_country') }}
+                    <CountrySelect
+                      v-model="row.birth_country_code"
+                      class="mt-1"
+                      :disabled="!canWrite"
+                      accent="payroll"
+                      data-test="identity-birth-country"
+                    />
+                  </label>
+                  <label :class="labelClass">
+                    {{ t('payroll.people.profile.citizenship_country') }}
+                    <CountrySelect
+                      v-model="row.citizenship_country_code"
+                      class="mt-1"
+                      :disabled="!canWrite"
+                      accent="payroll"
+                      data-test="identity-citizenship-country"
+                    />
+                  </label>
+                  <p class="self-end text-xs text-neutral-500 lg:col-span-1">
+                    {{ t('payroll.people.profile.registration_identity_effective_hint') }}
+                  </p>
+                </div>
+              </details>
               <div v-if="canWrite && !row.id" class="mt-3 flex justify-end">
                 <button type="button" :class="btnOutlineSm('danger')" @click="removeUnsaved(form.identity_history, index)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.remove') }}</button>
               </div>

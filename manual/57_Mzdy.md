@@ -10,7 +10,7 @@ nemají představovat konkrétního poplatníka.
 
 Samostatná sekce **Mzdy** tuto agendu nenahrazuje ani nelicencuje. Používá stejné
 karty zaměstnanců a postupně je rozšiřuje o více pracovních vztahů; aktuální stav
-popisuje kapitola [Úplné mzdy — aktivace a zaměstnanci](58_Uplne_mzdy.md).
+popisuje kapitola [Úplné mzdy — rozcestník](58_Uplne_mzdy.md).
 
 ## 57.1 Kdy modul použít
 

@@ -9,7 +9,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
+use MyInvoice\Repository\Payroll\PayrollEnforcementClaimMutationBlockedException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementConflictException;
+use MyInvoice\Repository\Payroll\PayrollEnforcementDeletionBlockedException;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
@@ -129,6 +131,60 @@ final class PayrollEnforcementAction
     }
 
     /** @param array{id:string} $args */
+    public function delete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->input($request);
+            $deleted = $this->transactional(
+                function () use ($request, $args, $body): ?array {
+                    $case = $this->repository->deleteUnusedCase(
+                        $this->currentSupplierId($request),
+                        (int) $args['id'],
+                        $this->positiveInt($body['row_version'] ?? null, 'row_version'),
+                    );
+                    if ($case !== null) {
+                        $this->audit(
+                            $request,
+                            'payroll.enforcement.case.deleted',
+                            $case,
+                        );
+                    }
+                    return $case;
+                },
+            );
+        } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollEnforcementConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollEnforcementDeletionBlockedException $e) {
+            return Json::error(
+                $response,
+                'enforcement_case_delete_blocked',
+                $e->getMessage(),
+                409,
+                ['blocker' => $e->blockerCode, 'suggestion' => 'stop'],
+            );
+        }
+        if ($deleted === null) {
+            return Json::error(
+                $response,
+                'not_found',
+                'Exekuční případ nebyl nalezen.',
+                404,
+            );
+        }
+        return Json::ok($response, [
+            'deleted' => true,
+            'id' => PayrollTimeValue::int($deleted['id'] ?? null, 'id'),
+        ]);
+    }
+
+    /** @param array{id:string} $args */
     public function addClaim(Request $request, Response $response, array $args): Response
     {
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
@@ -157,6 +213,101 @@ final class PayrollEnforcementAction
             return Json::error($response, 'invalid_case_state', $e->getMessage(), 409);
         }
         return Json::ok($response, ['claim' => $claim], 201);
+    }
+
+    /** @param array{id:string,claimId:string} $args */
+    public function updateClaim(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->input($request);
+            $claim = $this->transactional(
+                function () use ($request, $args, $body): ?array {
+                    $claim = $this->repository->updateUnusedClaim(
+                        $this->currentSupplierId($request),
+                        (int) $args['id'],
+                        (int) $args['claimId'],
+                        $body,
+                        $this->positiveInt($body['row_version'] ?? null, 'row_version'),
+                    );
+                    if ($claim !== null) {
+                        $this->audit(
+                            $request,
+                            'payroll.enforcement.claim.updated',
+                            $claim,
+                            'payroll_enforcement_claim',
+                        );
+                    }
+                    return $claim;
+                },
+            );
+        } catch (\ValueError|\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollEnforcementConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollEnforcementClaimMutationBlockedException $e) {
+            return $this->claimMutationBlocked($response, $e);
+        }
+        return $claim === null
+            ? Json::error($response, 'not_found', 'Pohledávka nebyla nalezena.', 404)
+            : Json::ok($response, ['claim' => $claim]);
+    }
+
+    /** @param array{id:string,claimId:string} $args */
+    public function deleteClaim(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->input($request);
+            $deletedValue = $this->transactional(
+                function () use ($request, $args, $body): ?array {
+                    $claim = $this->repository->deleteUnusedClaim(
+                        $this->currentSupplierId($request),
+                        (int) $args['id'],
+                        (int) $args['claimId'],
+                        $this->positiveInt($body['row_version'] ?? null, 'row_version'),
+                    );
+                    if ($claim !== null) {
+                        $this->audit(
+                            $request,
+                            'payroll.enforcement.claim.deleted',
+                            $claim,
+                            'payroll_enforcement_claim',
+                        );
+                    }
+                    return $claim;
+                },
+            );
+            $deleted = $deletedValue === null
+                ? null
+                : PayrollTimeValue::row($deletedValue, 'deleted_claim');
+        } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (PayrollEnforcementConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
+                'current_row_version' => $e->currentVersion,
+            ]);
+        } catch (PayrollEnforcementClaimMutationBlockedException $e) {
+            return $this->claimMutationBlocked($response, $e);
+        }
+        if ($deleted === null) {
+            return Json::error($response, 'not_found', 'Pohledávka nebyla nalezena.', 404);
+        }
+        return Json::ok($response, [
+            'deleted' => true,
+            'id' => PayrollTimeValue::int($deleted['id'] ?? null, 'id'),
+            'case_id' => PayrollTimeValue::int($deleted['case_id'] ?? null, 'case_id'),
+            'case_row_version' => PayrollTimeValue::int(
+                $deleted['case_row_version'] ?? null,
+                'case_row_version',
+            ),
+        ]);
     }
 
     /** @param array{id:string} $args */
@@ -393,6 +544,22 @@ final class PayrollEnforcementAction
         }
         try {
             $body = $this->input($request);
+            if (($body['insolvency_mode'] ?? null) === 'approved_standard'
+                && !$this->requirePermission(
+                    $request,
+                    $response,
+                    'documents',
+                    AccessLevel::READ,
+                    $error,
+                )
+            ) {
+                return $error ?? Json::error(
+                    $response,
+                    'forbidden',
+                    'Pro výběr rozhodnutí oddlužení nemáš oprávnění k dokumentům.',
+                    403,
+                );
+            }
             $evidence = $this->transactional(
                 function () use ($request, $args, $body): array {
                     $evidence = $this->repository->saveMonthEvidence(
@@ -418,6 +585,13 @@ final class PayrollEnforcementAction
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,
             ]);
+        } catch (\DomainException $e) {
+            return Json::error(
+                $response,
+                'invalid_insolvency_evidence',
+                $e->getMessage(),
+                409,
+            );
         }
         return Json::ok($response, ['evidence' => $evidence]);
     }
@@ -482,6 +656,19 @@ final class PayrollEnforcementAction
             );
         }
         return null;
+    }
+
+    private function claimMutationBlocked(
+        Response $response,
+        PayrollEnforcementClaimMutationBlockedException $exception,
+    ): Response {
+        return Json::error(
+            $response,
+            'enforcement_claim_change_blocked',
+            $exception->getMessage(),
+            409,
+            ['blocker' => $exception->blockerCode],
+        );
     }
 
     private function authorize(

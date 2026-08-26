@@ -160,6 +160,36 @@ describe('PayrollJmhzDispatchPanel', () => {
     expect(m.freezePreparation).not.toHaveBeenCalled()
   })
 
+  it('při prvním podání založí povinnost automaticky', async () => {
+    m.sendTransport.mockResolvedValue({
+      attempt: { id: 77, status: 'submitted' },
+      acknowledgement: null,
+      settled: false,
+      report: null,
+    })
+    const wrapper = mount(PayrollJmhzDispatchPanel, {
+      props: {
+        environment: 'test',
+        previews: [preview],
+        obligations: [],
+      },
+    })
+
+    const button = wrapper.get('[data-test="jmhz-dispatch-vrep-7:3"]')
+    expect((button.element as HTMLButtonElement).disabled).toBe(false)
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(m.freezePreparation).toHaveBeenCalledWith(7, expect.any(String), 'test')
+    expect(m.freezeSubmission).toHaveBeenCalledWith(55, null, 'test', 3)
+    expect(m.sendTransport).toHaveBeenCalledWith(
+      66,
+      '12345678',
+      'test',
+      expect.any(String),
+    )
+  })
+
   it('znovu použije existující zmrazené podání ve stavu ready', async () => {
     m.enqueueIsds.mockResolvedValue({
       ...(await m.enqueueIsds()),

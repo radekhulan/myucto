@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll\Posting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\Payroll\PayrollPostingReconciliationRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService;
@@ -30,6 +31,7 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
     private Connection $db;
     private PostingService $posting;
     private PayrollPostingReconciliationService $reconciliation;
+    private PayrollPostingReconciliationRepository $reconciliationRepository;
     private AccountingPeriodRepository $periods;
     private ChartOfAccountsSeeder $seeder;
     private int $supplierId = 0;
@@ -51,6 +53,9 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
             $this->posting = $container->get(PostingService::class);
             $this->reconciliation = $container->get(
                 PayrollPostingReconciliationService::class,
+            );
+            $this->reconciliationRepository = $container->get(
+                PayrollPostingReconciliationRepository::class,
             );
             $this->periods = $container->get(AccountingPeriodRepository::class);
             $this->seeder = $container->get(ChartOfAccountsSeeder::class);
@@ -146,6 +151,143 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         self::assertSame(12_345, $byKey['gross_wages']['journal_minor']);
         self::assertSame(2_400, $byKey['social_health_insurance']['journal_minor']);
         self::assertSame(0, $byKey['social_health_insurance']['diff_payroll_journal_minor']);
+    }
+
+    /**
+     * Výchozí účet dimenze je záměrně obecný analytický účet, ne jen analytika
+     * syntetik 521/522/523. Reconciliation proto nesmí ztratit hrubou mzdu jen
+     * proto, že zmrazená dimenze poslala její náklad například na účet 518.
+     */
+    public function testDimensionDefaultAccountRemainsGrossWageInReconciliation(): void
+    {
+        $this->buildBalancedRevision(
+            month: 11,
+            deducted: 445,
+            tag: 'DIMENSION-ACCOUNT',
+            grossAccount: '518',
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-11',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(12_345, $byKey['gross_wages']['journal_minor']);
+        self::assertSame(0, $byKey['gross_wages']['diff_payroll_journal_minor']);
+    }
+
+    /** Přesun dimenze na jiný účet musí správně zahrnout i storno starého účtu. */
+    public function testDimensionAccountCorrectionKeepsBothAccountsInGrossWages(): void
+    {
+        $fixture = $this->buildBalancedRevision(
+            month: 12,
+            deducted: 445,
+            tag: 'DIMENSION-CORRECTION',
+            grossAccount: '518',
+        );
+        $correctionResult = $this->buildResultSnapshot(
+            $fixture['employeeId'],
+            $fixture['employmentId'],
+            deducted: 445,
+        );
+        $revisionId = $this->insertRevision(
+            $fixture['runId'],
+            2,
+            $fixture['inputJson'],
+            $correctionResult['json'],
+            approved: true,
+        );
+        $this->insertStatutoryResult(
+            $revisionId,
+            'social_insurance',
+            ['employer_contribution_minor_units' => 800],
+        );
+        $this->insertStatutoryResult(
+            $revisionId,
+            'health_insurance',
+            ['employer_contribution_minor_units' => 700],
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_runs SET current_revision_no = 2 WHERE id = ?',
+        )->execute([$fixture['runId']]);
+
+        $entryDate = self::YEAR . '-12-31';
+        $batchId = $this->preparePostingBatch(
+            $fixture['runId'],
+            $revisionId,
+            $entryDate,
+            $fixture['batchId'],
+        );
+        $this->insertPostingAllocation(
+            $batchId,
+            "gross:employment:{$fixture['employmentId']}:input:1:debit",
+            '521',
+            12_345,
+        );
+        $entryId = $this->postJournal($revisionId, $entryDate, [
+            ['account_code' => '518', 'side' => 'credit', 'amount' => '123.45'],
+            ['account_code' => '521', 'side' => 'debit', 'amount' => '123.45'],
+        ]);
+        $this->finalizeBatch($batchId, $entryId);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-12',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(12_345, $byKey['gross_wages']['journal_minor']);
+        self::assertSame(0, $byKey['gross_wages']['diff_payroll_journal_minor']);
+    }
+
+    /** Dvě analytiky stejné syntetiky musí zůstat dvěma řádky repository. */
+    public function testJournalTotalsKeepFullAnalyticAccountInGroupKey(): void
+    {
+        $this->createAnalyticAccount('518.100');
+        $this->createAnalyticAccount('518.200');
+        $fixture = $this->buildBalancedRevision(
+            month: 10,
+            deducted: 445,
+            tag: 'ANALYTIC-GROUPING',
+            grossAccount: '518.100',
+            additionalLines: [
+                ['account_code' => '518.200', 'side' => 'debit', 'amount' => '1.00'],
+                ['account_code' => '331', 'side' => 'credit', 'amount' => '1.00'],
+            ],
+        );
+
+        $rows = array_values(array_filter(
+            $this->reconciliationRepository->journalTotals(
+                $this->supplierId,
+                [$fixture['revisionId']],
+            ),
+            static fn (array $row): bool =>
+                $row['prefix'] === '518' && $row['side'] === 'debit',
+        ));
+
+        self::assertSame(
+            ['518.100', '518.200'],
+            array_column($rows, 'account_code'),
+        );
+        self::assertSame([12_345, 100], array_column($rows, 'amount_minor'));
+    }
+
+    /** Rezervovaný účet 524 nesmí jednu částku vykázat ve dvou kategoriích. */
+    public function testReservedGrossAccountFailsClosedInsteadOfDoubleCounting(): void
+    {
+        $this->buildBalancedRevision(
+            month: 9,
+            deducted: 445,
+            tag: 'RESERVED-GROSS-ACCOUNT',
+            grossAccount: '524',
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('kolizní');
+        $this->reconciliation->forPeriod($this->supplierId, self::YEAR . '-09');
     }
 
     public function testTamperedJournalIsDetectedAndAttributedToTheRightCategory(): void
@@ -435,7 +577,16 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
      *   inputJson:string
      * }
      */
-    private function buildBalancedRevision(int $month, int $deducted, string $tag): array
+    /**
+     * @param list<array{account_code:string,side:string,amount:string,cost_center?:string}> $additionalLines
+     */
+    private function buildBalancedRevision(
+        int $month,
+        int $deducted,
+        string $tag,
+        string $grossAccount = '521',
+        array $additionalLines = [],
+    ): array
     {
         $employeeId = 8_000 + crc32($tag) % 900;
         $employmentId = 8_500 + crc32($tag . 'e') % 900;
@@ -459,7 +610,7 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
 
         $netWage = 12_345 - 600 - 300 - 900 - $deducted;
         $lines = [
-            ['account_code' => '521', 'side' => 'debit', 'amount' => '123.45'],
+            ['account_code' => $grossAccount, 'side' => 'debit', 'amount' => '123.45'],
             ['account_code' => '524', 'side' => 'debit', 'amount' => '15.00'],
             ['account_code' => '336', 'side' => 'credit', 'amount' => '24.00'],
             ['account_code' => '342', 'side' => 'credit', 'amount' => '9.00'],
@@ -475,8 +626,15 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
                 'amount' => number_format($netWage / 100, 2, '.', ''),
             ],
         ];
+        array_push($lines, ...$additionalLines);
         $entryDate = sprintf('%d-%02d-%02d', self::YEAR, $month, cal_days_in_month(CAL_GREGORIAN, $month, self::YEAR));
         $batchId = $this->preparePostingBatch($runId, $revisionId, $entryDate, null);
+        $this->insertPostingAllocation(
+            $batchId,
+            "gross:employment:{$employmentId}:input:1:debit",
+            $grossAccount,
+            12_345,
+        );
         $entryId = $this->postJournal($revisionId, $entryDate, $lines);
         $this->finalizeBatch($batchId, $entryId);
 
@@ -787,6 +945,45 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         ]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    private function insertPostingAllocation(
+        int $batchId,
+        string $allocationKey,
+        string $accountCode,
+        int $signedMinor,
+    ): void {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_posting_allocations
+                (supplier_id, batch_id, allocation_key, account_code,
+                 signed_minor, description)
+             VALUES (?, ?, ?, ?, ?, "Testovací hrubá mzda")',
+        )->execute([
+            $this->supplierId,
+            $batchId,
+            $allocationKey,
+            $accountCode,
+            $signedMinor,
+        ]);
+    }
+
+    private function createAnalyticAccount(string $accountCode): void
+    {
+        $prefix = substr($accountCode, 0, 3);
+        $this->db->pdo()->prepare(
+            'INSERT INTO chart_of_accounts
+                (supplier_id, account_code, name, account_type, normal_side,
+                 is_synthetic, parent_id)
+             SELECT ?, ?, ?, account_type, normal_side, 0, id
+               FROM chart_of_accounts
+              WHERE supplier_id = ? AND account_code = ?',
+        )->execute([
+            $this->supplierId,
+            $accountCode,
+            'Testovací analytika ' . $accountCode,
+            $this->supplierId,
+            $prefix,
+        ]);
     }
 
     /**

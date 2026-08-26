@@ -9,8 +9,9 @@ import { api } from './client'
 //   zákona č. 592/1992 Sb. Ten aplikace umí i SESTAVIT do odesílatelné podoby
 //   a vydat jako XML ověřené proti připnutému XSD.
 //
-// Odeslat nesmí ani jedno: transportní obálku nemá veřejně popsanou žádná ze
-// sedmi pojišťoven. `capability()` to říká kódem důvodu, ne mlčením.
+// Portálové API se bez doložené obálky nevolá. Validované XML lze u pojišťovny
+// s doloženou schránkou připravit do obecné ISDS fronty; odeslání vždy
+// potvrzuje uživatel.
 
 /** Proč aplikace nesmí odeslat sama. Nikdy to není prázdno — vždy je to kód. */
 export type HealthDispatchReasonCode =
@@ -31,13 +32,24 @@ export type HealthDutyKind =
 
 /** Jak je pravidlo doložené. `external_unverified` = ne textem zákona. */
 export type HealthSourceStatus = 'statute_verified' | 'external_unverified'
+export type HealthIsdsAttachmentFormat = 'xml' | 'text_pdf' | 'none'
 
 export interface HealthInsurerChannel {
   insurer_code: string
   insurer_name: string | null
   kind?: string
   data_box_id?: string | null
+  business_id?: string | null
+  address?: string | null
+  recipient_source?: 'system' | 'company' | 'missing'
   portal_url?: string | null
+  isds_attachment_format: HealthIsdsAttachmentFormat
+  isds_attachment_rules: Array<{
+    from: string
+    to: string | null
+    format: HealthIsdsAttachmentFormat
+  }>
+  /** Zpětně kompatibilní odvození: true právě při aktuálním formátu XML. */
   accepts_shared_data_message?: boolean
   automated_dispatch_documented?: boolean
   undocumented_reason_code: HealthDispatchReasonCode | string
@@ -91,6 +103,7 @@ export interface HealthDispatchDescription {
 
 export interface HealthDutyItem {
   id: string
+  obligation_id: number | null
   employment_id: number
   employee_id: number
   full_name: string
@@ -149,6 +162,31 @@ export interface HealthDutyFilters {
   offset?: number
 }
 
+export interface HealthRegisteredObligation {
+  duty_id: string
+  duty: {
+    kind: HealthDutyKind
+    employment_id: number
+    employee_id: number
+    insurer_code: string
+    occurred_on: string
+    reported_by_employer: boolean
+  }
+  obligation_id: number | null
+  created: boolean
+  skipped_reason_code: string | null
+}
+
+export interface HealthPeriodObligationSync {
+  items: Array<{
+    duty_id: string
+    obligation_id: number
+    created: boolean
+  }>
+  total: number
+  created: number
+}
+
 export interface HealthSchemaDocument {
   xsd_version: string
   namespace: string
@@ -164,6 +202,11 @@ export interface HealthCapability {
   documents: Record<string, HealthSchemaDocument>
   channels: Record<string, HealthInsurerChannel>
   automated_dispatch: { supported: false; reason_code: string }
+  isds_dispatch: {
+    supported: true
+    requires_user_confirmation: true
+    automatic_inbox: false
+  }
   change_codes: {
     total: number
     narrowing_effective_from: string
@@ -179,12 +222,14 @@ export interface HealthPreparedOverview {
   obligation_id: number
   part_id?: number
   artifact_id?: number
+  pdf_artifact_id?: number
   status: string
   row_version: number
   insurer_code: string
   period: string
   agenda_code: string
   artifact_sha256: string
+  pdf_artifact_sha256?: string
   created: boolean
   deadline: HealthDeadlineWindow
   /**
@@ -194,6 +239,26 @@ export interface HealthPreparedOverview {
    */
   schema_validated: boolean
   dispatch: HealthDispatchDescription
+}
+
+export interface HealthIsdsEnqueueResult {
+  outbox_id: number
+  created: boolean
+  recipient: { box_id: string; name: string }
+  subject: string
+  attachment: {
+    filename: string
+    mime: string
+    sha256: string
+    bytes: number
+    format: HealthIsdsAttachmentFormat
+  }
+  transport: {
+    automatic: boolean
+    channel: 'gateway' | 'manual_upload'
+    reason: string | null
+  }
+  outbox_url: string
 }
 
 export const payrollHealthNotificationApi = {
@@ -216,7 +281,7 @@ export const payrollHealthNotificationApi = {
     }).then(response => response.data),
 
   registerObligations: (employmentId: number, onDate: string) =>
-    api.post<{ items: unknown[] }>(
+    api.post<{ items: HealthRegisteredObligation[] }>(
       `/payroll/submissions/health-notifications/duties/${employmentId}/obligations`,
       {},
       { params: { on_date: onDate } },
@@ -225,6 +290,18 @@ export const payrollHealthNotificationApi = {
   preparePaymentOverview: (revisionId: number, insurerCode: string) =>
     api.post<HealthPreparedOverview>(
       `/payroll/submissions/health-notifications/payment-overview/${revisionId}/${insurerCode}/prepare`,
+    ).then(response => response.data),
+
+  registerPeriodObligations: (period: string) =>
+    api.post<HealthPeriodObligationSync>(
+      '/payroll/submissions/health-notifications/duties/obligations',
+      {},
+      { params: { period } },
+    ).then(response => response.data),
+
+  enqueuePaymentOverviewIsds: (submissionId: number, insurerCode: string) =>
+    api.post<HealthIsdsEnqueueResult>(
+      `/payroll/submissions/${submissionId}/health-isds/${insurerCode}`,
     ).then(response => response.data),
 
   // Artefakt se NESTAHUJE odsud. Podání zdravotní pojišťovně leží v téže

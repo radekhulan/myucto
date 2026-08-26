@@ -92,6 +92,59 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
         )->execute([$this->supplierId, $id]);
     }
 
+    public function testCorrectionPreparationListIsTenantEnvironmentPeriodRunAndReadinessScoped(): void
+    {
+        $blockedId = $this->repository->insert($this->record());
+        $ready = $this->record();
+        $ready['readiness_status'] = 'source_ready';
+        $ready['issue_count'] = 0;
+        $ready['readiness_json'] = CanonicalJson::encode([
+            'schema_reference' => 'payroll-jmhz-preparation-readiness.v1',
+            'status' => 'source_ready',
+            'issue_count' => 0,
+            'issues' => [],
+            'official_submission_supported' => false,
+        ]);
+        $ready['readiness_sha256'] = hash('sha256', $ready['readiness_json']);
+        $ready['source_manifest_sha256'] = str_repeat('c', 64);
+        $ready['snapshot_fingerprint'] = str_repeat('d', 64);
+        $ready['request_fingerprint'] = str_repeat('e', 64);
+        $ready['idempotency_key_hash'] = hash('sha256', 'ready-correction-preparation', true);
+        $readyId = $this->repository->insert($ready);
+
+        $listed = $this->repository->listSourceReadyForCorrection(
+            $this->supplierId,
+            'test',
+            $this->runId,
+            '2026-07-01',
+        );
+        self::assertCount(1, $listed);
+        self::assertSame($readyId, $listed[0]['id']);
+        self::assertSame($this->revisionId, $listed[0]['source_revision_id']);
+        self::assertSame(1, $listed[0]['revision_no']);
+        self::assertSame('2026-07-01', $listed[0]['period_start']);
+        self::assertIsString($listed[0]['created_at']);
+        self::assertNotSame($blockedId, $readyId);
+        self::assertSame([], $this->repository->listSourceReadyForCorrection(
+            $this->supplierId,
+            'production',
+            $this->runId,
+            '2026-07-01',
+        ));
+        self::assertSame([], $this->repository->listSourceReadyForCorrection(
+            $this->supplierId,
+            'test',
+            $this->runId + 1,
+            '2026-07-01',
+        ));
+        self::assertSame([], $this->repository->listSourceReadyForCorrection(
+            $this->supplierId + 999999,
+            'test',
+            $this->runId,
+            '2026-07-01',
+        ));
+    }
+
     public function testBlockedPreparationIsEncryptedAndIdempotent(): void
     {
         $first = $this->service->freeze(
@@ -152,6 +205,24 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
             $verified->payload['schema_reference'],
         );
         self::assertObjectNotHasProperty('snapshotCiphertext', $verified);
+    }
+
+    public function testVerifiedLoaderKeepsCurrentApprovedCorrectionRevisionUsable(): void
+    {
+        $created = $this->service->freeze(
+            $this->supplierId,
+            $this->revisionId,
+            'test',
+            'synthetic-jmhz-correction-source-loader',
+            null,
+        );
+        $verified = $this->service->loadVerified(
+            $this->supplierId,
+            'test',
+            (int) $created['id'],
+        );
+
+        self::assertSame($this->revisionId, $verified->sourceRevisionId);
     }
 
     public function testVerifiedLoaderHidesCrossEnvironmentAndUnknownScope(): void
@@ -601,7 +672,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
                  schema_version, ruleset_manifest_hash, input_snapshot_json,
                  input_snapshot_hash, result_snapshot_json,
                  result_snapshot_hash, idempotency_key_hash, approved_at)
-             VALUES (?, ?, 1, "regular", "approved",
+             VALUES (?, ?, 1, "correction", "approved",
                      "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())',
         )->execute([
             $this->supplierId,

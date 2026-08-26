@@ -37,7 +37,8 @@ final readonly class JmhzProtocolImportService
         private PayrollImportedJmhzProtocolRepository $protocols,
         private JmhzProtocolExplainer $explainer,
         private JmhzProtocolParser $parser = new JmhzProtocolParser(),
-    ) {}
+    ) {
+    }
 
     /**
      * @return array{
@@ -97,7 +98,7 @@ final readonly class JmhzProtocolImportService
                 'source_filename' => self::clip($filename, 255),
                 'payload_sha256' => hash('sha256', $xml),
                 'payload_xml' => $xml,
-                'dedupe_key' => self::dedupeKey($report, $xml),
+                'dedupe_key' => self::dedupeKey($xml),
             ],
             $actorUserId,
         );
@@ -170,23 +171,14 @@ final readonly class JmhzProtocolImportService
     }
 
     /**
-     * Otisk identity dokladu. GUID podání je nejsilnější (vyrobili jsme ho my),
-     * correlation reference druhá volba, a když protokol nenese ani jedno,
-     * rozhoduje obsah — dvakrát načtený stejný soubor je pořád jeden doklad.
+     * Otisk jednoho konkrétního doručeného dokladu. `idPodani` označuje celý
+     * řetězec řádného, opravného a stornovacího podání, takže podle něj nelze
+     * protokoly slučovat. Dvakrát načtený stejný originál zůstává jedním
+     * dokladem, ale každá odlišná odpověď ČSSZ dostane vlastní řádek.
      */
-    private static function dedupeKey(JmhzProtocolReport $report, string $xml): string
+    private static function dedupeKey(string $xml): string
     {
-        $identity = $report->submissionGuid !== null
-            ? 'guid:' . strtoupper($report->submissionGuid)
-            : ($report->correlationReference !== null
-                ? 'cid:' . strtoupper($report->correlationReference)
-                : 'sha:' . hash('sha256', $xml));
-
-        return hash('sha256', implode('|', [
-            $identity,
-            (string) ($report->periodYear ?? ''),
-            (string) ($report->periodMonth ?? ''),
-        ]));
+        return hash('sha256', $xml);
     }
 
     private static function kindColumn(JmhzProtocolReport $report): string

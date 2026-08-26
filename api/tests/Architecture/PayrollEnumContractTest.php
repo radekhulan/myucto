@@ -72,6 +72,8 @@ final class PayrollEnumContractTest extends TestCase
      */
     private const UNION_DOMAIN = [
         // Mzdový běh
+        'payroll.ts::PayrollPeriodExportScope'
+            => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři
@@ -100,6 +102,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRunStatus'      => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunStatus',
         'payroll.ts::PayrollRunCommand'     => 'enum:MyInvoice\Service\Payroll\Run\PayrollRunCommand',
         'payroll.ts::PayrollRunOutcomeCode' => 'consts:MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome',
+        'payroll.ts::PayrollRiskySavingsRiskFactor'
+            => 'enum:MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRiskFactor',
+        'payroll.ts::PayrollEmployeeCardStatusFilter'
+            => 'const:MyInvoice\Repository\Payroll\PayrollQuickInputRepository::CARD_STATUS_FILTERS',
         // Proč rozklad pojistného není k dispozici. Každý důvod má na obrazovce
         // vlastní větu — nová hodnota bez věty by se projevila prázdnou kartou.
         'payrollInsurance.ts::PayrollInsuranceUnavailableReason' =>
@@ -142,6 +148,7 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPersonAddressType'    => 'db:payroll_person_addresses.address_type',
         'payroll.ts::PayrollPersonContactType'    => 'db:payroll_person_contacts.contact_type',
         'payroll.ts::PayrollPersonIdentifierType' => 'db:payroll_person_identifiers.identifier_type',
+        'payroll.ts::PayrollPersonSex'            => 'db:payroll_person_identity_history.sex',
         'payroll.ts::PayrollPayoutMethod'         => 'db:payroll_employee_profiles.payout_method',
         'payroll.ts::PayrollSecureDeliveryChannel' => 'db:payroll_employee_profiles.secure_delivery_channel',
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
@@ -243,6 +250,8 @@ final class PayrollEnumContractTest extends TestCase
         // holým klíčem v tabulce.
         'payrollHealthNotifications.ts::HealthDutyKind'
             => 'enum:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind',
+        'payrollHealthNotifications.ts::HealthIsdsAttachmentFormat'
+            => 'enum:MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerIsdsAttachmentFormat',
         // Důvod, proč aplikace nesmí odeslat sama. Každý má na obrazovce vlastní
         // větu; nový kód bez věty by se vykreslil jako prázdné místo přesně tam,
         // kde má stát přiznání, co modul neumí.

@@ -498,6 +498,7 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
   it('zadanou referenci kontroluje a vlastní platnou hodnotu uloží', async () => {
     const wrapper = await startEditing()
     await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('signed')
 
     await wrapper.get('[data-test="tax_declarations-0-evidence_reference-reason"]')
       .setValue('custom')
@@ -537,10 +538,10 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       .findAll('option')
       .map(option => option.attributes('value'))
 
-    expect(reasons()).toEqual(['', 'declaration:38k-signed', 'custom'])
-
-    await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('not-signed')
     expect(reasons()).toEqual(['', 'declaration:38k-not-signed', 'custom'])
+
+    await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('signed')
+    expect(reasons()).toEqual(['', 'declaration:38k-signed', 'custom'])
 
     await wrapper.get('[data-test="tax_declarations-0-status"]').setValue('unverified')
     // Neověřená varianta doklad nést nesmí, tak se pole schová.

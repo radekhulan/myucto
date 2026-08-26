@@ -267,6 +267,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Run\PayrollRunDeductionLedgerApprover::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsApprover::class,
+                    ),
                 ),
             \MyInvoice\Service\Payroll\Run\PayrollRunCommandService::class =>
                 fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Run\PayrollRunCommandService(
@@ -671,6 +674,9 @@ final class Bootstrap
             // nedal otestovat bez databázového schématu.
             \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationSource::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class),
+
+            \MyInvoice\Service\Submission\Channel\Isds\IsdsAuthFlowStore::class => fn (ContainerInterface $c)
+                => $c->get(\MyInvoice\Repository\Submission\IsdsAuthFlowRepository::class),
 
             // Odesílací brána ISDS (`SetConcept`). Vědomě NENÍ implementací
             // `IsdsTransport` výš: brána umí JEN odesílat, a to s člověkem

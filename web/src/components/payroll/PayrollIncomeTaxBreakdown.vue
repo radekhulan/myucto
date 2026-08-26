@@ -6,6 +6,7 @@ import type {
   PayrollIncomeTaxResult,
   PayrollRunResultPerson,
 } from '@/api/payroll'
+import PayrollPersonPicker from '@/components/payroll/PayrollPersonPicker.vue'
 
 const props = withDefaults(defineProps<{
   people: PayrollRunResultPerson[]
@@ -36,6 +37,10 @@ const selectedPerson = computed(() =>
   ?? taxPeople.value[0]
   ?? null,
 )
+const personOptions = computed(() => taxPeople.value.map(person => ({
+  value: person.employee_id,
+  label: personLabel(person),
+})))
 
 const tax = computed(() => selectedPerson.value?.statutory.income_tax ?? null)
 const advance = computed(() => tax.value?.advance_tax ?? null)
@@ -166,23 +171,11 @@ function unavailableAdvanceLabel(): string {
       </div>
     </div>
 
-    <nav
-      class="flex gap-1 overflow-x-auto border-b border-neutral-200 px-2 sm:px-4"
-      :aria-label="t('payroll.runs.tax.people_tabs')"
-    >
-      <button
-        v-for="person in taxPeople"
-        :key="person.employee_id"
-        type="button"
-        class="whitespace-nowrap border-b-2 px-3 py-3 text-sm font-medium transition-colors"
-        :class="selectedPerson?.employee_id === person.employee_id
-          ? 'border-payroll-500 text-payroll-700'
-          : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
-        @click="selectedEmployeeId = person.employee_id"
-      >
-        {{ personLabel(person) }}
-      </button>
-    </nav>
+    <PayrollPersonPicker
+      v-model="selectedEmployeeId"
+      :options="personOptions"
+      :selector-label="t('payroll.runs.tax.people_tabs')"
+    />
 
     <div v-if="selectedPerson && tax" class="space-y-5 p-4 sm:p-5">
       <div class="flex flex-wrap items-center justify-between gap-2">

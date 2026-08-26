@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
@@ -27,6 +28,7 @@ use PDO;
 final class PayrollRunSnapshotBuilder
 {
     private readonly PayrollRunSnapshotBatchLoader $batch;
+    private readonly PayrollRiskySavingsPolicy $riskySavingsPolicy;
 
     /**
      * `$rulesets` je POVINNÝ. Jako volitelný parametr s defaultem ho PHP-DI
@@ -49,6 +51,7 @@ final class PayrollRunSnapshotBuilder
         // konstruktoru, aby nepřibyl další volitelný parametr, který by PHP-DI
         // nevyplnilo a který by se pak tiše nahradil defaultem.
         $this->batch = new PayrollRunSnapshotBatchLoader($db);
+        $this->riskySavingsPolicy = new PayrollRiskySavingsPolicy();
     }
 
     public function build(
@@ -248,11 +251,43 @@ final class PayrollRunSnapshotBuilder
                     'draft_inputs_present',
                     'employment',
                     $employmentId,
-                    'Pracovní vztah obsahuje neschválené mzdové vstupy.',
+                    sprintf(
+                        '%s: pracovní vztah obsahuje neschválené mzdové vstupy.',
+                        (string) $row['full_name'],
+                    ),
                     '/payroll/components',
                 );
             }
             $inputs = $this->inputs($inputRows[$employmentId] ?? []);
+            $riskySavingsEvidence = $this->riskySavingsEvidence($row);
+            if ($riskySavingsEvidence !== null) {
+                foreach ($this->riskySavingsPolicy->issues(
+                    $riskySavingsEvidence,
+                    $periodStart,
+                ) as $issue) {
+                    $validations[] = new PayrollRunValidation(
+                        'blocker',
+                        $issue,
+                        'employment',
+                        $employmentId,
+                        $this->riskySavingsValidationMessage($issue),
+                        '/payroll/components',
+                    );
+                }
+                foreach ($this->riskySavingsPolicy->warnings(
+                    $riskySavingsEvidence,
+                    $periodStart,
+                ) as $warning) {
+                    $validations[] = new PayrollRunValidation(
+                        'warning',
+                        $warning,
+                        'employment',
+                        $employmentId,
+                        $this->riskySavingsValidationMessage($warning),
+                        '/payroll/components',
+                    );
+                }
+            }
             if ($inputs === []) {
                 // JEDINÉ místo v modulu, které si žádá ruční override. Vztah bez
                 // složky je většinou chyba zadání, ale legitimní důvody existují
@@ -266,7 +301,10 @@ final class PayrollRunSnapshotBuilder
                     'employment_without_inputs',
                     'employment',
                     $employmentId,
-                    'Pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                    sprintf(
+                        '%s: pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+                        (string) $row['full_name'],
+                    ),
                     '/payroll/components',
                     true,
                 );
@@ -309,7 +347,11 @@ final class PayrollRunSnapshotBuilder
             ];
             $termSnapshot = null;
             if ($row['term_id'] !== null) {
-                $jmhzCodebooksVerified = $this->jmhzCodebooksVerifiedForPeriod($row, $periodEnd);
+                $jmhzValidationCodebook = $this->jmhzCodebookValidationForPeriod(
+                    $row,
+                    $periodStart,
+                    $periodEnd,
+                );
                 $termSnapshot = [
                     'id' => (int) $row['term_id'],
                     'row_version' => (int) $row['term_row_version'],
@@ -331,7 +373,11 @@ final class PayrollRunSnapshotBuilder
                         $row['jmhz_external_codebook_overlay_key'],
                     'jmhz_external_codebook_manifest_sha256' =>
                         $row['jmhz_external_codebook_manifest_sha256'],
-                    'jmhz_external_codebooks_verified_for_period' => $jmhzCodebooksVerified,
+                    'jmhz_external_codebooks_verified_for_period' => $jmhzValidationCodebook !== null,
+                    'jmhz_validation_external_codebook_overlay_key' =>
+                        $jmhzValidationCodebook['overlay_key'] ?? null,
+                    'jmhz_validation_external_codebook_manifest_sha256' =>
+                        $jmhzValidationCodebook['manifest_sha256'] ?? null,
                     'jmhz_apz_contribution_status' =>
                         (string) $row['jmhz_apz_contribution_status'],
                     'jmhz_apz_instrument_code' => $row['jmhz_apz_instrument_code'],
@@ -339,6 +385,14 @@ final class PayrollRunSnapshotBuilder
                         (string) $row['jmhz_functional_benefits_status'],
                     'jmhz_temporary_assignment_status' =>
                         (string) $row['jmhz_temporary_assignment_status'],
+                    'jmhz_orchard_discount_eligible' =>
+                        (bool) $row['jmhz_orchard_discount_eligible'],
+                    'jmhz_specific_legal_fact_applies' =>
+                        (bool) $row['jmhz_specific_legal_fact_applies'],
+                    'jmhz_ozp_employment_support_applies' =>
+                        (bool) $row['jmhz_ozp_employment_support_applies'],
+                    'jmhz_deep_mining_work_applies' =>
+                        (bool) $row['jmhz_deep_mining_work_applies'],
                     'social_insurance_participation' =>
                         (string) $row['social_insurance_participation'],
                     'health_insurance_participation' =>
@@ -392,10 +446,25 @@ final class PayrollRunSnapshotBuilder
                         : (bool) $row['term_is_primary'],
                 ],
                 'term' => $termSnapshot,
+                'ordinary_evidence_profile' => $row['term_id'] === null
+                    ? null
+                    : [
+                        'source_term_id' => (int) $row['term_id'],
+                        'source_term_row_version' => (int) $row['term_row_version'],
+                        'orchard_discount_eligible' =>
+                            (bool) $row['jmhz_orchard_discount_eligible'],
+                        'specific_legal_fact_applies' =>
+                            (bool) $row['jmhz_specific_legal_fact_applies'],
+                        'ozp_employment_support_applies' =>
+                            (bool) $row['jmhz_ozp_employment_support_applies'],
+                        'deep_mining_work_applies' =>
+                            (bool) $row['jmhz_deep_mining_work_applies'],
+                    ],
                 'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
                 'absences' => $absences,
                 'inputs' => $inputs,
+                'risky_savings_evidence' => $riskySavingsEvidence,
                 'dimensions' => $this->dimensions($dimensionRows[$employmentId] ?? []),
             ];
         }
@@ -432,6 +501,91 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $manifestJson),
             $validations,
         );
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>|null
+     */
+    private function riskySavingsEvidence(array $row): ?array
+    {
+        if ($row['risky_savings_id'] === null) {
+            return null;
+        }
+        return [
+            'id' => (int) $row['risky_savings_id'],
+            'period_start' => (string) $row['risky_savings_period_start'],
+            'revision_no' => (int) $row['risky_savings_revision_no'],
+            'risk_factor' => (string) $row['risky_savings_risk_factor'],
+            'work_category' => (int) $row['risky_savings_work_category'],
+            'qualifying_shift_eighths' =>
+                (int) $row['risky_savings_qualifying_shift_eighths'],
+            'right_claimed_on' =>
+                (string) $row['risky_savings_right_claimed_on'],
+            'employee_informed_on' =>
+                $row['risky_savings_employee_informed_on'],
+            'pension_company' =>
+                (string) $row['risky_savings_pension_company'],
+            'institution_account_id' =>
+                $row['risky_savings_institution_account_id'] === null
+                    ? null
+                    : (int) $row['risky_savings_institution_account_id'],
+            'institution_account_row_version' =>
+                $row['risky_savings_institution_account_row_version'] === null
+                    ? null
+                    : (int) $row['risky_savings_institution_account_row_version'],
+            'institution_account_hash' =>
+                $row['risky_savings_institution_account_hash'],
+            'institution_account_masked' =>
+                $row['risky_savings_institution_account_masked'],
+            'current_institution_account_row_version' =>
+                $row['risky_savings_current_account_row_version'] === null
+                    ? null
+                    : (int) $row['risky_savings_current_account_row_version'],
+            'current_institution_account_hash' =>
+                $row['risky_savings_current_account_hash'],
+            'product_reference' =>
+                (string) $row['risky_savings_product_reference'],
+            'variable_symbol' => $row['risky_savings_variable_symbol'],
+            'specific_symbol' => $row['risky_savings_specific_symbol'],
+            'payment_message' => $row['risky_savings_payment_message'],
+            'evidence_reference' => $row['risky_savings_evidence_reference'],
+            'status' => (string) $row['risky_savings_status'],
+            'row_version' => (int) $row['risky_savings_row_version'],
+            'approved_at' => $row['risky_savings_approved_at'],
+            'approved_by' => $row['risky_savings_approved_by'] === null
+                ? null
+                : (int) $row['risky_savings_approved_by'],
+        ];
+    }
+
+    private function riskySavingsValidationMessage(string $issue): string
+    {
+        return match ($issue) {
+            'risky_savings_evidence_not_approved' =>
+                'Evidence rozhodných směn pro povinné spoření není schválena.',
+            'risky_savings_shift_eighths_invalid' =>
+                'Rozsah rozhodných směn pro povinné spoření není platný.',
+            'risky_savings_claim_date_invalid' =>
+                'Chybí platný den, kdy zaměstnanec uplatnil právo na příspěvek.',
+            'risky_savings_claim_not_effective_for_period' =>
+                'Právo na příspěvek bylo uplatněno až v tomto období; nárok vzniká nejdříve následující měsíc.',
+            'risky_savings_risk_factor_invalid' =>
+                'Chybí zákonný rizikový faktor 3. kategorie pro povinné spoření.',
+            'risky_savings_work_category_invalid' =>
+                'Povinné spoření lze vypočítat jen pro doloženou práci 3. kategorie.',
+            'risky_savings_pension_company_missing' =>
+                'Chybí penzijní společnost pro povinné spoření.',
+            'risky_savings_product_reference_missing' =>
+                'Chybí identifikace produktu povinného spoření.',
+            'risky_savings_payment_target_invalid' =>
+                'Chybí platný ověřený účet penzijní společnosti pro povinné spoření.',
+            'risky_savings_payment_target_changed' =>
+                'Ověřený účet penzijní společnosti se po schválení podkladu změnil. Zkontrolujte účet a schvalte novou revizi evidence.',
+            'risky_savings_employee_not_informed' =>
+                'Není evidováno splnění informační povinnosti vůči zaměstnanci podle § 5 zákona č. 324/2025 Sb.',
+            default => 'Podklady povinného spoření vyžadují kontrolu.',
+        };
     }
 
     /**
@@ -475,8 +629,15 @@ final class PayrollRunSnapshotBuilder
         return $validations;
     }
 
-    /** @param array<string,mixed> $row */
-    private function jmhzCodebooksVerifiedForPeriod(array $row, string $periodEnd): bool
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,string|null>|null
+     */
+    private function jmhzCodebookValidationForPeriod(
+        array $row,
+        string $periodStart,
+        string $periodEnd,
+    ): ?array
     {
         $code = $row['jmhz_workplace_municipality_code'];
         $country = $row['jmhz_workplace_country_code'];
@@ -484,18 +645,28 @@ final class PayrollRunSnapshotBuilder
         $overlayKey = $row['jmhz_external_codebook_overlay_key'];
         $manifestHash = $row['jmhz_external_codebook_manifest_sha256'];
         if (!is_string($code) || !is_string($country) || !is_string($name)
-            || $overlayKey !== JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY
-            || $manifestHash !== JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256
+            || !is_string($overlayKey)
+            || !is_string($manifestHash)
             || $this->jmhzExternalCodebooks === null
+            || !$this->jmhzExternalCodebooks->hasLoadableIdentity($overlayKey, $manifestHash)
         ) {
-            return false;
+            return null;
         }
         try {
+            $startProvenance = $this->jmhzExternalCodebooks->provenanceForDate($periodStart);
+            $endProvenance = $this->jmhzExternalCodebooks->provenanceForDate($periodEnd);
+            if ($startProvenance['overlay_key'] !== $endProvenance['overlay_key']
+                || $startProvenance['manifest_sha256'] !== $endProvenance['manifest_sha256']
+            ) {
+                return null;
+            }
+            $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodStart);
+            $this->jmhzExternalCodebooks->requireCountry($country, $periodStart);
             $this->jmhzExternalCodebooks->requireMunicipality($code, $name, $periodEnd);
             $this->jmhzExternalCodebooks->requireCountry($country, $periodEnd);
-            return true;
+            return $endProvenance;
         } catch (JmhzCodebookUnavailableException|JmhzCodebookValueException) {
-            return false;
+            return null;
         }
     }
 
@@ -588,6 +759,10 @@ final class PayrollRunSnapshotBuilder
                     term.jmhz_apz_instrument_code,
                     term.jmhz_functional_benefits_status,
                     term.jmhz_temporary_assignment_status,
+                    term.jmhz_orchard_discount_eligible,
+                    term.jmhz_specific_legal_fact_applies,
+                    term.jmhz_ozp_employment_support_applies,
+                    term.jmhz_deep_mining_work_applies,
                     term.social_insurance_participation,
                     term.health_insurance_participation,
                     term.tax_regime,
@@ -613,7 +788,46 @@ final class PayrollRunSnapshotBuilder
                     average.status AS average_earning_status,
                     average.ruleset_id AS average_earning_ruleset_id,
                     average.ruleset_hash AS average_earning_ruleset_hash,
-                    HEX(average.input_hash) AS average_earning_input_hash
+                    HEX(average.input_hash) AS average_earning_input_hash,
+                    risky_savings.id AS risky_savings_id,
+                    risky_savings.period_start AS risky_savings_period_start,
+                    risky_savings.revision_no AS risky_savings_revision_no,
+                    risky_savings.risk_factor AS risky_savings_risk_factor,
+                    risky_savings.work_category AS risky_savings_work_category,
+                    risky_savings.qualifying_shift_eighths
+                        AS risky_savings_qualifying_shift_eighths,
+                    risky_savings.right_claimed_on
+                        AS risky_savings_right_claimed_on,
+                    risky_savings.employee_informed_on
+                        AS risky_savings_employee_informed_on,
+                    risky_savings.pension_company
+                        AS risky_savings_pension_company,
+                    risky_savings.institution_account_id
+                        AS risky_savings_institution_account_id,
+                    risky_savings.institution_account_row_version
+                        AS risky_savings_institution_account_row_version,
+                    risky_savings.institution_account_hash
+                        AS risky_savings_institution_account_hash,
+                    risky_savings.institution_account_masked
+                        AS risky_savings_institution_account_masked,
+                    risky_savings_account.row_version
+                        AS risky_savings_current_account_row_version,
+                    LOWER(HEX(risky_savings_account.bank_account_hash))
+                        AS risky_savings_current_account_hash,
+                    risky_savings.product_reference
+                        AS risky_savings_product_reference,
+                    risky_savings.variable_symbol
+                        AS risky_savings_variable_symbol,
+                    risky_savings.specific_symbol
+                        AS risky_savings_specific_symbol,
+                    risky_savings.payment_message
+                        AS risky_savings_payment_message,
+                    risky_savings.evidence_reference
+                        AS risky_savings_evidence_reference,
+                    risky_savings.status AS risky_savings_status,
+                    risky_savings.row_version AS risky_savings_row_version,
+                    risky_savings.approved_at AS risky_savings_approved_at,
+                    risky_savings.approved_by AS risky_savings_approved_by
                FROM effective_employment employment
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
@@ -672,6 +886,25 @@ final class PayrollRunSnapshotBuilder
                               selected_average.id DESC
                      LIMIT 1
                 )
+          LEFT JOIN payroll_risky_savings_evidence risky_savings
+                 ON risky_savings.supplier_id = employment.supplier_id
+                AND risky_savings.employment_id = employment.id
+                AND risky_savings.period_start = ?
+                AND risky_savings.revision_no = (
+                    SELECT MAX(selected_risky_savings.revision_no)
+                      FROM payroll_risky_savings_evidence selected_risky_savings
+                     WHERE selected_risky_savings.supplier_id =
+                           risky_savings.supplier_id
+                       AND selected_risky_savings.employment_id =
+                           risky_savings.employment_id
+                       AND selected_risky_savings.period_start =
+                           risky_savings.period_start
+                )
+          LEFT JOIN payroll_institution_accounts risky_savings_account
+                 ON risky_savings_account.supplier_id =
+                    risky_savings.supplier_id
+                AND risky_savings_account.id =
+                    risky_savings.institution_account_id
               WHERE employment.effective_status IS NOT NULL
                 AND employment.effective_status NOT IN ("archived", "no_show")
                 AND COALESCE(
@@ -707,6 +940,7 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
             $periodEnd,
             $periodEnd,
+            $periodStart,
             $periodStart,
             $periodStart,
             $periodStart,

@@ -437,7 +437,7 @@
         "section_payroll": "Payroll",
         "payroll_overview": "Payroll overview",
         "payroll_runs": "Payroll runs",
-        "payroll_payments": "Payments and settlement",
+        "payroll_payments": "Payroll payment orders",
         "payroll_posting_reconciliation": "Payroll posting reconciliation",
         "payroll_people": "Employees",
         "payroll_quick_inputs": "Quick monthly input",
@@ -806,7 +806,8 @@
             "reason_placeholder": "E.g. amendment No. …/2027 Coll. effective 1 January",
             "read_only_hint": "The rules are shared by every company, so only a superadmin may change them. You have read-only access.",
             "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
-            "degraded": "The stored override is inconsistent, so the calculation runs on the verified built-in set: {reason}",
+            "degraded": "The stored rules override is inconsistent. The calculation therefore uses the verified rules supplied with the application.",
+            "degraded_technical": "Technical details for support",
             "version_count": "Versions: {count}",
             "status": {
                 "ready": "Calculation enabled",
@@ -924,8 +925,8 @@
         "subtitle": "HR and payroll records, monthly runs, documents, payments, automatic posting and statutory submissions.",
         "load_failed": "The payroll module could not be loaded.",
         "payments": {
-            "title": "Payroll and statutory payments",
-            "subtitle": "Immutable liabilities from approved payroll, payment batches and traceable matching of actual payments.",
+            "title": "Payroll payment orders and settlement",
+            "subtitle": "Create ABO or SEPA bank orders from posted payroll and match actual payments after importing a bank statement.",
             "period": "Payroll period",
             "reload": "Reload",
             "materialize": "Prepare liabilities",
@@ -938,9 +939,17 @@
             "readonly_hint": "You have read-only access — liability preparation, payment batches, exports and matching are disabled.",
             "tabs_label": "Payroll payment sections",
             "tabs": {
-                "liabilities": "Liabilities",
-                "batches": "Payment batches",
-                "settlements": "Settlement and matching"
+                "liabilities": "Payments due",
+                "batches": "Payroll payment orders",
+                "settlements": "Payment matching"
+            },
+            "run_shortcut": {
+                "loading": "Opening payments from a payroll run",
+                "loading_hint": "Loading liabilities from the correct payroll period.",
+                "ready": "The run liabilities are ready for a payment order",
+                "ready_hint": "We preselected {count} mutually compatible payments. Check the total and payer account, then create the payroll payment order.",
+                "empty": "There is nothing from this run to add on the displayed page",
+                "empty_hint": "The payments may already be in an earlier order, have a different due date, or be on another page. Check Payroll payment orders and the remaining list pages."
             },
             "total_liabilities": "Total due",
             "total_batched": "Included in batches",
@@ -976,6 +985,7 @@
                 "insolvency": "Insolvency deduction",
                 "benefit": "Benefit",
                 "statutory_insurance": "Statutory insurance",
+                "risky_savings": "Mandatory savings for hazardous work",
                 "other": "Other liability"
             },
             "state": {
@@ -986,10 +996,10 @@
                 "settled": "Settled"
             },
             "batch": {
-                "new_title": "New payment batch",
+                "new_title": "New payroll payment order",
                 "selection_summary": "{count} liabilities selected, totalling {amount}.",
                 "clear_selection": "Clear selection",
-                "export_format": "Batch format",
+                "export_format": "Bank format",
                 "select_format": "Select a format",
                 "payer_account": "Payer account",
                 "select_payer": "Select payer account",
@@ -1001,14 +1011,15 @@
                     "sepa": "SEPA XML for EUR",
                     "manual": "Manual cash payment"
                 },
-                "create": "Create batch",
-                "creating": "Creating…",
-                "created": "The payment batch is ready ({count} items).",
+                "create": "Create payroll payment order",
+                "creating": "Creating order…",
+                "created": "The payroll payment order is ready ({count} items).",
+                "replayed": "This payroll payment order already existed; no duplicate batch was created.",
                 "create_failed": "The payment batch could not be created.",
                 "select_all": "Select or clear compatible liabilities",
                 "select_employee": "Select liability: {name}",
-                "empty": "There are no payment batches for this period yet",
-                "empty_hint": "Select compatible net wages on the Liabilities tab and create a batch.",
+                "empty": "There are no payroll payment orders for this period yet",
+                "empty_hint": "On Payments due, select payments with the same date, currency and payment method, then create a payroll payment order.",
                 "date": "Payment date",
                 "format_label": "Format",
                 "items": "Items",
@@ -1028,13 +1039,31 @@
                 "download_failed": "The payment export could not be downloaded."
             },
             "batches": {
-                "title": "Payment batches",
+                "title": "Payroll payment orders",
                 "foundation": "Batches are archived as immutable revisions with an exact total and a hash of exported bytes. Export is enabled only after a verified payer account and a secure bank format are available."
             },
             "options_failed": "The selection list could not be loaded.",
             "settlements": {
-                "title": "Settlement and matching",
+                "title": "Payment matching",
                 "foundation": "Settlement status is derived only from a bank transaction or a posted cash document; it never overwrites approved payroll or its liability.",
+                "incoming_title": "Confirm an actually received refund",
+                "incoming_hint": "An incoming correction liability does not create an outgoing bank batch. Select it manually and prove that the money was actually received using a bank transaction or a posted cash receipt.",
+                "incoming_liability": "Incoming correction liability",
+                "select_incoming_liability": "Select an unsettled refund",
+                "no_incoming_liabilities": "No unsettled refund",
+                "incoming_evidence_kind": "Where the money was received",
+                "incoming_evidence_bank": "Bank account",
+                "incoming_evidence_cash": "Cash register",
+                "incoming_evidence": "Actual receipt evidence",
+                "select_incoming_evidence": "Select an incoming transaction",
+                "no_incoming_evidence": "No compatible incoming transaction",
+                "incoming_amount": "Amount actually received",
+                "incoming_confirmation": "I confirm that this amount was actually credited to the company's account or received into its cash register.",
+                "incoming_match": "Confirm refund receipt",
+                "incoming_matching": "Confirming receipt…",
+                "incoming_success": "The actually received refund was matched with an audit trail.",
+                "incoming_failed": "The received refund could not be matched.",
+                "no_incoming_compatible_evidence": "There is no unused incoming transaction in the same currency for this refund. Check the selected evidence type or post the evidence first.",
                 "new_match": "Match an actual payment",
                 "new_match_hint": "Select a payment batch item and an unused bank transaction or cash document.",
                 "allocation": "Payment batch item",
@@ -1083,7 +1112,7 @@
             "reload": "Refresh",
             "retry": "Try again",
             "load_failed": "The payroll posting reconciliation could not be loaded.",
-            "detail_hint": "Per-employee detail is available in the payroll run and on the Payments and settlement page for the same period.",
+            "detail_hint": "Per-employee detail is available in the payroll run and on the Payroll payment orders and settlement page for the same period.",
             "hint_tax_evidence": "The company keeps tax records — payroll is not posted to the journal, so the Journal column stays empty.",
             "hint_unposted": "The revision is approved but has not been posted yet (automatic posting is disabled or has not run yet) — the Journal column stays empty.",
             "hint_payments_not_materialized": "Payment liabilities for this period have not been prepared yet — the Payments columns stay empty.",
@@ -1128,8 +1157,13 @@
             }
         },
         "runs": {
+            "person_picker": {
+                "placeholder": "Search for an employee",
+                "no_results": "No employee matches the search.",
+                "count": "no employees | 1 employee | {n} employees"
+            },
             "title": "Payroll runs",
-            "subtitle": "Input locking, immutable calculation, four-eye review and monthly payroll approval.",
+            "subtitle": "Input locking, immutable calculation, professional review and monthly payroll approval by one accountant.",
             "period": "Payroll period",
             "payment_date": "Payment date",
             "payment_date_value": "Payment {date}",
@@ -1147,6 +1181,8 @@
             "save_failed": "Payroll run could not be created.",
             "command_done": "Payroll run status was changed.",
             "command_failed": "Payroll run command failed.",
+            "payments_unsettled": "The run has not actually been paid in full yet. Under Payroll payment orders and settlement, match every amount to a bank transaction or posted cash document and resolve any refunds or reversals.",
+            "incoming_refund_unresolved": "The run is not fully settled and contains at least one incoming correction refund. First match all ordinary outgoing payments under Payroll payment orders and settlement. The incoming refund cannot be added to an outgoing batch, and the current workflow cannot yet link it to the payroll liability without such a batch; do not create a false outgoing payment.",
             "empty": "No payroll run for the selected period",
             "empty_hint": "Check the inputs and create the first run using the button above.",
             "run_label": "Payroll for {period}",
@@ -1157,6 +1193,16 @@
             "enforcement_withheld": "Enforcement withholding and fee",
             "payable_after": "Payable after enforcement",
             "validations": "Run checks",
+            "validation": {
+                "draft_inputs_one": "One employment relationship has unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
+                "draft_inputs_many": "There are {count} employment relationships with unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
+                "enforcement_net_pay_one": "Enforcement withholding cannot yet be calculated for one employee because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholding will then be recalculated automatically.",
+                "enforcement_net_pay_many": "Enforcement withholding cannot yet be calculated for {count} employees because calculated or verified net pay is missing. Complete the statutory payroll calculation first; the withholdings will then be recalculated automatically.",
+                "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then open a new run revision.",
+                "requires_attention": "A check found data that must be completed or reviewed by a person. Open the place to fix it; the technical detail remains in the audit trail.",
+                "and_more": "and {count} more",
+                "open_remediation": "Open the place to fix"
+            },
             "override": {
                 "awaiting": "This warning is waiting for a person. Until someone takes responsibility for it and writes down why, the payroll run cannot be approved.",
                 "grant": "Approve exception",
@@ -1287,6 +1333,28 @@
                 "excluded_components": "Excluded components",
                 "reasons": "Decision reasons: {codes}",
                 "issue": "Finding to review: {code}",
+                "unknown_component": "unspecified component",
+                "reason": {
+                    "inactive_without_attributable_income": "The employment was not active in this month and has no income attributed to it",
+                    "income_month_attribution_unverified": "The month to which the income belongs has not been verified",
+                    "dpp_group_contains_unresolved_relationship": "The group of agreements to complete a job contains an employment with incomplete evidence",
+                    "dpp_group_threshold_met": "Combined income from agreements to complete a job reached the participation threshold",
+                    "dpp_group_below_threshold": "Combined income from agreements to complete a job did not reach the participation threshold",
+                    "regular_relationship": "This is a regular employment relationship participating in insurance",
+                    "agreed_income_threshold_met": "The agreed income reached the participation threshold",
+                    "small_scale_group_contains_unresolved_relationship": "The small-scale employment group contains an employment with incomplete evidence",
+                    "small_scale_group_threshold_met": "Combined small-scale employment income reached the participation threshold",
+                    "small_scale_group_below_threshold": "Combined small-scale employment income did not reach the participation threshold",
+                    "dpc_group_contains_unresolved_relationship": "The group of agreements to perform work contains an employment with incomplete evidence",
+                    "dpc_group_negative_income_requires_period_revision": "Negative combined income from agreements to perform work requires a payroll period correction",
+                    "dpc_group_threshold_met": "Combined income from agreements to perform work reached the participation threshold",
+                    "dpc_group_below_threshold": "Combined income from agreements to perform work did not reach the participation threshold",
+                    "dpp_group_negative_income_requires_period_revision": "Negative combined income from agreements to complete a job requires a payroll period correction",
+                    "dependent_income_relationship": "This employment relationship participates in health insurance",
+                    "participation_component_manual_review": "Insurance participation treatment must be reviewed for payroll component {component}",
+                    "manual_review": "Insurance participation cannot be determined without reviewing the evidence",
+                    "unknown": "The insurance participation calculation requires review of its input evidence"
+                },
                 "health_base": "Assessment base at this employer",
                 "health_minimum": "Minimum assessment base",
                 "health_total_rate": "Total rate",
@@ -1409,6 +1477,7 @@
                 "mark_paid": "Mark as paid",
                 "request_correction": "Request correction",
                 "reopen": "Open correction",
+                "reopen_cancelled": "Start from corrected inputs",
                 "cancel": "Cancel run",
                 "close": "Close"
             },
@@ -1524,6 +1593,51 @@
             "save_blocked_invalid": "Fix the fields marked in red. Saving is blocked while an invalid value remains in the table.",
             "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again."
         },
+        "risky_savings": {
+            "title": "Mandatory savings for hazardous work",
+            "hint": "Record only selected category 3 work covered by Act No. 324/2025. The application calculates {rate}% from the evidenced assessment base and never infers eligibility from the generic hazardous-work flag.",
+            "threshold": "Entitlement from {eighths} shift eighths",
+            "employee": "Employee",
+            "employment": "Employment relationship",
+            "risk_factor_label": "Statutory risk factor (category 3)",
+            "risk_factor": {
+                "vibration": "Vibration",
+                "cold": "Cold",
+                "heat": "Heat",
+                "dynamic_physical_load": "Dynamic physical load involving large muscle groups"
+            },
+            "full_shifts": "Full eight-hour hazardous shifts",
+            "other_hours": "Started hours in shifts of another length",
+            "claimed_on": "Right claimed on",
+            "informed_on": "Employee informed on",
+            "informed_warning": "The date is missing. Calculation remains available, but the payroll run will warn about the outstanding information duty.",
+            "pension_company": "Pension company",
+            "payment_target": "Verified pension company account",
+            "payment_target_help": "The account is taken securely from the encrypted Payroll settings catalogue. Evidence and snapshots keep only its ID, version, hash and mask.",
+            "product_reference": "Product / contract reference",
+            "variable_symbol": "Variable symbol",
+            "specific_symbol": "Specific symbol (optional)",
+            "payment_message": "Payment message (optional)",
+            "evidence_reference": "Evidence reference (optional)",
+            "shift_help": "Qualifying extent: {eighths} shift eighths. For a shift other than 8 hours, every started hour counts as one eighth.",
+            "save_draft": "Save draft",
+            "save_approve": "Approve evidence",
+            "draft_saved": "The evidence draft was saved.",
+            "approved": "The evidence was approved and will enter the frozen payroll run.",
+            "load_failed": "Mandatory savings evidence could not be loaded.",
+            "save_failed": "Mandatory savings evidence could not be saved.",
+            "shifts": "Qualifying shifts",
+            "contribution": "Calculated contribution",
+            "status_label": "Status",
+            "actions": "Actions",
+            "due_on": "Due by {date}",
+            "payment_flow": "After the payroll revision is approved, a liability appears in Payroll payment orders. Payment is confirmed by matching a bank transaction or cash document, not by manually toggling a status.",
+            "status": {
+                "draft": "Evidence draft",
+                "approved": "Approved / awaiting calculation or payment",
+                "paid": "Paid"
+            }
+        },
         "components": {
             "title": "Payroll components and inputs",
             "subtitle": "Calculation component catalogue, recurring assignments, monthly inputs and safe imports with a mandatory preview.",
@@ -1550,7 +1664,11 @@
                 "add": "New component",
                 "new": "New payroll component",
                 "edit": "Edit component version",
-                "saved": "The payroll component was saved."
+                "saved": "The payroll component was saved.",
+                "delete": "Delete",
+                "delete_confirm": "Really delete the unused payroll component “{name}”? If it has already been used in payroll, the application safely refuses the deletion.",
+                "deleted": "The unused payroll component was deleted.",
+                "delete_failed": "The payroll component cannot be deleted. If it has already been used, end its validity or deactivate it."
             },
             "jmhz": {
                 "title": "Map component to JMHZ",
@@ -1584,6 +1702,10 @@
                 "new": "New recurring assignment",
                 "edit": "Edit recurring assignment",
                 "saved": "The recurring assignment was saved.",
+                "delete": "Delete",
+                "delete_confirm": "Really delete the unused “{component}” assignment for {employee}? If it has already created a monthly input, the application safely refuses the deletion.",
+                "deleted": "The unused recurring assignment was deleted.",
+                "delete_failed": "The recurring assignment cannot be deleted. If it has already created a payroll input, end its validity or deactivate it.",
                 "materialize": "Create monthly inputs",
                 "materialized": "Created {created_count}, already existed {replayed_count}, manual review {manual_review_count}.",
                 "materialize_failed": "The recurring assignments could not be materialized."
@@ -1679,6 +1801,7 @@
                 "active": "Active",
                 "status": "Status",
                 "actions": "Actions",
+                "employee": "Employee",
                 "employment": "Employment",
                 "component": "Payroll component",
                 "calculation": "Calculation",
@@ -1796,7 +1919,8 @@
             "batch_no_exits": "No employment ended in the period.",
             "batch_exit_archived": "employment certificate issued",
             "batch_exit_pending": "employment certificate missing, evidence is ready",
-            "batch_exit_blocked": "employment certificate missing and blocked ({code})",
+            "batch_exit_blocked": "employment certificate missing and blocked: {reason}",
+            "batch_exit_employee_unknown": "Employee relationship without an available name",
             "title": "Documents and outputs",
             "subtitle": "Payslips, certificates, payroll sheets and immutable monthly bundles from approved payroll revisions.",
             "period": "Period",
@@ -1804,7 +1928,23 @@
             "tabs_label": "Payroll document type",
             "tabs": {
                 "monthly": "Monthly outputs",
-                "annual": "Annual documents"
+                "annual": "Annual documents",
+                "archive": "Payroll archive"
+            },
+            "period_export": {
+                "title": "Monthly and annual payroll archive",
+                "description": "Download one verifiable ZIP containing payroll snapshots and already archived documents, submissions and protocols for the entire company. No employee list is loaded or selected for this export.",
+                "security_hint": "The archive is built exclusively from approved or superseded frozen revisions. It contains a manifest and SHA-256 checksums; passwords, access tokens, certificates, private keys and arbitrary manual attachments are never included.",
+                "monthly_title": "Single-month archive",
+                "monthly_hint": "Includes every approved revision for the selected month across payroll offices, including correction chains.",
+                "annual_title": "Full-year archive",
+                "annual_hint": "Includes approved payroll months and available immutable annual snapshots and documents.",
+                "download_monthly": "Create and download monthly ZIP",
+                "download_annual": "Create and download annual ZIP",
+                "preparing": "Preparing secure ZIP…",
+                "downloaded": "Archive {filename} was created and handed to your browser.",
+                "failed": "The payroll archive could not be created or downloaded.",
+                "permission_required": "You need payroll document write permission to create an archive."
             },
             "select_employee": "Employee",
             "select_employee_placeholder": "Select an employee…",
@@ -2112,7 +2252,7 @@
             "import": {
                 "button": "Import",
                 "title": "Import time data",
-                "hint": "CSV: employment_code, optional employment_id, starts_at, ends_at, timezone, category, break_minutes and unique external_id. Preview does not write anything.",
+                "hint": "CSV and XLSX: employment_code, optional employment_id, starts_at, ends_at, timezone, category, break_minutes and a unique external_id. Preview writes nothing; only rows shown as valid can be imported.",
                 "drop_hint": "Drop a CSV or XLSX file here, or click to browse",
                 "drop_active": "Release the file to load it",
                 "file_limit": "CSV and XLSX files up to 5 MB are supported.",
@@ -2125,11 +2265,11 @@
                 "apply": "Import valid rows",
                 "summary": "Rows {total_rows}, valid {accepted_rows}, rejected {rejected_rows}, duplicates {duplicate_rows}.",
                 "row_error": "Row {row}: {message}",
-                "xlsx_manual": "XLSX is not automatically supported. Convert it to CSV and run preview again.",
+                "xlsx_security": "XLSX accepts only the first worksheet and static values. For safety, formulas, macros, embedded files, and external links are rejected with a clear explanation.",
                 "preview_failed": "The import preview could not be created.",
                 "saved": "The time import was processed.",
                 "failed": "The time import could not be processed.",
-                "blocked_unsupported": "We cannot import this file format yet. Use a supported format, or enter the records by hand."
+                "blocked_unsupported": "The file did not pass the safety checks. Correct the reported issue and run preview again."
             },
             "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\".",
             "overtime": {
@@ -2254,6 +2394,22 @@
                 "contact": "contact",
                 "identifier": "birth number (or ECP/VCP)",
                 "employment": "employment relationship"
+            },
+            "next_step": {
+                "name": "Next step: add the first and last name.",
+                "residence": "Next step: add the residential address.",
+                "contact": "Next step: add an email address or phone number.",
+                "identifier": "Next step: add the birth number, ECP or VCP.",
+                "employment": "Next step: create an employment relationship.",
+                "ready": "The employee card is ready.",
+                "action": {
+                    "name": "Add name",
+                    "residence": "Add address",
+                    "contact": "Add contact",
+                    "identifier": "Add identifier",
+                    "employment": "Add relationship",
+                    "ready": "Open card"
+                }
             },
             "edit_person": "Edit employee",
             "back_to_list": "Back to the list",
@@ -2478,6 +2634,23 @@
                 "first_name": "First name",
                 "last_name": "Last name",
                 "full_name": "Full name",
+                "registration_identity_title": "Employee registration details",
+                "registration_identity_hint": "Birth details, citizenship and sex for PREZEC/REGZEC. Expand this only on hire or when the record changes.",
+                "registration_identity_filled": "Completed",
+                "registration_identity_empty": "Not completed yet",
+                "registration_identity_effective_hint": "These details are stored in the same historical version and apply from the date above.",
+                "title_prefix": "Title before name",
+                "title_suffix": "Title after name",
+                "birth_date": "Date of birth",
+                "birth_place": "Place of birth",
+                "birth_country": "Country of birth",
+                "citizenship_country": "Citizenship",
+                "sex_label": "Sex for registration",
+                "sex": {
+                    "female": "Female",
+                    "male": "Male",
+                    "unspecified": "Unspecified"
+                },
                 "new_birth_surname": "New birth surname",
                 "effective_from": "Valid from",
                 "effective_to": "Valid to",
@@ -2597,10 +2770,13 @@
             "transition_saved": "The employment status has been changed.",
             "transition_date": "Status change on",
             "effective_from": "Terms effective from",
+            "new_terms_effective_hint": "The latest version is effective from {date}. The new one can start no earlier than {min}.",
             "planned_start": "Planned start",
             "actual_start": "Actual start",
             "fixed_end": "Fixed term until",
             "weekly_hours": "Weekly hours",
+            "leave_entitlement_weeks_override": "Leave allowance exception (weeks)",
+            "leave_entitlement_weeks_override_hint": "Leave blank to inherit the company allowance. The minimum is 4 weeks.",
             "workload_bps": "Workload in hundredths of a percent",
             "contract_signed": "Contract signed",
             "work_place": "Place of work",
@@ -2627,6 +2803,15 @@
                     "no": "No",
                     "yes": "Yes"
                 }
+            },
+            "jmhz_ordinary_profile": {
+                "title": "JMHZ – exceptional situations",
+                "hint": "Most employees need no selection. Mark only a situation that can genuinely apply to this employment; a change is retained as a new effective terms version.",
+                "orchard_discount_eligible": "The orchard or vegetable-growing employee insurance discount may be claimed",
+                "specific_legal_fact_applies": "A specific legal event reportable in JMHZ may occur",
+                "ozp_employment_support_applies": "The employer may claim supported employment funding for a person with a disability",
+                "deep_mining_work_applies": "The work is performed in deep mining",
+                "monthly_hint": "The ordinary monthly flow does not ask these questions again. Monthly details are requested only for a marked exception. Enforcement, insolvency and deduction agreements are taken from their own registers."
             },
             "cz_isco_code": "CZ-ISCO code",
             "cz_isco": {
@@ -2685,13 +2870,40 @@
             "complete": "Complete",
             "confirm_start": "Confirm start on {date}",
             "registered_elsewhere": "Already registered — resolved",
+            "jmhz_identity": {
+                "title": "CSSA identifiers assigned for JMHZ",
+                "summary": "The person's OIC / MPSV ID and the employment ID PPV",
+                "description": "CSSA assigns these identifiers after registration. Test and production values are separate; the application stores them encrypted and only shows a mask after saving.",
+                "environment": "Environment",
+                "on_date": "Show status on",
+                "person_identifier": "Person OIC / MPSV ID",
+                "person_hint": "Exactly 10 digits including the check digit.",
+                "employment_identifier": "Employment ID PPV",
+                "employment_hint": "A numeric identifier of no more than 22 digits.",
+                "valid_from": "Valid from",
+                "source_reference": "Evidence note (optional)",
+                "source_hint": "For example the title or date of the CSSA protocol. An empty field does not block saving.",
+                "confirm": "I confirm that I verified the entered values against CSSA evidence and selected the correct environment.",
+                "complete": "Complete",
+                "incomplete": "Needs completion",
+                "missing": "Missing",
+                "saved": "The JMHZ identifiers were stored securely.",
+                "load_failed": "The JMHZ identifiers could not be loaded.",
+                "save_failed": "The JMHZ identifiers could not be saved.",
+                "start_date_missing": "Enter the employment start date first.",
+                "permission_required": "Saving requires permission to edit both the person and the employment."
+            },
             "openings": {
                 "title": "This employee started before you began running payroll here",
+                "title_new_hire": "Confirm the new employee's opening state",
                 "hint": "Started {start}, payroll runs from {period}. To make the calculation and the annual settlement add up, the totals from the previous processing need to be filled in.",
-                "done": "The totals from the previous processing are filled in — the calculation and the annual settlement use them. You can review or correct them below.",
+                "hint_new_hire": "If there was no earlier payroll for this employee at this company, save an explicit zero opening state below. This does not create fictitious processed months.",
+                "done": "The opening state is confirmed — the calculation and annual settlement use it. You can review or correct it below.",
                 "panel_title": "Opening balances for {year}",
                 "panel_hint": "Totals for the months processed elsewhere. Copy them from the previous system's report; enter amounts in whole currency units.",
-                "nothing_to_fill": "Payroll runs from January, so there is nothing to fill in.",
+                "zero_hint": "If the employee had no payroll with this company in the preceding months, leave every amount at zero and save the form. A source reference is optional.",
+                "new_hire_zero_hint": "This is a new hire with no previous payroll at this company. Save a zero opening state; a source reference is optional.",
+                "nothing_to_fill": "There are no previously processed months. Save the zero opening state below.",
                 "month": "Month",
                 "total": "Total",
                 "source": "Where the figures come from (optional)",
@@ -3062,7 +3274,7 @@
                     "working_pensioner_discount_evidence_unverified": "The working pensioner discount evidence for the month of determination is not verified.",
                     "pension_insurance_period_invalid": "The pension insurance interval does not belong to this relationship or overlaps.",
                     "termination_assessment_incomplete": "The assessment of how the employment ended was not confirmed.",
-                    "unknown": "The check ended with code {code}. Complete the evidence or contact an administrator.",
+                    "unknown": "The check could not be evaluated conclusively. Complete the evidence or contact an administrator.",
                     "employment_not_found": "The employment relationship was not found.",
                     "employment_not_ended": "The employment relationship has no end date yet.",
                     "employment_end_in_future": "The employment end date is in the future.",
@@ -3110,6 +3322,23 @@
                 "employer_window": "Note: this is the first employee. File the employer's own registration no later than {to} — after that date the employer status is presumed by law.",
                 "prepared": "{agenda} is ready to be sent.",
                 "not_sent_yet": "Not sent yet. The employee is registered only once the social security administration confirms it.",
+                "environment_label": "Environment",
+                "environment": {
+                    "test": "Test",
+                    "production": "Production"
+                },
+                "send_test": "Send to test",
+                "send_production": "Send to production",
+                "send_failed": "The registration could not be sent.",
+                "poll": "Fetch result",
+                "poll_failed": "The registration result could not be fetched.",
+                "close": "Close",
+                "close_failed": "The registration dispatch could not be closed.",
+                "closed": "Attempt no. {id} is closed.",
+                "attempt": "Attempt no. {id} · {status}",
+                "awaiting_protocol": "ČSSZ has confirmed receipt, not acceptance. Fetch the result manually; do not close the dispatch until then.",
+                "protocol": "ČSSZ protocol: {status}; errors: {errors}.",
+                "write_required": "Sending, fetching the result and closing require write access to payroll submissions.",
                 "show_xml": "Show XML",
                 "hide_xml": "Hide XML",
                 "copy_xml": "Copy XML",
@@ -3241,6 +3470,39 @@
                     "submission": "Submission no. {id}",
                     "attempts": "Attempts: {total}"
                 },
+                "ready": {
+                    "title": "Prepared submissions are waiting to be sent",
+                    "description": "These exact submissions have already been frozen but have no dispatch attempt yet. Send them directly from here by their submission number — the application will not look up another submission for the same period.",
+                    "submission": "Submission no. {id}",
+                    "corrects": "follows submission no. {id}",
+                    "kind": {
+                        "regular": "Regular report",
+                        "correction": "Amended report",
+                        "cancellation": "Whole-report cancellation"
+                    },
+                    "send_isds": "Send via ISDS",
+                    "send_vrep": "Send via VREP",
+                    "sending": "Preparing dispatch…",
+                    "user_action_note": "Nothing is sent automatically. You start every dispatch with this button; for ISDS you then explicitly confirm sign-in and sending.",
+                    "vrep_started": "Submission no. {id} was handed to the VREP gateway. Follow the result in the history below.",
+                    "isds_queued": "The submission was prepared in the ISDS outbox as message no. {id}.",
+                    "isds_already_queued": "The submission is already in the ISDS outbox as message no. {id}; no duplicate message was created.",
+                    "outbox": "ISDS outgoing message no. {id} is prepared. Your sign-in and confirmation are still required before sending.",
+                    "existing_outbox": "This submission is already in the ISDS outbox as message no. {id} — status: {state}. Another dispatch is blocked to prevent a duplicate.",
+                    "open_outbox": "Open outgoing messages",
+                    "outbox_state": {
+                        "ready": "ready",
+                        "sending": "sending",
+                        "send_uncertain": "dispatch result needs verification",
+                        "sent": "sent",
+                        "delivered": "delivered",
+                        "failed": "dispatch failed",
+                        "cancelled": "cancelled"
+                    },
+                    "continue_isds": "Sign in and send",
+                    "gateway_start_failed": "The message is safely stored in the outbox, but ISDS sign-in could not be started. Open outgoing submissions and try signing in again.",
+                    "dispatch_failed": "The prepared submission could not be handed over for dispatch."
+                },
                 "status": {
                     "prepared": "Ready to send",
                     "sent": "Sent",
@@ -3315,6 +3577,43 @@
                     "already": "A cancellation for this report already exists — it is submission no. {id}.",
                     "failed": "The cancellation could not be prepared.",
                     "unavailable": "Only a report already sent to ČSSZ can be cancelled."
+                },
+                "correction": {
+                    "action": "Correct reported values",
+                    "title": "Content correction for {period}",
+                    "description": "Select the current complete preparation after correcting payroll data. An accepted form is filed again in full with the same identity; a rejected or missing form is added as a new form. Summary and PVPOJ are always checked for everyone in the company.",
+                    "preparation_label": "Current JMHZ preparation",
+                    "preparation_placeholder": "Search by revision, date or period",
+                    "preparation_loading": "Finding eligible current preparations for this submission…",
+                    "preparation_empty": "No complete current preparation is available for the same company, environment, period and payroll run.",
+                    "preparation_no_results": "No preparation matches the search.",
+                    "preparation_option": "Revision {revision} — created {created}",
+                    "preparation_period": "Period {period}",
+                    "preparation_auto": "The only eligible preparation was selected automatically: {preparation}",
+                    "preparation_load_failed": "Eligible current preparations could not be loaded safely.",
+                    "load": "Load form results",
+                    "loading": "Verifying signed protocols and resolving the effective form state…",
+                    "empty": "Enter the current preparation and load form results.",
+                    "search_label": "Find an employment",
+                    "search_placeholder": "Employee name or ČSSZ identifier",
+                    "selection_count": "Selected {selected} of {total}",
+                    "protocol_errors": "The last displayed protocol identified {count} employments with a specific error.",
+                    "select_errors": "Select those flagged by the protocol",
+                    "flagged_by_protocol": "Protocol error",
+                    "no_results": "No employment matches this search.",
+                    "employee_unknown": "Employee name unavailable",
+                    "technical_identity": "ČSSZ: employment {employment} · person {person}",
+                    "action_kind": {
+                        "correct_values": "Correct accepted values",
+                        "complete_form": "Complete rejected/missing form"
+                    },
+                    "impact_confirmation": "I confirm that the current preparation contains complete corrected data. The application will freeze each selected form in full and, when affected, the summary and PVPOJ for everyone; sending remains a separate explicit action.",
+                    "confirm": "Prepare content correction",
+                    "cancel": "Leave it",
+                    "frozen": "The content correction is prepared as submission no. {id}. Review it and send it with a separate action.",
+                    "already": "The same content correction was already frozen — it is submission no. {id}.",
+                    "load_failed": "The effective form state could not be resolved authoritatively.",
+                    "failed": "The content correction could not be prepared."
                 }
             },
             "signing": {
@@ -3467,8 +3766,8 @@
                 "jmhz_preview_people": "People",
                 "jmhz_preview_status": "Output status",
                 "jmhz_preview_only": "Control preview only",
-                "jmhz_evidence_title": "JMHZ ordinary-profile confirmation",
-                "jmhz_evidence_description": "Confirm each legal fact separately for the specific approved revision. The confirmation is immutable and is never inferred from a default or missing data.",
+                "jmhz_evidence_title": "JMHZ legal facts",
+                "jmhz_evidence_description": "Ordinary employments are evidenced automatically from the frozen payroll and effective terms. The payroll accountant handles only recorded exceptions or incomplete sources.",
                 "jmhz_evidence_empty": "There is no approved revision to confirm for the selected period.",
                 "jmhz_evidence_card": "Period {period}, revision {revision}",
                 "jmhz_evidence_confirm_each": "I explicitly confirm that none of the following occurred in the period:",
@@ -3476,6 +3775,15 @@
                 "jmhz_evidence_confirmed": "Legal facts were confirmed immutably",
                 "jmhz_evidence_load_failed": "The legal-fact confirmation could not be loaded.",
                 "jmhz_evidence_save_failed": "The legal-fact confirmation could not be saved.",
+                "jmhz_evidence_automatic_count": "no employment will be evidenced automatically | 1 employment will be evidenced automatically | {n} employments will be evidenced automatically",
+                "jmhz_evidence_confirmed_count": "no employment is frozen | 1 employment is already frozen | {n} employments are already frozen",
+                "jmhz_evidence_all_resolved": "There is no need to review employees individually. Preparation freezes the ordinary state with its source.",
+                "jmhz_evidence_attention_default": "This employment requires monthly exception details.",
+                "jmhz_evidence_attention_action": "Open the place to fix",
+                "jmhz_evidence_attention_run_action": "Open payroll runs",
+                "jmhz_evidence_attention_employment_action": "Open employment",
+                "jmhz_evidence_attention_deductions_action": "Open deductions and enforcement",
+                "jmhz_evidence_technical": "Technical details for support",
                 "jmhz_evidence_facts": {
                     "reportable_wage_deductions_recorded": "No enforcement, insolvency or contractual wage deductions reportable in JMHZ are recorded.",
                     "employee_social_discount_claimed": "The employee does not claim the social-insurance discount for seasonal fruit-growing or vegetable-growing work.",
@@ -3483,13 +3791,41 @@
                     "ozp_employment_support_claimed": "No employment support for persons with disabilities governed by interaction IN28 is claimed.",
                     "deep_mining_work_occurred": "No deep-mining work governed by interaction IN30 was performed."
                 },
-                "jmhz_dry_run_title": "Monthly report dry run",
+                "jmhz_dry_run_title": "JMHZ monthly report test",
                 "jmhz_dry_run_description": "Builds the ordinary monthly report XML from the frozen sources and validates it against the pinned ČSSZ schema. Nothing is sent and no submission is created.",
                 "jmhz_dry_run_empty": "There is no approved revision to dry-run for the selected period.",
                 "jmhz_dry_run_card": "Period {period}, revision {revision}",
                 "jmhz_dry_run_start": "Run dry run",
                 "jmhz_dry_run_valid": "The XML passed the pinned schema {version}.",
-                "jmhz_dry_run_blocked": "The report cannot be built yet; {count} values are not evidenced.",
+                "jmhz_dry_run_blocked": "The report cannot be built yet. There are {count} completion steps below ({records} individual findings).",
+                "jmhz_dry_run_blocker_occurrences": "affects {count} records",
+                "jmhz_dry_run_technical_detail": "Technical details for support",
+                "jmhz_dry_run_attribute_ids": "CSSZ fields: {ids}",
+                "jmhz_dry_run_entity_ids": "Internal records: {ids}",
+                "jmhz_dry_run_actions": {
+                    "employment": "Complete employment",
+                    "person": "Complete employee",
+                    "employee": "Complete employee",
+                    "component": "Configure payroll components",
+                    "office": "Configure payroll office",
+                    "run": "Open payroll run",
+                    "revision": "Open payroll run",
+                    "preparation": "Open payroll run",
+                    "default": "Go to completion",
+                    "multiple": "Open {count} affected records",
+                    "record": "Open record {number}"
+                },
+                "jmhz_dry_run_action_codes": {
+                    "jmhz_attribute_10116_unresolved": "Confirm legal facts",
+                    "jmhz_attribute_10546_unresolved": "Confirm legal facts",
+                    "jmhz_interaction_in13_unresolved": "Confirm legal facts",
+                    "jmhz_interaction_in28_unresolved": "Confirm legal facts",
+                    "jmhz_interaction_in30_unresolved": "Confirm legal facts",
+                    "jmhz_ordinary_evidence_missing": "Confirm legal facts",
+                    "jmhz_average_hourly_earning_missing": "Complete average earnings",
+                    "jmhz_work_month_not_approved": "Approve working time",
+                    "jmhz_scenario1_earnings_vector_incomplete": "Configure payroll components"
+                },
                 "jmhz_dry_run_show_xml": "Show XML",
                 "jmhz_dry_run_hide_xml": "Hide XML",
                 "jmhz_dry_run_copy_xml": "Copy XML",
@@ -3501,7 +3837,7 @@
                 "jmhz_controls_form": "component {ordinal}",
                 "jmhz_deadline": "Submission window: {from} to {to} (shifted to a working day).",
                 "jmhz_controls_deviations": "Deviations from the literal catalogue wording ({count}) — verify against the CSSZ protocol",
-                "jmhz_dry_run_failed": "The monthly report dry run could not be started.",
+                "jmhz_dry_run_failed": "The JMHZ monthly report test could not be started.",
                 "jmhz_dispatch_title": "Freeze and submit JMHZ",
                 "jmhz_dispatch_description": "Choose the transport channel. Both paths first freeze the exact XML data that will be sent. ISDS prepares a data message for CSSA and asks you to sign in and approve it directly in the data box.",
                 "jmhz_dispatch_empty": "Complete an approved payroll revision, the validation preview and the mandatory legal evidence first.",
@@ -3522,8 +3858,25 @@
                 "jmhz_gateway_continue": "Sign in and approve in ISDS",
                 "jmhz_gateway_start_failed": "The data message is queued, but ISDS sign-in could not be started. Continue from the ISDS outbox.",
                 "jmhz_dry_run_blockers": {
+                    "unknown": "Some statutory data required for JMHZ is missing. Open the employment record and complete the highlighted fields.",
+                    "effective_term_missing": "The effective employment terms for this month are missing.",
+                    "component_jmhz_mapping_missing": "A payroll component has not been assigned to a JMHZ category.",
+                    "component_jmhz_manual_review": "A payroll component's JMHZ classification requires manual review.",
+                    "component_jmhz_treatment_invalid": "A payroll component has an invalid JMHZ setting.",
+                    "jmhz_average_hourly_earning_missing": "The verified average hourly earnings are missing.",
+                    "jmhz_identity_incomplete": "Some mandatory employee identification data is missing.",
+                    "jmhz_identity_oic_missing": "The verified CSSZ insured-person identifier is missing.",
+                    "jmhz_scenario_activity_code_missing": "The JMHZ activity type code is missing.",
+                    "jmhz_verified_boolean_missing": "A mandatory yes/no choice has not been confirmed.",
+                    "jmhz_work_month_not_approved": "The month's working time has not been approved.",
+                    "jmhz_workplace_codebooks_unverified": "Verified workplace code-list data is missing.",
                     "jmhz_preparation_not_ready": "The report sources are incomplete.",
                     "jmhz_ordinary_evidence_missing": "The ordinary-profile legal facts are not confirmed.",
+                    "jmhz_attribute_10116_unresolved": "It has not been confirmed whether statutory or contractual wage deductions are reported.",
+                    "jmhz_attribute_10546_unresolved": "It has not been confirmed whether the employee claims the seasonal social-insurance discount.",
+                    "jmhz_interaction_in13_unresolved": "The occurrence of the specific employment legal fact has not been confirmed.",
+                    "jmhz_interaction_in28_unresolved": "Employment support for persons with disabilities has not been confirmed.",
+                    "jmhz_interaction_in30_unresolved": "It has not been confirmed whether the employee performed deep-mining work.",
                     "jmhz_primary_employment_unresolved": "The primary employment relationship is not determined.",
                     "jmhz_taxpayer_declaration_unresolved": "The taxpayer declaration is not evidenced.",
                     "jmhz_scenario1_advance_tax_missing": "The advance tax result is missing.",
@@ -3534,7 +3887,18 @@
                     "jmhz_scenario1_multiple_employments_unsupported": "Multiple employment relationships are not supported by this profile yet.",
                     "jmhz_scenario1_annual_fields_unsupported": "Annual attributes are not supported by this profile yet.",
                     "jmhz_scenario1_pvpoj_unavailable": "The insurance part of the submission is missing.",
+                    "jmhz_scenario1_pvpoj_source_mismatch": "The insurance part does not match the selected CSSZ registration. Refresh the overview and check the payroll-office assignment.",
+                    "jmhz_scenario1_earnings_vector_incomplete": "Payroll components are not fully assigned to the monthly-report fields.",
                     "jmhz_eldp_evidence_missing": "The frozen ELDP evidence is missing.",
+                    "jmhz_eldp_absences_unsupported": "The employee has an absence in this month. Review the ELDP data individually against the working-time records.",
+                    "jmhz_eldp_work_summary_missing": "The approved work summary required for the ELDP data is missing.",
+                    "jmhz_eldp_work_summary_mismatch": "The work summary contains unworked time or another exception requiring an individual ELDP review.",
+                    "jmhz_eldp_relationship_kind_unsupported": "This employment relationship type cannot yet be transferred to the JMHZ ELDP section automatically.",
+                    "jmhz_eldp_ordinary_activity_unsupported": "The employment activity type is outside the supported ordinary ELDP scenario.",
+                    "jmhz_eldp_scenario_unsupported": "The employment relationship is outside the supported ordinary ELDP scenario and requires an individual review.",
+                    "jmhz_eldp_social_relationship_unsupported": "The relationship does not have ordinary social-insurance participation; its ELDP data requires an individual review.",
+                    "jmhz_eldp_capped_base_unsupported": "The assessment base was capped by the annual maximum and the ELDP data requires an individual review.",
+                    "jmhz_eldp_assessment_base_not_whole_czk": "The assessment base cannot be safely converted to whole CZK for ELDP.",
                     "jmhz_work_summary_v2_missing": "The approved monthly work summary is missing.",
                     "jmhz_employer_part_time_discount_unverified": "The part-time employer discount claim is not evidenced.",
                     "jmhz_employer_part_time_discount_outcome_missing": "The assessment of whether the part-time discount is due is missing.",
@@ -3547,7 +3911,7 @@
                 "health_download_failed": "The monthly health-insurer overview could not be downloaded.",
                 "empty": "There are no recorded obligations of this type for the selected period.",
                 "health_title": "Monthly overviews by insurer",
-                "health_description": "Overviews are built only from the current approved immutable revision. They are internal control JSON files, not officially submitted forms.",
+                "health_description": "Overviews are built only from the current approved immutable revision. The application prepares and archives XML or PDF according to the insurer's requirements; sending is a separate action that the user must always confirm.",
                 "health_empty": "No approved revision with calculated health insurance is available for the selected period.",
                 "health_insurer": "Health insurer {code}",
                 "health_people": "People: {count}",
@@ -3609,7 +3973,8 @@
                     "fulfilled": "Fulfilled",
                     "overdue": "Overdue",
                     "cancelled": "Cancelled",
-                    "manual_review": "Manual review"
+                    "manual_review": "Manual review",
+                    "unknown": "Unknown status"
                 },
                 "channel": {
                     "manual_upload": "Manual upload",
@@ -3617,12 +3982,69 @@
                     "vrep_apep": "VREP / APEP",
                     "pikr": "PIKR",
                     "health_portal": "Insurer portal",
-                    "other": "Other channel"
+                    "other": "Other channel",
+                    "unknown": "Other submission method"
                 },
+                "submission_kind": {
+                    "regular": "Regular submission",
+                    "correction": "Corrective submission",
+                    "cancellation": "Submission cancellation",
+                    "unknown": "Unknown submission kind"
+                },
+                "artifact_kind": {
+                    "outbound_xml": "Outbound XML data message",
+                    "outbound_pdf": "Outbound PDF form",
+                    "outbound_zip": "Outbound ZIP package",
+                    "validation_protocol": "Validation protocol",
+                    "receipt_original": "Original receipt or protocol",
+                    "receipt_parsed": "Processed protocol",
+                    "manual_attachment": "Manually attached file",
+                    "unknown": "Other archived file"
+                },
+                "issue_severity": {
+                    "blocker": "Blocking error",
+                    "error": "Error",
+                    "warning": "Warning",
+                    "info": "Information",
+                    "unknown": "Needs review"
+                },
+                "validation_stage": {
+                    "source": "Source data",
+                    "xsd": "XML schema validation",
+                    "catalog": "Codebook validation",
+                    "transport": "Submission transport",
+                    "remote": "Authority response",
+                    "unknown": "Submission check"
+                },
+                "verification_status": {
+                    "unverified": "Unverified protocol",
+                    "trusted": "Verified protocol",
+                    "unknown": "Verification status unknown"
+                },
+                "issue_message": {
+                    "receipt_unverified": "The received protocol could not be verified securely.",
+                    "jmhz_protocol_untrusted": "The CSSA protocol could not be verified securely.",
+                    "jmhz_xsd_validation_failed": "The JMHZ data message failed XML schema validation.",
+                    "zp_xsd_validation_failed": "The health insurance data message failed XML schema validation.",
+                    "eldp_xsd_validation_failed": "The pension insurance record sheet failed XML schema validation.",
+                    "ozuspoj_xsd_validation_failed": "The notice of intent to claim the contribution discount failed XML schema validation.",
+                    "regzel_xsd_validation_failed": "The registration submission failed XML schema validation.",
+                    "registration_xsd_validation_failed": "The registration submission failed XML schema validation.",
+                    "unknown": "The submission needs review. Support details are available below."
+                },
+                "issue_remediation": {
+                    "source": "Correct or complete the agenda source data, then prepare the submission again.",
+                    "xsd": "Prepare the submission again after checking its input data. If the issue persists, provide the technical details to support.",
+                    "catalog": "Check the values against the current codebooks, then prepare the submission again.",
+                    "transport": "Check the submission channel settings and retry the action.",
+                    "remote": "Review the authority protocol, then prepare a correction or contact support as appropriate.",
+                    "unknown": "Review the submission evidence. If the cause is unclear, provide the technical details to support."
+                },
+                "issue_technical": "Technical details for support",
                 "jmhz_evidence_scope": "{name} · employment no. {employment}",
                 "jmhz_evidence_scope_unnamed": "Employment no. {employment}",
-                "jmhz_evidence_pending": "no employment is awaiting confirmation | 1 employment is awaiting confirmation | {n} employments are awaiting confirmation",
-                "jmhz_evidence_no_scopes": "The revision contains no employment to confirm."
+                "jmhz_evidence_pending": "no employment requires attention | 1 employment requires attention | {n} employments require attention",
+                "jmhz_evidence_no_scopes": "The revision contains no employment."
             }
         },
         "eldp": {
@@ -3637,6 +4059,8 @@
             "confirmExcluded": "I confirm the excluded periods derived from the recorded absences.",
             "confirmDeducted": "I confirm there are no deductible periods after retirement age in the reported period.",
             "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
+            "authorityRequestReceivedOn": "Request received on",
+            "authorityRequestReceivedOnHint": "The eight-day deadline starts on this date. For a request made during the year, the sheet ends with the last month whose payroll has already been approved; future months are not required.",
             "noSendNotice": "Preparation stops at the prepared state. A person triggers sending from Submission status; the outgoing ELDP data message is not part of the pinned official schema set yet.",
             "preparedCreated": "The record sheet was built and the submission is ready to be sent.",
             "preparedReplayed": "The record sheet already existed; repeating did not create a second submission.",
@@ -3676,20 +4100,33 @@
             },
             "profile": {
                 "title": "Employer REGZEL profile",
-                "description": "These flags are separate source evidence for REGZELDOPL25. Saving always requires a new explicit confirmation.",
+                "description": "Tax administration codes and status flags are separate source evidence for REGZELDOPL25. Saving always requires a new explicit confirmation.",
                 "load_failed": "The REGZEL profile could not be loaded.",
                 "save_failed": "The REGZEL profile could not be saved.",
                 "saved": "The REGZEL profile and evidence confirmation were saved.",
                 "confirmed": "Evidence confirmed",
                 "not_confirmed": "Evidence not confirmed",
                 "flags_legend": "Recorded employer status",
+                "tax_office_code": "Tax office code for REGZEL",
+                "tax_office_code_hint": "Required four-digit kodFU from the tax office code list. This is neither the three-digit EPO code nor a workplace code.",
+                "tax_office_workplace_code": "Tax office workplace code for REGZEL",
+                "tax_office_workplace_code_hint": "Required four-digit kodPracovisteFU. It may be empty only for the Specialized Tax Office (kodFU 4000).",
+                "tax_office_code_invalid": "Select a valid four-digit REGZEL tax office code. Do not enter an EPO code or a tax office workplace code.",
+                "tax_office_workplace_code_required": "Enter the tax office workplace code. It may be empty only for the Specialized Tax Office (4000).",
+                "tax_office_workplace_code_invalid": "Enter a valid four-digit local workplace code from the tax administration code list.",
+                "tax_office_workplace_code_forbidden": "The Specialized Tax Office (4000) has no local workplace. Leave the workplace code empty.",
+                "tax_office_workplace_code_mismatch": "The local workplace code does not belong to the selected tax office.",
+                "payer_reference_number": "Payer reference number (VCP)",
+                "payer_reference_number_hint": "Optional nine-digit number assigned by the tax authority; it always starts with 6. It is neither the ten-digit variable symbol nor the employer registration number.",
+                "payer_reference_number_invalid": "The REGZEL payer reference number must have nine digits and start with 6.",
+                "use_workplace_suggestion": "Use suggested {code} from company tax settings",
                 "social_enterprise": "Social enterprise",
                 "social_enterprise_hint": "Select only when social-enterprise status is evidenced.",
                 "employment_agency": "Employment agency",
                 "employment_agency_hint": "Select only if the company performs agency employment.",
                 "protected_labor_market": "Protected labour market",
                 "protected_labor_market_hint": "Select only when protected-labour-market recognition is evidenced.",
-                "confirmation": "I confirm that I verified all three flags against the employer's current evidence, including the correctness of unchecked values.",
+                "confirmation": "I confirm that I verified the tax administration codes, any payer reference number and all three flags against the employer's current evidence, including the correctness of unchecked values.",
                 "confirmation_required": "Confirm the complete REGZEL evidence before saving.",
                 "confirmed_at": "Last confirmed",
                 "version": "Evidence version",
@@ -3804,9 +4241,10 @@
                 "rounding_mode": "Balance rounding",
                 "home_office": "Home office",
                 "travel_expenses": "Travel expenses",
+                "leave_entitlement_weeks": "Company leave allowance (weeks)",
+                "leave_entitlement_weeks_hint": "At least 4 weeks; 5 is a common company allowance. An employment-level exception can override it.",
                 "automation": "Automation",
                 "automation_title": "Approval and automated steps",
-                "four_eyes": "Require four-eyes review",
                 "automatic_calculation": "Calculate automatically",
                 "automatic_posting": "Post automatically",
                 "automatic_payments": "Prepare payments automatically",
@@ -3863,10 +4301,6 @@
                     "travel_expense_policy": {
                         "ok": "The travel-expense policy is configured.",
                         "blocked": "Travel expenses require a completed policy."
-                    },
-                    "four_eyes": {
-                        "ok": "Four-eyes review has at least two active approvers.",
-                        "blocked": "Four-eyes review requires at least two active approvers."
                     },
                     "automatic_calculation": {
                         "ok": "Automatic calculation is allowed by policy.",
@@ -4059,6 +4493,7 @@
         "status": {
             "disabled": "Inactive",
             "setup": "Setup in progress",
+            "qualification_required": "Test operation",
             "active": "Active",
             "suspended": "Suspended"
         },
@@ -4072,7 +4507,45 @@
             "disable_confirm": "Cancel payroll setup? No payroll data will be deleted.",
             "disabled": "Payroll setup has been cancelled.",
             "failed": "The payroll activation could not be saved.",
-            "conflict": "Another user changed the settings. The current state has been reloaded."
+            "conflict": "Another user changed the settings. The current state has been reloaded.",
+            "qualification_title": "Payroll is currently in test operation",
+            "qualification_description": "Calculations and test-environment filings remain available. Production filings and payment orders stay safely blocked until two approved parallel months, a correction run, backup recovery and the first production operation plan have been documented.",
+            "qualification_single_accountant": "One accountant can complete the check; the application does not require approval by a second user.",
+            "qualification": {
+                "title": "Complete production qualification",
+                "description": "Select two approved months, an approved correction and one consolidated company protocol from Documents. Production filings and payroll payment orders will then be enabled.",
+                "runs_title": "Verified payroll runs",
+                "first_run": "First parallel month",
+                "second_run": "Second parallel month",
+                "correction_run": "Approved correction run",
+                "choose": "Choose…",
+                "regular_badge": "regular run",
+                "correction_badge": "correction run",
+                "runs_distinct": "Parallel runs must cover two different months.",
+                "runs_missing": "Approve payroll runs for two different months first.",
+                "correction_missing": "Complete and approve at least one correction run first.",
+                "evidence_title": "Company qualification protocol",
+                "evidence_hint": "One consolidated document is enough. It must contain the parallel check, correction, backup recovery and first production operation plan.",
+                "document_search": "Search company documents by name…",
+                "document_bound": "Document to be used: {name}",
+                "hash_server": "The application reads SHA-256 directly from company DMS, stores an immutable link and prevents deletion of the evidence document.",
+                "document_search_failed": "Company documents could not be searched.",
+                "expert_title": "Expert review and recovery",
+                "approver_name": "Person who performed the review",
+                "approver_role": "Role or expertise",
+                "approved_on": "Expert review date",
+                "recovery_on": "Recovery drill date",
+                "operation_title": "Rollback and post-launch monitoring",
+                "rollback_on": "Rollback verification date",
+                "monitoring_on": "Monitoring preparation date",
+                "single_accountant": "One accountant may confirm the entire qualification. No second user or four-eyes rule is required.",
+                "final_warning": "By completing this step you confirm that the selected protocol matches the runs and the company is ready for production filings and payments.",
+                "confirm": "Complete qualification and enable production filings and payroll payments?",
+                "submit": "Enable production operation",
+                "completed": "Production payroll operation has been enabled.",
+                "failed": "Production qualification could not be completed.",
+                "load_failed": "Approved payroll runs could not be loaded."
+            }
         },
         "dashboard": {
             "start_period": "Starting period",
@@ -4120,6 +4593,10 @@
                     "title": "Close attendance",
                     "hint": "Review hours worked and approve the month."
                 },
+                "travel": {
+                    "title": "Record business trips",
+                    "hint": "Complete trips, reimbursements and their monthly inputs before calculation."
+                },
                 "quick_inputs": {
                     "title": "Enter pay and bonuses",
                     "hint": "Base pay, overtime, bonuses — one row per employee."
@@ -4128,8 +4605,12 @@
                     "title": "Calculate the payroll run",
                     "hint": "Lock inputs → calculate → review → approve."
                 },
+                "posting_reconciliation": {
+                    "title": "Post and reconcile",
+                    "hint": "Post the approved revision and reconcile the accounting bridge with the result."
+                },
                 "payments": {
-                    "title": "Post and pay",
+                    "title": "Prepare and make payments",
                     "hint": "Net pay, tax advance and insurance ready for payment."
                 },
                 "documents": {
@@ -4141,6 +4622,14 @@
                     "hint": "Social security and insurer statements, tax office filings, then close the run."
                 }
             }
+        },
+        "person_search": {
+            "placeholder": "Search employees…",
+            "no_results": "No employee matches the search.",
+            "loading": "Searching employees…",
+            "truncated": "Only some matches are shown — narrow your search.",
+            "load_failed": "Employees could not be loaded. Try the search again.",
+            "clear": "Clear employee selection"
         },
         "employee_cards": {
             "title": "Employees",
@@ -4290,16 +4779,47 @@
             "save_failed": "The change could not be saved.",
             "conflict": "Another user changed the case. The current state has been reloaded.",
             "case_created": "The deduction case was created.",
+            "case_deleted": "The accidentally created case was deleted.",
+            "delete_case": "Delete accidentally created case",
+            "delete_confirm": "Delete this case with no claim or downstream records? This action cannot be undone.",
+            "delete_blocked": {
+                "claim_exists": "The case already contains a claim. Keep its history and stop or close the case through the standard workflow.",
+                "event_exists": "The case already has a legally significant status change. Keep its history and use the stop or close workflow.",
+                "document_exists": "The case is already linked to a decision or document. Keep its history and use the stop or close workflow.",
+                "allocation_exists": "The case has already entered a payroll calculation. It cannot be deleted; stop or close it through the standard workflow.",
+                "ledger_exists": "The case already contains a deduction movement. It cannot be deleted; stop or close it through the standard workflow.",
+                "payment_footprint_exists": "The case has already created a payment liability or a downstream payment. It cannot be deleted; close it through the standard workflow.",
+                "case_started": "Only a case in Received — awaiting verification can be deleted. Keep this case in the history and stop it if needed.",
+                "concurrent_footprint_exists": "The case gained a legal, payroll or payment link in the meantime. Refresh the detail and stop or close the case.",
+                "other": "The case already has a legal, payroll or payment link. It cannot be deleted; stop or close it through the standard workflow."
+            },
             "claim_created": "The claim was added.",
+            "claim_updated": "The draft claim was corrected.",
+            "claim_deleted": "The draft claim was deleted.",
+            "claim_not_found": "The claim is no longer in the case. Refresh the detail.",
+            "edit_claim": "Correct draft claim",
+            "save_claim_changes": "Save correction",
+            "delete_claim_confirm": "Do you really want to delete this draft claim? This cannot be undone.",
+            "claim_change_blocked": {
+                "case_started": "A claim can only be corrected or deleted before withholding starts. Keep an active case in the audit history.",
+                "allocation_exists": "The claim has entered a payroll calculation. It cannot be overwritten or deleted; create a follow-up correction.",
+                "ledger_exists": "The claim already has a withholding or holding movement. It must remain in the audit history.",
+                "payroll_result_exists": "The claim has been frozen in a payroll result. It must remain in the audit history.",
+                "payment_footprint_exists": "The claim has created a payment liability or payment. Correct it through the follow-up workflow.",
+                "concurrent_footprint_exists": "The claim gained a payroll, accounting or payment link in the meantime. Refresh the detail.",
+                "case_changed": "The case changed during the correction. Refresh the detail and review its current state.",
+                "other": "The claim has a legal, payroll or payment link and must remain in the history."
+            },
             "dependant_created": "The dependant was added.",
             "evidence_saved": "The evidence verification state was saved.",
             "month_evidence_saved": "The monthly evidence was saved.",
             "month_evidence_load_failed": "The monthly evidence could not be loaded.",
             "transition_saved": "The case status was changed.",
-            "add_case": "New case",
+            "add_case": "New enforcement or agreement",
             "add_claim": "Add claim",
             "employee": "Employee",
             "select_employee": "Select an employee",
+            "all_employees": "All employees",
             "case_kind": "Legal basis",
             "effective_from": "Effective from",
             "status_label": "Status",
@@ -4308,6 +4828,57 @@
             "empty_title": "No deduction cases",
             "empty_description": "Create a case only after the legal document has been received and stored securely.",
             "case_number": "Internal case #{id}",
+            "next_step": "Recommended next step",
+            "show_other_actions": "Other status actions",
+            "hide_other_actions": "Hide other status actions",
+            "other_actions_hint": "Use these actions only when they match a documented decision. The application continues to enforce their legal prerequisites.",
+            "next_steps": {
+                "add_claim": {
+                    "title": "Add the first claim",
+                    "hint": "The case cannot be verified or included in the calculation until the claim amount, category and priority are recorded.",
+                    "action": "Add claim"
+                },
+                "verify_claims": {
+                    "title": "Complete claim verification",
+                    "hint": "For every incomplete claim, verify its legal basis, delivery, priority and maturity. An unverified claim does not enter withholding.",
+                    "action": "Open claims"
+                },
+                "verify_evidence": {
+                    "title": "Verify the case evidence",
+                    "hint": "Confirm the documents are complete in Evidence verification. The recipient may be verified later; until then withheld funds remain safely on hold.",
+                    "action": "Verify evidence"
+                },
+                "start_withholding": {
+                    "title": "Start withholding",
+                    "hint": "The claims and evidence are ready. Select a verified decision; funds remain on hold until the recipient is authorized.",
+                    "action": "Start withholding"
+                },
+                "verify_recipient": {
+                    "title": "Verify the recipient and account",
+                    "hint": "Withholding is active, but funds remain on hold. Select an account from the catalogue and confirm the recipient verification.",
+                    "action": "Verify recipient"
+                },
+                "authorize_remittance": {
+                    "title": "Authorize remittance to the recipient",
+                    "hint": "The recipient and account are verified. Support the authorization with a decision; only then are payment liabilities created.",
+                    "action": "Authorize remittance"
+                },
+                "monthly_check": {
+                    "title": "The case is ready for monthly payroll",
+                    "hint": "In an ordinary month, check only the details marked as relevant below. Open court and insolvency exceptions only when something changes.",
+                    "action": "Check month"
+                },
+                "resume_when_ready": {
+                    "title": "The case is deferred",
+                    "hint": "Once a documented reason to continue occurs, use the other status actions to resume holding or remittance.",
+                    "action": "Resume case"
+                },
+                "closed": {
+                    "title": "The case is closed",
+                    "hint": "The history, movements and supporting decisions remain available for review. No monthly details are added to a closed case.",
+                    "action": "Show history"
+                }
+            },
             "evidence_title": "Evidence verification",
             "evidence_hint": "Activation and remittance stay blocked until the required facts are verified.",
             "evidence_complete": "Evidence is complete and verified",
@@ -4334,8 +4905,22 @@
             "no_ledger": "Movements are created by the payroll period calculation.",
             "month_evidence_title": "Monthly calculation evidence",
             "month_evidence_hint": "Evidence is versioned by employee and period; incomplete verification forces manual review.",
+            "monthly_routine_title": "Ordinary monthly check",
+            "monthly_routine_hint": "Confirm only the items that actually apply in this month. The application disables irrelevant items and explains why.",
+            "monthly_exceptions": {
+                "title": "Court, insolvency and other exceptions",
+                "summary_active": "Special details are stored for this period. Expand and review them before saving.",
+                "summary_empty": "No special details. Open this section only for multiple payers, pension, insolvency or a court decision.",
+                "show": "Review exceptions",
+                "hide": "Hide exceptions",
+                "hint": "These details change the protected amount or debt-relief mode. Enter them only when supported by evidence."
+            },
             "period": "Period",
             "dependants_title": "Dependants",
+            "dependants_summary": "Recorded persons: {count}. An ordinary month does not ask for their list again.",
+            "manage_dependants": "Manage persons",
+            "hide_dependants": "Hide persons",
+            "dependants_hint": "Change the list only when eligibility starts, ends or is verified. Its validity is applied automatically to the corresponding months.",
             "dependant_type": "Person type",
             "valid_from": "Valid from",
             "valid_to": "Valid to",
@@ -4364,13 +4949,19 @@
                 "protected_override_czk": "Court-determined protected amount (CZK)",
                 "protected_override_verified": "The protected amount is verified",
                 "insolvency_mode": "Insolvency mode",
-                "insolvency_none": "No approved debt relief",
-                "insolvency_alert": "Insolvency alert only",
-                "insolvency_standard": "Approved standard debt relief",
-                "insolvency_court": "Court-determined amount",
+                "insolvency_none": "Debt relief does not apply this month",
+                "insolvency_alert": "Record an alert only",
+                "insolvency_standard": "Approved debt relief — withhold and hold",
+                "insolvency_court": "Individual court-determined amount",
+                "insolvency_impact": {
+                    "none": "No insolvency exception. The calculation follows the employee's ordinary evidence.",
+                    "alert_only": "The alert is recorded only. Payroll requires manual review and does not automatically remit an insolvency amount.",
+                    "approved_standard": "The deduction is calculated under the debt-relief regime but remains on hold for now. Payment to the insolvency administrator must be made and documented manually.",
+                    "court_determined_amount": "The amount is recorded only. Payroll requires manual review and does not apply or remit it automatically."
+                },
                 "court_amount_czk": "Court-determined amount (CZK)",
                 "insolvency_decision": "The insolvency decision is verified",
-                "insolvency_recipient": "The insolvency recipient is verified"
+                "insolvency_recipient": "The recipient was checked against the evidence (this does not replace the payment account or decision)"
             },
             "kinds": {
                 "enforcement": "Statutory deduction / enforcement",
@@ -4448,7 +5039,7 @@
                 "amount": "Enter a non-negative amount with no more than two decimal places."
             },
             "load_failed_hint": "Enforcements and insolvencies did not load. An empty list right now does not mean there are none — please try again.",
-            "support_failed": "Employees and recipient accounts could not be loaded, so the selection below stayed empty. This is not a configuration problem — try loading again.",
+            "support_failed": "Recipient accounts could not be loaded, so their selection stayed empty. This is not a configuration problem — try loading again.",
             "transition_blocked_document": "Pick the document the transition rests on. Without it the case would lack any trace of where the change came from.",
             "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped."
         },
@@ -4684,7 +5275,7 @@
         },
         "health_notifications": {
             "title": "Health insurer notification duty",
-            "subtitle": "What has to be reported for the period, to whom and by when. The application builds the file and validates it against the pinned XSD; sending it is up to the accountant — none of the seven insurers documents a transport channel.",
+            "subtitle": "HOZ: the application evaluates deadlines and records obligations for manual completion, but does not yet build or send the notification itself. PPZ: it creates XML and PDF from an approved revision and can place a documented attachment format into the ISDS outbox. The user always confirms the actual send.",
             "load_failed": "The notification duty overview could not be loaded.",
             "stale": "The data shown comes from the last successful load. {message}",
             "read_only": "Building a submission requires write access to payroll submissions.",
@@ -4695,12 +5286,24 @@
             "code_undocumented": "Code undocumented",
             "source_unverified": "Source: insurer publication, not statute text",
             "data_box": "Data box: {id}",
+            "isds_xml_supported": "XML can be prepared for ISDS",
+            "isds_pdf_supported": "Extractable PDF can be prepared for ISDS",
+            "alternative_route": "ISDS attachment format undocumented",
             "limits": {
-                "title": "What this module cannot do",
-                "no_transport": "The application does NOT send submissions. None of the seven insurers publishes a transport envelope — no endpoint, MIME type, attachment name or response format. Sending to a guessed target could at worst mean a missed deadline nobody notices.",
-                "manual_delivery": "The documented route is to download the file and file it manually: via data box or by uploading it to the insurer portal. Links and data box IDs are listed per insurer below.",
+                "title": "Electronic filing options",
+                "no_transport": "Only PPZ can be placed into the ISDS outbox, and only where the attachment format is documented — shared XML or extractable PDF. The user always explicitly confirms the send.",
+                "manual_delivery": "The application does not yet build or send HOZ. It only records the obligation and deadline; prepare and file the notification manually, then confirm completion in the obligation inbox.",
                 "undocumented_codes": "For these duty kinds the pinned schema does not determine a single change code, so none is issued at all: {kinds}. Guessing one would mean filing a record with a code that follows from nothing.",
                 "capability_failed": "The insurer channel list could not be loaded. The limits above still apply — they did not disappear, only their detail is missing."
+            },
+            "hoz_sync": {
+                "title": "HOZ obligation records",
+                "description": "Synchronization checks every employer obligation in the selected month and idempotently records it in the obligation inbox. It creates no HOZ file and sends nothing; after manual filing, confirm completion in the inbox.",
+                "action": "Synchronize HOZ obligations",
+                "wait_for_load": "The selected period must load first.",
+                "done": "{count} obligations are synchronized to the inbox. The HOZ itself was neither built nor sent.",
+                "partial_failed": "Some obligations could not be synchronized ({failed}). Successful records were kept; run synchronization again.",
+                "failed": "HOZ obligations could not be synchronized."
             },
             "reason": {
                 "zp_transport_envelope_undocumented": "The transport envelope is not publicly documented.",
@@ -4745,7 +5348,9 @@
                 "none": "Does not run for the employer"
             },
             "state": {
-                "manual_only": "For manual filing"
+                "needs_sync": "Evaluated; synchronize to inbox",
+                "obligation_registered": "In inbox; file HOZ manually",
+                "insured_reports": "Reported by the insured person"
             },
             "kind": {
                 "employment_start": "Employment start",
@@ -4759,7 +5364,7 @@
             },
             "prepare": {
                 "title": "Build the contribution payment overview",
-                "description": "Freezes the payment overview for an approved revision into a submittable form and validates it against the pinned XSD. It does not send — the result is a downloadable file.",
+                "description": "Freezes the payment overview for an approved revision, creates both shared XML and text-extractable PDF, and validates the XML against the pinned XSD. The documented attachment format is selected per insurer for ISDS.",
                 "action": "Build record",
                 "revision": "Approved revision",
                 "revision_placeholder": "Pick a revision",
@@ -4776,10 +5381,22 @@
                 "period": "Period",
                 "due_on": "Deadline",
                 "fingerprint": "File fingerprint",
-                "download": "Download XML",
+                "download": "Download attachment",
                 "downloading": "Downloading…",
                 "download_failed": "The artifact could not be downloaded.",
                 "artifact_missing": "No downloadable file is stored for this submission.",
+                "isds_action": "Prepare for ISDS",
+                "isds_preparing": "Preparing…",
+                "isds_ready": "The submission is ready in the ISDS outbox. It has not been sent yet.",
+                "isds_already_ready": "This submission is already in the ISDS outbox; no duplicate message was created.",
+                "isds_recipient": "Recipient: {name}, data box ID {id}.",
+                "open_outbox": "Open the outbox and confirm sending",
+                "gateway_title": "Before leaving for ISDS",
+                "gateway_credentials": "Choose the sign-in method and any additional verification on the official ISDS page. MyÚčto neither sees nor stores the credentials.",
+                "gateway_continue": "Continue to ISDS and confirm sending",
+                "gateway_failed": "The submission is in the outbox, but ISDS sign-in could not be started. Retry from the outbox.",
+                "isds_unavailable": "A documented attachment format and data box ID are not both available for this insurer. Download the attachment and verify the filing route with the insurer.",
+                "isds_failed": "The submission could not be placed into the ISDS outbox.",
                 "failed": "The record could not be built."
             }
         },
@@ -15982,6 +16599,7 @@
             "edit": "Edit business trip"
         },
         "form": {
+            "employee": "Employee",
             "employment": "Employment relation",
             "select": "Select an employment relation",
             "settlement_period": "Settlement period",
@@ -16073,6 +16691,7 @@
             "no_employments_message": "Absences, average earnings and the leave ledger are all tracked per employment. Create an employee and their employment in People, then come back here.",
             "no_employments_cta": "Go to People"
         },
+        "employee": "Employee",
         "employment": "Employment",
         "from": "From",
         "to": "To",
@@ -16157,6 +16776,30 @@
         "leave": {
             "balance": "Leave balance (h:mm)",
             "year": "Year",
+            "automatic_title": "Bulk calculation from verified evidence",
+            "automatic_hint": "Loads the effective company allowance, any relationship exception, agreed weekly time and approved attendance through {through}. Nothing is posted until you select it.",
+            "automatic_load_failed": "The evidence for automatic leave calculation could not be loaded.",
+            "automatic_empty": "There are no employment relationships for this year.",
+            "select_ready": "Select ready on this page",
+            "calculate_selected": "Calculate selected ({count})",
+            "automatic_created": "Entitlement was posted for {count} employment relationships.",
+            "automatic_summary": "Week {hours} · allowance {weeks} weeks · qualifying {worked}",
+            "ready": "Ready",
+            "needs_attention": "Complete",
+            "manual_tools": "Manual calculation and adjustments",
+            "manual_tools_hint": "Use only for exceptions that cannot be derived safely from stored evidence.",
+            "blockers": {
+                "employment_terms_missing": "Effective contractual terms are missing",
+                "employer_leave_policy_missing": "An effective company policy is missing",
+                "weekly_working_time_missing": "Agreed weekly working time is missing",
+                "weekly_working_time_changed": "Weekly working time changed during the year; manual assessment is required",
+                "leave_allowance_changed": "The leave allowance changed during the year; manual assessment is required",
+                "approved_time_month_missing": "An approved attendance month is missing",
+                "absence_legal_assessment_required": "Another approved absence requires manual assessment of qualifying time",
+                "absence_time_month_missing": "An absence overlaps an unapproved attendance month",
+                "worked_equivalent_time_missing": "Approved qualifying time is missing",
+                "entitlement_already_exists": "An entitlement already exists for this year; automation will not overwrite it"
+            },
             "entitlement": "Entitlement calculation",
             "weekly_minutes": "Weekly working time (hours)",
             "weeks": "Leave allowance (weeks)",
@@ -16555,7 +17198,7 @@
             "gatewayDescription": "For every dispatch, MyÚčto redirects you to the official ISDS sign-in page. You choose the sign-in method there from the options enabled for your account.",
             "gatewayBoundary": "MyÚčto never sees or stores your username, password, security code or Mobile Key.",
             "gatewayAvailable": "The sending gateway is ready for the selected environment.",
-            "gatewayUnavailable": "The sending gateway is not active for the selected environment yet; manual dispatch and the system certificate remain available.",
+            "gatewayUnavailable": "The sending gateway is a separate outgoing-only service and the operator has not activated it for this environment yet. Incoming messages can be fetched independently on the Incoming messages tab.",
             "methods": {
                 "password": "Username and password",
                 "mobileKey": "Mobile eGovernment Key (app PIN/password and confirmation in the key)",
@@ -16567,6 +17210,12 @@
             "certificateTitle": "Company system certificate",
             "certificateDescription": "The stored system certificate is used for direct server operations on this company's data box, especially manually requested collection of incoming messages.",
             "certificateRecommendedByIsds": "The ISDS operating rules recommend this method for third-party applications. The certificate and its password are stored encrypted.",
+            "inboxLoginTitle": "Sign-in for incoming messages",
+            "inboxLoginDescription": "Choose an access method when you manually fetch messages. The sending gateway is unrelated to this operation.",
+            "inboxMobileKey": "Mobile Key: username + communication code (app password), followed by confirmation of each session in the key. This personal access can be stored encrypted for you and the selected company.",
+            "inboxPassword": "Username + password: used once for a single request; if SMS authentication is enabled on the account, you enter the code in the second step.",
+            "inboxCertificate": "System certificate: encrypted and stored for the currently selected company.",
+            "inboxLoginBoundary": "A regular password is not stored in a profile. During the SMS step it remains for at most a few minutes in a one-time encrypted flow; it is erased after use and cannot be used after expiry. The SMS code is not stored. At your request, the Mobile Key username and communication code can be stored encrypted only for the company + user combination. The mailbox is never fetched automatically.",
             "certificateSettings": "System certificate settings",
             "certificateOnly": "This setting applies only to the currently selected company. Interactive sign-in for dispatch takes place separately in ISDS.",
             "label": "Label",
@@ -16686,8 +17335,49 @@
             "empty": "No downloaded messages.",
             "poll": "Fetch new messages",
             "polled": "New messages downloaded: {count}",
+            "polledWithErrors": "Messages downloaded: {stored}. Downloading or storing failed for {failed} messages; the fetch is incomplete and must be repeated.",
             "manualOnly": "The mailbox is never collected automatically. You must start and confirm every fetch.",
             "pollConfirm": "Fetch new messages from the data box now? Fetching may count as delivery and start statutory deadlines.",
+            "authTitle": "How do you want to sign in for this fetch?",
+            "authIntro": "You start every fetch manually. Mobile Key access can be remembered personally for this company; a regular password and SMS code remain one-time credentials.",
+            "auth": {
+                "mobile_key": {
+                    "title": "Mobile eGovernment Key",
+                    "description": "Recommended: enter your username and app password, then confirm this session in Mobile Key."
+                },
+                "password": {
+                    "title": "Username and password",
+                    "description": "For an account without a second factor. The MyÚčto server receives the password only for the fetch you just started, passes it to ISDS, and does not store it."
+                },
+                "sms": {
+                    "title": "Username, password and SMS code",
+                    "description": "MyÚčto first asks ISDS to send an SMS. Between the two steps it keeps the password only in a short-lived encrypted one-time flow; it is erased after use and cannot be used after expiry."
+                },
+                "certificate": {
+                    "title": "Company system certificate",
+                    "description": "Uses the encrypted certificate stored on the Access tab."
+                }
+            },
+            "username": "ISDS username",
+            "password": "ISDS password",
+            "communicationCode": "Communication code / app password",
+            "communicationCodeHint": "A separate code configured for external application access; you then confirm this session in Mobile Key.",
+            "savedCommunicationCodePlaceholder": "The saved code will be used; a new one replaces it",
+            "rememberMobileCredential": "Store encrypted for this company and my user account",
+            "mobileCredentialSaved": "Stored personally for account {username}.",
+            "forgetMobileCredential": "Forget stored access",
+            "mobileCredentialDeleted": "The stored personal Mobile Key access was removed.",
+            "smsCode": "One-time code from SMS",
+            "smsCodeRequired": "Enter the one-time code from SMS.",
+            "sendSms": "Send SMS code",
+            "confirmSmsAndFetch": "Verify SMS and fetch once",
+            "requestNewSms": "Request a new SMS code",
+            "startMobileKey": "Request Mobile Key confirmation",
+            "fetchOnce": "Sign in and fetch once",
+            "certificateMissing": "No system certificate is stored for this company and environment.",
+            "usernameRequired": "Enter your ISDS username.",
+            "passwordRequired": "Enter your ISDS password.",
+            "communicationCodeRequired": "Enter the communication code (app password).",
             "subject": "Subject",
             "sender": "Sender",
             "classification": "Classification",
@@ -16697,7 +17387,14 @@
         },
         "recipients": {
             "addTitle": "Add recipient",
+            "editTitle": "Edit company recipient",
+            "overrideTitle": "Override the default recipient for this company",
+            "overrideForCompany": "Override for company",
+            "overrideHint": "Saving creates a company-specific record that takes precedence over the system default. Deleting the company record restores the current default.",
+            "newRecord": "New record",
             "name": "Name",
+            "businessId": "Business ID",
+            "address": "Registered office",
             "kind": "Kind",
             "boxId": "Data box ID",
             "code": "Code",
@@ -16707,7 +17404,7 @@
             "noBoxId": "ID not filled in",
             "sourceHint": "Optionally state where you obtained the data box ID.",
             "missingBoxIds": "Records without a data box ID: {count}. Until you fill the ID in, no filing can be sent to them.",
-            "taxOfficeHint": "Tax offices are not pre-filled — we have no documented data box IDs for them and we do not guess. Fill them in from the tax administration list. A filing goes to the locally competent tax administrator, that is to the regional tax office mailbox, not to a local branch."
+            "taxOfficeHint": "All seven health insurers are pre-filled from the official VZP codebook. A company can override a default value. Tax offices are not pre-filled; add the locally competent recipient from the tax administration list."
         },
         "errors": {
             "certificateRequired": "Please upload the system certificate file (PFX or P12)."

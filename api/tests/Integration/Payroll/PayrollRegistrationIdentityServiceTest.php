@@ -351,6 +351,89 @@ final class PayrollRegistrationIdentityServiceTest extends TestCase
         );
     }
 
+    public function testManualJmhzIdentityIsAtomicAndUiStatusStaysMasked(): void
+    {
+        $assigned = $this->service->assignManualJmhzIdentity(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '100 000 000 1',
+            '200000000000000000002',
+            '2026-08-01',
+            null,
+            true,
+            null,
+        );
+
+        self::assertTrue($assigned['person_external_identifier']['created']);
+        self::assertTrue($assigned['employment_external_identifier']['created']);
+
+        $status = $this->service->jmhzIdentityStatusAt(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '2026-08-04',
+        );
+        self::assertSame($this->employeeId, $status['employee_id']);
+        self::assertSame($this->employmentId, $status['employment_id']);
+        self::assertSame('test', $status['environment']);
+        self::assertSame('2026-08-04', $status['on_date']);
+        self::assertNotNull($status['person_external_identifier']);
+        self::assertNotNull($status['employment_external_identifier']);
+        self::assertArrayNotHasKey('value', $status['person_external_identifier']);
+        self::assertArrayNotHasKey('value', $status['employment_external_identifier']);
+        self::assertStringNotContainsString(
+            '1000000001',
+            json_encode($status, JSON_THROW_ON_ERROR),
+        );
+        self::assertStringNotContainsString(
+            '200000000000000000002',
+            json_encode($status, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    public function testManualJmhzIdentityValidatesPairBeforeWriteAndChecksTenant(): void
+    {
+        try {
+            $this->service->assignManualJmhzIdentity(
+                $this->supplierId,
+                $this->employmentId,
+                'test',
+                '1000000001',
+                'ID-PPV-NENI-CISLO',
+                '2026-08-01',
+                null,
+                true,
+                null,
+            );
+            self::fail('Neplatné ID PPV musí vrátit celou dvojici identifikátorů.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertStringContainsString('ID PPV', $exception->getMessage());
+        }
+
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM payroll_person_external_ids
+              WHERE supplier_id = ' . $this->supplierId,
+        )->fetchColumn());
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM payroll_employment_external_ids
+              WHERE supplier_id = ' . $this->supplierId,
+        )->fetchColumn());
+
+        $this->expectException(\OutOfBoundsException::class);
+        $this->service->assignManualJmhzIdentity(
+            $this->otherSupplierId,
+            $this->employmentId,
+            'test',
+            '1000000001',
+            '200000000000000000002',
+            '2026-08-01',
+            null,
+            true,
+            null,
+        );
+    }
+
     public function testExternalIdentifierReplayAndEnvironmentAreImmutable(): void
     {
         $person = $this->service->assignPersonExternalId(

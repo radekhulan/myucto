@@ -159,12 +159,99 @@ final class PayrollOpeningBalanceServiceTest extends TestCase
             ['values']['assessment_base_minor_units']);
     }
 
-    public function testRejectsEmptyInputAndMoreMonthsThanCanPrecedeTheFirstPeriod(): void
+    /** Nový zaměstnanec nemá předchozí měsíce, ale nulový počátek musí potvrdit. */
+    public function testExplicitZeroOpeningUnblocksNewEmployee(): void
+    {
+        $saved = $this->service->save(
+            $this->supplierId, $this->employeeId, 2026, [], '', null,
+        );
+
+        self::assertSame([], $saved['months']);
+        self::assertNotNull($saved['openings']['social_insurance']);
+        self::assertNotNull($saved['openings']['income_tax']);
+        self::assertSame(0, $this->accumulators
+            ->stateBeforePeriod(
+                $this->supplierId,
+                $this->employeeId,
+                2026,
+                '2026-08-01',
+                'income_tax',
+            )['totals']['completed_months']);
+    }
+
+    public function testOpeningStartsWithEmploymentMonthAndCountsOnlyWorkedMonths(): void
+    {
+        $saved = $this->service->save(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            [
+                $this->month(3, 100, 100),
+                $this->month(4, 100, 100),
+                $this->month(5, 100, 100),
+                $this->month(6, 100, 100),
+                $this->month(7, 100, 100),
+            ],
+            '',
+            null,
+        );
+
+        self::assertSame([3, 4, 5, 6, 7], array_column($saved['months'], 'month'));
+        self::assertSame(5, $this->accumulators
+            ->stateBeforePeriod(
+                $this->supplierId,
+                $this->employeeId,
+                2026,
+                '2026-08-01',
+                'income_tax',
+            )['totals']['completed_months']);
+    }
+
+    public function testRejectsGapInsideOpeningMonthInterval(): void
     {
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('souvislou řadu');
         $this->service->save(
-            $this->supplierId, $this->employeeId, 2026, [], 'Sestava', null,
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            [$this->month(3, 100, 100), $this->month(5, 100, 100)],
+            '',
+            null,
         );
+    }
+
+    public function testBothAccumulatorKindsRollBackWhenSecondWriteFails(): void
+    {
+        $month = $this->month(3, 100, 100);
+        $month['advance_base_minor_units'] = -1;
+
+        try {
+            $this->service->save(
+                $this->supplierId,
+                $this->employeeId,
+                2026,
+                [$month],
+                '',
+                null,
+            );
+            self::fail('Neplatná daňová kumulace musí shodit oba openingy.');
+        } catch (\InvalidArgumentException) {
+            self::addToAssertionCount(1);
+        }
+
+        self::assertNull($this->accumulators->openingBalance(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            'social_insurance',
+        ));
+        self::assertNull($this->accumulators->openingBalance(
+            $this->supplierId,
+            $this->employeeId,
+            2026,
+            'income_tax',
+        ));
     }
 
     public function testRejectsTwelveMonthsBecauseOpeningCoversOnlyPrecedingMonths(): void

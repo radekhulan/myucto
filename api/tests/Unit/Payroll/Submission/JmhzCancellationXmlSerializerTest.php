@@ -112,6 +112,27 @@ final class JmhzCancellationXmlSerializerTest extends TestCase
         self::assertSame(2026, $request->year);
     }
 
+    public function testCancellationOfTransitionMonthsIsAlwaysRefused(): void
+    {
+        foreach ([1, 2, 3] as $month) {
+            try {
+                JmhzCancellationRequest::create(
+                    self::REGULAR_GUID,
+                    '1234567890',
+                    2026,
+                    $month,
+                    today: '2026-05-15',
+                );
+                self::fail("Storno za {$month}/2026 musí být odmítnuto.");
+            } catch (JmhzXmlException $exception) {
+                self::assertSame(
+                    'jmhz_cancellation_transition_period_forbidden',
+                    $exception->validationCode,
+                );
+            }
+        }
+    }
+
     public function testInvalidVariableSymbolIsRefused(): void
     {
         $this->expectException(JmhzXmlException::class);

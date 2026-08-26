@@ -181,6 +181,83 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         );
     }
 
+    public function testMandatoryRiskySavingsOverridesIncreasedEmployerRate(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $relationship = &$snapshot['people'][0]['employments'][0];
+        $relationship['term']['social_employer_rate_category'] = 'risk_employment';
+        $relationship['term']['social_employer_rate_category_evidence'] =
+            'synthetic-risk-category';
+        $relationship['risky_savings_evidence'] = [
+            'id' => 91,
+            'status' => 'approved',
+            'risk_factor' => 'vibration',
+            'work_category' => 3,
+            'qualifying_shift_eighths' => 24,
+            'right_claimed_on' => '2026-05-31',
+            'employee_informed_on' => '2026-05-01',
+            'pension_company' => 'Testovací penzijní společnost',
+            'product_reference' => 'SYNTHETIC-PRODUCT',
+            'institution_account_id' => 44,
+            'institution_account_row_version' => 2,
+            'institution_account_hash' => str_repeat('a', 64),
+            'institution_account_masked' => '******0005 / 0100',
+            'variable_symbol' => '123456',
+            'specific_symbol' => null,
+        ];
+        unset($relationship);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        $socialRelationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(
+            SocialEmployerRateCategory::Ordinary,
+            $socialRelationship?->employerRateCategory,
+        );
+        self::assertNull($socialRelationship?->employerRateCategoryEvidenceReference);
+    }
+
+    public function testClaimMadeInCurrentMonthKeepsRiskEmployerRateUntilNextMonth(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $relationship = &$snapshot['people'][0]['employments'][0];
+        $relationship['term']['social_employer_rate_category'] = 'risk_employment';
+        $relationship['term']['social_employer_rate_category_evidence'] =
+            'synthetic-risk-category';
+        $relationship['risky_savings_evidence'] = [
+            'id' => 92,
+            'status' => 'approved',
+            'risk_factor' => 'heat',
+            'work_category' => 3,
+            'qualifying_shift_eighths' => 24,
+            'right_claimed_on' => '2026-06-01',
+            'employee_informed_on' => null,
+            'pension_company' => 'Testovací penzijní společnost',
+            'product_reference' => 'SYNTHETIC-PRODUCT',
+            'institution_account_id' => 44,
+            'institution_account_row_version' => 2,
+            'institution_account_hash' => str_repeat('b', 64),
+            'institution_account_masked' => '******0005 / 0100',
+            'variable_symbol' => '123456',
+            'specific_symbol' => null,
+        ];
+        unset($relationship);
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertSame([], $bundle->issues);
+        $socialRelationship = $bundle->socialInsurance?->people[0]->relationships[0];
+        self::assertSame(
+            SocialEmployerRateCategory::RiskEmployment,
+            $socialRelationship?->employerRateCategory,
+        );
+        self::assertSame(
+            'synthetic-risk-category',
+            $socialRelationship?->employerRateCategoryEvidenceReference,
+        );
+    }
+
     /**
      * Sleva podle § 7a se musí dostat ze smluvních podmínek do vstupu výpočtu.
      * Dokud se nedostávala, byl `partTimeEmployerDiscount` mrtvý vstup: nárok

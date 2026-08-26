@@ -12,6 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
+use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -25,8 +26,8 @@ use Psr\Http\Message\UploadedFileInterface;
  * schránce otevírá odesílání podání jménem firmy — je to stejná třída tajemství
  * jako soukromý klíč, a tak se s ním zachází.
  *
- * Jméno a heslo se do serverového trezoru neukládají. Uživatelské metody
- * přihlášení nabízí odesílací brána přímo v ISDS, mimo perimetr aplikace.
+ * Osobní Mobilní klíč má oddělený trezor v rozsahu firma + uživatel. Jeho
+ * komunikační kód se nikdy nevrací v API a nezakládá automatické vybírání.
  *
  * Odpověď NIKDY neobsahuje uložený certifikát ani jeho heslo: čte se z projekce,
  * která ciphertext sloupce vůbec nevybírá.
@@ -35,6 +36,7 @@ final class DataBoxSettingsAction
 {
     public function __construct(
         private readonly SubmissionCredentialService $credentials,
+        private readonly IsdsMobileCredentialService $mobileCredentials,
         private readonly ActivityLogger $logger,
     ) {}
 
@@ -81,6 +83,70 @@ final class DataBoxSettingsAction
         $this->logger->log('databox_credentials_save', $userId, 'databox', $saved['id'], null, null, null, $supplierId);
 
         return Json::ok($response, $saved);
+    }
+
+    public function mobileKeyProfile(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+        try {
+            $profile = $this->mobileCredentials->profile(
+                SupplierGuard::currentId($request),
+                $this->userId($request),
+                (string) ($request->getQueryParams()['environment'] ?? 'production'),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return Json::ok($response, $profile);
+    }
+
+    public function saveMobileKeyProfile(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $profile = $this->mobileCredentials->save(
+                $supplierId,
+                $userId,
+                (string) ($body['environment'] ?? 'production'),
+                (string) ($body['username'] ?? ''),
+                (string) ($body['communication_code'] ?? ''),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        $this->logger->log('databox_mobile_credentials_save', $userId, 'databox', $profile['id'], null, null, null, $supplierId);
+        return Json::ok($response, $profile);
+    }
+
+    /** @param array<string,string> $args */
+    public function deleteMobileKeyProfile(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        try {
+            $deleted = $this->mobileCredentials->delete(
+                $supplierId,
+                $userId,
+                (string) ($args['environment'] ?? 'production'),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        if (!$deleted) {
+            return Json::error($response, 'not_found', 'Uložené přihlášení Mobilním klíčem nebylo nalezeno.', 404);
+        }
+        $this->logger->log('databox_mobile_credentials_delete', $userId, 'databox', 0, null, null, null, $supplierId);
+        return Json::ok($response, ['deleted' => true]);
     }
 
     /** @param array<string,string> $args */

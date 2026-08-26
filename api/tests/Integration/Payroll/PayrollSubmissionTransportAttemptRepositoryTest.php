@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
@@ -305,6 +307,54 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
     }
 
     /**
+     * Automatický sweep je JMHZ-specifický a nesmí registrační podání omylem
+     * dotazovat třídou CSSZ_JMHZ. PREZEC/REGZEC se po ručně spuštěném odeslání
+     * sledují jen přes svou explicitní transportní akci.
+     */
+    public function testJmhzDueQueuesExcludeRegistrationAttempts(): void
+    {
+        $pdo = $this->db->pdo();
+        $registrationSubmissionId = $this->createSubmission($pdo, 'registration');
+        $pdo->prepare(
+            'UPDATE payroll_obligations obligation
+               JOIN payroll_submissions submission
+                 ON submission.obligation_id = obligation.id
+                  SET obligation.agenda_code = "PREZEC26"
+                WHERE submission.id = ?',
+        )->execute([$registrationSubmissionId]);
+        $opened = $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $registrationSubmissionId,
+            self::CHANNEL,
+            1,
+            'registration-not-for-jmhz-sweep',
+            str_repeat('b', 64),
+            null,
+        );
+        $sent = $this->repository->markSent(
+            (int) $opened['id'],
+            'VREP-2026-08-REGISTRATION',
+            200,
+            (int) $opened['row_version'],
+            '2020-01-01 00:00:00',
+        );
+
+        self::assertNotContains(
+            $sent['id'],
+            array_column($this->repository->listDuePolls(50), 'id'),
+        );
+        $completed = $this->repository->markCompleted(
+            (int) $sent['id'],
+            (int) $sent['row_version'],
+        );
+        self::assertNotContains(
+            $completed['id'],
+            array_column($this->repository->listDueCloses(50, 8), 'id'),
+        );
+    }
+
+    /**
      * Transakce se uzavírá právě jednou. `closed_at` je jednorázové přiřazení,
      * takže druhý pokus není tichý no-op, ale hlasitá chyba — volající si musí
      * ověřit stav dřív, než začne posílat.
@@ -469,10 +519,16 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         self::assertArrayHasKey($ours['id'], $byId);
         self::assertSame('2026-07-01', $byId[$ours['id']]['period_start']);
         self::assertSame('2026-07-31', $byId[$ours['id']]['period_end']);
+        self::assertSame('regular', $byId[$ours['id']]['submission_kind']);
+        self::assertSame('prepared', $byId[$ours['id']]['submission_status']);
+        self::assertNull($byId[$ours['id']]['corrects_submission_id']);
 
         self::assertArrayHasKey($orphan, $byId);
         self::assertNull($byId[$orphan]['period_start']);
         self::assertNull($byId[$orphan]['period_end']);
+        self::assertNull($byId[$orphan]['submission_kind']);
+        self::assertNull($byId[$orphan]['submission_status']);
+        self::assertNull($byId[$orphan]['corrects_submission_id']);
 
         // Období smí přibýt jen do přehledu; detail pokusu i fronty na pozadí
         // zůstávají beze změny, aby se jim nezměnil tvar řádku.
@@ -483,6 +539,114 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         );
         self::assertIsArray($detail);
         self::assertArrayNotHasKey('period_start', $detail);
+    }
+
+    /**
+     * Připravené opravné a stornovací podání ještě nemá pokus v ledgeru, ale
+     * právě proto musí být v UI dohledatelné a odeslatelné podle vlastního ID.
+     */
+    public function testReadyCorrectiveSubmissionWithoutAttemptIsListed(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP()
+              WHERE id = ?',
+        )->execute([$this->submissionId]);
+        $obligationId = (int) $pdo->query(
+            'SELECT obligation_id FROM payroll_submissions WHERE id = '
+            . $this->submissionId,
+        )->fetchColumn();
+        $pdo->prepare('UPDATE payroll_obligations SET agenda_code = ? WHERE id = ?')
+            ->execute([JmhzSubmissionBridgeService::AGENDA_CODE, $obligationId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_submissions
+                (supplier_id, environment, obligation_id,
+                 corrects_submission_id, submission_kind, channel, status,
+                 source_snapshot_hash, request_fingerprint,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, ?, "cancellation", ?, "ready", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $obligationId,
+            $this->submissionId,
+            self::CHANNEL,
+            hash('sha256', "corrective-snapshot:{$this->supplierId}"),
+            hash('sha256', "corrective-request:{$this->supplierId}"),
+            hash('sha256', "corrective-key:{$this->supplierId}", true),
+        ]);
+        $correctiveId = (int) $pdo->lastInsertId();
+
+        $ready = $this->repository->listReadyJmhzSubmissions(
+            $this->supplierId,
+            self::ENVIRONMENT,
+        );
+
+        self::assertCount(1, $ready);
+        self::assertSame($correctiveId, $ready[0]['submission_id']);
+        self::assertSame('cancellation', $ready[0]['submission_kind']);
+        self::assertSame($this->submissionId, $ready[0]['corrects_submission_id']);
+        self::assertSame('2026-07-01', $ready[0]['period_start']);
+        self::assertNull($ready[0]['outbox_id']);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_submission_artifacts
+                (supplier_id, environment, submission_id, artifact_kind,
+                 direction, mime_type, content_ciphertext, byte_size,
+                 artifact_sha256, channel, idempotency_key_hash)
+             VALUES (?, ?, ?, "outbound_xml", "outbound", "application/xml",
+                     "enc:v2:test", 1, ?, "isds", ?)',
+        )->execute([
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $correctiveId,
+            str_repeat('d', 64),
+            hash('sha256', "corrective-artifact:{$this->supplierId}", true),
+        ]);
+        $artifactId = (int) $pdo->lastInsertId();
+        $queued = (new SubmissionOutboxRepository($this->db))->enqueue([
+            'supplier_id' => $this->supplierId,
+            'environment' => self::ENVIRONMENT,
+            'channel' => 'isds',
+            'agenda_code' => JmhzSubmissionBridgeService::AGENDA_CODE,
+            'recipient_id' => null,
+            'recipient_box_id' => '9tsaf6s',
+            'subject' => 'Syntetické storno JMHZ',
+            'artifact_kind' => 'payroll_submission',
+            'artifact_id' => $artifactId,
+            'artifact_filename' => 'synthetic-jmhz.xml',
+            'artifact_sha256' => str_repeat('d', 64),
+            'correlation_reference' => 'TEST-JMHZ-READY-OUTBOX-' . $correctiveId,
+            'created_by' => null,
+        ], 'ready-corrective-outbox-' . $correctiveId);
+
+        $queuedReady = $this->repository->listReadyJmhzSubmissions(
+            $this->supplierId,
+            self::ENVIRONMENT,
+        );
+        self::assertCount(1, $queuedReady);
+        self::assertSame((int) $queued['row']['id'], $queuedReady[0]['outbox_id']);
+        self::assertSame('ready', $queuedReady[0]['outbox_dispatch_state']);
+
+        $this->repository->open(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $correctiveId,
+            self::CHANNEL,
+            1,
+            'corrective-attempt',
+            str_repeat('c', 64),
+            null,
+        );
+        self::assertSame(
+            [],
+            $this->repository->listReadyJmhzSubmissions(
+                $this->supplierId,
+                self::ENVIRONMENT,
+            ),
+        );
     }
 
     /**

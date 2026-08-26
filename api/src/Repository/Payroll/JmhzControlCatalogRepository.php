@@ -386,9 +386,14 @@ final class JmhzControlCatalogRepository
                 'row_hash' => (string) $row['row_hash'],
             ];
         }
+        $expectedControls = $this->rows($payload, 'controls');
+        foreach ($expectedControls as &$expectedControl) {
+            unset($expectedControl['source_anomaly']);
+        }
+        unset($expectedControl);
         if (CanonicalJson::encode(['controls' => $controls, 'parameters' => $parameters])
             !== CanonicalJson::encode([
-                'controls' => $this->rows($payload, 'controls'),
+                'controls' => $expectedControls,
                 'parameters' => $this->rows($payload, 'parameters'),
             ])
         ) {

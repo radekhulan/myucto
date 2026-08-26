@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Submission;
 use MyInvoice\Repository\Submission\SubmissionOutboxAttemptRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Submission\Channel\AcceptanceState;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
@@ -51,6 +52,7 @@ final readonly class SubmissionOutboxService
         private SubmissionArtifactResolver $artifacts,
         private SubmissionArtifactValidator $validator,
         private LoggerInterface $logger,
+        private ?PayrollSubmissionDispatchProjection $payrollProjection,
     ) {}
 
     /**
@@ -265,8 +267,19 @@ final readonly class SubmissionOutboxService
         return match ($result->state) {
             DispatchState::Sent => (function () use ($supplierId, $id, $attempt, $attemptVersion, $outboxVersion, $result): array {
                 $this->attempts->markSent($supplierId, (int) $attempt['id'], (string) $result->externalMessageId, $attemptVersion);
+                $row = $this->outbox->markSent(
+                    $supplierId,
+                    $id,
+                    (string) $result->externalMessageId,
+                    $outboxVersion,
+                );
+                $this->projectPayrollSubmission(
+                    $supplierId,
+                    $row,
+                    (string) $result->externalMessageId,
+                );
                 return [
-                    'row' => $this->outbox->markSent($supplierId, $id, (string) $result->externalMessageId, $outboxVersion),
+                    'row' => $row,
                     'dispatched' => true,
                 ];
             })(),
@@ -415,6 +428,11 @@ final readonly class SubmissionOutboxService
             $sentAt ?? new \DateTimeImmutable('now'),
             (int) $row['row_version'],
         );
+        $this->projectPayrollSubmission(
+            $supplierId,
+            $updated,
+            $externalMessageId,
+        );
 
         return [
             'row' => $updated,
@@ -517,7 +535,19 @@ final readonly class SubmissionOutboxService
         }
 
         if ($probe->externalMessageId !== null) {
-            return $this->outbox->markSent($supplierId, $id, $probe->externalMessageId, (int) $row['row_version']);
+            $updated = $this->outbox->markSent(
+                $supplierId,
+                $id,
+                $probe->externalMessageId,
+                (int) $row['row_version'],
+            );
+            $this->projectPayrollSubmission(
+                $supplierId,
+                $updated,
+                $probe->externalMessageId,
+            );
+
+            return $updated;
         }
 
         return $this->outbox->markFailed(
@@ -583,6 +613,20 @@ final readonly class SubmissionOutboxService
             $status->evidence->value,
             $status->note,
             $version,
+        );
+    }
+
+    /** @param array<string,mixed> $row */
+    private function projectPayrollSubmission(
+        int $supplierId,
+        array $row,
+        string $externalMessageId,
+    ): void {
+        $this->payrollProjection?->project(
+            $supplierId,
+            (string) $row['artifact_kind'],
+            (int) $row['artifact_id'],
+            $externalMessageId,
         );
     }
 

@@ -10,9 +10,9 @@ const gateway = readFileSync(
 const mainCss = readFileSync(resolve(process.cwd(), 'src/styles/main.css'), 'utf8')
 
 describe('firemní přístup k datové schránce', () => {
-  it('ukazuje interaktivní metody ISDS vedle systémového certifikátu', () => {
-    expect(dataBox).toContain("['password', 'mobileKey', 'identity', 'sms', 'certificate', 'securityCode']")
-    expect(dataBox).toContain('databox.access.methods.${method}')
+  it('negarantuje metody gateway, které autoritativně vybírá až ISDS', () => {
+    expect(dataBox).not.toContain("['password', 'mobileKey', 'identity', 'sms', 'certificate', 'securityCode']")
+    expect(dataBox).toContain('databox.gateway.methodsByIsds')
     expect(dataBox).toContain('databox.access.certificateSettings')
     expect(dataBox).toContain('supplierStore.currentSupplier?.company_name')
   })

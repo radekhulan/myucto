@@ -15,6 +15,7 @@ use MyInvoice\Service\Submission\Channel\OutboundSubmission;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionArtifactResolver;
 use MyInvoice\Service\Submission\SubmissionArtifactValidator;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -75,6 +76,7 @@ final readonly class IsdsGatewayDispatchService
         private SubmissionArtifactResolver $artifacts,
         private SubmissionArtifactValidator $validator,
         private LoggerInterface $logger,
+        private ?PayrollSubmissionDispatchProjection $payrollProjection,
     ) {}
 
     /**
@@ -618,6 +620,12 @@ final readonly class IsdsGatewayDispatchService
 
         $this->outbox->markSent($supplierId, $outboxId, $messageId, (int) $claimed['row_version']);
         $this->attempts->markSent($supplierId, (int) $attempt['id'], $messageId, (int) $attempt['row_version']);
+        $this->payrollProjection?->project(
+            $supplierId,
+            (string) $claimed['artifact_kind'],
+            (int) $claimed['artifact_id'],
+            $messageId,
+        );
     }
 
     /**

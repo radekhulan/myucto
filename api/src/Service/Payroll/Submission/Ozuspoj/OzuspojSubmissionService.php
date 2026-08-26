@@ -48,7 +48,7 @@ final readonly class OzuspojSubmissionService
     ) {}
 
     /**
-     * Nácvik: ukáže, co by se podalo, a nezaloží nic.
+     * Test: ukáže, co by se podalo, a nezaloží nic.
      *
      * @return array{
      *   intent_id:int,agenda_code:string,submission_kind:string,xml:string,
@@ -77,7 +77,7 @@ final readonly class OzuspojSubmissionService
             ],
             'official_submission' => [
                 'supported' => false,
-                'reason' => 'Tohle je nácvik: podání se nezakládá a nic se neodesílá.',
+                'reason' => 'Tohle je test: podání se nezakládá a nic se neodesílá.',
             ],
         ];
     }

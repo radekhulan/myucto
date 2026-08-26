@@ -1,6 +1,6 @@
-# 99. Řešení problémů (FAQ)
+# 999. Řešení problémů (FAQ)
 
-## 99.1 Přihlášení
+## 999.1 Přihlášení
 
 ### Zapomenuté heslo
 
@@ -207,7 +207,7 @@ a nech volbu intervalu na jednotlivých uživatelích.
 `session.lock_after_minutes` není celé číslo 0–1440. Výchozí automatický zámek
 je proto vypnutý; osobní intervaly uživatelů platí dál.
 
-## 99.2 Faktury
+## 999.2 Faktury
 
 ### Nemůžu editovat vystavenou fakturu
 
@@ -240,7 +240,7 @@ s původními. **Toto je zamýšlené** — vystavený doklad nelze měnit.
 Pokud potřebuješ regenerovat PDF s novými údaji (např. opravil jsi překlep
 v názvu firmy), použij **Editovat (force)** s admin rolí.
 
-## 99.3 E-maily
+## 999.3 E-maily
 
 ### Faktura odešla, ale klient ji nedostal
 
@@ -264,7 +264,7 @@ v názvu firmy), použij **Editovat (force)** s admin rolí.
 3. Ověř DKIM přes [mxtoolbox.com](https://mxtoolbox.com/dkim.aspx).
 4. Až DNS funguje, zapni v `cfg.php → smtp.dkim.enabled => true`.
 
-## 99.4 Banka
+## 999.4 Banka
 
 ### GPC výpis se nenahraje („tento výpis už byl importovaný")
 
@@ -337,7 +337,7 @@ Multi-supplier ochrana — výpis musí být z účtu, který je v **Systém →
 Číselníky → Měny** aktuálního dodavatele. Pokud chceš nahrát výpis pro jiného
 dodavatele, **přepni na něj** přes přepínač v horní liště.
 
-## 99.5 Exporty
+## 999.5 Exporty
 
 ### ISDOC import do Pohody hodí chybu
 
@@ -356,7 +356,7 @@ při importu.
 Normální při ~100 fakturách/měsíc s 2. stranou výkazu. Pokud chceš menší ZIP,
 exportuj jen menší rozsah období (1 týden místo měsíce).
 
-## 99.6 Cron / automatika
+## 999.6 Cron / automatika
 
 ### Cron upomínek odeslal víc upomínek za den
 
@@ -406,13 +406,15 @@ jsou uložené v auditní stopě návrhu.
 
 ### Úplné mzdy zastavily výpočet v ruční kontrole
 
-Úplné mzdy jsou testovací alfa. Stav **Ruční kontrola** je bezpečnostní výsledek,
+Úplné mzdy jsou zkušební agenda. Stav **Ruční kontrola** je bezpečnostní výsledek,
 ne technická porucha: pro rozhodné datum může chybět účinný a odborně schválený
 ruleset, úplný personální podklad nebo podporovaný scénář. V **Mzdy →
 Legislativní pravidla** ověř období účinnosti a stav všech dotčených oblastí;
 v detailu revize potom projdi konkrétní blokery. Chybějící rok se nesmí nahradit
 nejbližší sadou pravidel. Výsledek neopravuj ručním přepsáním vypočtených částek
-a nepoužívej jej jako jediný podklad pro výplatu nebo podání.
+a nepoužívej jej jako jediný podklad pro výplatu nebo podání. Podrobný postup je
+v kapitolách [Mzdové běhy](58e_Mzdove_behy.md) a
+[Legislativní pravidla mezd](58q_Legislativni_pravidla_mezd.md).
 
 ### Odkaz do EPO po otevření zmizel
 
@@ -422,7 +424,7 @@ nedokončil, v detailu snapshotu vytvoř **nový odkaz EPO**. Nový odkaz sám n
 neodesílá. Úspěšné otevření formuláře také není důkaz podání — rozhoduje až
 potvrzení podatelny nahrané nebo převzaté do archivu.
 
-## 99.7 Výkon
+## 999.7 Výkon
 
 ### Dashboard se otevírá pomalu
 
@@ -437,7 +439,7 @@ Stats cache možná chybí. Spusť `php api/bin/recompute-stats.php` — přepo�
   drahé)
 - Sledování v `log/app-YYYY-MM-DD.log` (pomalé queries = `slow_query` v DB)
 
-## 99.8 Multi-supplier
+## 999.8 Multi-supplier
 
 ### Po přepnutí dodavatele vidím prázdný seznam klientů
 
@@ -450,7 +452,7 @@ dodavateli — záměrně).
 Multi-supplier guard. Buď přepni na dodavatele klienta, nebo si v aktuálním
 vytvoř toho samého klienta (oddělená data).
 
-## 99.9 Diagnostika
+## 999.9 Diagnostika
 
 **Systém → Diagnostika** je první místo, kam se podívat, když se aplikace chová
 divně a není jasné proč. Nejde o výpis hodnot, ale o verdikt — **vyhovuje /
@@ -510,7 +512,7 @@ co a kdy bylo předáno.
 Velikost je omezená na 25 MB, což je limit přílohy na portálu podpory. Když ji
 rozsah logů přesáhne, stránka to ohlásí ještě před vytvořením balíčku.
 
-## 99.10 Hlášení chyb
+## 999.10 Hlášení chyb
 
 Pokud problém nevyřeší tato kapitola, kontaktuj:
 
@@ -523,7 +525,7 @@ Pokud problém nevyřeší tato kapitola, kontaktuj:
 
 Užitečné pro hlášení:
 
-- **Diagnostický balíček** ze Systém → Diagnostika (viz 99.9) — pokryje verzi,
+- **Diagnostický balíček** ze Systém → Diagnostika (viz 999.9) — pokryje verzi,
   prostředí, stav migrací i plánovaných úloh naráz
 - Browser / OS
 - Krok-po-kroku, jak chybu reprodukovat

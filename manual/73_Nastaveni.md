@@ -779,7 +779,7 @@ aktuální firmu:
 | Záložka | Použití |
 |---|---|
 | **Kategorie nákladů** | Člení přijaté faktury a další náklady. U kategorie se zadává kód, název, pořadí a druh **fixní / variabilní** pro nákladové přehledy. |
-| **Kategorie tržeb** | Člení tržby z vydaných faktur. Zadává se kód, název a pořadí. Volitelně i **vlastní číselná řada** — faktury s touto kategorií pak dostanou číslo z ní (vlastní řada zákazníka má přednost), viz [§ 72.5.3](72_Multi_supplier.md#7253-islovani-faktur). |
+| **Kategorie tržeb** | Člení tržby z vydaných faktur. Zadává se kód, název a pořadí. Volitelně i **vlastní číselná řada** — faktury s touto kategorií pak dostanou číslo z ní (vlastní řada zákazníka má přednost), viz [§ 72.5.3](72_Multi_supplier.md#7253-cislovani-faktur). |
 
 U každé kategorie stránka ukazuje počet použití. Nepoužitou kategorii lze
 smazat; použitá se kvůli zachování historie pouze archivuje a přestane se
@@ -795,7 +795,7 @@ jedinečný.
 
 **Cesta: `Systém → Sazby a číselníky`**. Stránka sdružuje systémové
 číselníky **Sazby DPH**, **Klasifikace DPH**, **Země** a **Jednotky**.
-Sazby, země a jednotky popisuje [§ 73.1](#731-iselniky); pro výkazy je
+Sazby, země a jednotky popisuje [§ 73.1](#731-ciselniky); pro výkazy je
 zásadní také následující klasifikace DPH.
 
 ### Klasifikace DPH
@@ -930,39 +930,12 @@ pokud nezůstane jiný aktivní alias daného účelu, nové odkazy použijí v�
 
 ## 73.17 Datová schránka
 
-**Cesta: `Firma → Datová schránka`.** Stránka vždy pracuje s právě zvolenou
-firmou a sdružuje její systémový certifikát,
-odchozí frontu podání, ručně načítanou příchozí schránku, doručenky a výzvy
-k odstranění vad. Stav dopravy (**připraveno, odesláno, doručeno**) se vždy
-zobrazuje odděleně od výsledku zpracování (**přijato, odmítnuto, neznámé**).
-Doručenka datové zprávy sama neprokazuje přijetí podání úřadem.
+**Firma → Datová schránka** (`/admin/databox`) spravuje přístupy, příchozí
+zprávy, příjemce, výzvy a odchozí podání právě vybrané firmy. Přehled všech
+přihlašovacích metod, ručního inboxu a odeslání najdete v samostatné kapitole
+[Datová schránka](73a_Datova_schranka.md).
 
-Na kartě **Přístup** jsou oddělené dvě cesty. Doporučené interaktivní odeslání
-přes odesílací bránu připraví zprávu jako koncept přímo v ISDS. Před odchodem MyÚčto
-zobrazí instrukci k přihlášení; přihlašovací údaje se zadávají pouze na stránce
-ISDS, MyÚčto je nevidí ani neukládá. Metodu vybírá ISDS podle konkrétního účtu —
-zahrnuje jméno a heslo, Mobilní klíč eGovernmentu (PIN nebo heslo aplikace a
-potvrzení v klíči), Identitu občana, SMS, uživatelský certifikát nebo bezpečnostní
-kód podle nastavení účtu. Zpráva se neodešle pouhým přesměrováním:
-uživatel musí připravený koncept v ISDS vědomě schválit.
-
-Druhou cestou je **systémový certifikát firmy** pro přímé serverové operace,
-zejména pro ruční načtení příchozích zpráv. Je uložený šifrovaně a patří pouze
-aktuální firmě; po přepnutí firmy se používá její vlastní nastavení. Přihlašovací
-jméno a heslo se do MyÚčta neukládá. Provozní řád ISDS pro aplikace třetích stran
-doporučuje právě systémový certifikát.
-
-Globální registraci odesílací brány v **Systém → Odesílací brána ISDS** a její
-komerční certifikát spravuje pouze
-provozní superadmin. Mzdová účetní ani správce firmy tyto tajné údaje nevidí;
-pro odeslání dostanou jen bezpečnou informaci, zda je brána pro zvolené
-prostředí dostupná. Jako návratovou adresu registrace použij hodnotu zobrazenou
-v aplikaci; směřuje na autentizovanou stránku `/isds-gateway/callback`, aby se
-z ISDS mohla bezpečně vrátit i mzdová role bez práva spravovat globální
-certifikát brány.
-
-Příchozí schránka se **nevybírá automaticky ani plánovanou úlohou**. Nové zprávy
-se načtou jen po kliknutí uživatele na **Načíst nové zprávy** a potvrzení
-upozornění. Je to záměrná pojistka: vyzvednutí zprávy může být právně rozhodným
-doručením a spustit navazující lhůty. Automatické stahování nelze v nastavení
-zapnout.
+Globální registraci externí aplikace spravuje provozovatel v **Systém →
+Odesílací brána ISDS** (`/admin/isds-gateway`); popisuje ji kapitola
+[Odesílací brána ISDS](73b_Odesilaci_brana_ISDS.md). Mzdové formuláře a jejich
+věcný stav popisuje kapitola [Podání a hlášení](58j_Podani_a_hlaseni.md).

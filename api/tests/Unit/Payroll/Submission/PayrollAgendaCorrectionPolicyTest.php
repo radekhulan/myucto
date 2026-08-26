@@ -40,28 +40,21 @@ final class PayrollAgendaCorrectionPolicyTest extends TestCase
     }
 
     /**
-     * JMHZ je jediná deklarovaná výjimka: protokol chodí asynchronně, lhůta pro
-     * storno je pevná.
+     * JMHZ smí navázat až na konečný důvěryhodný výsledek. Samotné odeslání,
+     * zpracování ani zamítnutí nevytváří platný řádný kořen pro O/S.
      */
-    public function testJmhzIsDeclaredWithItsReason(): void
+    public function testJmhzOnlyAcceptsFinalAcceptedPredecessors(): void
     {
         $agendaCode = JmhzSubmissionBridgeService::AGENDA_CODE;
 
-        self::assertTrue(
+        self::assertFalse(
             PayrollAgendaCorrectionPolicy::allowsPendingPredecessor($agendaCode),
         );
-        self::assertContains(
-            'submitted',
+        self::assertSame(
+            ['accepted', 'partially_accepted'],
             PayrollAgendaCorrectionPolicy::correctableStatuses($agendaCode),
         );
-        self::assertContains(
-            'processing',
-            PayrollAgendaCorrectionPolicy::correctableStatuses($agendaCode),
-        );
-        $reason = PayrollAgendaCorrectionPolicy::reason($agendaCode);
-        self::assertIsString($reason);
-        self::assertStringContainsString('asynchronně', $reason);
-        self::assertStringContainsString('20. dne', $reason);
+        self::assertNull(PayrollAgendaCorrectionPolicy::reason($agendaCode));
     }
 
     /**
@@ -72,7 +65,7 @@ final class PayrollAgendaCorrectionPolicyTest extends TestCase
     public function testEveryDeclarationCarriesAReason(): void
     {
         $declarations = PayrollAgendaCorrectionPolicy::declarations();
-        self::assertNotSame([], $declarations);
+        self::assertIsArray($declarations);
 
         foreach ($declarations as $agendaCode => $reason) {
             self::assertMatchesRegularExpression('/^[A-Z0-9_]{2,48}$/D', $agendaCode);
@@ -84,17 +77,35 @@ final class PayrollAgendaCorrectionPolicyTest extends TestCase
         }
     }
 
-    /**
-     * Kód agendy je v katalogu jako řetězec, aby sdílená vrstva podání nemusela
-     * znát třídy konkrétní agendy. Tenhle test drží obě strany u sebe — jinak
-     * by přejmenování agendy tiše vrátilo JMHZ přísnou sadu a storno by přestalo
-     * jít podat, aniž by se cokoli ozvalo.
-     */
-    public function testDeclaredCodeMatchesTheAgendaItself(): void
+    public function testJmhzHasNoPendingPredecessorException(): void
     {
-        self::assertArrayHasKey(
+        self::assertArrayNotHasKey(
             JmhzSubmissionBridgeService::AGENDA_CODE,
             PayrollAgendaCorrectionPolicy::declarations(),
         );
+    }
+
+    public function testAcceptedJmhzCorrectionKeepsItsRegularRoot(): void
+    {
+        self::assertFalse(PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'correction',
+        ));
+        self::assertTrue(PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'cancellation',
+        ));
+        self::assertTrue(PayrollAgendaCorrectionPolicy::supersedesPredecessorOnAcceptance(
+            'EPO_DPH',
+            'correction',
+        ));
+        self::assertTrue(PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'cancellation',
+        ));
+        self::assertFalse(PayrollAgendaCorrectionPolicy::supersedesCorrectionChainOnAcceptance(
+            JmhzSubmissionBridgeService::AGENDA_CODE,
+            'correction',
+        ));
     }
 }

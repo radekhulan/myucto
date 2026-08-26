@@ -30,7 +30,7 @@ klikni na **Zkontrolovat znovu**.
 
 Stejná kontrola je i po instalaci v **Systém → Diagnostika**, kde navíc hlídá
 plánované úlohy, velikost logů a dostupnost novější verze — viz
-[99. Řešení problémů](99_Reseni_problemu.md).
+[999. Řešení problémů](999_Reseni_problemu.md).
 
 ## 7.1 Krok 1 — Administrátor
 

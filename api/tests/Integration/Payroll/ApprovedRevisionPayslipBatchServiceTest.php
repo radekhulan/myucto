@@ -6,12 +6,17 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\ApprovedRevisionPayslipRepository;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionDocumentBatchService;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
+use MyInvoice\Service\Payroll\Document\PayrollArtifact;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentKind;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
 use MyInvoice\Service\Payroll\Document\PayslipDocumentData;
+use MyInvoice\Service\Payroll\Document\PayslipDocumentSnapshotHydrator;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Fixtures\Payroll\SyntheticPayslipFixture;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -109,6 +114,68 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             $this->supplierId,
             $this->revisionId,
         ));
+    }
+
+    public function testPdfRenderingFinishesBeforeBatchTransactionBoundaryStarts(): void
+    {
+        $documents = new TransactionObservingPayrollDocumentService($this->db);
+        $service = new ApprovedRevisionPayslipBatchService(
+            $this->db,
+            new ApprovedRevisionPayslipRepository($this->db),
+            new PayslipDocumentSnapshotHydrator(),
+            $documents,
+        );
+
+        $result = $service->generate(
+            $this->supplierId,
+            $this->runId,
+            $this->revisionId,
+            null,
+        );
+
+        self::assertCount(2, $result);
+        self::assertSame([], $documents->legacyGenerateTransactionStates);
+        self::assertSame([false, false], $documents->renderTransactionStates);
+        self::assertSame([true, true], $documents->archiveTransactionStates);
+    }
+
+    public function testSourceChangedDuringRenderingFailsBeforeArchiveWrite(): void
+    {
+        $documents = new TransactionObservingPayrollDocumentService(
+            $this->db,
+            function (): void {
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_runs
+                        SET period_start = "2026-08-01"
+                      WHERE supplier_id = ? AND id = ?'
+                )->execute([$this->supplierId, $this->runId]);
+            },
+        );
+        $service = new ApprovedRevisionPayslipBatchService(
+            $this->db,
+            new ApprovedRevisionPayslipRepository($this->db),
+            new PayslipDocumentSnapshotHydrator(),
+            $documents,
+        );
+
+        try {
+            $service->generate(
+                $this->supplierId,
+                $this->runId,
+                $this->revisionId,
+                null,
+            );
+            self::fail('Změněný zdroj během renderu nesmí vydat staré pásky.');
+        } catch (\DomainException $exception) {
+            self::assertStringContainsString(
+                'během vykreslování změnil',
+                $exception->getMessage(),
+            );
+        }
+
+        self::assertSame([false, false], $documents->renderTransactionStates);
+        self::assertSame([], $documents->archiveTransactionStates);
+        self::assertSame(0, $this->documentCount());
     }
 
     public function testOuterRollbackCanCleanExternallyOwnedStorageScope(): void
@@ -522,5 +589,113 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             throw new \RuntimeException('Synthetic payroll batch query failed.');
         }
         return $statement;
+    }
+}
+
+final class TransactionObservingPayrollDocumentService extends PayrollDocumentService
+{
+    /** @var list<bool> */
+    public array $renderTransactionStates = [];
+    /** @var list<bool> */
+    public array $archiveTransactionStates = [];
+    /** @var list<bool> */
+    public array $legacyGenerateTransactionStates = [];
+
+    private readonly int $initialSavepointCount;
+    private bool $sourceMutated = false;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly ?\Closure $mutateSource = null,
+    ) {
+        $this->initialSavepointCount = $this->savepointCount();
+    }
+
+    /** @return array<string,mixed> */
+    public function generatePayslip(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        int $employeeId,
+        PayslipDocumentData $data,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        ?int $supersedesDocumentId = null,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        $this->legacyGenerateTransactionStates[] = $this->batchSavepointExists();
+
+        return ['id' => $employeeId, 'employee_id' => $employeeId];
+    }
+
+    public function renderPayslip(PayslipDocumentData $data): PayrollArtifact
+    {
+        $this->renderTransactionStates[] = $this->batchSavepointExists();
+        if (!$this->sourceMutated && $this->mutateSource !== null) {
+            $this->sourceMutated = true;
+            ($this->mutateSource)();
+        }
+
+        return new PayrollArtifact(
+            PayrollDocumentKind::Payslip,
+            '%PDF-1.4 synthetic transaction-boundary test',
+            'application/pdf',
+            'synteticka-vyplatni-paska.pdf',
+            $data->sourceSnapshotSha256,
+            'synthetic-template-v1',
+            'synthetic-renderer-v1',
+        );
+    }
+
+    /** @return array<string,mixed> */
+    public function archivePayslip(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        int $employeeId,
+        PayrollArtifact $artifact,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        ?int $supersedesDocumentId = null,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        $this->archiveTransactionStates[] = $this->batchSavepointExists();
+
+        return ['id' => $employeeId, 'employee_id' => $employeeId];
+    }
+
+    public function beginStorageScope(): PayrollDocumentStorageScope
+    {
+        return new PayrollDocumentStorageScope();
+    }
+
+    public function commitStorageScope(PayrollDocumentStorageScope $scope): void
+    {
+        $scope->close();
+    }
+
+    public function cleanupStorageScope(
+        int $supplierId,
+        PayrollDocumentStorageScope $scope,
+    ): void {
+        $scope->close();
+    }
+
+    private function batchSavepointExists(): bool
+    {
+        return $this->savepointCount() > $this->initialSavepointCount;
+    }
+
+    private function savepointCount(): int
+    {
+        $statement = $this->db->pdo()->query(
+            "SHOW SESSION STATUS LIKE 'Com_savepoint'",
+        );
+        if ($statement === false) {
+            throw new \RuntimeException('Stav SAVEPOINTů se nepodařilo načíst.');
+        }
+        $row = $statement->fetch(\PDO::FETCH_ASSOC);
+
+        return (int) ($row['Value'] ?? 0);
     }
 }

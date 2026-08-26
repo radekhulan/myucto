@@ -61,6 +61,18 @@ final class SubmissionRecipientAction
 
         $boxId = trim((string) ($body['isds_box_id'] ?? ''));
         $boxId = $boxId !== '' ? strtolower($boxId) : null;
+        $businessId = preg_replace('/\s+/', '', trim((string) ($body['business_id'] ?? '')));
+        $businessId = $businessId !== '' ? $businessId : null;
+        if ($businessId !== null && preg_match('/^[0-9]{8}$/D', $businessId) !== 1) {
+            return Json::error(
+                $response,
+                'invalid_business_id',
+                'IČ instituce musí mít přesně 8 číslic.',
+                400,
+            );
+        }
+        $address = trim((string) ($body['address'] ?? ''));
+        $address = $address !== '' ? mb_substr($address, 0, 500) : null;
         $sourceUrl = trim((string) ($body['source_url'] ?? ''));
         $sourceUrl = $sourceUrl !== '' ? $sourceUrl : null;
 
@@ -76,6 +88,8 @@ final class SubmissionRecipientAction
             $id = $this->recipients->upsertForSupplier(SupplierGuard::currentId($request), [
                 'code' => $code,
                 'name' => mb_substr($name, 0, 190),
+                'business_id' => $businessId,
+                'address' => $address,
                 'kind' => $kind,
                 'isds_box_id' => $boxId,
                 'source_url' => $sourceUrl !== null ? mb_substr($sourceUrl, 0, 500) : null,

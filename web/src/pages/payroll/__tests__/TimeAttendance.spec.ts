@@ -150,6 +150,32 @@ describe('TimeAttendance', () => {
     expect(wrapper.text()).not.toContain('Syntetická osoba A')
   })
 
+  it('uses a keyboard-searchable employment selector in the editor', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [
+        row(12, 'Syntetická osoba A'),
+        row(13, 'Syntetická osoba B'),
+      ],
+      total: 2,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+
+    const add = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.add')
+    await add!.trigger('click')
+
+    const selector = wrapper.get('[data-test="payroll-time-employment"]')
+    expect(selector.find('[role="combobox"]').exists()).toBe(true)
+    expect(selector.find('select').exists()).toBe(false)
+    await selector.get('[role="combobox"]').setValue('osoba B')
+
+    expect(selector.findAll('[role="option"]')).toHaveLength(1)
+    expect(selector.text()).toContain('Syntetická osoba B')
+  })
+
   /** Zúžení „jen nedokončené" mění obsah, takže musí vrátit stránku na začátek. */
   it('returns to the first page when the incomplete filter changes', async () => {
     m.timeMonth.mockResolvedValue({
@@ -249,6 +275,62 @@ describe('TimeAttendance', () => {
       format: 'csv',
       original_name: 'attendance.csv',
     }))
+  })
+
+  it('reads XLSX as an ArrayBuffer and sends only its Base64 payload', async () => {
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const importButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.import.button')
+    await importButton!.trigger('click')
+
+    const file = new File(
+      [new Uint8Array([0x50, 0x4b, 0x03, 0x04])],
+      'attendance.xlsx',
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    )
+    await wrapper.get('[data-testid="payroll-time-import-dropzone"]').trigger('drop', {
+      dataTransfer: { files: [file] },
+    })
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-testid="payroll-time-import-selected"]').attributes('title'))
+        .toBe('attendance.xlsx')
+      const preview = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.time.import.preview')
+      expect(preview!.attributes('disabled')).toBeUndefined()
+    })
+
+    const preview = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.import.preview')
+    await preview!.trigger('click')
+    await flushPromises()
+
+    expect(m.previewTimeImport).toHaveBeenCalledWith(expect.objectContaining({
+      format: 'xlsx',
+      original_name: 'attendance.xlsx',
+      content: 'UEsDBA==',
+    }))
+    expect(wrapper.text()).toContain('payroll.time.import.xlsx_security')
+  })
+
+  it('rejects an XLSX over five megabytes before FileReader or API use', async () => {
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const importButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.import.button')
+    await importButton!.trigger('click')
+
+    const file = new File(
+      [new Uint8Array(5_000_001)],
+      'too-large.xlsx',
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    )
+    await wrapper.get('[data-testid="payroll-time-import-dropzone"]').trigger('drop', {
+      dataTransfer: { files: [file] },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('payroll.time.import.file_too_large')
+    expect(m.previewTimeImport).not.toHaveBeenCalled()
   })
 
   it('shows a payroll-styled error and clears a previous selection after rejection', async () => {

@@ -282,6 +282,55 @@ final class PayrollComponentsInputsApiTest extends TestCase
         ], $codes);
     }
 
+    public function testApprovalFreezesExemptionBasisInComponentSnapshot(): void
+    {
+        $component = $this->createComponent([
+            ...$this->componentPayload(
+                code: 'SYN_EXEMPT',
+                validFrom: '2026-01-01',
+                annualLimitMinor: null,
+                kind: 'benefit_health',
+                valueKind: 'non_monetary',
+            ),
+            'tax_treatment' => 'exempt',
+            'social_participation_treatment' => 'excluded',
+            'social_treatment' => 'excluded',
+            'health_participation_treatment' => 'excluded',
+            'health_treatment' => 'excluded',
+            'exemption_basis' => 'not_subject_to_tax',
+        ]);
+        $input = $this->createInput($this->inputPayload(
+            PayrollTimeValue::int($component['id'] ?? null, 'component_id'),
+            12_345,
+            'exemption-basis-1',
+        ));
+        $inputId = PayrollTimeValue::int($input['id'] ?? null, 'input_id');
+
+        $response = $this->inputs->approve(
+            $this->request('POST', "/api/payroll/inputs/{$inputId}/approve")
+                ->withParsedBody([
+                    'row_version' => PayrollTimeValue::int(
+                        $input['row_version'] ?? null,
+                        'row_version',
+                    ),
+                ]),
+            new Response(),
+            ['id' => (string) $inputId],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $approved = PayrollTimeValue::row(
+            $this->json($response)['input'] ?? null,
+            'approved_input',
+        );
+        $snapshot = json_decode(PayrollTimeValue::string(
+            $approved['component_snapshot_json'] ?? null,
+            'component_snapshot_json',
+        ), true);
+        self::assertIsArray($snapshot);
+        self::assertSame('not_subject_to_tax', $snapshot['exemption_basis'] ?? null);
+    }
+
     public function testDedupeTenantIsolationOptimisticLockAndSessionOnly(): void
     {
         $component = $this->createComponent($this->componentPayload(

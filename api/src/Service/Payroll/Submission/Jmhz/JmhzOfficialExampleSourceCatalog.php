@@ -9,7 +9,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 final class JmhzOfficialExampleSourceCatalog
 {
     public const CATALOG_KEY = 'jmhz-official-xml-examples-2026-04-13-source-v1';
-    public const MANIFEST_SHA256 = 'cf251bed901af193add356be9027474538a2cb378bb9174f73c0dd75a713b683';
+    public const MANIFEST_SHA256 = 'c4c28906f38fdf116ed1f15506494b70d423cfc55da6f3909bbf0fdd4dff3e89';
     public const ARCHIVE_SHA256 = 'd31c89be8e2f0e4e93b20edd0beda05030e48884aa45dbfb4db0ee88e313a507';
     public const XSD_INVENTORY_SHA256 = '72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c';
 

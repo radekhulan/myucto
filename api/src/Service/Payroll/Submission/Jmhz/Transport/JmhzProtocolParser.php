@@ -34,7 +34,7 @@ final readonly class JmhzProtocolParser
     private const QUALIFIER_ACCEPTED = 'response';
     private const QUALIFIER_REJECTED = 'error';
 
-    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC'];
+    private const CLASSES = ['CSSZ_JMHZ', 'CSSZ_REGZEC', 'CSSZ_PREZEC'];
     private const ERROR_KINDS = ['prijem', 'zpracovani'];
     private const PART_SCOPES = [
         'global' => JmhzProtocolPartKind::General,
@@ -179,7 +179,10 @@ final readonly class JmhzProtocolParser
             $kind = JmhzProtocolPartKind::fromSubtype($item->getAttribute('subtype'));
             $outcome = $this->assertOutcome($item->getAttribute('result'));
             $formGuid = trim($item->getAttribute('sqnr'));
-            if ($kind === JmhzProtocolPartKind::Form && $formGuid === '') {
+            $normalizedFormGuid = $kind === JmhzProtocolPartKind::Form
+                ? $this->formGuid($formGuid)
+                : null;
+            if ($kind === JmhzProtocolPartKind::Form && $normalizedFormGuid === null) {
                 throw new JmhzTransportException(
                     'jmhz_protocol_form_unidentified',
                     'Individualizovaná součást protokolu nemá GUID formuláře.',
@@ -191,7 +194,7 @@ final readonly class JmhzProtocolParser
                 $outcome === 'OK'
                     ? JmhzSubmissionStatus::ProcessedAndComplete
                     : JmhzSubmissionStatus::Rejected,
-                $kind === JmhzProtocolPartKind::Form ? strtoupper($formGuid) : null,
+                $normalizedFormGuid,
                 $ikMpsv,
                 $idPpv,
                 $this->parseErrorMessage(

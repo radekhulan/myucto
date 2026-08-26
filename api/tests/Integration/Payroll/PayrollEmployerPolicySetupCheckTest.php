@@ -246,7 +246,6 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
         self::assertEqualsCanonicalizing([
             'home_office_policy',
             'travel_expense_policy',
-            'four_eyes',
             'automatic_calculation',
             'automatic_posting',
             'automatic_payments',

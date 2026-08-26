@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v7',
+            'payroll-jmhz-preparation-source.v9',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -75,6 +75,47 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertStringNotContainsString('"entity_id"', $public);
         self::assertStringNotContainsString('Synthetic Person', $public);
         self::assertFalse($snapshot->readiness()['official_submission_supported']);
+    }
+
+    public function testMandatoryEarningsVectorContainsZerosWithoutArtificialInputs(): void
+    {
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $this->source(),
+            [],
+            [],
+        );
+
+        self::assertSame(
+            [
+                '10328' => 0,
+                '10329' => 0,
+                '10330' => 0,
+                '10331' => 0,
+            ],
+            $snapshot->payload['people'][0]['employments'][0]
+                ['earnings_by_attribute_minor'],
+        );
+    }
+
+    public function testCurrentApprovedCorrectionRevisionCanBeTheSourceOfFirstRegularSubmission(): void
+    {
+        $source = $this->source();
+        $source['revision']['revision_kind'] = 'correction';
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+        );
+
+        self::assertNotContains(
+            'jmhz_correction_revision_unsupported',
+            $snapshot->payload['readiness_issue_codes'],
+        );
     }
 
     public function testLegacyRunWithoutSelectorEvidenceRemainsBlocked(): void
@@ -693,6 +734,77 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             [701, 702],
             array_column($snapshot->payload['source_versions']['ordinary_evidence'], 'id'),
         );
+    }
+
+    public function testCanonicalStoredDerivedOrdinaryEvidenceIsAccepted(): void
+    {
+        $source = $this->source();
+        $ordinary = $this->ordinaryEvidenceSource($source, 11, 101, 701);
+        $ordinary['payload']['confirmation'] = [
+            'source_kind' => 'derived_from_frozen_payroll_sources',
+            'source_term_id' => 201,
+            'source_term_row_version' => 1,
+            'confirmed_by_user_id' => 12,
+            'confirmed_at' => '2026-08-13T12:00:00.000000Z',
+        ];
+        $ordinary['payload'] = json_decode(
+            CanonicalJson::encode($ordinary['payload']),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
+            7,
+            'test',
+            $source,
+            [],
+            [],
+            [],
+            [],
+            [101 => $ordinary],
+        );
+
+        self::assertNotContains(
+            'jmhz_ordinary_evidence_missing',
+            $snapshot->payload['readiness_issue_codes'],
+        );
+    }
+
+    public function testDerivedOrdinaryEvidenceWithDifferentTermVersionIsRejected(): void
+    {
+        $source = $this->source();
+        $ordinary = $this->ordinaryEvidenceSource($source, 11, 101, 701);
+        $ordinary['payload']['confirmation'] = [
+            'source_kind' => 'derived_from_frozen_payroll_sources',
+            'source_term_id' => 201,
+            'source_term_row_version' => 99,
+            'confirmed_by_user_id' => 12,
+            'confirmed_at' => '2026-08-13T12:00:00.000000Z',
+        ];
+        $ordinary['payload'] = json_decode(
+            CanonicalJson::encode($ordinary['payload']),
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+
+        try {
+            (new JmhzPreparationSnapshotBuilder())->build(
+                7,
+                'test',
+                $source,
+                [],
+                [],
+                [],
+                [],
+                [101 => $ordinary],
+            );
+            self::fail('Odvozená evidence z jiné verze podmínek musí být odmítnuta.');
+        } catch (JmhzPreparationSnapshotException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_confirmation_invalid',
+                $exception->validationCode,
+            );
+        }
     }
 
     /**

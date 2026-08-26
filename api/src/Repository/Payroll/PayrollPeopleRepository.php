@@ -257,6 +257,45 @@ final class PayrollPeopleRepository
         return $options;
     }
 
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,string>
+     */
+    public function namesForTenant(int $supplierId, array $employeeIds): array
+    {
+        $ids = [];
+        foreach ($employeeIds as $employeeId) {
+            if ($employeeId <= 0) {
+                throw new \InvalidArgumentException('Identifikátor zaměstnance musí být kladný.');
+            }
+            $ids[$employeeId] = true;
+        }
+        $ids = array_keys($ids);
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employee.id,
+                    ' . self::fullNameExpression() . ' AS full_name
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ?
+                AND employee.id IN (' . $placeholders . ')',
+        );
+        $statement->execute([$supplierId, ...$ids]);
+
+        $names = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                throw new \UnexpectedValueException('Databáze vrátila neplatného zaměstnance.');
+            }
+            $names[(int) $row['id']] = (string) $row['full_name'];
+        }
+
+        return $names;
+    }
+
     /** @return array<string,mixed>|null */
     public function findForTenant(int $supplierId, int $employeeId): ?array
     {

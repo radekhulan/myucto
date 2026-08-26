@@ -24,10 +24,12 @@ final class PayrollRunWorkflow
             PayrollRunStatus::CALCULATED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::REVIEW,
+                PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::REVIEWED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::APPROVE,
+                PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::APPROVED => [
                 PayrollRunCommand::POST,
@@ -51,7 +53,9 @@ final class PayrollRunWorkflow
             PayrollRunStatus::CORRECTION_PENDING => [
                 PayrollRunCommand::REOPEN,
             ],
-            PayrollRunStatus::CANCELLED => [],
+            PayrollRunStatus::CANCELLED => [
+                PayrollRunCommand::REOPEN,
+            ],
         };
     }
 
@@ -108,17 +112,9 @@ final class PayrollRunWorkflow
         ], true) && !$context->hasCalculatedResult) {
             throw new \DomainException('Kontrola a schválení vyžadují uložený výsledek.');
         }
-        if ($command === PayrollRunCommand::REVIEW
-            && $context->calculatedBy === $context->actorUserId
-        ) {
-            throw new \DomainException('Výsledek musí zkontrolovat jiný uživatel než kalkulátor.');
-        }
         if ($command === PayrollRunCommand::APPROVE) {
             if ($context->reviewedBy === null) {
                 throw new \DomainException('Před schválením musí být evidována odborná kontrola.');
-            }
-            if ($context->calculatedBy === $context->actorUserId) {
-                throw new \DomainException('Mzdu musí schválit jiný uživatel než kalkulátor.');
             }
             if ($context->blockerCount > 0) {
                 throw new \DomainException('Mzdový běh obsahuje blokující validace.');
@@ -141,9 +137,14 @@ final class PayrollRunWorkflow
             throw new \DomainException('Tento přechod vyžaduje uvedení důvodu.');
         }
         if ($command === PayrollRunCommand::REOPEN
-            && $from !== PayrollRunStatus::CORRECTION_PENDING
+            && !in_array($from, [
+                PayrollRunStatus::CORRECTION_PENDING,
+                PayrollRunStatus::CANCELLED,
+            ], true)
         ) {
-            throw new \DomainException('Opravu lze otevřít jen z čekajícího opravného stavu.');
+            throw new \DomainException(
+                'Novou revizi lze otevřít jen ze zrušeného nebo opravného běhu.',
+            );
         }
     }
 }

@@ -11,6 +11,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -758,6 +760,30 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame(2, $summary['rejected_rows']);
         self::assertSame(1, $summary['duplicate_rows']);
 
+        $foreign = $this->action->previewImport(
+            $this->request(
+                'POST',
+                '/api/payroll/time/imports/preview',
+                supplierId: $this->otherSupplierId,
+            )->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(200, $foreign->getStatusCode());
+        $foreignSummary = $this->json($foreign)['preview'];
+        self::assertSame(0, $foreignSummary['accepted_rows']);
+        self::assertSame(4, $foreignSummary['rejected_rows']);
+
+        $bearer = $this->action->previewImport(
+            $this->request(
+                'POST',
+                '/api/payroll/time/imports/preview',
+                authMethod: 'bearer',
+            )->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
+
         $first = $this->action->import(
             $this->request('POST', '/api/payroll/time/imports')->withParsedBody($payload),
             new Response(),
@@ -777,6 +803,166 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame($firstImport['id'], $replayed['id']);
         self::assertTrue($replayed['replayed']);
         self::assertSame(1, $this->countRows('payroll_time_entries'));
+    }
+
+    public function testXlsxPreviewHandlesFiveHundredEmploymentsWithoutCompanyWideLoad(): void
+    {
+        $pdo = $this->db->pdo();
+        $employee = $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, ?, ?, 1, 1, 0, 42000, 0, 1)'
+        );
+        $profile = $pdo->prepare(
+            "INSERT INTO payroll_employee_profiles
+                (supplier_id, employee_id, profile_status)
+             VALUES (?, ?, 'legacy')"
+        );
+        $employment = $pdo->prepare(
+            "INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, monthly_gross_minor, is_legacy_projection)
+             VALUES (?, ?, ?, 'employment', 'active', '2026-01-01', 4200000, 0)"
+        );
+        $rows = [[
+            'employment_code',
+            'starts_at',
+            'ends_at',
+            'timezone',
+            'category',
+            'break_minutes',
+            'external_id',
+        ], [
+            'SYN-TIME-1',
+            '2026-05-04T08:00:00+02:00',
+            '2026-05-04T16:00:00+02:00',
+            'Europe/Prague',
+            'regular',
+            30,
+            'SCALE-1',
+        ]];
+        for ($index = 2; $index <= 500; ++$index) {
+            $code = sprintf('SYN-SCALE-%03d', $index);
+            $employee->execute([
+                $this->supplierId,
+                "Syntetická osoba {$index}",
+                'employee',
+                'hpp',
+            ]);
+            $employeeId = (int) $pdo->lastInsertId();
+            $profile->execute([$this->supplierId, $employeeId]);
+            $employment->execute([$this->supplierId, $employeeId, $code]);
+            $day = (($index - 1) % 28) + 1;
+            $rows[] = [
+                $code,
+                sprintf('2026-05-%02dT08:00:00+02:00', $day),
+                sprintf('2026-05-%02dT16:00:00+02:00', $day),
+                'Europe/Prague',
+                'regular',
+                30,
+                "SCALE-{$index}",
+            ];
+        }
+
+        $response = $this->action->previewImport(
+            $this->request('POST', '/api/payroll/time/imports/preview')
+                ->withParsedBody([
+                    'period' => '2026-05',
+                    'format' => 'xlsx',
+                    'original_name' => 'synthetic-scale.xlsx',
+                    'content' => base64_encode($this->xlsx($rows)),
+                ]),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $preview = $this->json($response)['preview'];
+        self::assertSame(500, $preview['total_rows']);
+        self::assertSame(500, $preview['accepted_rows']);
+        self::assertSame(0, $preview['rejected_rows']);
+        self::assertSame(0, $preview['duplicate_rows']);
+    }
+
+    public function testXlsxPreviewPartialImportAndReplayAreIdempotent(): void
+    {
+        $content = $this->xlsx([
+            ['employment_code', 'starts_at', 'ends_at', 'timezone', 'category', 'break_minutes', 'external_id'],
+            ['SYN-TIME-1', '2026-05-04T08:00:00+02:00', '2026-05-04T16:00:00+02:00', 'Europe/Prague', 'regular', 30, 'XLSX-EXT-1'],
+            ['SYN-TIME-1', '2026-05-04T08:00:00+02:00', '2026-05-04T16:00:00+02:00', 'Europe/Prague', 'regular', 30, 'XLSX-EXT-1'],
+            ['UNKNOWN', '2026-05-05T08:00:00+02:00', '2026-05-05T16:00:00+02:00', 'Europe/Prague', 'regular', 30, 'XLSX-EXT-2'],
+            ['SYN-TIME-1', '2026-05-06T08:00:00+02:00', '2026-05-06T16:00:00+02:00', 'Europe/Prague', 'unsupported', 30, 'XLSX-EXT-3'],
+        ]);
+        $payload = [
+            'period' => '2026-05',
+            'format' => 'xlsx',
+            'original_name' => 'synthetic-time.xlsx',
+            'content' => base64_encode($content),
+        ];
+
+        $preview = $this->action->previewImport(
+            $this->request('POST', '/api/payroll/time/imports/preview')
+                ->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(200, $preview->getStatusCode());
+        $summary = $this->json($preview)['preview'];
+        self::assertTrue($summary['supported']);
+        self::assertSame(1, $summary['accepted_rows']);
+        self::assertSame(2, $summary['rejected_rows']);
+        self::assertSame(1, $summary['duplicate_rows']);
+
+        $first = $this->action->import(
+            $this->request('POST', '/api/payroll/time/imports')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $first->getStatusCode());
+        $firstImport = $this->json($first)['import'];
+        self::assertSame('xlsx', $firstImport['format']);
+        self::assertSame('partial', $firstImport['status']);
+        self::assertSame(1, $firstImport['accepted_rows']);
+        self::assertSame(2, $firstImport['rejected_rows']);
+        self::assertSame(1, $firstImport['duplicate_rows']);
+
+        $replay = $this->action->import(
+            $this->request('POST', '/api/payroll/time/imports')->withParsedBody($payload),
+            new Response(),
+        );
+        $replayed = $this->json($replay)['import'];
+        self::assertSame($firstImport['id'], $replayed['id']);
+        self::assertTrue($replayed['replayed']);
+        self::assertSame(1, $this->countRows('payroll_time_entries'));
+    }
+
+    public function testXlsxFormulaIsRejectedBeforePreviewOrApplyWritesAnything(): void
+    {
+        $payload = [
+            'period' => '2026-05',
+            'format' => 'xlsx',
+            'original_name' => 'formula-must-not-run.xlsx',
+            'content' => base64_encode($this->xlsx([
+                ['employment_code', 'starts_at', 'ends_at', 'timezone', 'category', 'break_minutes', 'external_id'],
+                ['SYN-TIME-1', '2026-05-04T08:00:00+02:00', '2026-05-04T16:00:00+02:00', 'Europe/Prague', 'regular', '=15+15', 'FORMULA-1'],
+            ])),
+        ];
+
+        $preview = $this->action->previewImport(
+            $this->request('POST', '/api/payroll/time/imports/preview')
+                ->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(422, $preview->getStatusCode());
+        self::assertStringContainsString('vzorec', $this->json($preview)['error']['message']);
+
+        $apply = $this->action->import(
+            $this->request('POST', '/api/payroll/time/imports')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(422, $apply->getStatusCode());
+        self::assertStringContainsString('vzorec', $this->json($apply)['error']['message']);
+        self::assertSame(0, $this->countRows('payroll_time_entries'));
+        self::assertSame(0, $this->countRows('payroll_time_imports'));
     }
 
     public function testCrossMonthEntryBelongsOnlyToLocalStartMonth(): void
@@ -882,6 +1068,28 @@ final class PayrollTimeApiTest extends TestCase
         );
         $stmt->execute([$this->supplierId]);
         return (int) $stmt->fetchColumn();
+    }
+
+    /** @param list<list<string|int>> $rows */
+    private function xlsx(array $rows): string
+    {
+        $spreadsheet = new Spreadsheet();
+        $spreadsheet->getActiveSheet()->fromArray($rows);
+        $tmp = tempnam(sys_get_temp_dir(), 'payroll-time-xlsx-');
+        if ($tmp === false) {
+            throw new \RuntimeException('Nelze vytvořit syntetický XLSX.');
+        }
+        try {
+            (new Xlsx($spreadsheet))->save($tmp);
+            $content = file_get_contents($tmp);
+            if ($content === false) {
+                throw new \RuntimeException('Syntetický XLSX nelze načíst.');
+            }
+            return $content;
+        } finally {
+            $spreadsheet->disconnectWorksheets();
+            @unlink($tmp);
+        }
     }
 
     private function request(

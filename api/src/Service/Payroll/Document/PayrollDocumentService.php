@@ -28,21 +28,58 @@ class PayrollDocumentService
         ?int $supersedesDocumentId = null,
         ?PayrollDocumentStorageScope $storageScope = null,
     ): array {
+        return $this->archivePayslip(
+            $supplierId,
+            $runId,
+            $revisionId,
+            $employeeId,
+            $this->renderPayslip($data),
+            $idempotencyKey,
+            $actorUserId,
+            $supersedesDocumentId,
+            $storageScope,
+        );
+    }
+
+    public function renderPayslip(PayslipDocumentData $data): PayrollArtifact
+    {
         $rendered = $this->payslips->render($data);
+
+        return new PayrollArtifact(
+            PayrollDocumentKind::Payslip,
+            $rendered->pdfBytes,
+            $rendered->mimeType,
+            $rendered->suggestedFilename,
+            $rendered->sourceSnapshotSha256,
+            PayslipPdfRenderer::VERSION,
+            $rendered->rendererVersion,
+        );
+    }
+
+    /** @return array<string,mixed> */
+    public function archivePayslip(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        int $employeeId,
+        PayrollArtifact $artifact,
+        string $idempotencyKey,
+        ?int $actorUserId,
+        ?int $supersedesDocumentId = null,
+        ?PayrollDocumentStorageScope $storageScope = null,
+    ): array {
+        if ($artifact->kind !== PayrollDocumentKind::Payslip) {
+            throw new \InvalidArgumentException(
+                'Archiv výplatní pásky vyžaduje PDF výplatní pásky.',
+            );
+        }
+
         return $this->archive(
             $supplierId,
             $runId,
             $revisionId,
             $employeeId,
-            new PayrollArtifact(
-                PayrollDocumentKind::Payslip,
-                $rendered->pdfBytes,
-                $rendered->mimeType,
-                $rendered->suggestedFilename,
-                $rendered->sourceSnapshotSha256,
-                PayslipPdfRenderer::VERSION,
-                $rendered->rendererVersion,
-            ),
+            $artifact,
             $idempotencyKey,
             $actorUserId,
             $supersedesDocumentId,

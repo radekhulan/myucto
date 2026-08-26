@@ -17,7 +17,7 @@ export function pageParams(page?: PayrollPageParams): Record<string, number> {
   }
 }
 
-export type PayrollModuleStatus = 'disabled' | 'setup' | 'active' | 'suspended'
+export type PayrollModuleStatus = 'disabled' | 'setup' | 'qualification_required' | 'active' | 'suspended'
 export type PayrollSupportStatus = 'supported' | 'manual_review' | 'not_supported'
 
 export interface PayrollModuleState {
@@ -156,6 +156,7 @@ export interface PayrollEmploymentTerms {
   actual_start_on: string | null
   fixed_term_end_on: string | null
   weekly_hours: string | null
+  leave_entitlement_weeks_override?: number | null
   workload_basis_points: number
   work_place: string | null
   regular_workplace: string | null
@@ -167,6 +168,10 @@ export interface PayrollEmploymentTerms {
   jmhz_apz_instrument_code: string | null
   jmhz_functional_benefits_status: PayrollVerifiedTriState
   jmhz_temporary_assignment_status: PayrollVerifiedTriState
+  jmhz_orchard_discount_eligible?: boolean
+  jmhz_specific_legal_fact_applies?: boolean
+  jmhz_ozp_employment_support_applies?: boolean
+  jmhz_deep_mining_work_applies?: boolean
   cz_isco_code: string | null
   activity_code: string | null
   jmhz_relationship_detail_code: string | null
@@ -241,6 +246,8 @@ export type PayrollEmploymentTermsPayload = Omit<
     | 'social_employer_rate_category_evidence'
     | 'social_part_time_discount_reason' | 'social_part_time_discount_evidence'
     | 'social_part_time_discount_notified_on'
+    | 'jmhz_orchard_discount_eligible' | 'jmhz_specific_legal_fact_applies'
+    | 'jmhz_ozp_employment_support_applies' | 'jmhz_deep_mining_work_applies'
 > & {
   risky_work?: boolean
   social_employer_rate_category?: PayrollSocialEmployerRateCategory
@@ -251,6 +258,10 @@ export type PayrollEmploymentTermsPayload = Omit<
   social_part_time_discount_reason?: PayrollSocialPartTimeDiscountReason
   social_part_time_discount_evidence?: string | null
   social_part_time_discount_notified_on?: string | null
+  jmhz_orchard_discount_eligible?: boolean
+  jmhz_specific_legal_fact_applies?: boolean
+  jmhz_ozp_employment_support_applies?: boolean
+  jmhz_deep_mining_work_applies?: boolean
 }
 
 export interface PayrollEmploymentCreatePayload {
@@ -315,6 +326,7 @@ export type PayrollSecureDeliveryChannel = 'portal' | 'paper'
 export type PayrollPersonAddressType = 'residence' | 'mailing'
 export type PayrollPersonContactType = 'email' | 'phone'
 export type PayrollPersonIdentifierType = 'birth_number' | 'ecp' | 'vcp' | 'foreign_tax_identifier'
+export type PayrollPersonSex = 'female' | 'male' | 'unspecified'
 export type PayrollPersonAccountVerificationSource =
   | 'employee_confirmation'
   | 'bank_document'
@@ -325,7 +337,14 @@ export interface PayrollPersonIdentityHistory {
   full_name: string
   first_name: string | null
   last_name: string | null
+  title_prefix: string | null
+  title_suffix: string | null
   birth_surname_masked: string | null
+  birth_date: string | null
+  birth_place: string | null
+  birth_country_code: string | null
+  citizenship_country_code: string | null
+  sex: PayrollPersonSex | null
   effective_from: string
   effective_to: string | null
   row_version: number
@@ -497,8 +516,15 @@ export interface PayrollPersonIdentityPayload {
   full_name: string
   first_name: string
   last_name: string
+  title_prefix?: string | null
+  title_suffix?: string | null
   birth_surname?: string | null
   birth_surname_source_id?: number
+  birth_date?: string | null
+  birth_place?: string | null
+  birth_country_code?: string | null
+  citizenship_country_code?: string | null
+  sex?: PayrollPersonSex | null
   effective_from: string
   effective_to: string | null
 }
@@ -968,7 +994,7 @@ export interface PayrollTimeImportError {
 export interface PayrollTimeImportPreview {
   format: 'csv' | 'xlsx'
   supported: boolean
-  status: 'preview' | 'manual_review'
+  status: 'preview'
   period: string
   original_name: string
   total_rows: number
@@ -1082,6 +1108,65 @@ export type PayrollComponentPayload = Omit<
   PayrollComponent,
   'id' | 'supplier_id' | 'row_version' | 'created_at' | 'updated_at'
 >
+
+export interface PayrollRiskySavingsItem {
+  id: number
+  employment_id: number
+  period_start: string
+  revision_no: number
+  risk_factor: PayrollRiskySavingsRiskFactor
+  work_category: 3
+  qualifying_shift_eighths: number
+  right_claimed_on: string
+  employee_informed_on: string | null
+  pension_company: string
+  institution_account_id: number
+  institution_account_masked: string | null
+  institution_account_row_version: number | null
+  institution_account_hash: string | null
+  payment_target_name: string | null
+  product_reference: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  payment_message: string | null
+  evidence_reference: string | null
+  status: 'draft' | 'approved'
+  row_version: number
+  full_name: string
+  employment_code: string
+  contribution_id: number | null
+  revision_id: number | null
+  assessment_base_minor: number | null
+  contribution_minor: number | null
+  payment_due_on: string | null
+  paid_on: string | null
+  contribution_status: 'approved' | 'paid' | null
+}
+
+export type PayrollRiskySavingsRiskFactor =
+  | 'vibration'
+  | 'cold'
+  | 'heat'
+  | 'dynamic_physical_load'
+
+export interface PayrollRiskySavingsEvidencePayload {
+  employment_id: number
+  period: string
+  source_evidence_id: number | null
+  row_version: number | null
+  risk_factor: PayrollRiskySavingsRiskFactor
+  qualifying_shift_eighths: number
+  right_claimed_on: string
+  employee_informed_on: string | null
+  pension_company: string
+  institution_account_id: number
+  product_reference: string
+  variable_symbol: string | null
+  specific_symbol: string | null
+  payment_message: string | null
+  evidence_reference: string | null
+  approve: boolean
+}
 
 export interface PayrollComponentJmhzTarget {
   attribute_id: string
@@ -1304,6 +1389,8 @@ export interface PayrollQuickInputRow {
   relation_type: PayrollRelationType
   effective_status: PayrollEmploymentStatus
   suspended_in_month: boolean
+  /** Lehký příznak pro přehled; úplné absence se vracejí jen kartám stránky. */
+  away_in_month?: boolean
   base_amount_minor: number
   base_managed_elsewhere: boolean
   base_conflict: boolean
@@ -1339,6 +1426,37 @@ export interface PayrollQuickInputMonth {
   items: PayrollQuickInputRow[]
   /** Počet vztahů v měsíci; `items` je jen aktuální stránka. */
   total: number
+}
+
+export type PayrollEmployeeCardStatusFilter = 'active' | 'away' | 'attention' | 'all'
+
+export interface PayrollEmployeeCardAbsence {
+  id: number
+  employment_id: number
+  absence_type: string
+  date_from: string
+  date_to: string
+  status: 'requested' | 'approved'
+}
+
+export interface PayrollEmployeeCardRow extends PayrollQuickInputRow {
+  absences: PayrollEmployeeCardAbsence[]
+}
+
+export interface PayrollEmployeeCardMonth {
+  period: string
+  items: PayrollEmployeeCardRow[]
+  /** Počet vztahů odpovídajících serverovému filtru. */
+  total: number
+  /** Všechny osoby firmy, včetně těch bez účinného vztahu v měsíci. */
+  company_headcount: number
+  /** Souhrn celého měsíce, nikoli jen zobrazené stránky nebo filtru. */
+  summary: {
+    people: number
+    gross_preview_minor: number
+    away: number
+    attention: number
+  }
 }
 
 export interface PayrollQuickInputSavePayload {
@@ -1534,6 +1652,33 @@ export interface PayrollEmployerSettingsPayload {
 }
 
 export type PayrollRegzelEnvironment = 'production' | 'test'
+
+export interface PayrollJmhzExternalIdentifierStatus {
+  id: number
+  value_masked: string
+  valid_from: string
+  valid_to: string | null
+  source_kind: 'trusted_receipt' | 'verified_manual_import'
+  row_version: number
+}
+
+export interface PayrollJmhzIdentityStatus {
+  employee_id: number
+  employment_id: number
+  environment: PayrollRegzelEnvironment
+  on_date: string
+  person_external_identifier: PayrollJmhzExternalIdentifierStatus | null
+  employment_external_identifier: PayrollJmhzExternalIdentifierStatus | null
+}
+
+export interface PayrollJmhzIdentityPayload {
+  environment: PayrollRegzelEnvironment
+  person_external_identifier?: string | null
+  employment_external_identifier?: string | null
+  valid_from: string
+  source_reference?: string | null
+  evidence_confirmed: true
+}
 
 export type PayrollSubmissionObligationStatus =
   | 'open'
@@ -1839,8 +1984,6 @@ export interface PayrollJmhzPvpojPreview {
     statutory_result_hash: string
     ruleset_id: string
     ruleset_hash: string
-    social_liability_id: number
-    social_liability_hash: string
   }
   pvpoj: {
     pojistne: {
@@ -1875,11 +2018,11 @@ export interface PayrollJmhzPvpojPreview {
 }
 
 export interface PayrollJmhzOrdinaryEvidenceFacts {
-  reportable_wage_deductions_recorded: false
-  employee_social_discount_claimed: false
-  specific_legal_fact_occurred: false
-  ozp_employment_support_claimed: false
-  deep_mining_work_occurred: false
+  reportable_wage_deductions_recorded: boolean
+  employee_social_discount_claimed: boolean
+  specific_legal_fact_occurred: boolean
+  ozp_employment_support_claimed: boolean
+  deep_mining_work_occurred: boolean
 }
 
 /**
@@ -1893,6 +2036,9 @@ export interface PayrollJmhzOrdinaryEvidenceScope {
   employment_id: number
   employee_name: string
   confirmed: boolean
+  resolution: 'confirmed' | 'automatic_on_preparation' | 'attention_required'
+  attention_code: string | null
+  attention_message: string | null
 }
 
 export interface PayrollJmhzOrdinaryEvidenceState {
@@ -1911,6 +2057,7 @@ export interface PayrollJmhzOrdinaryEvidence {
   schema_reference: 'payroll-jmhz-ordinary-evidence.v1'
   source_manifest_sha256: string
   facts: PayrollJmhzOrdinaryEvidenceFacts
+  source_kind: 'explicit_confirmation' | 'derived_from_frozen_payroll_sources'
   confirmed_at: string
   created_at: string
   created: boolean
@@ -2107,11 +2254,32 @@ export interface PayrollRegistrationSubmission {
   deadline: PayrollRegistrationDeadline
 }
 
+/** Ručně spuštěný VREP přenos jedné zmrazené PREZEC/REGZEC registrace. */
+export interface PayrollRegistrationTransportResult {
+  agenda_code: PayrollRegistrationAgenda
+  submission_class: 'CSSZ_PREZEC' | 'CSSZ_REGZEC'
+  payload_sha256: string
+  attempt: PayrollJmhzTransportAttempt
+  acknowledgement: PayrollJmhzTransportAcknowledgement | null
+  /** `true` až po načtení protokolu o zpracování z ČSSZ. */
+  settled: boolean
+}
+
+export interface PayrollRegistrationTransportStatus {
+  agenda_code: PayrollRegistrationAgenda
+  submission_class: 'CSSZ_PREZEC' | 'CSSZ_REGZEC'
+  attempt: PayrollJmhzTransportAttempt | null
+}
+
 export interface PayrollRegzelProfile {
   supplier_id: number
   social_enterprise: boolean
   employment_agency: boolean
   protected_labor_market: boolean
+  tax_office_code: string | null
+  tax_office_workplace_code: string | null
+  payer_reference_number: string | null
+  is_complete: boolean
   evidence_confirmed_at: string
   row_version: number
   updated_at: string
@@ -2122,7 +2290,15 @@ export interface PayrollRegzelProfilePayload {
   social_enterprise: boolean
   employment_agency: boolean
   protected_labor_market: boolean
+  tax_office_code: string
+  tax_office_workplace_code: string | null
+  payer_reference_number: string | null
   evidence_confirmed: boolean
+}
+
+export interface PayrollRegzelProfileResponse {
+  profile: PayrollRegzelProfile | null
+  suggested_tax_office_workplace_code: string | null
 }
 
 /**
@@ -2204,6 +2380,7 @@ export interface PayrollEmployerPolicy {
   balance_rounding_mode: PayrollBalanceRoundingMode
   home_office_policy: PayrollOptionalPolicyState
   travel_expense_policy: PayrollOptionalPolicyState
+  leave_entitlement_weeks: number
   four_eyes_required: boolean
   automatic_calculation_enabled: boolean
   automatic_posting_enabled: boolean
@@ -2468,6 +2645,18 @@ export interface PayrollAnnualDocumentList {
   total: number
   limit: number
   offset: number
+}
+
+export type PayrollPeriodExportScope = 'monthly' | 'annual'
+
+export interface PayrollPeriodExport {
+  id: number
+  scope: PayrollPeriodExportScope
+  period_start: string
+  period_end: string
+  file_sha256: string
+  size_bytes: number
+  suggested_filename: string
 }
 
 /* ── Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP) ─────────────── */
@@ -3030,6 +3219,7 @@ export interface PayrollRun {
   row_version: number
   revision_id: number | null
   revision_no: number | null
+  revision_kind: 'regular' | 'correction' | null
   revision_status: string | null
   payment_materialization_supported: boolean
   can_delete: boolean
@@ -3043,6 +3233,31 @@ export interface PayrollRunsPage {
   total: number
   limit: number
   offset: number
+}
+
+export interface PayrollProductionQualification {
+  id: number
+  supplier_id: number
+  module_state_row_version: number
+  support_matrix_version: string
+  support_matrix_sha256: string
+  evidence_sha256: string
+  qualified_by: number | null
+  qualified_at: string
+}
+
+export interface PayrollProductionQualificationEvidence {
+  parallel_runs: Array<{ payroll_run_id: number; document_id: number }>
+  correction_scenario: { payroll_run_id: number; document_id: number }
+  recovery_drill: { completed_on: string; document_id: number }
+  expert_approval: {
+    approver_name: string
+    approver_role: string
+    approved_on: string
+    document_id: number
+  }
+  rollback_plan: { verified_on: string; document_id: number }
+  post_go_live_monitoring: { prepared_on: string; document_id: number }
 }
 
 export interface PayrollRunCommandResponse {
@@ -3262,6 +3477,10 @@ export interface PayrollJmhzTransportAttempt {
   /** Období hlášení z povinnosti; `null` u pokusu, jehož podání už v evidenci není. */
   period_start: string | null
   period_end: string | null
+  /** Druh a stav podání, ke kterému pokus patří; `null` jen u osiřelého ledgeru. */
+  submission_kind: string | null
+  submission_status: string | null
+  corrects_submission_id: number | null
   /** CorrelationID přidělené branou VREP; bez něj se na výsledek nelze zeptat. */
   correlation_reference: string | null
   request_sha256: string | null
@@ -3306,12 +3525,65 @@ export interface PayrollJmhzCorrectiveSubmission {
   year: number
 }
 
+export interface PayrollJmhzCorrectableComponent {
+  form_guid: string
+  person_external_identifier: string
+  employment_external_identifier: string
+}
+
+export interface PayrollJmhzContentCorrectionForm {
+  employee_name: string | null
+  person_external_identifier: string
+  employment_external_identifier: string
+  effective_state: 'accepted' | 'rejected' | 'cancelled' | 'missing'
+  action: 'correct_values' | 'complete_form'
+}
+
+export interface PayrollJmhzContentCorrectionPreparation {
+  id: number
+  source_revision_id: number
+  revision_no: number
+  period_start: string
+  created_at: string
+  document_sha256: string
+}
+
+export interface PayrollJmhzContentCorrectionPreparations {
+  environment: PayrollJmhzTransportEnvironment
+  submission_id: number
+  preparations: PayrollJmhzContentCorrectionPreparation[]
+  auto_selected_preparation_id: number | null
+}
+
+export interface PayrollJmhzContentCorrectionCandidates {
+  environment: PayrollJmhzTransportEnvironment
+  submission_id: number
+  preparation_id: number
+  document_sha256: string
+  forms: PayrollJmhzContentCorrectionForm[]
+}
+
 export interface PayrollJmhzTransportHistory {
   environment: PayrollJmhzTransportEnvironment
   attempts: PayrollJmhzTransportAttempt[]
+  ready_submissions: PayrollJmhzReadySubmission[]
   total: number
   limit: number
   offset: number
+}
+
+export interface PayrollJmhzReadySubmission {
+  submission_id: number
+  submission_kind: string
+  submission_status: 'ready'
+  corrects_submission_id: number | null
+  period_start: string
+  period_end: string
+  created_at: string
+  outbox_id: number | null
+  outbox_dispatch_state: string | null
+  outbox_acceptance_state: string | null
+  outbox_external_message_id: string | null
 }
 
 /** Potvrzení o PŘEVZETÍ zprávy, ne o přijetí podání. */
@@ -3442,9 +3714,18 @@ export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
   activation: () =>
-    api.get<{ state: PayrollModuleState }>('/payroll/settings/activation').then(response => response.data.state),
+    api.get<{ state: PayrollModuleState; production_qualification: PayrollProductionQualification | null }>('/payroll/settings/activation')
+      .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
+  qualifyProduction: (payload: {
+    row_version: number
+    support_matrix_version: string
+    evidence: PayrollProductionQualificationEvidence
+  }) => api.post<{
+    state: PayrollModuleState
+    qualification: PayrollProductionQualification
+  }>('/payroll/settings/activation/production-qualification', payload).then(response => response.data),
   /**
    * Stránka seznamu osob. Filtr i hledání jdou na server — kdyby zužoval
    * prohlížeč, hledal by jen v načtené stránce a člověka ze třetí stránky by
@@ -3782,6 +4063,21 @@ export const payrollApi = {
     api.get<PayrollJmhzOrdinaryEvidenceState>(
       `/payroll/submissions/jmhz-ordinary-evidence/${revisionId}`,
     ).then(response => response.data),
+  jmhzIdentity: (
+    employmentId: number,
+    environment: PayrollRegzelEnvironment,
+    onDate: string,
+  ) => api.get<{ identity: PayrollJmhzIdentityStatus }>(
+    `/payroll/jmhz/identities/${employmentId}`,
+    { params: { environment, on_date: onDate } },
+  ).then(response => response.data.identity),
+  saveJmhzIdentity: (
+    employmentId: number,
+    payload: PayrollJmhzIdentityPayload,
+  ) => api.put<{ assigned: Record<string, unknown> }>(
+    `/payroll/jmhz/identities/${employmentId}`,
+    payload,
+  ).then(response => response.data.assigned),
   confirmJmhzOrdinaryEvidence: (
     revisionId: number,
     employmentId: number,
@@ -3823,14 +4119,14 @@ export const payrollApi = {
   ).then(response => response.data),
   freezeJmhzSubmission: (
     preparationId: number,
-    obligationId: number,
+    obligationId: number | null,
     environment: PayrollJmhzTransportEnvironment,
     officeId?: number | null,
   ) => api.post<PayrollJmhzFrozenSubmission>(
     `/payroll/submissions/jmhz-freeze/${preparationId}`,
     {
       environment,
-      obligation_id: obligationId,
+      ...(obligationId == null ? {} : { obligation_id: obligationId }),
       ...(officeId == null ? {} : { office: officeId }),
     },
   ).then(response => response.data),
@@ -3846,6 +4142,44 @@ export const payrollApi = {
     environment: 'test' | 'production' = 'test',
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
+    { environment },
+  ).then(response => response.data),
+  sendEmploymentRegistrationTransport: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    idempotencyKey: string,
+  ) => api.post<PayrollRegistrationTransportResult>(
+    `/payroll/submissions/registration-transport/${submissionId}`,
+    { environment },
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
+  employmentRegistrationTransportStatus: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollRegistrationTransportStatus>(
+    `/payroll/submissions/registration-transport/${submissionId}`,
+    { params: { environment } },
+  ).then(response => response.data),
+  /**
+   * Ruční dotaz na výsledek PREZEC/REGZEC. Registrace nemají automatický poll;
+   * každé síťové volání vyvolá účetní z detailu pracovního vztahu.
+   */
+  pollEmploymentRegistrationTransportAttempt: (
+    attemptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<PayrollJmhzTransportPoll>(
+    `/payroll/submissions/registration-transport/${attemptId}/poll`,
+    { environment },
+  ).then(response => response.data),
+  closeEmploymentRegistrationTransportAttempt: (
+    attemptId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.post<{
+    closed: boolean
+    already_closed: boolean
+    attempt: PayrollJmhzTransportAttempt
+  }>(
+    `/payroll/submissions/registration-transport/${attemptId}/close`,
     { environment },
   ).then(response => response.data),
   downloadJmhzPvpojPreview: async (
@@ -3914,14 +4248,15 @@ export const payrollApi = {
     excluded_days_confirmed: boolean
     deducted_days_none: boolean
     requested_by_authority: boolean
+    authority_request_received_on: string | null
     note: string
     idempotency_key: string
   }) =>
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
   regzelProfile: () =>
-    api.get<{ profile: PayrollRegzelProfile | null }>('/payroll/submissions/regzel/profile')
-      .then(response => response.data.profile),
+    api.get<PayrollRegzelProfileResponse>('/payroll/submissions/regzel/profile')
+      .then(response => response.data),
   saveRegzelProfile: (payload: PayrollRegzelProfilePayload) =>
     api.put<{ profile: PayrollRegzelProfile }>('/payroll/submissions/regzel/profile', payload)
       .then(response => response.data.profile),
@@ -4127,6 +4462,42 @@ export const payrollApi = {
       {},
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
+  downloadPeriodExport: async (
+    scope: PayrollPeriodExportScope,
+    period: string | number,
+  ): Promise<PayrollPeriodExport> => {
+    const exported = await api.post<PayrollPeriodExport>(
+      `/payroll/exports/${scope}/${period}`,
+      {},
+    ).then(response => response.data)
+    const grant = await api.post<{
+      grant_id: number
+      export_id: number
+      token: string
+      expires_at: string
+    }>(
+      `/payroll/exports/${exported.id}/download-grants`,
+      { ttl_seconds: 120 },
+    ).then(response => response.data)
+    const response = await api.post<Blob>(
+      '/payroll/exports/download',
+      { token: grant.token },
+      { responseType: 'blob' },
+    )
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = exported.suggested_filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+
+    return exported
+  },
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(
       `/payroll/employments/${employmentId}/documents/exit`,
@@ -4355,6 +4726,18 @@ export const payrollApi = {
     api.get<{ components: PayrollComponent[] }>('/payroll/components', {
       params: effectiveOn ? { effective_on: effectiveOn } : undefined,
     }).then(response => response.data.components),
+  riskySavings: (period: string) =>
+    api.get<{
+      items: PayrollRiskySavingsItem[]
+      minimum_shift_eighths: number
+      rate_basis_points: number
+    }>('/payroll/risky-savings', { params: { period } })
+      .then(response => response.data),
+  saveRiskySavingsEvidence: (payload: PayrollRiskySavingsEvidencePayload) =>
+    api.put<{ evidence: PayrollRiskySavingsItem }>(
+      '/payroll/risky-savings/evidence',
+      payload,
+    ).then(response => response.data.evidence),
   createComponent: (payload: PayrollComponentPayload) =>
     api.post<{ component: PayrollComponent }>('/payroll/components', payload)
       .then(response => response.data.component),
@@ -4363,6 +4746,11 @@ export const payrollApi = {
       ...payload,
       row_version: rowVersion,
     }).then(response => response.data.component),
+  deleteComponent: (id: number, rowVersion: number) =>
+    api.delete<{ deleted: true; cascade: PayrollDeleteCascade }>(
+      `/payroll/components/${id}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data.cascade),
   componentJmhzTargets: () =>
     api.get<{
       package_key: string
@@ -4409,6 +4797,11 @@ export const payrollApi = {
       ...payload,
       row_version: rowVersion,
     }).then(response => response.data.recurring_component),
+  deleteRecurringComponent: (id: number, rowVersion: number) =>
+    api.delete<{ deleted: true; cascade: PayrollDeleteCascade }>(
+      `/payroll/recurring-components/${id}`,
+      { data: { row_version: rowVersion } },
+    ).then(response => response.data.cascade),
   materializeRecurringComponents: (period: string) =>
     api.post<{ materialization: PayrollRecurringMaterialization }>(
       '/payroll/recurring-components/materialize',
@@ -4431,6 +4824,19 @@ export const payrollApi = {
         ...(employmentId ? { employment_id: employmentId } : {}),
       },
     }).then(response => response.data.month),
+  employeeCards: (
+    period: string,
+    page: PayrollPageParams,
+    filters: { search: string, status: PayrollEmployeeCardStatusFilter },
+  ) => api.get<{ month: PayrollEmployeeCardMonth }>('/payroll/quick-inputs', {
+    params: {
+      period,
+      view: 'cards',
+      ...pageParams(page),
+      search: filters.search,
+      status: filters.status,
+    },
+  }).then(response => response.data.month),
   /**
    * Zúžení se posílá i při ukládání — odpověď je táž stránka, ze které se
    * plní formulář, a ta musí zůstat zúžená.
@@ -4565,18 +4971,54 @@ export const payrollApi = {
     `/payroll/submissions/${submissionId}/jmhz-cancel`,
     { environment },
   ).then(response => response.data),
+  /** Vztahy načtené ze zmrazeného řádného XML; zákonné identifikátory se neopisují ručně. */
+  jmhzCorrectableComponents: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<{
+    environment: PayrollJmhzTransportEnvironment
+    submission_id: number
+    components: PayrollJmhzCorrectableComponent[]
+  }>(
+    `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
+    { params: { environment } },
+  ).then(response => response.data),
   /** Opravné podání, které stornuje jen vyjmenované pracovněprávní vztahy. */
   cancelJmhzSubmissionComponents: (
     submissionId: number,
     environment: PayrollJmhzTransportEnvironment,
-    components: Array<{
-      form_guid: string
-      person_external_identifier: string
-      employment_external_identifier: string
-    }>,
+    formGuids: string[],
   ) => api.post<PayrollJmhzCorrectiveSubmission>(
     `/payroll/submissions/${submissionId}/jmhz-cancel-components`,
-    { environment, components },
+    { environment, form_guids: formGuids },
+  ).then(response => response.data),
+  jmhzContentCorrectionPreparations: (
+    submissionId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzContentCorrectionPreparations>(
+    `/payroll/submissions/${submissionId}/jmhz-content-correction-preparations`,
+    { params: { environment } },
+  ).then(response => response.data),
+  jmhzContentCorrectionCandidates: (
+    submissionId: number,
+    preparationId: number,
+    environment: PayrollJmhzTransportEnvironment,
+  ) => api.get<PayrollJmhzContentCorrectionCandidates>(
+    `/payroll/submissions/${submissionId}/jmhz-content-correction`,
+    { params: { environment, preparation_id: preparationId } },
+  ).then(response => response.data),
+  freezeJmhzContentCorrection: (
+    submissionId: number,
+    preparationId: number,
+    environment: PayrollJmhzTransportEnvironment,
+    employmentExternalIdentifiers: string[],
+  ) => api.post<PayrollJmhzCorrectiveSubmission>(
+    `/payroll/submissions/${submissionId}/jmhz-content-correction`,
+    {
+      environment,
+      preparation_id: preparationId,
+      employment_external_identifiers: employmentExternalIdentifiers,
+    },
   ).then(response => response.data),
   /** Protokoly načtené ze souboru, od nejnovějšího období. */
   jmhzImportedProtocols: (

@@ -55,6 +55,9 @@ final class FakeIsdsTransport implements IsdsTransport
     /** @var array<string,string> */
     public array $downloads = [];
 
+    /** @var array<string,SubmissionChannelException> */
+    public array $downloadFailures = [];
+
     public ?string $deliveryReceipt = null;
 
     public function checkRecipientBox(ChannelContext $context, string $boxId): IsdsBoxCheck
@@ -148,6 +151,9 @@ final class FakeIsdsTransport implements IsdsTransport
     public function downloadMessage(ChannelContext $context, string $messageId): string
     {
         $this->callLog[] = 'downloadMessage';
+        if (isset($this->downloadFailures[$messageId])) {
+            throw $this->downloadFailures[$messageId];
+        }
         return $this->downloads[$messageId] ?? 'ZFO-' . $messageId;
     }
 

@@ -175,6 +175,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/jmhz/employment-evidence-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/municipalities$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Klasifikace zaměstnání ČSÚ je veřejná referenční data, ne data nájemce —
         // stejná úroveň jako sousední našeptávač obcí.
         ['GET', '#^/api/payroll/cz-isco$#', 'payroll', AccessLevel::READ],
@@ -214,7 +216,7 @@ final class RoutePermissionMap
         // samostatné právo by zamklo hledání a nechalo otevřený celý seznam.
         ['GET', '#^/api/payroll/payments/reconciliation/options$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],
-        ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals)$#', 'payroll.payments', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals|incoming-refunds|incoming-refund-reversals)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/batches/[0-9]+/exports$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/[0-9]+/download-grants$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/exports/download$#', 'payroll.payments', AccessLevel::WRITE],
@@ -244,6 +246,10 @@ final class RoutePermissionMap
         // by se v praxi vždy přidělovaly společně.
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+/poll$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+/close$#', 'payroll.submissions', AccessLevel::WRITE],
         // Záměr uplatňovat slevu na pojistném (OZUSPOJ). Zápis výsledku od ČSSZ
         // je WRITE stejně jako příprava podání — mění doloženost nároku, tedy
         // i výši odvedeného pojistného.
@@ -257,6 +263,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/jmhz-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-transport/[0-9]+/close$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-transport$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-cancel-components$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction-preparations$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-cancel(?:-components)?$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-protocol-import$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-protocol-import$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
@@ -265,6 +276,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/health-overviews/[0-9]+(?:/[0-9]{3}/download)?$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/health-notifications/capability$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/health-notifications/duties$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/health-notifications/duties/obligations$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/health-notifications/duties/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/health-notifications/duties/[0-9]+/obligations$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/health-notifications/payment-overview/[0-9]+/[0-9]{3}/prepare$#', 'payroll.submissions', AccessLevel::WRITE],
@@ -306,6 +318,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/components/(?:jmhz-targets|jmhz-mappings|[0-9]+/jmhz-mapping)$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/components/[0-9]+/jmhz-mapping$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/components(?:/[0-9]+)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/risky-savings$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/risky-savings/evidence$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/travel/trips(?:/[0-9]+/calculation)?$#', 'payroll', AccessLevel::READ],
         // Zrušení schválené cesty bere zpět schválení — proto stejné právo jako
         // schválit a vyúčtovat. Smazání KONCEPTU spadá pod `payroll.inputs.write`
@@ -328,6 +342,7 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/input-imports/(preview|apply)$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/settings/activation/production-qualification$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/account-options$#', 'payroll.settings', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/employer$#', 'payroll.settings', AccessLevel::WRITE],

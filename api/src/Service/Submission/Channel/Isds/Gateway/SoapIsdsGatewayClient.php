@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Submission\Channel\Isds\Gateway;
 
+use MyInvoice\Service\Submission\Channel\Isds\IsdsClientCertificate;
 use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportTimeout;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use Psr\Log\LoggerInterface;
@@ -26,21 +27,10 @@ use Psr\Log\NullLogger;
  * dokumentace uvádí jmenný prostor `…/ats-ws/v1`, kdežto WSDL přibalené v příloze
  * je ve verzi `…/ats-ws/v1_1`.
  *
- * ── Certifikát na disku ─────────────────────────────────────────────────────
- * cURL jinou cestu nenabízí: klientský certifikát i klíč musí být soubory.
- * Zmenšujeme tedy okno, ne riziko úplně:
- *   - název je náhodný (12 bajtů z `random_bytes`), takže se na něj nedá čekat,
- *   - práva se hned zužují na 0600,
- *   - smazání je ve `finally`, tedy proběhne i když volání skončí výjimkou.
- *
- * ⚠️ **Na Windows to 0600 nedělá nic.** `chmod()` tam POSIX práva nenastavuje,
- * mapuje se jen na příznak „jen pro čtení" — přístup jiných účtů neomezí.
- * Na cílovém nasazení (IIS/Windows) tedy soubor chrání **výhradně ACL adresáře**,
- * a `sys_get_temp_dir()` tam bývá `C:\Windows\Temp` s benevolentním ACL.
- * **Provozovatel proto MUSÍ app poolu nastavit vlastní `TMP`/`TEMP` s omezeným
- * ACL** — na Windows to není zpřísnění navíc, ale jediná skutečná ochrana
- * soukromého klíče po dobu volání. Je to jeden z bodů, které musí udělat ručně,
- * než se brána zapne; sám kód to za něj vynutit nemůže.
+ * ── Certifikát jen v paměti ──────────────────────────────────────────────────
+ * PKCS#12 se předává libcurl přes `CURLOPT_SSLCERT_BLOB`. Soukromý klíč proto
+ * nevzniká ani krátce v systémovém TEMP; po ukončení volání se pracovní kopie
+ * přepíše pomocí `sodium_memzero()`.
  */
 final class SoapIsdsGatewayClient implements IsdsGatewayClient
 {
@@ -242,7 +232,19 @@ final class SoapIsdsGatewayClient implements IsdsGatewayClient
             return ($this->httpDouble)($url, $body, $soapAction, $registration, $credential);
         }
 
-        [$certificatePath, $keyPath] = $this->materializeCertificate($registration);
+        try {
+            $clientCertificate = IsdsClientCertificate::fromBase64(
+                $registration->certificate->reveal(),
+                $registration->certificatePassphrase?->reveal() ?? '',
+            );
+        } catch (\UnexpectedValueException) {
+            throw new SubmissionChannelException(
+                'isds_gateway_certificate_unreadable',
+                'Certifikát odesílací brány se nepodařilo otevřít. Zkontrolujte soubor a jeho heslo.',
+                500,
+            );
+        }
+        $handle = null;
 
         try {
             $handle = curl_init($url);
@@ -272,10 +274,6 @@ final class SoapIsdsGatewayClient implements IsdsGatewayClient
                 // Kap. 3.1 bod 5: „Komunikace se službou ISDS probíhá vždy
                 // zabezpečeným způsobem přes protokol TLSv1.2."
                 CURLOPT_SSLVERSION => CURL_SSLVERSION_TLSv1_2,
-                CURLOPT_SSLCERT => $certificatePath,
-                CURLOPT_SSLCERTTYPE => 'PEM',
-                CURLOPT_SSLKEY => $keyPath,
-                CURLOPT_SSLKEYTYPE => 'PEM',
             ];
 
             if ($credential !== null) {
@@ -286,11 +284,10 @@ final class SoapIsdsGatewayClient implements IsdsGatewayClient
             }
 
             curl_setopt_array($handle, $options);
+            $clientCertificate->applyTo($handle);
             $raw = curl_exec($handle);
             $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
             $curlError = curl_error($handle);
-            curl_close($handle);
-
             if ($raw === false || $raw === '') {
                 // Nedovolali jsme se, NEBO se spojení přerušilo po odeslání.
                 // Obojí je nevědomost, ne selhání.
@@ -328,66 +325,11 @@ final class SoapIsdsGatewayClient implements IsdsGatewayClient
 
             return ['status' => $status, 'body' => $raw];
         } finally {
-            // Úklid i při výjimce. Klientský klíč nesmí na disku přežít volání.
-            foreach ([$certificatePath, $keyPath] as $path) {
-                if ($path !== '' && is_file($path)) {
-                    @unlink($path);
-                }
+            if ($handle instanceof \CurlHandle) {
+                unset($handle);
             }
+            $clientCertificate->clear();
         }
-    }
-
-    /**
-     * Rozbalí PKCS#12 na dvojici dočasných PEM souborů.
-     *
-     * @return array{0:string,1:string} cesta k certifikátu, cesta ke klíči
-     */
-    private function materializeCertificate(IsdsGatewayRegistration $registration): array
-    {
-        $bundle = [];
-        $raw = base64_decode($registration->certificate->reveal(), true);
-        if ($raw === false || $raw === '') {
-            throw new SubmissionChannelException(
-                'isds_gateway_certificate_unreadable',
-                'Uložený certifikát odesílací brány se nepodařilo přečíst.',
-                500,
-            );
-        }
-
-        $passphrase = $registration->certificatePassphrase?->reveal() ?? '';
-        if (!@openssl_pkcs12_read($raw, $bundle, $passphrase)) {
-            throw new SubmissionChannelException(
-                'isds_gateway_certificate_unreadable',
-                'Certifikát odesílací brány se nepodařilo otevřít. Zkontrolujte soubor a jeho heslo.',
-                500,
-            );
-        }
-
-        $directory = sys_get_temp_dir();
-        $base = $directory . DIRECTORY_SEPARATOR . 'isdsgw-' . bin2hex(random_bytes(12));
-        $certificatePath = $base . '.crt';
-        $keyPath = $base . '.key';
-
-        $chain = (string) ($bundle['cert'] ?? '');
-        foreach ((array) ($bundle['extracerts'] ?? []) as $extra) {
-            $chain .= (string) $extra;
-        }
-
-        if (file_put_contents($certificatePath, $chain) === false
-            || file_put_contents($keyPath, (string) ($bundle['pkey'] ?? '')) === false
-        ) {
-            @unlink($certificatePath);
-            @unlink($keyPath);
-            throw new SubmissionChannelException(
-                'isds_gateway_certificate_unusable',
-                'Certifikát odesílací brány se nepodařilo připravit k použití.',
-                500,
-            );
-        }
-        @chmod($certificatePath, 0600);
-        @chmod($keyPath, 0600);
-
-        return [$certificatePath, $keyPath];
     }
 
     /** @param array{status:int,body:string} $response */

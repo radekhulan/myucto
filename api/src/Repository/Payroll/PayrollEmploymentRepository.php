@@ -283,6 +283,21 @@ final class PayrollEmploymentRepository
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    public function currentRelationType(int $supplierId, int $employmentId): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT relation_type
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+        if (!is_string($value) || $value === '') {
+            throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+        }
+        return $value;
+    }
+
     /**
      * Prohlášení plátce podle § 6 odst. 4 písm. b) ZDP, které u vztahu právě
      * platí. Čte ho validátor smluvních podmínek, aby ho neshodila obrazovka,
@@ -727,7 +742,8 @@ final class PayrollEmploymentRepository
                     terms.effective_from, terms.effective_to,
                     terms.contract_signed_on, terms.planned_start_on,
                     terms.actual_start_on, terms.fixed_term_end_on,
-                    terms.weekly_hours, terms.workload_basis_points,
+                    terms.weekly_hours, terms.leave_entitlement_weeks_override,
+                    terms.workload_basis_points,
                     terms.work_place, terms.regular_workplace,
                     terms.jmhz_workplace_municipality_code,
                     terms.jmhz_workplace_country_code,
@@ -737,6 +753,10 @@ final class PayrollEmploymentRepository
                     terms.jmhz_apz_instrument_code,
                     terms.jmhz_functional_benefits_status,
                     terms.jmhz_temporary_assignment_status,
+                    terms.jmhz_orchard_discount_eligible,
+                    terms.jmhz_specific_legal_fact_applies,
+                    terms.jmhz_ozp_employment_support_applies,
+                    terms.jmhz_deep_mining_work_applies,
                     terms.cz_isco_code, terms.activity_code,
                     terms.jmhz_relationship_detail_code,
                     terms.social_insurance_participation,
@@ -827,7 +847,8 @@ final class PayrollEmploymentRepository
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
-                 fixed_term_end_on, weekly_hours, workload_basis_points,
+                 fixed_term_end_on, weekly_hours, leave_entitlement_weeks_override,
+                 workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
                  jmhz_relationship_detail_code,
                  jmhz_workplace_municipality_code,
@@ -837,6 +858,10 @@ final class PayrollEmploymentRepository
                  jmhz_apz_contribution_status, jmhz_apz_instrument_code,
                  jmhz_functional_benefits_status,
                  jmhz_temporary_assignment_status,
+                 jmhz_orchard_discount_eligible,
+                 jmhz_specific_legal_fact_applies,
+                 jmhz_ozp_employment_support_applies,
+                 jmhz_deep_mining_work_applies,
                  social_insurance_participation, health_insurance_participation,
                  tax_regime, other_withholding_eligibility,
                  foreign_legislation_country_code,
@@ -846,7 +871,7 @@ final class PayrollEmploymentRepository
                  social_part_time_discount_notified_on,
                  tax_declaration_signed,
                  is_primary, change_reason, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -857,6 +882,7 @@ final class PayrollEmploymentRepository
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
             $data['weekly_hours'],
+            $data['leave_entitlement_weeks_override'],
             $data['workload_basis_points'],
             $data['work_place'],
             $data['regular_workplace'],
@@ -871,6 +897,10 @@ final class PayrollEmploymentRepository
             $data['jmhz_apz_instrument_code'],
             $data['jmhz_functional_benefits_status'],
             $data['jmhz_temporary_assignment_status'],
+            (int) $data['jmhz_orchard_discount_eligible'],
+            (int) $data['jmhz_specific_legal_fact_applies'],
+            (int) $data['jmhz_ozp_employment_support_applies'],
+            (int) $data['jmhz_deep_mining_work_applies'],
             $data['social_insurance_participation'],
             $data['health_insurance_participation'],
             $data['tax_regime'],
@@ -1278,7 +1308,16 @@ final class PayrollEmploymentRepository
             'workload_basis_points',
             'row_version',
         ];
-        $bools = ['is_primary', 'is_legacy_projection', 'risky_work', 'tax_declaration_signed'];
+        $bools = [
+            'is_primary',
+            'is_legacy_projection',
+            'risky_work',
+            'tax_declaration_signed',
+            'jmhz_orchard_discount_eligible',
+            'jmhz_specific_legal_fact_applies',
+            'jmhz_ozp_employment_support_applies',
+            'jmhz_deep_mining_work_applies',
+        ];
         foreach ($ints as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];

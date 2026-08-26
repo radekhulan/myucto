@@ -26,6 +26,16 @@ final class PayrollEnforcementSecurityContractTest extends TestCase
         self::assertNotNull($write);
         self::assertSame('payroll.enforcement', $write->key);
         self::assertSame(AccessLevel::WRITE, $write->minimum);
+
+        foreach (['PUT', 'DELETE'] as $method) {
+            $claimMutation = $map->match(
+                $method,
+                '/api/payroll/enforcement/cases/17/claims/23',
+            );
+            self::assertNotNull($claimMutation);
+            self::assertSame('payroll.enforcement', $claimMutation->key);
+            self::assertSame(AccessLevel::WRITE, $claimMutation->minimum);
+        }
     }
 
     public function testRepositoryQueriesCarrySupplierScope(): void
@@ -38,6 +48,24 @@ final class PayrollEnforcementSecurityContractTest extends TestCase
         self::assertGreaterThanOrEqual(18, substr_count($source, 'supplier_id = ?'));
         self::assertStringContainsString(
             'WHERE supplier_id = ? AND id = ? FOR UPDATE',
+            $source,
+        );
+    }
+
+    public function testClaimMutationRoutesAreRegistered(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 4) . '/src/Routes.php');
+        self::assertIsString($source);
+        self::assertStringContainsString(
+            "'/enforcement/cases/{id:[0-9]+}/claims/{claimId:[0-9]+}'",
+            $source,
+        );
+        self::assertStringContainsString(
+            "[PayrollEnforcementAction::class, 'updateClaim']",
+            $source,
+        );
+        self::assertStringContainsString(
+            "[PayrollEnforcementAction::class, 'deleteClaim']",
             $source,
         );
     }

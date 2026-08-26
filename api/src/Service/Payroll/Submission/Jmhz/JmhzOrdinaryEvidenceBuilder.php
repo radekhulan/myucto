@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceScope;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementEvidenceSource;
+use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
+use MyInvoice\Service\Payroll\Garnishment\GarnishmentInput;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzOrdinaryEvidenceBuilder
@@ -73,6 +77,7 @@ final class JmhzOrdinaryEvidenceBuilder
         array $facts,
         int $confirmedBy,
         string $confirmedAt,
+        string $sourceKind = 'explicit_confirmation',
     ): JmhzOrdinaryEvidenceSnapshot {
         if ($targetEmploymentId <= 0) {
             throw new \InvalidArgumentException('Pracovní vztah musí být kladné číslo.');
@@ -83,12 +88,12 @@ final class JmhzOrdinaryEvidenceBuilder
         $runId = $this->positiveInt($revision['run_id'] ?? null, 'revision.run_id');
         $revisionNo = $this->positiveInt($revision['revision_no'] ?? null, 'revision.revision_no');
         if (($revision['status'] ?? null) !== 'approved'
-            || ($revision['revision_kind'] ?? null) !== 'regular'
+            || !in_array($revision['revision_kind'] ?? null, ['regular', 'correction'], true)
             || ($revision['current_revision_no'] ?? null) !== $revisionNo
         ) {
             $this->invalid(
                 'jmhz_ordinary_evidence_revision_not_current_approved',
-                'Potvrzení vyžaduje aktuální schválenou řádnou revizi.',
+                'Měsíční podklady JMHZ vyžadují aktuální schválenou revizi mzdy.',
             );
         }
         $periodStart = $this->date($revision['period_start'] ?? null, 'period_start');
@@ -117,6 +122,7 @@ final class JmhzOrdinaryEvidenceBuilder
             $input,
             $targetEmploymentId,
         );
+        $profileSource = $this->ordinaryProfileSource($employment, $sourceKind);
         $this->assertNoKnownDeductionConflict($person, $result, $employeeId);
         $term = $this->object($employment['term'] ?? null, 'term');
         $selection = JmhzScenario1SelectorResolver::load()->resolve(
@@ -193,13 +199,77 @@ final class JmhzOrdinaryEvidenceBuilder
                 'source_attribute_id' => '10546',
                 'row_sha256' => $in36->rowHash,
             ]],
-            'confirmation' => [
-                'source_kind' => 'explicit_confirmation',
+            'confirmation' => array_filter([
+                'source_kind' => $sourceKind,
+                'source_term_id' => $profileSource['source_term_id'] ?? null,
+                'source_term_row_version' => $profileSource['source_term_row_version'] ?? null,
                 'confirmed_by_user_id' => $confirmedBy,
                 'confirmed_at' => $confirmedAt,
-            ],
+            ], static fn (mixed $value): bool => $value !== null),
         ];
         return new JmhzOrdinaryEvidenceSnapshot($payload);
+    }
+
+    /**
+     * Automatický běžný profil je dovolený jen z údajů zmrazených ve mzdové
+     * revizi. Zapnutá výjimka se nesmí tiše přepsat nulovým měsíčním stavem.
+     *
+     * @param array<string,mixed> $employment
+     * @return array{source_term_id:int,source_term_row_version:int}|array{}
+     */
+    private function ordinaryProfileSource(array $employment, string $sourceKind): array
+    {
+        if (!in_array(
+            $sourceKind,
+            ['explicit_confirmation', 'derived_from_frozen_payroll_sources'],
+            true,
+        )) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_confirmation_invalid',
+                'Zdroj potvrzení právních skutečností není podporován.',
+            );
+        }
+        if ($sourceKind === 'explicit_confirmation') {
+            return [];
+        }
+
+        $profileValue = $employment['ordinary_evidence_profile'] ?? null;
+        if (!is_array($profileValue) || array_is_list($profileValue)) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_profile_missing',
+                'Tato revize vznikla před doplněním podkladů JMHZ. Mzdu znovu přepočítejte a schvalte.',
+            );
+        }
+        $profile = $profileValue;
+        $termId = $this->positiveInt($profile['source_term_id'] ?? null, 'source_term_id');
+        $termVersion = $this->positiveInt(
+            $profile['source_term_row_version'] ?? null,
+            'source_term_row_version',
+        );
+        foreach ([
+            'orchard_discount_eligible',
+            'specific_legal_fact_applies',
+            'ozp_employment_support_applies',
+            'deep_mining_work_applies',
+        ] as $key) {
+            if (!is_bool($profile[$key] ?? null)) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_profile_incomplete',
+                    'Zmrazené nastavení neobvyklých situací JMHZ není úplné.',
+                );
+            }
+            if ($profile[$key] === true) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_monthly_exception_required',
+                    'Pracovní vztah má evidovanou neobvyklou situaci. Doplňte její měsíční údaje.',
+                );
+            }
+        }
+
+        return [
+            'source_term_id' => $termId,
+            'source_term_row_version' => $termVersion,
+        ];
     }
 
     /**
@@ -270,7 +340,6 @@ final class JmhzOrdinaryEvidenceBuilder
         $claims = $enforcement['claims'] ?? null;
         $insolvency = $this->object($enforcement['insolvency'] ?? null, 'insolvency');
         if (!is_array($claims) || !array_is_list($claims)
-            || ($enforcement['claim_register_evidence_complete'] ?? null) !== true
             || $claims !== [] || ($insolvency['mode'] ?? null) !== 'none'
         ) {
             $this->invalid('jmhz_ordinary_evidence_deduction_conflict', 'Revize obsahuje exekuční nebo insolvenční evidenci.');
@@ -311,9 +380,48 @@ final class JmhzOrdinaryEvidenceBuilder
         $resultEnforcement = $this->object($resultPerson['enforcement'] ?? null, 'result.enforcement');
         $enforcementInput = $this->object($resultEnforcement['input'] ?? null, 'result.enforcement.input');
         $enforcementResult = $this->object($resultEnforcement['result'] ?? null, 'result.enforcement.result');
+        try {
+            $calculationInput = GarnishmentInput::fromCanonicalArray($enforcementInput);
+            $calculationEvidence = new EnforcementPersonMonthEvidence(
+                $calculationInput->claims,
+                $calculationInput->eligibleDependants,
+                $calculationInput->dependantsEvidenceComplete,
+                $calculationInput->eligibleSpouse,
+                $calculationInput->spouseEvidenceComplete,
+                $calculationInput->pensionEvidence,
+                $calculationInput->hasMultiplePayers,
+                $calculationInput->protectedAmountOverrideMinorUnits,
+                $calculationInput->protectedAmountOverrideVerified,
+                $calculationInput->claimRegisterEvidenceComplete,
+                $calculationInput->insolvency,
+            );
+        } catch (\Throwable) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_source_invalid',
+                'Výsledek neobsahuje platný vstup výpočtu srážek.',
+            );
+        }
+        if (($enforcement['claim_register_evidence_complete'] ?? null) !== true) {
+            try {
+                $evidenceScope = EnforcementEvidenceScope::fromCanonicalArray(
+                    $this->object($enforcementResult['evidence_source'] ?? null, 'result.enforcement.result.evidence_source'),
+                );
+            } catch (\Throwable) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_source_invalid',
+                    'Výsledek neobsahuje platný rozsah kontroly exekuční evidence.',
+                );
+            }
+            if ($evidenceScope->claimRegister !== EnforcementEvidenceSource::NotApplicable) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_deduction_conflict',
+                    'Kontrola evidence pohledávek není doložená ani označená jako nepoužitelná.',
+                );
+            }
+        }
         if (($enforcementResult['status'] ?? null) !== 'supported'
             || ($enforcementResult['issues'] ?? null) !== []
-            || CanonicalJson::encode($enforcementInput) !== CanonicalJson::encode($enforcement)
+            || CanonicalJson::encode($calculationEvidence->toCanonicalArray()) !== CanonicalJson::encode($enforcement)
             || ($enforcementResult['allocations'] ?? null) !== []
             || ($enforcementResult['total_withheld_minor_units'] ?? null) !== 0
             || ($enforcementResult['insolvency_applied'] ?? null) !== false

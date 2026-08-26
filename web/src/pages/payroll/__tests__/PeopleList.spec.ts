@@ -17,12 +17,17 @@ const m = vi.hoisted(() => ({
   capabilities: vi.fn(),
   employerSettings: vi.fn(),
   saveStatutoryEvidence: vi.fn(),
+  employmentAgendaSummary: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.routerReplace }),
-  RouterLink: { template: '<a><slot /></a>' },
+  RouterLink: {
+    name: 'RouterLink',
+    props: ['to'],
+    template: '<a><slot /></a>',
+  },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -38,6 +43,7 @@ vi.mock('@/api/payroll', () => ({
     // Nabídka mzdových účtáren a výchozí pojišťovny pro nového zaměstnance.
     employerSettings: m.employerSettings,
     saveStatutoryEvidence: m.saveStatutoryEvidence,
+    employmentAgendaSummary: m.employmentAgendaSummary,
   },
 }))
 
@@ -153,6 +159,7 @@ function mountPage() {
           template: '<div data-test="person-actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
         },
         RouterLink: {
+          name: 'RouterLink',
           props: ['to'],
           template: '<a data-test="router-link"><slot /></a>',
         },
@@ -202,6 +209,11 @@ describe('PeopleList toolbar and shared employee creation', () => {
     m.capabilities.mockResolvedValue({ state: { start_period: '2026-01-01' } })
     m.employerSettings.mockResolvedValue({ offices: [], default_health_insurer_code: null })
     m.saveStatutoryEvidence.mockResolvedValue({})
+    m.employmentAgendaSummary.mockResolvedValue({
+      employment_id: 44,
+      employee_id: 4,
+      agendas: [],
+    })
   })
 
   /*
@@ -324,7 +336,27 @@ describe('PeopleList toolbar and shared employee creation', () => {
     }))
   })
 
-  it('opens the common editor first and keeps advanced history collapsed', async () => {
+  it('names the next setup step and gives each employee a matching CTA', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const incompleteRows = wrapper.findAll('[data-test="person-next-step-3"]')
+    expect(incompleteRows.length).toBeGreaterThan(0)
+    expect(incompleteRows[0]!.text())
+      .toContain('payroll.people.next_step.residence')
+
+    const incompleteActions = wrapper.findAll('[data-test="edit-employee-3"]')
+    expect(incompleteActions.length).toBeGreaterThan(0)
+    expect(incompleteActions[0]!.text())
+      .toContain('payroll.people.next_step.action.residence')
+
+    const readyActions = wrapper.findAll('[data-test="edit-employee-1"]')
+    expect(readyActions.length).toBeGreaterThan(0)
+    expect(readyActions[0]!.text())
+      .toContain('payroll.people.next_step.action.ready')
+  })
+
+  it('opens the reading summary first and keeps advanced editors collapsed', async () => {
     m.person.mockResolvedValue({
       ...person(1, 'Alfa Aktivní', true, false),
       employments: [],
@@ -471,6 +503,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
 
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('test')
     expect(wrapper.get('[data-test="person-breadcrumbs"]').text()).toContain('test')
+    expect(wrapper.getComponent({ name: 'RouterLink' }).props('to'))
+      .toEqual({ name: 'payroll-dashboard' })
     expect(wrapper.get('[data-test="person-header-employments"]').text())
       .toContain('payroll.people.header_employments')
     expect(wrapper.text()).toContain('payroll.people.needs_setup')
@@ -718,6 +752,60 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(m.peoplePage).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Beta Neaktivní')
+  })
+
+  it('opens the employee card from an employment deep-link', async () => {
+    m.routeQuery.employment = '44'
+    m.person.mockResolvedValue({
+      ...person(4, 'Delta Nová', true, true),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.employmentAgendaSummary).toHaveBeenCalledWith(44)
+    expect(m.person).toHaveBeenCalledWith(4)
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Delta Nová')
+  })
+
+  it('prefers an explicit person deep-link over an accompanying employment id', async () => {
+    m.routeQuery.person = '2'
+    m.routeQuery.employment = '44'
+    m.person.mockResolvedValue({
+      ...person(2, 'Beta Neaktivní', false, false),
+      employments: [],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.employmentAgendaSummary).not.toHaveBeenCalled()
+    expect(m.person).toHaveBeenCalledWith(2)
+    expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Beta Neaktivní')
+  })
+
+  it.each(['0', '-1', 'not-an-id'])(
+    'ignores invalid employment deep-link %s without fetching a detail',
+    async (employment) => {
+      m.routeQuery.employment = employment
+      const wrapper = mountPage()
+      await flushPromises()
+
+      expect(m.employmentAgendaSummary).not.toHaveBeenCalled()
+      expect(m.person).not.toHaveBeenCalled()
+      expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(false)
+    },
+  )
+
+  it('keeps a missing employment deep-link silent and closed', async () => {
+    m.routeQuery.employment = '404'
+    m.employmentAgendaSummary.mockRejectedValue(new Error('not found'))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.person).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="selected-person-editor"]').exists()).toBe(false)
+    expect(m.toastError).not.toHaveBeenCalled()
   })
 
   it('ignores an unknown person id in the query', async () => {

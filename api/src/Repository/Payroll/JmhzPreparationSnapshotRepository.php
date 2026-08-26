@@ -230,6 +230,59 @@ final class JmhzPreparationSnapshotRepository
         );
     }
 
+    /**
+     * @return list<array{
+     *   id:int,source_revision_id:int,revision_no:int,
+     *   period_start:string,created_at:string
+     * }>
+     */
+    public function listSourceReadyForCorrection(
+        int $supplierId,
+        string $environment,
+        int $runId,
+        string $periodStart,
+    ): array {
+        if ($supplierId <= 0 || $runId <= 0
+            || !in_array($environment, ['test', 'production'], true)
+            || preg_match('/^\d{4}-\d{2}-01$/D', $periodStart) !== 1
+        ) {
+            throw new \InvalidArgumentException('Rozsah příprav JMHZ není platný.');
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT snapshot.id, snapshot.source_revision_id,
+                    revision.revision_no, snapshot.period_start,
+                    snapshot.created_at
+               FROM payroll_jmhz_preparation_snapshots snapshot
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = snapshot.supplier_id
+                AND revision.run_id = snapshot.run_id
+                AND revision.id = snapshot.source_revision_id
+              WHERE snapshot.supplier_id = ?
+                AND snapshot.environment = ?
+                AND snapshot.run_id = ?
+                AND snapshot.period_start = ?
+                AND snapshot.readiness_status = \'source_ready\'
+              ORDER BY revision.revision_no DESC, snapshot.id DESC',
+        );
+        $statement->execute([$supplierId, $environment, $runId, $periodStart]);
+
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                throw new \UnexpectedValueException('Databáze vrátila neplatnou přípravu JMHZ.');
+            }
+            $rows[] = [
+                'id' => (int) $row['id'],
+                'source_revision_id' => (int) $row['source_revision_id'],
+                'revision_no' => (int) $row['revision_no'],
+                'period_start' => (string) $row['period_start'],
+                'created_at' => (string) $row['created_at'],
+            ];
+        }
+
+        return $rows;
+    }
+
     /** @param array<string,mixed> $record */
     public function insert(array $record): int
     {

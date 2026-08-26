@@ -1,10 +1,10 @@
 {
-    "manifest_sha256": "cf251bed901af193add356be9027474538a2cb378bb9174f73c0dd75a713b683",
+    "manifest_sha256": "c4c28906f38fdf116ed1f15506494b70d423cfc55da6f3909bbf0fdd4dff3e89",
     "payload": {
         "schema_version": "jmhz-official-xml-example-source-catalog.v1",
         "catalog_key": "jmhz-official-xml-examples-2026-04-13-source-v1",
-        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.7_manifest-v1",
-        "spec_manifest_sha256": "f449e605be6f1ee293f3ac359ab4921604c5fc9a225d71fee51b4f94584a0a6b",
+        "spec_package_key": "jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1",
+        "spec_manifest_sha256": "429e3de56e37442f35fdf8a79aab4bdff49a99beb8b3ac06afa8306312c1d205",
         "xsd_inventory_sha256": "72285ef5c8924d55041d54b075cbcc135a3229e6954fe81a25ef773a8d12215c",
         "usage_policy": "source_evidence_only",
         "privacy_policy": "xml_bytes_external_not_redistributed",

@@ -13,12 +13,18 @@ import { useToast } from '@/composables/useToast'
  * programu; roční kumulaci z nich složí server. Bez nich osoba vypadne z dávky
  * zákonného výpočtu a celý mzdový běh skončí v „ručním posouzení".
  */
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   personId: number
-  /** Období, od kterého firma vede mzdy v MyÚčtu (YYYY-MM). */
+  /** Rok a první zpracovávané období (YYYY-MM). */
   startPeriod: string
   canWrite: boolean
-}>()
+  /** Před startem existují měsíce zpracované v jiném systému. */
+  includePriorMonths?: boolean
+  /** První skutečně zpracovaný měsíc zaměstnance v daném roce (1–12). */
+  firstIncludedMonth: number | null
+}>(), {
+  includePriorMonths: true,
+})
 
 /**
  * Jsou úhrny doplněné? Ptá se na to karta vztahu, aby nad hotovou věcí nevisela
@@ -32,19 +38,32 @@ const toast = useToast()
 const loading = ref(true)
 const saving = ref(false)
 const locked = ref(false)
+const hasSavedOpening = ref(false)
 const error = ref('')
 const sourceReference = ref('')
 
 const year = computed(() => Number(props.startPeriod.slice(0, 4)))
 
 /**
- * Počáteční stavy pokrývají měsíce PŘED prvním zpracovaným obdobím. Pro start
- * v srpnu jsou to leden až červenec; pro start v lednu není co doplňovat.
+ * Počáteční stavy pokrývají skutečně zpracované měsíce před aktivací. Nástup
+ * v březnu a první běh v srpnu tedy znamená interval 3–7.
  */
 const monthNumbers = computed(() => {
-  const first = Number(props.startPeriod.slice(5, 7))
-  return Array.from({ length: first - 1 }, (_, index) => index + 1)
+  if (!props.includePriorMonths) return []
+  const processedMonth = Number(props.startPeriod.slice(5, 7))
+  const first = props.firstIncludedMonth
+  if (first === null || !Number.isInteger(first) || first < 1 || first >= processedMonth) {
+    return []
+  }
+  return Array.from(
+    { length: processedMonth - first },
+    (_, index) => first + index,
+  )
 })
+
+function hasCompleteOpenings(openings: Record<string, number | null> | undefined): boolean {
+  return openings?.social_insurance != null && openings.income_tax != null
+}
 
 const AMOUNT_FIELDS = [
   'social_assessment_base_minor_units',
@@ -89,16 +108,12 @@ const totals = computed(() => {
   return sums
 })
 
-/** Zadal uživatel vůbec něco? Prázdný formulář nemá smysl ukládat. */
-const hasAnyAmount = computed(
-  () => AMOUNT_FIELDS.some(field => totals.value[field] !== 0),
-)
-
 async function load() {
   loading.value = true
   try {
     const saved = await payrollApi.statutoryOpenings(props.personId, year.value)
     locked.value = saved.locked
+    hasSavedOpening.value = hasCompleteOpenings(saved.openings)
     for (const month of monthNumbers.value) drafts.value[month] = emptyRow()
     for (const row of saved.months) {
       const draft = emptyRow()
@@ -106,7 +121,7 @@ async function load() {
       drafts.value[row.month] = draft
     }
     sourceReference.value = saved.source_reference
-    emit('loaded', hasAnyAmount.value)
+    emit('loaded', hasSavedOpening.value)
   } catch (exception) {
     error.value = apiErrorMessage(exception, t('payroll.people.openings.load_failed'))
   } finally {
@@ -141,7 +156,8 @@ async function save() {
       months: payload,
     })
     locked.value = saved.locked
-    emit('loaded', hasAnyAmount.value)
+    hasSavedOpening.value = hasCompleteOpenings(saved.openings)
+    emit('loaded', hasSavedOpening.value)
     toast.success(t('payroll.people.openings.saved'))
   } catch (exception) {
     // Hláška ze serveru jmenuje konkrétní důvod (např. zamčeno schválenou
@@ -172,14 +188,12 @@ onMounted(load)
     <div class="border-t border-neutral-200 p-3">
       <div v-if="loading" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
 
-      <p
-        v-else-if="monthNumbers.length === 0"
-        class="rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
-      >
-        {{ t('payroll.people.openings.nothing_to_fill') }}
-      </p>
-
       <template v-else>
+        <p class="mb-3 rounded-md bg-payroll-50 px-3 py-2 text-xs text-payroll-700">
+          {{ t(includePriorMonths
+            ? 'payroll.people.openings.zero_hint'
+            : 'payroll.people.openings.new_hire_zero_hint') }}
+        </p>
         <p
           v-if="locked"
           class="mb-3 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
@@ -188,7 +202,14 @@ onMounted(load)
           {{ t('payroll.people.openings.locked') }}
         </p>
 
-        <div class="overflow-x-auto">
+        <p
+          v-if="monthNumbers.length === 0"
+          class="rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600"
+        >
+          {{ t('payroll.people.openings.nothing_to_fill') }}
+        </p>
+
+        <div v-else class="overflow-x-auto">
           <table class="min-w-full text-xs">
             <thead>
               <tr class="text-left text-neutral-500">
@@ -255,7 +276,7 @@ onMounted(load)
           <button
             type="button"
             :class="btnFilled('primary')"
-            :disabled="saving || !hasAnyAmount"
+            :disabled="saving"
             data-test="openings-save"
             @click="save"
           >

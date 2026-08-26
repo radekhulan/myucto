@@ -308,6 +308,7 @@ final class PayrollInputRepository
                         component.accounting_credit_code,
                         component.annual_limit_minor,
                         component.exemption_basket,
+                        component.exemption_basis,
                         component.valid_from,
                         component.valid_to,
                         component.row_version AS component_row_version

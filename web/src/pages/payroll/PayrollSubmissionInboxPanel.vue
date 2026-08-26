@@ -28,7 +28,9 @@ const auth = useAuthStore()
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const loading = ref(true)
 const error = ref('')
-const environment = ref<PayrollRegzelEnvironment>('production')
+const environment = defineModel<PayrollRegzelEnvironment>('environment', {
+  default: 'production',
+})
 // Vyřešené položky odfiltrovává SERVER (výchozí `status=unresolved`), takže
 // `total` popisuje právě ty řádky, které tabulka ukáže. Dokud se filtrovalo
 // tady, pager počítal i vyřešené: stránka měla míň řádků, než sliboval, a

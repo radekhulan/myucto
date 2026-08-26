@@ -41,9 +41,10 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
  *    timeouty (výchozí Guzzle klient je čeká donekonečna), takže si je
  *    implementace musí nastavit sama. Zavěšené spojení jinak drží PHP worker.
  *
- * 4. **Přihlášení výhradně systémovým certifikátem.** Jméno a heslo do datové
- *    schránky nesmí opustit zařízení uživatele (§ 9 odst. 2 zák. 300/2008 Sb.),
- *    takže {@see ChannelContext} žádné nenese a nikdy nést nebude.
+ * 4. **Žádná perzistence běžného hesla.** Systémový certifikát lze držet v
+ *    šifrovaném firemním trezoru. Interaktivní metody smějí nést osobní tajemství
+ *    v {@see ChannelContext} jen jako {@see SensitiveValue} po dobu právě
+ *    spuštěného načtení; do credential tabulky ani logů se nesmí zapsat.
  *
  * 5. **Žádný plaintext na disku.** Knihovna odkládá stažené přílohy do
  *    systémového TEMP nešifrované a uklízí je až v destruktoru — po fatální

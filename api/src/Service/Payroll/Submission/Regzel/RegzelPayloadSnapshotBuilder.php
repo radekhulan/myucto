@@ -42,12 +42,13 @@ final readonly class RegzelPayloadSnapshotBuilder
             interaction: 'supplemental_information',
             csszWorkplaceCode:
                 $source['social_security_office_code'] ?? '',
-            taxOfficeCode: $source['financial_office_code'] ?? '',
-            taxOfficeWorkplaceCode: $source['workplace_code'],
+            taxOfficeCode: $source['regzel_tax_office_code'] ?? '',
+            taxOfficeWorkplaceCode:
+                $source['regzel_tax_office_workplace_code'],
             socialSecurityVariableSymbol:
                 $source['social_security_variable_symbol'] ?? '',
             payerReferenceNumber:
-                $source['employer_registration_number'],
+                $source['regzel_payer_reference_number'],
             notificationDataBoxId: $source['data_box_id'],
             socialEnterprise: $source['social_enterprise'],
             employmentAgency: $source['employment_agency'],

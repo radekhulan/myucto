@@ -96,9 +96,31 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 55. [Měsíční kontrola](55_Mesicni_kontrola.md)
 56. [Měsíční přehled](56_Mesicni_report.md)
 57. [Mzdová rekapitulace a mzdový list](57_Mzdy.md)
-58. [Úplné mzdy — aktivace a zaměstnanci](58_Uplne_mzdy.md)
 59. [Majetek](59_Majetek.md)
 60. [Účetní kontroly a inventarizace — metodika](60_Ucetni_kontroly_a_inventarizace.md)
+
+### Mzdy
+
+58. [Úplné mzdy — jak začít a jak postupovat](58_Uplne_mzdy.md)
+58a. [Absence a dovolená](58a_Absence_a_dovolena.md)
+58b. [Docházka a směny](58b_Dochazka_a_smeny.md)
+58c. [Cestovní náhrady](58c_Cestovni_nahrady.md)
+58d. [Rychlý měsíční vstup](58d_Rychly_mesicni_vstup.md)
+58e. [Mzdové běhy](58e_Mzdove_behy.md)
+58f. [Shoda účtování mezd](58f_Shoda_uctovani_mezd.md)
+58g. [Mzdové příkazy a úhrady](58g_Platby_a_uhrady.md)
+58h. [Dokumenty a výstupy](58h_Dokumenty_a_vystupy.md)
+58i. [Roční zúčtování](58i_Rocni_zuctovani.md)
+58j. [Podání a hlášení](58j_Podani_a_hlaseni.md)
+58k. [Zaměstnanci](58k_Zamestnanci.md)
+58l. [Dohody o srážkách](58l_Dohody_o_srazkach.md)
+58m. [Srážky a exekuce](58m_Srazky_a_exekuce.md)
+58n. [Koše benefitů](58n_Kose_benefitu.md)
+58o. [Nastavení mezd](58o_Nastaveni_mezd.md)
+58p. [Mzdové složky a vstupy](58p_Mzdove_slozky_a_vstupy.md)
+58q. [Legislativní pravidla mezd](58q_Legislativni_pravidla_mezd.md)
+58r. [Retenční lhůty](58r_Retencni_lhuty.md)
+58s. [Výmaz osobních údajů](58s_Vymaz_osobnich_udaju.md)
 
 ### Nástroje
 
@@ -121,6 +143,8 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 
 72. [Více dodavatelů](72_Multi_supplier.md)
 73. [Nastavení](73_Nastaveni.md)
+73a. [Datová schránka](73a_Datova_schranka.md)
+73b. [Odesílací brána ISDS](73b_Odesilaci_brana_ISDS.md)
 74. [Elektronické podpisy](74_Elektronicke_podpisy.md)
 
 ### Systém
@@ -134,4 +158,4 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 
 ### Reference
 
-99. [Řešení problémů](99_Reseni_problemu.md)
+999. [Řešení problémů](999_Reseni_problemu.md)

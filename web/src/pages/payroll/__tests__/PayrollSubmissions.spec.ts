@@ -134,13 +134,20 @@ function setup() {
     }],
   })
   m.profile.mockResolvedValue({
-    supplier_id: 1,
-    social_enterprise: false,
-    employment_agency: false,
-    protected_labor_market: false,
-    evidence_confirmed_at: '2026-08-04 12:00:00',
-    row_version: 1,
-    updated_at: '2026-08-04 12:00:00',
+    suggested_tax_office_workplace_code: null,
+    profile: {
+      supplier_id: 1,
+      social_enterprise: false,
+      employment_agency: false,
+      protected_labor_market: false,
+      tax_office_code: '3000',
+      tax_office_workplace_code: '3001',
+      payer_reference_number: null,
+      is_complete: true,
+      evidence_confirmed_at: '2026-08-04 12:00:00',
+      row_version: 1,
+      updated_at: '2026-08-04 12:00:00',
+    },
   })
   m.snapshots.mockResolvedValue({
     environment: 'production',
@@ -314,8 +321,6 @@ function setup() {
       statutory_result_hash: 'b'.repeat(64),
       ruleset_id: 'cz-social-2026',
       ruleset_hash: 'c'.repeat(64),
-      social_liability_id: 91,
-      social_liability_hash: 'd'.repeat(64),
     },
     pvpoj: {
       pojistne: {
@@ -445,10 +450,10 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Devět od chvíle, kdy má vlastní záložku i záměr uplatňovat slevu
+    // Devět včetně vlastní záložky pro záměr uplatňovat slevu
     // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
-    // Desátá je „Ostatní": skupina `other` jinak nemá kam se zobrazit.
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(10)
+    // „Ostatní" zůstává záchytná skupina; zdravotní povinnosti mají jednu kartu.
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(9)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
@@ -467,7 +472,7 @@ describe('PayrollSubmissions', () => {
     // stránky, jinak by pager počítal řádky, které tabulka neukazuje.
     await clickTab(wrapper, 'jmhz')
     expect(m.overview).toHaveBeenCalledWith(
-      'production',
+      'test',
       expect.stringMatching(/^[0-9]{4}-[0-9]{2}$/),
       { agenda_group: 'jmhz', limit: 50, offset: 0 },
     )
@@ -561,7 +566,7 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    await clickTab(wrapper, 'health_notifications')
+    await clickTab(wrapper, 'health')
     await flushPromises()
 
     expect(wrapper.find('[data-test="health-notifications"]').exists()).toBe(true)
@@ -570,7 +575,7 @@ describe('PayrollSubmissions', () => {
       .toBe(true)
   })
 
-  it('nabídne interní měsíční přehled zdravotní pojišťovny ke stažení', async () => {
+  it('ve společné zdravotní záložce zachová historii měsíčních přehledů ke stažení', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 

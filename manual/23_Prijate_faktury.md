@@ -129,8 +129,8 @@ Limity:
 | **Splatnost** | Z platebních podmínek dodavatele. |
 | **Datum přijetí** | Kdy jsi to fyzicky / e-mailem dostal. Default = dnes. |
 | **Měna faktury** | Měna, ve které je doklad vystaven (USD, EUR, CZK…). |
-| **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne denní kurz k rozhodnému dni dokladu. Korunový doklad kurz nemá — když měnu přepneš na CZK, kurz i jeho datum se vyprázdní. Viz [§ 23.2.8](#2328-kurz-cizi-meny-a-jeho-prenacitani). |
-| **Reverse charge** | Zaškrtni, pokud je doklad B2B s přenesenou daňovou povinností (pořízení zboží z EU, služby z EU/3. země, tuzemský §92a). Položkám nastav **tuzemskou sazbu** (typicky 21 %) a odpovídající klasifikační kód — daň na dokladu zůstane 0 (dodavatel ji neúčtuje), samovyměření i zrcadlový odpočet dopočítají výkazy DPH. Viz [§ 23.2.6](#2326-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba). |
+| **Kurz k DUZP** | Pokud je měna ≠ CZK, **musíš zafixovat kurz**. Tlačítko „Načíst z ČNB" stáhne denní kurz k rozhodnému dni dokladu. Korunový doklad kurz nemá — když měnu přepneš na CZK, kurz i jeho datum se vyprázdní. Viz [§ 23.2.9](#2329-kurz-cizi-meny-a-jeho-prenacitani). |
+| **Reverse charge** | Zaškrtni, pokud je doklad B2B s přenesenou daňovou povinností (pořízení zboží z EU, služby z EU/3. země, tuzemský §92a). Položkám nastav **tuzemskou sazbu** (typicky 21 %) a odpovídající klasifikační kód — daň na dokladu zůstane 0 (dodavatel ji neúčtuje), samovyměření i zrcadlový odpočet dopočítají výkazy DPH. Viz [§ 23.2.7](#2327-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba). |
 
 > [!NOTE]
 > **Datum přijetí a období odpočtu DPH.** U ručně založené (tzn. **ne** importované)
@@ -434,7 +434,7 @@ fakturu tak zaplatíš z pokladny přímo z editoru, aniž bys přecházel/a do 
 Pokladna a doklad tam vypisoval/a ručně.
 
 - Výchozí volba je **„Nepoužít pokladnu"**; nabízejí se **jen korunové**
-  pokladny ([§ 30.1](30_Pokladna.md#301-iselnik-pokladen)). Bez korunové
+pokladny ([§ 30.1](30_Pokladna.md#301-ciselnik-pokladen)). Bez korunové
   pokladny se zobrazí hláška „Nemáte založenou žádnou korunovou pokladnu —
   doklad zůstane neuhrazený."
 - Vyrovnání se spustí **při uložení faktury** a při přechodu do stavu

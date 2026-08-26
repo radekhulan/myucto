@@ -15,6 +15,11 @@ const m = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   total: vi.fn(),
+  push: vi.fn(),
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({ push: m.push }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -64,6 +69,7 @@ function run(overrides: Partial<PayrollRun> = {}): PayrollRun {
     row_version: 2,
     revision_id: null,
     revision_no: null,
+    revision_kind: null,
     revision_status: null,
     payment_materialization_supported: false,
     can_delete: true,
@@ -204,6 +210,81 @@ describe('PayrollRuns', () => {
       .toContain('nemá nastavené výplatní pravidlo')
   })
 
+  it('lokalizuje blokaci skutečné úhrady místo české serverové věty', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'payment_ready',
+      can_delete: false,
+      available_commands: ['mark_paid'],
+    })])
+    m.commandRun.mockRejectedValue({
+      response: {
+        status: 422,
+        data: {
+          error: {
+            code: 'payroll_payments_unsettled',
+            message: 'Mzdový běh nelze označit za uhrazený.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-mark_paid"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
+      .toBe('payroll.runs.payments_unsettled')
+  })
+
+  it('odliší nepodporovanou příchozí opravnou vratku', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'payment_ready',
+      can_delete: false,
+      available_commands: ['mark_paid'],
+    })])
+    m.commandRun.mockRejectedValue({
+      response: {
+        status: 422,
+        data: {
+          error: {
+            code: 'payroll_incoming_refund_unresolved',
+            message: 'Mzdový běh nelze označit za uhrazený.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-mark_paid"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-run-15-blocker"]').text())
+      .toBe('payroll.runs.incoming_refund_unresolved')
+  })
+
+  it('po přípravě plateb otevře mzdové příkazy ve správném období', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'posted',
+      can_delete: false,
+      available_commands: ['prepare_payments'],
+    })])
+    m.commandRun.mockResolvedValue({
+      outcome: { outcome: 'payments_prepared', details: { created_count: 3 } },
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-prepare_payments"]').trigger('click')
+    await flushPromises()
+
+    expect(m.push).toHaveBeenCalledWith({
+      name: 'payroll-payments',
+      query: { period: '2026-08', run: '15', focus: 'bank-order' },
+    })
+  })
+
   it('řekne nahlas, že se u daňové evidence nic nezaúčtovalo', async () => {
     m.runs.mockResolvedValue([run({
       status: 'approved',
@@ -314,6 +395,241 @@ describe('PayrollRuns', () => {
       expect.any(String),
     )
     expect(m.success).toHaveBeenCalledWith('payroll.runs.override.granted')
+  })
+
+  it('groups repeated blockers and never exposes their internal issue codes', async () => {
+    m.peopleOptions.mockResolvedValue([
+      { id: 2, full_name: 'Jana Syntetická' },
+      { id: 3, full_name: 'Petr Syntetický' },
+    ])
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [
+        validation({
+          id: 72,
+          severity: 'blocker',
+          code: 'enforcement_manual_review',
+          entity_type: 'employee',
+          entity_id: 2,
+          message: 'Exekuce. income:net_pay_result_missing_or_unverified',
+          remediation_path: '/payroll/enforcement',
+          requires_override: false,
+        }),
+        validation({
+          id: 73,
+          severity: 'blocker',
+          code: 'enforcement_manual_review',
+          entity_type: 'employee',
+          entity_id: 3,
+          message: 'Exekuce. income:net_pay_result_missing_or_unverified',
+          remediation_path: '/payroll/enforcement',
+          requires_override: false,
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="payroll-validation-group-enforcement_manual_review"]'))
+      .toHaveLength(1)
+    expect(wrapper.text()).toContain('payroll.runs.validation.enforcement_net_pay_many')
+    expect(wrapper.text()).not.toContain('net_pay_result_missing_or_unverified')
+    expect(wrapper.text()).toContain('Jana Syntetická')
+    expect(wrapper.text()).toContain('Petr Syntetický')
+    expect(wrapper.get('[data-test="payroll-validation-remediation"]').attributes('href'))
+      .toBe('/payroll/enforcement')
+  })
+
+  it('keeps a grouped validation readable for hundreds of employees', async () => {
+    m.peopleOptions.mockResolvedValue(Array.from({ length: 6 }, (_, index) => ({
+      id: index + 1,
+      full_name: `Zaměstnanec ${index + 1}`,
+    })))
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: Array.from({ length: 6 }, (_, index) => validation({
+        id: 100 + index,
+        code: 'draft_inputs_present',
+        entity_type: 'employee',
+        entity_id: index + 1,
+        requires_override: false,
+      })),
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const group = wrapper.get('[data-test="payroll-validation-group-draft_inputs_present"]')
+    expect(group.text()).toContain('Zaměstnanec 1')
+    expect(group.text()).toContain('Zaměstnanec 5')
+    expect(group.text()).not.toContain('Zaměstnanec 6')
+    expect(group.text()).toContain('payroll.runs.validation.and_more')
+  })
+
+  it('reopens a cancelled run from corrected inputs with the required reason', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'cancelled',
+      can_delete: false,
+      available_commands: ['reopen'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const reopen = wrapper.get('[data-testid="payroll-run-15-reopen"]')
+    expect(reopen.text()).toContain('payroll.runs.commands.reopen_cancelled')
+
+    await reopen.trigger('click')
+    const textarea = document.body.querySelector<HTMLTextAreaElement>(
+      '[data-test="run-command-reason"]',
+    )!
+    textarea.value = 'Opravené vstupy po zrušeném pokusu.'
+    textarea.dispatchEvent(new Event('input'))
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>(
+      '[data-test="run-command-dialog"] button[type="submit"]',
+    )?.click()
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'reopen',
+      { row_version: 2, reason: 'Opravené vstupy po zrušeném pokusu.' },
+      expect.any(String),
+    )
+  })
+
+  it('keeps distinct readable enforcement findings instead of calling all of them net-pay errors', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [
+        validation({
+          id: 77,
+          code: 'enforcement_manual_review',
+          entity_type: 'employee',
+          entity_id: 2,
+          message: 'Exekuční srážku zatím nelze spočítat, protože chybí vypočtená čistá mzda.',
+          requires_override: false,
+        }),
+        validation({
+          id: 78,
+          code: 'enforcement_manual_review',
+          entity_type: 'employee',
+          entity_id: 3,
+          message: 'V agendě Exekuce doplňte nebo ověřte další podklady: vyživované osoby a pořadí pohledávek.',
+          requires_override: false,
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="payroll-validation-group-enforcement_manual_review"]'))
+      .toHaveLength(2)
+    expect(wrapper.text()).toContain('chybí vypočtená čistá mzda')
+    expect(wrapper.text()).toContain('vyživované osoby a pořadí pohledávek')
+    expect(wrapper.text()).not.toContain('payroll.runs.validation.enforcement_net_pay_many')
+  })
+
+  it('translates every part of a historical mixed enforcement finding without leaking codes', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation({
+        id: 79,
+        code: 'enforcement_manual_review',
+        entity_type: 'employee',
+        entity_id: 2,
+        message: 'income:net_pay_result_missing_or_unverified dependants_evidence_incomplete',
+        requires_override: false,
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.runs.validation.enforcement_net_pay_one')
+    expect(wrapper.text()).toContain('payroll.runs.validation.requires_attention')
+    expect(wrapper.text()).not.toContain('net_pay_result_missing_or_unverified')
+    expect(wrapper.text()).not.toContain('dependants_evidence_incomplete')
+  })
+
+  it('does not mislabel a historical non-net-pay enforcement finding', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation({
+        id: 80,
+        code: 'enforcement_manual_review',
+        entity_type: 'employee',
+        entity_id: 2,
+        message: 'multiple_payers_protected_amount_decision_missing',
+        requires_override: false,
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.runs.validation.requires_attention')
+    expect(wrapper.text()).not.toContain('payroll.runs.validation.enforcement_net_pay_one')
+    expect(wrapper.text()).not.toContain('multiple_payers_protected_amount_decision_missing')
+  })
+
+  it('shows a detailed Czech statutory remediation but hides historical raw codes', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [
+        validation({
+          id: 74,
+          severity: 'blocker',
+          code: 'statutory_calculation_manual_review',
+          message: 'U 1 pracovního vztahu potvrďte účast na nemocenském pojištění z odměny.',
+          requires_override: false,
+        }),
+        validation({
+          id: 75,
+          severity: 'blocker',
+          code: 'statutory_calculation_manual_review',
+          message: 'income_tax:other-withholding-eligibility-unverified:employee:4',
+          requires_override: false,
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('potvrďte účast na nemocenském pojištění z odměny')
+    expect(wrapper.text()).toContain('payroll.runs.validation.statutory_incomplete')
+    expect(wrapper.text()).not.toContain('other-withholding-eligibility-unverified')
+  })
+
+  it('never exposes an unknown internal code on the run card or in the override dialog', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation({
+        id: 76,
+        code: 'new_validation_not_known_by_frontend',
+        message: 'Kontrola vyžaduje zásah. payroll:future_internal_reason:employment:3',
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.runs.validation.requires_attention')
+    expect(wrapper.text()).not.toContain('future_internal_reason')
+
+    await wrapper.get('[data-testid="payroll-validation-76-override"]').trigger('click')
+    expect(document.body.textContent).toContain('payroll.runs.validation.requires_attention')
+    expect(document.body.textContent).not.toContain('future_internal_reason')
   })
 
   /*

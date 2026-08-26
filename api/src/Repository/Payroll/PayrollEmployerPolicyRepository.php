@@ -16,6 +16,7 @@ final class PayrollEmployerPolicyRepository
         id, supplier_id, valid_from, valid_to, payday_day,
         payday_month_offset, payday_business_day_rule,
         balance_rounding_mode, home_office_policy, travel_expense_policy,
+        leave_entitlement_weeks,
         four_eyes_required, automatic_calculation_enabled,
         automatic_posting_enabled, automatic_payments_enabled,
         delivery_channel, delivery_verified_on, source_kind,
@@ -153,13 +154,14 @@ final class PayrollEmployerPolicyRepository
                     (supplier_id, valid_from, valid_to, payday_day,
                      payday_month_offset, payday_business_day_rule,
                      balance_rounding_mode, home_office_policy,
-                     travel_expense_policy, four_eyes_required,
+                     travel_expense_policy, leave_entitlement_weeks,
+                     four_eyes_required,
                      automatic_calculation_enabled,
                      automatic_posting_enabled,
                      automatic_payments_enabled, delivery_channel,
                      delivery_verified_on, source_kind, source_reference,
                      created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             );
             $stmt->execute($this->writeValues(
                 $supplierId,
@@ -248,6 +250,7 @@ final class PayrollEmployerPolicyRepository
                         balance_rounding_mode = ?,
                         home_office_policy = ?,
                         travel_expense_policy = ?,
+                        leave_entitlement_weeks = ?,
                         four_eyes_required = ?,
                         automatic_calculation_enabled = ?,
                         automatic_posting_enabled = ?,
@@ -390,6 +393,9 @@ final class PayrollEmployerPolicyRepository
             self::requiredString($data, 'balance_rounding_mode'),
             self::requiredString($data, 'home_office_policy'),
             self::requiredString($data, 'travel_expense_policy'),
+            array_key_exists('leave_entitlement_weeks', $data)
+                ? self::requiredInt($data, 'leave_entitlement_weeks')
+                : 4,
             (int) self::requiredBool($data, 'four_eyes_required'),
             (int) self::requiredBool($data, 'automatic_calculation_enabled'),
             (int) self::requiredBool($data, 'automatic_posting_enabled'),
@@ -447,6 +453,10 @@ final class PayrollEmployerPolicyRepository
         $row['payday_month_offset'] = self::requiredInt(
             $row,
             'payday_month_offset',
+        );
+        $row['leave_entitlement_weeks'] = self::requiredInt(
+            $row,
+            'leave_entitlement_weeks',
         );
         $row['row_version'] = self::requiredInt($row, 'row_version');
         $row['four_eyes_required'] = self::requiredBool(

@@ -58,6 +58,10 @@ function mountDashboard() {
         ActionBar: actionBarStub,
         PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
         PayrollGuide: { template: '<div data-test="guide-stub" />' },
+        PayrollProductionQualificationPanel: {
+          props: ['state', 'matrixVersion'],
+          template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" />',
+        },
       },
     },
   })
@@ -174,5 +178,33 @@ describe('PayrollDashboard monthly workspace', () => {
 
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="setup-blockers"]').exists()).toBe(false)
+  })
+
+  it('explains test operation without hiding the monthly workflow', async () => {
+    m.capabilities.mockResolvedValue({
+      state: {
+        supplier_id: 1,
+        status: 'qualification_required',
+        start_period: '2026-01',
+        row_version: 2,
+        activated_at: null,
+        suspended_at: null,
+        created_at: null,
+        updated_at: null,
+      },
+      support_matrix: {
+        version: '2026-08',
+        supported_years: [2026],
+        employment_types: [],
+        features: [],
+      },
+    })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="production-qualification-notice"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="qualification-panel-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
 })

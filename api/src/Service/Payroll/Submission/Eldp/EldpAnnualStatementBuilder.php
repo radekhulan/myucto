@@ -37,7 +37,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  */
 final class EldpAnnualStatementBuilder
 {
-    public const BUILDER_VERSION = 'eldp-annual-statement.v1';
+    public const BUILDER_VERSION = 'eldp-annual-statement.v2';
 
     private const MONTH_NAMES = [
         1 => 'leden', 2 => 'únor', 3 => 'březen', 4 => 'duben',
@@ -83,6 +83,21 @@ final class EldpAnnualStatementBuilder
                 'Potvrzení musí výslovně určit, zda jde o evidenční list na výzvu ČSSZ/ÚSSZ.',
             );
         }
+        $authorityRequestReceivedOn = null;
+        if ($requestedByAuthority) {
+            $authorityRequestReceivedOn = $confirmation['authority_request_received_on']
+                ?? null;
+            if (!is_string($authorityRequestReceivedOn)
+                || !self::isDate($authorityRequestReceivedOn)
+                || substr($authorityRequestReceivedOn, 0, 4) < sprintf('%04d', $year)
+            ) {
+                throw new EldpValidationException(
+                    'eldp_authority_request_date_invalid',
+                    'Při sestavení na výzvu zadejte platné datum doručení výzvy '
+                        . 'ČSSZ/ÚSSZ, které není před vykazovaným rokem.',
+                );
+            }
+        }
         if (($confirmation['excluded_days_confirmed'] ?? null) !== true) {
             throw new EldpValidationException(
                 'eldp_excluded_days_not_confirmed',
@@ -125,10 +140,24 @@ final class EldpAnnualStatementBuilder
         ksort($months, SORT_STRING);
 
         $employment = $this->resolveEmployment($months, $employmentId, $blockers);
+        $reportingEnd = $employment['end'];
+        // Všeobecné zásady ČSSZ k ELDP určují pro výzvu během roku jako
+        // datum „Do“ konec posledního měsíce se zúčtovaným příjmem. Schválená
+        // aktuální revize je zde neměnným důkazem takového zúčtovaného měsíce.
+        if ($requestedByAuthority
+            && substr((string) $authorityRequestReceivedOn, 0, 4) === sprintf('%04d', $year)
+        ) {
+            $lastAccountedMonth = (string) array_key_last($months);
+            $lastAccountedOn = (new \DateTimeImmutable($lastAccountedMonth))
+                ->modify('last day of this month')->format('Y-m-d');
+            $reportingEnd = $reportingEnd === null
+                ? $lastAccountedOn
+                : min($reportingEnd, $lastAccountedOn);
+        }
         $requiredMonths = self::requiredMonths(
             $year,
             $employment['start'],
-            $employment['end'],
+            $reportingEnd,
         );
         foreach ($requiredMonths as $periodStart) {
             if (!isset($months[$periodStart])) {
@@ -207,14 +236,21 @@ final class EldpAnnualStatementBuilder
         // celý rok a platí řádná lhůta do 30. dubna. Mimořádná lhůta „do
         // jednoho měsíce po konečném vyúčtování“ patří jen skončení v průběhu
         // roku.
-        $window = $participationEnd !== null
+        if ($requestedByAuthority) {
+            $window = $this->deadlines->forAuthorityRequest(
+                (string) $authorityRequestReceivedOn,
+            );
+        } elseif ($participationEnd !== null
             && $participationEnd < sprintf('%04d-12-31', $year)
-                ? $this->deadlines->forTermination(
-                    $year,
-                    $participationEnd,
-                    $lastLine['period_end'],
-                )
-                : $this->deadlines->forYear($year);
+        ) {
+            $window = $this->deadlines->forTermination(
+                $year,
+                $participationEnd,
+                $lastLine['period_end'],
+            );
+        } else {
+            $window = $this->deadlines->forYear($year);
+        }
 
         $spec = $this->specManifest();
         $payload = [
@@ -233,6 +269,7 @@ final class EldpAnnualStatementBuilder
                 'rule' => $eligibility['rule'],
                 'reason' => $eligibility['reason'],
                 'requested_by_authority' => $requestedByAuthority,
+                'authority_request_received_on' => $authorityRequestReceivedOn,
             ],
             'deadline' => [
                 'ruleset_id' => $window->rulesetId,
@@ -276,6 +313,7 @@ final class EldpAnnualStatementBuilder
                 'excluded_days_confirmed' => true,
                 'deducted_days_none' => true,
                 'requested_by_authority' => $requestedByAuthority,
+                'authority_request_received_on' => $authorityRequestReceivedOn,
                 'note' => trim($note),
             ],
         ];
@@ -327,14 +365,18 @@ final class EldpAnnualStatementBuilder
             }
             $revisionNo = $revision['revision_no'] ?? null;
             if (($revision['status'] ?? null) !== 'approved'
-                || ($revision['revision_kind'] ?? null) !== 'regular'
+                || !in_array(
+                    $revision['revision_kind'] ?? null,
+                    ['regular', 'correction'],
+                    true,
+                )
                 || !is_int($revisionNo)
                 || ($revision['current_revision_no'] ?? null) !== $revisionNo
             ) {
                 $label = self::monthLabel($periodStart);
                 $blockers[] = [
                     'code' => 'eldp_revision_not_current_approved',
-                    'message' => "Revize za {$label} není aktuální schválená řádná revize.",
+                    'message' => "Revize za {$label} není aktuální schválená revize.",
                     'detail' => ['period_start' => $periodStart],
                 ];
                 continue;

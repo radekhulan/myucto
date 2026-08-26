@@ -26,7 +26,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
   'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
-  | 'health_notifications' | 'other' | 'inbox' | 'certificate'
+  | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -39,10 +39,9 @@ const activeTab = ref<SubmissionTab>('transport')
 // ELDP stojí hned za JMHZ: od roku 2026 ho ČSSZ sestavuje z měsíčního
 // hlášení sama, takže samostatný evidenční list je navazující a přechodná
 // agenda, ne konkurenční hlášení.
-// Zdravotní agenda má dvě záložky, protože jde o dvě různé povinnosti:
-// „health" je stav podaných přehledů o platbě, „health_notifications" je
-// oznamovací povinnost z § 10 — ta běží na osm dnů od skutečnosti, ne
-// měsíčně, a slít je do jedné záložky by tenhle rozdíl schovalo.
+// Zdravotní agenda je v jedné záložce, ale panel odděluje měsíční přehled
+// o platbě od oznamovací povinnosti z § 10, která běží na osm dnů od
+// skutečnosti. Uživatel tak nemá dvě konkurenční obrazovky nad stejnými daty.
 // Záměr uplatňovat slevu stojí hned za JMHZ, protože je jeho podmínkou: sleva
 // se sice vykazuje v měsíčním hlášení, ale nárok na ni zakládá tohle podání.
 // „Ostatní" je záchytná záložka pro skupinu `other`: `agenda_code` povinnosti
@@ -51,7 +50,7 @@ const activeTab = ref<SubmissionTab>('transport')
 // filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
 const tabs: SubmissionTab[] = [
   'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
-  'health_notifications', 'other', 'inbox', 'certificate',
+  'other', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -70,6 +69,9 @@ const snapshotsTotal = ref(0)
 const snapshotsOffset = ref(0)
 const snapshotsPage = computed(() =>
   Math.floor(snapshotsOffset.value / snapshotsPageSize) + 1)
+// Prostředí je jedna volba pro celou stránku. Kdyby si je držely jednotlivé
+// záložky samy, přepnutí z TESTU na jinou agendu by uživatele bez upozornění
+// vrátilo do produkce.
 const environment = ref<PayrollRegzelEnvironment>('production')
 const officeId = ref<number | null>(null)
 const evidenceConfirmed = ref(false)
@@ -151,12 +153,12 @@ async function load() {
   error.value = ''
   success.value = ''
   try {
-    const [employerSettings, regzelProfile] = await Promise.all([
+    const [employerSettings, regzelProfileResponse] = await Promise.all([
       payrollApi.employerSettings(),
       payrollApi.regzelProfile(),
     ])
     settings.value = employerSettings
-    profile.value = regzelProfile
+    profile.value = regzelProfileResponse.profile
     officeId.value = employerSettings.offices.find(office => office.is_active)?.id ?? null
     await loadSnapshots()
   } catch (exception: unknown) {
@@ -180,7 +182,7 @@ async function prepare() {
     error.value = t('payroll.regzel.prepare.confirmation_required')
     return
   }
-  if (!profile.value) {
+  if (!profile.value?.is_complete) {
     error.value = t('payroll.regzel.prepare.profile_required')
     return
   }
@@ -303,7 +305,10 @@ onMounted(loadInboxBadge)
       obstarává sám a schovat ho za skeleton registrace by znamenalo, že se
       odpověď na „co jsem odeslal" objeví později, než by musela.
     -->
-    <PayrollTransportHistoryPanel v-if="activeTab === 'transport'" />
+    <PayrollTransportHistoryPanel
+      v-if="activeTab === 'transport'"
+      v-model:environment="environment"
+    />
 
     <!--
       Evidenční list si data obstarává sám a nepotřebuje načtení REGZEL
@@ -313,15 +318,24 @@ onMounted(loadInboxBadge)
       Záměr uplatňovat slevu si data obstarává sám a na REGZEL profilu
       nezávisí, proto stojí mimo společný skeleton.
     -->
-    <PayrollDiscountIntentsPanel v-else-if="activeTab === 'discount_intents'" />
+    <PayrollDiscountIntentsPanel
+      v-else-if="activeTab === 'discount_intents'"
+      v-model:environment="environment"
+    />
 
-    <PayrollEldpPanel v-else-if="activeTab === 'eldp'" />
+    <PayrollEldpPanel
+      v-else-if="activeTab === 'eldp'"
+      v-model:environment="environment"
+    />
 
     <!--
-      Oznamovací povinnost si data obstarává sama a na REGZEL profilu
+      Zdravotní agenda si data obstarává sama a na REGZEL profilu
       nezávisí, proto stojí mimo společný skeleton.
     -->
-    <PayrollHealthNotificationPanel v-else-if="activeTab === 'health_notifications'" />
+    <template v-else-if="activeTab === 'health'">
+      <PayrollHealthNotificationPanel />
+      <PayrollSubmissionOverviewPanel v-model:environment="environment" mode="health" />
+    </template>
 
     <div v-else-if="loading" class="space-y-4">
       <div class="h-28 animate-pulse rounded-xl bg-neutral-100" />
@@ -396,7 +410,7 @@ onMounted(loadInboxBadge)
         </div>
 
         <div
-          v-if="!profile"
+          v-if="!profile?.is_complete"
           class="mt-5 rounded-lg border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700"
         >
           {{ t('payroll.regzel.prepare.profile_required') }}
@@ -464,7 +478,7 @@ onMounted(loadInboxBadge)
             type="button"
             data-test="regzel-prepare"
             :class="btnFilled('primary')"
-            :disabled="preparing || !profile || officeId === null"
+            :disabled="preparing || !profile?.is_complete || officeId === null"
             @click="prepare"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -587,14 +601,19 @@ onMounted(loadInboxBadge)
 
     <PayrollSubmissionInboxPanel
       v-else-if="activeTab === 'inbox'"
+      v-model:environment="environment"
       @update:open-count="inboxOpenCount = $event"
     />
 
-    <PayrollSigningCertificatePanel v-else-if="activeTab === 'certificate'" />
+    <PayrollSigningCertificatePanel
+      v-else-if="activeTab === 'certificate'"
+      v-model:environment="environment"
+    />
 
     <PayrollSubmissionOverviewPanel
       v-else
-      :mode="activeTab === 'health' || activeTab === 'other' ? activeTab : 'jmhz'"
+      v-model:environment="environment"
+      :mode="activeTab === 'other' ? activeTab : 'jmhz'"
     />
   </div>
 </template>

@@ -575,14 +575,13 @@ final class PayrollSubmissionPlatformTest extends TestCase
      * Kdyby to šlo plošně, agendy s okamžitým protokolem (EPO) by dovolily
      * podat opravu dřív, než se ví, jestli originál prošel — a duplicitní
      * podání se pozná až u správce daně, kdy se s tím nedá nic dělat.
-     * JMHZ výjimku má a je vypsaná i s důvodem v
-     * {@see \MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy};
-     * tenhle test drží druhou stranu, aby to nikdo nerozvolnil zpátky omylem.
+     * JMHZ25 má naopak výslovně užší pravidlo; tady neznámá agenda drží
+     * bezpečný obecný fallback, aby ho nikdo nerozvolnil zpátky omylem.
      */
     public function testCorrectionCannotFollowPendingSubmissionOfUndeclaredAgenda(): void
     {
-        // Agenda „JMHZ" (bez ročníku) v katalogu výjimek NENÍ — na rozdíl od
-        // „JMHZ25", pod kterou běží měsíční hlášení.
+        // Agenda „JMHZ" (bez ročníku) není deklarovaná agenda měsíčního
+        // hlášení; i neznámý kód proto musí zůstat přísný.
         self::assertFalse(
             PayrollAgendaCorrectionPolicy::allowsPendingPredecessor('JMHZ'),
         );

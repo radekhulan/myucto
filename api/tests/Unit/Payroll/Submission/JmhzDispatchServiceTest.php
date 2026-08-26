@@ -80,7 +80,16 @@ final class JmhzDispatchServiceTest extends TestCase
     {
         $attempts = $this->attempts();
         $attempts->method('nextAttemptNo')->willReturn(1);
-        $attempts->expects(self::once())->method('open')->willReturnCallback(
+        $attempts->expects(self::once())->method('open')->with(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            JmhzDispatchService::CHANNEL,
+            1,
+            'jmhz-2026-04-11',
+            hash('sha256', JmhzTransportSample::payload()),
+            3,
+        )->willReturnCallback(
             function (): array {
                 $this->log[] = 'open';
 
@@ -345,6 +354,36 @@ final class JmhzDispatchServiceTest extends TestCase
         );
         self::assertTrue($outcome->isSettled());
         self::assertSame('completed', $outcome->attempt['status']);
+    }
+
+    public function testPollRejectsAProtocolForAnotherSubmissionClass(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('find')->willReturn(self::sentRow());
+        $attempts->expects(self::never())->method('markCompleted');
+
+        try {
+            $this->service($attempts, [
+                new Response(
+                    200,
+                    ['Content-Type' => 'text/xml'],
+                    JmhzTransportSample::partialProtocol(),
+                ),
+            ])->poll(
+                self::SUPPLIER,
+                'test',
+                self::ATTEMPT,
+                JmhzTransportSample::VARIABLE_SYMBOL,
+                1,
+                'CSSZ_PREZEC',
+            );
+            self::fail('Protokol JMHZ nesmí uzavřít pokus PREZEC.');
+        } catch (JmhzTransportException $exception) {
+            self::assertSame(
+                'jmhz_protocol_class_mismatch',
+                $exception->errorCode,
+            );
+        }
     }
 
     /**

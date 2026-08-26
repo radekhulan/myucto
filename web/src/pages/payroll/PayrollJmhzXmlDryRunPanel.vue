@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { RouteLocationRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
@@ -8,8 +9,13 @@ import {
   type PayrollJmhzControlReport,
   type PayrollJmhzPvpojOffice,
   type PayrollJmhzXmlDryRun,
+  type PayrollJmhzXmlDryRunBlocker,
   type PayrollRun,
 } from '@/api/payroll'
+import {
+  payrollAbsenceApi,
+  type PayrollAbsenceEmployment,
+} from '@/api/payrollAbsences'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 
@@ -28,12 +34,14 @@ const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const states = ref<Record<number, DryRunState>>({})
 /**
  * Registrace u OSSZ, za které se z revize podává. Měsíční hlášení je podání
- * ZA REGISTRACI, takže nácvik nad během přes víc mzdových účtáren musí vědět,
+ * ZA REGISTRACI, takže test nad během přes víc mzdových účtáren musí vědět,
  * kterou z nich zkouší — jinak by se lidé jedné účtárny vykázali pod cizím
  * variabilním symbolem.
  */
 const offices = ref<Record<number, PayrollJmhzPvpojOffice[]>>({})
 const selectedOffice = ref<Record<number, number | null>>({})
+const remediationEmployments = ref<PayrollAbsenceEmployment[]>([])
+const remediationContextRequested = ref(false)
 
 watch(() => props.runs, async runs => {
   const loaded: Record<number, PayrollJmhzPvpojOffice[]> = {}
@@ -83,6 +91,12 @@ async function ensureOffices(revision: number): Promise<void> {
   }
 }
 
+async function ensureRemediationContext(): Promise<void> {
+  if (remediationContextRequested.value) return
+  remediationContextRequested.value = true
+  remediationEmployments.value = await payrollAbsenceApi.context().catch(() => [])
+}
+
 function state(run: PayrollRun): DryRunState | null {
   const id = revisionId(run)
   return id === null ? null : states.value[id] ?? null
@@ -99,7 +113,7 @@ async function run(payrollRun: PayrollRun) {
   }
   states.value = { ...states.value, [id]: current }
   try {
-    // Registrace se mohou ještě načítat — spustit nácvik dřív, než je známý
+    // Registrace se mohou ještě načítat — spustit test dřív, než je známý
     // seznam účtáren, by u víceúčtárenské revize znamenalo nacvičit naslepo.
     await ensureOffices(id)
     if (submittableOffices(id).length > 1 && selectedOffice.value[id] == null) {
@@ -112,11 +126,17 @@ async function run(payrollRun: PayrollRun) {
       id,
       crypto.randomUUID(),
     )
-    states.value[id].result = await payrollApi.jmhzXmlDryRun(
+    const result = await payrollApi.jmhzXmlDryRun(
       preparation.id,
       'test',
       selectedOffice.value[id] ?? null,
     )
+    states.value[id].result = result
+    if (result.status === 'blocked'
+      && result.blockers.some(blocker => blocker.entity_id !== null)
+    ) {
+      await ensureRemediationContext()
+    }
   } catch (exception) {
     states.value[id].error = apiErrorMessage(
       exception,
@@ -130,7 +150,155 @@ async function run(payrollRun: PayrollRun) {
 function blockerLabel(code: string): string {
   const key = `payroll.submissions.overview.jmhz_dry_run_blockers.${code}`
   const translated = t(key)
-  return translated === key ? code : translated
+  return translated === key
+    ? t('payroll.submissions.overview.jmhz_dry_run_blockers.unknown')
+    : translated
+}
+
+interface BlockerGroup {
+  key: string
+  blocker: PayrollJmhzXmlDryRunBlocker
+  count: number
+  entityIds: number[]
+}
+
+function groupedBlockers(blockers: PayrollJmhzXmlDryRunBlocker[]): BlockerGroup[] {
+  const groups = new Map<string, BlockerGroup>()
+  for (const blocker of blockers) {
+    const key = JSON.stringify([
+      blocker.code,
+      blocker.entity_type,
+      [...blocker.attribute_ids].sort(),
+    ])
+    const current = groups.get(key)
+    if (current) {
+      current.count++
+      if (blocker.entity_id !== null
+        && !current.entityIds.includes(blocker.entity_id)
+      ) {
+        current.entityIds.push(blocker.entity_id)
+      }
+    } else {
+      groups.set(key, {
+        key,
+        blocker,
+        count: 1,
+        entityIds: blocker.entity_id === null ? [] : [blocker.entity_id],
+      })
+    }
+  }
+  return [...groups.values()]
+}
+
+function blockerTarget(
+  blocker: PayrollJmhzXmlDryRunBlocker,
+  entityId: number | null = blocker.entity_id,
+): RouteLocationRaw | null {
+  if ([
+    'jmhz_attribute_10116_unresolved',
+    'jmhz_attribute_10546_unresolved',
+    'jmhz_interaction_in13_unresolved',
+    'jmhz_interaction_in28_unresolved',
+    'jmhz_interaction_in30_unresolved',
+    'jmhz_ordinary_evidence_missing',
+  ].includes(blocker.code)) {
+    return { name: 'payroll-submissions', hash: '#jmhz-ordinary-evidence' }
+  }
+  if (blocker.code === 'jmhz_average_hourly_earning_missing') {
+    return entityId === null
+      ? { name: 'payroll-absences', query: { tab: 'averages' } }
+      : {
+          name: 'payroll-absences',
+          query: { employment: String(entityId), tab: 'averages' },
+        }
+  }
+  if (blocker.code === 'jmhz_work_month_not_approved') {
+    return entityId === null
+      ? { name: 'payroll-time' }
+      : { name: 'payroll-time', query: { employment: String(entityId) } }
+  }
+  if (blocker.code === 'jmhz_scenario1_earnings_vector_incomplete') {
+    return { name: 'payroll-components' }
+  }
+  switch (blocker.entity_type) {
+    case 'employment':
+      return entityId === null
+        ? { name: 'payroll-people' }
+        : { name: 'payroll-people', query: { employment: String(entityId) } }
+    case 'person':
+    case 'employee':
+      return entityId === null
+        ? { name: 'payroll-people' }
+        : { name: 'payroll-people', query: { person: String(entityId) } }
+    case 'component':
+      return { name: 'payroll-components' }
+    case 'office':
+      return { name: 'payroll-settings', query: { tab: 'offices' } }
+    case 'run':
+    case 'revision':
+    case 'preparation':
+      return { name: 'payroll-runs' }
+    default:
+      return null
+  }
+}
+
+function blockerActionLabel(blocker: PayrollJmhzXmlDryRunBlocker): string {
+  const codeKey = `payroll.submissions.overview.jmhz_dry_run_action_codes.${blocker.code}`
+  const codeTranslated = t(codeKey)
+  if (codeTranslated !== codeKey) return codeTranslated
+  const key = `payroll.submissions.overview.jmhz_dry_run_actions.${blocker.entity_type}`
+  const translated = t(key)
+  return translated === key
+    ? t('payroll.submissions.overview.jmhz_dry_run_actions.default')
+    : translated
+}
+
+function blockerUsesSharedTarget(code: string): boolean {
+  return [
+    'jmhz_attribute_10116_unresolved',
+    'jmhz_attribute_10546_unresolved',
+    'jmhz_interaction_in13_unresolved',
+    'jmhz_interaction_in28_unresolved',
+    'jmhz_interaction_in30_unresolved',
+    'jmhz_ordinary_evidence_missing',
+    'jmhz_scenario1_earnings_vector_incomplete',
+  ].includes(code)
+}
+
+function blockerUsesAgendaTarget(group: BlockerGroup): boolean {
+  return blockerUsesSharedTarget(group.blocker.code) || group.entityIds.length > 10
+}
+
+function blockerGroupTarget(group: BlockerGroup): RouteLocationRaw | null {
+  return blockerUsesAgendaTarget(group)
+    ? blockerTarget(group.blocker, null)
+    : blockerTarget(group.blocker)
+}
+
+function entityIdPreview(entityIds: number[]): string {
+  const visible = entityIds.slice(0, 10).join(', ')
+  return entityIds.length > 10 ? `${visible}, …` : visible
+}
+
+function remediationLabel(
+  blocker: PayrollJmhzXmlDryRunBlocker,
+  entityId: number,
+  index: number,
+): string {
+  const employment = blocker.entity_type === 'employment'
+    ? remediationEmployments.value.find(item => item.id === entityId)
+    : ['person', 'employee'].includes(blocker.entity_type)
+      ? remediationEmployments.value.find(item => item.employee_id === entityId)
+      : undefined
+  if (employment !== undefined) {
+    return blocker.entity_type === 'employment'
+      ? `${employment.full_name} · ${employment.code}`
+      : employment.full_name
+  }
+  return t('payroll.submissions.overview.jmhz_dry_run_actions.record', {
+    number: index + 1,
+  })
 }
 
 interface ControlGroup {
@@ -380,18 +548,85 @@ async function copyXml(payrollRun: PayrollRun) {
           >
             <p class="text-sm font-medium text-warning-700">
               {{ t('payroll.submissions.overview.jmhz_dry_run_blocked', {
-                count: state(payrollRun)!.result!.blockers.length,
+                count: groupedBlockers(state(payrollRun)!.result!.blockers).length,
+                records: state(payrollRun)!.result!.blockers.length,
               }) }}
             </p>
-            <ul class="mt-2 space-y-1 text-sm text-warning-700">
+            <ul class="mt-3 space-y-3 text-sm text-warning-700">
               <li
-                v-for="blocker in state(payrollRun)!.result!.blockers"
-                :key="`${blocker.code}-${blocker.entity_type}-${blocker.entity_id ?? ''}`"
+                v-for="group in groupedBlockers(state(payrollRun)!.result!.blockers)"
+                :key="group.key"
+                class="rounded-lg border border-warning-500/20 bg-surface/60 p-3"
+                data-test="jmhz-dry-run-blocker"
               >
-                {{ blockerLabel(blocker.code) }}
-                <span v-if="blocker.attribute_ids.length" class="text-xs opacity-75">
-                  ({{ blocker.attribute_ids.join(', ') }})
-                </span>
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <p class="font-medium">{{ blockerLabel(group.blocker.code) }}</p>
+                    <p v-if="group.count > 1" class="mt-1 text-xs opacity-80">
+                      {{ t('payroll.submissions.overview.jmhz_dry_run_blocker_occurrences', {
+                        count: group.count,
+                      }) }}
+                    </p>
+                  </div>
+                  <RouterLink
+                    v-if="blockerGroupTarget(group)
+                      && (group.entityIds.length <= 1
+                        || blockerUsesAgendaTarget(group))"
+                    :to="blockerGroupTarget(group)!"
+                    :class="btnOutline('warning')"
+                    data-test="jmhz-dry-run-remediation"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.edit" />
+                    </svg>
+                    {{ blockerActionLabel(group.blocker) }}
+                  </RouterLink>
+                </div>
+                <details
+                  v-if="blockerTarget(group.blocker) && group.entityIds.length > 1
+                    && group.entityIds.length <= 10
+                    && !blockerUsesAgendaTarget(group)"
+                  class="mt-2"
+                  data-test="jmhz-dry-run-remediation-list"
+                >
+                  <summary class="cursor-pointer font-medium underline decoration-dotted underline-offset-4">
+                    {{ t('payroll.submissions.overview.jmhz_dry_run_actions.multiple', {
+                      count: group.entityIds.length,
+                    }) }}
+                  </summary>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <RouterLink
+                      v-for="(entityId, index) in group.entityIds"
+                      :key="entityId"
+                      :to="blockerTarget(group.blocker, entityId)!"
+                      :class="btnOutline('warning')"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path :d="ICONS.edit" />
+                      </svg>
+                      {{ remediationLabel(group.blocker, entityId, index) }}
+                    </RouterLink>
+                  </div>
+                </details>
+                <details
+                  v-if="group.blocker.attribute_ids.length || group.entityIds.length"
+                  class="mt-2 text-xs opacity-80"
+                  data-test="jmhz-dry-run-technical-detail"
+                >
+                  <summary class="cursor-pointer">
+                    {{ t('payroll.submissions.overview.jmhz_dry_run_technical_detail') }}
+                  </summary>
+                  <p v-if="group.blocker.attribute_ids.length" class="mt-1 font-mono">
+                    {{ t('payroll.submissions.overview.jmhz_dry_run_attribute_ids', {
+                      ids: group.blocker.attribute_ids.join(', '),
+                    }) }}
+                  </p>
+                  <p v-if="group.entityIds.length" class="mt-1 font-mono">
+                    {{ t('payroll.submissions.overview.jmhz_dry_run_entity_ids', {
+                      ids: entityIdPreview(group.entityIds),
+                    }) }}
+                  </p>
+                </details>
               </li>
             </ul>
           </div>
