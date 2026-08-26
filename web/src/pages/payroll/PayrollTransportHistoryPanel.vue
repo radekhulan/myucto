@@ -175,6 +175,9 @@ interface AttemptGroup {
   /** Období hlášení; nese ho každý řádek ledgeru, uvnitř skupiny je stejné. */
   periodStart: string | null
   periodEnd: string | null
+  submissionKind: string | null
+  submissionStatus: string | null
+  correctsSubmissionId: number | null
   attempts: PayrollJmhzTransportAttempt[]
 }
 
@@ -192,6 +195,9 @@ const groups = computed<AttemptGroup[]>(() => {
         submissionId: attempt.submission_id,
         periodStart: attempt.period_start,
         periodEnd: attempt.period_end,
+        submissionKind: attempt.submission_kind,
+        submissionStatus: attempt.submission_status,
+        correctsSubmissionId: attempt.corrects_submission_id,
         attempts: [],
       }
       byId.set(attempt.submission_id, group)
@@ -355,7 +361,10 @@ function canClose(attempt: PayrollJmhzTransportAttempt): boolean {
  * neopustilo aplikaci, u ČSSZ neexistuje a rušit se u něj nemá co.
  */
 function canCancel(group: AttemptGroup): boolean {
-  return canWrite.value && group.attempts.some(attempt => attempt.sent_at !== null)
+  return canWrite.value
+    && group.submissionKind === 'regular'
+    && ['accepted', 'partially_accepted'].includes(group.submissionStatus ?? '')
+    && group.attempts.some(attempt => attempt.sent_at !== null)
 }
 
 /**
@@ -364,7 +373,12 @@ function canCancel(group: AttemptGroup): boolean {
  * jen odhad. Definitivní způsobilost ještě ověří server nad stavem podání.
  */
 function canCorrect(group: AttemptGroup): boolean {
-  if (!canWrite.value || !group.attempts.some(attempt => attempt.status === 'completed')) {
+  if (
+    !canWrite.value
+    || group.submissionKind !== 'regular'
+    || group.submissionStatus !== 'accepted'
+    || !group.attempts.some(attempt => attempt.status === 'completed')
+  ) {
     return false
   }
   const latestKnownReport = group.attempts

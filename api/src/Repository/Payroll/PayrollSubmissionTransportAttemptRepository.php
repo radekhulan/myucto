@@ -66,7 +66,9 @@ final class PayrollSubmissionTransportAttemptRepository
     /** MariaDB kód duplicitního unikátního klíče. */
     private const DUPLICATE_KEY = 1062;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(private readonly Connection $db)
+    {
+    }
 
     public function isAvailable(): bool
     {
@@ -160,7 +162,10 @@ final class PayrollSubmissionTransportAttemptRepository
         $limit = max(1, min($limit, 200));
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::attemptColumns() . ',
-                    obligation.period_start, obligation.period_end
+                    obligation.period_start, obligation.period_end,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id
                FROM ' . self::TABLE . ' attempt
                LEFT JOIN payroll_submissions submission
                       ON submission.supplier_id = attempt.supplier_id
@@ -219,7 +224,10 @@ final class PayrollSubmissionTransportAttemptRepository
 
         $statement = $this->db->pdo()->prepare(
             'SELECT ' . self::attemptColumns() . ',
-                    obligation.period_start, obligation.period_end
+                    obligation.period_start, obligation.period_end,
+                    submission.submission_kind,
+                    submission.status AS submission_status,
+                    submission.corrects_submission_id
                FROM ' . self::TABLE . ' attempt
                LEFT JOIN payroll_submissions submission
                       ON submission.supplier_id = attempt.supplier_id
@@ -839,23 +847,24 @@ final class PayrollSubmissionTransportAttemptRepository
             [
                 'id', 'supplier_id', 'submission_id', 'attempt_no',
                 'row_version', 'poll_count', 'close_attempts',
-            ]
-            as $field
+            ] as $field
         ) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = (int) $normalized[$field];
             }
         }
-        foreach (['response_http_status', 'created_by'] as $field) {
+        foreach (['response_http_status', 'created_by', 'corrects_submission_id'] as $field) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null
                     : (int) $normalized[$field];
             }
         }
-        // Období přidává jen listRecent() a nese ho LEVÝ join, takže u pokusu
-        // bez podání chybí. Prázdno musí zůstat prázdnem, ne "".
-        foreach (['period_start', 'period_end'] as $field) {
+        // Období a identitu podání přidává jen přehled přes LEVÉ joiny, takže
+        // u osiřelého pokusu chybí. Prázdno musí zůstat prázdnem, ne "".
+        foreach (
+            ['period_start', 'period_end', 'submission_kind', 'submission_status'] as $field
+        ) {
             if (array_key_exists($field, $normalized)) {
                 $normalized[$field] = $normalized[$field] === null
                     ? null

@@ -3328,6 +3328,10 @@ export interface PayrollJmhzTransportAttempt {
   /** Období hlášení z povinnosti; `null` u pokusu, jehož podání už v evidenci není. */
   period_start: string | null
   period_end: string | null
+  /** Druh a stav podání, ke kterému pokus patří; `null` jen u osiřelého ledgeru. */
+  submission_kind: string | null
+  submission_status: string | null
+  corrects_submission_id: number | null
   /** CorrelationID přidělené branou VREP; bez něj se na výsledek nelze zeptat. */
   correlation_reference: string | null
   request_sha256: string | null

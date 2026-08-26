@@ -469,10 +469,16 @@ final class PayrollSubmissionTransportAttemptRepositoryTest extends TestCase
         self::assertArrayHasKey($ours['id'], $byId);
         self::assertSame('2026-07-01', $byId[$ours['id']]['period_start']);
         self::assertSame('2026-07-31', $byId[$ours['id']]['period_end']);
+        self::assertSame('regular', $byId[$ours['id']]['submission_kind']);
+        self::assertSame('prepared', $byId[$ours['id']]['submission_status']);
+        self::assertNull($byId[$ours['id']]['corrects_submission_id']);
 
         self::assertArrayHasKey($orphan, $byId);
         self::assertNull($byId[$orphan]['period_start']);
         self::assertNull($byId[$orphan]['period_end']);
+        self::assertNull($byId[$orphan]['submission_kind']);
+        self::assertNull($byId[$orphan]['submission_status']);
+        self::assertNull($byId[$orphan]['corrects_submission_id']);
 
         // Období smí přibýt jen do přehledu; detail pokusu i fronty na pozadí
         // zůstávají beze změny, aby se jim nezměnil tvar řádku.

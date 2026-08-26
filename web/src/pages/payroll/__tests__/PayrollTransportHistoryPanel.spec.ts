@@ -57,6 +57,9 @@ function attempt(overrides: Record<string, unknown> = {}) {
     status: 'awaiting_protocol',
     period_start: '2026-07-01',
     period_end: '2026-07-31',
+    submission_kind: 'regular',
+    submission_status: 'accepted',
+    corrects_submission_id: null,
     correlation_reference: 'ABC-123-XYZ',
     request_sha256: 'a'.repeat(64),
     response_http_status: 200,
@@ -863,6 +866,35 @@ describe('PayrollTransportHistoryPanel', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="transport-correct-70"]').exists()).toBe(true)
+  })
+
+  it('nevratné akce nabídne jen nad přijatým řádným hlášením', async () => {
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({ submission_status: 'submitted' })],
+    })
+    const pending = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(pending.find('[data-test="transport-cancel-70"]').exists()).toBe(false)
+    expect(pending.find('[data-test="transport-correct-70"]').exists()).toBe(false)
+
+    pending.unmount()
+    m.jmhzTransportHistory.mockResolvedValue({
+      environment: 'production',
+      attempts: [attempt({
+        submission_kind: 'cancellation',
+        submission_status: 'accepted',
+        corrects_submission_id: 60,
+        status: 'completed',
+        completed_at: '2026-08-11 10:00:00',
+      })],
+    })
+    const cancellation = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+
+    expect(cancellation.find('[data-test="transport-cancel-70"]').exists()).toBe(false)
+    expect(cancellation.find('[data-test="transport-correct-70"]').exists()).toBe(false)
   })
 
   it('během načítání součástí neukáže zavádějící prázdný stav', async () => {
