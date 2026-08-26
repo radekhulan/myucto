@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
@@ -511,9 +512,17 @@ final class StatementMatcher
                 )->execute([$inv['id'], $transactionId]);
 
                 $finalDraftId = null;
-                if (!$alreadyPaid && $inv['invoice_type'] === 'proforma') {
-                    // DUZP finálního dokladu = den přijetí platby z výpisu, ne dnešek.
-                    $finalDraftId = $this->finalCreator->create((int) $inv['id'], 0, (string) $row['posted_at']);
+                if (!$alreadyPaid) {
+                    $finalDraftId = ProformaPaymentDocuments::afterPayment(
+                        $this->finalCreator,
+                        $this->taxDocCreator,
+                        (int) $inv['id'],
+                        isset($inv['invoice_type']) ? (string) $inv['invoice_type'] : null,
+                        true,
+                        null,
+                        0,
+                        (string) $row['posted_at'],
+                    )['final_draft_id'];
                 }
                 $pdo->commit();
             } catch (\Throwable $e) {
@@ -566,14 +575,16 @@ final class StatementMatcher
                       WHERE id = ?"
                 )->execute([$inv['id'], $transactionId]);
 
-                $taxDocId = null;
-                if ($inv['invoice_type'] === 'proforma' && $this->taxDocCreator !== null) {
-                    try {
-                        $taxDocId = $this->taxDocCreator->createForPayment((int) $recorded['payment_id'], 0);
-                    } catch (\RuntimeException) {
-                        // Neplátce DPH / reverse charge / jiná podmínka — doklad se nevystavuje.
-                    }
-                }
+                $taxDocId = ProformaPaymentDocuments::afterPayment(
+                    $this->finalCreator,
+                    $this->taxDocCreator,
+                    (int) $inv['id'],
+                    isset($inv['invoice_type']) ? (string) $inv['invoice_type'] : null,
+                    false,
+                    isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
+                    0,
+                    (string) $row['posted_at'],
+                )['tax_document_id'];
                 $pdo->commit();
             } catch (\Throwable $e) {
                 if ($pdo->inTransaction()) $pdo->rollBack();

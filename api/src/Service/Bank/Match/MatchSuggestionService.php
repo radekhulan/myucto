@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank\Match;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use PDO;
@@ -343,15 +344,21 @@ final class MatchSuggestionService
                 'variable_symbol' => $tx['variable_symbol'] ?? null, 'bank_reference' => $tx['bank_ref'] ?? null,
                 'created_by' => $userId ?: null,
             ]);
-            if ((string) $row['invoice_type'] === 'proforma') {
-                if ($recorded['became_paid']) {
-                    $finalDraftIds[] = $this->finalCreator->create($invoiceId, $userId ?: 0, $postedAt);
-                } else {
-                    try {
-                        $taxDocumentIds[] = $this->taxDocCreator->createForPayment((int) $recorded['payment_id'], $userId ?: 0);
-                    } catch (\RuntimeException) {
-                    }
-                }
+            $followUp = ProformaPaymentDocuments::afterPayment(
+                $this->finalCreator,
+                $this->taxDocCreator,
+                $invoiceId,
+                (string) $row['invoice_type'],
+                (bool) $recorded['became_paid'],
+                isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
+                $userId ?: 0,
+                $postedAt,
+            );
+            if ($followUp['final_draft_id'] !== null) {
+                $finalDraftIds[] = $followUp['final_draft_id'];
+            }
+            if ($followUp['tax_document_id'] !== null) {
+                $taxDocumentIds[] = $followUp['tax_document_id'];
             }
         }
         $this->markTransaction((int) $tx['id'], $invoiceIds[0], $manual ? 'manual' : 'auto_exact', $userId);

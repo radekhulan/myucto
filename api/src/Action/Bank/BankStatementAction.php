@@ -25,6 +25,7 @@ use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Bank\Match\SubsetSumSolver;
 use MyInvoice\Service\Bank\StatementScanner;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
+use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
@@ -2621,20 +2622,18 @@ final class BankStatementAction
                     $markedPaid = $recorded['became_paid'];
                     $partialPayment = !$recorded['became_paid'];
 
-                    if (($invoice['invoice_type'] ?? '') === 'proforma') {
-                        if ($markedPaid) {
-                            // Zaplacená proforma → DRAFT finální faktury (DUZP = datum platby)
-                            $finalDraftId = $this->finalCreator->create($invoiceId, $userId ?: 0, $postedAt);
-                        } else {
-                            // Částečná úhrada proformy → DRAFT daňového dokladu k přijaté
-                            // platbě (plátce DPH, ne-RC; creator si podmínky hlídá sám).
-                            try {
-                                $taxDocId = $this->taxDocCreator->createForPayment((int) $recorded['payment_id'], $userId ?: 0);
-                            } catch (\RuntimeException) {
-                                // Neplátce / reverse charge — doklad se nevystavuje.
-                            }
-                        }
-                    }
+                    $followUp = ProformaPaymentDocuments::afterPayment(
+                        $this->finalCreator,
+                        $this->taxDocCreator,
+                        $invoiceId,
+                        isset($invoice['invoice_type']) ? (string) $invoice['invoice_type'] : null,
+                        $markedPaid,
+                        isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
+                        $userId ?: 0,
+                        $postedAt,
+                    );
+                    $finalDraftId = $followUp['final_draft_id'] ?? $finalDraftId;
+                    $taxDocId = $followUp['tax_document_id'] ?? $taxDocId;
                 }
             }
 
@@ -2913,6 +2912,7 @@ final class BankStatementAction
         }
 
         $finalDraftIds = [];
+        $taxDocumentIds = [];
         $paidInvoiceIds = [];
         $pdo->beginTransaction();
         try {
@@ -2989,9 +2989,26 @@ final class BankStatementAction
                 ]);
                 if ($recorded['became_paid']) {
                     $paidInvoiceIds[] = $iid;
-                    if ((string) ($byId[$iid]['invoice_type'] ?? '') === 'proforma') {
-                        $finalDraftIds[$iid] = $this->finalCreator->create($iid, $userId ?: 0, $postedAt);
-                    }
+                }
+                // Dřív se tu zakládala jen finální faktura. Částečná úhrada tu zatím
+                // nastat nemůže (každá faktura dostává celý zbytek a součet musí sedět
+                // na částku platby), takže to nebyla aktivní chyba — ale rozhodnutí
+                // patří na jedno místo se zbytkem cest párování (issue #39).
+                $followUp = ProformaPaymentDocuments::afterPayment(
+                    $this->finalCreator,
+                    $this->taxDocCreator,
+                    $iid,
+                    isset($byId[$iid]['invoice_type']) ? (string) $byId[$iid]['invoice_type'] : null,
+                    (bool) $recorded['became_paid'],
+                    isset($recorded['payment_id']) ? (int) $recorded['payment_id'] : null,
+                    $userId ?: 0,
+                    $postedAt,
+                );
+                if ($followUp['final_draft_id'] !== null) {
+                    $finalDraftIds[$iid] = $followUp['final_draft_id'];
+                }
+                if ($followUp['tax_document_id'] !== null) {
+                    $taxDocumentIds[$iid] = $followUp['tax_document_id'];
                 }
             }
 
@@ -3020,6 +3037,7 @@ final class BankStatementAction
             'client_id'       => $clientId,
             'paid_at'         => $postedAt,
             'final_draft_ids' => array_values($finalDraftIds),
+            'tax_document_ids' => array_values($taxDocumentIds),
         ], $ip, $request->getHeaderLine('User-Agent'));
 
         // Děkovné e-maily za úhradu — per faktura, best-effort (selhání nesmí rozbít spárování).
@@ -3037,6 +3055,9 @@ final class BankStatementAction
         $result = ['matched' => true, 'split' => true, 'paid_at' => $postedAt, 'invoice_ids' => $invoiceIds, 'posting' => $posting];
         if ($finalDraftIds !== []) {
             $result['final_draft_ids'] = array_values($finalDraftIds);
+        }
+        if ($taxDocumentIds !== []) {
+            $result['tax_document_ids'] = array_values($taxDocumentIds);
         }
         return Json::ok($response, $result);
     }
