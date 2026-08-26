@@ -955,7 +955,7 @@ onMounted(async () => {
         <nav class="text-xs text-neutral-500" aria-label="breadcrumb" data-test="person-breadcrumbs">
           <ol class="flex flex-wrap items-center gap-1">
             <li>
-              <RouterLink :to="{ name: 'payroll' }" class="hover:text-neutral-700 hover:underline">
+              <RouterLink :to="{ name: 'payroll-dashboard' }" class="hover:text-neutral-700 hover:underline">
                 {{ t('payroll.people.breadcrumbs.payroll') }}
               </RouterLink>
             </li>

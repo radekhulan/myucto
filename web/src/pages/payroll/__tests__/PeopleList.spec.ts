@@ -23,7 +23,11 @@ const m = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
   useRouter: () => ({ replace: m.routerReplace }),
-  RouterLink: { template: '<a><slot /></a>' },
+  RouterLink: {
+    name: 'RouterLink',
+    props: ['to'],
+    template: '<a><slot /></a>',
+  },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -155,6 +159,7 @@ function mountPage() {
           template: '<div data-test="person-actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
         },
         RouterLink: {
+          name: 'RouterLink',
           props: ['to'],
           template: '<a data-test="router-link"><slot /></a>',
         },
@@ -478,6 +483,8 @@ describe('PeopleList toolbar and shared employee creation', () => {
 
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('test')
     expect(wrapper.get('[data-test="person-breadcrumbs"]').text()).toContain('test')
+    expect(wrapper.getComponent({ name: 'RouterLink' }).props('to'))
+      .toEqual({ name: 'payroll-dashboard' })
     expect(wrapper.get('[data-test="person-header-employments"]').text())
       .toContain('payroll.people.header_employments')
     expect(wrapper.text()).toContain('payroll.people.needs_setup')
