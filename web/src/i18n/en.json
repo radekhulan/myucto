@@ -4755,6 +4755,22 @@
                 "other": "The case already has a legal, payroll or payment link. It cannot be deleted; stop or close it through the standard workflow."
             },
             "claim_created": "The claim was added.",
+            "claim_updated": "The draft claim was corrected.",
+            "claim_deleted": "The draft claim was deleted.",
+            "claim_not_found": "The claim is no longer in the case. Refresh the detail.",
+            "edit_claim": "Correct draft claim",
+            "save_claim_changes": "Save correction",
+            "delete_claim_confirm": "Do you really want to delete this draft claim? This cannot be undone.",
+            "claim_change_blocked": {
+                "case_started": "A claim can only be corrected or deleted before withholding starts. Keep an active case in the audit history.",
+                "allocation_exists": "The claim has entered a payroll calculation. It cannot be overwritten or deleted; create a follow-up correction.",
+                "ledger_exists": "The claim already has a withholding or holding movement. It must remain in the audit history.",
+                "payroll_result_exists": "The claim has been frozen in a payroll result. It must remain in the audit history.",
+                "payment_footprint_exists": "The claim has created a payment liability or payment. Correct it through the follow-up workflow.",
+                "concurrent_footprint_exists": "The claim gained a payroll, accounting or payment link in the meantime. Refresh the detail.",
+                "case_changed": "The case changed during the correction. Refresh the detail and review its current state.",
+                "other": "The claim has a legal, payroll or payment link and must remain in the history."
+            },
             "dependant_created": "The dependant was added.",
             "evidence_saved": "The evidence verification state was saved.",
             "month_evidence_saved": "The monthly evidence was saved.",

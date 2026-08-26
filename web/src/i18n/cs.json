@@ -4755,6 +4755,22 @@
                 "other": "Případ už má právní, mzdovou nebo platební návaznost. Smazat jej nelze; zastavte nebo uzavřete jej standardním krokem."
             },
             "claim_created": "Pohledávka byla přidána.",
+            "claim_updated": "Rozpracovaná pohledávka byla opravena.",
+            "claim_deleted": "Rozpracovaná pohledávka byla smazána.",
+            "claim_not_found": "Pohledávka už v případu není. Obnovte detail.",
+            "edit_claim": "Opravit rozpracovanou pohledávku",
+            "save_claim_changes": "Uložit opravu",
+            "delete_claim_confirm": "Opravdu chcete tuto rozpracovanou pohledávku smazat? Smazání nelze vrátit.",
+            "claim_change_blocked": {
+                "case_started": "Pohledávku lze opravit nebo smazat jen před zahájením srážení. Aktivní případ zachovejte v auditní historii.",
+                "allocation_exists": "Pohledávka už vstoupila do mzdového výpočtu. Nelze ji přepsat ani smazat; proveďte navazující opravu.",
+                "ledger_exists": "Pohledávka už má pohyb srážky nebo depozita. Musí zůstat v auditní historii.",
+                "payroll_result_exists": "Pohledávka už byla zmrazena ve mzdovém výsledku. Musí zůstat v auditní historii.",
+                "payment_footprint_exists": "Z pohledávky už vznikl platební závazek nebo platba. Opravte ji navazujícím postupem.",
+                "concurrent_footprint_exists": "Pohledávka mezitím získala mzdovou, účetní nebo platební návaznost. Obnovte detail.",
+                "case_changed": "Případ se během opravy změnil. Obnovte detail a zkontrolujte jeho aktuální stav.",
+                "other": "Pohledávka už má právní, mzdovou nebo platební návaznost a musí zůstat v historii."
+            },
             "dependant_created": "Vyživovaná osoba byla přidána.",
             "evidence_saved": "Stav ověření podkladů byl uložen.",
             "month_evidence_saved": "Měsíční podklady byly uloženy.",

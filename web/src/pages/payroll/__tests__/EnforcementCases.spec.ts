@@ -19,6 +19,8 @@ const m = vi.hoisted(() => ({
   person: vi.fn(),
   institutionAccounts: vi.fn(),
   deleteCase: vi.fn(),
+  updateClaim: vi.fn(),
+  deleteClaim: vi.fn(),
   canRead: vi.fn(),
   canWrite: vi.fn(),
   error: vi.fn(),
@@ -40,6 +42,8 @@ vi.mock('@/api/payrollEnforcement', () => ({
     detail: m.detail,
     create: vi.fn(),
     addClaim: vi.fn(),
+    updateClaim: m.updateClaim,
+    deleteClaim: m.deleteClaim,
     updateEvidence: vi.fn(),
     transition: vi.fn(),
     deleteCase: m.deleteCase,
@@ -213,6 +217,13 @@ describe('EnforcementCases', () => {
     m.person.mockResolvedValue({ id: 3, full_name: 'Syntetický Povinný' })
     m.institutionAccounts.mockResolvedValue([])
     m.deleteCase.mockResolvedValue({ deleted: true, id: 11 })
+    m.updateClaim.mockResolvedValue(verifiedClaim())
+    m.deleteClaim.mockResolvedValue({
+      deleted: true,
+      id: 51,
+      case_id: 11,
+      case_row_version: 2,
+    })
     m.monthEvidence.mockResolvedValue(monthEvidenceOf())
     m.dependants.mockResolvedValue([])
   })
@@ -305,6 +316,50 @@ describe('EnforcementCases', () => {
     expect(evidenceWrapper.get('[data-test="enforcement-next-step-action"]').text())
       .toContain('payroll.enforcement.next_steps.verify_evidence.action')
     evidenceWrapper.unmount()
+  })
+
+  it('umožní opravit a smazat rozpracovanou pohledávku před zahájením srážení', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const received = summary({ claim_count: 1 })
+    const claim = verifiedClaim()
+    const initial = { ...detailOf(received), claims: [claim] }
+    const corrected = {
+      ...initial,
+      claims: [{ ...claim, outstanding_minor_units: 123_400 }],
+    }
+    const withoutClaim = {
+      ...detailOf({ ...received, claim_count: 0, outstanding_minor_units: 0 }),
+      claims: [],
+    }
+    m.casesPage.mockResolvedValue(page([received]))
+    m.detail
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(corrected)
+      .mockResolvedValueOnce(withoutClaim)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    await wrapper.get('[data-test="edit-claim-51"]').trigger('click')
+    expect((wrapper.get('[data-test="claim-amount"]').element as HTMLInputElement).value)
+      .toBe('2500')
+    await wrapper.get('[data-test="claim-amount"]').setValue('1234')
+    await wrapper.get('[data-test="enforcement-claim-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.updateClaim).toHaveBeenCalledWith(11, 51, expect.objectContaining({
+      outstanding_minor_units: 123_400,
+      row_version: 1,
+    }))
+    expect(m.success).toHaveBeenCalledWith('payroll.enforcement.claim_updated')
+
+    await wrapper.get('[data-test="delete-claim-51"]').trigger('click')
+    await flushPromises()
+    expect(m.deleteClaim).toHaveBeenCalledWith(11, 51, 1)
+    expect(m.success).toHaveBeenCalledWith('payroll.enforcement.claim_deleted')
+    expect(wrapper.find('[data-test="delete-claim-51"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('schová méně časté stavové změny, ale ponechá je dostupné', async () => {

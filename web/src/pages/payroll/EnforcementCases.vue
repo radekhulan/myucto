@@ -17,6 +17,7 @@ import {
   type EnforcementCaseStatus,
   type EnforcementCaseSummary,
   type EnforcementClaimCategory,
+  type EnforcementClaim,
   type EnforcementClaimPayload,
   type EnforcementDependant,
   type EnforcementMonthEvidence,
@@ -72,6 +73,7 @@ const detail = ref<EnforcementCaseDetail | null>(null)
 const expandedId = ref<number | null>(null)
 const showCreate = ref(false)
 const showClaim = ref(false)
+const editingClaimId = ref<number | null>(null)
 const showStateActions = ref(false)
 const showMonthlyExceptions = ref(false)
 const showDependants = ref(false)
@@ -235,6 +237,15 @@ type NextStep = {
     | 'verify_recipient' | 'authorize_remittance' | 'monthly_check' | 'resume_when_ready'
     | 'closed'
   action: LocalNextStepAction | EnforcementCaseCommand | null
+}
+const claimChangeBlockerTranslations: Record<string, string> = {
+  case_started: 'payroll.enforcement.claim_change_blocked.case_started',
+  allocation_exists: 'payroll.enforcement.claim_change_blocked.allocation_exists',
+  ledger_exists: 'payroll.enforcement.claim_change_blocked.ledger_exists',
+  payroll_result_exists: 'payroll.enforcement.claim_change_blocked.payroll_result_exists',
+  payment_footprint_exists: 'payroll.enforcement.claim_change_blocked.payment_footprint_exists',
+  concurrent_footprint_exists: 'payroll.enforcement.claim_change_blocked.concurrent_footprint_exists',
+  case_changed: 'payroll.enforcement.claim_change_blocked.case_changed',
 }
 
 const localNextStepActions = new Set<LocalNextStepAction>([
@@ -468,6 +479,7 @@ function collapseDetail() {
   ++detailRequestSequence
   closeTransition()
   showClaim.value = false
+  editingClaimId.value = null
   showStateActions.value = false
   showMonthlyExceptions.value = false
   showDependants.value = false
@@ -494,6 +506,7 @@ async function selectCase(item: EnforcementCaseSummary) {
   const sequence = ++detailRequestSequence
   closeTransition()
   showClaim.value = false
+  editingClaimId.value = null
   showStateActions.value = false
   showMonthlyExceptions.value = false
   showDependants.value = false
@@ -658,6 +671,10 @@ async function handleMutationError(error: any) {
     const translation = deleteBlockerTranslations[String(apiError.blocker ?? '')]
       ?? 'payroll.enforcement.delete_blocked.other'
     toast.error(t(translation))
+  } else if (apiError?.code === 'enforcement_claim_change_blocked') {
+    const translation = claimChangeBlockerTranslations[String(apiError.blocker ?? '')]
+      ?? 'payroll.enforcement.claim_change_blocked.other'
+    toast.error(t(translation))
   } else {
     toast.error(apiError?.message || t('payroll.enforcement.save_failed'))
   }
@@ -801,26 +818,105 @@ async function addClaim() {
   if (!current) return
   saving.value = true
   try {
+    const wasEditing = editingClaimId.value !== null
     const amount = minorUnits(claimAmountCzk.value)
     if (amount === null) return
-    await payrollEnforcementApi.addClaim(current.id, {
+    const payload: EnforcementClaimPayload = {
       ...newClaim.value,
       legal_basis: current.case_kind === 'voluntary_agreement'
         ? 'voluntary_agreement'
         : 'statutory',
       outstanding_minor_units: amount,
       maintenance_weight_minor_units: minorUnits(maintenanceWeightCzk.value, false),
-    })
+    }
+    if (editingClaimId.value === null) {
+      await payrollEnforcementApi.addClaim(current.id, payload)
+    } else {
+      delete payload.same_order_as_claim_id
+      const claim = current.claims.find(item => item.id === editingClaimId.value)
+      if (!claim) throw new Error(t('payroll.enforcement.claim_not_found'))
+      await payrollEnforcementApi.updateClaim(current.id, claim.id, {
+        ...payload,
+        row_version: claim.row_version,
+      })
+    }
     const updated = await payrollEnforcementApi.detail(current.id)
     detail.value = updated
     updateSummary(updated)
     showClaim.value = false
+    editingClaimId.value = null
     claimAmountCzk.value = ''
     maintenanceWeightCzk.value = ''
     newClaim.value = emptyClaim()
-    toast.success(t('payroll.enforcement.claim_created'))
+    toast.success(t(wasEditing
+      ? 'payroll.enforcement.claim_updated'
+      : 'payroll.enforcement.claim_created'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || error?.message || t('payroll.enforcement.save_failed'))
+    if (error?.response?.data?.error?.code === 'row_version_conflict'
+      || error?.response?.data?.error?.code === 'enforcement_claim_change_blocked'
+    ) {
+      await handleMutationError(error)
+    } else {
+      toast.error(error?.response?.data?.error?.message || error?.message || t('payroll.enforcement.save_failed'))
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+function editClaim(claim: EnforcementClaim) {
+  editingClaimId.value = claim.id
+  newClaim.value = {
+    legal_basis: claim.legal_basis,
+    category: claim.category,
+    outstanding_minor_units: claim.outstanding_minor_units,
+    maintenance_weight_minor_units: claim.maintenance_weight_minor_units,
+    priority_date: claim.priority_date,
+    order_issued_on: claim.order_issued_on,
+    legal_title_verified: claim.legal_title_verified,
+    order_or_notice_delivered: claim.order_or_notice_delivered,
+    priority_classification_verified: claim.priority_classification_verified,
+    agreement_verified: claim.agreement_verified,
+    due_monetary_claim_verified: claim.due_monetary_claim_verified,
+  }
+  claimAmountCzk.value = String(claim.outstanding_minor_units / 100)
+  maintenanceWeightCzk.value = claim.maintenance_weight_minor_units === null
+    ? ''
+    : String(claim.maintenance_weight_minor_units / 100)
+  showClaim.value = true
+  void nextTick(() => claimsSection.value?.scrollIntoView?.({
+    behavior: 'smooth',
+    block: 'start',
+  }))
+}
+
+function cancelClaimForm() {
+  editingClaimId.value = null
+  showClaim.value = false
+  newClaim.value = emptyClaim()
+  claimAmountCzk.value = ''
+  maintenanceWeightCzk.value = ''
+}
+
+function startNewClaim() {
+  cancelClaimForm()
+  showClaim.value = true
+}
+
+async function deleteClaim(claim: EnforcementClaim) {
+  const current = detail.value
+  if (!current || current.status !== 'received') return
+  if (!window.confirm(t('payroll.enforcement.delete_claim_confirm'))) return
+  saving.value = true
+  try {
+    await payrollEnforcementApi.deleteClaim(current.id, claim.id, claim.row_version)
+    const updated = await payrollEnforcementApi.detail(current.id)
+    detail.value = updated
+    updateSummary(updated)
+    cancelClaimForm()
+    toast.success(t('payroll.enforcement.claim_deleted'))
+  } catch (error: any) {
+    await handleMutationError(error)
   } finally {
     saving.value = false
   }
@@ -1253,18 +1349,19 @@ onMounted(load)
         </section>
 
         <section ref="claimsSection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
-          <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.claims') }}</h3><button v-if="canWrite && detail.status === 'received'" :class="btnFilled('primary')" @click="showClaim = !showClaim"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.enforcement.add_claim') }}</button></div>
+          <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.claims') }}</h3><button v-if="canWrite && detail.status === 'received'" :class="btnFilled('primary')" @click="startNewClaim"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.enforcement.add_claim') }}</button></div>
           <form v-if="showClaim" data-test="enforcement-claim-form" class="mt-4 grid grid-cols-1 gap-3 rounded-lg bg-neutral-50 p-4 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="addClaim">
+            <h4 class="font-medium text-neutral-900 sm:col-span-2 lg:col-span-4">{{ t(editingClaimId === null ? 'payroll.enforcement.add_claim' : 'payroll.enforcement.edit_claim') }}</h4>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.claim_category') }}<select v-model="newClaim.category" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="category in claimCategories" :key="category" :value="category">{{ t(`payroll.enforcement.categories.${category}`) }}</option></select></label>
-            <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.outstanding_czk') }}<input v-model="claimAmountCzk" required inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+            <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.outstanding_czk') }}<input v-model="claimAmountCzk" required inputmode="decimal" data-test="claim-amount" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.priority_date') }}<input v-model="newClaim.priority_date" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.order_issued_on') }}<input v-model="newClaim.order_issued_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-            <label v-if="detail.claims.length" class="text-xs text-neutral-600">{{ t('payroll.enforcement.same_order_as') }}<select v-model="newClaim.same_order_as_claim_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">{{ t('payroll.enforcement.new_order') }}</option><option v-for="claim in detail.claims" :key="claim.id" :value="claim.id">{{ t(`payroll.enforcement.categories.${claim.category}`) }} · {{ claim.priority_date || '—' }}</option></select></label>
+            <label v-if="detail.claims.length && editingClaimId === null" class="text-xs text-neutral-600">{{ t('payroll.enforcement.same_order_as') }}<select v-model="newClaim.same_order_as_claim_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">{{ t('payroll.enforcement.new_order') }}</option><option v-for="claim in detail.claims" :key="claim.id" :value="claim.id">{{ t(`payroll.enforcement.categories.${claim.category}`) }} · {{ claim.priority_date || '—' }}</option></select></label>
             <label v-if="newClaim.category.includes('maintenance')" class="text-xs text-neutral-600">{{ t('payroll.enforcement.maintenance_weight_czk') }}<input v-model="maintenanceWeightCzk" required inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <div class="space-y-2 text-sm sm:col-span-2 lg:col-span-3"><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.legal_title_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.legal_title') }}</label><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.order_or_notice_delivered" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.delivered') }}</label><label class="flex items-center gap-2"><input v-model="newClaim.priority_classification_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.priority') }}</label><label v-if="detail.case_kind === 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.agreement_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.agreement') }}</label><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.due_monetary_claim_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.due_claim') }}</label></div>
-            <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4"><button type="button" :class="btnOutline('neutral')" @click="showClaim = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
+            <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4"><button type="button" :class="btnOutline('neutral')" @click="cancelClaimForm"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" data-test="save-claim" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t(editingClaimId === null ? 'common.save' : 'payroll.enforcement.save_claim_changes') }}</button></div>
           </form>
-          <div v-if="detail.claims.length" class="mt-4 overflow-x-auto"><table class="min-w-full divide-y divide-neutral-200 text-sm"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-3 py-2">{{ t('payroll.enforcement.claim_category') }}</th><th class="px-3 py-2">{{ t('payroll.enforcement.priority_date') }}</th><th class="px-3 py-2 text-right">{{ t('payroll.enforcement.balance') }}</th><th class="px-3 py-2">{{ t('payroll.enforcement.verification.title') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="claim in detail.claims" :key="claim.id"><td class="px-3 py-2">{{ t(`payroll.enforcement.categories.${claim.category}`) }}</td><td class="px-3 py-2 text-neutral-600">{{ claim.priority_date || '—' }}</td><td class="px-3 py-2 text-right font-medium">{{ money(claim.outstanding_minor_units) }}</td><td class="px-3 py-2"><span :class="claimVerified(claim) ? 'text-success-600' : 'text-warning-600'">{{ t(claimVerified(claim) ? 'payroll.enforcement.verified' : 'payroll.enforcement.incomplete') }}</span></td></tr></tbody></table></div>
+          <div v-if="detail.claims.length" class="mt-4 overflow-x-auto"><table class="min-w-full divide-y divide-neutral-200 text-sm"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-3 py-2">{{ t('payroll.enforcement.claim_category') }}</th><th class="px-3 py-2">{{ t('payroll.enforcement.priority_date') }}</th><th class="px-3 py-2 text-right">{{ t('payroll.enforcement.balance') }}</th><th class="px-3 py-2">{{ t('payroll.enforcement.verification.title') }}</th><th v-if="canWrite && detail.status === 'received'" class="px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="claim in detail.claims" :key="claim.id"><td class="px-3 py-2">{{ t(`payroll.enforcement.categories.${claim.category}`) }}</td><td class="px-3 py-2 text-neutral-600">{{ claim.priority_date || '—' }}</td><td class="px-3 py-2 text-right font-medium">{{ money(claim.outstanding_minor_units) }}</td><td class="px-3 py-2"><span :class="claimVerified(claim) ? 'text-success-600' : 'text-warning-600'">{{ t(claimVerified(claim) ? 'payroll.enforcement.verified' : 'payroll.enforcement.incomplete') }}</span></td><td v-if="canWrite && detail.status === 'received'" class="px-3 py-2"><div class="flex flex-wrap justify-end gap-2"><button type="button" :class="btnOutlineSm('neutral')" :data-test="`edit-claim-${claim.id}`" @click="editClaim(claim)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button type="button" :class="btnOutlineSm('danger')" :data-test="`delete-claim-${claim.id}`" @click="deleteClaim(claim)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>{{ t('common.delete') }}</button></div></td></tr></tbody></table></div>
           <p v-else class="mt-3 text-sm text-neutral-500">{{ t('payroll.enforcement.no_claims') }}</p>
         </section>
 

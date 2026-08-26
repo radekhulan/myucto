@@ -69,6 +69,7 @@ export interface EnforcementClaim {
   due_monetary_claim_verified: boolean
   is_active: boolean
   row_version: number
+  case_row_version?: number
 }
 
 export interface EnforcementEvent {
@@ -223,6 +224,24 @@ export const payrollEnforcementApi = {
       `/payroll/enforcement/cases/${caseId}/claims`,
       payload,
     ).then(response => response.data.claim),
+  updateClaim: (
+    caseId: number,
+    claimId: number,
+    payload: EnforcementClaimPayload & { row_version: number },
+  ) =>
+    api.put<{ claim: EnforcementClaim }>(
+      `/payroll/enforcement/cases/${caseId}/claims/${claimId}`,
+      payload,
+    ).then(response => response.data.claim),
+  deleteClaim: (caseId: number, claimId: number, rowVersion: number) =>
+    api.delete<{
+      deleted: true
+      id: number
+      case_id: number
+      case_row_version: number
+    }>(`/payroll/enforcement/cases/${caseId}/claims/${claimId}`, {
+      data: { row_version: rowVersion },
+    }).then(response => response.data),
   updateEvidence: (
     caseId: number,
     payload: {

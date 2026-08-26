@@ -56,6 +56,13 @@ nelze. Aplikace uvede konkrétní důvod; případ zastavte nebo uzavřete stand
 stavovým krokem. Tím zůstane zachováno, podle jakého podkladu a v jakém období
 se postupovalo.
 
+Stejné pravidlo platí pro jednotlivou pohledávku. Dokud je případ ve stavu
+**Přijato — čeká na ověření** a pohledávka ještě nevstoupila do mzdového
+výsledku, ledgeru ani platebního závazku, můžete ji v tabulce **Opravit** nebo
+**Smazat**. Oprava zachová interní identitu pohledávky, zvýší její verzi a
+znovu označí podklady případu jako neověřené. Po zahájení srážení se původní
+záznam nemění ani nemaže; použijte navazující právní nebo opravný postup.
+
 ## Kontroly a bezpečnost
 
 Použijte nejvyšší míru omezení přístupu. Ověřte pravidla účinná v měsíci, pořadí doručení, přednostní charakter, nezabavitelnou částku a souběh. Citlivé listiny neukládejte do veřejných odkazů a neměňte historické rozhodné datum bez auditní stopy.
