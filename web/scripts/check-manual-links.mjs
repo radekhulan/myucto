@@ -64,6 +64,10 @@ function markdownSlug(value) {
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '')
+    // Autoritativni je PHP mdSlug() v tools/generateManualHtml.php, protoze /manual
+    // servíruje manual/index.php. Jeho iconv //TRANSLIT prevede pomlcky na '-';
+    // holy strip nize by je zahodil a kotva by se rozesla s realnym HTML.
+    .replace(/[‐-―−]/g, '-')
     .replace(/[^a-z0-9\s-]/g, '')
     .replace(/[\s_]+/g, '-')
     .replace(/-+/g, '-')
