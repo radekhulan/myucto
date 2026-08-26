@@ -13514,7 +13514,7 @@
         "tab_units": "Units",
         "tab_tax_constants": "Tax constants",
         "tax_g_advanced": "Additional annual statutory values",
-        "tax_hint": "Yearly tax rates, limits and assessment bases for the tax optimizer (sole traders). The app ships verified defaults in code; here you can override them per year without a new deployment (e.g. after the annual rate changes). \"Reset to default\" removes the override and restores the in-code values.",
+        "tax_hint": "General tax constants — yearly rates, limits and assessment bases. The app ships verified defaults in code; here you can override them per year without a new deployment (e.g. after the annual rate changes). \"Reset to default\" removes the override and restores the in-code values.",
         "tax_year": "Year",
         "tax_overridden": "overridden",
         "tax_default": "default (from code)",

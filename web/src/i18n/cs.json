@@ -13514,7 +13514,7 @@
         "tab_units": "Jednotky",
         "tab_tax_constants": "Daňové konstanty",
         "tax_g_advanced": "Další roční zákonné hodnoty",
-        "tax_hint": "Roční daňové sazby, limity a vyměřovací základy pro daňový optimalizátor (OSVČ). Aplikace má ověřené výchozí hodnoty v kódu; tady je můžeš pro daný rok přepsat bez nového nasazení (např. po každoroční změně sazeb). Reset na výchozí smaže úpravu a vrátí hodnoty z kódu.",
+        "tax_hint": "Obecné daňové konstanty — roční sazby, limity a vyměřovací základy. Aplikace má ověřené výchozí hodnoty v kódu; tady je můžeš pro daný rok přepsat bez nového nasazení (např. po každoroční změně sazeb). Reset na výchozí smaže úpravu a vrátí hodnoty z kódu.",
         "tax_year": "Rok",
         "tax_overridden": "upraveno (přepis)",
         "tax_default": "výchozí (z kódu)",
