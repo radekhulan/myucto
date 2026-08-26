@@ -2232,7 +2232,7 @@
             "import": {
                 "button": "Import",
                 "title": "Import time data",
-                "hint": "CSV: employment_code, optional employment_id, starts_at, ends_at, timezone, category, break_minutes and unique external_id. Preview does not write anything.",
+                "hint": "CSV and XLSX: employment_code, optional employment_id, starts_at, ends_at, timezone, category, break_minutes and a unique external_id. Preview writes nothing; only rows shown as valid can be imported.",
                 "drop_hint": "Drop a CSV or XLSX file here, or click to browse",
                 "drop_active": "Release the file to load it",
                 "file_limit": "CSV and XLSX files up to 5 MB are supported.",
@@ -2245,11 +2245,11 @@
                 "apply": "Import valid rows",
                 "summary": "Rows {total_rows}, valid {accepted_rows}, rejected {rejected_rows}, duplicates {duplicate_rows}.",
                 "row_error": "Row {row}: {message}",
-                "xlsx_manual": "XLSX is not automatically supported. Convert it to CSV and run preview again.",
+                "xlsx_security": "XLSX accepts only the first worksheet and static values. For safety, formulas, macros, embedded files, and external links are rejected with a clear explanation.",
                 "preview_failed": "The import preview could not be created.",
                 "saved": "The time import was processed.",
                 "failed": "The time import could not be processed.",
-                "blocked_unsupported": "We cannot import this file format yet. Use a supported format, or enter the records by hand."
+                "blocked_unsupported": "The file did not pass the safety checks. Correct the reported issue and run preview again."
             },
             "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\".",
             "overtime": {

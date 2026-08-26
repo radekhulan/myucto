@@ -16,6 +16,51 @@ Zaměstnanec musí mít aktivní vztah a přiřazený pracovní režim. Uživate
 4. Porovnejte docházku s absencemi, svátky a změnami vztahu.
 5. Vyřešte varování a teprve potom předejte období do mzdového běhu.
 
+## Import docházky z CSV nebo XLSX
+
+Tlačítko **Import** slouží pro docházkové systémy i vlastní tabulku. CSV a XLSX
+používají stejnou datovou větu, stejnou kontrolu a stejný výsledek. Import je
+dvoukrokový: **Zkontrolovat** nejdřív vytvoří náhled bez jediného zápisu a až
+**Importovat platné řádky** uloží řádky označené v náhledu jako platné. Chybné
+řádky se vypíšou česky s číslem řádku; neopravují se odhadem.
+
+Povinné sloupce jsou:
+
+- `employment_code` — označení pracovního vztahu z karty zaměstnance;
+- `starts_at` a `ends_at` — začátek a konec včetně časového posunu, například
+  `2026-10-05T08:00:00+02:00`;
+- `timezone` — IANA časové pásmo, pro českou docházku obvykle `Europe/Prague`;
+- `category` — `regular`, `overtime`, `night`, `weekend`, `holiday` nebo
+  `difficult_environment`;
+- `external_id` — jedinečný identifikátor záznamu ve zdrojovém docházkovém
+  systému.
+
+Volitelně lze přidat `employment_id` pro přesné párování souběžných vztahů a
+`break_minutes` pro délku přestávky v celých nezáporných minutách. Odkaz na
+zdrojový dokument se nevyžaduje. Za správnost párovacího kódu a importovaných
+hodnot odpovídá uživatel, který potvrdí náhled.
+
+Stejné `external_id` u stejného pracovního vztahu se podruhé nezapíše. Opakované
+odeslání totožného souboru vrátí původní výsledek importu. Lze tedy bezpečně
+zopakovat požadavek po přerušení spojení, aniž vznikne dvojí docházka. Párování
+vždy probíhá jen uvnitř právě zvolené firmy a import vyžaduje přihlášenou relaci
+s oprávněním zapisovat docházku.
+
+### Bezpečnost a limity XLSX
+
+Soubor smí mít nejvýše 5 MB, 10 000 datových řádků a 24 sloupců. U XLSX se
+zpracuje pouze první list. Aplikace přijímá jen statické hodnoty: vzorec,
+makro, vložený soubor, externí propojení nebo neobvykle rozbalený archiv odmítne
+ještě před náhledem a nic nezapíše. Bezpečnostní kontrola omezuje také počet
+částí archivu a jeho rozbalenou velikost, takže komprimovaný soubor nemůže
+nekontrolovaně spotřebovat paměť serveru.
+
+Import není závislý na tom, kolik zaměstnanců je právě načteno v přehledu.
+Každý řádek se páruje přímo podle označení vztahu v dané firmě, takže stejný
+postup lze použít pro deset i pět set zaměstnanců. Pro rozsáhlý soubor nejdřív
+zkontrolujte souhrn platných, chybných a duplicitních řádků a teprve potom
+potvrďte zápis.
+
 ## Stavy
 
 Období může být rozpracované, úplné nebo blokované nesouladem. Po převzetí do otevřeného běhu se změna projeví až novým výpočtem. Uzavřené období neupravujte bez opravy běhu.

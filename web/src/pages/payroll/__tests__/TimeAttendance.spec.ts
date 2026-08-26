@@ -277,6 +277,62 @@ describe('TimeAttendance', () => {
     }))
   })
 
+  it('reads XLSX as an ArrayBuffer and sends only its Base64 payload', async () => {
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const importButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.import.button')
+    await importButton!.trigger('click')
+
+    const file = new File(
+      [new Uint8Array([0x50, 0x4b, 0x03, 0x04])],
+      'attendance.xlsx',
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    )
+    await wrapper.get('[data-testid="payroll-time-import-dropzone"]').trigger('drop', {
+      dataTransfer: { files: [file] },
+    })
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-testid="payroll-time-import-selected"]').attributes('title'))
+        .toBe('attendance.xlsx')
+      const preview = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll.time.import.preview')
+      expect(preview!.attributes('disabled')).toBeUndefined()
+    })
+
+    const preview = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.import.preview')
+    await preview!.trigger('click')
+    await flushPromises()
+
+    expect(m.previewTimeImport).toHaveBeenCalledWith(expect.objectContaining({
+      format: 'xlsx',
+      original_name: 'attendance.xlsx',
+      content: 'UEsDBA==',
+    }))
+    expect(wrapper.text()).toContain('payroll.time.import.xlsx_security')
+  })
+
+  it('rejects an XLSX over five megabytes before FileReader or API use', async () => {
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const importButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.import.button')
+    await importButton!.trigger('click')
+
+    const file = new File(
+      [new Uint8Array(5_000_001)],
+      'too-large.xlsx',
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+    )
+    await wrapper.get('[data-testid="payroll-time-import-dropzone"]').trigger('drop', {
+      dataTransfer: { files: [file] },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('payroll.time.import.file_too_large')
+    expect(m.previewTimeImport).not.toHaveBeenCalled()
+  })
+
   it('shows a payroll-styled error and clears a previous selection after rejection', async () => {
     const wrapper = mount(TimeAttendance)
     await flushPromises()

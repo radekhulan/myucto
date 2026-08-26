@@ -101,6 +101,7 @@ const importFormat = ref<'csv' | 'xlsx'>('csv')
 const importContent = ref('')
 const importFileError = ref('')
 const importPreview = ref<PayrollTimeImportPreview | null>(null)
+const IMPORT_MAX_BYTES = 5_000_000
 const selectedEmploymentIds = ref<number[]>([])
 const approvalItem = ref<PayrollTimeOverviewItem | null>(null)
 const approvalStandardFund = ref('')
@@ -838,6 +839,10 @@ function clearImportSelection() {
 }
 
 async function loadImportFile(file: File) {
+  if (file.size > IMPORT_MAX_BYTES) {
+    rejectImportFile('file_too_large')
+    return
+  }
   importFileError.value = ''
   importName.value = file.name
   importFormat.value = file.name.toLowerCase().endsWith('.xlsx') ? 'xlsx' : 'csv'
@@ -847,10 +852,21 @@ async function loadImportFile(file: File) {
     if (importFormat.value === 'csv') {
       importContent.value = await file.text()
     } else {
-      const bytes = new Uint8Array(await file.arrayBuffer())
-      let binary = ''
-      for (const byte of bytes) binary += String.fromCharCode(byte)
-      importContent.value = btoa(binary)
+      const buffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onerror = () => reject(reader.error ?? new Error('file_read_failed'))
+        reader.onload = () => {
+          if (reader.result instanceof ArrayBuffer) resolve(reader.result)
+          else reject(new Error('file_read_failed'))
+        }
+        reader.readAsArrayBuffer(file)
+      })
+      const bytes = new Uint8Array(buffer)
+      const chunks: string[] = []
+      for (let offset = 0; offset < bytes.length; offset += 32_768) {
+        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32_768)))
+      }
+      importContent.value = btoa(chunks.join(''))
     }
   } catch {
     clearImportSelection()
@@ -1073,7 +1089,7 @@ onMounted(load)
       </div>
       <div v-if="importPreview" class="mt-4 rounded-lg bg-neutral-50 p-4 text-sm">
         <p>{{ t('payroll.time.import.summary', importPreview) }}</p>
-        <p v-if="!importPreview.supported" class="mt-2 text-warning-700">{{ t('payroll.time.import.xlsx_manual') }}</p>
+        <p v-if="importFormat === 'xlsx'" class="mt-2 text-neutral-600">{{ t('payroll.time.import.xlsx_security') }}</p>
         <ul v-if="importPreview.errors.length" class="mt-3 space-y-1 text-danger-600">
           <li v-for="error in importPreview.errors" :key="`${error.row_number}-${error.error_code}`">
             {{ t('payroll.time.import.row_error', { row: error.row_number, message: error.error_message }) }}

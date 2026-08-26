@@ -2232,7 +2232,7 @@
             "import": {
                 "button": "Import",
                 "title": "Import docházky",
-                "hint": "CSV: employment_code, volitelně employment_id, starts_at, ends_at, timezone, category, break_minutes a jedinečné external_id. Náhled nic nezapisuje.",
+                "hint": "CSV i XLSX: employment_code, volitelně employment_id, starts_at, ends_at, timezone, category, break_minutes a jedinečné external_id. Náhled nic nezapisuje; importuje se jen to, co předem uvidíte jako platné.",
                 "drop_hint": "Přetáhněte sem CSV nebo XLSX, případně klikněte pro výběr",
                 "drop_active": "Pusťte soubor pro načtení",
                 "file_limit": "Podporované formáty CSV a XLSX, nejvýše 5 MB.",
@@ -2245,11 +2245,11 @@
                 "apply": "Importovat platné řádky",
                 "summary": "Řádků {total_rows}, platných {accepted_rows}, chybných {rejected_rows}, duplicit {duplicate_rows}.",
                 "row_error": "Řádek {row}: {message}",
-                "xlsx_manual": "XLSX není automaticky podporován. Převeďte jej do CSV a spusťte znovu náhled.",
+                "xlsx_security": "XLSX přijímá jen první list a statické hodnoty. Vzorce, makra, vložené soubory a externí propojení aplikace z bezpečnostních důvodů odmítne s českým vysvětlením.",
                 "preview_failed": "Náhled importu se nepodařilo vytvořit.",
                 "saved": "Import docházky byl zpracován.",
                 "failed": "Import docházky se nepodařilo zpracovat.",
-                "blocked_unsupported": "Tenhle formát souboru zatím neumíme naimportovat. Použijte podporovaný formát, nebo záznamy zadejte ručně."
+                "blocked_unsupported": "Soubor neprošel bezpečnostní kontrolou. Opravte uvedenou chybu a spusťte náhled znovu."
             },
             "load_failed_hint": "Docházka za toto období se nenačetla. Než se to povede, neberte prázdný přehled jako doklad, že nikdo nic nevykázal.",
             "overtime": {

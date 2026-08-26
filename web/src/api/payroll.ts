@@ -993,7 +993,7 @@ export interface PayrollTimeImportError {
 export interface PayrollTimeImportPreview {
   format: 'csv' | 'xlsx'
   supported: boolean
-  status: 'preview' | 'manual_review'
+  status: 'preview'
   period: string
   original_name: string
   total_rows: number

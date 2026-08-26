@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Time;
 use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Component\PayrollInputTabularParser;
 
 final class PayrollTimeCsvImportService
 {
@@ -26,10 +27,21 @@ final class PayrollTimeCsvImportService
         'holiday',
         'difficult_environment',
     ];
+    private const CANONICAL_COLUMNS = [
+        'employment_id',
+        'employment_code',
+        'starts_at',
+        'ends_at',
+        'timezone',
+        'category',
+        'break_minutes',
+        'external_id',
+    ];
 
     public function __construct(
         private readonly PayrollTimeRepository $repository,
         private readonly PayrollTimeService $time,
+        private readonly PayrollInputTabularParser $parser,
     ) {}
 
     /** @return array<string,mixed> */
@@ -40,41 +52,41 @@ final class PayrollTimeCsvImportService
         string $originalName,
         string $content,
     ): array {
-        [$periodStart] = $this->time->periodBounds($period);
-        if ($format === 'xlsx') {
-            return [
-                'format' => 'xlsx',
-                'supported' => false,
-                'status' => 'manual_review',
-                'period' => $period,
-                'original_name' => $originalName,
-                'total_rows' => 0,
-                'accepted_rows' => 0,
-                'rejected_rows' => 0,
-                'duplicate_rows' => 0,
-                'errors' => [[
-                    'row_number' => 0,
-                    'error_code' => 'xlsx_manual_review',
-                    'field_name' => null,
-                    'error_message' => 'XLSX import není automaticky podporován; soubor vyžaduje ruční převod do CSV a kontrolu.',
-                ]],
-                'rows' => [],
-            ];
-        }
-        if ($format !== 'csv') {
-            throw new \InvalidArgumentException('format musí být csv nebo xlsx.');
-        }
-        if (strlen($content) > 5_000_000) {
-            throw new \InvalidArgumentException('CSV je větší než bezpečný limit 5 MB.');
-        }
+        $format = $this->format($format);
+        $originalName = $this->originalName($originalName);
+        $content = $this->decodedContent($format, $content);
+        return $this->previewDecoded(
+            $supplierId,
+            $period,
+            $format,
+            $originalName,
+            $content,
+        );
+    }
 
-        $parsed = $this->parseCsv($content);
-        $errors = $parsed['errors'];
+    /** @return array<string,mixed> */
+    private function previewDecoded(
+        int $supplierId,
+        string $period,
+        string $format,
+        string $originalName,
+        string $content,
+    ): array {
+        [$periodStart] = $this->time->periodBounds($period);
+        $parsed = $this->parser->parse($format, $content, self::REQUIRED);
+        $errors = array_map($this->parserError(...), $parsed['errors']);
         $accepted = [];
         $duplicates = 0;
         $seenSourceHashes = [];
+        $resolvedEmployments = [];
         foreach ($parsed['rows'] as $row) {
-            $validated = $this->validateRow($supplierId, $period, $row);
+            $row['row_hash'] = $this->rowHash($row);
+            $validated = $this->validateRow(
+                $supplierId,
+                $period,
+                $row,
+                $resolvedEmployments,
+            );
             if (isset($validated['error'])) {
                 $errors[] = $validated['error'];
                 continue;
@@ -99,14 +111,14 @@ final class PayrollTimeCsvImportService
         }
 
         return [
-            'format' => 'csv',
+            'format' => $format,
             'supported' => true,
             'status' => 'preview',
             'period' => $period,
             'period_start' => $periodStart,
             'original_name' => $originalName,
             'content_hash' => hash('sha256', $content),
-            'total_rows' => count($parsed['rows']) + count($parsed['row_errors']),
+            'total_rows' => count($parsed['rows']) + count($parsed['errors']),
             'accepted_rows' => count($accepted),
             'rejected_rows' => count($errors),
             'duplicate_rows' => $duplicates,
@@ -135,6 +147,9 @@ final class PayrollTimeCsvImportService
         string $content,
         ?int $userId,
     ): array {
+        $format = $this->format($format);
+        $originalName = $this->originalName($originalName);
+        $content = $this->decodedContent($format, $content);
         [$periodStart] = $this->time->periodBounds($period);
         $contentHash = hash('sha256', $content, true);
         $existing = $this->repository->importByHash($supplierId, $periodStart, $contentHash);
@@ -143,37 +158,13 @@ final class PayrollTimeCsvImportService
             return $existing;
         }
 
-        $preview = $this->preview(
+        $preview = $this->previewDecoded(
             $supplierId,
             $period,
             $format,
             $originalName,
             $content,
         );
-        if ($format === 'xlsx') {
-            $recorded = $this->repository->recordImport(
-                $supplierId,
-                $periodStart,
-                'xlsx',
-                $originalName,
-                $contentHash,
-                'manual_review',
-                0,
-                0,
-                0,
-                0,
-                [[
-                    'row_number' => 0,
-                    'error_code' => 'xlsx_manual_review',
-                    'field_name' => null,
-                    'error_message' => 'XLSX import vyžaduje ruční převod do CSV a kontrolu.',
-                    'row_hash' => hash('sha256', 'xlsx_manual_review', true),
-                ]],
-                $userId,
-            );
-            $recorded['supported'] = false;
-            return $recorded;
-        }
 
         $acceptedRows = PayrollTimeValue::rows($preview['_accepted'] ?? null, '_accepted');
         $errors = $this->errors($preview['_errors'] ?? null);
@@ -244,7 +235,7 @@ final class PayrollTimeCsvImportService
         $recorded = $this->repository->recordImport(
             $supplierId,
             $periodStart,
-            'csv',
+            $format,
             $originalName,
             $contentHash,
             $status,
@@ -260,91 +251,18 @@ final class PayrollTimeCsvImportService
     }
 
     /**
-     * @return array{
-     *   rows:list<array<string,mixed>>,
-     *   errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string,row_hash:string}>,
-     *   row_errors:list<array{row_number:int,error_code:string,field_name:?string,error_message:string,row_hash:string}>
-     * }
-     */
-    private function parseCsv(string $content): array
-    {
-        $stream = fopen('php://temp', 'w+b');
-        if ($stream === false) {
-            throw new \RuntimeException('CSV se nepodařilo otevřít v paměti.');
-        }
-        fwrite($stream, preg_replace('/^\xEF\xBB\xBF/', '', $content) ?? $content);
-        rewind($stream);
-        $firstLine = fgets($stream);
-        if ($firstLine === false) {
-            fclose($stream);
-            throw new \InvalidArgumentException('CSV je prázdné.');
-        }
-        $delimiter = substr_count($firstLine, ';') >= substr_count($firstLine, ',') ? ';' : ',';
-        rewind($stream);
-        $header = fgetcsv($stream, 0, $delimiter, escape: '');
-        if ($header === false) {
-            fclose($stream);
-            throw new \InvalidArgumentException('CSV nemá platnou hlavičku.');
-        }
-        $header = array_map(
-            static fn (?string $value): string => trim($value ?? ''),
-            $header,
-        );
-        foreach (self::REQUIRED as $required) {
-            if (!in_array($required, $header, true)) {
-                fclose($stream);
-                throw new \InvalidArgumentException("CSV hlavička neobsahuje {$required}.");
-            }
-        }
-        if (count($header) !== count(array_unique($header))) {
-            fclose($stream);
-            throw new \InvalidArgumentException('CSV hlavička obsahuje duplicitní názvy sloupců.');
-        }
-
-        $rows = [];
-        $rowErrors = [];
-        $line = 1;
-        while (($values = fgetcsv($stream, 0, $delimiter, escape: '')) !== false) {
-            ++$line;
-            if ($values === [null] || $values === ['']) {
-                continue;
-            }
-            $raw = implode(
-                $delimiter,
-                array_map(static fn (?string $value): string => $value ?? '', $values),
-            );
-            $rowHash = hash('sha256', $raw, true);
-            if (count($values) !== count($header)) {
-                $rowErrors[] = $this->error(
-                    $line,
-                    'column_count',
-                    null,
-                    'Počet sloupců řádku neodpovídá hlavičce.',
-                    $rowHash,
-                );
-                continue;
-            }
-            $combined = array_combine($header, $values);
-            $row = [];
-            foreach ($combined as $key => $value) {
-                $row[$key] = trim($value ?? '');
-            }
-            $row['row_number'] = $line;
-            $row['row_hash'] = $rowHash;
-            $rows[] = $row;
-        }
-        fclose($stream);
-        return ['rows' => $rows, 'errors' => $rowErrors, 'row_errors' => $rowErrors];
-    }
-
-    /**
      * @param array<string,mixed> $row
+     * @param array<string,int|null> $resolvedEmployments
      * @return array{entry:array<string,mixed>}|array{
      *   error:array{row_number:int,error_code:string,field_name:?string,error_message:string,row_hash:string}
      * }
      */
-    private function validateRow(int $supplierId, string $period, array $row): array
-    {
+    private function validateRow(
+        int $supplierId,
+        string $period,
+        array $row,
+        array &$resolvedEmployments,
+    ): array {
         $rowNumber = PayrollTimeValue::int($row['row_number'] ?? null, 'row_number');
         $rowHash = PayrollTimeValue::string($row['row_hash'] ?? null, 'row_hash');
         $employmentCode = $this->nullable(
@@ -366,11 +284,16 @@ final class PayrollTimeCsvImportService
             }
             $employmentId = (int) $employmentIdRaw;
         }
-        $resolved = $this->repository->resolveEmployment(
-            $supplierId,
-            $employmentId,
-            $employmentCode,
-        );
+        $resolutionKey = ($employmentId === null ? '' : (string) $employmentId)
+            . "\0" . ($employmentCode ?? '');
+        if (!array_key_exists($resolutionKey, $resolvedEmployments)) {
+            $resolvedEmployments[$resolutionKey] = $this->repository->resolveEmployment(
+                $supplierId,
+                $employmentId,
+                $employmentCode,
+            );
+        }
+        $resolved = $resolvedEmployments[$resolutionKey];
         if ($resolved === null) {
             return ['error' => $this->error(
                 $rowNumber,
@@ -503,6 +426,76 @@ final class PayrollTimeCsvImportService
     {
         $value = trim($value);
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * @param array{row_number:int,error_code:string,field_name:?string,error_message:string} $error
+     * @return array{row_number:int,error_code:string,field_name:?string,error_message:string,row_hash:string}
+     */
+    private function parserError(array $error): array
+    {
+        $rowNumber = $error['row_number'];
+        $errorCode = $error['error_code'];
+        return [
+            'row_number' => $rowNumber,
+            'error_code' => $errorCode,
+            'field_name' => $error['field_name'],
+            'error_message' => $error['error_message'],
+            'row_hash' => hash(
+                'sha256',
+                "payroll-time-import-error\0{$rowNumber}\0{$errorCode}",
+                true,
+            ),
+        ];
+    }
+
+    /** @param array<string,string|int> $row */
+    private function rowHash(array $row): string
+    {
+        $canonical = [];
+        foreach (self::CANONICAL_COLUMNS as $column) {
+            $value = $row[$column] ?? '';
+            $canonical[$column] = trim((string) $value);
+        }
+        return hash(
+            'sha256',
+            json_encode($canonical, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+            true,
+        );
+    }
+
+    private function format(string $format): string
+    {
+        $format = strtolower(trim($format));
+        if (!in_array($format, ['csv', 'xlsx'], true)) {
+            throw new \InvalidArgumentException('Formát musí být csv nebo xlsx.');
+        }
+        return $format;
+    }
+
+    private function originalName(string $name): string
+    {
+        $name = basename(str_replace('\\', '/', trim($name)));
+        if ($name === '' || mb_strlen($name) > 190
+            || preg_match('/[\x00-\x1F\x7F]/u', $name) === 1) {
+            throw new \InvalidArgumentException('Název importního souboru není platný.');
+        }
+        return $name;
+    }
+
+    private function decodedContent(string $format, string $content): string
+    {
+        if ($format === 'csv') {
+            return $content;
+        }
+        if (strlen($content) > 6_700_000) {
+            throw new \InvalidArgumentException('XLSX překračuje bezpečný limit 5 MB.');
+        }
+        $decoded = base64_decode($content, true);
+        if ($decoded === false) {
+            throw new \InvalidArgumentException('Obsah XLSX není platné Base64.');
+        }
+        return $decoded;
     }
 
     /**
