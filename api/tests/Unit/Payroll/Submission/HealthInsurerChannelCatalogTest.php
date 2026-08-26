@@ -27,22 +27,26 @@ final class HealthInsurerChannelCatalogTest extends TestCase
             '205' => 'xml',
             '207' => 'xml',
             '209' => 'text_pdf',
-            '211' => 'xml',
+            '211' => 'text_pdf',
             '213' => 'xml',
         ], $formats);
     }
 
-    public function testZpMvUsesXmlFromJuly2026(): void
+    public function testZpMvKeepsTextPdfForIsdsAfterXmlGatewayLaunch(): void
     {
         $channel = (new HealthInsurerChannelCatalog())->forInsurer('211');
 
         self::assertSame(
             HealthInsurerIsdsAttachmentFormat::TextPdf,
-            $channel->isdsAttachmentFormatOn('2026-06-30'),
+            $channel->isdsAttachmentFormatOn('2026-09-30'),
         );
         self::assertSame(
-            HealthInsurerIsdsAttachmentFormat::Xml,
-            $channel->isdsAttachmentFormatOn('2026-07-01'),
+            HealthInsurerIsdsAttachmentFormat::TextPdf,
+            $channel->isdsAttachmentFormatOn('2026-10-01'),
+        );
+        self::assertSame(
+            HealthInsurerIsdsAttachmentFormat::TextPdf,
+            $channel->isdsAttachmentFormatOn('2027-01-01'),
         );
     }
 

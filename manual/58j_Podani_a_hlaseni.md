@@ -312,11 +312,12 @@ Formát připravené přílohy se řídí pojišťovnou a obdobím:
 | 205 | ČPZP | XML podle zveřejněného schématu |
 | 207 | OZP | XML podle zveřejněného schématu |
 | 209 | ZPŠ | strojově čitelné PDF |
-| 211 | ZP MV ČR | PDF do 30. 6. 2026, od 1. 7. 2026 nový XML formát |
+| 211 | ZP MV ČR | strojově čitelné PDF; nový XML/B2B kanál je oddělený |
 | 213 | RBP | XML podle zveřejněného schématu |
 
-ZP MV ČR přijímá ve druhém pololetí 2026 přechodně také PDF; MyÚčto od
-1. 7. 2026 volí novější XML. RBP připouští XML i vytěžitelné PDF a MyÚčto
+ZP MV ČR plánuje nový XML/B2B kanál od 1. 10. 2026, ale pro ISDS výslovně
+zůstává podporované strojově čitelné PDF i od roku 2027; MyÚčto proto ISDS
+automaticky na XML nepřepíná. RBP připouští XML i vytěžitelné PDF a MyÚčto
 volí XML. U VZP a VoZP je XDP šablona pomůcka pro hromadné vyplnění PDF,
 nikoli soubor, který by se přikládal k datové zprávě. XSD se rovněž
 neodesílá: slouží jen jako schéma, proti kterému aplikace kontroluje XML.

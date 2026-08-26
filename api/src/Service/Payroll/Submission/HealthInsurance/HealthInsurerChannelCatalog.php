@@ -159,16 +159,13 @@ final class HealthInsurerChannelCatalog
                 insurerCode: '211',
                 kind: HealthInsurerChannelKind::OwnPortal,
                 portalUrl: 'https://eforms.zpmvcr.cz',
-                isdsAttachmentRules: [
-                    self::pdfBetween('2026-01-01', '2026-06-30'),
-                    self::xmlSince('2026-07-01'),
-                ],
+                isdsAttachmentRules: [self::pdfSince('2026-01-01')],
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode: self::REASON_B2B_NOT_PUBLISHED,
-                note: 'ZP MV přijímá přes datovou schránku PDF a od '
-                    . '1. 7. 2026 také nový XML formát. MyÚčto od tohoto '
-                    . 'data volí XML. Pojišťovna přechodně přijímá PDF až '
-                    . 'do 31. 12. 2026, aplikace ale používá nový formát.',
+                note: 'ZP MV přijímá přes datovou schránku strojově čitelné '
+                    . 'PDF i po spuštění nového XML/B2B rozhraní plánovaného '
+                    . 'od 1. 10. 2026. MyÚčto proto ISDS automaticky na XML '
+                    . 'nepřepíná; B2B zůstává samostatný kanál.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '213',
@@ -211,13 +208,4 @@ final class HealthInsurerChannelCatalog
         ];
     }
 
-    /** @return array{from:string,to:string,format:HealthInsurerIsdsAttachmentFormat} */
-    private static function pdfBetween(string $from, string $to): array
-    {
-        return [
-            'from' => $from,
-            'to' => $to,
-            'format' => HealthInsurerIsdsAttachmentFormat::TextPdf,
-        ];
-    }
 }
