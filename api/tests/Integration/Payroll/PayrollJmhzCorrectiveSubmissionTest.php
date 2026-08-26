@@ -205,6 +205,21 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
         self::assertStringContainsString('<typFormulare>S</typFormulare>', $xml);
     }
 
+    public function testComponentCancellationAfterTheDeadlineIsRefused(): void
+    {
+        $original = $this->acceptedRegularSubmission();
+        $this->clock->modify('+25 days');
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessage('Lhůta pro storno');
+        $this->corrections->cancelComponents(
+            $this->supplierId,
+            self::ENVIRONMENT,
+            $original['id'],
+            [self::FORM_GUID],
+        );
+    }
+
     /**
      * Druhé kliknutí nesmí založit druhé storno. XML se nestaví znovu — jinak
      * by pod týmž podáním vznikl jiný dokument, a duplicitu přijatého podání

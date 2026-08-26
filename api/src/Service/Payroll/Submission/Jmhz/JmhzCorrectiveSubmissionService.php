@@ -256,7 +256,6 @@ final readonly class JmhzCorrectiveSubmissionService
                 $identity->month,
                 $this->deadlines,
                 $this->localDate(),
-                $submissionKind === 'cancellation',
             );
             $envelope = JmhzSubmissionEnvelope::createForExistingSubmission(
                 $identity->submissionGuid,
