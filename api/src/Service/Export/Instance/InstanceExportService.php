@@ -34,6 +34,7 @@ use Psr\Log\LoggerInterface;
  *
  * Co je uvnitř (viz `CTI-MNE.txt` v archivu):
  *   data/{tabulka}.jsonl   strojově čitelný export všech agend (JSON Lines)
+ *   shared/payroll/…       globální mzdové podklady nutné k obnově
  *   doklady/{rok}/…        PDF a ISDOC vydaných, PDF přijatých, výpisy z účtu
  *   prilohy/…              skeny, přílohy deníku (§ 33a), dokumenty DMS, mzdové doklady
  *   manifest.json          co v archivu je, kolik toho je, k jakému datu, jaká verze
@@ -83,7 +84,67 @@ final class InstanceExportService
     ];
 
     /** Verze formátu archivu — čtečky se podle ní mají rozhodovat. */
-    private const FORMAT_VERSION = 3;
+    private const FORMAT_VERSION = 4;
+
+    /**
+     * Globální mzdová konfigurace a připnuté legislativní podklady. Nejsou
+     * tenantově omezené, ale jsou nutné pro reprodukci mzdových snapshotů a
+     * jejich cizí klíče. Seznam je explicitní: nová globální tabulka se nesmí
+     * do archivu dostat bez bezpečnostního posouzení.
+     *
+     * Pořadí respektuje rodiče před potomky kvůli triggerům při obnově.
+     *
+     * @var list<string>
+     */
+    public const SHARED_PAYROLL_TABLES = [
+        'payroll_rulesets',
+        'payroll_jmhz_spec_packages',
+        'payroll_jmhz_codebooks',
+        'payroll_jmhz_dictionary_attributes',
+        'payroll_jmhz_codebook_entries',
+        'payroll_jmhz_control_catalogs',
+        'payroll_jmhz_control_definitions',
+        'payroll_jmhz_control_attribute_refs',
+        'payroll_jmhz_control_parameters',
+        'payroll_jmhz_control_parameter_refs',
+        'payroll_jmhz_control_parameter_values',
+        'payroll_jmhz_scenario_catalogs',
+        'payroll_jmhz_requirement_matrices',
+        'payroll_jmhz_scenario_definitions',
+        'payroll_jmhz_interaction_definitions',
+        'payroll_jmhz_field_requirements',
+        'payroll_jmhz_interaction_attribute_refs',
+        'payroll_jmhz_master_attribute_axis',
+        'payroll_jmhz_matrix_evidence_axes',
+        'payroll_jmhz_matrix_evidence_members',
+    ];
+
+    /**
+     * Globální ruleset je nutný pro shodný budoucí výpočet, ale jeho správcovská
+     * provenance nepatří firmě, která si stahuje vlastní archiv. Auditní tabulka
+     * se neexportuje vůbec; z efektivního rulesetu zůstává pouze výpočetní obsah.
+     *
+     * @var array<string,array<string,string>>
+     */
+    private const SHARED_PAYROLL_OMITTED_COLUMNS = [
+        'payroll_rulesets' => [
+            'reason' => 'global_admin_reason',
+        ],
+    ];
+
+    /**
+     * Nula znamená „úkon existoval, identita správce byla odstraněna“. Zachovává
+     * schvalovací stav nutný pro shodný runtime rulesetu, ale není ID uživatele.
+     * Sloupce nemají FK na users právě proto, že globální ruleset není tenantový.
+     *
+     * @var array<string,list<string>>
+     */
+    private const SHARED_PAYROLL_NEUTRALIZED_USER_COLUMNS = [
+        'payroll_rulesets' => [
+            'created_by', 'updated_by', 'reviewed_by', 'approved_by',
+            'activated_by', 'superseded_by',
+        ],
+    ];
 
     /** Řádků na dávku při čtení tabulky. */
     private const BATCH = 1000;
@@ -707,6 +768,7 @@ final class InstanceExportService
                 'redacted_columns' => $scope->redacted,
             ];
         }
+        $sharedPayrollTables = $this->exportSharedPayrollTables($archive, $workDir);
         $identity = $this->exportIdentity($archive, $supplierId, $workDir);
         // Dočasné soubory drží ZipArchive až do close — vynutíme zápis, ať se uvolní.
         $archive->flushNow();
@@ -714,11 +776,148 @@ final class InstanceExportService
         return [
             'format' => 'JSON Lines (UTF-8, jeden JSON objekt na řádek)',
             'tables' => $tables,
+            'shared_payroll_tables' => $sharedPayrollTables,
+            'shared_payroll_note' => 'Globální legislativní podklady a výpočetní obsah správcovských '
+                . 'odchylek jsou součástí obnovy. Identita správců, jejich důvody ani globální audit se neexportují.',
             'identity' => $identity,
-            'skipped_tables' => $this->scopes->skipped(),
+            'skipped_tables' => array_diff_key(
+                $this->scopes->skipped(),
+                array_fill_keys(self::SHARED_PAYROLL_TABLES, true),
+            ),
             'skipped_note' => 'Vynechané tabulky jsou systémové, globální číselníky, '
                 . 'nebo se je nepodařilo jednoznačně přiřadit této firmě. Data firmy v nich nejsou.',
         ];
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function exportSharedPayrollTables(InstanceExportArchive $archive, string $workDir): array
+    {
+        $tables = [];
+        foreach (self::SHARED_PAYROLL_TABLES as $table) {
+            $columns = $this->exportableColumns($table);
+            if ($columns === null) {
+                continue;
+            }
+            if ($columns['unsafe_redacted'] !== []) {
+                throw new InstanceExportException(
+                    'shared_payroll_secret_column',
+                    'Globální mzdová tabulka obsahuje tajný sloupec a nelze ji bezpečně obnovit: ' . $table . '.',
+                );
+            }
+            $neutralized = array_map(
+                static fn (string $column): string => $column . ' (global_admin_user_id_neutralized)',
+                self::SHARED_PAYROLL_NEUTRALIZED_USER_COLUMNS[$table] ?? [],
+            );
+            $tmp = $workDir . DIRECTORY_SEPARATOR . 'shared-' . $table . '.jsonl';
+            $rows = $this->writeSharedTableJsonl($table, $columns['exported'], $columns['order_by'], $tmp);
+            if ($rows === 0) {
+                @unlink($tmp);
+                $tables[$table] = [
+                    'rows' => 0,
+                    'entry' => null,
+                    'scope' => 'global_payroll_reference',
+                    'redacted_columns' => [...$columns['redacted'], ...$neutralized],
+                ];
+                continue;
+            }
+            $entry = 'shared/payroll/' . $table . '.jsonl';
+            $archive->addFile($entry, $tmp, deleteAfterFlush: true);
+            $tables[$table] = [
+                'rows' => $rows,
+                'entry' => $entry,
+                'scope' => 'global_payroll_reference',
+                'redacted_columns' => [...$columns['redacted'], ...$neutralized],
+            ];
+        }
+        return $tables;
+    }
+
+    /**
+     * @return array{exported:list<string>,redacted:list<string>,unsafe_redacted:list<string>,order_by:string}|null
+     */
+    private function exportableColumns(string $table): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COLUMN_NAME, COLUMN_KEY
+               FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+                AND (GENERATION_EXPRESSION IS NULL OR GENERATION_EXPRESSION = "")
+                AND (EXTRA IS NULL OR EXTRA NOT LIKE "%GENERATED%")
+              ORDER BY ORDINAL_POSITION'
+        );
+        $stmt->execute([$table]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($rows === []) {
+            return null;
+        }
+        $exported = [];
+        $redacted = [];
+        $unsafeRedacted = [];
+        $primary = [];
+        $omitted = self::SHARED_PAYROLL_OMITTED_COLUMNS[$table] ?? [];
+        foreach ($rows as $row) {
+            $column = (string) $row['COLUMN_NAME'];
+            if (isset($omitted[$column])) {
+                $redacted[] = $column . ' (' . $omitted[$column] . ')';
+                continue;
+            }
+            if (TenantScopeResolver::isSecretColumn($column)) {
+                $redacted[] = $column . ' (credential)';
+                $unsafeRedacted[] = $column;
+                continue;
+            }
+            $exported[] = $column;
+            if ((string) $row['COLUMN_KEY'] === 'PRI') {
+                $primary[] = $column;
+            }
+        }
+        if ($exported === []) {
+            throw new InstanceExportException('shared_payroll_empty', 'Globální mzdová tabulka nemá bezpečné sloupce: ' . $table);
+        }
+        $order = $primary !== [] ? $primary : [$exported[0]];
+        return [
+            'exported' => $exported,
+            'redacted' => $redacted,
+            'unsafe_redacted' => $unsafeRedacted,
+            'order_by' => implode(', ', array_map(static fn (string $column): string => '`' . $column . '`', $order)),
+        ];
+    }
+
+    /** @param list<string> $columns */
+    private function writeSharedTableJsonl(string $table, array $columns, string $orderBy, string $filePath): int
+    {
+        $select = implode(', ', array_map(static fn (string $column): string => '`' . $column . '`', $columns));
+        $stmt = $this->db->pdo()->query('SELECT ' . $select . ' FROM `' . $table . '` ORDER BY ' . $orderBy);
+        if ($stmt === false) {
+            throw new InstanceExportException('shared_payroll_read_failed', 'Nelze načíst globální mzdovou tabulku ' . $table . '.');
+        }
+        $fh = fopen($filePath, 'wb');
+        if ($fh === false) {
+            throw new InstanceExportException('storage_failed', 'Nelze zapsat ' . $filePath);
+        }
+        $rows = 0;
+        try {
+            while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                foreach (self::SHARED_PAYROLL_NEUTRALIZED_USER_COLUMNS[$table] ?? [] as $column) {
+                    if (array_key_exists($column, $row) && $row[$column] !== null) {
+                        $row[$column] = 0;
+                    }
+                }
+                $line = json_encode(
+                    $row,
+                    JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION,
+                );
+                if ($line === false) {
+                    throw new InstanceExportException('encode_failed', 'JSON encode selhal pro ' . $table . '.');
+                }
+                fwrite($fh, $line . "\n");
+                $rows++;
+            }
+        } finally {
+            $stmt->closeCursor();
+            fclose($fh);
+        }
+        return $rows;
     }
 
     /**
@@ -1164,6 +1363,7 @@ final class InstanceExportService
         );
         $sources = [
             [RuntimePaths::storage('payroll-documents/sup-' . $supplierId), null, 'prilohy/mzdy'],
+            [RuntimePaths::storage('payroll-payment-exports/sup-' . $supplierId), null, 'prilohy/mzdove-platebni-exporty'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/attachments', null, 'prilohy/vydane-faktury-prilohy'],
         ];
@@ -1205,7 +1405,12 @@ final class InstanceExportService
                 }
             }
             if ($storagePath !== null) {
-                $restoreFiles[] = ['entry' => $entry, 'storage_path' => $storagePath, 'sha256' => null, 'kind' => 'attachment'];
+                $restoreFiles[] = [
+                    'entry' => $entry,
+                    'storage_path' => $storagePath,
+                    'sha256' => $archive->entries()[$entry]['sha256'] ?? null,
+                    'kind' => 'attachment',
+                ];
             }
             $bytes += (int) (@filesize($abs) ?: 0);
             $done++;
@@ -1389,6 +1594,7 @@ final class InstanceExportService
     {
         $sections = $manifest['sections'] ?? [];
         $tableCount = count($sections['data']['tables'] ?? []);
+        $sharedPayrollTableCount = count($sections['data']['shared_payroll_tables'] ?? []);
         $lines = [
             'EXPORT DAT — ' . (string) $supplier['company_name'],
             str_repeat('=', 60),
@@ -1407,11 +1613,13 @@ final class InstanceExportService
             '               formát JSON Lines (JSONL): jeden JSON objekt na řádek, UTF-8.',
             '               Otevře ho Excel/LibreOffice přes import, Python (pandas.read_json',
             '               s lines=True), jq i běžný textový editor. Tabulek: ' . $tableCount . '.',
+            'shared/payroll Globální legislativní podklady mezd nutné k úplné obnově.',
+            '               Tabulek: ' . $sharedPayrollTableCount . '; neobsahují data jiných firem.',
             'doklady/       PDF dokladů po LETECH a agendách (vydané faktury, přijaté faktury,',
             '               výpisy z účtu) a ISDOC vydaných faktur. Tohle je část, kterou',
             '               v praxi potřebuješ nejčastěji — otevře ji jakákoli čtečka PDF.',
             'prilohy/       Nahrané soubory: skeny, přílohy účetního deníku, dokumenty, mzdové',
-            '               doklady.',
+            '               doklady a zašifrované bankovní exporty mzdových plateb.',
             'dph/           Hromadné podklady DPH po měsících; u čtvrtletního plátce i',
             '               za čtvrtletí (Kniha DPH v PDF a Kontrolní hlášení v XML).',
             'uzaverky/      Kompletní uzávěrkové balíčky za účetní období firmy vedené',
@@ -1446,6 +1654,11 @@ final class InstanceExportService
         $lines[] = 'Přihlašovací údaje, tokeny a klíče k integracím v archivu ZÁMĚRNĚ nejsou —';
         $lines[] = 'nejsou to účetní záznamy a archiv opouští instalaci. Seznam vynechaných';
         $lines[] = 'sloupců je v manifest.json.';
+        $lines[] = 'Globální audit mzdových rulesetů ani důvody a identity správců se nepřenášejí;';
+        $lines[] = 'u schválených odchylek zůstává jen neosobní informace, že schválení proběhlo.';
+        $lines[] = 'Mzdové osobní údaje a platební exporty zůstávají uvnitř kontextově zašifrované;';
+        $lines[] = 'pro jejich čtení po obnově musí cílová instalace bezpečně převzít původní';
+        $lines[] = 'app.secret_encryption_key (nebo jej ponechat mezi previous keys). Klíč v archivu není.';
         $lines[] = '';
         $lines[] = 'OBNOVA';
         $lines[] = str_repeat('-', 60);

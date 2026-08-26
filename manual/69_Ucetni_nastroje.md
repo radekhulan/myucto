@@ -169,11 +169,20 @@ Export obsahuje JSON Lines data firmy, mimo jiné:
 - vydané a přijaté faktury, položky a částečné úhrady,
 - banku a pokladnu,
 - přílohy deníku včetně binárních souborů,
+- kompletní firemní mzdovou evidenci včetně zaměstnanců, pracovních vztahů,
+  docházky, vstupů, běhů, výsledků, srážek, plateb, dokumentů a podání,
 - daň z příjmů a u skladové firmy skladovou evidenci.
 
+Obnovitelný archiv přidává také připnuté legislativní katalogy JMHZ a výpočetní
+obsah správcovských odchylek mzdových pravidel, aby obnovené snapshoty neztratily
+své podklady. Globální audit, identity správců a jimi zapsané důvody se do exportu
+jedné firmy nepřenášejí.
+
 Manifest uvádí verzi schématu, počty řádků a SHA-256 každé datové části i
-přílohy. Hesla, API klíče a jiné provozní tajné hodnoty se neexportují. PDF
-faktur jsou součástí exportu a lze je při obnově volitelně vrátit do aplikace.
+přílohy. Hesla, API klíče, soukromé certifikáty, volba podpisového certifikátu,
+uložené osobní přístupy k ISDS a jiné provozní tajné hodnoty se neexportují;
+po obnově se nastaví znovu. PDF faktur i mzdové dokumenty jsou součástí exportu;
+zahrnuty jsou také zašifrované bankovní exporty mzdových plateb.
 
 ### 69.6.1 Obnova ze serveru
 
@@ -196,6 +205,10 @@ jejich aplikačních úložišť; PDF vydané faktury přitom znovu propojí př
 `invoices.pdf_path`. Bez tohoto parametru se obnoví databáze, výpisy a přílohy,
 ale PDF dokladů zůstávají jen v exportním ZIPu. Přihlašovací tajemství, tokeny a klíče se neobnovují;
 uživatelé jsou zablokovaní a správce jim pošle pozvánku nebo reset hesla.
+Mzdové osobní údaje a bankovní exporty zůstávají v archivu kontextově
+zašifrované. Cílová instalace proto musí bezpečně převzít původní
+`app.secret_encryption_key`, případně jej po rotaci dočasně ponechat mezi
+`app.secret_encryption_previous_keys`. Samotný klíč v exportu nikdy není.
 Automatický round-trip test hlídá počty, vazby a hashe souborů, ale archiv stále
 nenahrazuje celoinstanční zálohu databáze.
 
@@ -208,7 +221,8 @@ nadřazený ZIP. U jednotlivých částí si zvolí, co do něj patří:
   přílohami; volba automaticky zapne nutné části, včetně podkladů pro volitelnou
   obnovu PDF dokladů;
 - **Data, doklady a přílohy** — přenositelný JSON Lines export, PDF/ISDOC doklady,
-  bankovní výpisy a nahrané soubory;
+  bankovní výpisy, mzdové PDF, zašifrované mzdové platební exporty a nahrané
+  soubory;
 - u plátce DPH **podklady po měsících** (Kniha DPH v PDF a kontrolní hlášení v XML),
   při čtvrtletní periodě také ZIP za každé čtvrtletí;
 - v podvojném účetnictví **uzávěrkové balíčky** za vybraná účetní období.
