@@ -6,14 +6,22 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
+use PDOException;
 
 final class PayrollRegistrationEventRepository
 {
     public function __construct(private readonly Connection $db) {}
 
-    /** @param array<string,mixed> $record */
+    /**
+     * @param array<string,mixed> $record
+     * @return array{row:array<string,mixed>,created:bool}
+     */
     public function insert(array $record): array
     {
+        $existing = $this->findByBusinessKey($record);
+        if ($existing !== null) {
+            return $this->existingOrConflict($existing, $record);
+        }
         $statement = $this->db->pdo()->prepare(
             'INSERT INTO payroll_registration_event_snapshots
                 (supplier_id, employee_id, employment_id, environment,
@@ -23,15 +31,27 @@ final class PayrollRegistrationEventRepository
                  approved_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())'
         );
-        $statement->execute([
-            $record['supplier_id'], $record['employee_id'],
-            $record['employment_id'], $record['environment'],
-            $record['interaction_code'], $record['action_code'],
-            $record['effective_on'], $record['source_kind'],
-            $record['source_reference'], $record['source_manifest_json'],
-            $record['source_manifest_hash'], $record['snapshot_ciphertext'],
-            $record['snapshot_fingerprint'], $record['approved_by'],
-        ]);
+        try {
+            $statement->execute([
+                $record['supplier_id'], $record['employee_id'],
+                $record['employment_id'], $record['environment'],
+                $record['interaction_code'], $record['action_code'],
+                $record['effective_on'], $record['source_kind'],
+                $record['source_reference'], $record['source_manifest_json'],
+                $record['source_manifest_hash'], $record['snapshot_ciphertext'],
+                $record['snapshot_fingerprint'], $record['approved_by'],
+            ]);
+        } catch (PDOException $exception) {
+            if (!$this->isBusinessKeyRace($exception)) {
+                throw $exception;
+            }
+            $existing = $this->findByBusinessKey($record);
+            if ($existing === null) {
+                throw $exception;
+            }
+
+            return $this->existingOrConflict($existing, $record);
+        }
 
         $stored = $this->find(
             (int) $record['supplier_id'],
@@ -42,7 +62,59 @@ final class PayrollRegistrationEventRepository
             throw new \RuntimeException('Neměnný zdroj REGZEC nelze načíst.');
         }
 
-        return $stored;
+        return ['row' => $stored, 'created' => true];
+    }
+
+    /** @param array<string,mixed> $record @return array<string,mixed>|null */
+    private function findByBusinessKey(array $record): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT * FROM payroll_registration_event_snapshots
+              WHERE supplier_id = ? AND environment = ? AND employment_id = ?
+                AND interaction_code = ? AND effective_on = ?
+                AND source_reference = ?'
+        );
+        $statement->execute([
+            $record['supplier_id'],
+            $record['environment'],
+            $record['employment_id'],
+            $record['interaction_code'],
+            $record['effective_on'],
+            $record['source_reference'],
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @param array<string,mixed> $existing
+     * @param array<string,mixed> $record
+     * @return array{row:array<string,mixed>,created:false}
+     */
+    private function existingOrConflict(array $existing, array $record): array
+    {
+        if (!hash_equals(
+            (string) ($existing['snapshot_fingerprint'] ?? ''),
+            (string) $record['snapshot_fingerprint'],
+        )) {
+            throw new \DomainException(
+                'Stejná registrační událost REGZEC už byla schválena s jiným neměnným obsahem.',
+            );
+        }
+
+        return ['row' => $existing, 'created' => false];
+    }
+
+    private function isBusinessKeyRace(PDOException $exception): bool
+    {
+        if ((int) ($exception->errorInfo[1] ?? 0) !== 1062) {
+            return false;
+        }
+        $message = (string) ($exception->errorInfo[2] ?? $exception->getMessage());
+
+        return str_contains($message, 'uq_payroll_registration_event_business')
+            || str_contains($message, 'uq_payroll_registration_event_source');
     }
 
     /** @return array<string,mixed>|null */

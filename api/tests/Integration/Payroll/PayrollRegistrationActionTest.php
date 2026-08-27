@@ -918,6 +918,89 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    public function testA3ChangeReplaysTheSameFrozenBusinessEvent(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-03-01", actual_start_date = "2026-03-01",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, '2026-03-01');
+        $request = [
+            'environment' => 'test',
+            'interaction' => 'change',
+            'effective_on' => '2026-03-30',
+            'source_reference' => 'synthetic-change-business-replay',
+            'changes' => ['title_prefix' => 'Mgr.'],
+        ];
+
+        $created = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($request),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $first = $this->json($created);
+
+        $replayed = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($request),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $replayed->getStatusCode(), (string) $replayed->getBody());
+        $second = $this->json($replayed);
+        self::assertFalse($second['created']);
+        self::assertSame($first['id'], $second['id']);
+    }
+
+    public function testA3ChangeRejectsBusinessDuplicateAfterLiveSnapshotChanges(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-03-01", actual_start_date = "2026-03-01",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, '2026-03-01');
+        $request = [
+            'environment' => 'test',
+            'interaction' => 'change',
+            'effective_on' => '2026-03-30',
+            'source_reference' => 'synthetic-change-business-conflict',
+            'changes' => ['title_prefix' => 'Mgr.'],
+        ];
+
+        $created = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($request),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET company_name = ? WHERE id = ?',
+        )->execute(['Změněný syntetický zaměstnavatel s.r.o.', $this->supplierId]);
+
+        $conflict = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody($request),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(409, $conflict->getStatusCode(), (string) $conflict->getBody());
+        self::assertSame('conflict', $this->json($conflict)['error']['code']);
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_registration_event_snapshots
+              WHERE supplier_id = ? AND environment = "test"
+                AND employment_id = ? AND interaction_code = "change"
+                AND effective_on = "2026-03-30"
+                AND source_reference = "synthetic-change-business-conflict"',
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(1, (int) $statement->fetchColumn());
+    }
+
     /**
      * A3 musí projít celou produkční cestou: schválená událost je neměnná,
      * XML je validované proti připnutému XSD a zmrazený artefakt zůstává

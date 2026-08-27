@@ -185,7 +185,7 @@ final readonly class PayrollRegistrationEventService
         ];
         $manifestJson = CanonicalJson::encode($manifest);
         $manifestHash = hash('sha256', $manifestJson);
-        $stored = $this->events->insert([
+        $result = $this->events->insert([
             'supplier_id' => $supplierId,
             'employee_id' => $employeeId,
             'employment_id' => $employmentId,
@@ -205,7 +205,10 @@ final readonly class PayrollRegistrationEventService
             'approved_by' => $approvedBy,
         ]);
 
-        return $this->publicRow($stored, false);
+        $public = $this->publicRow($result['row'], false);
+        $public['created'] = $result['created'];
+
+        return $public;
     }
 
     /** @return array<string,mixed> */
