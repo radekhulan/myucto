@@ -59,6 +59,15 @@ export interface SubscriptionInfo {
   next_charge_at: number | null
   cancelled_at: number | null
   valid_until: number | null
+  /**
+   * Dá se zrušené předplatné obnovit rovnou z aplikace?
+   *
+   * ⚠️ Rozhoduje o tom, jestli se tlačítko vůbec nabídne. Jakmile je hostovaná
+   * instance vypnutá, je obnova ruční operace v retenční lhůtě a tlačítko by
+   * vedlo jen na hlášku „ozvěte se podpoře". Starší server pole neposílá —
+   * `undefined` proto znamená „nenabízet".
+   */
+  resumable?: boolean
 }
 
 /**
@@ -237,6 +246,20 @@ export interface CancelRenewalResult {
   state: LicenseStatus
 }
 
+/**
+ * Výsledek spuštěné obnovy zrušeného předplatného.
+ *
+ * ⚠️ Předplatné je v tenhle okamžik pořád zrušené — rozeběhne se, až zákazník
+ * na `pay_url` zaplatí. Zrušením se zneplatnil mandát u brány, takže bez nové
+ * karty by se příští obnova jen znovu nestrhla.
+ */
+export interface ResumeRenewalResult {
+  /** Adresa platební brány, kde zákazník zadá kartu. */
+  pay_url: string
+  /** Konec dosud zaplaceného období. */
+  valid_until: number | null
+}
+
 /** Kalkulace poměrného doplatku za in-place navýšení počtu uživatelů. */
 export interface UpgradeQuote {
   current_users: number | null
@@ -406,6 +429,16 @@ export const licenseApi = {
    *  do konce zaplaceného období, jen se nestrhne další platba. Idempotentní. */
   cancelRenewal: () =>
     api.post<CancelRenewalResult>('/license/cancel-renewal').then((r) => r.data),
+
+  /**
+   * Admin — obnova zrušeného předplatného.
+   *
+   * ⚠️ Neobnoví ho rovnou: vrací `pay_url`. Zrušení zneplatnilo mandát
+   * u platební brány, takže se předplatné rozeběhne až po zaplacení novou
+   * kartou. Obrazovka na tu adresu přesměruje.
+   */
+  resumeRenewal: () =>
+    api.post<ResumeRenewalResult>('/license/resume-renewal').then((r) => r.data),
 
   /** Založí serverově svázaný PKCE checkout. Instance ani tajemství nejdou v URL. */
   startPurchase: () =>

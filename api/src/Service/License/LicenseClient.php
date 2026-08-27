@@ -26,6 +26,7 @@ use Psr\Log\NullLogger;
  *   POST {server}/api/license/purchase-session
  *   POST {server}/api/license/purchase-claim
  *   POST {server}/api/license/cancel-renewal
+ *   POST {server}/api/license/resume-renewal
  *   POST {server}/api/license/support-session
  */
 final class LicenseClient
@@ -182,6 +183,23 @@ final class LicenseClient
     public function cancelRenewal(string $licenseKey, string $instanceId): array
     {
         return $this->post('/api/license/cancel-renewal', [
+            'license_key' => $licenseKey,
+            'instance_id' => $instanceId,
+        ]);
+    }
+
+    /**
+     * Obnova dobrovolně zrušeného předplatného.
+     *
+     * ⚠️ NEOBNOVUJE ho rovnou — vrací `pay_url`. Zrušení zneplatnilo mandát
+     * u brány, takže se předplatné rozeběhne až po zaplacení novou kartou.
+     *
+     * @return array<string,mixed> {ok,pay_url,valid_until} / {error}
+     * @throws LicenseNetworkException
+     */
+    public function resumeRenewal(string $licenseKey, string $instanceId): array
+    {
+        return $this->post('/api/license/resume-renewal', [
             'license_key' => $licenseKey,
             'instance_id' => $instanceId,
         ]);

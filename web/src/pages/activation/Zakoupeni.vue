@@ -126,6 +126,7 @@ const tierSuccess = ref<string | null>(null)
 
 // Automatické prodlužování předplatného (vypnutí = licence doběhne do valid_until).
 const cancellingRenewal = ref(false)
+const resumingRenewal = ref(false)
 const renewalSuccess = ref<string | null>(null)
 const renewalError = ref<string | null>(null)
 const purchasing = ref(false)
@@ -470,6 +471,36 @@ async function cancelRenewal() {
     renewalError.value = err.response?.data?.error?.message ?? t('license.renewal_cancel_failed')
   } finally {
     cancellingRenewal.value = false
+  }
+}
+
+/**
+ * Obnova zrušeného předplatného.
+ *
+ * ⚠️ Nejde jen přepnout příznak zpátky. Zrušením se u platební brány zneplatnil
+ * mandát, takže bez nové karty by se příští obnova jen znovu nestrhla — a
+ * zákazník by se to dozvěděl až tím, že mu přestane fungovat instalace. Server
+ * proto vrací adresu platby a předplatné se rozeběhne, teprve až projde.
+ *
+ * ⚠️ Bez potvrzovacího dialogu schválně: potvrzením je sama platební brána,
+ * ze které se dá odejít. Dvě potvrzení nad jednou akcí se dřív nebo později
+ * rozejdou v tom, co slibují.
+ */
+async function resumeRenewal() {
+  if (resumingRenewal.value) return
+  resumingRenewal.value = true
+  renewalError.value = null
+  renewalSuccess.value = null
+  try {
+    const res = await licenseApi.resumeRenewal()
+    if (!res.pay_url) throw new Error('missing pay_url')
+    window.location.href = res.pay_url
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { error?: { message?: string } } } }
+    renewalError.value = err.response?.data?.error?.message ?? t('license.renewal_resume_failed')
+    // ⚠️ Odemknout JEN při chybě. Po úspěchu se odchází na bránu a odemčené
+    // tlačítko by svádělo k druhému kliknutí, tedy k druhé platbě.
+    resumingRenewal.value = false
   }
 }
 
@@ -845,6 +876,25 @@ onMounted(async () => {
           </button>
         </div>
 
+        <!-- ⚠️ Zrušení nesmí být slepá ulička. Dokud tady nic nebylo, končila
+             obrazovka větou „poté je znovu zpřístupní nový nákup předplatného"
+             a zákazník neměl KUDY se vrátit — u hostované instalace navíc mezitím
+             doběhl naplánovaný konec provozu a instalace zhasla. -->
+        <div v-else-if="subscription.state === 'cancelled'" class="mt-4" data-renewal-resume>
+          <p class="text-sm text-neutral-700">
+            {{ isManaged
+              ? t('license.renewal_resume_desc_managed', { date: fmtDate(paidUntil) })
+              : t('license.renewal_resume_desc', { date: fmtDate(paidUntil) }) }}
+          </p>
+          <div v-if="subscription.resumable" class="mt-3 flex flex-wrap gap-2">
+            <button type="button" @click="resumeRenewal" :disabled="resumingRenewal" :class="btnFilled('success')" data-renewal-resume-cta>
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ resumingRenewal ? t('license.renewal_resuming') : t('license.renewal_resume_cta') }}
+            </button>
+          </div>
+          <p v-else class="mt-2 text-sm text-warning-800">{{ t('license.renewal_resume_unavailable') }}</p>
+        </div>
+
         <div v-if="renewalSuccess" class="mt-3 rounded-md bg-success-50 border border-success-300 p-3 text-sm text-success-700">
           {{ renewalSuccess }}
         </div>
@@ -1004,6 +1054,25 @@ onMounted(async () => {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.pause" /></svg>
             {{ cancellingRenewal ? t('license.renewal_cancelling') : t('license.renewal_cancel_cta') }}
           </button>
+        </div>
+
+        <!-- ⚠️ Zrušení nesmí být slepá ulička. Dokud tady nic nebylo, končila
+             obrazovka větou „poté je znovu zpřístupní nový nákup předplatného"
+             a zákazník neměl KUDY se vrátit — u hostované instalace navíc mezitím
+             doběhl naplánovaný konec provozu a instalace zhasla. -->
+        <div v-else-if="subscription.state === 'cancelled'" class="mt-4" data-renewal-resume>
+          <p class="text-sm text-neutral-700">
+            {{ isManaged
+              ? t('license.renewal_resume_desc_managed', { date: fmtDate(paidUntil) })
+              : t('license.renewal_resume_desc', { date: fmtDate(paidUntil) }) }}
+          </p>
+          <div v-if="subscription.resumable" class="mt-3 flex flex-wrap gap-2">
+            <button type="button" @click="resumeRenewal" :disabled="resumingRenewal" :class="btnFilled('success')" data-renewal-resume-cta>
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ resumingRenewal ? t('license.renewal_resuming') : t('license.renewal_resume_cta') }}
+            </button>
+          </div>
+          <p v-else class="mt-2 text-sm text-warning-800">{{ t('license.renewal_resume_unavailable') }}</p>
         </div>
 
         <div v-if="renewalSuccess" class="mt-3 rounded-md bg-success-50 border border-success-300 p-3 text-sm text-success-700">

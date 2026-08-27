@@ -485,6 +485,44 @@ final class LicenseService
     }
 
     /**
+     * Obnova dobrovolně zrušeného předplatného.
+     *
+     * ⚠️ Vrací ADRESU K PLATBĚ, ne hotovou obnovu. Zrušení zneplatnilo mandát
+     * u brány, takže bez nové karty by se příští obnova jen znovu nestrhla
+     * a zákazník by se to dozvěděl až tím, že mu přestane fungovat instalace.
+     * Předplatné se rozeběhne, až platba projde — proto se tady ani neukládá
+     * stav: dokud zákazník nezaplatí, je pořád zrušené.
+     *
+     * @return array{ok:bool,error?:string,pay_url?:string,valid_until?:?int}
+     */
+    public function resumeRenewal(): array
+    {
+        $row = $this->loadRow();
+        $key = $this->keyOf($row);
+        if ($key === null) {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        try {
+            $resp = $this->client->resumeRenewal($key, (string) $row['instance_id']);
+        } catch (LicenseNetworkException $e) {
+            $this->logger->info('license.resume_renewal.network_error', ['error' => $e->getMessage()]);
+            return ['ok' => false, 'error' => 'server_unreachable'];
+        }
+
+        if (($resp['ok'] ?? false) !== true) {
+            $this->logger->warning('license.resume_renewal.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
+            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'resume_failed')];
+        }
+
+        return [
+            'ok'          => true,
+            'pay_url'     => (string) ($resp['pay_url'] ?? ''),
+            'valid_until' => isset($resp['valid_until']) ? (int) $resp['valid_until'] : null,
+        ];
+    }
+
+    /**
      * Kalkulace poměrného doplatku za navýšení počtu uživatelů (in-place upgrade).
      * Nic nestrhává — jen dotáhne od serveru {current_users, new_users, amount, currency, period_end}.
      *

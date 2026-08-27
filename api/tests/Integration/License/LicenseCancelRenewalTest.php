@@ -249,6 +249,69 @@ final class LicenseCancelRenewalTest extends TestCase
         ];
     }
 
+    // ── obnova zrušeného předplatného ────────────────────────────────────
+    //
+    // ⚠️ Obnova NENÍ přepnutí příznaku zpátky: zrušení zneplatnilo mandát
+    // u brány, takže bez nové karty by se příští stržení jen zase nepovedlo.
+    // Server proto vrací adresu k platbě a instalace na ni pošle zákazníka.
+
+    public function testResumeRenewalReturnsPaymentUrl(): void
+    {
+        $validUntil = time() + 20 * 86400;
+        $this->prime($this->cancelledSubscription($validUntil), $validUntil);
+
+        $this->client->expects($this->once())->method('resumeRenewal')
+            ->willReturn(['ok' => true, 'pay_url' => 'https://myucto.cz/gw/abc', 'valid_until' => $validUntil]);
+
+        $result = $this->service->resumeRenewal();
+
+        self::assertTrue($result['ok']);
+        self::assertSame('https://myucto.cz/gw/abc', $result['pay_url']);
+    }
+
+    public function testResumeRenewalKeepsSubscriptionCancelledUntilItIsPaid(): void
+    {
+        // Kdyby se stav přepsal hned, stačilo by zavřít bránu a instalace by
+        // tvrdila „prodlužuje se" nad předplatným, které nikdo nestrhne.
+        $validUntil = time() + 20 * 86400;
+        $this->prime($this->cancelledSubscription($validUntil), $validUntil);
+
+        $this->client->method('resumeRenewal')
+            ->willReturn(['ok' => true, 'pay_url' => 'https://myucto.cz/gw/abc', 'valid_until' => $validUntil]);
+
+        $this->service->resumeRenewal();
+
+        $state = $this->service->current();
+        self::assertSame('cancelled', $state->subscription['state']);
+        self::assertFalse($state->autoRenews());
+    }
+
+    public function testResumeRenewalWithoutLicenseKeyDoesNotCallServer(): void
+    {
+        $this->db->pdo()->exec('UPDATE license SET license_key = NULL WHERE id = 1');
+        $this->client->expects($this->never())->method('resumeRenewal');
+
+        $result = $this->service->resumeRenewal();
+
+        self::assertFalse($result['ok']);
+        self::assertSame('invalid_key', $result['error']);
+    }
+
+    public function testResumeRenewalPassesServerRefusalThrough(): void
+    {
+        // ⚠️ Vypnutou instanci samoobsluha zpátky nezapne — a obrazovka to musí
+        // říct, ne nabízet „zkuste to znovu".
+        $validUntil = time() + 20 * 86400;
+        $this->prime($this->cancelledSubscription($validUntil), $validUntil);
+        $this->client->method('resumeRenewal')
+            ->willReturn(['ok' => false, 'error' => 'instance_not_restorable']);
+
+        $result = $this->service->resumeRenewal();
+
+        self::assertFalse($result['ok']);
+        self::assertSame('instance_not_restorable', $result['error']);
+    }
+
     /**
      * Licencovaný řádek: klíč, platný token a (volitelně) známý stav předplatného.
      *

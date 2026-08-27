@@ -304,6 +304,7 @@ use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
 use MyInvoice\Action\License\RefreshLicenseAction;
 use MyInvoice\Action\License\CancelRenewalLicenseAction;
+use MyInvoice\Action\License\ResumeRenewalLicenseAction;
 use MyInvoice\Action\License\StorageQuoteAction;
 use MyInvoice\Action\License\StorageUpgradeAction;
 use MyInvoice\Action\License\UpgradeQuoteLicenseAction;
@@ -440,6 +441,7 @@ final class Routes
         $app->post('/api/license/refresh',       RefreshLicenseAction::class);
         // Vypnutí automatického prodlužování — licence doběhne do valid_until.
         $app->post('/api/license/cancel-renewal', CancelRenewalLicenseAction::class);
+        $app->post('/api/license/resume-renewal', ResumeRenewalLicenseAction::class);
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).
         $app->post('/api/license/upgrade/quote', UpgradeQuoteLicenseAction::class);
         $app->post('/api/license/upgrade',       UpgradeLicenseAction::class);
