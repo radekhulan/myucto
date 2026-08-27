@@ -169,6 +169,12 @@ Některé události nečekají na konec měsíce:
 - inbox datové schránky načítejte vědomě podle interního režimu firmy. Každé
   načtení musí spustit a potvrdit uživatel, protože vyzvednutí může založit
   doručení a právní lhůtu;
+- na přehledu mezd sledujte **Provozní přehled mezd**. U fronty dokumentů a
+  archivních exportů ukazuje nejen počty čekajících, opakovaných a vadných
+  úloh, ale také stáří nejstarší aktivní položky a čas posledního úspěšného
+  dokončení. Dlouhé stáří při nulovém pokroku je důvod zkontrolovat plánované
+  úlohy; údaj „Zatím nikdy“ po prvním očekávaném běhu znamená, že úspěšné
+  dokončení zatím není doložené;
 - u větší firmy pracujte s filtry, hledáním a hromadnými měsíčními vstupy.
   Neprocházejte stovky zaměstnanců jen proto, abyste znovu potvrzovali stav,
   který se od minulého období nezměnil.

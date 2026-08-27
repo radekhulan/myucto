@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -30,11 +31,14 @@ final class PayrollOperationalHealthActionTest extends TestCase
     private int $otherSupplierId;
     private int $userId;
     private int $revisionSequence = 0;
+    private string $appTimezone;
 
     protected function setUp(): void
     {
         $container = Bootstrap::buildApp()->getContainer();
         $this->db = $container->get(Connection::class);
+        $this->appTimezone = (string) $container->get(Config::class)
+            ->get('app.timezone', 'Europe/Prague');
         foreach ([
             'payroll_document_batches',
             'payroll_period_export_jobs',
@@ -84,14 +88,48 @@ final class PayrollOperationalHealthActionTest extends TestCase
 
     public function testReturnsOnlyTenantAggregatedOperationalCounts(): void
     {
+        [$oldestDocumentAt, $oldestDocumentUtc] = $this->queueTimestamp(2);
+        [$oldestExportAt, $oldestExportUtc] = $this->queueTimestamp(3);
         foreach (['queued', 'running', 'retry_wait', 'failed'] as $status) {
-            $this->documentBatch($this->supplierId, $status);
+            $this->documentBatch(
+                $this->supplierId,
+                $status,
+                $status === 'retry_wait' ? $oldestDocumentAt : null,
+            );
         }
-        $this->documentBatch($this->otherSupplierId, 'queued');
+        $this->documentBatch(
+            $this->supplierId,
+            'completed',
+            '2026-08-31 11:00:00',
+            '2026-08-31 12:00:00',
+        );
+        $this->documentBatch($this->otherSupplierId, 'queued', '2026-01-01 00:00:00');
+        $this->documentBatch(
+            $this->otherSupplierId,
+            'completed',
+            '2026-09-30 11:00:00',
+            '2026-09-30 12:00:00',
+        );
         foreach (['queued', 'processing', 'retry_wait', 'failed'] as $status) {
-            $this->periodExportJob($this->supplierId, $status);
+            $this->periodExportJob(
+                $this->supplierId,
+                $status,
+                $status === 'retry_wait' ? $oldestExportAt : null,
+            );
         }
-        $this->periodExportJob($this->otherSupplierId, 'queued');
+        $this->periodExportJob(
+            $this->supplierId,
+            'completed',
+            '2026-08-30 10:00:00',
+            '2026-08-30 11:00:00',
+        );
+        $this->periodExportJob($this->otherSupplierId, 'queued', '2026-01-01 00:00:00');
+        $this->periodExportJob(
+            $this->otherSupplierId,
+            'completed',
+            '2026-09-29 11:00:00',
+            '2026-09-29 12:00:00',
+        );
 
         $rejected = $this->submission($this->supplierId, 'rejected', 'rejected');
         $this->submission($this->supplierId, 'correction_required', 'correction');
@@ -120,18 +158,31 @@ final class PayrollOperationalHealthActionTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('no-store, private', $response->getHeaderLine('Cache-Control'));
+        $body = $this->json($response);
+        self::assertGreaterThanOrEqual(7_200, $body['document_batches']['oldest_pending_age_seconds']);
+        self::assertLessThan(7_260, $body['document_batches']['oldest_pending_age_seconds']);
+        self::assertGreaterThanOrEqual(10_800, $body['period_export_jobs']['oldest_pending_age_seconds']);
+        self::assertLessThan(10_860, $body['period_export_jobs']['oldest_pending_age_seconds']);
+        unset(
+            $body['document_batches']['oldest_pending_age_seconds'],
+            $body['period_export_jobs']['oldest_pending_age_seconds'],
+        );
         self::assertSame([
             'document_batches' => [
                 'queued' => 1,
                 'running' => 1,
                 'retry_wait' => 1,
                 'failed' => 1,
+                'oldest_pending_at' => $oldestDocumentUtc,
+                'last_completed_at' => '2026-08-31T12:00:00Z',
             ],
             'period_export_jobs' => [
                 'queued' => 1,
                 'processing' => 1,
                 'retry_wait' => 1,
                 'failed' => 1,
+                'oldest_pending_at' => $oldestExportUtc,
+                'last_completed_at' => '2026-08-30T11:00:00Z',
             ],
             'submissions' => [
                 'rejected' => 1,
@@ -144,7 +195,7 @@ final class PayrollOperationalHealthActionTest extends TestCase
                 'rejected' => 1,
             ],
             'overdue_unpaid_liabilities' => 3,
-        ], $this->json($response));
+        ], $body);
     }
 
     public function testRequiresSessionAuthentication(): void
@@ -160,14 +211,77 @@ final class PayrollOperationalHealthActionTest extends TestCase
         }
     }
 
-    private function documentBatch(int $supplierId, string $status): void
+    public function testNeverRunQueuesReturnNullObservabilityInsteadOfInventedSuccess(): void
+    {
+        $response = ($this->action)($this->request(), new Response());
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->json($response);
+        self::assertSame(0, $body['document_batches']['queued']);
+        self::assertNull($body['document_batches']['oldest_pending_at']);
+        self::assertNull($body['document_batches']['oldest_pending_age_seconds']);
+        self::assertNull($body['document_batches']['last_completed_at']);
+        self::assertSame(0, $body['period_export_jobs']['queued']);
+        self::assertNull($body['period_export_jobs']['oldest_pending_at']);
+        self::assertNull($body['period_export_jobs']['oldest_pending_age_seconds']);
+        self::assertNull($body['period_export_jobs']['last_completed_at']);
+    }
+
+    public function testPendingAgeUsesElapsedUtcTimeAcrossDaylightSavingChanges(): void
+    {
+        $createdAt = '2026-03-28 12:00:00';
+        $this->documentBatch($this->supplierId, 'queued', $createdAt);
+        $expectedAge = time() - (new \DateTimeImmutable(
+            $createdAt,
+            new \DateTimeZone($this->appTimezone),
+        ))->getTimestamp();
+
+        $body = $this->json(($this->action)($this->request(), new Response()));
+
+        self::assertEqualsWithDelta(
+            $expectedAge,
+            $body['document_batches']['oldest_pending_age_seconds'],
+            1,
+        );
+    }
+
+    /** @return array{0:string,1:string} */
+    private function queueTimestamp(int $hoursAgo): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT
+                DATE_FORMAT(CURRENT_TIMESTAMP() - INTERVAL ? HOUR, "%Y-%m-%d %H:%i:%s"),
+                DATE_FORMAT(
+                    CONVERT_TZ(
+                        CURRENT_TIMESTAMP() - INTERVAL ? HOUR,
+                        @@session.time_zone,
+                        "+00:00"
+                    ),
+                    "%Y-%m-%dT%H:%i:%sZ"
+                )',
+        );
+        $statement->execute([$hoursAgo, $hoursAgo]);
+        $row = $statement->fetch(\PDO::FETCH_NUM);
+        if (!is_array($row) || !is_string($row[0] ?? null) || !is_string($row[1] ?? null)) {
+            throw new \RuntimeException('Nelze připravit čas fronty pro test.');
+        }
+
+        return [$row[0], $row[1]];
+    }
+
+    private function documentBatch(
+        int $supplierId,
+        string $status,
+        ?string $createdAt = null,
+        ?string $completedAt = null,
+    ): void
     {
         [$runId, $revisionId, $hash] = $this->approvedRevision($supplierId, "batch-{$status}");
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_document_batches
                 (supplier_id, run_id, revision_id, status, source_snapshot_hash,
-                 idempotency_key_hash, item_count)
-             VALUES (?, ?, ?, ?, ?, UNHEX(?), 1)',
+                 idempotency_key_hash, item_count, succeeded_count, created_at, completed_at)
+             VALUES (?, ?, ?, ?, ?, UNHEX(?), 1, ?, COALESCE(?, UTC_TIMESTAMP()), ?)',
         )->execute([
             $supplierId,
             $runId,
@@ -175,10 +289,18 @@ final class PayrollOperationalHealthActionTest extends TestCase
             $status,
             $hash,
             hash('sha256', "health-batch:{$supplierId}:{$status}:{$revisionId}"),
+            $status === 'completed' ? 1 : 0,
+            $createdAt,
+            $completedAt,
         ]);
     }
 
-    private function periodExportJob(int $supplierId, string $status): void
+    private function periodExportJob(
+        int $supplierId,
+        string $status,
+        ?string $createdAt = null,
+        ?string $completedAt = null,
+    ): void
     {
         $lease = $status === 'processing' ? random_bytes(16) : null;
         $periodStart = match ($status) {
@@ -186,18 +308,51 @@ final class PayrollOperationalHealthActionTest extends TestCase
             'processing' => '2026-07-01',
             'retry_wait' => '2026-06-01',
             'failed' => '2026-05-01',
+            'completed' => '2026-04-01',
             default => throw new \InvalidArgumentException('Neznámý stav exportní fronty.'),
         };
         $periodEnd = (new \DateTimeImmutable($periodStart))
             ->modify('last day of this month')
             ->format('Y-m-d');
+        $exportId = null;
+        if ($status === 'completed') {
+            $sourceHash = hash('sha256', "health-export-source:{$supplierId}:{$periodStart}");
+            $fileHash = hash('sha256', "health-export-file:{$supplierId}:{$periodStart}");
+            $this->db->pdo()->prepare(
+                'INSERT INTO payroll_period_exports
+                    (supplier_id, export_scope, period_start, period_end,
+                     source_manifest_hash, manifest_json, file_sha256, size_bytes,
+                     storage_key, suggested_filename)
+                 VALUES (?, "monthly", ?, ?, ?, "{}", ?, 1, ?, ?)',
+            )->execute([
+                $supplierId,
+                $periodStart,
+                $periodEnd,
+                $sourceHash,
+                $fileHash,
+                $fileHash,
+                "health-export-{$supplierId}-{$periodStart}.zip",
+            ]);
+            $exportId = (int) $this->db->pdo()->lastInsertId();
+        }
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_period_export_jobs
                 (supplier_id, export_scope, period_start, period_end, status, available_at,
-                 lease_token, locked_at)
+                 lease_token, locked_at, export_id, created_at, completed_at)
              VALUES (?, "monthly", ?, ?, ?, UTC_TIMESTAMP(), ?,
-                     CASE WHEN ? IS NULL THEN NULL ELSE UTC_TIMESTAMP() END)',
-        )->execute([$supplierId, $periodStart, $periodEnd, $status, $lease, $lease]);
+                     CASE WHEN ? IS NULL THEN NULL ELSE UTC_TIMESTAMP() END,
+                     ?, COALESCE(?, UTC_TIMESTAMP()), ?)',
+        )->execute([
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            $status,
+            $lease,
+            $lease,
+            $exportId,
+            $createdAt,
+            $completedAt,
+        ]);
     }
 
     private function submission(int $supplierId, string $status, string $suffix): int

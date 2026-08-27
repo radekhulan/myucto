@@ -5048,6 +5048,13 @@
                 "open_issues": "Open blockers and errors",
                 "isds_outbox": "Data box",
                 "send_uncertain": "Uncertain send",
+                "oldest_pending": "Oldest pending",
+                "last_completed": "Last completed",
+                "never_pending": "Nothing pending",
+                "never_completed": "Not completed yet",
+                "age_minutes": "{count} min",
+                "age_hours": "{count} h",
+                "age_days": "{count} d",
                 "liabilities": "Payroll liabilities",
                 "overdue_unpaid": "Overdue and not fully paid"
             },

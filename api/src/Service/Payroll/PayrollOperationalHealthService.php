@@ -4,18 +4,37 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
 /** Read-only, tenant-scoped operational counts for the payroll dashboard. */
 final class PayrollOperationalHealthService
 {
-    public function __construct(private readonly Connection $db) {}
+    private readonly \DateTimeZone $appTimeZone;
+
+    public function __construct(
+        private readonly Connection $db,
+        Config $config,
+    ) {
+        $timezone = (string) $config->get('app.timezone', 'Europe/Prague');
+        try {
+            $this->appTimeZone = new \DateTimeZone($timezone);
+        } catch (\Throwable) {
+            $this->appTimeZone = new \DateTimeZone(date_default_timezone_get());
+        }
+    }
 
     /**
      * @return array{
-     *   document_batches:array{queued:int,running:int,retry_wait:int,failed:int},
-     *   period_export_jobs:array{queued:int,processing:int,retry_wait:int,failed:int},
+     *   document_batches:array{
+     *     queued:int,running:int,retry_wait:int,failed:int,
+     *     oldest_pending_at:?string,oldest_pending_age_seconds:?int,last_completed_at:?string
+     *   },
+     *   period_export_jobs:array{
+     *     queued:int,processing:int,retry_wait:int,failed:int,
+     *     oldest_pending_at:?string,oldest_pending_age_seconds:?int,last_completed_at:?string
+     *   },
      *   submissions:array{rejected:int,correction_required:int,open_blocker_or_error_issues:int},
      *   isds_outbox:array{failed:int,send_uncertain:int,rejected:int},
      *   overdue_unpaid_liabilities:int
@@ -32,7 +51,12 @@ final class PayrollOperationalHealthService
         ];
     }
 
-    /** @return array{queued:int,running:int,retry_wait:int,failed:int} */
+    /**
+     * @return array{
+     *   queued:int,running:int,retry_wait:int,failed:int,
+     *   oldest_pending_at:?string,oldest_pending_age_seconds:?int,last_completed_at:?string
+     * }
+     */
     private function documentBatches(int $supplierId): array
     {
         $statement = $this->db->pdo()->prepare(
@@ -40,21 +64,41 @@ final class PayrollOperationalHealthService
                 SUM(status = "queued") AS queued,
                 SUM(status = "running") AS running,
                 SUM(status = "retry_wait") AS retry_wait,
-                SUM(status = "failed") AS failed
+                SUM(status = "failed") AS failed,
+                DATE_FORMAT(
+                    MIN(CASE WHEN status IN ("queued", "running", "retry_wait")
+                        THEN created_at END),
+                    "%Y-%m-%d %H:%i:%s"
+                ) AS oldest_pending_local,
+                DATE_FORMAT(
+                    MAX(CASE WHEN status = "completed" THEN completed_at END),
+                    "%Y-%m-%d %H:%i:%s"
+                ) AS last_completed_utc
                FROM payroll_document_batches
               WHERE supplier_id = ?',
         );
         $statement->execute([$supplierId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC) ?: [];
+        [$oldestPendingAt, $oldestPendingAge] = $this->pendingTime(
+            $row['oldest_pending_local'] ?? null,
+        );
         return [
             'queued' => (int) ($row['queued'] ?? 0),
             'running' => (int) ($row['running'] ?? 0),
             'retry_wait' => (int) ($row['retry_wait'] ?? 0),
             'failed' => (int) ($row['failed'] ?? 0),
+            'oldest_pending_at' => $oldestPendingAt,
+            'oldest_pending_age_seconds' => $oldestPendingAge,
+            'last_completed_at' => $this->completedTime($row['last_completed_utc'] ?? null),
         ];
     }
 
-    /** @return array{queued:int,processing:int,retry_wait:int,failed:int} */
+    /**
+     * @return array{
+     *   queued:int,processing:int,retry_wait:int,failed:int,
+     *   oldest_pending_at:?string,oldest_pending_age_seconds:?int,last_completed_at:?string
+     * }
+     */
     private function periodExportJobs(int $supplierId): array
     {
         $statement = $this->db->pdo()->prepare(
@@ -62,18 +106,56 @@ final class PayrollOperationalHealthService
                 SUM(status = "queued") AS queued,
                 SUM(status = "processing") AS processing,
                 SUM(status = "retry_wait") AS retry_wait,
-                SUM(status = "failed") AS failed
+                SUM(status = "failed") AS failed,
+                DATE_FORMAT(
+                    MIN(CASE WHEN status IN ("queued", "processing", "retry_wait")
+                        THEN created_at END),
+                    "%Y-%m-%d %H:%i:%s"
+                ) AS oldest_pending_local,
+                DATE_FORMAT(
+                    MAX(CASE WHEN status = "completed" THEN completed_at END),
+                    "%Y-%m-%d %H:%i:%s"
+                ) AS last_completed_utc
                FROM payroll_period_export_jobs
               WHERE supplier_id = ?',
         );
         $statement->execute([$supplierId]);
         $row = $statement->fetch(PDO::FETCH_ASSOC) ?: [];
+        [$oldestPendingAt, $oldestPendingAge] = $this->pendingTime(
+            $row['oldest_pending_local'] ?? null,
+        );
         return [
             'queued' => (int) ($row['queued'] ?? 0),
             'processing' => (int) ($row['processing'] ?? 0),
             'retry_wait' => (int) ($row['retry_wait'] ?? 0),
             'failed' => (int) ($row['failed'] ?? 0),
+            'oldest_pending_at' => $oldestPendingAt,
+            'oldest_pending_age_seconds' => $oldestPendingAge,
+            'last_completed_at' => $this->completedTime($row['last_completed_utc'] ?? null),
         ];
+    }
+
+    /** @return array{0:?string,1:?int} */
+    private function pendingTime(mixed $value): array
+    {
+        if (!is_string($value) || $value === '') {
+            return [null, null];
+        }
+        $local = new \DateTimeImmutable($value, $this->appTimeZone);
+        $utc = $local->setTimezone(new \DateTimeZone('UTC'));
+        return [
+            $utc->format('Y-m-d\TH:i:s\Z'),
+            max(0, time() - $utc->getTimestamp()),
+        ];
+    }
+
+    private function completedTime(mixed $value): ?string
+    {
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+        return (new \DateTimeImmutable($value, new \DateTimeZone('UTC')))
+            ->format('Y-m-d\TH:i:s\Z');
     }
 
     /** @return array{rejected:int,correction_required:int,open_blocker_or_error_issues:int} */

@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { payrollApi, type PayrollOperationalHealth } from '@/api/payroll'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const health = ref<PayrollOperationalHealth | null>(null)
 const unavailable = ref(false)
 
@@ -15,6 +15,31 @@ async function load() {
     health.value = null
     unavailable.value = true
   }
+}
+
+function formatAge(seconds: number | null): string {
+  if (seconds === null) return t('payroll.dashboard.operational_health.never_pending')
+  if (seconds < 3_600) {
+    return t('payroll.dashboard.operational_health.age_minutes', {
+      count: Math.max(1, Math.floor(seconds / 60)),
+    })
+  }
+  if (seconds < 86_400) {
+    return t('payroll.dashboard.operational_health.age_hours', {
+      count: Math.floor(seconds / 3_600),
+    })
+  }
+  return t('payroll.dashboard.operational_health.age_days', {
+    count: Math.floor(seconds / 86_400),
+  })
+}
+
+function formatCompletedAt(value: string | null): string {
+  if (!value) return t('payroll.dashboard.operational_health.never_completed')
+  return new Intl.DateTimeFormat(locale.value, {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date(value))
 }
 
 onMounted(load)
@@ -50,6 +75,20 @@ onMounted(load)
           <dt>{{ t('payroll.dashboard.operational_health.failed') }}</dt>
           <dd class="text-right font-semibold text-danger-700" data-test="document-failed">{{ health.document_batches.failed }}</dd>
         </dl>
+        <dl class="mt-3 space-y-1 border-t border-neutral-200 pt-2 text-xs text-neutral-600">
+          <div class="flex items-start justify-between gap-2">
+            <dt>{{ t('payroll.dashboard.operational_health.oldest_pending') }}</dt>
+            <dd class="text-right font-medium text-neutral-800" data-test="document-oldest-age">
+              {{ formatAge(health.document_batches.oldest_pending_age_seconds) }}
+            </dd>
+          </div>
+          <div class="flex items-start justify-between gap-2">
+            <dt>{{ t('payroll.dashboard.operational_health.last_completed') }}</dt>
+            <dd class="text-right font-medium text-neutral-800" data-test="document-last-completed">
+              {{ formatCompletedAt(health.document_batches.last_completed_at) }}
+            </dd>
+          </div>
+        </dl>
       </div>
 
       <div class="rounded-lg bg-neutral-50 p-3">
@@ -65,6 +104,20 @@ onMounted(load)
           <dd class="text-right font-semibold">{{ health.period_export_jobs.retry_wait }}</dd>
           <dt>{{ t('payroll.dashboard.operational_health.failed') }}</dt>
           <dd class="text-right font-semibold text-danger-700" data-test="period-export-failed">{{ health.period_export_jobs.failed }}</dd>
+        </dl>
+        <dl class="mt-3 space-y-1 border-t border-neutral-200 pt-2 text-xs text-neutral-600">
+          <div class="flex items-start justify-between gap-2">
+            <dt>{{ t('payroll.dashboard.operational_health.oldest_pending') }}</dt>
+            <dd class="text-right font-medium text-neutral-800" data-test="period-export-oldest-age">
+              {{ formatAge(health.period_export_jobs.oldest_pending_age_seconds) }}
+            </dd>
+          </div>
+          <div class="flex items-start justify-between gap-2">
+            <dt>{{ t('payroll.dashboard.operational_health.last_completed') }}</dt>
+            <dd class="text-right font-medium text-neutral-800" data-test="period-export-last-completed">
+              {{ formatCompletedAt(health.period_export_jobs.last_completed_at) }}
+            </dd>
+          </div>
         </dl>
       </div>
 

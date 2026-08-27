@@ -1865,12 +1865,18 @@ export interface PayrollOperationalHealth {
     running: number
     retry_wait: number
     failed: number
+    oldest_pending_at: string | null
+    oldest_pending_age_seconds: number | null
+    last_completed_at: string | null
   }
   period_export_jobs: {
     queued: number
     processing: number
     retry_wait: number
     failed: number
+    oldest_pending_at: string | null
+    oldest_pending_age_seconds: number | null
+    last_completed_at: string | null
   }
   submissions: {
     rejected: number

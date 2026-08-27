@@ -5048,6 +5048,13 @@
                 "open_issues": "Otevřené blokátory a chyby",
                 "isds_outbox": "Datová schránka",
                 "send_uncertain": "Nejisté odeslání",
+                "oldest_pending": "Nejstarší čeká",
+                "last_completed": "Naposledy dokončeno",
+                "never_pending": "Nic nečeká",
+                "never_completed": "Zatím nikdy",
+                "age_minutes": "{count} min",
+                "age_hours": "{count} h",
+                "age_days": "{count} d",
                 "liabilities": "Mzdové závazky",
                 "overdue_unpaid": "Po splatnosti a ne zcela uhrazené"
             },
