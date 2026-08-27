@@ -208,7 +208,7 @@ final readonly class PayrollInsolvencyPaymentInstructionService
         $document = $this->documents->findActiveReferenceForUpdate(
             $documentId,
             $supplierId,
-            DocumentViewerContext::companyOnly(),
+            DocumentViewerContext::internalCompany(),
         );
         $documentHash = $document['sha256'] ?? null;
         if (!is_string($documentHash)

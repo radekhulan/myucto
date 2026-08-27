@@ -16,11 +16,26 @@ final class DocumentViewerResolver
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = self::userId($user['id'] ?? null);
+        $isSession = $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'session';
         $canViewPayrollEnforcementEvidence =
-            $request->getAttribute(AuthMiddleware::ATTR_METHOD) === 'session'
+            $isSession
             && RequestAuthorization::allows(
                 $request,
                 'payroll.enforcement',
+                AccessLevel::READ,
+            );
+        $canViewPayrollInsolvencyEvidence =
+            $canViewPayrollEnforcementEvidence
+            && RequestAuthorization::allows(
+                $request,
+                'payroll.insolvency',
+                AccessLevel::READ,
+            );
+        $canViewPayrollSubmissionEvidence =
+            $isSession
+            && RequestAuthorization::allows(
+                $request,
+                'payroll.submissions',
                 AccessLevel::READ,
             );
 
@@ -28,6 +43,8 @@ final class DocumentViewerResolver
             RequestAuthorization::isSuperadmin($request),
             $userId,
             $canViewPayrollEnforcementEvidence,
+            $canViewPayrollInsolvencyEvidence,
+            $canViewPayrollSubmissionEvidence,
         );
     }
 

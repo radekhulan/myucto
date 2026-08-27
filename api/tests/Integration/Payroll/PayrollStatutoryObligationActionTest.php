@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Document\DocumentsAction;
 use MyInvoice\Action\Payroll\PayrollStatutoryObligationAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Deletion\DocumentDeletionGuard;
+use MyInvoice\Repository\DocumentFolderRepository;
+use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -26,6 +30,9 @@ final class PayrollStatutoryObligationActionTest extends TestCase
     private Connection $db;
     private PayrollStatutoryObligationAction $action;
     private DocumentDeletionGuard $documentDeletionGuard;
+    private DocumentRepository $documents;
+    private DocumentFolderRepository $folders;
+    private DocumentsAction $documentsAction;
     private int $supplierId;
     private int $otherSupplierId;
     private int $userId;
@@ -42,6 +49,9 @@ final class PayrollStatutoryObligationActionTest extends TestCase
         }
         $this->action = $container->get(PayrollStatutoryObligationAction::class);
         $this->documentDeletionGuard = $container->get(DocumentDeletionGuard::class);
+        $this->documents = $container->get(DocumentRepository::class);
+        $this->folders = $container->get(DocumentFolderRepository::class);
+        $this->documentsAction = $container->get(DocumentsAction::class);
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) ($pdo->query(
             'SELECT id FROM supplier ORDER BY id LIMIT 1',
@@ -172,6 +182,85 @@ final class PayrollStatutoryObligationActionTest extends TestCase
         $changed['receipt_reference'] = 'CSSZ-OTHER';
         $conflict = $this->record($changed, 'conflict-key');
         self::assertSame(409, $conflict->getStatusCode());
+    }
+
+    public function testStatutoryEvidenceIsHiddenFromGenericDmsWithoutSessionSubmissionPermission(): void
+    {
+        self::assertSame(201, $this->record(
+            $this->validBody(),
+            'statutory-dms-category',
+        )->getStatusCode());
+        $folderId = $this->folders->create(
+            $this->supplierId,
+            null,
+            'Syntetická složka podání',
+            $this->userId,
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ? WHERE supplier_id = ? AND id = ?',
+        )->execute([$folderId, $this->supplierId, $this->documentId]);
+
+        $documentsOnly = new EffectiveRole(
+            78,
+            'Dokumenty bez podání',
+            'staff',
+            true,
+            ['documents' => AccessLevel::READ->value],
+        );
+        $restricted = $this->request('GET', 'session', $documentsOnly);
+        $restricted = $restricted->withUri(
+            $restricted->getUri()->withPath("/api/documents/{$this->documentId}"),
+        );
+        $detail = $this->documentsAction->get(
+            $restricted,
+            new Response(),
+            ['id' => (string) $this->documentId],
+        );
+        self::assertSame(404, $detail->getStatusCode());
+        self::assertNull($this->documents->findRaw(
+            $this->documentId,
+            $this->supplierId,
+            DocumentViewerContext::forUser($this->userId),
+        ));
+        self::assertSame([], $this->documents->rawByFolderIds(
+            $this->supplierId,
+            [$folderId],
+            DocumentViewerContext::forUser($this->userId),
+        ));
+        self::assertNull($this->documents->findRaw(
+            $this->documentId,
+            $this->otherSupplierId,
+            DocumentViewerContext::forUser($this->userId, false, false, true),
+        ));
+
+        $submissionReader = new EffectiveRole(
+            79,
+            'Mzdová účetní pro podání',
+            'staff',
+            true,
+            [
+                'documents' => AccessLevel::READ->value,
+                'payroll.submissions' => AccessLevel::READ->value,
+            ],
+        );
+        $allowed = $restricted->withAttribute('auth.effective_role', $submissionReader);
+        self::assertSame(200, $this->documentsAction->get(
+            $allowed,
+            new Response(),
+            ['id' => (string) $this->documentId],
+        )->getStatusCode());
+        self::assertNotEmpty($this->documents->rawByFolderIds(
+            $this->supplierId,
+            [$folderId],
+            DocumentViewerContext::forUser($this->userId, false, false, true),
+        ));
+
+        $bearer = $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer');
+        self::assertSame(404, $this->documentsAction->get(
+            $bearer,
+            new Response(),
+            ['id' => (string) $this->documentId],
+        )->getStatusCode());
     }
 
     public function testAccidentInsuranceRecordsOnlyConfirmedExternalPayment(): void

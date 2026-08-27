@@ -175,7 +175,7 @@ final class PayrollStatutoryObligationService
             $document = $this->documents->findActiveReferenceForUpdate(
                 $documentId,
                 $supplierId,
-                DocumentViewerContext::companyOnly(),
+                DocumentViewerContext::internalCompany(),
             );
             if ($document === null) {
                 throw new \InvalidArgumentException(

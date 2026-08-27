@@ -575,6 +575,126 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertSame(404, $detail->getStatusCode());
     }
 
+    public function testClassifiedInsolvencyDecisionRequiresBothSessionPayrollPermissionsInGenericDms(): void
+    {
+        $employmentId = $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'DMS-INSOLVENCY',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $account = $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'DMS-INS',
+            'institution_name' => 'Syntetický insolvenční správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:dms-insolvency',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+        $folderId = $this->documentFolders->create(
+            $this->supplierId,
+            null,
+            'Syntetická složka oddlužení',
+            $this->userId,
+        );
+        $documentId = $this->document($this->supplierId, str_repeat('f', 64));
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ? WHERE supplier_id = ? AND id = ?',
+        )->execute([$folderId, $this->supplierId, $documentId]);
+        $this->repository->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06',
+            [
+                'claim_register_evidence_complete' => false,
+                'dependants_evidence_complete' => false,
+                'spouse_evidence_complete' => false,
+                'pension_evidence' => 'unknown',
+                'has_multiple_payers' => false,
+                'protected_amount_override_minor_units' => null,
+                'protected_amount_override_verified' => false,
+                'insolvency_mode' => 'approved_standard',
+                'insolvency_decision_verified' => true,
+                'insolvency_recipient_verified' => true,
+                'insolvency_employment_id' => $employmentId,
+                'insolvency_institution_account_id' => (int) $account['id'],
+                'insolvency_decision_document_id' => $documentId,
+                'court_determined_amount_minor_units' => null,
+            ],
+            $this->userId,
+            null,
+        );
+        $instructionCount = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_insolvency_payment_instructions
+              WHERE supplier_id = ? AND decision_document_id = ?',
+        );
+        $instructionCount->execute([$this->supplierId, $documentId]);
+        self::assertSame(1, (int) $instructionCount->fetchColumn());
+
+        $documentsOnly = new EffectiveRole(
+            93,
+            'Dokumenty bez oddlužení',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $restricted = $this->request('GET', "/api/documents/{$documentId}")
+            ->withAttribute('auth.effective_role', $documentsOnly);
+        self::assertSame(404, $this->documentsAction->get(
+            $restricted,
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertNull($this->documents->findRaw(
+            $documentId,
+            $this->supplierId,
+            DocumentViewerContext::forUser($this->userId),
+        ));
+        self::assertSame([], $this->documents->rawByFolderIds(
+            $this->supplierId,
+            [$folderId],
+            DocumentViewerContext::forUser($this->userId),
+        ));
+        self::assertNull($this->documents->findRaw(
+            $documentId,
+            $this->otherSupplierId,
+            DocumentViewerContext::forUser($this->userId, false, true),
+        ));
+
+        $reader = new EffectiveRole(
+            94,
+            'Mzdová účetní pro oddlužení',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.enforcement' => 1, 'payroll.insolvency' => 1],
+        );
+        $allowed = $restricted->withAttribute('auth.effective_role', $reader);
+        self::assertSame(200, $this->documentsAction->get(
+            $allowed,
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertNotEmpty($this->documents->rawByFolderIds(
+            $this->supplierId,
+            [$folderId],
+            DocumentViewerContext::forUser($this->userId, false, true),
+        ));
+        self::assertSame(404, $this->documentsAction->get(
+            $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'),
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+    }
+
     public function testZeroProtectedAmountOverrideIsAcceptedForMultiplePayers(): void
     {
         $evidence = $this->repository->saveMonthEvidence(
