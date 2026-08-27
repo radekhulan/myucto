@@ -57,6 +57,9 @@ final readonly class AnnualSettlementResult implements JsonSerializable
         public int $payableMinorUnits,
         public bool $annualBonusThresholdMet,
         public array $trace,
+        public int $annualTaxBonusCandidateMinorUnits,
+        public bool $annualBonusAmountThresholdMet,
+        public string $annualBonusEligibilityReason,
     ) {}
 
     /**
@@ -82,6 +85,9 @@ final readonly class AnnualSettlementResult implements JsonSerializable
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             false,
             $trace,
+            0,
+            false,
+            'income_below_threshold',
         );
     }
 
@@ -103,7 +109,19 @@ final readonly class AnnualSettlementResult implements JsonSerializable
         int $payableMinorUnits,
         bool $annualBonusThresholdMet,
         array $trace,
+        ?int $annualTaxBonusCandidateMinorUnits = null,
+        ?bool $annualBonusAmountThresholdMet = null,
+        ?string $annualBonusEligibilityReason = null,
     ): self {
+        $candidate = $annualTaxBonusCandidateMinorUnits ?? $annualTaxBonusMinorUnits;
+        $amountThresholdMet = $annualBonusAmountThresholdMet
+            ?? AnnualSettlementStatute::isAnnualBonusAmountEligible($candidate);
+        $eligibilityReason = $annualBonusEligibilityReason ?? match (true) {
+            !$annualBonusThresholdMet => 'income_below_threshold',
+            !$amountThresholdMet => 'amount_below_threshold',
+            default => 'eligible',
+        };
+
         return new self(
             $taxYear,
             true,
@@ -123,6 +141,9 @@ final readonly class AnnualSettlementResult implements JsonSerializable
             $payableMinorUnits,
             $annualBonusThresholdMet,
             $trace,
+            $candidate,
+            $amountThresholdMet,
+            $eligibilityReason,
         );
     }
 
@@ -157,6 +178,12 @@ final readonly class AnnualSettlementResult implements JsonSerializable
             'settlement_difference_minor_units' => $this->settlementDifferenceMinorUnits,
             'payable_minor_units' => $this->payableMinorUnits,
             'annual_bonus_threshold_met' => $this->annualBonusThresholdMet,
+            'annual_bonus_candidate_minor_units' => $this->annualTaxBonusCandidateMinorUnits,
+            'annual_bonus_income_threshold_met' => $this->annualBonusThresholdMet,
+            'annual_bonus_amount_threshold_met' => $this->annualBonusAmountThresholdMet,
+            'annual_bonus_eligible' => $this->annualBonusThresholdMet
+                && $this->annualBonusAmountThresholdMet,
+            'annual_bonus_eligibility_reason' => $this->annualBonusEligibilityReason,
             'bonus_qualifying_income_minor_units' =>
                 (int) ($this->trace['total_bonus_qualifying_income_minor_units'] ?? 0),
             'bonus_minimum_income_minor_units' =>

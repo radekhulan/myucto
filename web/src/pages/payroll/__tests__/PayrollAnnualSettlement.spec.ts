@@ -162,6 +162,11 @@ function result(overrides: Record<string, unknown> = {}) {
     settlement_difference_minor_units: 120_000,
     payable_minor_units: 120_000,
     annual_bonus_threshold_met: true,
+    annual_bonus_candidate_minor_units: 10_000,
+    annual_bonus_income_threshold_met: true,
+    annual_bonus_amount_threshold_met: true,
+    annual_bonus_eligible: true,
+    annual_bonus_eligibility_reason: 'eligible',
     bonus_qualifying_income_minor_units: 14_000_000,
     bonus_minimum_income_minor_units: 13_440_000,
     bonus_minimum_amount_minor_units: 10_000,
@@ -294,7 +299,7 @@ describe('Roční zúčtování', () => {
 
     expect(wrapper.find('[data-test="annual-settlement-result"]').exists()).toBe(true)
     const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
-    expect(bonus.text()).toContain('payroll.annual_settlement.bonus_threshold_met')
+    expect(bonus.text()).toContain('payroll.annual_settlement.bonus_eligibility.eligible')
     expect(wrapper.get('[data-test="annual-tax-bonus-income"]').text()).toContain('140 000')
     expect(wrapper.get('[data-test="annual-tax-bonus-income-threshold"]').text())
       .toContain('134 400')
@@ -317,6 +322,10 @@ describe('Roční zúčtování', () => {
     m.previewAnnualSettlement.mockResolvedValue(previewResponse({
       result: result({
         annual_bonus_threshold_met: false,
+        annual_bonus_income_threshold_met: false,
+        annual_bonus_amount_threshold_met: true,
+        annual_bonus_eligible: false,
+        annual_bonus_eligibility_reason: 'income_below_threshold',
         bonus_qualifying_income_minor_units: 10_000_000,
         annual_tax_bonus_minor_units: 0,
         bonus_difference_minor_units: 0,
@@ -328,8 +337,35 @@ describe('Roční zúčtování', () => {
     await flushPromises()
 
     const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
-    expect(bonus.text()).toContain('payroll.annual_settlement.bonus_threshold_not_met')
+    expect(bonus.text()).toContain(
+      'payroll.annual_settlement.bonus_eligibility.income_below_threshold',
+    )
     expect(wrapper.get('[data-test="annual-tax-bonus-income"]').text()).toContain('100 000')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('0,00')
+  })
+
+  it('vysvětlí nulový bonus kandidátem pod ročním minimem', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        annual_bonus_candidate_minor_units: 9_900,
+        annual_bonus_income_threshold_met: true,
+        annual_bonus_amount_threshold_met: false,
+        annual_bonus_eligible: false,
+        annual_bonus_eligibility_reason: 'amount_below_threshold',
+        annual_tax_bonus_minor_units: 0,
+        bonus_difference_minor_units: 0,
+      }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain(
+      'payroll.annual_settlement.bonus_eligibility.amount_below_threshold',
+    )
+    expect(wrapper.get('[data-test="annual-tax-bonus-candidate"]').text()).toContain('99,00')
     expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('0,00')
   })
 

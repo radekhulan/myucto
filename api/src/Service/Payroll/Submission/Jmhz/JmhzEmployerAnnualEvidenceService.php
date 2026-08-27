@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzEmployerAnnualEvidenceRepository;
+use MyInvoice\Service\Payroll\SupportMatrix;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final readonly class JmhzEmployerAnnualEvidenceService
@@ -14,12 +15,13 @@ final readonly class JmhzEmployerAnnualEvidenceService
     public function __construct(
         private JmhzEmployerAnnualEvidenceRepository $repository,
         private JmhzSpecPackageCatalog $specification,
+        private SupportMatrix $support,
     ) {}
 
     /** @return array<string,mixed> */
     public function view(int $supplierId, int $reportYear): array
     {
-        self::assertYear($reportYear);
+        $this->assertYear($reportYear);
         $codebooks = $this->codebooks();
         return [
             'evidence' => $this->repository->latest($supplierId, $reportYear),
@@ -39,7 +41,7 @@ final readonly class JmhzEmployerAnnualEvidenceService
         array $input,
         ?int $actorUserId,
     ): array {
-        self::assertYear($reportYear);
+        $this->assertYear($reportYear);
         $expected = $input['expected_revision_id'] ?? null;
         if ($expected !== null && (!is_int($expected) || $expected <= 0)) {
             throw new \InvalidArgumentException('expected_revision_id musí být kladné celé číslo nebo null.');
@@ -142,10 +144,12 @@ final readonly class JmhzEmployerAnnualEvidenceService
         return $evidence;
     }
 
-    private static function assertYear(int $year): void
+    private function assertYear(int $year): void
     {
-        if ($year < 2026 || $year > 2100) {
-            throw new \InvalidArgumentException('Rok ročních údajů JMHZ musí být 2026 až 2100.');
+        if (!$this->support->supportsYear($year)) {
+            throw new \InvalidArgumentException(
+                "Rok {$year} není podporovaný účinnými mzdovými rulesety.",
+            );
         }
     }
 

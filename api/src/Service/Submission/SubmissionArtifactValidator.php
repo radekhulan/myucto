@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Submission;
 
+use DOMDocument;
+use DOMElement;
+use MyInvoice\Service\Payroll\Garnishment\Xmlzam\XmlzamSchemaCatalog;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 
 /**
@@ -43,7 +46,10 @@ final readonly class SubmissionArtifactValidator
         'OSVC25' => 'osvc25',
     ];
 
-    public function __construct(private XmlSchemaValidator $schemas) {}
+    public function __construct(
+        private XmlSchemaValidator $schemas,
+        private XmlzamSchemaCatalog $xmlzam = new XmlzamSchemaCatalog(),
+    ) {}
 
     /**
      * @param array{filename:string,mime:string,bytes:string} $artifact
@@ -51,6 +57,9 @@ final readonly class SubmissionArtifactValidator
      */
     public function validateArtifact(string $agendaCode, array $artifact): array
     {
+        if (strtoupper($agendaCode) === 'XMLZAM') {
+            return $this->validateXmlzam($artifact);
+        }
         $formCode = self::AGENDA_SCHEMAS[strtoupper($agendaCode)] ?? null;
         if ($formCode === null || !$this->schemas->hasSchema($formCode)) {
             return ['status' => 'skipped', 'errors' => []];
@@ -66,7 +75,60 @@ final readonly class SubmissionArtifactValidator
 
     public function hasSchemaFor(string $agendaCode): bool
     {
+        if (strtoupper($agendaCode) === 'XMLZAM') {
+            return true;
+        }
         $formCode = self::AGENDA_SCHEMAS[strtoupper($agendaCode)] ?? null;
         return $formCode !== null && $this->schemas->hasSchema($formCode);
+    }
+
+    /**
+     * @param array{filename:string,mime:string,bytes:string} $artifact
+     * @return array{status:'passed'|'failed',errors:list<string>}
+     */
+    private function validateXmlzam(array $artifact): array
+    {
+        if (!str_contains($artifact['mime'], 'xml')) {
+            return ['status' => 'failed', 'errors' => ['XMLZAM musí být XML příloha.']];
+        }
+        if (preg_match('/<!\s*(?:DOCTYPE|ENTITY)\b/i', $artifact['bytes']) === 1) {
+            return ['status' => 'failed', 'errors' => ['XMLZAM nesmí obsahovat deklaraci DTD.']];
+        }
+
+        $document = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $loaded = $document->loadXML(
+                $artifact['bytes'],
+                LIBXML_NONET | LIBXML_NOBLANKS | LIBXML_COMPACT,
+            );
+            $root = $document->documentElement;
+            $declaredType = $root instanceof DOMElement
+                ? $root->getAttributeNS('http://www.w3.org/2001/XMLSchema-instance', 'type')
+                : '';
+            if (!$loaded || $declaredType !== 'soucinnost_odpoved') {
+                return ['status' => 'failed', 'errors' => ['Příloha není odpověď na součinnost XMLZAM.']];
+            }
+            if (!$document->schemaValidate($this->xmlzam->schemaPath())) {
+                $errors = [];
+                foreach (libxml_get_errors() as $error) {
+                    $message = trim($error->message);
+                    if ($message !== '') {
+                        $errors[] = $message;
+                    }
+                }
+                return [
+                    'status' => 'failed',
+                    'errors' => $errors !== []
+                        ? array_values(array_unique($errors))
+                        : ['XMLZAM neodpovídá oficiálnímu schématu.'],
+                ];
+            }
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+
+        return ['status' => 'passed', 'errors' => []];
     }
 }

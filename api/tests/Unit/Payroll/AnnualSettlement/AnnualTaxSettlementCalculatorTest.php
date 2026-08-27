@@ -379,6 +379,10 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertSame(0, $result->annualTaxBonusMinorUnits);
         self::assertSame(0, $result->bonusDifferenceMinorUnits);
         self::assertSame(0, $result->payableMinorUnits);
+        self::assertSame(
+            'income_below_threshold',
+            $result->jsonSerialize()['annual_bonus_eligibility_reason'],
+        );
     }
 
     /**
@@ -431,6 +435,7 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertSame(13_440_000, $result->jsonSerialize()['bonus_minimum_income_minor_units']);
         self::assertSame(14_000_000, $result->jsonSerialize()['bonus_qualifying_income_minor_units']);
         self::assertSame(1_267_000, $result->jsonSerialize()['monthly_tax_bonus_minor_units']);
+        self::assertSame('eligible', $result->jsonSerialize()['annual_bonus_eligibility_reason']);
     }
 
     public function testAnnualBonusIncomeThresholdIsInclusive(): void
@@ -454,6 +459,33 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertTrue($result->annualBonusThresholdMet);
         self::assertSame(1_520_400, $result->annualTaxBonusMinorUnits);
         self::assertSame(13_440_000, $result->jsonSerialize()['bonus_minimum_income_minor_units']);
+    }
+
+    public function testAnnualBonusExplainsCandidateBelowTheAmountThreshold(): void
+    {
+        $result = (new AnnualTaxSettlementCalculator())->calculate(
+            $this->input(
+                advanceBase: 30_630_000,
+                advanceTax: 0,
+                appliedCredits: 0,
+                bonusQualifyingIncome: 13_440_000,
+                creditMonths: [
+                    new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
+                ],
+                childMonths: [
+                    new AnnualSettlementChildMonths('child-a', 1, 12, 0),
+                ],
+            ),
+            $this->rates(),
+        );
+        $serialized = $result->jsonSerialize();
+
+        self::assertSame(9_900, $serialized['annual_bonus_candidate_minor_units']);
+        self::assertTrue($serialized['annual_bonus_income_threshold_met']);
+        self::assertFalse($serialized['annual_bonus_amount_threshold_met']);
+        self::assertFalse($serialized['annual_bonus_eligible']);
+        self::assertSame('amount_below_threshold', $serialized['annual_bonus_eligibility_reason']);
+        self::assertSame(0, $result->annualTaxBonusMinorUnits);
     }
 
     /** Rok bez jediného uzavřeného měsíce se nedopočítává „aspoň částečně". */

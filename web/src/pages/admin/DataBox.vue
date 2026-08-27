@@ -353,8 +353,10 @@ async function purgeInboxLocalContent(message: InboxMessage) {
   if (!window.confirm(t('databox.inbox.privacy.purgeConfirm'))) return
   privacyBusyId.value = message.id
   try {
-    await dataBoxApi.purgeInboxLocalContent(message.id, message.lifecycle_row_version)
-    toast.success(t('databox.inbox.privacy.purged'))
+    const item = await dataBoxApi.purgeInboxLocalContent(message.id, message.lifecycle_row_version)
+    toast.success(t(item.local_content_state === 'purged'
+      ? 'databox.inbox.privacy.purged'
+      : 'databox.inbox.privacy.purgePending'))
     await loadAll()
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -1805,6 +1807,12 @@ onUnmounted(clearMobileStatusTimer)
                   >
                     {{ t('databox.inbox.privacy.contentPurged') }}
                   </span>
+                  <span
+                    v-else-if="m.local_content_state === 'purging'"
+                    class="inline-flex h-7 items-center rounded-full bg-warning-50 px-2 text-xs text-warning-700 dark:bg-warning-900/30 dark:text-warning-200"
+                  >
+                    {{ t('databox.inbox.privacy.contentPurging') }}
+                  </span>
                   <button type="button" :class="btnOutlineSm('neutral')" @click="startNoticeFromMessage(m)">
                     {{ t('databox.notices.recordFromMessage') }}
                   </button>
@@ -1835,7 +1843,7 @@ onUnmounted(clearMobileStatusTimer)
                     {{ t('databox.inbox.privacy.restore') }}
                   </button>
                   <button
-                    v-if="canManageInboxPrivacy(m) && m.local_content_state === 'available'"
+                    v-if="canManageInboxPrivacy(m) && m.local_content_state !== 'purged'"
                     type="button"
                     :class="btnOutlineSm('danger')"
                     :disabled="privacyBusyId === m.id"
@@ -1845,7 +1853,9 @@ onUnmounted(clearMobileStatusTimer)
                     <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
                     </svg>
-                    {{ t('databox.inbox.privacy.purge') }}
+                    {{ t(m.local_content_state === 'purging'
+                      ? 'databox.inbox.privacy.purgeRetry'
+                      : 'databox.inbox.privacy.purge') }}
                   </button>
                 </div>
               </td>

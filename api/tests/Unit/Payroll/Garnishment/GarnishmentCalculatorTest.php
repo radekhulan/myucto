@@ -654,6 +654,43 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertSame(363_200, $result->allocationFor('later')?->firstPoolMinorUnits);
     }
 
+    public function testNewSnapshotReevaluatesAllocationsAfterOlderOrderArrives(): void
+    {
+        $middle = $this->statutoryClaim(
+            'middle',
+            ClaimCategory::NonPriority,
+            500_000,
+            '2026-02-10',
+            orderIssuedOn: '2021-12-31',
+        );
+        $latest = $this->statutoryClaim(
+            'latest',
+            ClaimCategory::NonPriority,
+            500_000,
+            '2026-03-10',
+            orderIssuedOn: '2021-12-31',
+        );
+
+        $firstSnapshot = $this->calculate(4_000_000, [$middle, $latest]);
+        self::assertSame(500_000, $firstSnapshot->allocationFor('middle')?->firstPoolMinorUnits);
+        self::assertSame(363_200, $firstSnapshot->allocationFor('latest')?->firstPoolMinorUnits);
+
+        $secondSnapshot = $this->calculate(4_000_000, [
+            $middle,
+            $latest,
+            $this->statutoryClaim(
+                'oldest',
+                ClaimCategory::NonPriority,
+                500_000,
+                '2026-01-10',
+                orderIssuedOn: '2021-12-31',
+            ),
+        ]);
+        self::assertSame(500_000, $secondSnapshot->allocationFor('oldest')?->firstPoolMinorUnits);
+        self::assertSame(363_200, $secondSnapshot->allocationFor('middle')?->firstPoolMinorUnits);
+        self::assertNull($secondSnapshot->allocationFor('latest'));
+    }
+
     public function testUnsupportedInsolvencyInstructionFailsClosed(): void
     {
         $result = $this->calculate(

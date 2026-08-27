@@ -250,8 +250,20 @@ final readonly class SubmissionInboxService
         return $this->inbox->pollState($supplierId, $channelCode, $environment);
     }
 
+    /** @return array<string,mixed>|null */
+    public function findById(int $supplierId, int $messageId): ?array
+    {
+        return $this->inbox->findById($supplierId, $messageId);
+    }
+
     /** Ruční zařazení zprávy, kterou automat nepoznal. */
-    public function reclassify(int $supplierId, int $messageId, string $classification, ?int $outboxId): bool
+    public function reclassify(
+        int $supplierId,
+        int $messageId,
+        string $classification,
+        ?int $outboxId,
+        int $expectedVersion,
+    ): bool
     {
         $allowed = [
             InboxMessageClassifier::DELIVERY_RECEIPT,
@@ -270,7 +282,53 @@ final readonly class SubmissionInboxService
                 400,
             );
         }
-        return $this->inbox->reclassify($supplierId, $messageId, $classification, $outboxId);
+        $current = $this->inbox->findById($supplierId, $messageId);
+        if ($current === null) {
+            return false;
+        }
+        if ($current['matched_outbox_id'] !== null
+            && (int) $current['matched_outbox_id'] !== $outboxId
+        ) {
+            throw new SubmissionChannelException(
+                'isds_inbox_business_link_immutable',
+                'Zpráva už je navázaná na podání a tuto evidenční vazbu nelze ručním zařazením odpojit ani změnit.',
+                409,
+            );
+        }
+        if ((int) $current['lifecycle_row_version'] !== $expectedVersion
+            || $current['hidden_at'] !== null
+            || (string) $current['local_content_state'] !== 'available'
+        ) {
+            throw new SubmissionChannelException(
+                'isds_inbox_privacy_conflict',
+                'Zprávu mezitím změnil jiný uživatel. Načtěte seznam znovu.',
+                409,
+            );
+        }
+        $updated = $this->inbox->reclassify(
+            $supplierId,
+            $messageId,
+            $classification,
+            $outboxId,
+            $expectedVersion,
+        );
+        if (!$updated) {
+            $fresh = $this->inbox->findById($supplierId, $messageId);
+            if ($fresh !== null && $fresh['matched_outbox_id'] !== null) {
+                throw new SubmissionChannelException(
+                    'isds_inbox_business_link_immutable',
+                    'Zprávu mezitím navázalo podání; evidenční vazbu nelze odpojit ani změnit.',
+                    409,
+                );
+            }
+            throw new SubmissionChannelException(
+                'isds_inbox_privacy_conflict',
+                'Zprávu mezitím změnil jiný uživatel. Načtěte seznam znovu.',
+                409,
+            );
+        }
+
+        return true;
     }
 
     // ───────────────────────── interní ─────────────────────────

@@ -1751,7 +1751,21 @@
                 "empty": "V tomto období nejsou mzdové vstupy",
                 "empty_hint": "Přidejte jednorázový vstup, importujte soubor nebo materializujte pravidelné předpisy.",
                 "basket_usage": "Koš {basket} podle {statute}: po tomto plnění vyčerpáno {used} z {limit}, zbývá {remaining}.",
-                "basket_over_limit": "Roční limit koše je překročen: osvobozeno {exempt}, zdanitelných {taxable} — nadlimitní část vstupuje do daně i do vyměřovacích základů pojistného."
+                "basket_over_limit": "Zákonný limit koše je překročen: osvobozeno {exempt}, zdanitelných {taxable} — nadlimitní část vstupuje do daně i do vyměřovacích základů pojistného.",
+                "meal_entitlement_summary": "Nároků celkem {count}: {qualifying} základních a {second} druhých příspěvků.",
+                "meal_basis_label": "Použitý režim: {basis}.",
+                "meal_basis": {
+                    "shift": "rozvržené směny",
+                    "calendar_day": "kalendářní dny bez rozvržených směn",
+                    "mixed": "souběh směn a kalendářních dnů podle pracovních vztahů"
+                },
+                "meal_evidence_complete": "Docházkový podklad je úplný a uzavřený.",
+                "meal_evidence_incomplete": "Podklad není úplný; vstup zatím nelze schválit jako osvobozený.",
+                "meal_missing": {
+                    "employment_missing": "Osoba nemá pro období pracovní vztah.",
+                    "attendance_missing": "Za období chybí docházka, směny i odpracovaný čas.",
+                    "attendance_month_open": "Docházkový měsíc není uzavřený."
+                }
             },
             "import": {
                 "title": "Import měsíčních vstupů",
@@ -2116,10 +2130,16 @@
             "below_threshold_note": "Zúčtování proběhlo, ale přeplatek do {threshold} se podle zákona nevyplácí.",
             "bonus_threshold_met": "Roční příjem pro bonus {income} dosáhl hranice {threshold}; celoroční bonus musí činit alespoň {minimum}.",
             "bonus_threshold_not_met": "Roční bonus nevznikl: příjem {income} nedosáhl roční hranice {threshold}.",
+            "bonus_eligibility": {
+                "eligible": "Roční bonus je způsobilý: příjem {income} dosáhl hranice {threshold} a vypočtený bonus {candidate} dosáhl minima {minimum}.",
+                "income_below_threshold": "Roční bonus nevznikl: příjem {income} nedosáhl roční hranice {threshold}.",
+                "amount_below_threshold": "Roční bonus je nulový: vypočtená částka {candidate} nedosáhla minima {minimum}, přestože příjmová hranice byla splněna."
+            },
             "bonus_threshold_hint": "Roční výpočet znovu posoudí všechny měsíce nároku. Může proto doplatit bonus za měsíce, ve kterých nebyla splněna měsíční příjmová hranice.",
             "bonus_income": "Příjem rozhodný pro roční bonus",
             "bonus_income_threshold": "Roční příjmová hranice",
             "bonus_amount_minimum": "Nejnižší roční bonus",
+            "bonus_candidate": "Vypočtený bonus před minimem",
             "row_tax_base": "Úhrn základů pro výpočet záloh",
             "row_rounded_base": "Základ daně po zaokrouhlení",
             "row_tax": "Daň za zdaňovací období",
@@ -17470,11 +17490,14 @@
                 "hide": "Skrýt",
                 "restore": "Obnovit",
                 "purge": "Smazat místní kopii",
+                "purgeRetry": "Dokončit mazání",
                 "contentPurged": "Místní obsah smazán",
+                "contentPurging": "Mazání místní kopie čeká na dokončení",
                 "purgeConfirm": "Opravdu nevratně smazat stažené ZFO a všechny jeho přílohy z Dokumentů? Technická hlavička zprávy zůstane kvůli auditu a ochraně před opakovaným stažením.",
                 "hidden": "Zpráva byla skryta.",
                 "restored": "Zpráva byla obnovena mezi aktivní.",
-                "purged": "Místní kopie zprávy a jejích příloh byla odstraněna."
+                "purged": "Místní kopie zprávy a jejích příloh byla odstraněna.",
+                "purgePending": "Databázová kopie byla odstraněna, ale fyzické soubory se zatím nepodařilo ověřeně smazat. Akci opakujte."
             },
             "empty": "Žádné stažené zprávy.",
             "poll": "Vyzvednout nové zprávy",

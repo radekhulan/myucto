@@ -80,7 +80,7 @@ describe('payroll REGZEL API', () => {
     )
   })
 
-  it('načte a stáhne interní přehled zdravotní pojišťovny podle revize', async () => {
+  it('načte a stáhne oficiální přehled zdravotní pojišťovny podle revize', async () => {
     m.get.mockResolvedValueOnce({
       data: {
         items: [],
@@ -100,16 +100,28 @@ describe('payroll REGZEL API', () => {
       insurer: { code: '111' },
       filename: 'zp-prehled-2026-08-111-revize-18.json',
     } as Parameters<typeof payrollApi.downloadHealthPaymentOverview>[0]
-    m.get.mockResolvedValueOnce({ data: new Blob(['synthetic-health']) })
+    m.get.mockResolvedValueOnce({
+      data: new Blob(['%PDF-synthetic-health'], { type: 'application/pdf' }),
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': 'attachment; filename="zp-prehled-2026-08-111-revize-18.pdf"',
+      },
+    })
     vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:synthetic-health')
     vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
-    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.download).toBe(
+          'zp-prehled-2026-08-111-revize-18.pdf',
+        )
+      })
 
     await payrollApi.downloadHealthPaymentOverview(overview)
     expect(m.get).toHaveBeenLastCalledWith(
       '/payroll/submissions/health-overviews/18/111/download',
       { responseType: 'blob' },
     )
+    expect(click).toHaveBeenCalledOnce()
   })
 
   it('načte a stáhne pouze interní PVPOJ kontrolní náhled', async () => {

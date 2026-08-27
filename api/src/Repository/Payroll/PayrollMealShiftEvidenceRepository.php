@@ -126,7 +126,7 @@ final class PayrollMealShiftEvidenceRepository
      * o 1 (SEČ) až 2 (SELČ) hodiny vedle.
      *
      * @param list<int> $employmentIds
-     * @return list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}>
+     * @return list<array{employment_id:int, starts_at_utc:string, ends_at_utc:string, timezone_name:string}>
      */
     public function mealAllowanceTrips(
         int $supplierId,
@@ -139,7 +139,7 @@ final class PayrollMealShiftEvidenceRepository
         [$from, $to] = $this->window($periodStart);
         $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            'SELECT departure_at_utc, arrival_at_utc, timezone_name
+            'SELECT employment_id, departure_at_utc, arrival_at_utc, timezone_name
                FROM payroll_business_trips
               WHERE supplier_id = ?
                 AND status IN ("approved", "settled")
@@ -151,6 +151,7 @@ final class PayrollMealShiftEvidenceRepository
         $rows = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $rows[] = [
+                'employment_id' => (int) $row['employment_id'],
                 'starts_at_utc' => (string) $row['departure_at_utc'],
                 'ends_at_utc' => (string) $row['arrival_at_utc'],
                 'timezone_name' => (string) $row['timezone_name'],

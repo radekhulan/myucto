@@ -189,6 +189,20 @@ final class SubmissionInboxRepository
         return $row !== false ? self::normalize($row) : null;
     }
 
+    /** @return array<string,mixed>|null */
+    public function findByIdForUpdate(int $supplierId, int $id): ?array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . $this->columns() . ' FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND id = ? FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? self::normalize($row) : null;
+    }
+
     /**
      * Doručenky, které se k žádnému podání nepřiřadily.
      *
@@ -223,9 +237,17 @@ final class SubmissionInboxRepository
     public function linkToOutbox(int $supplierId, int $id, int $outboxId): bool
     {
         $this->assertAvailable();
+        $privacy = $this->supportsPrivacyLifecycle()
+            ? ', lifecycle_row_version = lifecycle_row_version + 1'
+            : '';
+        $guard = $this->supportsPrivacyLifecycle()
+            ? ' AND hidden_at IS NULL AND local_content_state = \'available\''
+            : '';
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE ' . self::TABLE . ' SET matched_outbox_id = ?, processed_at = UTC_TIMESTAMP()
-              WHERE id = ? AND supplier_id = ? AND matched_outbox_id IS NULL'
+            'UPDATE ' . self::TABLE . ' SET matched_outbox_id = ?, processed_at = UTC_TIMESTAMP()'
+            . $privacy
+            . ' WHERE id = ? AND supplier_id = ? AND matched_outbox_id IS NULL'
+            . $guard
         );
         $stmt->execute([$outboxId, $id, $supplierId]);
 
@@ -233,14 +255,33 @@ final class SubmissionInboxRepository
     }
 
     /** Ruční zařazení zprávy, kterou automat nepoznal. */
-    public function reclassify(int $supplierId, int $id, string $classification, ?int $matchedOutboxId): bool
+    public function reclassify(
+        int $supplierId,
+        int $id,
+        string $classification,
+        ?int $matchedOutboxId,
+        ?int $expectedVersion = null,
+    ): bool
     {
         $this->assertAvailable();
+        $privacy = $this->supportsPrivacyLifecycle()
+            ? ', lifecycle_row_version = lifecycle_row_version + 1'
+            : '';
+        $guard = $this->supportsPrivacyLifecycle()
+            ? ' AND hidden_at IS NULL AND local_content_state = \'available\''
+            : '';
+        $params = [$classification, $matchedOutboxId, $id, $supplierId];
+        if ($expectedVersion !== null) {
+            $guard .= ' AND lifecycle_row_version = ?';
+            $params[] = $expectedVersion;
+        }
         $stmt = $this->db->pdo()->prepare(
-            'UPDATE ' . self::TABLE . ' SET classification = ?, matched_outbox_id = ?
-              WHERE id = ? AND supplier_id = ?'
+            'UPDATE ' . self::TABLE . ' SET classification = ?, matched_outbox_id = ?'
+            . $privacy
+            . ' WHERE id = ? AND supplier_id = ?'
+            . $guard
         );
-        $stmt->execute([$classification, $matchedOutboxId, $id, $supplierId]);
+        $stmt->execute($params);
         return $stmt->rowCount() > 0;
     }
 
@@ -285,29 +326,137 @@ final class SubmissionInboxRepository
                 SET hidden_at = ' . ($hidden ? 'UTC_TIMESTAMP()' : 'NULL') . ',
                     hidden_by = ?, lifecycle_row_version = lifecycle_row_version + 1
               WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?'
+            . ' AND classification = \'unclassified\' AND matched_outbox_id IS NULL'
         );
         $stmt->execute([$hidden ? $userId : null, $supplierId, $id, $expectedVersion]);
         return $stmt->rowCount() === 1;
     }
 
-    public function markLocalContentPurged(
+    public function beginLocalContentPurge(
         int $supplierId,
         int $id,
         int $expectedVersion,
-        ?int $userId,
     ): bool {
         $this->assertPrivacyLifecycle();
         $stmt = $this->db->pdo()->prepare(
             'UPDATE ' . self::TABLE . '
-                SET document_id = NULL, local_content_state = \'purged\',
+                SET document_id = NULL, local_content_state = \'purging\',
+                    lifecycle_row_version = lifecycle_row_version + 1
+              WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?
+                AND local_content_state = \'available\'
+                AND classification = \'unclassified\' AND matched_outbox_id IS NULL'
+        );
+        $stmt->execute([$supplierId, $id, $expectedVersion]);
+        return $stmt->rowCount() === 1;
+    }
+
+    public function finishLocalContentPurge(int $supplierId, int $id, ?int $userId): bool
+    {
+        $this->assertPrivacyLifecycle();
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . '
+                SET local_content_state = \'purged\',
                     local_content_purged_at = UTC_TIMESTAMP(),
                     local_content_purged_by = ?,
                     lifecycle_row_version = lifecycle_row_version + 1
-              WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?
-                AND local_content_state = \'available\''
+              WHERE supplier_id = ? AND id = ? AND local_content_state = \'purging\'
+                AND NOT EXISTS (
+                    SELECT 1 FROM submission_inbox_purge_manifest manifest
+                     WHERE manifest.supplier_id = ? AND manifest.inbox_message_id = ?
+                       AND manifest.status IN (\'pending\',\'failed\')
+                )'
         );
-        $stmt->execute([$userId, $supplierId, $id, $expectedVersion]);
+        $stmt->execute([$userId, $supplierId, $id, $supplierId, $id]);
         return $stmt->rowCount() === 1;
+    }
+
+    /** @param list<array{sha256:string,filename:string,thumb_path:?string}> $entries */
+    public function createPurgeManifest(int $supplierId, int $id, array $entries): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO submission_inbox_purge_manifest
+                (supplier_id, inbox_message_id, entry_no, sha256, internal_filename, thumb_filename)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        foreach ($entries as $index => $entry) {
+            $stmt->execute([
+                $supplierId,
+                $id,
+                $index + 1,
+                $entry['sha256'],
+                $entry['filename'],
+                $entry['thumb_path'] !== null ? basename($entry['thumb_path']) : null,
+            ]);
+        }
+    }
+
+    /** @return list<array{id:int,sha256:string,internal_filename:string,thumb_filename:?string,status:string,attempts:int}> */
+    public function pendingPurgeManifest(int $supplierId, int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, sha256, internal_filename, thumb_filename, status, attempts
+               FROM submission_inbox_purge_manifest
+              WHERE supplier_id = ? AND inbox_message_id = ? AND status IN (\'pending\',\'failed\')
+              ORDER BY entry_no'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            if (!is_array($row)) {
+                throw new \UnexpectedValueException('Položka manifestu mazání nemá očekávaný tvar.');
+            }
+            $result[] = [
+                'id' => self::databaseInt($row['id'] ?? null, 'id'),
+                'sha256' => self::databaseString($row['sha256'] ?? null, 'sha256'),
+                'internal_filename' => self::databaseString(
+                    $row['internal_filename'] ?? null,
+                    'internal_filename',
+                ),
+                'thumb_filename' => ($row['thumb_filename'] ?? null) !== null
+                    ? self::databaseString($row['thumb_filename'], 'thumb_filename')
+                    : null,
+                'status' => self::databaseString($row['status'] ?? null, 'status'),
+                'attempts' => self::databaseInt($row['attempts'] ?? null, 'attempts'),
+            ];
+        }
+        return $result;
+    }
+
+    public function resolvePurgeManifestEntry(
+        int $supplierId,
+        int $manifestId,
+        string $status,
+        ?string $error = null,
+    ): void {
+        if (!in_array($status, ['deleted', 'retained_shared', 'failed'], true)) {
+            throw new \InvalidArgumentException('Neznámý stav položky mazání.');
+        }
+        $resolved = $status === 'failed' ? 'NULL' : 'UTC_TIMESTAMP()';
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE submission_inbox_purge_manifest
+                SET status = ?, attempts = attempts + 1, last_error = ?, resolved_at = ' . $resolved . '
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$status, $error, $supplierId, $manifestId]);
+    }
+
+    private static function databaseString(mixed $value, string $field): string
+    {
+        if (!is_string($value)) {
+            throw new \UnexpectedValueException("Databázové pole {$field} není text.");
+        }
+        return $value;
+    }
+
+    private static function databaseInt(mixed $value, string $field): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_string($value) && ctype_digit($value)) {
+            return (int) $value;
+        }
+        throw new \UnexpectedValueException("Databázové pole {$field} není celé číslo.");
     }
 
     // ───────────────────────── rozhodný den doručení ─────────────────────────

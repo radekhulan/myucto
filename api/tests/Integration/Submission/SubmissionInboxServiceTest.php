@@ -703,10 +703,169 @@ final class SubmissionInboxServiceTest extends TestCase
     public function testUnclassifiedCannotBeLinkedToASubmission(): void
     {
         $this->expectException(SubmissionChannelException::class);
-        $this->service->reclassify($this->supplierId, 1, 'unclassified', 5);
+        $this->service->reclassify($this->supplierId, 1, 'unclassified', 5, 1);
+    }
+
+    public function testReclassificationBumpsLifecycleAndMakesStaleHideFail(): void
+    {
+        $row = $this->inbox->record($this->inboxRow('DM-RECLASSIFY'));
+
+        self::assertTrue($this->service->reclassify(
+            $this->supplierId,
+            (int) $row['id'],
+            'tax_office_response',
+            null,
+            (int) $row['lifecycle_row_version'],
+        ));
+        $changed = $this->inbox->findById($this->supplierId, (int) $row['id']);
+        self::assertNotNull($changed);
+        self::assertSame(
+            (int) $row['lifecycle_row_version'] + 1,
+            $changed['lifecycle_row_version'],
+        );
+
+        try {
+            $this->privacy->hide(
+                $this->supplierId,
+                (int) $row['id'],
+                (int) $row['lifecycle_row_version'],
+                $this->userId,
+            );
+            self::fail('Zastaralá verze nesmí skrýt nově zařazenou zprávu.');
+        } catch (SubmissionChannelException $e) {
+            self::assertContains(
+                $e->errorCode,
+                ['isds_inbox_message_has_business_link', 'isds_inbox_privacy_conflict'],
+            );
+        }
+    }
+
+    public function testMatchedBusinessMessageCannotBeUnlinkedByReclassification(): void
+    {
+        $recipient = $this->createRecipient('recipient_immutable', 'zzzzzzz');
+        $queued = $this->outbox->enqueue([
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'channel' => 'isds',
+            'agenda_code' => 'JMHZ',
+            'recipient_id' => $recipient,
+            'recipient_box_id' => 'zzzzzzz',
+            'subject' => 'Syntetické podání',
+            'artifact_kind' => 'document',
+            'artifact_id' => 1,
+            'artifact_filename' => 'synthetic.xml',
+            'artifact_sha256' => hash('sha256', 'synthetic'),
+            'correlation_reference' => 'JMHZ-IMMUTABLE-' . bin2hex(random_bytes(4)),
+            'created_by' => $this->userId,
+        ], 'immutable-' . bin2hex(random_bytes(8)));
+        $row = $this->inbox->record([
+            ...$this->inboxRow('DM-IMMUTABLE'),
+            'classification' => 'cssz_protocol',
+            'matched_outbox_id' => (int) $queued['row']['id'],
+        ]);
+
+        try {
+            $this->service->reclassify(
+                $this->supplierId,
+                (int) $row['id'],
+                'unclassified',
+                null,
+                (int) $row['lifecycle_row_version'],
+            );
+            self::fail('Business vazba příchozí zprávy nesmí jít odpojit.');
+        } catch (SubmissionChannelException $e) {
+            self::assertSame('isds_inbox_business_link_immutable', $e->errorCode);
+        }
+        $unchanged = $this->inbox->findById($this->supplierId, (int) $row['id']);
+        self::assertNotNull($unchanged);
+        self::assertSame((int) $queued['row']['id'], $unchanged['matched_outbox_id']);
+        self::assertSame('cssz_protocol', $unchanged['classification']);
+    }
+
+    public function testInterruptedPhysicalPurgeRemainsRetryableUntilFilesAreVerifiedGone(): void
+    {
+        $row = $this->inbox->record($this->inboxRow('DM-PURGE-RETRY'));
+        $sha = hash('sha256', 'synthetic-purge-retry');
+        $filename = 'synthetic-purge-retry.bin';
+        $this->db->pdo()->prepare(
+            'UPDATE submission_inbox_messages
+                SET local_content_state = \'purging\', lifecycle_row_version = lifecycle_row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $row['id']]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO submission_inbox_purge_manifest
+                (supplier_id, inbox_message_id, entry_no, sha256, internal_filename)
+             VALUES (?, ?, 1, ?, ?)'
+        )->execute([$this->supplierId, $row['id'], $sha, $filename]);
+        $blockingPath = DocumentStorage::baseDir($this->supplierId)
+            . '/' . substr($sha, 0, 2) . '/' . $filename;
+        self::assertTrue(mkdir($blockingPath, 0755, true));
+
+        $pending = $this->privacy->purgeLocalContent(
+            $this->supplierId,
+            (int) $row['id'],
+            (int) $row['lifecycle_row_version'] + 1,
+            $this->userId,
+        );
+        self::assertSame('purging', $pending['local_content_state']);
+        self::assertSame('failed', $this->db->pdo()->query(
+            'SELECT status FROM submission_inbox_purge_manifest WHERE inbox_message_id = ' . (int) $row['id'],
+        )->fetchColumn());
+
+        self::assertTrue(rmdir($blockingPath));
+        $purged = $this->privacy->purgeLocalContent(
+            $this->supplierId,
+            (int) $row['id'],
+            (int) $pending['lifecycle_row_version'],
+            $this->userId,
+        );
+        self::assertSame('purged', $purged['local_content_state']);
+        self::assertSame('deleted', $this->db->pdo()->query(
+            'SELECT status FROM submission_inbox_purge_manifest WHERE inbox_message_id = ' . (int) $row['id'],
+        )->fetchColumn());
     }
 
     // ───────────────────────── pomocné ─────────────────────────
+
+    /** @return array<string,mixed> */
+    private function inboxRow(string $messageId): array
+    {
+        return [
+            'supplier_id' => $this->supplierId,
+            'environment' => 'test',
+            'channel' => 'isds',
+            'external_message_id' => $messageId,
+            'sender_box_id' => 'abc1234',
+            'sender_name' => 'Syntetický odesílatel',
+            'subject' => 'Syntetická zpráva',
+            'sender_ident' => null,
+            'classification' => 'unclassified',
+            'matched_outbox_id' => null,
+            'document_id' => null,
+            'delivered_at' => '2026-08-27 08:00:00',
+            'accepted_at' => null,
+            'raw_sha256' => hash('sha256', $messageId),
+        ];
+    }
+
+    private function createRecipient(string $code, string $boxId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO submission_recipients
+                (supplier_id, code, name, kind, isds_box_id, source_url, created_by)
+             VALUES (?, ?, ?, \'other\', ?, ?, ?)',
+        );
+        $stmt->execute([
+            $this->supplierId,
+            $code,
+            'Syntetický příjemce',
+            $boxId,
+            'https://example.invalid/recipient-source',
+            $this->userId,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
 
     private function insertCredential(): void
     {

@@ -154,6 +154,18 @@ const items = computed<PayrollAnnualSettlementListItem[]>(() => data.value?.item
 const result = computed(() => preview.value?.result ?? null)
 const blockers = computed(() => result.value?.blockers ?? [])
 const performed = computed(() => result.value?.performed === true)
+const annualBonusEligibilityReason = computed(() => {
+  if (result.value?.annual_bonus_eligibility_reason) {
+    return result.value.annual_bonus_eligibility_reason
+  }
+  return result.value?.annual_bonus_threshold_met
+    ? 'eligible'
+    : 'income_below_threshold'
+})
+const annualBonusEligible = computed(() =>
+  result.value?.annual_bonus_eligible
+    ?? annualBonusEligibilityReason.value === 'eligible',
+)
 
 const settleDisabledReason = computed(() => {
   if (!canSettle.value) return t('payroll.annual_settlement.blocker.not_requested')
@@ -1185,23 +1197,22 @@ onMounted(async () => {
                 v-if="blockers.length === 0 && result.bonus_minimum_income_minor_units !== undefined"
                 data-test="annual-tax-bonus-eligibility"
                 class="mt-4 rounded-md border p-4"
-                :class="result.annual_bonus_threshold_met
+                :class="annualBonusEligible
                   ? 'border-success-500/40 bg-success-50'
                   : 'border-warning-500/40 bg-warning-50'"
               >
                 <p class="text-sm font-medium text-neutral-900">
-                  {{ t(result.annual_bonus_threshold_met
-                    ? 'payroll.annual_settlement.bonus_threshold_met'
-                    : 'payroll.annual_settlement.bonus_threshold_not_met', {
+                  {{ t(`payroll.annual_settlement.bonus_eligibility.${annualBonusEligibilityReason}`, {
                     income: money(result.bonus_qualifying_income_minor_units),
                     threshold: money(result.bonus_minimum_income_minor_units),
+                    candidate: money(result.annual_bonus_candidate_minor_units),
                     minimum: money(result.bonus_minimum_amount_minor_units),
                   }) }}
                 </p>
                 <p class="mt-1 text-xs text-neutral-600">
                   {{ t('payroll.annual_settlement.bonus_threshold_hint') }}
                 </p>
-                <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+                <dl class="mt-3 grid gap-2 text-sm sm:grid-cols-2 xl:grid-cols-4">
                   <div data-test="annual-tax-bonus-income">
                     <dt class="text-xs text-neutral-500">{{ t('payroll.annual_settlement.bonus_income') }}</dt>
                     <dd class="mt-0.5 font-medium tabular-nums text-neutral-900">
@@ -1218,6 +1229,12 @@ onMounted(async () => {
                     <dt class="text-xs text-neutral-500">{{ t('payroll.annual_settlement.bonus_amount_minimum') }}</dt>
                     <dd class="mt-0.5 font-medium tabular-nums text-neutral-900">
                       {{ money(result.bonus_minimum_amount_minor_units) }}
+                    </dd>
+                  </div>
+                  <div data-test="annual-tax-bonus-candidate">
+                    <dt class="text-xs text-neutral-500">{{ t('payroll.annual_settlement.bonus_candidate') }}</dt>
+                    <dd class="mt-0.5 font-medium tabular-nums text-neutral-900">
+                      {{ money(result.annual_bonus_candidate_minor_units) }}
                     </dd>
                   </div>
                 </dl>

@@ -328,15 +328,23 @@ final class SubmissionInboxAction
                 (int) ($args['id'] ?? 0),
                 (string) ($body['classification'] ?? ''),
                 isset($body['outbox_id']) ? (int) $body['outbox_id'] : null,
+                $this->rowVersion($body),
             );
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
         if (!$updated) {
             return Json::error($response, 'not_found', 'Zpráva nebyla nalezena.', 404);
         }
 
-        return Json::ok($response, ['updated' => true]);
+        return Json::ok($response, [
+            'item' => $this->inbox->findById(
+                SupplierGuard::currentId($request),
+                (int) ($args['id'] ?? 0),
+            ),
+        ]);
     }
 
     /** @param array<string,string> $args */
@@ -374,8 +382,14 @@ final class SubmissionInboxAction
                 $this->rowVersion($body),
                 $this->userId($request),
             );
-            $this->auditPrivacy($request, $supplierId, (int) $item['id'], 'purged');
-            return Json::ok($response, ['item' => $item]);
+            $purged = (string) $item['local_content_state'] === 'purged';
+            $this->auditPrivacy(
+                $request,
+                $supplierId,
+                (int) $item['id'],
+                $purged ? 'purged' : 'purge_pending',
+            );
+            return Json::ok($response, ['item' => $item], $purged ? 200 : 202);
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\InvalidArgumentException $e) {

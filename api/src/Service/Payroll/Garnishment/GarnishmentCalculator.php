@@ -16,7 +16,10 @@ final class GarnishmentCalculator
      * nevyplnilo a výpočet by tiše četl výchozí sadu z kódu — administrátorská
      * změna nezabavitelných částek by se neprojevila (chyba MZ-02-W08).
      */
-    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
+    public function __construct(
+        private readonly PayrollRulesetProvider $rulesets,
+        private readonly EnforcementPriorityResolver $priorities = new EnforcementPriorityResolver(),
+    ) {}
 
     public function calculate(GarnishmentInput $input): GarnishmentResult
     {
@@ -358,19 +361,15 @@ final class GarnishmentCalculator
      */
     private function allocateRankedClaims(array $claims, int $capacity, array &$balances): array
     {
-        usort($claims, self::claimOrder(...));
         $allocated = [];
-        $offset = 0;
-
-        while ($capacity > 0 && isset($claims[$offset])) {
-            $priorityDate = $claims[$offset]->priorityDate;
-            $group = [];
-            while (isset($claims[$offset]) && $claims[$offset]->priorityDate === $priorityDate) {
-                if (($balances[$claims[$offset]->id] ?? 0) > 0) {
-                    $group[] = $claims[$offset];
-                }
-                $offset++;
+        foreach ($this->priorities->resolve($claims) as $priorityGroup) {
+            if ($capacity <= 0) {
+                break;
             }
+            $group = array_values(array_filter(
+                $priorityGroup,
+                static fn (DeductionClaim $claim): bool => ($balances[$claim->id] ?? 0) > 0,
+            ));
             if ($group === []) {
                 continue;
             }
@@ -760,21 +759,7 @@ final class GarnishmentCalculator
      */
     private function activeClaims(array $claims): array
     {
-        $active = array_values(array_filter(
-            $claims,
-            static fn (DeductionClaim $claim): bool =>
-                $claim->active && $claim->outstandingMinorUnits > 0,
-        ));
-        usort($active, self::claimOrder(...));
-
-        return $active;
-    }
-
-    private static function claimOrder(DeductionClaim $left, DeductionClaim $right): int
-    {
-        $dateOrder = ($left->priorityDate ?? '') <=> ($right->priorityDate ?? '');
-
-        return $dateOrder !== 0 ? $dateOrder : $left->id <=> $right->id;
+        return $this->priorities->orderedActiveClaims($claims);
     }
 
     /** @param list<string> $issues */

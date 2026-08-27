@@ -137,4 +137,30 @@ describe('DataBox — soukromí příchozích zpráv', () => {
     expect(wrapper.find('[data-test="inbox-hide"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="inbox-purge-content"]').exists()).toBe(false)
   })
+
+  it('ukáže nedokončené fyzické mazání a nabídne bezpečné opakování', async () => {
+    const purging = message({
+      document_id: null,
+      local_content_state: 'purging',
+      lifecycle_row_version: 5,
+    })
+    m.inbox.mockResolvedValue({ items: [purging], state: null })
+    m.purgeInboxLocalContent.mockResolvedValue(purging)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    const wrapper = mount(DataBox, {
+      global: { stubs: { EmptyState: true, RouterLink: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    expect(wrapper.text()).toContain('databox.inbox.privacy.contentPurging')
+    expect(wrapper.get('[data-test="inbox-purge-content"]').text())
+      .toContain('databox.inbox.privacy.purgeRetry')
+    await wrapper.get('[data-test="inbox-purge-content"]').trigger('click')
+    await flushPromises()
+
+    expect(m.purgeInboxLocalContent).toHaveBeenCalledWith(51, 5)
+    expect(m.toastSuccess).toHaveBeenCalledWith('databox.inbox.privacy.purgePending')
+  })
 })

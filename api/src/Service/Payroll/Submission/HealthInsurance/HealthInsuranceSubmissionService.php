@@ -415,6 +415,66 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
+     * Sestaví přímo uživatelsky předatelný artefakt podle doloženého formátu
+     * konkrétní pojišťovny. Interní JSON přehled se touto cestou nikdy nevydává.
+     *
+     * @return array{bytes:string,mime_type:string,filename:string,sha256:string,format:string}
+     */
+    public function paymentOverviewDownload(
+        int $supplierId,
+        int $revisionId,
+        string $insurerCode,
+    ): array {
+        $source = $this->paymentOverviewSource(
+            $supplierId,
+            $revisionId,
+            $insurerCode,
+        );
+        $format = $this->channels->forInsurer($insurerCode)
+            ->isdsAttachmentFormatOn($this->today());
+        if ($format === HealthInsurerIsdsAttachmentFormat::Xml) {
+            $bytes = $this->serializer->serializePaymentOverview(
+                $source['payload'],
+            );
+            $this->validator->validatePaymentOverview(
+                $source['payload'],
+                $bytes,
+            );
+            $mimeType = 'application/xml';
+            $extension = 'xml';
+        } elseif ($format === HealthInsurerIsdsAttachmentFormat::TextPdf) {
+            $bytes = $this->pdfRenderer->renderPayload(
+                $source['payload'],
+                is_string($source['channel']['insurer_name'] ?? null)
+                    ? $source['channel']['insurer_name']
+                    : null,
+                $this->today(),
+            );
+            $mimeType = 'application/pdf';
+            $extension = 'pdf';
+        } else {
+            throw new HealthNotificationException(
+                'zp_isds_attachment_undocumented',
+                'Pro tuto zdravotní pojišťovnu není k dnešnímu dni doložený formát předatelného přehledu.',
+            );
+        }
+
+        return [
+            'bytes' => $bytes,
+            'mime_type' => $mimeType,
+            'filename' => sprintf(
+                'zp-prehled-%s-%s-revize-%d.%s',
+                $source['overview']->period,
+                $insurerCode,
+                $revisionId,
+                $extension,
+            ),
+            'sha256' => hash('sha256', $bytes),
+            'format' => $format->value,
+        ];
+    }
+
+    /**
      * Zmrazí přehled o platbě pojistného do odesílatelné podoby. Neodesílá.
      *
      * @return array<string,mixed>
@@ -426,22 +486,16 @@ final readonly class HealthInsuranceSubmissionService
         string $insurerCode,
         ?int $createdBy = null,
     ): array {
-        $this->schemas->assertInsurerCode($insurerCode);
-        $overview = $this->overviews->overview(
+        $documents = $this->paymentOverviewDocuments(
             $supplierId,
             $revisionId,
             $insurerCode,
         );
-        $payload = $this->payload($supplierId, $overview);
-        $xml = $this->serializer->serializePaymentOverview($payload);
-        $channel = $this->channelDescription($supplierId, $insurerCode);
-        $pdf = $this->pdfRenderer->renderPayload(
-            $payload,
-            is_string($channel['insurer_name'] ?? null)
-                ? $channel['insurer_name']
-                : null,
-            $this->today(),
-        );
+        $overview = $documents['overview'];
+        $payload = $documents['payload'];
+        $xml = $documents['xml'];
+        $pdf = $documents['pdf'];
+        $channel = $documents['channel'];
         $window = $this->deadlines->forPaymentOverview($overview->period);
         $sourceHash = hash('sha256', CanonicalJson::encode([
             'schema_reference' => 'payroll-health-payment-overview-submission.v4',
@@ -1242,6 +1296,66 @@ final readonly class HealthInsuranceSubmissionService
                 $overview->totals['assessment_base_minor_units'],
             contributionCzk: intdiv($contribution, 100),
         );
+    }
+
+    /**
+     * @return array{
+     *   overview:HealthPaymentOverview,payload:HealthPaymentOverviewPayload,
+     *   xml:string,pdf:string,channel:array<string,mixed>
+     * }
+     */
+    private function paymentOverviewDocuments(
+        int $supplierId,
+        int $revisionId,
+        string $insurerCode,
+    ): array {
+        $source = $this->paymentOverviewSource(
+            $supplierId,
+            $revisionId,
+            $insurerCode,
+        );
+        $payload = $source['payload'];
+        $channel = $source['channel'];
+        $xml = $this->serializer->serializePaymentOverview($payload);
+        $pdf = $this->pdfRenderer->renderPayload(
+            $payload,
+            is_string($channel['insurer_name'] ?? null)
+                ? $channel['insurer_name']
+                : null,
+            $this->today(),
+        );
+
+        return $source + [
+            'xml' => $xml,
+            'pdf' => $pdf,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   overview:HealthPaymentOverview,payload:HealthPaymentOverviewPayload,
+     *   channel:array<string,mixed>
+     * }
+     */
+    private function paymentOverviewSource(
+        int $supplierId,
+        int $revisionId,
+        string $insurerCode,
+    ): array {
+        $this->schemas->assertInsurerCode($insurerCode);
+        $overview = $this->overviews->overview(
+            $supplierId,
+            $revisionId,
+            $insurerCode,
+        );
+        $payload = $this->payload($supplierId, $overview);
+        $channel = $this->channelDescription($supplierId, $insurerCode);
+
+        return [
+            'overview' => $overview,
+            'payload' => $payload,
+            'channel' => $channel,
+        ];
     }
 
     private function requireEmployer(

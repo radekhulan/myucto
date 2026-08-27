@@ -1751,7 +1751,21 @@
                 "empty": "There are no payroll inputs in this period",
                 "empty_hint": "Add a one-off input, import a file or materialize recurring assignments.",
                 "basket_usage": "Basket {basket} under {statute}: after this benefit {used} of {limit} is used, {remaining} remains.",
-                "basket_over_limit": "The annual basket limit is exceeded: {exempt} exempt, {taxable} taxable — the excess enters income tax and both insurance assessment bases."
+                "basket_over_limit": "The statutory basket limit is exceeded: {exempt} exempt, {taxable} taxable — the excess enters income tax and both insurance assessment bases.",
+                "meal_entitlement_summary": "{count} entitlements in total: {qualifying} primary and {second} second contributions.",
+                "meal_basis_label": "Applied basis: {basis}.",
+                "meal_basis": {
+                    "shift": "scheduled shifts",
+                    "calendar_day": "calendar days without scheduled shifts",
+                    "mixed": "scheduled shifts and calendar days evaluated per employment"
+                },
+                "meal_evidence_complete": "The attendance evidence is complete and closed.",
+                "meal_evidence_incomplete": "The evidence is incomplete; the input cannot yet be approved as exempt.",
+                "meal_missing": {
+                    "employment_missing": "The person has no employment for the period.",
+                    "attendance_missing": "Attendance, shifts and worked time are missing for the period.",
+                    "attendance_month_open": "The attendance month is not closed."
+                }
             },
             "import": {
                 "title": "Monthly input import",
@@ -2116,10 +2130,16 @@
             "below_threshold_note": "The settlement was performed, but by law an overpayment of up to {threshold} is not paid out.",
             "bonus_threshold_met": "Bonus-qualifying annual income of {income} reached the {threshold} threshold; the annual bonus itself must be at least {minimum}.",
             "bonus_threshold_not_met": "No annual bonus arose: income of {income} did not reach the annual threshold of {threshold}.",
+            "bonus_eligibility": {
+                "eligible": "The annual bonus is eligible: income of {income} reached {threshold} and the calculated bonus of {candidate} reached the {minimum} minimum.",
+                "income_below_threshold": "No annual bonus arose: income of {income} did not reach the annual threshold of {threshold}.",
+                "amount_below_threshold": "The annual bonus is zero: the calculated amount of {candidate} did not reach the {minimum} minimum even though the income threshold was met."
+            },
             "bonus_threshold_hint": "The annual calculation reassesses every eligible month. It can therefore catch up the bonus for months in which the monthly income threshold was not met.",
             "bonus_income": "Annual bonus-qualifying income",
             "bonus_income_threshold": "Annual income threshold",
             "bonus_amount_minimum": "Minimum annual bonus",
+            "bonus_candidate": "Calculated bonus before minimum",
             "row_tax_base": "Total advance tax bases",
             "row_rounded_base": "Rounded annual tax base",
             "row_tax": "Tax for the tax year",
@@ -17470,11 +17490,14 @@
                 "hide": "Hide",
                 "restore": "Restore",
                 "purge": "Delete local copy",
+                "purgeRetry": "Finish deletion",
                 "contentPurged": "Local content deleted",
+                "contentPurging": "Local-copy deletion is awaiting completion",
                 "purgeConfirm": "Permanently delete the downloaded ZFO and all of its attachments from Documents? The technical message header remains for audit and duplicate-download prevention.",
                 "hidden": "The message was hidden.",
                 "restored": "The message was restored to active messages.",
-                "purged": "The local message copy and its attachments were deleted."
+                "purged": "The local message copy and its attachments were deleted.",
+                "purgePending": "The database copy was removed, but physical-file deletion has not yet been verified. Retry the action."
             },
             "empty": "No downloaded messages.",
             "poll": "Fetch new messages",

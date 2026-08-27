@@ -291,6 +291,45 @@ final class DocumentStorage
         }
     }
 
+    /** @return array{status:'deleted'|'retained_shared'|'failed',error:?string} */
+    public function resolvePrivacyPurgeEntry(
+        int $supplierId,
+        string $sha256,
+        string $filename,
+        ?string $thumbFilename,
+        DocumentRepository $repo,
+    ): array {
+        if (preg_match('/^[a-f0-9]{64}$/D', $sha256) !== 1
+            || $filename === ''
+            || basename($filename) !== $filename
+            || ($thumbFilename !== null && basename($thumbFilename) !== $thumbFilename)
+        ) {
+            return ['status' => 'failed', 'error' => 'Manifest obsahuje neplatný interní název souboru.'];
+        }
+        if ($repo->countBySha($supplierId, $sha256) > 0) {
+            return ['status' => 'retained_shared', 'error' => null];
+        }
+
+        $path = $this->pathFor($supplierId, $sha256, $filename);
+        if (is_file($path) && !@unlink($path)) {
+            return ['status' => 'failed', 'error' => 'Fyzický soubor se nepodařilo odstranit.'];
+        }
+        if (file_exists($path)) {
+            return ['status' => 'failed', 'error' => 'Fyzický soubor po odstranění stále existuje.'];
+        }
+        if ($thumbFilename !== null && $thumbFilename !== '') {
+            $thumbPath = self::thumbsDir($supplierId) . '/' . $thumbFilename;
+            if (is_file($thumbPath) && !@unlink($thumbPath)) {
+                return ['status' => 'failed', 'error' => 'Náhled se nepodařilo odstranit.'];
+            }
+            if (file_exists($thumbPath)) {
+                return ['status' => 'failed', 'error' => 'Náhled po odstranění stále existuje.'];
+            }
+        }
+
+        return ['status' => 'deleted', 'error' => null];
+    }
+
     /**
      * Smaže prázdné podadresáře pod sup-{id} (sha-shardy / _thumbs), které zůstanou
      * po vysypání koše. Volat po dedup-aware mazání souborů.

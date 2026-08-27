@@ -1057,6 +1057,16 @@ export type PayrollExemptionBasis =
   | 'benefit_basket'
   | 'periodic_benefit_limit'
 
+export interface PayrollMealShiftEntitlement {
+  period_start: string
+  basis: 'shift' | 'calendar_day' | 'mixed'
+  qualifying_count: number
+  second_contribution_count: number
+  count: number
+  complete: boolean
+  missing: string[]
+}
+
 export interface PayrollBenefitBasketUsage {
   basket: PayrollBenefitExemptionBasket
   statute: string
@@ -1065,6 +1075,7 @@ export interface PayrollBenefitBasketUsage {
    * limit na směnách nestojí — nula by tvrdila, že se nic neodpracovalo.
    */
   shift_entitlements: number | null
+  entitlement?: PayrollMealShiftEntitlement | null
   limit_minor: number
   used_before_minor: number
   used_after_minor: number
@@ -2813,6 +2824,14 @@ export interface PayrollAnnualSettlementResult {
   settlement_difference_minor_units: number
   payable_minor_units: number
   annual_bonus_threshold_met: boolean
+  annual_bonus_candidate_minor_units?: number
+  annual_bonus_income_threshold_met?: boolean
+  annual_bonus_amount_threshold_met?: boolean
+  annual_bonus_eligible?: boolean
+  annual_bonus_eligibility_reason?:
+    | 'income_below_threshold'
+    | 'amount_below_threshold'
+    | 'eligible'
   bonus_qualifying_income_minor_units?: number
   bonus_minimum_income_minor_units?: number
   bonus_minimum_amount_minor_units?: number
@@ -4306,11 +4325,20 @@ export const payrollApi = {
       `/payroll/submissions/health-overviews/${overview.revision_id}/${overview.insurer.code}/download`,
       { responseType: 'blob' },
     )
+    const disposition = response.headers['content-disposition']
+    const matchedFilename = typeof disposition === 'string'
+      ? /filename="([^"]+)"/u.exec(disposition)?.[1]
+      : undefined
+    const contentType = String(
+      response.headers['content-type'] ?? response.data.type,
+    )
+    const extension = contentType.includes('pdf') ? 'pdf' : 'xml'
     const objectUrl = URL.createObjectURL(response.data)
     try {
       const anchor = document.createElement('a')
       anchor.href = objectUrl
-      anchor.download = overview.filename
+      anchor.download = matchedFilename
+        ?? `zp-prehled-${overview.period}-${overview.insurer.code}-revize-${overview.revision_id}.${extension}`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()

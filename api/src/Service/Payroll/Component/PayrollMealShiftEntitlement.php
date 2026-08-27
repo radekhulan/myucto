@@ -25,6 +25,8 @@ namespace MyInvoice\Service\Payroll\Component;
  *    výslovně upravuje a podmínku druhého příspěvku v ní staví jinak: „pokud
  *    během tohoto dne zaměstnanec vykonával práci alespoň 11 hodin", tedy
  *    NEOSTŘE a o odpracované době, ne o délce intervalu.
+ *  - `mixed` — osoba má souběžné vztahy v obou režimech; každý vztah se
+ *    vyhodnotil vlastní větví a teprve výsledné počty se sečetly.
  *
  * `complete` je fail-closed brána: `false` znamená, že docházka období není
  * uzavřená, takže počet nároků NENÍ podklad, jen mezistav. `missing` pak řekne,
@@ -35,6 +37,8 @@ final readonly class PayrollMealShiftEntitlement implements \JsonSerializable
     public const BASIS_SHIFT = 'shift';
 
     public const BASIS_CALENDAR_DAY = 'calendar_day';
+
+    public const BASIS_MIXED = 'mixed';
 
     /**
      * @param list<string> $missing Kódy chybějícího podkladu, viz
@@ -48,7 +52,11 @@ final readonly class PayrollMealShiftEntitlement implements \JsonSerializable
         public bool $complete,
         public array $missing = [],
     ) {
-        if (!in_array($basis, [self::BASIS_SHIFT, self::BASIS_CALENDAR_DAY], true)) {
+        if (!in_array(
+            $basis,
+            [self::BASIS_SHIFT, self::BASIS_CALENDAR_DAY, self::BASIS_MIXED],
+            true,
+        )) {
             throw new \InvalidArgumentException('Neznámá větev nároku na stravování.');
         }
         if ($qualifyingCount < 0 || $secondContributionCount < 0) {

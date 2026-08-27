@@ -182,7 +182,7 @@ export interface InboxMessage {
   fetched_at: string
   hidden_at: string | null
   hidden_by: number | null
-  local_content_state: 'available' | 'purged'
+  local_content_state: 'available' | 'purging' | 'purged'
   local_content_purged_at: string | null
   local_content_purged_by: number | null
   lifecycle_row_version: number
@@ -687,8 +687,16 @@ export const dataBoxApi = {
       environment,
     }).then(r => r.data),
 
-  classify: (id: number, classification: InboxClassification, outboxId: number | null) =>
-    api.post(`/submissions/inbox/${id}/classify`, { classification, outbox_id: outboxId }).then(r => r.data),
+  classify: (
+    id: number,
+    classification: InboxClassification,
+    outboxId: number | null,
+    rowVersion: number,
+  ) => api.post(`/submissions/inbox/${id}/classify`, {
+    classification,
+    outbox_id: outboxId,
+    row_version: rowVersion,
+  }).then(r => r.data),
 
   /**
    * „Odeslal jsem to ručně." ID zprávy není formalita — je to přesný

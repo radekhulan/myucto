@@ -107,7 +107,12 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     accounting_mode = 'double_entry',
                     company_name = 'Syntetický zaměstnavatel',
                     display_name = 'Syntetický zaměstnavatel',
-                    ic = '00000019'
+                    ic = '00000019',
+                    street = 'Zkušební',
+                    street_number_pop = '12',
+                    zip = '110 00',
+                    city = 'Praha 1',
+                    phone = '+420111222333'
               WHERE id = ?",
         )->execute([$this->supplierId]);
 
@@ -125,6 +130,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
 
         $officeId = $this->createOffice();
         $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
         $baseComponentId = $this->createComponent('MZDA_MESICNI_FLOW', 'base_wage', 'regular');
         $bonusComponentId = $this->createComponent('ODMENA_FLOW', 'bonus', 'one_off');
         $definitions = [
@@ -443,6 +449,29 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             'valid_to' => null,
             'source_kind' => 'official_document',
             'source_reference' => 'synthetic:full-flow-cssz-account',
+            'verified_on' => '2026-06-15',
+        ], $this->actors[0]);
+    }
+
+    private function configureHealthInsuranceOutput(): void
+    {
+        $accounts = $this->container->get(PayrollInstitutionAccountRepository::class);
+        if (!$accounts instanceof PayrollInstitutionAccountRepository) {
+            throw new \RuntimeException('Evidence účtů institucí není dostupná.');
+        }
+        $accounts->create($this->supplierId, [
+            'institution_type' => 'health_insurer',
+            'institution_code' => '111',
+            'institution_name' => 'Syntetická zdravotní pojišťovna',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '0000001900',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:full-flow-health-account',
             'verified_on' => '2026-06-15',
         ], $this->actors[0]);
     }

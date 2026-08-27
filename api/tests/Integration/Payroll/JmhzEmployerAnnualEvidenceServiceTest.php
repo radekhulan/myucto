@@ -18,6 +18,16 @@ final class JmhzEmployerAnnualEvidenceServiceTest extends TestCase
 {
     use IsolatedSupplierTrait;
 
+    public function testYearWithoutCompletePayrollRulesetsIsRejected(): void
+    {
+        $service = Bootstrap::buildContainer()
+            ->get(JmhzEmployerAnnualEvidenceService::class);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('není podporovaný účinnými mzdovými rulesety');
+        $service->view(1, 2099);
+    }
+
     public function testRevisionsArePinnedIdempotentAndTenantScoped(): void
     {
         $container = Bootstrap::buildContainer();

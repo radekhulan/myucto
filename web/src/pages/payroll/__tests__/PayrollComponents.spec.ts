@@ -835,6 +835,113 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('shows the meal entitlement counts and mixed evidence basis', async () => {
+    m.previewInput.mockResolvedValue({
+      support_status: 'supported',
+      blocker: null,
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: 0,
+      annual_after_minor: 30000,
+      exemption_basket: {
+        basket: 'meal_per_shift',
+        statute: '§ 6 odst. 9 písm. b) ZDP',
+        shift_entitlements: 3,
+        limit_minor: 38850,
+        used_before_minor: 0,
+        used_after_minor: 30000,
+        remaining_minor: 8850,
+        exempt_minor: 30000,
+        taxable_minor: 0,
+        limit_exceeded: false,
+        entitlement: {
+          period_start: '2026-06-01',
+          basis: 'mixed',
+          qualifying_count: 2,
+          second_contribution_count: 1,
+          count: 3,
+          complete: true,
+          missing: [],
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('300')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+
+    const entitlement = wrapper.get('[data-testid="payroll-input-meal-entitlement"]')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_entitlement_summary')
+    expect(entitlement.attributes('data-basis')).toBe('mixed')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_complete')
+    wrapper.unmount()
+  })
+
+  it('warns with a translated reason when meal evidence is incomplete', async () => {
+    m.previewInput.mockResolvedValue({
+      support_status: 'supported',
+      blocker: null,
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: 0,
+      annual_after_minor: 10000,
+      exemption_basket: {
+        basket: 'meal_per_shift',
+        statute: '§ 6 odst. 9 písm. b) ZDP',
+        shift_entitlements: 0,
+        limit_minor: 0,
+        used_before_minor: 0,
+        used_after_minor: 10000,
+        remaining_minor: 0,
+        exempt_minor: 0,
+        taxable_minor: 10000,
+        limit_exceeded: true,
+        entitlement: {
+          period_start: '2026-06-01',
+          basis: 'shift',
+          qualifying_count: 0,
+          second_contribution_count: 0,
+          count: 0,
+          complete: false,
+          missing: ['attendance_month_open'],
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('100')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+
+    const entitlement = wrapper.get('[data-testid="payroll-input-meal-entitlement"]')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_incomplete')
+    expect(entitlement.text()).toContain(
+      'payroll.components.inputs.meal_missing.attendance_month_open',
+    )
+    expect(wrapper.get('[data-testid="payroll-input-preview"]').classes())
+      .toContain('border-warning-500/40')
+    wrapper.unmount()
+  })
+
   it('shows the exact API validation error inside the active editor', async () => {
     m.createComponent.mockRejectedValue({
       response: {

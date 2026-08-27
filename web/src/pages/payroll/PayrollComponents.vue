@@ -282,6 +282,9 @@ const manualInputPayload = computed<PayrollInputPayload | null>(() => {
   }
 })
 const manualInputFingerprint = computed(() => JSON.stringify(manualInputPayload.value))
+const mealEvidenceIncomplete = computed(() =>
+  inputPreview.value?.exemption_basket?.entitlement?.complete === false,
+)
 const canSaveInput = computed(() =>
   manualInputPayload.value !== null
   && inputPreview.value !== null
@@ -1426,7 +1429,59 @@ onMounted(load)
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.source_period') }}</span><input v-model="inputForm.source_period" type="month" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.external_id') }}</span><input v-model="inputForm.external_id" maxlength="190" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm"></label>
           </div>
-          <div v-if="inputPreview" class="mt-4 rounded-lg border p-4 text-sm" :class="inputPreview.support_status === 'supported' && !inputPreview.annual_limit_exceeded ? 'border-success-500/30 bg-success-50 text-success-700' : 'border-warning-500/40 bg-warning-50 text-warning-700'"><p class="font-medium">{{ t(`payroll.components.inputs.preview_status.${inputPreview.support_status}`) }}</p><p v-if="inputPreview.blocker" class="mt-1">{{ inputPreview.blocker }}</p><p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p><template v-if="inputPreview.exemption_basket"><p data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor), limit: formatMoney(inputPreview.exemption_basket.limit_minor), remaining: formatMoney(inputPreview.exemption_basket.remaining_minor) }) }}</p><p v-if="inputPreview.exemption_basket.limit_exceeded" data-testid="payroll-input-basket-over" class="mt-1">{{ t('payroll.components.inputs.basket_over_limit', { exempt: formatMoney(inputPreview.exemption_basket.exempt_minor), taxable: formatMoney(inputPreview.exemption_basket.taxable_minor) }) }}</p></template></div>
+          <div
+            v-if="inputPreview"
+            data-testid="payroll-input-preview"
+            class="mt-4 rounded-lg border p-4 text-sm"
+            :class="inputPreview.support_status === 'supported'
+              && !inputPreview.annual_limit_exceeded
+              && !mealEvidenceIncomplete
+              ? 'border-success-500/30 bg-success-50 text-success-700'
+              : 'border-warning-500/40 bg-warning-50 text-warning-700'"
+          >
+            <p class="font-medium">{{ t(`payroll.components.inputs.preview_status.${inputPreview.support_status}`) }}</p>
+            <p v-if="inputPreview.blocker" class="mt-1">{{ inputPreview.blocker }}</p>
+            <p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p>
+            <template v-if="inputPreview.exemption_basket">
+              <p data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor), limit: formatMoney(inputPreview.exemption_basket.limit_minor), remaining: formatMoney(inputPreview.exemption_basket.remaining_minor) }) }}</p>
+              <div
+                v-if="inputPreview.exemption_basket.entitlement"
+                data-testid="payroll-input-meal-entitlement"
+                :data-basis="inputPreview.exemption_basket.entitlement.basis"
+                class="mt-2 rounded-md border border-current/20 p-3"
+              >
+                <p class="font-medium">
+                  {{ t('payroll.components.inputs.meal_entitlement_summary', {
+                    count: inputPreview.exemption_basket.entitlement.count,
+                    qualifying: inputPreview.exemption_basket.entitlement.qualifying_count,
+                    second: inputPreview.exemption_basket.entitlement.second_contribution_count,
+                  }) }}
+                </p>
+                <p class="mt-1">
+                  {{ t('payroll.components.inputs.meal_basis_label', {
+                    basis: t(`payroll.components.inputs.meal_basis.${inputPreview.exemption_basket.entitlement.basis}`),
+                  }) }}
+                </p>
+                <p v-if="inputPreview.exemption_basket.entitlement.complete" class="mt-1">
+                  {{ t('payroll.components.inputs.meal_evidence_complete') }}
+                </p>
+                <template v-else>
+                  <p class="mt-1 font-medium">
+                    {{ t('payroll.components.inputs.meal_evidence_incomplete') }}
+                  </p>
+                  <ul class="mt-1 list-disc space-y-1 pl-5">
+                    <li
+                      v-for="reason in inputPreview.exemption_basket.entitlement.missing"
+                      :key="reason"
+                    >
+                      {{ t(`payroll.components.inputs.meal_missing.${reason}`) }}
+                    </li>
+                  </ul>
+                </template>
+              </div>
+              <p v-if="inputPreview.exemption_basket.limit_exceeded" data-testid="payroll-input-basket-over" class="mt-1">{{ t('payroll.components.inputs.basket_over_limit', { exempt: formatMoney(inputPreview.exemption_basket.exempt_minor), taxable: formatMoney(inputPreview.exemption_basket.taxable_minor) }) }}</p>
+            </template>
+          </div>
           <div class="mt-5 flex flex-wrap justify-end gap-2"><button :class="btnOutline('neutral')" :disabled="saving || !manualInputPayload" @click="previewManualInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.inputs.preview') }}</button><button :class="btnFilled('primary')" :disabled="saving || !canSaveInput" @click="saveInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
         </section>
 

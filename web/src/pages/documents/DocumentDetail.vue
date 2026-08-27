@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
@@ -144,6 +144,10 @@ function goEntity(l: { entity_type: EntityType; entity_id: number }) {
 }
 
 onMounted(load)
+watch(id, () => {
+  previewOverrideId.value = null
+  void load()
+})
 </script>
 
 <template>

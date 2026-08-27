@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
+use MyInvoice\Service\Payroll\Calculation\CalculationStep;
+use MyInvoice\Service\Payroll\Calculation\DecimalRate;
+use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -45,10 +48,10 @@ final class PayrollBenefitBasketService
         string $periodStart,
         int $shiftEntitlements = 0,
     ): int {
-        $value = $this->rulesets
-            ->forCalculation(PayrollRulesetDomain::IncomeTax, $this->effectiveOn($basket, $periodStart))
-            ->parameter($basket->rulesetKey())
-            ->value;
+        $effectiveOn = $this->effectiveOn($basket, $periodStart);
+        $incomeTax = $this->rulesets
+            ->forCalculation(PayrollRulesetDomain::IncomeTax, $effectiveOn);
+        $value = $incomeTax->parameter($basket->rulesetKey())->value;
         if (!is_int($value) || $value <= 0) {
             throw new PayrollRulesetException(
                 "Limit koše {$basket->rulesetKey()} není částka v haléřích.",
@@ -56,6 +59,33 @@ final class PayrollBenefitBasketService
         }
         if (!$basket->scalesWithShifts()) {
             return $value;
+        }
+        $rateValue = $incomeTax
+            ->parameter('benefit_exemption.meal.shift_rate')
+            ->value;
+        $travelMaximum = $this->rulesets
+            ->forCalculation(PayrollRulesetDomain::TravelAllowances, $effectiveOn)
+            ->parameter('meal_allowance.band_1.tax_exempt_maximum')
+            ->value;
+        if (!is_string($rateValue) || !is_int($travelMaximum) || $travelMaximum <= 0) {
+            throw new PayrollRulesetException(
+                'Parametry benefit_exemption.meal.shift_rate a '
+                . 'meal_allowance.band_1.tax_exempt_maximum nemají očekávaný typ.',
+            );
+        }
+        $derived = CalculationStep::calculate(
+            'benefit_exemption.meal.per_shift',
+            $travelMaximum,
+            DecimalRate::fromString($rateValue),
+            RoundingMode::HalfUp,
+        )->outputMinorUnits;
+        if ($value !== $derived) {
+            throw new PayrollRulesetException(
+                'Parametr benefit_exemption.meal.per_shift (' . $value . ') musí odpovídat '
+                . 'benefit_exemption.meal.shift_rate (' . $rateValue . ') × '
+                . 'meal_allowance.band_1.tax_exempt_maximum (' . $travelMaximum . ') = '
+                . $derived . '.',
+            );
         }
         if ($shiftEntitlements < 0) {
             throw new PayrollRulesetException(
