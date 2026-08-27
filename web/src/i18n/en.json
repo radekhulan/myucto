@@ -5554,10 +5554,16 @@
             "payroll_runs": "Monthly payroll runs",
             "payslips": "Payslips and documents",
             "automatic_posting": "Automatic accounting posting",
-            "jmhz_export": "JMHZ export",
+            "jmhz_export": "JMHZ — standard scenario 1",
+            "jmhz_special_scenarios": "JMHZ — special scenarios 2 to 8",
+            "jmhz_submission": "JMHZ submission",
+            "registration_submission": "Employee registration submission",
             "employment_exit_documents": "Employment exit documents",
             "health_insurer_export": "Health insurer submissions",
-            "direct_submission": "Direct electronic submission"
+            "health_insurer_submission": "Health insurer report submission",
+            "eldp_control_export": "ELDP control XML",
+            "eldp_submission": "Standalone electronic ELDP submission",
+            "direct_submission": "Generic automatic submission of any agenda"
         },
         "health_notifications": {
             "title": "Health insurer notification duty",

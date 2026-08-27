@@ -10,7 +10,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-18-v8';
+    public const VERSION = '2026-08-27-v9';
 
     /**
      * Mzdový rok je podporovaný jen tehdy, když ho pokrývají VŠECHNY výpočtově
@@ -86,10 +86,13 @@ final class SupportMatrix
                 // jinak dokument fail-closed odmítne vzniknout.
                 ['key' => 'employment_exit_documents', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-16'],
                 ['key' => 'automatic_posting', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-18'],
-                // JMHZ export je dostupný: modul staví XML měsíčního hlášení,
-                // ověřuje ho připnutým XSD a projde s ním celý katalog kontrol
-                // ČSSZ. Neodesílá se — to je `direct_submission` níž.
+                // Automatizovaný je jen standardní scénář 1. Zvláštní scénáře
+                // mají připnuté zdrojové matice a XSD, ale bez samostatných
+                // právních důkazních modelů musí zůstat fail-closed.
                 ['key' => 'jmhz_export', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-22'],
+                ['key' => 'jmhz_special_scenarios', 'status' => 'manual_review', 'available' => false, 'min_epic' => 'MZ-22'],
+                ['key' => 'jmhz_submission', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-22'],
+                ['key' => 'registration_submission', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-22'],
                 // Export pro zdravotní pojišťovny je dostupný: modul vyhodnotí
                 // oznamovací povinnost, sestaví přehled o platbě, ověří ho
                 // připnutým XSD a vydá XML ke stažení — a účetní se k tomu
@@ -99,6 +102,11 @@ final class SupportMatrix
                 // až s obrazovkou, protože hotové jádro bez cesty k němu je
                 // z pohledu uživatele nedostupná funkce.
                 ['key' => 'health_insurer_export', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-23'],
+                ['key' => 'health_insurer_submission', 'status' => 'supported', 'available' => true, 'min_epic' => 'MZ-23'],
+                ['key' => 'eldp_control_export', 'status' => 'manual_review', 'available' => true, 'min_epic' => 'MZ-22'],
+                ['key' => 'eldp_submission', 'status' => 'not_supported', 'available' => false, 'min_epic' => 'MZ-22'],
+                // Obecné automatické odesílání libovolné agendy není bezpečný
+                // fallback. Podporované jsou jen výše uvedené konkrétní toky.
                 ['key' => 'direct_submission', 'status' => 'not_supported', 'available' => false, 'min_epic' => 'MZ-27'],
             ],
         ];

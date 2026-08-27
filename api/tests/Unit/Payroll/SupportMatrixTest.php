@@ -33,6 +33,15 @@ final class SupportMatrixTest extends TestCase
             $features['employment_exit_documents']['status'],
         );
         self::assertTrue($features['automatic_posting']['available']);
+        self::assertTrue($features['jmhz_export']['available']);
+        self::assertSame('supported', $features['jmhz_export']['status']);
+        self::assertFalse($features['jmhz_special_scenarios']['available']);
+        self::assertSame('manual_review', $features['jmhz_special_scenarios']['status']);
+        self::assertTrue($features['jmhz_submission']['available']);
+        self::assertTrue($features['registration_submission']['available']);
+        self::assertTrue($features['health_insurer_submission']['available']);
+        self::assertTrue($features['eldp_control_export']['available']);
+        self::assertFalse($features['eldp_submission']['available']);
         self::assertSame('not_supported', $features['direct_submission']['status']);
 
         $employmentTypes = array_column($matrix['employment_types'], null, 'key');

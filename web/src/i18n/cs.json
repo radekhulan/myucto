@@ -5554,10 +5554,16 @@
             "payroll_runs": "Měsíční mzdové běhy",
             "payslips": "Výplatní pásky a dokumenty",
             "automatic_posting": "Automatické zaúčtování",
-            "jmhz_export": "JMHZ export",
+            "jmhz_export": "JMHZ — standardní scénář 1",
+            "jmhz_special_scenarios": "JMHZ — zvláštní scénáře 2 až 8",
+            "jmhz_submission": "Podání JMHZ",
+            "registration_submission": "Podání registrací zaměstnanců",
             "employment_exit_documents": "Výstupní dokumenty při skončení vztahu",
             "health_insurer_export": "Podání zdravotním pojišťovnám",
-            "direct_submission": "Přímé elektronické podání"
+            "health_insurer_submission": "Odeslání přehledů zdravotním pojišťovnám",
+            "eldp_control_export": "Kontrolní XML ELDP",
+            "eldp_submission": "Samostatné elektronické podání ELDP",
+            "direct_submission": "Obecné automatické podání libovolné agendy"
         },
         "health_notifications": {
             "title": "Oznamovací povinnost vůči zdravotní pojišťovně",
