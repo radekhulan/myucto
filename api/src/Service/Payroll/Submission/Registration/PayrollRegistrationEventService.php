@@ -68,6 +68,15 @@ final readonly class PayrollRegistrationEventService
         if ($context === null) {
             throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen ve stejné firmě.');
         }
+        PayrollRegistrationBusinessMatrix::requireActionVariant(
+            $definition[0],
+            is_string($context['activity_code'] ?? null)
+                ? $context['activity_code']
+                : null,
+            is_string($context['jmhz_relationship_detail_code'] ?? null)
+                ? $context['jmhz_relationship_detail_code']
+                : null,
+        );
         $employeeId = (int) ($context['employee_id'] ?? 0);
         $identity = $this->identities->sensitiveJmhzIdentityAt(
             $supplierId,
@@ -274,10 +283,9 @@ final readonly class PayrollRegistrationEventService
         array $input,
         string $employmentExternalIdentifier,
     ): array {
-        return match ($interaction) {
+        $data = match ($interaction) {
             'termination' => $this->termination($effectiveOn, $context, $input),
-            'change' => $this->delta($input, false)
-                + $this->relationIdentity($context),
+            'change' => $this->delta($input, false),
             'correction' => $this->correction(
                 $supplierId,
                 $environment,
@@ -285,7 +293,7 @@ final readonly class PayrollRegistrationEventService
                 $effectiveOn,
                 $input,
                 $employmentExternalIdentifier,
-            ) + $this->relationIdentity($context),
+            ),
             'variable_symbol_transfer' => [
                 'new_variable_symbol' => $this->requiredDigits(
                     $input['new_variable_symbol'] ?? null,
@@ -310,6 +318,8 @@ final readonly class PayrollRegistrationEventService
             ),
             default => throw new \LogicException('Neznámá interakce REGZEC.'),
         };
+
+        return $data + $this->relationIdentity($context);
     }
 
     /** @param array<string,mixed> $context @param array<string,mixed> $input @return array<string,mixed> */
@@ -544,16 +554,11 @@ final readonly class PayrollRegistrationEventService
 
     private function a2Scenario(string $activityCode, mixed $detail): string
     {
-        if ($activityCode === '10') {
-            return '10';
-        }
-        if (in_array($activityCode, ['11', '12', '13', '14', 'M'], true)
-            || (preg_match('/^[1-9]$/D', $activityCode) === 1
-                && (string) $detail === '2')
-        ) {
-            return 'SPEC';
-        }
-        return 'OST';
+        return PayrollRegistrationBusinessMatrix::requireActionVariant(
+            2,
+            $activityCode,
+            is_string($detail) ? $detail : null,
+        );
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */

@@ -5,10 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 /**
- * Jediný seznam registračních interakcí, které tenhle core umí vyrobit.
+ * Jediný seznam registračních interakcí, které tenhle core rozpoznává.
  *
  * Připnuté REGZEC25 XSD povoluje `employee/@act` v rozsahu 1..99, takže tento
- * katalog je hranice podporovaných interakcí pro resolver, validátor i transport.
+ * katalog je hranice známých interakcí. Jejich aktuální business způsobilost
+ * samostatně vynucuje `PayrollRegistrationBusinessMatrix`.
  */
 final readonly class PayrollRegistrationInteraction
 {

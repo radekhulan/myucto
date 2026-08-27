@@ -115,6 +115,11 @@ použít omezenou předregistraci PREZEC, nebo je potřeba úplná registrace RE
 Náhled i následné zmrazení používají stejný historický zdroj a stejné kontroly;
 pozdější změna osobní karty už nemění dříve zmrazené podání.
 
+Úplnou registraci REGZEC s akcí A1 aplikace nepřipraví ani neodešle, dokud
+nemá zmrazený povinný druh činnosti a úplnou datovou sadu odpovídající varianty
+OST, 10 nebo SPEC. Navazující akce A5 až A8 jsou dostupné pouze pro variantu
+OST; u variant 10 a SPEC je aplikace odmítne ještě před schválením události.
+
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto

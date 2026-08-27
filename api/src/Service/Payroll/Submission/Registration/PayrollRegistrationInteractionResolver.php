@@ -20,7 +20,9 @@ final class PayrollRegistrationInteractionResolver
      * @param array{
      *   work_started:bool,full_registration_data:bool,
      *   pre_registration_accepted:bool,did_not_start:bool,
-     *   employment_ended:bool,event_interaction:?string
+     *   employment_ended:bool,event_interaction:?string,
+     *   activity_code?:?string,relationship_detail_code?:?string,
+     *   regzec_variant_data_complete?:bool
      * } $context
      */
     public function resolve(
@@ -92,6 +94,16 @@ final class PayrollRegistrationInteractionResolver
                     'REGZEC A1 vyžaduje úplnou a samostatně ověřenou datovou sadu.',
                 );
             }
+            PayrollRegistrationBusinessMatrix::requireActionVariant(
+                1,
+                is_string($context['activity_code'] ?? null)
+                    ? $context['activity_code']
+                    : null,
+                is_string($context['relationship_detail_code'] ?? null)
+                    ? $context['relationship_detail_code']
+                    : null,
+                ($context['regzec_variant_data_complete'] ?? false) === true,
+            );
 
             return $this->forSnapshot(
                 $snapshot,
@@ -129,7 +141,9 @@ final class PayrollRegistrationInteractionResolver
      * @param array{
      *   work_started:bool,full_registration_data:bool,
      *   pre_registration_accepted:bool,did_not_start:bool,
-     *   employment_ended:bool,event_interaction:?string
+     *   employment_ended:bool,event_interaction:?string,
+     *   activity_code?:?string,relationship_detail_code?:?string,
+     *   regzec_variant_data_complete?:bool
      * } $context
      */
     public function agendaFor(

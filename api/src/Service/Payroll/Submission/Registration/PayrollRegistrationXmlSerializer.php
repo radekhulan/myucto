@@ -17,6 +17,32 @@ final class PayrollRegistrationXmlSerializer
                 'Registrační interakce není v podporovaném katalogu.',
             );
         }
+        if ($payload->interaction->documentType === 'REGZEC25'
+            && $payload->interaction->actionCode === 1
+        ) {
+            PayrollRegistrationBusinessMatrix::requireActionVariant(
+                1,
+                null,
+                null,
+                false,
+            );
+        }
+        $eventData = $payload->eventSnapshot['data'] ?? null;
+        if ($payload->interaction->documentType === 'REGZEC25'
+            && $payload->interaction->actionCode >= 2
+            && is_array($eventData)
+            && !array_is_list($eventData)
+        ) {
+            PayrollRegistrationBusinessMatrix::requireActionVariant(
+                $payload->interaction->actionCode,
+                is_string($eventData['activity_code'] ?? null)
+                    ? $eventData['activity_code']
+                    : null,
+                is_string($eventData['relationship_detail_code'] ?? null)
+                    ? $eventData['relationship_detail_code']
+                    : null,
+            );
+        }
 
         return match ($payload->interaction->documentType) {
             'PREZEC26' => $this->prezec($payload),

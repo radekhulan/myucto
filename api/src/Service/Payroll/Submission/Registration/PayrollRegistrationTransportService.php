@@ -299,6 +299,22 @@ final readonly class PayrollRegistrationTransportService
                     'Transport podporuje pouze schválenou podporovanou akci PREZEC/REGZEC.',
                 );
             }
+            if ($agendaCode === 'REGZEC25' && (int) $action === 1) {
+                try {
+                    PayrollRegistrationBusinessMatrix::requireActionVariant(
+                        1,
+                        null,
+                        null,
+                        false,
+                    );
+                } catch (PayrollRegistrationXmlException $exception) {
+                    throw new \DomainException(
+                        $exception->getMessage(),
+                        0,
+                        $exception,
+                    );
+                }
+            }
         }
         $symbols = [];
         $nodes = $xpath->query(

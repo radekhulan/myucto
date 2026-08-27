@@ -180,11 +180,7 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
-    /**
-     * Po skutečném nástupu se podává plná registrace REGZEC A1 — částečné
-     * přihlášení už nemá co doplňovat.
-     */
-    public function testRegistrationAfterActualStartPreparesRegzecA1(): void
+    public function testRegistrationAfterActualStartKeepsIncompleteRegzecA1Closed(): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
@@ -195,13 +191,12 @@ final class PayrollRegistrationActionTest extends TestCase
         $response = $this->post();
         $body = $this->json($response);
 
-        self::assertSame(201, $response->getStatusCode(), (string) json_encode($body));
-        self::assertSame('REGZEC25', $body['agenda_code']);
-        self::assertSame('direct_full_registration', $body['interaction']);
-        $stored = $this->storedArtifactXml((int) $body['submission_id']);
-        self::assertStringContainsString('<REGZEC', $stored);
-        self::assertStringContainsString('act="1"', $stored);
-        self::assertStringContainsString('fro="' . self::START_ON . '"', $stored);
+        self::assertSame(422, $response->getStatusCode(), (string) json_encode($body));
+        self::assertSame(
+            'registration_regzec_a1_activity_missing',
+            $body['error']['code'],
+        );
+        self::assertSame(0, $this->countSubmissions());
     }
 
     /** Skončený vztah bez schváleného A2 zdroje nesmí znovu vytvořit A1. */
@@ -1096,6 +1091,16 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    public function testA5ToA8RejectActivity10BeforeEventFreeze(): void
+    {
+        $this->assertA5ToA8RejectVariant('10', null);
+    }
+
+    public function testA5ToA8RejectSpecVariantBeforeEventFreeze(): void
+    {
+        $this->assertA5ToA8RejectVariant('11', '1');
+    }
+
     /**
      * A6: přechod na české právní předpisy nese jen zmrazený podklad o
      * zahraničním nositeli; po přípravě nesmí tvrdit, že jej ČSSZ přijala.
@@ -1112,7 +1117,7 @@ final class PayrollRegistrationActionTest extends TestCase
             $this->supplierId,
             $this->employmentId,
         ]);
-        $this->seedRegistrationEventPrerequisites('10', null, self::TODAY);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::TODAY);
 
         $event = $this->json(($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -1164,7 +1169,7 @@ final class PayrollRegistrationActionTest extends TestCase
             $this->supplierId,
             $this->employmentId,
         ]);
-        $this->seedRegistrationEventPrerequisites('10', null, self::TODAY);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::TODAY);
 
         $event = $this->json(($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -1214,7 +1219,25 @@ final class PayrollRegistrationActionTest extends TestCase
         )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
         $this->seedRegistrationEventPrerequisites('10', null, '2026-08-16');
 
-        $source = $this->json($this->post());
+        $sourceEvent = $this->json(($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a4-source-change',
+                'changes' => ['title_prefix' => 'Bc.'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $source = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $sourceEvent['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
         $this->markRegistrationAccepted((int) $source['submission_id']);
 
         $wrongDate = ($this->action)->approveEvent(
@@ -1262,7 +1285,7 @@ final class PayrollRegistrationActionTest extends TestCase
                     status = "active"
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('10', null, '2026-08-01');
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-08-01');
 
         $eventResponse = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -1378,12 +1401,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame($prepared['artifact_sha256'], $replayed['artifact_sha256']);
     }
 
-    /**
-     * Navazující podání: po přijaté částečné přihlášce a skutečném nástupu
-     * se podává plná registrace, a to jako DOPLNĚNÍ po P1, ne jako nová
-     * přímá registrace — jinak by se u ČSSZ rozpadla vazba na předregistraci.
-     */
-    public function testAcceptedPreRegistrationLeadsToTheFollowUpRegistration(): void
+    public function testAcceptedPreRegistrationDoesNotBypassIncompleteA1Guard(): void
     {
         $this->seedAcceptedPreRegistration();
         $this->db->pdo()->prepare(
@@ -1392,10 +1410,14 @@ final class PayrollRegistrationActionTest extends TestCase
               WHERE supplier_id = ? AND id = ?',
         )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
 
-        $body = $this->json($this->post());
+        $response = $this->post();
+        $body = $this->json($response);
 
-        self::assertSame('REGZEC25', $body['agenda_code']);
-        self::assertSame('full_registration_after_p1', $body['interaction']);
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_regzec_a1_activity_missing',
+            $body['error']['code'],
+        );
     }
 
     /**
@@ -1437,12 +1459,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(1, $this->countSubmissions());
     }
 
-    /**
-     * Podání po lhůtě se připraví — zmeškaný termín se řeší podáním, ne jeho
-     * odepřením — ale povinnost v registru musí termín nést pravdivě, aby
-     * bylo zpoždění vidět.
-     */
-    public function testLateRegistrationIsPreparedAndKeepsTheRealDueDate(): void
+    public function testLateRegistrationDoesNotBypassIncompleteA1Guard(): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
@@ -1451,13 +1468,13 @@ final class PayrollRegistrationActionTest extends TestCase
               WHERE supplier_id = ? AND id = ?',
         )->execute([$this->supplierId, $this->employmentId]);
 
-        $body = $this->json($this->post());
+        $response = $this->post();
 
-        self::assertSame('REGZEC25', $body['agenda_code']);
-        // Lhůta zůstává dnem nástupu, tedy v minulosti vůči „dnešku" testu.
-        self::assertSame('2026-07-06', $body['deadline']['due_on']);
-        self::assertLessThan(self::TODAY, $body['deadline']['due_on']);
-        self::assertSame('2026-06-28', $this->obligationEarliest('REGZEC25'));
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_regzec_a1_activity_missing',
+            $this->json($response)['error']['code'],
+        );
     }
 
     /**
@@ -1832,6 +1849,71 @@ final class PayrollRegistrationActionTest extends TestCase
             $idPpvReceiptId,
             $this->userId,
         );
+    }
+
+    private function assertA5ToA8RejectVariant(
+        string $activityCode,
+        ?string $relationshipDetail,
+    ): void {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            self::TODAY,
+            self::TODAY,
+            $this->supplierId,
+            $this->employmentId,
+        ]);
+        $this->seedRegistrationEventPrerequisites(
+            $activityCode,
+            $relationshipDetail,
+            self::TODAY,
+        );
+        $cases = [
+            'variable_symbol_transfer' => [
+                'new_variable_symbol' => '9990005678',
+            ],
+            'czech_legislation_start' => [
+                'foreign_insurance' => [
+                    'current' => 'P',
+                    'name' => 'Syntetická zahraniční instituce',
+                    'country_code' => 'SK',
+                ],
+            ],
+            'czech_legislation_end' => [
+                'foreign_insurance' => [
+                    'current' => 'S',
+                    'name' => 'Syntetická zahraniční instituce',
+                    'country_code' => 'SK',
+                    'identifier' => 'SYN-INS-123',
+                ],
+            ],
+            'cancellation' => [
+                'source_submission_id' => 1,
+                'not_started' => true,
+            ],
+        ];
+
+        foreach ($cases as $interaction => $specificInput) {
+            $response = ($this->action)->approveEvent(
+                $this->request('POST')->withParsedBody([
+                    'environment' => 'test',
+                    'interaction' => $interaction,
+                    'effective_on' => self::TODAY,
+                    'source_reference' => "synthetic-{$interaction}-{$activityCode}",
+                    ...$specificInput,
+                ]),
+                new Response(),
+                ['employmentId' => (string) $this->employmentId],
+            );
+
+            self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame(
+                'registration_regzec_action_variant_unsupported',
+                $this->json($response)['error']['code'],
+            );
+        }
     }
 
     private function seedTrustedReceipt(

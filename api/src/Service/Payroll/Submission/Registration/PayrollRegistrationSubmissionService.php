@@ -601,9 +601,10 @@ final readonly class PayrollRegistrationSubmissionService
     }
 
     /**
-     * Fakta pro resolver. `full_registration_data` NEZNAMENÁ „máme vyplněná
-     * pole" — znamená „plnou registraci lze doložit jako skutečnost". Před
-     * nástupem českého občana se za doloženou vědomě nepovažuje: `job/@fro`
+     * Fakta pro resolver. `full_registration_data` potvrzuje jen základní
+     * metadata zaměstnavatele a skutečný nástup, nikoli právní úplnost A1;
+     * úplnou variantní sadu samostatně hlídá business matice. Před nástupem
+     * českého občana se za doloženou vědomě nepovažuje: `job/@fro`
      * je datum SKUTEČNÉHO nástupu a předjímat ho znamená tvrdit ČSSZ událost,
      * která se ještě nestala. Přesně na tuhle mezeru je PREZEC.
      *
@@ -626,13 +627,13 @@ final readonly class PayrollRegistrationSubmissionService
                 ['active', 'suspended', 'ended', 'archived'],
                 true,
             );
-        $employerDataComplete = $context['employer_name'] !== ''
+        $employerMetadataComplete = $context['employer_name'] !== ''
             && $context['employer_variable_symbol'] !== null
             && $context['cssz_workplace_code'] !== null;
 
         return [
             'work_started' => $workStarted,
-            'full_registration_data' => $employerDataComplete && $workStarted,
+            'full_registration_data' => $employerMetadataComplete && $workStarted,
             'pre_registration_accepted' =>
                 $this->registrations->hasAcceptedPreRegistration(
                     $supplierId,

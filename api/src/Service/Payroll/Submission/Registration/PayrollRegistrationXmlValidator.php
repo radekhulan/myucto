@@ -127,12 +127,12 @@ final readonly class PayrollRegistrationXmlValidator
                 'registration_regzec_full_payload_incomplete',
                 'REGZEC nemá úplná povinná metadata zaměstnavatele.',
             );
-        } elseif ($payload->interaction->actionCode === 1
-            && $payload->actualStartOn === null
-        ) {
-            $this->invalid(
-                'registration_regzec_full_payload_incomplete',
-                'REGZEC A1 nemá datum skutečného nástupu.',
+        } elseif ($payload->interaction->actionCode === 1) {
+            PayrollRegistrationBusinessMatrix::requireActionVariant(
+                1,
+                null,
+                null,
+                false,
             );
         } elseif ($payload->interaction->actionCode >= 2) {
             $this->validateEventSnapshot($payload);
@@ -181,6 +181,15 @@ final readonly class PayrollRegistrationXmlValidator
             );
         }
         $action = $payload->interaction->actionCode;
+        PayrollRegistrationBusinessMatrix::requireActionVariant(
+            $action,
+            is_string($data['activity_code'] ?? null)
+                ? $data['activity_code']
+                : null,
+            is_string($data['relationship_detail_code'] ?? null)
+                ? $data['relationship_detail_code']
+                : null,
+        );
         $valid = match ($action) {
             2 => ($data['end_on'] ?? null) === $effectiveOn
                 && is_string($data['activity_code'] ?? null),

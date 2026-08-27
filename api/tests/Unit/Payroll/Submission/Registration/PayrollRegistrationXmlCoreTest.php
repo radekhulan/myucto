@@ -17,7 +17,7 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollRegistrationXmlCoreTest extends TestCase
 {
-    public function testResolverChoosesP1ThenRegzecA1AndP2WithoutGuessing(): void
+    public function testResolverChoosesP1AndP2ButKeepsIncompleteA1Closed(): void
     {
         $resolver = new PayrollRegistrationInteractionResolver();
         $snapshot = self::snapshot('CZ');
@@ -33,15 +33,17 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             [$p1->documentType, $p1->interaction, $p1->actionCode],
         );
 
-        $a1 = $resolver->resolve(self::snapshot('CZ', 'REGZEC25'), [
-            'work_started' => true,
-            'full_registration_data' => true,
-            'pre_registration_accepted' => true,
-            'did_not_start' => false,
-        ]);
-        self::assertSame(
-            ['REGZEC25', 'full_registration_after_p1', 1],
-            [$a1->documentType, $a1->interaction, $a1->actionCode],
+        $this->expectCode(
+            'registration_regzec_a1_activity_missing',
+            static fn () => $resolver->resolve(
+                self::snapshot('CZ', 'REGZEC25'),
+                [
+                    'work_started' => true,
+                    'full_registration_data' => true,
+                    'pre_registration_accepted' => true,
+                    'did_not_start' => false,
+                ],
+            ),
         );
 
         $p2 = $resolver->resolve($snapshot, [
@@ -74,7 +76,7 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
         ))->validate($payload, $xml);
     }
 
-    public function testRegzecA1HasStableExactBytesAndPassesPinnedXsd(): void
+    public function testRegzecA1CannotSerializeTheKnownIncompleteShape(): void
     {
         $payload = self::payload(
             self::snapshot('SK'),
@@ -86,12 +88,17 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             expectedStartOn: null,
             actualStartOn: '2026-08-05',
         );
-        $xml = (new PayrollRegistrationXmlSerializer())->serialize($payload);
-
-        self::assertSame(self::regzecGolden(), $xml);
-        (new PayrollRegistrationXmlValidator(
-            new PayrollRegistrationSchemaCatalog(),
-        ))->validate($payload, $xml);
+        $this->expectCode(
+            'registration_regzec_a1_activity_missing',
+            static fn () => (new PayrollRegistrationXmlSerializer())
+                ->serialize($payload),
+        );
+        $this->expectCode(
+            'registration_regzec_a1_activity_missing',
+            static fn () => (new PayrollRegistrationXmlValidator(
+                new PayrollRegistrationSchemaCatalog(),
+            ))->validate($payload, '<REGZEC/>'),
+        );
     }
 
     public function testPrezecP2HasStableExactBytesAndPassesPinnedXsd(): void
@@ -381,8 +388,12 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
             ]],
             'variable_symbol_transfer' => [5, [
                 'new_variable_symbol' => '9876543210',
+                'activity_code' => '1',
+                'relationship_detail_code' => '1',
             ]],
             'czech_legislation_start' => [6, [
+                'activity_code' => '1',
+                'relationship_detail_code' => '1',
                 'foreign_insurance' => [
                     'current' => 'P',
                     'name' => 'Syntetická instituce',
@@ -390,6 +401,8 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 ],
             ]],
             'czech_legislation_end' => [7, [
+                'activity_code' => '1',
+                'relationship_detail_code' => '1',
                 'foreign_insurance' => [
                     'current' => 'S',
                     'name' => 'Syntetická instituce',
@@ -397,7 +410,11 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                     'identifier' => 'SYN-123',
                 ],
             ]],
-            'cancellation' => [8, ['not_started' => true]],
+            'cancellation' => [8, [
+                'not_started' => true,
+                'activity_code' => '1',
+                'relationship_detail_code' => '1',
+            ]],
         ];
 
         foreach ($cases as $interaction => [$actionCode, $data]) {
@@ -430,6 +447,40 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
                 PayrollRegistrationInteraction::SUPPORTED,
                 'action_code',
             ),
+        );
+    }
+
+    public function testDirectEventPayloadCannotBypassTheA5ToA8VariantMatrix(): void
+    {
+        $payload = self::payload(
+            self::snapshot('SK'),
+            new PayrollRegistrationInteraction(
+                'REGZEC25',
+                'variable_symbol_transfer',
+                5,
+            ),
+            expectedStartOn: null,
+            eventSnapshot: self::eventSnapshot(
+                'variable_symbol_transfer',
+                5,
+                [
+                    'new_variable_symbol' => '9876543210',
+                    'activity_code' => '10',
+                    'relationship_detail_code' => null,
+                ],
+            ),
+        );
+
+        $this->expectCode(
+            'registration_regzec_action_variant_unsupported',
+            static fn () => (new PayrollRegistrationXmlSerializer())
+                ->serialize($payload),
+        );
+        $this->expectCode(
+            'registration_regzec_action_variant_unsupported',
+            static fn () => (new PayrollRegistrationXmlValidator(
+                new PayrollRegistrationSchemaCatalog(),
+            ))->validate($payload, '<REGZEC/>'),
         );
     }
 
@@ -696,26 +747,6 @@ final class PayrollRegistrationXmlCoreTest extends TestCase
     </employee>
   </employees>
 </PREZEC>
-XML;
-    }
-
-    private static function regzecGolden(): string
-    {
-        return <<<'XML'
-<?xml version="1.0" encoding="UTF-8"?>
-<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025">
-  <employees>
-    <employee sqnr="1" dep="110" act="1" dat="2026-08-04">
-      <client bno="9152031234">
-        <name sur="Novotná" fir="Jana" tit="Ing."/>
-        <birth dat="1991-02-03" nam="Nováková" cit="Testov" stat="CZ"/>
-        <stat cnt="SK"/>
-      </client>
-      <comp vs="1234567890" nam="Syntetický zaměstnavatel s.r.o."/>
-      <job fro="2026-08-05"/>
-    </employee>
-  </employees>
-</REGZEC>
 XML;
     }
 
