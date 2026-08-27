@@ -1392,6 +1392,21 @@ final class LicenseService
      *
      * @return array{ok:bool,error:?string}
      */
+    /**
+     * Zahodí zapamatovaný licenční řádek.
+     *
+     * Prvotní setup zapisuje `license.instance_id` PŘÍMO přes PDO (je součástí
+     * jedné transakce se založením admina), takže se o tom tahle služba nemá
+     * jak dozvědět — a následná aktivace odešla se STARÝM, lokálně vygenerovaným
+     * UUID. Licenční server ji odmítl `instance_not_managed` a zaplacená
+     * instalace zůstala na zkušebním období.
+     */
+    public function forgetCachedRow(): void
+    {
+        $this->rowCache = null;
+        $this->cache->invalidateGroup(EntityCache::GROUP_LICENSE);
+    }
+
     public function acceptManagedLicense(string $envelope): array
     {
         if (!$this->isManaged()) {

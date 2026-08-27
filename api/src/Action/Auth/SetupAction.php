@@ -376,6 +376,11 @@ final class SetupAction
         $licenseActivated = null;
         if ($licenseKey !== '') {
             try {
+                // ⚠️ Přiřazené `instance_id` jsme zapsali přímo přes PDO uvnitř
+                // transakce, takže licenční služba má v paměti pořád původní,
+                // lokálně vygenerované UUID. Bez tohohle zahození odešla aktivace
+                // s ním a server ji odmítl `instance_not_managed`.
+                $this->license->forgetCachedRow();
                 $res = $this->license->activate($licenseKey);
                 $licenseActivated = ($res['ok'] ?? false) === true;
                 if (!$licenseActivated) {
