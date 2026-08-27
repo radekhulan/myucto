@@ -204,6 +204,124 @@ final class PayrollRulesetAdminService
     }
 
     /**
+     * Read-only náhled účinku kandidáta před aktivací. Nepředstírá přepočet
+     * peněz: bez konkrétního uzamčeného vstupu by částku jen odhadoval. Ukazuje
+     * proto přesně změněný manifest a hranici, že dřívější snapshoty zůstávají
+     * neměnné.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function impactPreview(string $rulesetId): ?array
+    {
+        $entry = $this->registry->entry($rulesetId);
+        if ($entry === null) {
+            return null;
+        }
+
+        $candidate = $entry['version'];
+        $candidateContent = PayrollRulesetContent::canonicalArray($candidate);
+        $baseline = $this->previousActiveBaseline($candidate)
+            ?? $this->defaultBaseline($entry['default']);
+        $parameterDiff = $baseline === null
+            ? null
+            : PayrollRulesetDiff::between($baseline['content'], $candidateContent);
+        $newSnapshotsWouldChange = $parameterDiff === null
+            ? null
+            : !$parameterDiff['identical'];
+
+        return [
+            'ruleset' => $this->summary($entry),
+            'baseline' => $baseline === null ? null : $baseline['summary'],
+            'effective' => [
+                'from' => $candidate->effectiveFrom,
+                'to' => $candidate->effectiveTo,
+            ],
+            'parameter_diff' => $parameterDiff,
+            'activation_effect' => [
+                'new_snapshots_would_change' => $newSnapshotsWouldChange,
+                'existing_snapshots_are_immutable' => true,
+                'money_delta' => null,
+                'money_delta_unavailable_reason' => 'no_locked_input_snapshot',
+            ],
+        ];
+    }
+
+    /**
+     * @return array{content:array<string,mixed>,summary:array<string,string>}|null
+     */
+    private function previousActiveBaseline(PayrollRulesetVersion $candidate): ?array
+    {
+        $snapshot = $this->overrides->latestActivationBoundary($candidate->id);
+        if ($snapshot === null || $snapshot['lifecycle'] !== PayrollRulesetLifecycle::Active->value) {
+            return null;
+        }
+
+        try {
+            $recanonicalized = PayrollRulesetContent::recanonicalize($snapshot['snapshot_json']);
+            if (!hash_equals($snapshot['snapshot_hash'], $recanonicalized['hash'])) {
+                throw new PayrollRulesetException('Otisk aktivního auditního snapshotu rulesetu nesouhlasí.');
+            }
+            $content = json_decode($recanonicalized['canonical'], true, 64, JSON_THROW_ON_ERROR);
+            if (!is_array($content)
+                || self::snapshotText($content, 'id') !== $candidate->id
+                || self::snapshotText($content, 'domain') !== $candidate->domain->value) {
+                return null;
+            }
+
+            return [
+                'content' => $content,
+                'summary' => [
+                    'ruleset_id' => self::snapshotText($content, 'id'),
+                    'version' => self::snapshotText($content, 'version'),
+                    'origin' => VendorRulesetManifest::contains($recanonicalized['hash'])
+                        ? PayrollRulesetOrigin::Vendor->value
+                        : PayrollRulesetOrigin::CustomerOverride->value,
+                    'canonical_hash' => $recanonicalized['hash'],
+                    'source' => 'previous_active_snapshot',
+                ],
+            ];
+        } catch (\JsonException | PayrollRulesetException $e) {
+            throw new PayrollRulesetGovernanceException(
+                'impact_baseline_invalid',
+                'Náhled nelze sestavit: poslední aktivní auditní snapshot nemá platnou integritu.',
+                ['ruleset_id' => $candidate->id],
+            );
+        }
+    }
+
+    /**
+     * @return array{content:array<string,mixed>,summary:array<string,string>}|null
+     */
+    private function defaultBaseline(?PayrollRulesetVersion $default): ?array
+    {
+        if ($default === null) {
+            return null;
+        }
+
+        return [
+            'content' => PayrollRulesetContent::canonicalArray($default),
+            'summary' => [
+                'ruleset_id' => $default->id,
+                'version' => $default->version,
+                'origin' => $default->origin->value,
+                'canonical_hash' => PayrollRulesetContent::hash(PayrollRulesetContent::encode($default)),
+                'source' => 'vendor_default',
+            ],
+        ];
+    }
+
+    /** @param array<array-key, mixed> $snapshot */
+    private static function snapshotText(array $snapshot, string $field): string
+    {
+        $value = $snapshot[$field] ?? null;
+        if (!is_string($value) || $value === '') {
+            throw new PayrollRulesetException("Snapshot rulesetu nemá textové pole {$field}.");
+        }
+
+        return $value;
+    }
+
+    /**
      * Uloží override obsahu. Lifecycle se tudy NEMĚNÍ — na to jsou příkazové
      * routy, aby neexistoval endpoint „nastav libovolný stav".
      *

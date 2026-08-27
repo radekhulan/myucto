@@ -241,6 +241,41 @@ final class PayrollRulesetRepository
         return $result;
     }
 
+    /**
+     * Poslední provozní hranice téhož rulesetu. Audit je append-only, takže
+     * nečteme z aktuálního override řádku, který už mohl být změněn do dalšího
+     * kandidáta. Reset a supersede zároveň ukončují platnost starší aktivace.
+     *
+     * @return array{action:string,lifecycle:string,snapshot_json:string,snapshot_hash:string}|null
+     */
+    public function latestActivationBoundary(string $rulesetId): ?array
+    {
+        if (!$this->db->hasTable('payroll_ruleset_audit')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT action, lifecycle, snapshot_json, snapshot_hash
+               FROM payroll_ruleset_audit
+              WHERE ruleset_id = ?
+                AND action IN (?, ?, ?)
+              ORDER BY id DESC
+              LIMIT 1',
+        );
+        $stmt->execute([$rulesetId, 'activate', 'reset', 'supersede']);
+        $fetched = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($fetched === false) {
+            return null;
+        }
+        $row = self::row($fetched);
+
+        return [
+            'action' => self::str($row, 'action'),
+            'lifecycle' => self::str($row, 'lifecycle'),
+            'snapshot_json' => self::str($row, 'snapshot_json'),
+            'snapshot_hash' => self::str($row, 'snapshot_hash'),
+        ];
+    }
+
     /** @return array<string, mixed> */
     private static function hydrate(mixed $value): array
     {

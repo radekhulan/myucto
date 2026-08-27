@@ -13,6 +13,7 @@ import {
   type PayrollRulesetDiff,
   type PayrollRulesetDomainGroup,
   type PayrollRulesetDomainStatus,
+  type PayrollRulesetImpactPreview,
   type PayrollRulesetOverview,
   type PayrollRulesetSource,
   type PayrollRulesetSummary,
@@ -34,6 +35,9 @@ const saving = ref(false)
 const overview = ref<PayrollRulesetOverview | null>(null)
 const detail = ref<PayrollRulesetDetail | null>(null)
 const diff = ref<PayrollRulesetDiff | null>(null)
+const impactPreview = ref<PayrollRulesetImpactPreview | null>(null)
+const impactPreviewLoading = ref(false)
+const activationPreviewConfirmed = ref(false)
 const TABS = ['parameters', 'sources', 'diff', 'audit'] as const
 type RulesetTab = (typeof TABS)[number]
 const tab = ref<RulesetTab>('parameters')
@@ -50,6 +54,18 @@ const COLUMNS: ColumnDef[] = [
 const tbl = useTablePrefs('payroll-rulesets', COLUMNS)
 
 const canEdit = computed(() => auth.isSuperadmin)
+const impactPreviewMatchesCandidate = computed(() =>
+  impactPreview.value !== null
+  && detail.value !== null
+  && impactPreview.value.ruleset.ruleset_id === detail.value.ruleset_id
+  && impactPreview.value.ruleset.row_version === detail.value.row_version
+  && impactPreview.value.ruleset.canonical_hash === detail.value.canonical_hash,
+)
+const canActivate = computed(() =>
+  detail.value?.next_command === 'activate'
+  && impactPreviewMatchesCandidate.value
+  && activationPreviewConfirmed.value,
+)
 
 const lifecycleClass: Record<string, string> = {
   draft: 'bg-neutral-100 text-neutral-600',
@@ -148,6 +164,8 @@ async function load() {
 async function open(summary: PayrollRulesetSummary) {
   tab.value = 'parameters'
   reason.value = ''
+  impactPreview.value = null
+  activationPreviewConfirmed.value = false
   Object.keys(drafts).forEach(key => delete drafts[key])
   try {
     detail.value = await payrollRulesetsApi.detail(summary.ruleset_id)
@@ -162,6 +180,8 @@ async function open(summary: PayrollRulesetSummary) {
 function close() {
   detail.value = null
   diff.value = null
+  impactPreview.value = null
+  activationPreviewConfirmed.value = false
 }
 
 /**
@@ -268,6 +288,8 @@ async function save() {
       parameters,
     })
     detail.value = updated
+    impactPreview.value = null
+    activationPreviewConfirmed.value = false
     Object.keys(drafts).forEach(key => delete drafts[key])
     reason.value = ''
     diff.value = updated.has_default
@@ -284,6 +306,10 @@ async function save() {
 
 async function runCommand(command: PayrollRulesetCommand | null) {
   if (!detail.value || command === null) return
+  if (command === 'activate' && !canActivate.value) {
+    toast.warning(t('payroll.rulesets.impact_preview.required'))
+    return
+  }
   if (reason.value.trim() === '') {
     toast.warning(t('payroll.rulesets.reason_required'))
     return
@@ -295,6 +321,8 @@ async function runCommand(command: PayrollRulesetCommand | null) {
       row_version: detail.value.row_version,
     })
     detail.value = result.ruleset
+    impactPreview.value = null
+    activationPreviewConfirmed.value = false
     reason.value = ''
     await load()
     toast.success(
@@ -306,6 +334,20 @@ async function runCommand(command: PayrollRulesetCommand | null) {
     toast.error(errorMessage(error, t('payroll.rulesets.command_failed')))
   } finally {
     saving.value = false
+  }
+}
+
+async function loadImpactPreview() {
+  if (!detail.value || detail.value.next_command !== 'activate') return
+  impactPreview.value = null
+  activationPreviewConfirmed.value = false
+  impactPreviewLoading.value = true
+  try {
+    impactPreview.value = await payrollRulesetsApi.impactPreview(detail.value.ruleset_id)
+  } catch (error: unknown) {
+    toast.error(errorMessage(error, t('payroll.rulesets.impact_preview.load_failed')))
+  } finally {
+    impactPreviewLoading.value = false
   }
 }
 
@@ -321,6 +363,8 @@ async function resetToDefault() {
     await load()
     if (result.ruleset) {
       detail.value = result.ruleset
+      impactPreview.value = null
+      activationPreviewConfirmed.value = false
       diff.value = result.ruleset.has_default
         ? await payrollRulesetsApi.diff(result.ruleset.ruleset_id, 'default')
         : null
@@ -645,6 +689,114 @@ onMounted(load)
           </li>
         </ul>
 
+        <section
+          v-if="canEdit && detail.next_command === 'activate'"
+          class="rounded-lg border border-warning-500/40 bg-warning-50 p-4"
+          data-test="ruleset-impact-preview"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 class="text-sm font-semibold text-neutral-900">
+                {{ t('payroll.rulesets.impact_preview.title') }}
+              </h3>
+              <p class="mt-1 max-w-3xl text-sm text-neutral-600">
+                {{ t('payroll.rulesets.impact_preview.hint') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              :class="btnOutline('primary')"
+              :disabled="saving || impactPreviewLoading"
+              data-test="ruleset-impact-preview-load"
+              @click="loadImpactPreview"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path :d="ICONS.cycle" />
+              </svg>
+              {{ impactPreviewLoading
+                ? t('payroll.rulesets.impact_preview.loading')
+                : t(impactPreview ? 'payroll.rulesets.impact_preview.refresh' : 'payroll.rulesets.impact_preview.load') }}
+            </button>
+          </div>
+
+          <template v-if="impactPreview">
+            <p class="mt-4 text-sm text-neutral-800" data-test="ruleset-impact-preview-effective">
+              {{ t('payroll.rulesets.impact_preview.effective', impactPreview.effective) }}
+            </p>
+            <p v-if="impactPreview.baseline" class="mt-1 text-xs text-neutral-600">
+              {{ t(`payroll.rulesets.impact_preview.baseline.${impactPreview.baseline.source}`, {
+                version: impactPreview.baseline.version,
+              }) }}
+            </p>
+
+            <div class="mt-3" data-test="ruleset-impact-preview-diff">
+              <p v-if="!impactPreview.parameter_diff" class="text-sm text-neutral-600">
+                {{ t('payroll.rulesets.impact_preview.baseline_unavailable') }}
+              </p>
+              <p v-else-if="impactPreview.parameter_diff.identical" class="text-sm text-neutral-600">
+                {{ t('payroll.rulesets.impact_preview.identical') }}
+              </p>
+              <div v-else class="overflow-x-auto">
+                <table class="w-full min-w-[36rem] table-fixed divide-y divide-warning-500/20 text-sm">
+                  <thead>
+                    <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                      <th class="px-3 py-2">{{ t('payroll.rulesets.column.parameter') }}</th>
+                      <th class="px-3 py-2">{{ t('payroll.rulesets.column.before') }}</th>
+                      <th class="px-3 py-2">{{ t('payroll.rulesets.column.after') }}</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-warning-500/10">
+                    <tr v-for="row in impactPreview.parameter_diff.changed" :key="`impact-c-${row.key}`">
+                      <td class="px-3 py-2 align-top text-neutral-900">
+                        {{ nameForKey(row.key) }}
+                        <span class="mt-0.5 block font-mono text-xs break-all text-neutral-400">{{ row.key }}</span>
+                      </td>
+                      <td class="px-3 py-2 align-top text-neutral-500 line-through">{{ diffValue(row.before) }}</td>
+                      <td class="px-3 py-2 align-top font-medium text-neutral-900">{{ diffValue(row.after) }}</td>
+                    </tr>
+                    <tr v-for="row in impactPreview.parameter_diff.added" :key="`impact-a-${row.key}`">
+                      <td class="px-3 py-2 align-top text-neutral-900">
+                        {{ nameForKey(row.key) }}
+                        <span class="mt-0.5 block font-mono text-xs break-all text-neutral-400">{{ row.key }}</span>
+                      </td>
+                      <td class="px-3 py-2 align-top text-neutral-400">{{ t('payroll.rulesets.diff_added') }}</td>
+                      <td class="px-3 py-2 align-top font-medium text-success-600">{{ diffValue(row.after) }}</td>
+                    </tr>
+                    <tr v-for="row in impactPreview.parameter_diff.removed" :key="`impact-r-${row.key}`">
+                      <td class="px-3 py-2 align-top text-neutral-900">
+                        {{ nameForKey(row.key) }}
+                        <span class="mt-0.5 block font-mono text-xs break-all text-neutral-400">{{ row.key }}</span>
+                      </td>
+                      <td class="px-3 py-2 align-top text-neutral-500 line-through">{{ diffValue(row.before) }}</td>
+                      <td class="px-3 py-2 align-top text-danger-500">{{ t('payroll.rulesets.diff_removed') }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p class="mt-3 text-sm text-neutral-700" data-test="ruleset-impact-preview-immutable">
+              {{ t('payroll.rulesets.impact_preview.immutable') }}
+            </p>
+            <p class="mt-1 text-sm text-neutral-700" data-test="ruleset-impact-preview-money">
+              {{ t('payroll.rulesets.impact_preview.money_unavailable') }}
+            </p>
+            <p v-if="!impactPreviewMatchesCandidate" class="mt-3 text-sm font-medium text-danger-500">
+              {{ t('payroll.rulesets.impact_preview.stale') }}
+            </p>
+            <label class="mt-3 flex cursor-pointer items-start gap-2 text-sm text-neutral-800">
+              <input
+                v-model="activationPreviewConfirmed"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-primary-600 focus:ring-primary-500"
+                :disabled="!impactPreviewMatchesCandidate"
+                data-test="ruleset-impact-preview-confirm"
+              >
+              <span>{{ t('payroll.rulesets.impact_preview.confirm') }}</span>
+            </label>
+          </template>
+        </section>
+
         <nav class="flex flex-wrap gap-2 border-b border-neutral-200 pb-2">
           <button
             v-for="key in TABS"
@@ -962,6 +1114,7 @@ onMounted(load)
               maxlength="1000"
               class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
               :placeholder="t('payroll.rulesets.reason_placeholder')"
+              data-test="ruleset-reason"
             >
           </label>
 
@@ -979,9 +1132,12 @@ onMounted(load)
             </button>
             <button
               v-if="detail.next_command"
-              :class="btnOutline('success')"
-              :disabled="saving || detail.blockers.length > 0"
-              :title="detail.blockers[0]?.message"
+              :class="detail.next_command === 'activate' ? btnFilled('success') : btnOutline('success')"
+              :disabled="saving || detail.blockers.length > 0 || (detail.next_command === 'activate' && !canActivate)"
+              :title="detail.blockers[0]?.message ?? (detail.next_command === 'activate' && !canActivate
+                ? t('payroll.rulesets.impact_preview.required')
+                : undefined)"
+              :data-test="`ruleset-command-${detail.next_command}`"
               @click="runCommand(detail.next_command)"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

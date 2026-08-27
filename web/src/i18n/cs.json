@@ -845,6 +845,26 @@
             "diff_removed": "Odebráno",
             "audit_empty": "Zatím žádná změna.",
             "audit_actor": "Uživatel: {user}",
+            "impact_preview": {
+                "title": "Náhled dopadu před uvedením do provozu",
+                "hint": "Před aktivací načtěte aktuální kandidát. Náhled neprovádí žádnou produkční akci.",
+                "load": "Načíst náhled",
+                "refresh": "Obnovit náhled",
+                "loading": "Načítám náhled…",
+                "load_failed": "Náhled dopadu se nepodařilo načíst.",
+                "effective": "Aktivace se použije pro nové snapshoty s účinností od {from} do {to}.",
+                "baseline": {
+                    "vendor_default": "Porovnání je proti ověřené dodané sadě {version}.",
+                    "previous_active_snapshot": "Porovnání je proti poslednímu skutečně aktivnímu snapshotu {version}."
+                },
+                "baseline_unavailable": "Přesný rozdíl nelze poctivě určit, protože chybí porovnatelná předloha.",
+                "identical": "V parametrech proti porovnávanému stavu není žádný rozdíl.",
+                "immutable": "Dříve uložené snapshoty se aktivací nemění.",
+                "money_unavailable": "Dopad v Kč bez uzamčeného vstupu nelze poctivě spočítat.",
+                "stale": "Náhled už neodpovídá aktuálnímu kandidátu. Načtěte jej znovu.",
+                "confirm": "Seznámil(a) jsem se s aktuálním náhledem, rozdílem parametrů a jeho omezeními.",
+                "required": "Aktivace vyžaduje aktuální náhled dopadu a výslovné potvrzení."
+            },
             "unit": {
                 "czk": "Kč"
             },

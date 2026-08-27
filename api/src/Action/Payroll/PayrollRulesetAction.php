@@ -21,6 +21,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET    /api/payroll/rulesets                                — přehled domén a verzí
  *   GET    /api/payroll/rulesets/{id}                           — detail verze
  *   GET    /api/payroll/rulesets/{id}/diff?against=default|{id} — diff parametrů
+ *   GET    /api/payroll/rulesets/{id}/impact-preview            — read-only dopad před aktivací
  *   PUT    /api/payroll/rulesets/{id}                           — uložit override obsahu
  *   DELETE /api/payroll/rulesets/{id}                           — reset na default z kódu
  *   POST   /api/payroll/rulesets/{id}/commands/{command}        — review|approve|activate|supersede
@@ -82,6 +83,25 @@ final class PayrollRulesetAction
         return $diff === null
             ? Json::error($response, 'not_found', 'Ruleset nebyl nalezen.', 404)
             : Json::ok($response, ['diff' => $diff]);
+    }
+
+    /** @param array<string,string> $args */
+    public function impactPreview(Request $request, Response $response, array $args): Response
+    {
+        // Náhled sice nic nemění, ale ukazuje globální legislativní kandidát.
+        // Drží proto stejnou hranici superadmina jako aktivace.
+        if (($error = $this->authorizeWrite($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $preview = $this->service->impactPreview((string) ($args['rulesetId'] ?? ''));
+        } catch (PayrollRulesetGovernanceException $e) {
+            return Json::error($response, $e->reasonCode, $e->getMessage(), 422, $e->context);
+        }
+
+        return $preview === null
+            ? Json::error($response, 'not_found', 'Ruleset nebyl nalezen.', 404)
+            : Json::ok($response, ['impact_preview' => $preview]);
     }
 
     /** @param array<string,string> $args */

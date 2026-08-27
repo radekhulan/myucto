@@ -845,6 +845,26 @@
             "diff_removed": "Removed",
             "audit_empty": "No change recorded yet.",
             "audit_actor": "User: {user}",
+            "impact_preview": {
+                "title": "Impact preview before activation",
+                "hint": "Load the current candidate before activation. The preview does not perform any production action.",
+                "load": "Load preview",
+                "refresh": "Refresh preview",
+                "loading": "Loading preview…",
+                "load_failed": "The impact preview could not be loaded.",
+                "effective": "Activation applies to new snapshots effective from {from} to {to}.",
+                "baseline": {
+                    "vendor_default": "The comparison is against verified delivered set {version}.",
+                    "previous_active_snapshot": "The comparison is against the last actually active snapshot {version}."
+                },
+                "baseline_unavailable": "The exact difference cannot be stated truthfully because a comparable baseline is unavailable.",
+                "identical": "There is no parameter difference from the compared state.",
+                "immutable": "Activation does not alter previously stored snapshots.",
+                "money_unavailable": "A CZK impact cannot be calculated honestly without locked input.",
+                "stale": "The preview no longer matches the current candidate. Load it again.",
+                "confirm": "I have reviewed the current preview, parameter difference and its limitations.",
+                "required": "Activation requires a current impact preview and explicit confirmation."
+            },
             "unit": {
                 "czk": "CZK"
             },

@@ -849,6 +849,7 @@ final class Routes
             // Legislativní rulesety — globální číselník (default v kódu + DB override),
             // konkrétnější cesty musí být před `/rulesets/{rulesetId}`.
             $g->get('/rulesets', [PayrollRulesetAction::class, 'list']);
+            $g->get('/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}/impact-preview', [PayrollRulesetAction::class, 'impactPreview']);
             $g->get('/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}/diff', [PayrollRulesetAction::class, 'diff']);
             $g->post(
                 '/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}/commands/{command:review|approve|activate|supersede}',
