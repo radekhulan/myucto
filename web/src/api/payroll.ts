@@ -2040,6 +2040,20 @@ export interface PayrollHealthPaymentOverview {
     employer_contribution_minor_units: number
     total_contribution_minor_units: number
   }>
+  /** Živá read-only projekce platebního ledgeru; není součástí otisku PPZ. */
+  payment_reconciliation: {
+    liability_ids: number[]
+    expected_minor: number
+    liability_minor: number
+    liability_difference_minor: number
+    bank_settled_minor: number
+    outgoing_remaining_minor: number
+    incoming_remaining_minor: number
+    bank_remaining_minor: number
+    state: 'missing' | 'mismatch' | 'open' | 'partially_settled' | 'settled'
+    closing_blocked: boolean
+    blockers: Array<'liability_missing' | 'liability_difference' | 'bank_unsettled'>
+  }
   sha256: string
   filename: string
 }

@@ -131,6 +131,17 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
             135_000,
             $body['items'][0]['totals']['total_contribution_minor_units'],
         );
+        self::assertSame(
+            'missing',
+            $body['items'][0]['payment_reconciliation']['state'],
+        );
+        self::assertTrue(
+            $body['items'][0]['payment_reconciliation']['closing_blocked'],
+        );
+        self::assertSame(
+            ['liability_missing', 'liability_difference'],
+            $body['items'][0]['payment_reconciliation']['blockers'],
+        );
         self::assertMatchesRegularExpression(
             '/^[0-9a-f]{64}$/D',
             $body['items'][0]['sha256'],
@@ -185,6 +196,84 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
             'payroll-health-payment-overview.v1',
             $bytes,
         );
+    }
+
+    public function testIndexShowsPartialHealthPaymentAndBlocksClosing(): void
+    {
+        $liabilityId = $this->healthLiability(
+            $this->db->pdo(),
+            $this->revisionId,
+            135_000,
+        );
+        $this->settleLiability(
+            $this->db->pdo(),
+            $liabilityId,
+            135_000,
+            60_000,
+        );
+
+        $response = $this->action->index(
+            $this->request(
+                'GET',
+                "/api/payroll/submissions/health-overviews/{$this->revisionId}",
+            ),
+            new Response(),
+            ['revisionId' => (string) $this->revisionId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $payment = $this->json($response)['items'][0]['payment_reconciliation'];
+        self::assertSame('partially_settled', $payment['state']);
+        self::assertSame(135_000, $payment['liability_minor']);
+        self::assertSame(60_000, $payment['bank_settled_minor']);
+        self::assertSame(75_000, $payment['outgoing_remaining_minor']);
+        self::assertSame(0, $payment['incoming_remaining_minor']);
+        self::assertTrue($payment['closing_blocked']);
+        self::assertSame(['bank_unsettled'], $payment['blockers']);
+    }
+
+    public function testCorrectionRefundUsesDirectIncomingEvidence(): void
+    {
+        $outgoingId = $this->healthLiability(
+            $this->db->pdo(),
+            $this->revisionId,
+            135_000,
+        );
+        $this->settleLiability($this->db->pdo(), $outgoingId, 135_000, 135_000);
+
+        $correctionId = $this->correctionRevision($this->db->pdo());
+        $this->healthResult(
+            $this->employeeIdForRevision($this->db->pdo(), $correctionId),
+            $correctionId,
+            totalContributionMinor: 100_000,
+        );
+        $incomingId = $this->healthLiability(
+            $this->db->pdo(),
+            $correctionId,
+            35_000,
+            'incoming',
+            $outgoingId,
+        );
+        $this->settleIncomingLiability($this->db->pdo(), $incomingId, 35_000);
+
+        $response = $this->action->index(
+            $this->request(
+                'GET',
+                "/api/payroll/submissions/health-overviews/{$correctionId}",
+            ),
+            new Response(),
+            ['revisionId' => (string) $correctionId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $payment = $this->json($response)['items'][0]['payment_reconciliation'];
+        self::assertSame('settled', $payment['state']);
+        self::assertSame(100_000, $payment['liability_minor']);
+        self::assertSame(100_000, $payment['bank_settled_minor']);
+        self::assertSame(0, $payment['outgoing_remaining_minor']);
+        self::assertSame(0, $payment['incoming_remaining_minor']);
+        self::assertFalse($payment['closing_blocked']);
+        self::assertSame([], $payment['blockers']);
     }
 
     public function testDownloadReturnsValidatedXmlForXmlInsurer(): void
@@ -441,8 +530,11 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
         string $insurerCode = '111',
         string $calculationDate = '2026-06-30',
         string $fullName = 'Syntetická HTTP osoba',
+        int $totalContributionMinor = 135_000,
     ): void
     {
+        $employeeContributionMinor = intdiv($totalContributionMinor, 3);
+        $employerContributionMinor = $totalContributionMinor - $employeeContributionMinor;
         (new PayrollStatutoryResultRepository($this->db))->store(
             $this->supplierId,
             $revisionId ?? $this->revisionId,
@@ -456,16 +548,16 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
                 'calculation_date' => $calculationDate,
                 'status' => 'calculated',
                 'assessment_base_minor_units' => 1_000_000,
-                'employee_contribution_minor_units' => 45_000,
-                'employer_contribution_minor_units' => 90_000,
-                'total_contribution_minor_units' => 135_000,
+                'employee_contribution_minor_units' => $employeeContributionMinor,
+                'employer_contribution_minor_units' => $employerContributionMinor,
+                'total_contribution_minor_units' => $totalContributionMinor,
                 'insurer_liabilities' => [[
                     'insurer_code' => $insurerCode,
                     'person_count' => 1,
                     'assessment_base_minor_units' => 1_000_000,
-                    'employee_contribution_minor_units' => 45_000,
-                    'employer_contribution_minor_units' => 90_000,
-                    'total_contribution_minor_units' => 135_000,
+                    'employee_contribution_minor_units' => $employeeContributionMinor,
+                    'employer_contribution_minor_units' => $employerContributionMinor,
+                    'total_contribution_minor_units' => $totalContributionMinor,
                 ]],
                 'issues' => [],
                 'ruleset_id' => 'cz-health-2026',
@@ -487,9 +579,9 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
                     'insurer_code' => $insurerCode,
                     'ppz_counted' => true,
                     'assessment_base_minor_units' => 1_000_000,
-                    'employee_contribution_minor_units' => 45_000,
-                    'employer_contribution_minor_units' => 90_000,
-                    'total_contribution_minor_units' => 135_000,
+                    'employee_contribution_minor_units' => $employeeContributionMinor,
+                    'employer_contribution_minor_units' => $employerContributionMinor,
+                    'total_contribution_minor_units' => $totalContributionMinor,
                 ],
                 'relationships' => [],
             ]],
@@ -528,6 +620,231 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
             $this->userId,
             $this->userId,
             $this->userId,
+        ]);
+    }
+
+    private function healthLiability(
+        PDO $pdo,
+        int $revisionId,
+        int $amountMinor,
+        string $direction = 'outgoing',
+        ?int $previousLiabilityId = null,
+    ): int {
+        $source = '{"schema":"synthetic-health-liability.v1"}';
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, previous_liability_id,
+                 source_snapshot_json,
+                 source_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, "health-insurance:i111", "health_insurance",
+                     ?, "institution:synthetic", "2026-07-20",
+                     "CZK", ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $direction,
+            $amountMinor,
+            $previousLiabilityId,
+            $source,
+            hash('sha256', $source),
+            hash('sha256', "health-liability:{$this->supplierId}:{$revisionId}:{$direction}", true),
+        ]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function correctionRevision(PDO $pdo): int
+    {
+        $stmt = $pdo->prepare(
+            'SELECT run_id FROM payroll_run_revisions
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $stmt->execute([$this->supplierId, $this->revisionId]);
+        $runId = (int) $stmt->fetchColumn();
+        $pdo->prepare(
+            'UPDATE payroll_runs SET current_revision_no = 2 WHERE id = ?',
+        )->execute([$runId]);
+        $input = '{"schema_version":"payroll-run-input.v2","correction":true}';
+        $result = '{"schema_version":"payroll-run-result.v2","correction":true}';
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind,
+                 previous_revision_id, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 2, "correction", ?, "approved",
+                     "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $this->revisionId,
+            str_repeat('a', 64),
+            $input,
+            hash('sha256', $input),
+            $result,
+            hash('sha256', $result),
+            hash('sha256', "health-correction:{$this->supplierId}:{$runId}", true),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $employeeId = $this->employeeIdForRevision($pdo, $this->revisionId);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, status)
+             VALUES (?, ?, ?, "calculated")',
+        )->execute([$this->supplierId, $revisionId, $employeeId]);
+        return $revisionId;
+    }
+
+    private function employeeIdForRevision(PDO $pdo, int $revisionId): int
+    {
+        $stmt = $pdo->prepare(
+            'SELECT employee_id FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id = ? LIMIT 1',
+        );
+        $stmt->execute([$this->supplierId, $revisionId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function settleIncomingLiability(PDO $pdo, int $liabilityId, int $amountMinor): void
+    {
+        $reference = "health-refund-{$this->supplierId}-{$liabilityId}";
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number,
+                 bank_code, currency, statement_date)
+             VALUES (?, ?, ?, "1000000005", "0100", "CZK", "2026-07-21")',
+        )->execute([
+            $this->supplierId,
+            "{$reference}.gpc",
+            hash('sha256', "{$reference}-statement"),
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, "2026-07-21", ?, "CZK",
+                     "Syntetická vratka zdravotního pojištění", ?)',
+        )->execute([
+            $statementId,
+            number_format($amountMinor / 100, 2, '.', ''),
+            hash('sha256', "{$reference}-transaction"),
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, liability_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id, actual_payment_date,
+                 evidence_amount_minor, evidence_currency_code,
+                 evidence_fact_hash, idempotency_key_hash)
+             VALUES (?, ?, "matched", ?, ?, ?, "2026-07-21", ?, "CZK", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $liabilityId,
+            $amountMinor,
+            $statementId,
+            $transactionId,
+            $amountMinor,
+            hash('sha256', "{$reference}-evidence"),
+            hash('sha256', "{$reference}-match", true),
+        ]);
+    }
+
+    private function settleLiability(
+        PDO $pdo,
+        int $liabilityId,
+        int $allocatedMinor,
+        int $settledMinor,
+    ): void {
+        $reference = "health-payment-{$this->supplierId}-{$liabilityId}";
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_batches
+                (supplier_id, batch_reference, channel, export_format,
+                 direction, planned_payment_date, currency_code,
+                 payer_reference, declared_total_minor, declared_item_count,
+                 snapshot_ciphertext, snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, "bank", "manual", "outgoing", "2026-07-20",
+                     "CZK", "payer:synthetic", ?, 1, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            "{$reference}-batch",
+            $allocatedMinor,
+            'enc:v2:synthetic-health-batch',
+            hash('sha256', "{$reference}-batch"),
+            hash('sha256', "{$reference}-batch", true),
+        ]);
+        $batchId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_items
+                (supplier_id, batch_id, item_reference, recipient_reference,
+                 amount_minor, instruction_ciphertext, instruction_hash,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, "institution:synthetic", ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $batchId,
+            "{$reference}-item",
+            $allocatedMinor,
+            'enc:v2:synthetic-health-instruction',
+            hash('sha256', "{$reference}-item"),
+            hash('sha256', "{$reference}-item", true),
+        ]);
+        $itemId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_allocations
+                (supplier_id, item_id, liability_id, amount_minor,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $itemId,
+            $liabilityId,
+            $allocatedMinor,
+            hash('sha256', "{$reference}-allocation", true),
+        ]);
+        $allocationId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number,
+                 bank_code, currency, statement_date)
+             VALUES (?, ?, ?, "1000000005", "0100", "CZK", "2026-07-20")',
+        )->execute([
+            $this->supplierId,
+            "{$reference}.gpc",
+            hash('sha256', "{$reference}-statement"),
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, "2026-07-20", ?, "CZK",
+                     "Syntetická úhrada zdravotního pojištění", ?)',
+        )->execute([
+            $statementId,
+            number_format(-$settledMinor / 100, 2, '.', ''),
+            hash('sha256', "{$reference}-transaction"),
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+        $evidenceHash = hash('sha256', "{$reference}-evidence");
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id, actual_payment_date,
+                 evidence_amount_minor, evidence_currency_code,
+                 evidence_fact_hash, idempotency_key_hash)
+             VALUES (?, ?, "matched", ?, ?, ?, "2026-07-20", ?, "CZK", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $allocationId,
+            $settledMinor,
+            $statementId,
+            $transactionId,
+            $settledMinor,
+            $evidenceHash,
+            hash('sha256', "{$reference}-match", true),
         ]);
     }
 

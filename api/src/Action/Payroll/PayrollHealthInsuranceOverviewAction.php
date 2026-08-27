@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceOverview
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverview;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewReconciliationService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -25,6 +26,7 @@ final class PayrollHealthInsuranceOverviewAction
 
     public function __construct(
         private readonly HealthPaymentOverviewService $service,
+        private readonly HealthPaymentOverviewReconciliationService $reconciliation,
         private readonly HealthInsuranceSubmissionService $submissions,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
@@ -44,10 +46,12 @@ final class PayrollHealthInsuranceOverviewAction
         try {
             $revisionId = $this->routePositiveInt($args, 'revisionId');
             $items = array_map(
-                static fn (HealthPaymentOverview $overview): array => [
+                fn (HealthPaymentOverview $overview): array => [
                     ...$overview->toArray(),
                     'sha256' => $overview->sha256(),
                     'filename' => $overview->filename(),
+                    'payment_reconciliation' =>
+                        $this->reconciliation->forOverview($overview),
                 ],
                 $this->service->overviews(
                     $this->currentSupplierId($request),

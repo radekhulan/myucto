@@ -1096,6 +1096,23 @@ onMounted(load)
                   {{ formatMinor(overview.totals.total_contribution_minor_units) }}
                 </dd>
               </div>
+              <div>
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_bank_settled') }}</dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ formatMinor(overview.payment_reconciliation.bank_settled_minor) }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_payment_state') }}</dt>
+                <dd
+                  class="mt-0.5 font-medium"
+                  :class="overview.payment_reconciliation.closing_blocked ? 'text-danger-700' : 'text-success-700'"
+                >
+                  {{ overview.payment_reconciliation.closing_blocked
+                    ? t('payroll.submissions.overview.health_payment_blocked')
+                    : t('payroll.submissions.overview.health_payment_settled') }}
+                </dd>
+              </div>
             </dl>
           </article>
         </div>
