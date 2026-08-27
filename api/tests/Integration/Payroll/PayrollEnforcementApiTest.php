@@ -865,6 +865,28 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertSame('forbidden', $this->errorCode($response));
     }
 
+    public function testInsolvencyEndpointsAlsoRequireEnforcementPermission(): void
+    {
+        $insolvencyOnly = new EffectiveRole(
+            94,
+            'Syntetická role pouze pro oddlužení',
+            'staff',
+            true,
+            ['payroll.insolvency' => 2],
+        );
+        $response = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/options",
+            )->withAttribute('auth.effective_role', $insolvencyOnly),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('forbidden', $this->errorCode($response));
+    }
+
     public function testApprovedInsolvencyEvidenceRequiresDocumentPermission(): void
     {
         $withoutDocuments = new EffectiveRole(
