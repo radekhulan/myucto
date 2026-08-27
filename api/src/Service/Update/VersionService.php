@@ -73,10 +73,16 @@ final class VersionService
      * (LAMP/XAMPP/WSL) ne. Některé alternativy (Podman) `/.dockerenv`
      * nemají; detekce není 100% spolehlivá, ale stačí pro UI / volbu
      * upgrade flow.
+     *
+     * ⚠️ Zavináč není lenost. Pod `open_basedir` (sdílený hosting) leží obě
+     * cesty mimo povolený strom, takže `is_file()` u každého požadavku zapíše
+     * dvě varování do error logu — a ten pak není v čem číst, když se něco
+     * doopravdy pokazí. Odpověď „nevím" je tu navíc správně: mimo kontejner
+     * to není.
      */
     public function detectEnvironment(): string
     {
-        if (is_file('/.dockerenv') || is_file('/run/.containerenv')) {
+        if (@is_file('/.dockerenv') || @is_file('/run/.containerenv')) {
             return 'docker';
         }
         return 'native';

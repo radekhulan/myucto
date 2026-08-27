@@ -776,6 +776,53 @@ final class AccountingActivationTest extends TestCase
         )->fetchColumn();
     }
 
+    /**
+     * ⚠️ Regrese ze sdíleného hostingu: worker se spouštěl starším PHP, umřel
+     * na první řádce composeru a job zůstal `queued`. Obrazovka aktivace pak
+     * hlásila „Čeká" — a protože prošlost se počítala až od čtvrt hodiny,
+     * trvalo to čtvrt hodiny. Nepřihlášený worker je jistota, ne pomalý běh.
+     */
+    public function testUnclaimedJobIsFailedSoonerThanAStalledOne(): void
+    {
+        // Unikátní index pustí k jednomu dodavateli jen jeden aktivní job,
+        // takže se obě situace zkoušejí po sobě, ne vedle sebe.
+        $queued = $this->jobs->create($this->supplierId, 'dry_run', [], 1);
+        $this->age($queued, 3);
+
+        self::assertSame(1, $this->jobs->reapStale($this->supplierId));
+        $dead = $this->jobs->find($queued, $this->supplierId);
+        self::assertSame('failed', $dead['status']);
+        self::assertStringContainsString('nerozběhlo', (string) $dead['last_error']);
+
+        // Běžící worker může nad velkou historií chvíli mlčet — ten se čeká dál.
+        $running = $this->jobs->create($this->supplierId, 'dry_run', [], 1);
+        $this->db->pdo()->prepare("UPDATE accounting_backfill_jobs SET status = 'running', started_at = NOW() WHERE id = ?")
+            ->execute([$running]);
+        $this->age($running, 3);
+
+        self::assertSame(0, $this->jobs->reapStale($this->supplierId));
+        self::assertSame('running', $this->jobs->find($running, $this->supplierId)['status']);
+    }
+
+    public function testStalledRunningJobIsStillReapedAfterTheLongerGrace(): void
+    {
+        $running = $this->jobs->create($this->supplierId, 'dry_run', [], 1);
+        $this->db->pdo()->prepare("UPDATE accounting_backfill_jobs SET status = 'running', started_at = NOW() WHERE id = ?")
+            ->execute([$running]);
+        $this->age($running, 30);
+
+        self::assertSame(1, $this->jobs->reapStale($this->supplierId));
+        self::assertSame('failed', $this->jobs->find($running, $this->supplierId)['status']);
+    }
+
+    /** Posune `updated_at` do minulosti — `NOW()` se v testu jinak neposouvá. */
+    private function age(int $jobId, int $minutes): void
+    {
+        $this->db->pdo()
+            ->prepare('UPDATE accounting_backfill_jobs SET updated_at = NOW() - INTERVAL ? MINUTE WHERE id = ?')
+            ->execute([$minutes, $jobId]);
+    }
+
     private function jobCount(): int
     {
         return (int) $this->db->pdo()->query(

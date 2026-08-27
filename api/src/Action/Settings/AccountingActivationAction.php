@@ -233,14 +233,21 @@ final class AccountingActivationAction
                 ->execute([$supplierId]);
         }
         $root = Bootstrap::rootDir();
+        // ⚠️ `$diag` se ZAHODIT NESMÍ. Nejčastější příčina je prostředí, ne
+        // aplikace — na sdíleném hostingu chybí použitelné CLI php. Bez téhle
+        // věty zbyde adminovi „zkuste to znovu", což s tímtéž prostředím
+        // dopadne pokaždé stejně.
+        $diag = null;
         $spawned = BackgroundProcess::spawnPhp(
             $root . '/api/bin/accounting-backfill-worker.php',
             ['--job-id=' . $jobId],
             RuntimePaths::log('accounting-backfill-worker.log'),
             $root,
+            $diag,
         );
         if (!$spawned) {
-            $this->jobs->markFailed($jobId, 'Worker se nepodařilo spustit.');
+            $this->audit($request, 'accounting_activation.worker_start_failed', $supplierId, ['job_id' => $jobId, 'diag' => $diag]);
+            $this->jobs->markFailed($jobId, 'Worker se nepodařilo spustit' . ($diag === null ? '.' : ': ' . $diag));
             if ($kind === 'execute') {
                 $this->db->pdo()->prepare("UPDATE supplier SET accounting_activation_status = 'failed' WHERE id = ?")
                     ->execute([$supplierId]);

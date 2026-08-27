@@ -11,6 +11,17 @@ final class AccountingBackfillJobRepository
 {
     private const STALE_MINUTES = 15;
 
+    /**
+     * Kolik minut se čeká na worker, který se ještě ani nepřihlásil.
+     *
+     * ⚠️ Kratší než {@see self::STALE_MINUTES} schválně. Worker si job vezme
+     * (`queued` → `running`) během vteřin; když to neudělá, nespustil se vůbec
+     * a čekat na něj čtvrt hodiny znamená čtvrt hodiny hlásit „Čeká" u něčeho,
+     * co je dávno mrtvé. Přesně tohle se stalo, když se worker spouštěl starší
+     * verzí PHP: umřel na první řádce a obrazovka o tom nevěděla.
+     */
+    private const UNCLAIMED_MINUTES = 2;
+
     public function __construct(private readonly Connection $db) {}
 
     public function create(int $supplierId, string $kind, array $params, int $userId): int
@@ -176,14 +187,26 @@ final class AccountingBackfillJobRepository
 
     public function reapStale(int $supplierId, int $staleMinutes = self::STALE_MINUTES): int
     {
+        // Rozlišujeme „worker se vůbec nepřihlásil" od „přihlásil se a zamrzl":
+        // první případ je jistota, druhý může být pomalý běh nad velkou historií.
         $stmt = $this->db->pdo()->prepare(
+            // ⚠️ `last_error` se přiřazuje PŘED `status`. MySQL vyhodnocuje SET
+            // zleva doprava nad už změněnými hodnotami, takže v opačném pořadí
+            // by CASE četl `failed`, které si právě nastavilo samo, a hláška by
+            // vždycky vyšla na tu druhou větev.
             "UPDATE accounting_backfill_jobs
-                SET status = 'failed', finished_at = NOW(),
-                    last_error = 'Doúčtování bylo ukončeno jako neaktivní — worker neodpovídá. Spusťte je znovu.'
-              WHERE supplier_id = ? AND status IN ('queued','running')
-                AND updated_at < (NOW() - INTERVAL ? MINUTE)"
+                SET last_error = CASE WHEN status = 'queued'
+                        THEN 'Doúčtování se nerozběhlo — worker se vůbec nespustil. Zkuste je prosím spustit znovu; když to nepomůže, ozvěte se podpoře.'
+                        ELSE 'Doúčtování bylo ukončeno jako neaktivní — worker neodpovídá. Spusťte je znovu.'
+                    END,
+                    status = 'failed', finished_at = NOW()
+              WHERE supplier_id = ?
+                AND (
+                    (status = 'queued'  AND updated_at < (NOW() - INTERVAL ? MINUTE))
+                    OR (status = 'running' AND updated_at < (NOW() - INTERVAL ? MINUTE))
+                )"
         );
-        $stmt->execute([$supplierId, $staleMinutes]);
+        $stmt->execute([$supplierId, min(self::UNCLAIMED_MINUTES, $staleMinutes), $staleMinutes]);
         if ($stmt->rowCount() > 0) {
             $this->db->pdo()->prepare(
                 "UPDATE supplier SET accounting_activation_status = 'failed'

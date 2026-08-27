@@ -65,6 +65,7 @@ final class PhpCliLocatorTest extends TestCase
 
     public function testResolveNeverReturnsNonCliBinary(): void
     {
+        PhpCliLocator::forget();
         $resolved = PhpCliLocator::resolve();
         if ($resolved === null) {
             self::markTestSkipped('Žádné php nenalezeno v tomto prostředí.');
@@ -72,6 +73,67 @@ final class PhpCliLocatorTest extends TestCase
         self::assertFalse(
             PhpCliLocator::isNonCliSapiName(basename($resolved)),
             "resolve() nesmí vrátit ne-CLI SAPI binárku, vráceno: $resolved"
+        );
+    }
+
+    /**
+     * ⚠️ Regrese ze sdíleného hostingu s víc verzemi PHP.
+     *
+     * Web běžel pod `/usr/bin/php-cgi8.5`, ale holé `php` bylo 7.4. Hledání
+     * skončilo právě u něj, worker composer autoload na první řádce zabil
+     * hláškou o nesplněné platformě — a protože `nohup … &` vrátí úspěch,
+     * kontrola aktivace účetnictví zůstala navždy ve stavu „Čeká".
+     *
+     * Správný protějšek k `php-cgi8.5` je `php8.5`, ne `php`.
+     *
+     * @return list<array{string,string}>
+     */
+    public static function cliCounterparts(): array
+    {
+        return [
+            ['php-cgi8.5', 'php8.5'],
+            ['php-cgi7.4', 'php7.4'],
+            ['php-fpm8.5', 'php8.5'],
+            ['php-cgi', 'php'],
+            ['php-fpm', 'php'],
+            ['php-cgi.exe', 'php.exe'],
+            ['php-win.exe', 'php.exe'],
+            ['php8.5', 'php8.5'],
+            ['php', 'php'],
+        ];
+    }
+
+    #[DataProvider('cliCounterparts')]
+    public function testDerivesVersionedCliCounterpart(string $sapi, string $expected): void
+    {
+        self::assertSame($expected, PhpCliLocator::cliNameFor($sapi));
+    }
+
+    /**
+     * ⚠️ Nalezená binárka musí umět rozběhnout aplikaci. Starší verze worker
+     * jen zabije a job zůstane viset — je lepší nenajít nic (a job rovnou
+     * selže s hláškou) než najít php, na kterém nic nepoběží.
+     */
+    public function testResolvedBinaryMeetsTheMinimumVersion(): void
+    {
+        PhpCliLocator::forget();
+        $resolved = PhpCliLocator::resolve();
+        if ($resolved === null) {
+            self::markTestSkipped('Žádné php nenalezeno v tomto prostředí.');
+        }
+
+        // Sonda bez uvozovek a bez `|` — na Windows by je escapeshellarg()
+        // rozbil, viz PhpCliLocator::probe().
+        $out = [];
+        $rc  = 1;
+        exec(escapeshellarg($resolved) . ' -r ' . escapeshellarg('echo PHP_SAPI, PHP_EOL, PHP_VERSION;'), $out, $rc);
+        self::assertSame(0, $rc, "resolve() vrátil nespustitelnou binárku: $resolved");
+
+        [$sapi, $version] = [trim($out[0]), trim($out[1])];
+        self::assertSame('cli', $sapi);
+        self::assertTrue(
+            version_compare($version, PhpCliLocator::MIN_VERSION, '>='),
+            "resolve() vrátil php $version, aplikace potřebuje aspoň " . PhpCliLocator::MIN_VERSION
         );
     }
 }
