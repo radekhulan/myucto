@@ -35,7 +35,8 @@ info:
     Cesty `/api/v1/accounting/**`, `/api/v1/reports/**`, `/api/v1/tax/**`,
     `/api/v1/tax-evidence/**`, `/api/v1/tax-return/**` a `/api/v1/automation/**`
     odpovídají na `GET`, ale jakýkoli zápis odmítnou chybou
-    `403 token_write_forbidden` — i tokenu se scope `read_write`.
+    `403 token_write_forbidden` — i tokenu se scope `read_write`. Výjimkou jsou
+    mzdové podcesty popsané níže, které bearer token nezavolá vůbec.
 
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
     § 46 / § 74b, podání přiznání i odeslání podání na EPO jsou úkony s daňovou
@@ -57,6 +58,8 @@ info:
 
     Mzdový modul je kvůli zvláštní citlivosti personálních, daňových a platebních
     údajů dostupný jen z přihlášeného webového rozhraní pod `/api/payroll/**`.
+    Stejná hranice platí pro legacy `/api/accounting/payroll/**` a
+    `/api/accounting/reports/payroll-sheet`.
     Veřejná bearer varianta pro mzdy neexistuje a proto v tomto OpenAPI kontraktu
     není. Její případné budoucí zpřístupnění vyžaduje samostatný
     omezený kontrakt oprávnění, rozsahů dat a auditování; interní session endpointy
@@ -9089,121 +9092,6 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '415': { description: Nepodporovaný formát souboru, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
-  /api/v1/accounting/payroll/preview:
-    post:
-      tags: [Accounting]
-      summary: Náhled rozpadu hrubé mzdy na účty
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [year, month, gross]
-              properties:
-                year: { type: integer, minimum: 2018, maximum: 2100 }
-                month: { type: integer, minimum: 1, maximum: 12 }
-                gross: { type: number, minimum: 0, maximum: 10000000 }
-                taxpayer_type: { type: string, default: employee }
-      responses:
-        '200': { description: "Rozpad hrubé mzdy po účtech", content: { application/json: { schema: { type: object } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-
-  /api/v1/accounting/payroll/post:
-    post:
-      tags: [Accounting]
-      summary: Zaúčtuje rozpad mzdy (idempotentní na RRRRMM)
-      description: Účetní/admin. Účtuje přes PostingService se source_id = RRRRMM.
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [year, month, gross]
-              properties:
-                year: { type: integer, minimum: 2018, maximum: 2100 }
-                month: { type: integer, minimum: 1, maximum: 12 }
-                gross: { type: number, minimum: 0, maximum: 10000000 }
-                taxpayer_type: { type: string, default: employee }
-                employee_id: { type: [integer, "null"] }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { description: Zápis za dané období už existuje / uzavřené období, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-
-  /api/v1/accounting/payroll/employees:
-    get:
-      tags: [Accounting]
-      summary: Seznam zaměstnanců pro mzdový list (§38j)
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: query, name: active, schema: { type: boolean } }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/PayrollEmployee' } } } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-    post:
-      tags: [Accounting]
-      summary: Založí zaměstnance
-      description: Účetní/admin.
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [full_name]
-              properties:
-                full_name: { type: string }
-                birth_date: { type: [string, "null"], format: date }
-                birth_number: { type: [string, "null"] }
-                address: { type: [string, "null"] }
-                taxpayer_type: { type: string, default: employee }
-                tax_credit_taxpayer: { type: boolean, default: true }
-                child_count: { type: integer, minimum: 0, maximum: 20 }
-                is_active: { type: boolean, default: true }
-      responses:
-        '201': { description: OK, content: { application/json: { schema: { type: object, properties: { employee: { type: object } } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-
-  /api/v1/accounting/payroll/employees/{id}:
-    put:
-      tags: [Accounting]
-      summary: Upraví zaměstnance
-      description: Účetní/admin. Všechna pole volitelná (patch-like).
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: id, required: true, schema: { type: integer } }
-      requestBody:
-        required: true
-        content: { application/json: { schema: { type: object } } }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { employee: { type: object } } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
-    delete:
-      tags: [Accounting]
-      summary: Smaže zaměstnance
-      description: Účetní/admin. Jen bez mzdových záznamů.
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: path, name: id, required: true, schema: { type: integer } }
-      responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { deleted: { type: boolean } } } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Zaměstnanec má mzdové záznamy, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-
   /api/v1/accounting/cost-centers:
     get:
       tags: [Accounting]
@@ -9962,21 +9850,6 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-
-  /api/v1/accounting/reports/payroll-sheet:
-    get:
-      tags: [Accounting]
-      summary: Mzdový list zaměstnance (§38j ZDP) — PDF
-      parameters:
-        - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2018, maximum: 2100 } }
-        - { in: query, name: employee_id, required: true, schema: { type: integer } }
-        - { in: query, name: format, schema: { type: string, enum: [pdf], default: pdf } }
-      responses:
-        '200': { description: Soubor PDF, content: { application/pdf: { schema: { type: string, format: binary } } } }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/reports/entity-category:
     get:
@@ -16919,41 +16792,6 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
 
   schemas:
-    PayrollEmployee:
-      type: object
-      additionalProperties: false
-      required:
-        - id
-        - supplier_id
-        - full_name
-        - taxpayer_type
-        - employment_type
-        - tax_declaration_signed
-        - tax_credit_taxpayer
-        - child_count
-        - auto_post
-        - is_active
-        - created_at
-        - updated_at
-      properties:
-        id: { type: integer, format: int64 }
-        supplier_id: { type: integer }
-        full_name: { type: string }
-        birth_date: { type: [string, "null"], format: date }
-        birth_number: { type: [string, "null"] }
-        address: { type: [string, "null"] }
-        taxpayer_type: { type: string, enum: [employee, managing_partner] }
-        employment_type: { type: string, enum: [hpp, dpp, dpc, statutory_body] }
-        tax_declaration_signed: { type: boolean }
-        tax_credit_taxpayer: { type: boolean }
-        child_count: { type: integer, minimum: 0 }
-        net_settlement_account_code: { type: [string, "null"] }
-        monthly_gross: { type: [integer, "null"], minimum: 0 }
-        auto_post: { type: boolean }
-        is_active: { type: boolean }
-        created_at: { type: string }
-        updated_at: { type: string }
-
     AppUrlConfigurationDiagnostic:
       type: object
       additionalProperties: false

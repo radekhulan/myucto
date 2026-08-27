@@ -92,6 +92,8 @@ final class PayrollPaymentsApiContractTest extends TestCase
     {
         $openApi = $this->read('api/openapi.yaml');
         self::assertStringNotContainsString('/api/v1/payroll/', $openApi);
+        self::assertStringNotContainsString('/api/v1/accounting/payroll/', $openApi);
+        self::assertStringNotContainsString('/api/v1/accounting/reports/payroll-sheet', $openApi);
     }
 
     private function read(string $relativePath): string
