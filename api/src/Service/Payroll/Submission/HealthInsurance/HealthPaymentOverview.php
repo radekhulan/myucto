@@ -32,6 +32,7 @@ final readonly class HealthPaymentOverview
         public int $runId,
         public int $revisionId,
         public int $revisionNo,
+        public string $revisionKind,
         public string $period,
         public string $insurerCode,
         public int $statutoryResultId,
@@ -56,6 +57,7 @@ final readonly class HealthPaymentOverview
             'run_id' => $this->runId,
             'revision_id' => $this->revisionId,
             'revision_no' => $this->revisionNo,
+            'revision_kind' => $this->revisionKind,
             'period' => $this->period,
             'currency_code' => 'CZK',
             'insurer' => [

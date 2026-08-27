@@ -679,6 +679,69 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         );
     }
 
+    public function testCorrectionRevisionCreatesCorrectiveOverviewLinkedToAcceptedPredecessor(): void
+    {
+        $regular = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP(), row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $regular['submission_id']]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_obligations
+                SET status = "fulfilled", row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $regular['obligation_id']]);
+
+        $correctionRevisionId = $this->correctionRevision();
+        $this->revisionId = $correctionRevisionId;
+        $employeeId = (int) $this->db->pdo()->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId,
+        )->fetchColumn();
+        $this->storeResult($employeeId);
+
+        $correction = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $correctionRevisionId,
+            '111',
+        );
+        $submission = $this->repository->findSubmission(
+            $this->supplierId,
+            $correction['submission_id'],
+        );
+        self::assertIsArray($submission);
+        self::assertSame('correction', $submission['submission_kind']);
+        self::assertSame($regular['submission_id'], $submission['corrects_submission_id']);
+        self::assertStringContainsString(
+            '<typPrehledu>opravny</typPrehledu>',
+            $this->submissions->artifactBytes(
+                $this->supplierId,
+                (int) $correction['artifact_id'],
+            ),
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP(), row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $correction['submission_id']]);
+        $replayed = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $correctionRevisionId,
+            '111',
+        );
+        self::assertSame($correction['submission_id'], $replayed['submission_id']);
+        self::assertFalse($replayed['created']);
+    }
+
     public function testInsurerWithoutAnOverviewIsRefused(): void
     {
         $this->expectException(\OutOfBoundsException::class);
@@ -945,6 +1008,52 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
                 (supplier_id, revision_id, employee_id, status)
              VALUES (?, ?, ?, "calculated")',
         )->execute([$this->supplierId, $revisionId, $employeeId]);
+
+        return $revisionId;
+    }
+
+    private function correctionRevision(): int
+    {
+        $pdo = $this->db->pdo();
+        $regular = $pdo->query(
+            'SELECT run_id, input_snapshot_json, input_snapshot_hash,
+                    result_snapshot_json, result_snapshot_hash
+               FROM payroll_run_revisions WHERE id = ' . $this->revisionId,
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($regular);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind,
+                 previous_revision_id, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 2, "correction", ?, "approved",
+                     "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            (int) $regular['run_id'],
+            $this->revisionId,
+            str_repeat('a', 64),
+            $regular['input_snapshot_json'],
+            $regular['input_snapshot_hash'],
+            $regular['result_snapshot_json'],
+            $regular['result_snapshot_hash'],
+            hash('sha256', 'synthetic-zp-correction:' . $this->revisionId, true),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'UPDATE payroll_runs
+                SET current_revision_no = 2
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, (int) $regular['run_id']]);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, status)
+             SELECT supplier_id, ?, employee_id, "calculated"
+               FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id = ?'
+        )->execute([$revisionId, $this->supplierId, $this->revisionId]);
 
         return $revisionId;
     }

@@ -814,6 +814,118 @@ final class PayrollSubmissionRepository
     }
 
     /**
+     * @param list<string> $statuses
+     * @return array{id:int,status:string,submission_kind:string}|null
+     */
+    public function latestSubmissionForScopeForUpdate(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $subjectType,
+        string $subjectReference,
+        string $periodStart,
+        string $periodEnd,
+        array $statuses,
+    ): ?array {
+        if ($statuses === []) {
+            return null;
+        }
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id, submission.status,
+                    submission.submission_kind
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND obligation.agenda_code = ?
+                AND obligation.subject_type = ?
+                AND obligation.subject_reference = ?
+                AND obligation.period_start = ?
+                AND obligation.period_end = ?
+                AND submission.submission_kind IN (\'regular\', \'correction\')
+                AND submission.status IN (' . $placeholders . ')
+              ORDER BY submission.id DESC
+              LIMIT 1
+              FOR UPDATE',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $agendaCode,
+            $subjectType,
+            $subjectReference,
+            $periodStart,
+            $periodEnd,
+            ...$statuses,
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'předchozí mzdové podání');
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'status' => self::string($row, 'status'),
+            'submission_kind' => self::string($row, 'submission_kind'),
+        ];
+    }
+
+    /**
+     * @return array{id:int,submission_kind:string,corrects_submission_id:?int}|null
+     */
+    public function submissionForSourceEventForUpdate(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $sourceEventType,
+        string $sourceEventReference,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT submission.id, submission.submission_kind,
+                    submission.corrects_submission_id
+               FROM payroll_submissions submission
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND obligation.agenda_code = ?
+                AND obligation.source_event_type = ?
+                AND obligation.source_event_reference = ?
+              ORDER BY submission.id DESC
+              LIMIT 1
+              FOR UPDATE',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $agendaCode,
+            $sourceEventType,
+            $sourceEventReference,
+        ]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return null;
+        }
+        $row = self::associativeRow($row, 'podání zdrojové události');
+
+        return [
+            'id' => self::integer($row, 'id'),
+            'submission_kind' => self::string($row, 'submission_kind'),
+            'corrects_submission_id' => self::nullableInteger(
+                $row,
+                'corrects_submission_id',
+            ),
+        ];
+    }
+
+    /**
      * @return array{
      *   id:int,status:string,row_version:int,request_fingerprint:string,
      *   source_snapshot_hash:string,submission_kind:string,channel:string,

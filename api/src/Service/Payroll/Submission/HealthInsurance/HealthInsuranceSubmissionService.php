@@ -11,6 +11,7 @@ use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\InstitutionAccountType;
+use MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
@@ -497,43 +498,14 @@ final readonly class HealthInsuranceSubmissionService
         $pdf = $documents['pdf'];
         $channel = $documents['channel'];
         $window = $this->deadlines->forPaymentOverview($overview->period);
-        $sourceHash = hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'payroll-health-payment-overview-submission.v4',
-            'revision_id' => $overview->revisionId,
-            'insurer_code' => $insurerCode,
-            'statutory_result_hash' => $overview->statutoryResultHash,
-            'xml_sha256' => hash('sha256', $xml),
-            'pdf_template_reference' =>
-                $this->pdfRenderer->templateReference($insurerCode),
-            'isds_attachment_rules' => $channel['isds_attachment_rules'],
-        ]));
-        $obligation = $this->obligations->register(
-            $supplierId,
-            self::AGENDA_PAYMENT_OVERVIEW,
-            self::SUBJECT_RUN,
-            'payroll_run:' . $overview->runId . ':' . $insurerCode,
-            // Období povinnosti je mzdový měsíc, za který se pojistné platí,
-            // ne okno lhůty. Lhůta má vlastní pole a plést je znamená, že se
-            // přehled zařadí do jiného měsíce, než za který je.
-            $overview->period . '-01',
-            $window->earliestSubmissionOn,
-            'regular',
-            self::CHANNEL,
-            self::SOURCE_EVENT_OVERVIEW,
+        $submissionKind = $overview->revisionKind;
+        $subjectReference =
+            'payroll_run:' . $overview->runId . ':' . $insurerCode;
+        $sourceEventReference =
             'payroll_health_payment_overview:' . $overview->revisionId
-                . ':' . $insurerCode,
-            $sourceHash,
-            $window->earliestSubmissionOn,
-            $window->dueOn,
-            $window->calendarBasis,
-            $window->rulesetId,
-            $window->rulesetHash,
-            'health-overview-obligation:' . $environment . ':' . $sourceHash,
-            null,
-            $createdBy,
-            null,
-            $environment,
-        );
+                . ':' . $insurerCode;
+        $periodStart = $overview->period . '-01';
+        $periodEnd = $window->earliestSubmissionOn;
 
         return $this->submissionRepository->transaction(function () use (
             $supplierId,
@@ -543,9 +515,13 @@ final readonly class HealthInsuranceSubmissionService
             $payload,
             $xml,
             $pdf,
-            $sourceHash,
-            $obligation,
             $window,
+            $submissionKind,
+            $subjectReference,
+            $sourceEventReference,
+            $periodStart,
+            $periodEnd,
+            $channel,
             $createdBy,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
@@ -554,11 +530,91 @@ final readonly class HealthInsuranceSubmissionService
                     'Firma přehledu o platbě nebyla nalezena.',
                 );
             }
+            $correctsSubmissionId = null;
+            if ($submissionKind === 'correction') {
+                $existingSource = $this->submissionRepository
+                    ->submissionForSourceEventForUpdate(
+                        $supplierId,
+                        $environment,
+                        self::AGENDA_PAYMENT_OVERVIEW,
+                        self::SOURCE_EVENT_OVERVIEW,
+                        $sourceEventReference,
+                    );
+                if ($existingSource !== null) {
+                    if ($existingSource['submission_kind'] !== 'correction'
+                        || $existingSource['corrects_submission_id'] === null
+                    ) {
+                        throw new HealthNotificationException(
+                            'zp_correction_source_conflict',
+                            'Zdroj opravného přehledu už patří jinému druhu podání.',
+                        );
+                    }
+                    $correctsSubmissionId =
+                        $existingSource['corrects_submission_id'];
+                } else {
+                    $predecessor = $this->submissionRepository
+                        ->latestSubmissionForScopeForUpdate(
+                            $supplierId,
+                            $environment,
+                            self::AGENDA_PAYMENT_OVERVIEW,
+                            self::SUBJECT_RUN,
+                            $subjectReference,
+                            $periodStart,
+                            $periodEnd,
+                            PayrollAgendaCorrectionPolicy::correctableStatuses(
+                                self::AGENDA_PAYMENT_OVERVIEW,
+                            ),
+                        );
+                    if ($predecessor === null) {
+                        throw new HealthNotificationException(
+                            'zp_correction_predecessor_missing',
+                            'Opravný přehled nemá rozhodnuté předchozí podání stejné pojišťovny a období.',
+                        );
+                    }
+                    $correctsSubmissionId = $predecessor['id'];
+                }
+            }
+            $sourceHash = hash('sha256', CanonicalJson::encode([
+                'schema_reference' =>
+                    'payroll-health-payment-overview-submission.v5',
+                'revision_id' => $overview->revisionId,
+                'revision_kind' => $submissionKind,
+                'corrects_submission_id' => $correctsSubmissionId,
+                'insurer_code' => $insurerCode,
+                'statutory_result_hash' => $overview->statutoryResultHash,
+                'xml_sha256' => hash('sha256', $xml),
+                'pdf_template_reference' =>
+                    $this->pdfRenderer->templateReference($insurerCode),
+                'isds_attachment_rules' => $channel['isds_attachment_rules'],
+            ]));
+            $obligation = $this->obligations->register(
+                $supplierId,
+                self::AGENDA_PAYMENT_OVERVIEW,
+                self::SUBJECT_RUN,
+                $subjectReference,
+                $periodStart,
+                $periodEnd,
+                $submissionKind,
+                self::CHANNEL,
+                self::SOURCE_EVENT_OVERVIEW,
+                $sourceEventReference,
+                $sourceHash,
+                $window->earliestSubmissionOn,
+                $window->dueOn,
+                $window->calendarBasis,
+                $window->rulesetId,
+                $window->rulesetHash,
+                'health-overview-obligation:' . $environment . ':' . $sourceHash,
+                null,
+                $createdBy,
+                null,
+                $environment,
+            );
             $keys = $this->idempotencyKeys($environment, $sourceHash);
             $submission = $this->submissions->prepare(
                 $supplierId,
                 $obligation['id'],
-                'regular',
+                $submissionKind,
                 self::CHANNEL,
                 $sourceHash,
                 $keys['submission'],
@@ -567,7 +623,7 @@ final readonly class HealthInsuranceSubmissionService
                 // přehledu ale váže XML a zdravotní výsledek, ne celý běh —
                 // provázat je by znamenalo tvrdit shodu, která neplatí.
                 null,
-                null,
+                $correctsSubmissionId,
                 $createdBy,
                 $environment,
             );
@@ -1287,7 +1343,9 @@ final readonly class HealthInsuranceSubmissionService
 
         return new HealthPaymentOverviewPayload(
             insurerCode: $overview->insurerCode,
-            overviewKind: HealthPaymentOverviewPayload::KIND_REGULAR,
+            overviewKind: $overview->revisionKind === 'correction'
+                ? HealthPaymentOverviewPayload::KIND_CORRECTIVE
+                : HealthPaymentOverviewPayload::KIND_REGULAR,
             employer: $employer,
             month: (int) substr($overview->period, 5, 2),
             year: (int) substr($overview->period, 0, 4),

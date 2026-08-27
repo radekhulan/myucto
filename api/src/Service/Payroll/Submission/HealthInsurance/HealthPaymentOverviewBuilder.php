@@ -32,6 +32,15 @@ final class HealthPaymentOverviewBuilder
             $revision['revision_no'] ?? null,
             'revision.revision_no',
         );
+        $revisionKind = $revision['revision_kind'] ?? null;
+        if (!is_string($revisionKind)
+            || !in_array($revisionKind, ['regular', 'correction'], true)
+        ) {
+            throw new HealthInsuranceOverviewException(
+                'health_insurance_revision_kind_invalid',
+                'Přehled lze vytvořit jen z řádné nebo opravné mzdové revize.',
+            );
+        }
         if (($revision['revision_status'] ?? null) !== 'approved'
             || ($revision['current_revision_no'] ?? null) !== $revisionNo
         ) {
@@ -137,6 +146,7 @@ final class HealthPaymentOverviewBuilder
                 $runId,
                 $revisionId,
                 $revisionNo,
+                $revisionKind,
                 $period,
                 $code,
                 $statutoryResultId,

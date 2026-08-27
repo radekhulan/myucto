@@ -24,6 +24,7 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
         $overviews = $this->builder->build(41, $source);
 
         self::assertCount(2, $overviews);
+        self::assertSame('regular', $overviews[0]->revisionKind);
         self::assertSame(['111', '201'], array_map(
             static fn ($overview): string => $overview->insurerCode,
             $overviews,
@@ -212,6 +213,7 @@ final class HealthPaymentOverviewBuilderTest extends TestCase
                 'id' => 53,
                 'run_id' => 19,
                 'revision_no' => 2,
+                'revision_kind' => 'regular',
                 'revision_status' => 'approved',
                 'period_start' => '2026-06-01',
                 'current_revision_no' => 2,
