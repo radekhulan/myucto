@@ -133,6 +133,12 @@ $keep = [
     'cnb_repo_rates',        // repo sazby ČNB pro úrok z prodlení — seed 1048
     'bank_rule_templates',   // globální šablony bankovních pravidel — seed 1056
     'remittance_map',        // globální mapa odvodů na účty ČNB — seed 1056
+    // ⚠️ Provozní nastavení instalace, NE uživatelská data. Když řádek zmizí,
+    // spadne režim plánovaných úloh zpátky na `individual` — a na instalaci,
+    // kde je hostingem nastavený `dispatcher`, se dispatcher ukončí bez práce
+    // a NEBĚŽÍ NIC. Heartbeat přitom tiká dál, takže se na to přijde až
+    // z monitoringu poskytovatele. Reset uživatelských dat tohle měnit nemá.
+    'cron_settings',         // režim plánovaných úloh — migrace 1184/1320
 ];
 // ARES/VIES/CRPDPH cache — defaultně mažeme, s --keep-cache ponecháme.
 if ($keepCache) {

@@ -36,6 +36,7 @@ use Symfony\Component\Uid\Uuid;
 use Webauthn\CredentialRecord;
 use Webauthn\PublicKeyCredentialDescriptor;
 use Webauthn\TrustPath\EmptyTrustPath;
+use MyInvoice\Service\Auth\MfaRecoveryCodeService;
 
 #[AllowMockObjectsWithoutExpectations]
 final class PasskeyActionTest extends TestCase
@@ -56,6 +57,7 @@ final class PasskeyActionTest extends TestCase
     private BruteForceGuard&MockObject $bruteForce;
     private PasskeySessionTransitionService&MockObject $sessionTransitions;
     private MfaProtectedOperationService&MockObject $protectedOperations;
+    private MfaRecoveryCodeService&MockObject $recoveryCodes;
 
     protected function setUp(): void
     {
@@ -76,6 +78,9 @@ final class PasskeyActionTest extends TestCase
         $this->bruteForce = $this->createMock(BruteForceGuard::class);
         $this->sessionTransitions = $this->createMock(PasskeySessionTransitionService::class);
         $this->protectedOperations = $this->createMock(MfaProtectedOperationService::class);
+        // Registrace passkey vydává první sadu záložních kódů; testy tu sledují
+        // ceremonii, ne kódy, takže atrapa mlčí a vrací prázdno.
+        $this->recoveryCodes = $this->createMock(MfaRecoveryCodeService::class);
     }
 
     public function testCredentialListContainsOnlyPublicMetadata(): void
@@ -636,6 +641,7 @@ final class PasskeyActionTest extends TestCase
             $this->bruteForce,
             $this->sessionTransitions,
             $this->protectedOperations,
+            $this->recoveryCodes,
         );
     }
 
