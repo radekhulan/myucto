@@ -302,6 +302,7 @@ use MyInvoice\Action\License\LicenseBillingAction;
 use MyInvoice\Action\License\LicenseStatusAction;
 use MyInvoice\Action\License\ActivateLicenseAction;
 use MyInvoice\Action\License\DeactivateLicenseAction;
+use MyInvoice\Action\License\RefreshLicenseAction;
 use MyInvoice\Action\License\CancelRenewalLicenseAction;
 use MyInvoice\Action\License\StorageQuoteAction;
 use MyInvoice\Action\License\StorageUpgradeAction;
@@ -433,6 +434,10 @@ final class Routes
         // klíčem — nepodepsaný požadavek neudělá nic.
         $app->post('/api/managed/license',       \MyInvoice\Action\License\ManagedLicenseAction::class);
         $app->post('/api/license/deactivate',    DeactivateLicenseAction::class);
+        // Okamžité stažení rozsahu z licenčního serveru — zaplacené navýšení
+        // se jinak projeví až denní obnovou tokenu a zákazník kouká na staré
+        // počty. Nic nekupuje, jen si řekne o čerstvý token.
+        $app->post('/api/license/refresh',       RefreshLicenseAction::class);
         // Vypnutí automatického prodlužování — licence doběhne do valid_until.
         $app->post('/api/license/cancel-renewal', CancelRenewalLicenseAction::class);
         // In-place navýšení počtu uživatelů (poměrný doplatek z uložené karty).

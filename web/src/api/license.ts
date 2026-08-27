@@ -392,6 +392,16 @@ export const licenseApi = {
   /** Admin — deaktivace (uvolní vazbu, smaže klíč lokálně). */
   deactivate: () => api.post<DeactivateResult>('/license/deactivate').then((r) => r.data),
 
+  /**
+   * Admin — okamžité stažení rozsahu z licenčního serveru.
+   *
+   * Zaplacené navýšení se do instalace propíše až novým tokenem, který se
+   * běžně obnovuje jednou denně. Po platbě, která proběhla jinde než tady
+   * (odkaz z e-mailu, ruční potvrzení obsluhou), by zákazník do té doby koukal
+   * na staré počty.
+   */
+  refresh: () => api.post<LicenseStatus>('/license/refresh').then((r) => r.data),
+
   /** Admin — vypnutí automatického prodlužování. NENÍ deaktivace: licence běží
    *  do konce zaplaceného období, jen se nestrhne další platba. Idempotentní. */
   cancelRenewal: () =>

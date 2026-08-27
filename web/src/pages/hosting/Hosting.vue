@@ -106,6 +106,29 @@ async function load(): Promise<void> {
   }
 }
 
+/**
+ * Ruční stažení rozsahu z licenčního serveru.
+ *
+ * Zaplacené navýšení míst i rozšíření úložiště se do instalace propíše až
+ * novým licenčním tokenem, a ten se běžně obnovuje jednou denně. Po platbě,
+ * která proběhla jinde než tady — odkaz z e-mailu, ruční potvrzení obsluhou —
+ * koukal zákazník do té doby na staré počty a nechápal, za co zaplatil.
+ */
+const refreshing = ref(false)
+
+async function refreshEntitlement(): Promise<void> {
+  refreshing.value = true
+  errorMsg.value = null
+  try {
+    publishInstanceStatus(await licenseApi.refresh())
+    await auth.refresh()
+  } catch (e: unknown) {
+    errorMsg.value = (e as Error)?.message ?? t('hosting.refresh_failed')
+  } finally {
+    refreshing.value = false
+  }
+}
+
 onMounted(async () => {
   await load()
   if (!auth.isSuperadmin) return
@@ -736,8 +759,26 @@ watch(previewScenario, (scenario) => {
       <!-- ── CO MÁM ─────────────────────────────────────────────────────────
            Řádek v pořádku je šedý a bez tlačítka. Křičí jen to, co se má řešit. -->
       <section>
-        <h2 class="text-lg font-semibold text-neutral-900">{{ t('hosting.overview_title') }}</h2>
-        <p class="mt-0.5 text-sm text-neutral-600">{{ t('hosting.overview_desc') }}</p>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold text-neutral-900">{{ t('hosting.overview_title') }}</h2>
+            <p class="mt-0.5 text-sm text-neutral-600">{{ t('hosting.overview_desc') }}</p>
+          </div>
+          <!-- ⚠️ Rozsah se do instalace propíše až novým licenčním tokenem, a ten
+               se obnovuje jednou denně. Po platbě, která proběhla jinde než tady,
+               by zákazník do zítřka koukal na staré počty. -->
+          <button
+            v-if="auth.isSuperadmin"
+            type="button"
+            :class="btnOutline('primary')"
+            :disabled="refreshing"
+            data-hosting-refresh
+            @click="refreshEntitlement"
+          >
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+            {{ refreshing ? t('hosting.refresh_busy') : t('hosting.refresh_cta') }}
+          </button>
+        </div>
 
         <ul class="mt-4 grid gap-3 sm:grid-cols-2">
           <!-- Tarif licence -->
