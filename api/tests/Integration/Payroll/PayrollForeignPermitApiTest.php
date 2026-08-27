@@ -14,6 +14,7 @@ use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -265,9 +266,14 @@ final class PayrollForeignPermitApiTest extends TestCase
         self::assertArrayNotHasKey('document_sha256', $history[0]);
     }
 
-    public function testPermitDocumentIsHiddenFromGenericDmsListDetailAndBearerWithoutSessionPayrollRead(): void
+    public function testPermitDocumentAndExtractedChildRequirePersonnelDocumentPermission(): void
     {
         $documentId = $this->document($this->supplierId, 'company');
+        $childDocumentId = $this->document(
+            $this->supplierId,
+            'company',
+            $documentId,
+        );
         $this->insertPermitFixture($documentId);
         $documentsOnly = new EffectiveRole(
             701,
@@ -284,6 +290,11 @@ final class PayrollForeignPermitApiTest extends TestCase
             $restricted->withUri($restricted->getUri()->withPath("/api/documents/{$documentId}")),
             new Response(),
             ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertSame(404, $this->documentsAction->get(
+            $restricted->withUri($restricted->getUri()->withPath("/api/documents/{$childDocumentId}")),
+            new Response(),
+            ['id' => (string) $childDocumentId],
         )->getStatusCode());
         self::assertSame([], $this->json($this->documentsAction->list(
             $restricted->withUri($restricted->getUri()->withPath('/api/documents')),
@@ -302,16 +313,90 @@ final class PayrollForeignPermitApiTest extends TestCase
             true,
             ['documents' => AccessLevel::READ->value, 'payroll' => AccessLevel::READ->value],
         );
-        $allowed = $restricted->withAttribute('auth.effective_role', $payrollReader);
+        $stillRestricted = $restricted->withAttribute('auth.effective_role', $payrollReader);
+        self::assertSame(404, $this->documentsAction->get(
+            $stillRestricted,
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertSame(404, $this->documentsAction->get(
+            $stillRestricted->withUri(
+                $stillRestricted->getUri()->withPath("/api/documents/{$childDocumentId}"),
+            ),
+            new Response(),
+            ['id' => (string) $childDocumentId],
+        )->getStatusCode());
+        $restrictedJobViewer = DocumentViewerContext::fromJobParams(
+            DocumentViewerResolver::fromRequest($stillRestricted)->toJobParams(),
+            $this->userId,
+        );
+        self::assertNull($this->documents->findRaw(
+            $documentId,
+            $this->supplierId,
+            $restrictedJobViewer,
+        ));
+        self::assertNull($this->documents->findRaw(
+            $childDocumentId,
+            $this->supplierId,
+            $restrictedJobViewer,
+        ));
+        $metadata = $this->action->show(
+            $stillRestricted,
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(200, $metadata->getStatusCode());
+        self::assertNull($this->json($metadata)['permits']['history'][0]['document_id']);
+
+        $personnelReader = new EffectiveRole(
+            704,
+            'Mzdová účetní pro personální doklady',
+            'staff',
+            true,
+            [
+                'documents' => AccessLevel::READ->value,
+                'payroll' => AccessLevel::READ->value,
+                'payroll.person.write' => AccessLevel::READ->value,
+            ],
+        );
+        $allowed = $restricted->withAttribute('auth.effective_role', $personnelReader);
         self::assertSame(200, $this->documentsAction->get(
             $allowed,
             new Response(),
             ['id' => (string) $documentId],
         )->getStatusCode());
+        self::assertSame(200, $this->documentsAction->get(
+            $allowed->withUri($allowed->getUri()->withPath("/api/documents/{$childDocumentId}")),
+            new Response(),
+            ['id' => (string) $childDocumentId],
+        )->getStatusCode());
         self::assertCount(1, $this->json($this->documentsAction->list(
             $allowed->withUri($allowed->getUri()->withPath('/api/documents')),
             new Response(),
         ))['data']);
+        $personnelMetadata = $this->action->show(
+            $allowed,
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+        self::assertSame(
+            $documentId,
+            $this->json($personnelMetadata)['permits']['history'][0]['document_id'],
+        );
+        $jobViewer = DocumentViewerContext::fromJobParams(
+            DocumentViewerResolver::fromRequest($allowed)->toJobParams(),
+            $this->userId,
+        );
+        self::assertNotNull($this->documents->findRaw(
+            $documentId,
+            $this->supplierId,
+            $jobViewer,
+        ));
+        self::assertNotNull($this->documents->findRaw(
+            $childDocumentId,
+            $this->supplierId,
+            $jobViewer,
+        ));
         self::assertSame(404, $this->documentsAction->get(
             $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'),
             new Response(),
@@ -355,21 +440,31 @@ final class PayrollForeignPermitApiTest extends TestCase
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    private function document(int $supplierId, string $scope): int
+    private function document(
+        int $supplierId,
+        string $scope,
+        ?int $parentDocumentId = null,
+    ): int
     {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO documents
                 (supplier_id, title, original_name, filename, sha256, mime_type,
-                 size_bytes, doc_type, uploaded_by, scope, owner_user_id)
+                 size_bytes, doc_type, uploaded_by, scope, owner_user_id,
+                 parent_document_id)
              VALUES (?, "Syntetický podklad oprávnění", "permit.pdf", "permit.pdf", ?,
-                     "application/pdf", 128, "pdf", ?, ?, ?)',
+                     "application/pdf", 128, "pdf", ?, ?, ?, ?)',
         );
         $stmt->execute([
             $supplierId,
-            hash('sha256', "permit-{$scope}-{$supplierId}"),
+            hash(
+                'sha256',
+                "permit-{$scope}-{$supplierId}"
+                    . ($parentDocumentId === null ? '' : "-child-{$parentDocumentId}"),
+            ),
             $this->userId,
             $scope,
             $scope === 'user' ? $this->userId : null,
+            $parentDocumentId,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }

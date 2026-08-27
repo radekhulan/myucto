@@ -96,7 +96,24 @@ final class DocumentViewerResolverTest extends TestCase
                     ['documents' => 1, 'payroll' => 1],
                 )),
         );
-        self::assertTrue($payroll->canViewPayrollForeignPermitEvidence);
+        self::assertFalse($payroll->canViewPayrollForeignPermitEvidence);
+
+        $personnel = DocumentViewerResolver::fromRequest(
+            $request
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+                ->withAttribute('auth.effective_role', new EffectiveRole(
+                    98,
+                    'Mzdová účetní pro personální doklady',
+                    'staff',
+                    true,
+                    [
+                        'documents' => 1,
+                        'payroll' => 1,
+                        'payroll.person.write' => 1,
+                    ],
+                )),
+        );
+        self::assertTrue($personnel->canViewPayrollForeignPermitEvidence);
 
         $insolvency = DocumentViewerResolver::fromRequest(
             $request

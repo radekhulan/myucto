@@ -42,7 +42,7 @@ final class DocumentViewerResolver
             $isSession
             && RequestAuthorization::allows(
                 $request,
-                'payroll',
+                'payroll.person.write',
                 AccessLevel::READ,
             );
         $canViewPayrollHealthEvidence =

@@ -36,7 +36,10 @@ final class PayrollForeignPermitAction
             return Json::error($response, 'validation_failed', 'as_of musí být datum YYYY-MM-DD.', 422);
         }
         $view = $this->permits->view($this->currentSupplierId($request), (int) $args['id'], $asOf);
-        if ($view !== null && !RequestAuthorization::allows($request, 'documents', AccessLevel::READ)) {
+        if ($view !== null && (
+            !RequestAuthorization::allows($request, 'documents', AccessLevel::READ)
+            || !RequestAuthorization::allows($request, 'payroll.person.write', AccessLevel::READ)
+        )) {
             foreach ($view['history'] as &$permit) {
                 $permit['document_id'] = null;
             }
