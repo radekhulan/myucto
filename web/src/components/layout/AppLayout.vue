@@ -601,6 +601,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/people', label: t('nav.payroll_people'), icon: ICONS.clients, permission: 'payroll' as PermissionKey, dividerBefore: true },
         { to: '/payroll/deduction-agreements', label: t('nav.payroll_deduction_agreements'), icon: ICONS.tag, permission: 'payroll' as PermissionKey },
         { to: '/payroll/enforcement', label: t('nav.payroll_enforcement'), icon: ICONS.coin, permission: 'payroll.enforcement' as PermissionKey },
+        { to: '/payroll/enforcement/cooperation', label: t('nav.payroll_enforcement_cooperation'), icon: ICONS.requestDoc, permission: 'payroll.enforcement.cooperation' as PermissionKey },
         { to: '/payroll/insolvency', label: t('nav.payroll_insolvency'), icon: ICONS.documents, permission: 'payroll.insolvency' as PermissionKey, additionalPermissions: ['payroll.enforcement'] },
         // Roční koše osvobození benefitů se sledují průběžně, ne v měsíčním
         // taktu: kdo se dozví o překročení až u prosincového vstupu, dozví se to

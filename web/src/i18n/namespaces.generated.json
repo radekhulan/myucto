@@ -424,6 +424,9 @@
     "payroll-enforcement": [
       "payroll"
     ],
+    "payroll-enforcement-cooperation": [
+      "payroll"
+    ],
     "payroll-insolvency": [
       "payroll"
     ],

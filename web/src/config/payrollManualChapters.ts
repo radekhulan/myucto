@@ -13,6 +13,7 @@ export const PAYROLL_MANUAL_CHAPTERS: PayrollManualChapterRule[] = [
   [/^\/payroll\/submissions(?:\/|$)/, '68_Podani_a_hlaseni'],
   [/^\/payroll\/people(?:\/|$)/, '69_Zamestnanci'],
   [/^\/payroll\/deduction-agreements(?:\/|$)/, '70_Dohody_o_srazkach'],
+  [/^\/payroll\/enforcement\/cooperation(?:\/|$)/, '71_Srazky_a_exekuce'],
   [/^\/payroll\/enforcement(?:\/|$)/, '71_Srazky_a_exekuce'],
   [/^\/payroll\/insolvency(?:\/|$)/, '71_Srazky_a_exekuce'],
   [/^\/payroll\/benefit-baskets(?:\/|$)/, '72_Kose_benefitu'],
