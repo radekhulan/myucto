@@ -16,7 +16,8 @@ final readonly class JmhzPreparationSnapshot
     public const PREVIOUS_V6_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v6';
     public const PREVIOUS_V7_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v7';
     public const PREVIOUS_V8_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v8';
-    public const CURRENT_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v9';
+    public const PREVIOUS_V9_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v9';
+    public const CURRENT_SCHEMA_REFERENCE = 'payroll-jmhz-preparation-source.v10';
 
     /**
      * @param array<string,mixed> $payload

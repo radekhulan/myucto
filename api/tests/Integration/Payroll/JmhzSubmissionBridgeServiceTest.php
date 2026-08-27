@@ -25,10 +25,12 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzVerifiedPreparationSnapshot;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -449,7 +451,16 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
         $payload['people'][0]['annual_evidence']['settlement']['child_rows'] = [[
             'label' => '1. dítě',
+            'child_reference' => 'dependant-91',
+            'given_name' => 'Anna',
+            'family_name' => 'Syntetická',
+            'birth_date' => '2018-04-12',
+            'birth_number' => null,
             'months' => 12,
+            'ztp_p_months' => 0,
+            'ztp_p_months_mask' => 'NNNNNNNNNNNN',
+            'order_months_mask' => '111111111111',
+            'other_household_caregiver' => false,
             'amount_minor_units' => 152_040_00,
         ]];
         $childResolution = $this->resolutionFor(
@@ -458,13 +469,48 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             periodStart: '2026-02-01',
             periodEnd: '2026-02-28',
         );
-        self::assertSame('blocked', $childResolution->status());
-        self::assertContains(
+        self::assertSame('resolved', $childResolution->status());
+        self::assertNotContains(
             'jmhz_annual_settlement_child_details_unsupported',
             array_map(
                 static fn (JmhzScenario1Blocker $blocker): string => $blocker->code,
                 $childResolution->blockers,
             ),
+        );
+        self::assertInstanceOf(
+            JmhzScenario1NormalizedDocument::class,
+            $childResolution->candidate,
+        );
+        $childXml = (new JmhzScenario1XmlSerializer())->serialize(
+            $childResolution->candidate,
+            JmhzSubmissionEnvelope::create(
+                '019A0000-0000-7000-8000-000000000101',
+                [101 => '019A0000-0000-7000-8000-000000000102'],
+                '2026-03-06T09:00:00Z',
+                'MyÚčto.cz',
+                'test',
+            ),
+        );
+        self::assertStringContainsString(
+            '<form:uplatnenoZvyhodneniNaDeti>true</form:uplatnenoZvyhodneniNaDeti>',
+            $childXml,
+        );
+        self::assertStringContainsString(
+            '<form:vyzivujeJinaOsoba>false</form:vyzivujeJinaOsoba>',
+            $childXml,
+        );
+        self::assertStringContainsString('<form:jmeno>Anna</form:jmeno>', $childXml);
+        self::assertStringContainsString(
+            '<form:prijmeni>Syntetická</form:prijmeni>',
+            $childXml,
+        );
+        self::assertStringContainsString(
+            '<form:datumNarozeni>2018-04-12</form:datumNarozeni>',
+            $childXml,
+        );
+        self::assertStringContainsString(
+            '<form:poradi>111111111111</form:poradi>',
+            $childXml,
         );
     }
 
@@ -487,6 +533,69 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         self::assertContains('jmhz_december_collective_agreement_source_missing', $codes);
         self::assertContains('jmhz_december_ownership_form_source_missing', $codes);
         self::assertContains('jmhz_december_ozp_annual_source_missing', $codes);
+    }
+
+    public function testDecemberSerializesFrozenEmployerAnnualEvidence(): void
+    {
+        $payload = $this->payloadForPeriod('2026-12-01', '2026-12-31');
+        $payload['employer_annual_evidence'] = [
+            'schema_reference' => 'payroll-jmhz-employer-annual-evidence.v1',
+            'id' => 901,
+            'revision_no' => 2,
+            'report_year' => 2026,
+            'collective_agreement_types' => ['1', '3'],
+            'ownership_form' => '2',
+            'average_headcount_hundredths' => 2_675,
+            'average_disabled_headcount_hundredths' => 134,
+            'disabled_share_hundredths' => 501,
+            'ozp_reporting_office_id' => null,
+            'source_reference_sha256' => str_repeat('9', 64),
+        ];
+
+        $resolution = $this->resolutionFor(
+            $this->pvpoj(period: '2026-12'),
+            $payload,
+            periodStart: '2026-12-01',
+            periodEnd: '2026-12-31',
+        );
+
+        self::assertSame('resolved', $resolution->status());
+        $created = $this->bridge($resolution, '2027-01-05 Europe/Prague')->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            null,
+            self::ENVIRONMENT,
+            $this->userId,
+        );
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            $created['artifact_id'],
+        );
+        self::assertStringContainsString(
+            '<so:formaVlastnictvi>2</so:formaVlastnictvi>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<so:zecPocetPrepRok>26.75</so:zecPocetPrepRok>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<so:zecPocetPrepOzpRok>1.34</so:zecPocetPrepOzpRok>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<so:podilZamZtp>5.01</so:podilZamZtp>',
+            $xml,
+        );
+        self::assertSame(2, substr_count($xml, '<so:kolektivniSmlouva>'));
+        self::assertStringContainsString(
+            '<so:typKolektSmlouvy>1</so:typKolektSmlouvy>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<so:typKolektSmlouvy>3</so:typKolektSmlouvy>',
+            $xml,
+        );
     }
 
     public function testContentCorrectionFreezesFullAcceptedFormWithSameGuidAndReplaysImmutableArtifact(): void

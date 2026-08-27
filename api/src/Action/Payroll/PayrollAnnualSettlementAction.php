@@ -265,6 +265,21 @@ final class PayrollAnnualSettlementAction
             return self::invalid($response);
         }
 
+        $caregiverStatus = (string) ($body['other_household_caregiver_status'] ?? 'unknown');
+        try {
+            $caregivers = self::caregivers(
+                $caregiverStatus,
+                $body['other_household_caregivers'] ?? [],
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
         // Sestavením domény se vynutí tytéž podmínky, jaké hlídají CHECK
         // constrainty — validace tak žije jednou, ne zvlášť v akci a v databázi.
         try {
@@ -309,6 +324,8 @@ final class PayrollAnnualSettlementAction
                     'filing_obligation_reason' => $candidate->filingObligationReason,
                     'annual_claims' => $candidate->annualClaims->value,
                     'annual_claims_note' => $candidate->annualClaimsNote,
+                    'other_household_caregiver_status' => $caregiverStatus,
+                    'other_household_caregivers' => $caregivers,
                     'note' => $candidate->note,
                 ],
                 $expectedRowVersion,
@@ -514,6 +531,64 @@ final class PayrollAnnualSettlementAction
         $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * @return list<array{given_name:string,family_name:string,birth_date:string,months_mask:string}>
+     */
+    private static function caregivers(string $status, mixed $value): array
+    {
+        if (!in_array($status, ['unknown', 'none', 'present'], true)) {
+            throw new \InvalidArgumentException('Stav jiného pečujícího není platný.');
+        }
+        if (!is_array($value)) {
+            throw new \InvalidArgumentException('Seznam jiných pečujících není platný.');
+        }
+        if (count($value) > 100) {
+            throw new \InvalidArgumentException(
+                'Seznam jiných pečujících může obsahovat nejvýše 100 osob.',
+            );
+        }
+
+        $rows = [];
+        foreach (array_values($value) as $row) {
+            if (!is_array($row)) {
+                throw new \InvalidArgumentException('Údaj o jiném pečujícím není platný.');
+            }
+            $givenName = self::text($row['given_name'] ?? null);
+            $familyName = self::text($row['family_name'] ?? null);
+            $birthDate = self::date($row['birth_date'] ?? null);
+            $monthsMask = strtoupper(trim((string) ($row['months_mask'] ?? '')));
+            if ($givenName === null || mb_strlen($givenName) > 100
+                || $familyName === null || mb_strlen($familyName) > 100
+                || $birthDate === null
+                || preg_match('/^[AN]{12}$/D', $monthsMask) !== 1
+                || !str_contains($monthsMask, 'A')
+            ) {
+                throw new \InvalidArgumentException(
+                    'Jméno, datum narození nebo měsíce jiného pečujícího nejsou platné.',
+                );
+            }
+            $rows[] = [
+                'given_name' => $givenName,
+                'family_name' => $familyName,
+                'birth_date' => $birthDate->format('Y-m-d'),
+                'months_mask' => $monthsMask,
+            ];
+        }
+
+        if ($status === 'present' && $rows === []) {
+            throw new \InvalidArgumentException(
+                'Při stavu „ano“ zadejte alespoň jednoho jiného pečujícího.',
+            );
+        }
+        if ($status !== 'present' && $rows !== []) {
+            throw new \InvalidArgumentException(
+                'Seznam jiných pečujících smí být vyplněný jen při stavu „ano“.',
+            );
+        }
+
+        return $rows;
     }
 
     /** @return array<string,mixed> */

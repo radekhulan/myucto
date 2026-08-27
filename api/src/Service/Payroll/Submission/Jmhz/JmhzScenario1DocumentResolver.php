@@ -19,6 +19,7 @@ final class JmhzScenario1DocumentResolver
         JmhzPreparationSnapshotBuilder::PREVIOUS_V6_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V7_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V8_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V9_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
     ];
 
@@ -138,26 +139,14 @@ final class JmhzScenario1DocumentResolver
             );
         }
         $month = (int) substr($preparation->periodStart, 5, 2);
-        if ($month === 12) {
-            $blockers[] = $this->blocker(
-                'jmhz_december_collective_agreement_source_missing',
-                'revision',
-                $preparation->sourceRevisionId,
-                ['10214'],
-            );
-            $blockers[] = $this->blocker(
-                'jmhz_december_ownership_form_source_missing',
-                'revision',
-                $preparation->sourceRevisionId,
-                ['10220'],
-            );
-            $blockers[] = $this->blocker(
-                'jmhz_december_ozp_annual_source_missing',
-                'revision',
-                $preparation->sourceRevisionId,
-                ['10038', '10039', '10452'],
-            );
-        }
+        $employerAnnual = $this->employerAnnual(
+            $preparation->payload['employer_annual_evidence'] ?? null,
+            $month,
+            (int) substr($preparation->periodStart, 0, 4),
+            $registration['id'],
+            $preparation->sourceRevisionId,
+            $blockers,
+        );
 
         $normalizedPeople = [];
         // Bez osob není co potvrzovat — a hlavně není čím právní skutečnosti
@@ -533,6 +522,7 @@ final class JmhzScenario1DocumentResolver
                 'source' => $preparation->payload['employer_summary']['employer'] ?? null,
                 'pvpoj' => $pvpojPayload,
                 'summary_totals' => $this->employerTaxTotals($normalizedPeople),
+                'annual' => $employerAnnual,
             ],
             'people' => $normalizedPeople,
             'interactions' => [
@@ -1278,6 +1268,117 @@ final class JmhzScenario1DocumentResolver
      * @param list<JmhzScenario1Blocker> $blockers
      * @return array<string,mixed>|null
      */
+    /**
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @param-out list<JmhzScenario1Blocker> $blockers
+     * @return array<string,mixed>|null
+     */
+    private function employerAnnual(
+        mixed $value,
+        int $month,
+        int $reportYear,
+        ?int $officeId,
+        int $revisionId,
+        array &$blockers,
+    ): ?array {
+        if ($month !== 12) {
+            return null;
+        }
+        $evidence = $this->object($value);
+        $types = $evidence['collective_agreement_types'] ?? null;
+        $validTypes = is_array($types)
+            && array_is_list($types)
+            && $types !== []
+            && $types === array_values(array_unique($types, SORT_STRING))
+            && array_filter(
+                $types,
+                static fn (mixed $type): bool => !is_string($type)
+                    || !in_array($type, ['0', '1', '2', '3', '4', '5'], true),
+            ) === []
+            && (!in_array('0', $types, true) || $types === ['0']);
+        if (!$validTypes
+            || ($evidence['schema_reference'] ?? null)
+                !== 'payroll-jmhz-employer-annual-evidence.v1'
+            || ($evidence['report_year'] ?? null) !== $reportYear
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_december_collective_agreement_source_missing',
+                'revision',
+                $revisionId,
+                ['10214'],
+            );
+        }
+        $ownership = $evidence['ownership_form'] ?? null;
+        if (!is_string($ownership)
+            || !in_array($ownership, ['1', '2', '3', '4'], true)
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_december_ownership_form_source_missing',
+                'revision',
+                $revisionId,
+                ['10220'],
+            );
+        }
+        $total = $evidence['average_headcount_hundredths'] ?? null;
+        $disabled = $evidence['average_disabled_headcount_hundredths'] ?? null;
+        $share = $evidence['disabled_share_hundredths'] ?? null;
+        $expectedShare = is_int($total) && $total > 0 && is_int($disabled)
+            ? intdiv(($disabled * 10_000) + intdiv($total, 2), $total)
+            : null;
+        $validOzp = is_int($total)
+            && $total >= 0
+            && is_int($disabled)
+            && $disabled >= 0
+            && $disabled <= $total
+            && is_int($share)
+            && $share === ($total === 0 ? 0 : $expectedShare)
+            && $share >= 0
+            && $share <= 10_000;
+        if (!$validOzp) {
+            $blockers[] = $this->blocker(
+                'jmhz_december_ozp_annual_source_missing',
+                'revision',
+                $revisionId,
+                ['10038', '10039', '10452'],
+            );
+        }
+        if (!$validTypes
+            || !is_string($ownership)
+            || !in_array($ownership, ['1', '2', '3', '4'], true)
+            || !$validOzp
+        ) {
+            return null;
+        }
+        $selectedOfficeId = $evidence['ozp_reporting_office_id'] ?? null;
+        if ($selectedOfficeId !== null
+            && (!is_int($selectedOfficeId) || $selectedOfficeId <= 0)
+        ) {
+            $blockers[] = $this->blocker(
+                'jmhz_december_ozp_annual_source_missing',
+                'revision',
+                $revisionId,
+                ['10038', '10039', '10452'],
+            );
+            return null;
+        }
+
+        return [
+            'source_id' => $evidence['id'] ?? null,
+            'source_revision_no' => $evidence['revision_no'] ?? null,
+            'report_year' => $reportYear,
+            'ownership_form' => $ownership,
+            'collective_agreement_types' => $types,
+            'ozp' => $total > 2_500
+                && ($selectedOfficeId === null || $selectedOfficeId === $officeId)
+                    ? [
+                        'average_headcount_hundredths' => $total,
+                        'average_disabled_headcount_hundredths' => $disabled,
+                        'disabled_share_hundredths' => $share,
+                    ]
+                    : null,
+        ];
+    }
+
     private function annualSummary(
         mixed $value,
         string $periodStart,
@@ -1374,7 +1475,10 @@ final class JmhzScenario1DocumentResolver
             }
             $childRows = $this->rows($settlement['child_rows'] ?? null);
             $childClaimed = $childRows !== [];
-            if ($childClaimed) {
+            $children = $childClaimed
+                ? $this->annualChildren($childRows)
+                : null;
+            if ($childClaimed && $children === null) {
                 $blockers[] = $this->blocker(
                     'jmhz_annual_settlement_child_details_unsupported',
                     'person',
@@ -1411,6 +1515,9 @@ final class JmhzScenario1DocumentResolver
                         : null,
                 'child_credit_claimed' => $childClaimed,
             ];
+            if ($childClaimed) {
+                $result['child_credit_details'] = $children;
+            }
             if (in_array(null, $result, true)) {
                 $blockers[] = $this->blocker(
                     'jmhz_annual_settlement_result_incomplete',
@@ -1448,6 +1555,72 @@ final class JmhzScenario1DocumentResolver
             'performed' => $performed,
             'result' => $result,
             'withholding' => $withholding,
+        ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array<string,mixed>|null
+     */
+    private function annualChildren(array $rows): ?array
+    {
+        $children = [];
+        $caregiver = null;
+        foreach ($rows as $row) {
+            $reference = $row['child_reference'] ?? null;
+            $givenName = $row['given_name'] ?? null;
+            $familyName = $row['family_name'] ?? null;
+            $birthDate = $row['birth_date'] ?? null;
+            $birthNumber = $row['birth_number'] ?? null;
+            $ztpMask = $row['ztp_p_months_mask'] ?? null;
+            $orderMask = $row['order_months_mask'] ?? null;
+            $rowCaregiver = $row['other_household_caregiver'] ?? null;
+            if (!is_string($reference) || trim($reference) === ''
+                || !is_string($givenName) || trim($givenName) === ''
+                || mb_strlen($givenName) > 100
+                || !is_string($familyName) || trim($familyName) === ''
+                || mb_strlen($familyName) > 100
+                || ($birthDate !== null
+                    && (!is_string($birthDate)
+                        || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $birthDate) !== 1))
+                || ($birthNumber !== null
+                    && (!is_string($birthNumber)
+                        || preg_match('/^\d{9,10}$/D', $birthNumber) !== 1))
+                || ($birthDate === null && $birthNumber === null)
+                || !is_string($ztpMask)
+                || preg_match('/^(A|N){12}$/D', $ztpMask) !== 1
+                || !is_string($orderMask)
+                || preg_match('/^([1-3]|N){12}$/D', $orderMask) !== 1
+                || !is_bool($rowCaregiver)
+                || ($caregiver !== null && $caregiver !== $rowCaregiver)
+            ) {
+                return null;
+            }
+            $caregiver = $rowCaregiver;
+            $children[] = [
+                'reference' => $reference,
+                'identity' => [
+                    'given_name' => trim($givenName),
+                    'family_name' => trim($familyName),
+                    'birth_date' => $birthDate,
+                    'birth_number' => $birthNumber,
+                ],
+                'ztp_p_months_mask' => $ztpMask,
+                'order_months_mask' => $orderMask,
+            ];
+        }
+        $otherCaregivers = $this->rows($rows[0]['other_household_caregivers'] ?? null);
+        if ($caregiver === true && $otherCaregivers === []) {
+            return null;
+        }
+        if ($caregiver === false && $otherCaregivers !== []) {
+            return null;
+        }
+
+        return [
+            'other_household_caregiver' => $caregiver ?? false,
+            'other_household_caregivers' => $otherCaregivers,
+            'children' => $children,
         ];
     }
 

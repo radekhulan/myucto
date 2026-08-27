@@ -20,6 +20,7 @@ import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
 import PayrollDimensions from './PayrollDimensions.vue'
 import RegzelProfileSettings from './RegzelProfileSettings.vue'
+import JmhzEmployerAnnualEvidenceSettings from './JmhzEmployerAnnualEvidenceSettings.vue'
 import { codeFromName, OFFICE_CODE_MAX_LENGTH } from '@/utils/slugifyCode'
 import {
   PAYROLL_ACCOUNT_TYPES,
@@ -791,10 +792,10 @@ onMounted(load)
 
       <PayrollDimensions v-if="activeTab === 'dimensions'" :can-write="canWrite" />
 
-      <RegzelProfileSettings
-        v-if="activeTab === 'submissions'"
-        :can-write="canWriteSubmissions"
-      />
+      <div v-if="activeTab === 'submissions'" class="space-y-6">
+        <RegzelProfileSettings :can-write="canWriteSubmissions" />
+        <JmhzEmployerAnnualEvidenceSettings :can-write="canWriteSubmissions" />
+      </div>
 
       <div
         v-if="!canWrite && (activeTab === 'employer' || activeTab === 'accounting')"

@@ -85,6 +85,7 @@ use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
@@ -1151,6 +1152,14 @@ final class Routes
             $g->post(
                 '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}/{employmentId:[0-9]+}',
                 [PayrollJmhzOrdinaryEvidenceAction::class, 'confirm'],
+            );
+            $g->get(
+                '/submissions/jmhz-employer-annual-evidence/{reportYear:[0-9]{4}}',
+                [PayrollJmhzEmployerAnnualEvidenceAction::class, 'get'],
+            );
+            $g->post(
+                '/submissions/jmhz-employer-annual-evidence/{reportYear:[0-9]{4}}',
+                [PayrollJmhzEmployerAnnualEvidenceAction::class, 'save'],
             );
             $g->post(
                 '/submissions/jmhz-preparation/{revisionId:[0-9]+}',

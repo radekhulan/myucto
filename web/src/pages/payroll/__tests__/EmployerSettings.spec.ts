@@ -19,6 +19,8 @@ const m = vi.hoisted(() => ({
   updateEmployerPolicy: vi.fn(),
   regzelProfile: vi.fn(),
   saveRegzelProfile: vi.fn(),
+  jmhzEmployerAnnualEvidence: vi.fn(),
+  saveJmhzEmployerAnnualEvidence: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -42,6 +44,8 @@ vi.mock('@/api/payroll', () => ({
     updateEmployerPolicy: m.updateEmployerPolicy,
     regzelProfile: m.regzelProfile,
     saveRegzelProfile: m.saveRegzelProfile,
+    jmhzEmployerAnnualEvidence: m.jmhzEmployerAnnualEvidence,
+    saveJmhzEmployerAnnualEvidence: m.saveJmhzEmployerAnnualEvidence,
   },
 }))
 
@@ -60,6 +64,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+    locale: { value: 'cs-CZ' },
   }),
 }))
 
@@ -156,6 +161,12 @@ async function mountPage(value = settings()) {
   m.regzelProfile.mockResolvedValue({
     profile: null,
     suggested_tax_office_workplace_code: null,
+  })
+  m.jmhzEmployerAnnualEvidence.mockResolvedValue({
+    evidence: null,
+    offices: [],
+    collective_agreement_types: [],
+    ownership_forms: [],
   })
   m.saveEmployerSettings.mockResolvedValue(value)
   const wrapper = mount(EmployerSettings, { attachTo: document.body })

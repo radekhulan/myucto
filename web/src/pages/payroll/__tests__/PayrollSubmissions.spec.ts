@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   downloadJmhzPreview: vi.fn(),
   healthOverviews: vi.fn(),
   downloadHealthOverview: vi.fn(),
+  prepareHealthOverview: vi.fn(),
   submissionInbox: vi.fn(),
   acknowledgeInboxItem: vi.fn(),
   snoozeInboxItem: vi.fn(),
@@ -90,7 +91,7 @@ vi.mock('@/api/payrollHealthNotifications', () => ({
       },
       unresolved_employments: [],
     }),
-    preparePaymentOverview: vi.fn(),
+    preparePaymentOverview: m.prepareHealthOverview,
   },
 }))
 
@@ -272,6 +273,15 @@ function setup() {
       reason_code: 'health_insurance_transport_unavailable',
     },
   }))
+  m.prepareHealthOverview.mockResolvedValue({
+    submission_id: 31,
+    artifact_id: 51,
+    pdf_artifact_id: 52,
+    insurer_code: '111',
+    status: 'ready',
+    schema_validated: true,
+    dispatch: { channel: { isds_attachment_format: 'text_pdf' } },
+  })
   // Přehled se podává za REGISTRACI u OSSZ, takže panel se nejdřív ptá,
   // za které účtárny se z revize podává.
   m.jmhzOffices.mockImplementation(async () => [{
@@ -400,6 +410,17 @@ function setup() {
       mime_type: 'application/xml',
       byte_size: 2048,
       xsd_version: '1.4.3.4',
+      catalog_version: null,
+      channel: 'manual_upload',
+      created_at: '2026-09-01 08:01:00',
+    }, {
+      id: 52,
+      part_id: 41,
+      artifact_kind: 'outbound_pdf',
+      direction: 'outbound',
+      mime_type: 'application/pdf',
+      byte_size: 4096,
+      xsd_version: null,
       catalog_version: null,
       channel: 'manual_upload',
       created_at: '2026-09-01 08:01:00',
@@ -594,9 +615,12 @@ describe('PayrollSubmissions', () => {
     const download = wrapper.get('[data-test="health-payment-overviews"] button')
     await download.trigger('click')
     await flushPromises()
-    expect(m.downloadHealthOverview).toHaveBeenCalledWith(
-      expect.objectContaining({ revision_id: 18, insurer: { code: '111' } }),
+    expect(m.prepareHealthOverview).toHaveBeenCalledWith(18, '111', 'production')
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ id: 52, mime_type: 'application/pdf' }),
     )
+    expect(m.downloadHealthOverview).not.toHaveBeenCalled()
   })
 
   it('nabídne bezpečně označený PVPOJ kontrolní náhled ke stažení', async () => {

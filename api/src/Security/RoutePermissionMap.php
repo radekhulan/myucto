@@ -230,6 +230,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/isds-gateway/(?:outbox/[0-9]+|callback)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/inbox$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/inbox/[0-9]+/(?:acknowledge|snooze)$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/jmhz-employer-annual-evidence/[0-9]{4}$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/jmhz-employer-annual-evidence/[0-9]{4}$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-pvpoj/[0-9]+(?:/download)?$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/jmhz-ordinary-evidence/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-ordinary-evidence/[0-9]+/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],

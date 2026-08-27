@@ -162,6 +162,10 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         self::assertCount(1, $result['children']);
         self::assertSame(12, $result['children'][0]->months);
         self::assertSame(6, $result['children'][0]->ztpPMonths);
+        self::assertSame(range(1, 12), $result['children'][0]->claimedMonths);
+        self::assertSame(range(7, 12), $result['children'][0]->ztpPClaimedMonths);
+        self::assertSame(range(1, 12), $result['children'][0]->toArray()['claimed_months']);
+        self::assertSame(range(7, 12), $result['children'][0]->toArray()['ztp_p_claimed_months']);
     }
 
     /** Pořadí pro určení výše se v rámci roku nesmí měnit (§ 35c odst. 1). */

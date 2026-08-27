@@ -20,6 +20,7 @@ import {
   payrollApi,
   type PayrollAnnualSettlementAnnualClaims,
   type PayrollAnnualSettlementCertificate,
+  type PayrollAnnualSettlementCaregiverStatus,
   type PayrollAnnualSettlementFilingObligation,
   type PayrollAnnualSettlementList,
   type PayrollAnnualSettlementListItem,
@@ -94,6 +95,8 @@ const form = ref({
   filing_obligation_reason: '',
   annual_claims: 'unknown' as PayrollAnnualSettlementAnnualClaims,
   annual_claims_note: '',
+  other_household_caregiver_status: 'unknown' as PayrollAnnualSettlementCaregiverStatus,
+  other_household_caregivers: [] as CaregiverForm[],
   note: '',
   row_version: 0,
 })
@@ -119,6 +122,13 @@ interface CertificateForm {
   missing: string[]
 }
 
+interface CaregiverForm {
+  given_name: string
+  family_name: string
+  birth_date: string
+  months: number[]
+}
+
 const certificates = ref<CertificateForm[]>([])
 const savingCertificates = ref(false)
 
@@ -131,6 +141,7 @@ const CERTIFICATE_AMOUNTS = [
   'credit_35c',
   'tax_bonus',
 ] as const
+const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
 
 const canWrite = computed(() => auth.canWrite('payroll.documents'))
 const canSettle = computed(() => auth.canWrite('payroll.approve'))
@@ -206,6 +217,33 @@ function formatMonth(value: string | undefined): string {
     : new Intl.DateTimeFormat(locale.value, { month: 'long', year: 'numeric' }).format(date)
 }
 
+function monthLabel(month: number): string {
+  return new Intl.DateTimeFormat(locale.value, { month: 'short' }).format(
+    new Date(2024, month - 1, 1),
+  )
+}
+
+function maskToMonths(mask: string): number[] {
+  return [...mask].flatMap((value, index) => value === 'A' ? [index + 1] : [])
+}
+
+function monthsToMask(months: number[]): string {
+  const selected = new Set(months)
+  return MONTHS.map(month => selected.has(month) ? 'A' : 'N').join('')
+}
+
+function addCaregiver(): void {
+  form.value.other_household_caregivers = [
+    ...form.value.other_household_caregivers,
+    { given_name: '', family_name: '', birth_date: '', months: [] },
+  ]
+}
+
+function removeCaregiver(index: number): void {
+  form.value.other_household_caregivers = form.value.other_household_caregivers
+    .filter((_, position) => position !== index)
+}
+
 function stateLabel(item: PayrollAnnualSettlementListItem): string {
   return t(
     `payroll.annual_settlement.request_status_options.${item.request_status ?? 'unknown'}`,
@@ -262,6 +300,14 @@ async function select(employeeId: number): Promise<void> {
       filing_obligation_reason: response.request.filing_obligation_reason ?? '',
       annual_claims: response.request.annual_claims,
       annual_claims_note: response.request.annual_claims_note ?? '',
+      other_household_caregiver_status:
+        response.request.other_household_caregiver_status ?? 'unknown',
+      other_household_caregivers: (response.request.other_household_caregivers ?? []).map(row => ({
+        given_name: row.given_name,
+        family_name: row.family_name,
+        birth_date: row.birth_date,
+        months: maskToMonths(row.months_mask),
+      })),
       note: response.request.note ?? '',
       row_version: response.request.row_version,
     }
@@ -385,6 +431,15 @@ async function saveRequest(): Promise<void> {
       filing_obligation_reason: form.value.filing_obligation_reason || null,
       annual_claims: form.value.annual_claims,
       annual_claims_note: form.value.annual_claims_note || null,
+      other_household_caregiver_status: form.value.other_household_caregiver_status,
+      other_household_caregivers: form.value.other_household_caregiver_status === 'present'
+        ? form.value.other_household_caregivers.map(row => ({
+            given_name: row.given_name.trim(),
+            family_name: row.family_name.trim(),
+            birth_date: row.birth_date,
+            months_mask: monthsToMask(row.months),
+          }))
+        : [],
       note: form.value.note || null,
       ...(form.value.row_version > 0 ? { row_version: form.value.row_version } : {}),
     })
@@ -771,6 +826,122 @@ onMounted(async () => {
                   class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                 >
               </label>
+
+              <fieldset
+                :disabled="!canWrite"
+                class="sm:col-span-2 rounded-md border border-neutral-200 p-3"
+                data-test="annual-settlement-caregiver-fields"
+              >
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.other_caregiver_status') }}
+                  </span>
+                  <select
+                    v-model="form.other_household_caregiver_status"
+                    data-test="annual-settlement-caregiver-status"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                    <option
+                      v-for="option in ['unknown', 'none', 'present']"
+                      :key="option"
+                      :value="option"
+                    >
+                      {{ t(`payroll.annual_settlement.other_caregiver_options.${option}`) }}
+                    </option>
+                  </select>
+                  <span class="mt-1 block text-xs text-neutral-500">
+                    {{ t('payroll.annual_settlement.other_caregiver_hint') }}
+                  </span>
+                </label>
+
+                <template v-if="form.other_household_caregiver_status === 'present'">
+                  <div
+                    v-for="(caregiver, caregiverIndex) in form.other_household_caregivers"
+                    :key="caregiverIndex"
+                    class="mt-3 rounded-md border border-neutral-200 p-3"
+                    data-test="annual-settlement-caregiver"
+                  >
+                    <div class="grid gap-3 sm:grid-cols-3">
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-medium text-neutral-600">
+                          {{ t('payroll.annual_settlement.caregiver_given_name') }}
+                        </span>
+                        <input
+                          v-model="caregiver.given_name"
+                          type="text"
+                          maxlength="100"
+                          class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                        >
+                      </label>
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-medium text-neutral-600">
+                          {{ t('payroll.annual_settlement.caregiver_family_name') }}
+                        </span>
+                        <input
+                          v-model="caregiver.family_name"
+                          type="text"
+                          maxlength="100"
+                          class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                        >
+                      </label>
+                      <label class="block">
+                        <span class="mb-1 block text-xs font-medium text-neutral-600">
+                          {{ t('payroll.annual_settlement.caregiver_birth_date') }}
+                        </span>
+                        <input
+                          v-model="caregiver.birth_date"
+                          type="date"
+                          class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                        >
+                      </label>
+                    </div>
+                    <fieldset class="mt-3">
+                      <legend class="text-xs font-medium text-neutral-600">
+                        {{ t('payroll.annual_settlement.caregiver_months') }}
+                      </legend>
+                      <div class="mt-2 flex flex-wrap gap-2">
+                        <label
+                          v-for="month in MONTHS"
+                          :key="month"
+                          class="inline-flex items-center gap-1 rounded-md border border-neutral-200 px-2 py-1 text-xs text-neutral-700"
+                        >
+                          <input
+                            v-model="caregiver.months"
+                            type="checkbox"
+                            :value="month"
+                          >
+                          {{ monthLabel(month) }}
+                        </label>
+                      </div>
+                    </fieldset>
+                    <div class="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        :class="btnOutline('danger')"
+                        data-test="annual-settlement-caregiver-remove"
+                        @click="removeCaregiver(caregiverIndex)"
+                      >
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path :d="ICONS.trash" />
+                        </svg>
+                        {{ t('payroll.annual_settlement.caregiver_remove') }}
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    :class="btnOutline('neutral')"
+                    class="mt-3"
+                    data-test="annual-settlement-caregiver-add"
+                    @click="addCaregiver"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path :d="ICONS.plus" />
+                    </svg>
+                    {{ t('payroll.annual_settlement.caregiver_add') }}
+                  </button>
+                </template>
+              </fieldset>
 
               <label class="block sm:col-span-2">
                 <span class="mb-1 block text-xs font-medium text-neutral-600">

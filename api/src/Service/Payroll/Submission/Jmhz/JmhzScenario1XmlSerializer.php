@@ -331,9 +331,73 @@ final class JmhzScenario1XmlSerializer
             (string) $this->int($totals['tax_bonus'] ?? null, '10035'),
         );
         $node->appendChild($monthly);
-        // `danUdajeRok` a `zamestnavatelUdajeRok` jsou v připnutém XSD celé
-        // volitelné bloky. Bez zmrazeného ročního zdroje se proto vynechají;
-        // nulové ani záporné právní skutečnosti se z absence zdroje neodhadují.
+        $annual = $this->object(
+            $this->object($payload['employer'] ?? null)['annual'] ?? null,
+        );
+        if ($annual !== []) {
+            $annualNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:zamestnavatelUdajeRok',
+            );
+            $this->text(
+                $dom,
+                $annualNode,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:formaVlastnictvi',
+                $this->string($annual['ownership_form'] ?? null, '10220'),
+            );
+            $ozp = $this->object($annual['ozp'] ?? null);
+            if ($ozp !== []) {
+                $ozpNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_SOUHRN,
+                    'so:zamestnavaniOzp',
+                );
+                foreach ([
+                    'so:zecPocetPrepRok' => ['average_headcount_hundredths', '10038'],
+                    'so:zecPocetPrepOzpRok' => ['average_disabled_headcount_hundredths', '10039'],
+                    'so:podilZamZtp' => ['disabled_share_hundredths', '10452'],
+                ] as $element => [$key, $attributeId]) {
+                    $this->text(
+                        $dom,
+                        $ozpNode,
+                        JmhzSchemaCatalog::NS_SOUHRN,
+                        $element,
+                        $this->decimal($ozp[$key] ?? null, 2, $attributeId),
+                    );
+                }
+                $annualNode->appendChild($ozpNode);
+            }
+            $agreements = $annual['collective_agreement_types'] ?? null;
+            if (!is_array($agreements) || !array_is_list($agreements) || $agreements === []) {
+                $this->unresolved('10214');
+            }
+            $agreementsNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:kolektivniSmlouvy',
+            );
+            foreach ($agreements as $agreement) {
+                $agreementNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_SOUHRN,
+                    'so:kolektivniSmlouva',
+                );
+                $this->text(
+                    $dom,
+                    $agreementNode,
+                    JmhzSchemaCatalog::NS_SOUHRN,
+                    'so:typKolektSmlouvy',
+                    $this->string($agreement, '10214'),
+                );
+                $agreementsNode->appendChild($agreementNode);
+            }
+            $annualNode->appendChild($agreementsNode);
+            $node->appendChild($annualNode);
+        }
+        // `danUdajeRok` je v připnutém XSD volitelný blok. Bez zmrazeného
+        // ročního zdroje se vynechá; právní skutečnosti se z absence neodhadují.
         // `specifickaSkutecnost` se neuvádí, protože IN13 je doložené `false`.
 
         return $node;
@@ -788,6 +852,9 @@ final class JmhzScenario1XmlSerializer
                         ? 'true'
                         : 'false',
                 );
+                if (($result['child_credit_claimed'] ?? null) === true) {
+                    $this->annualChildCredit($dom, $resultNode, $result);
+                }
                 $annualNode->appendChild($resultNode);
             }
             $node->appendChild($annualNode);
@@ -825,6 +892,151 @@ final class JmhzScenario1XmlSerializer
                 (string) $this->int($summary[$key] ?? null, $attributeId),
             );
             $node->appendChild($wrapper);
+        }
+
+        return $node;
+    }
+
+    /** @param array<string,mixed> $result */
+    private function annualChildCredit(
+        DOMDocument $dom,
+        DOMElement $resultNode,
+        array $result,
+    ): void {
+        $details = $this->object($result['child_credit_details'] ?? null);
+        $children = $this->rows($details['children'] ?? null);
+        if ($children === []) {
+            $this->unresolved('10446');
+        }
+        $block = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:zvyhodneniNaDeti',
+        );
+        $other = $this->bool(
+            $details['other_household_caregiver'] ?? null,
+            '10455',
+        );
+        $this->text(
+            $dom,
+            $block,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyzivujeJinaOsoba',
+            $other ? 'true' : 'false',
+        );
+        $caregivers = $this->rows($details['other_household_caregivers'] ?? null);
+        if ($other) {
+            if ($caregivers === []) {
+                $this->unresolved('10441');
+            }
+            $caregiverList = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:jineOsoby',
+            );
+            foreach ($caregivers as $caregiver) {
+                $caregiverNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:jinaOsoba',
+                );
+                $caregiverNode->appendChild($this->annualPerson(
+                    $dom,
+                    $this->object($caregiver['identity'] ?? null),
+                    'form:osoba',
+                    ['10441', '10442', '10443', '10444'],
+                ));
+                $this->text(
+                    $dom,
+                    $caregiverNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:mesiceVyzivovani',
+                    $this->string($caregiver['months_mask'] ?? null, '10445'),
+                );
+                $caregiverList->appendChild($caregiverNode);
+            }
+            $block->appendChild($caregiverList);
+        }
+        $childList = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyzivovaneDeti',
+        );
+        foreach ($children as $child) {
+            $childNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:vyzivovaneDite',
+            );
+            $childNode->appendChild($this->annualPerson(
+                $dom,
+                $this->object($child['identity'] ?? null),
+                'form:dite',
+                ['10446', '10447', '10448', '10449'],
+            ));
+            $ztp = $this->string($child['ztp_p_months_mask'] ?? null, '10450');
+            if ($ztp !== 'NNNNNNNNNNNN') {
+                $this->text(
+                    $dom,
+                    $childNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prukazZtpp',
+                    $ztp,
+                );
+            }
+            $this->text(
+                $dom,
+                $childNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:poradi',
+                $this->string($child['order_months_mask'] ?? null, '10451'),
+            );
+            $childList->appendChild($childNode);
+        }
+        $block->appendChild($childList);
+        $resultNode->appendChild($block);
+    }
+
+    /**
+     * @param array<string,mixed> $identity
+     * @param array{string,string,string,string} $attributeIds
+     */
+    private function annualPerson(
+        DOMDocument $dom,
+        array $identity,
+        string $element,
+        array $attributeIds,
+    ): DOMElement {
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
+        foreach ([
+            'form:jmeno' => ['given_name', $attributeIds[0]],
+            'form:prijmeni' => ['family_name', $attributeIds[1]],
+        ] as $name => [$key, $attributeId]) {
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                $name,
+                $this->string($identity[$key] ?? null, $attributeId),
+            );
+        }
+        if (($identity['birth_date'] ?? null) !== null) {
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:datumNarozeni',
+                $this->date($identity['birth_date'], $attributeIds[2]),
+            );
+        }
+        if (($identity['birth_number'] ?? null) !== null) {
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rodneCislo',
+                $this->string($identity['birth_number'], $attributeIds[3]),
+            );
         }
 
         return $node;

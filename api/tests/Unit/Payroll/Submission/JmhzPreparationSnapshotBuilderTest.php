@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v9',
+            'payroll-jmhz-preparation-source.v10',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -466,6 +466,50 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         return array_values(array_filter($codes, 'is_string'));
     }
 
+    public function testDecemberNamesMissingEmployerAnnualSourcesAndPinsTheirRevision(): void
+    {
+        $builder = new JmhzPreparationSnapshotBuilder();
+        $missing = $builder->build(7, 'test', $this->sourceForDecember(), [], []);
+        self::assertContains(
+            'jmhz_employer_annual_collective_agreement_missing',
+            $missing->payload['readiness_issue_codes'],
+        );
+        self::assertContains(
+            'jmhz_employer_annual_ownership_missing',
+            $missing->payload['readiness_issue_codes'],
+        );
+        self::assertContains(
+            'jmhz_employer_annual_ozp_summary_missing',
+            $missing->payload['readiness_issue_codes'],
+        );
+
+        $evidence = [
+            'id' => 901,
+            'report_year' => 2026,
+            'revision_no' => 2,
+            'schema_reference' => 'payroll-jmhz-employer-annual-evidence.v1',
+            'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            'payload_sha256' => str_repeat('d', 64),
+        ];
+        $present = $builder->build(
+            7,
+            'test',
+            $this->sourceForDecember(),
+            [],
+            [],
+            employerAnnualEvidence: $evidence,
+        );
+        self::assertNotContains(
+            'jmhz_employer_annual_collective_agreement_missing',
+            $present->payload['readiness_issue_codes'],
+        );
+        self::assertSame(
+            JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            $present->payload['source_versions']['employer_annual_evidence']
+                ['spec_manifest_sha256'],
+        );
+    }
+
     /**
      * @param array<string,mixed> $relationship
      * @return array<string,mixed>
@@ -481,6 +525,41 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertIsArray($result);
         $result['people'][0]['statutory']['social_insurance']['relationships'][0]
             = ['relationship_id' => 'employment:101'] + $relationship;
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        return $source;
+    }
+
+    /** @return array<string,mixed> */
+    private function sourceForDecember(): array
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        $input['period_start'] = '2026-12-01';
+        $input['period_end'] = '2026-12-31';
+        $input['people'][0]['employments'][0]['average_earning']['applicable_quarter'] = 4;
+        $source['revision']['period_start'] = '2026-12-01';
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
         $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
         $source['revision']['result_snapshot_hash'] = hash(
             'sha256',

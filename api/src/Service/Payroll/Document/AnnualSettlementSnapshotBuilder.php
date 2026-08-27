@@ -38,7 +38,7 @@ final class AnnualSettlementSnapshotBuilder
 {
     public const SCHEMA_VERSION = AnnualSettlementResult::SCHEMA_VERSION;
     public const PURPOSE = 'annual_settlement_result';
-    public const MAPPING_VERSION = 'annual-settlement-mapping.v1';
+    public const MAPPING_VERSION = 'annual-settlement-mapping.v2';
 
     /**
      * Doména klíčovaného otisku snapshotu. Je veřejná proto, že revizi čte
@@ -96,17 +96,30 @@ final class AnnualSettlementSnapshotBuilder
         }
         $manifestSources = [];
         foreach ($sources as $source) {
+            $source = self::object($source, 'source');
             $manifestSources[] = [
-                'period_start' => (string) $source['period_start'],
-                'run_id' => (int) $source['run_id'],
-                'revision_id' => (int) $source['revision_id'],
-                'result_snapshot_hash' => (string) $source['result_snapshot_hash'],
-                'person_result_hash' => (string) $source['person_result_hash'],
+                'period_start' => self::stringValue($source['period_start'] ?? null, 'source.period_start'),
+                'run_id' => self::positiveIntValue($source['run_id'] ?? null, 'source.run_id'),
+                'revision_id' => self::positiveIntValue($source['revision_id'] ?? null, 'source.revision_id'),
+                'result_snapshot_hash' => self::stringValue(
+                    $source['result_snapshot_hash'] ?? null,
+                    'source.result_snapshot_hash',
+                ),
+                'person_result_hash' => self::stringValue(
+                    $source['person_result_hash'] ?? null,
+                    'source.person_result_hash',
+                ),
             ];
         }
 
         $profile = $this->profileSnapshot($supplierId, $employeeId, $taxYear);
         $employer = $this->employerSnapshot($supplierId);
+        $childRows = $this->childRowsSnapshot(
+            $supplierId,
+            $employeeId,
+            $taxYear,
+            $childRows,
+        );
 
         $snapshot = [
             'schema_version' => self::SCHEMA_VERSION,
@@ -131,6 +144,10 @@ final class AnnualSettlementSnapshotBuilder
             // Otisk výsledku patří do manifestu: dva různé výsledky nad týmiž
             // měsíci musí být dvě různé revize, ne jedna přehraná.
             'result_hash' => hash('sha256', CanonicalJson::encode($result->jsonSerialize())),
+            'document_rows_hash' => hash('sha256', CanonicalJson::encode([
+                'credit_rows' => $creditRows,
+                'child_rows' => $childRows,
+            ])),
             'sources' => $manifestSources,
         ];
         $manifestJson = CanonicalJson::encode($manifest);
@@ -144,7 +161,11 @@ final class AnnualSettlementSnapshotBuilder
             $manifestHash,
         );
         if ($existing !== null) {
-            if (!hash_equals((string) $existing['snapshot_hash'], $snapshotHash)) {
+            $existingHash = self::stringValue(
+                $existing['snapshot_hash'] ?? null,
+                'revision.snapshot_hash',
+            );
+            if (!hash_equals($existingHash, $snapshotHash)) {
                 throw new \DomainException(
                     'Stejný manifest ročního zúčtování odkazuje na jiný snapshot.',
                 );
@@ -152,7 +173,7 @@ final class AnnualSettlementSnapshotBuilder
 
             return [
                 'revision' => $existing,
-                'document' => $this->hydrate($snapshot, (string) $existing['snapshot_hash']),
+                'document' => $this->hydrate($snapshot, $existingHash),
                 'created' => false,
             ];
         }
@@ -172,7 +193,12 @@ final class AnnualSettlementSnapshotBuilder
             'employee_id' => $employeeId,
             'tax_year' => $taxYear,
             'purpose' => self::PURPOSE,
-            'revision_no' => $previous === null ? 1 : (int) $previous['revision_no'] + 1,
+            'revision_no' => $previous === null
+                ? 1
+                : self::positiveIntValue(
+                    $previous['revision_no'] ?? null,
+                    'previous.revision_no',
+                ) + 1,
             'previous_revision_id' => $previous['id'] ?? null,
             'snapshot_ciphertext' => $ciphertext,
             'snapshot_hash' => $snapshotHash,
@@ -199,56 +225,134 @@ final class AnnualSettlementSnapshotBuilder
         $trace = self::object($result['trace'] ?? null, 'result.trace');
         // Starší revize klíč nenesly — chybějící příspěvek je nula, protože se
         // tehdy potvrzení od jiného plátce nepoužilo vůbec.
-        $external = is_array($trace['external_certificates'] ?? null)
-            ? $trace['external_certificates']
-            : [];
+        $external = ($trace['external_certificates'] ?? null) === null
+            ? []
+            : self::object($trace['external_certificates'], 'result.trace.external_certificates');
 
         return new AnnualSettlementDocumentData(
             $snapshotHash,
-            (int) $snapshot['tax_year'],
-            (string) $employer['name'],
-            (string) $employer['identification_number'],
-            (string) $employer['address'],
-            (string) $employee['name'],
-            (string) $employee['identifier_label'],
-            (string) $employee['identifier_value'],
-            (string) $snapshot['settled_on'],
-            (int) $trace['completed_months'],
-            (int) $trace['advance_base_minor_units'],
-            (int) $result['rounded_tax_base_minor_units'],
-            (int) $result['tax_before_credits_minor_units'],
-            self::rows($snapshot['credit_rows'] ?? null),
-            (int) $result['applied_credits_minor_units'],
-            self::rows($snapshot['child_rows'] ?? null),
-            (int) $result['child_credit_minor_units'],
-            (int) $result['annual_tax_bonus_minor_units'],
-            (int) $result['tax_after_all_credits_minor_units'],
-            (int) $trace['advance_tax_minor_units'],
-            (int) $trace['monthly_tax_bonus_minor_units'],
-            (int) $result['tax_difference_minor_units'],
-            (int) $result['bonus_difference_minor_units'],
-            (int) $result['settlement_difference_minor_units'],
-            (int) $result['payable_minor_units'],
-            (string) $result['outcome'],
-            (int) ($external['count'] ?? 0),
-            (int) ($external['advance_base_minor_units'] ?? 0),
-            (int) ($external['advance_tax_minor_units'] ?? 0),
-            (int) ($external['tax_bonus_minor_units'] ?? 0),
+            self::integerValue($snapshot['tax_year'] ?? null, 'tax_year'),
+            self::stringValue($employer['name'] ?? null, 'employer.name'),
+            self::stringValue(
+                $employer['identification_number'] ?? null,
+                'employer.identification_number',
+            ),
+            self::stringValue($employer['address'] ?? null, 'employer.address'),
+            self::stringValue($employee['name'] ?? null, 'employee.name'),
+            self::stringValue(
+                $employee['identifier_label'] ?? null,
+                'employee.identifier_label',
+            ),
+            self::stringValue(
+                $employee['identifier_value'] ?? null,
+                'employee.identifier_value',
+            ),
+            self::stringValue($snapshot['settled_on'] ?? null, 'settled_on'),
+            self::integerValue($trace['completed_months'] ?? null, 'result.trace.completed_months'),
+            self::integerValue(
+                $trace['advance_base_minor_units'] ?? null,
+                'result.trace.advance_base_minor_units',
+            ),
+            self::integerValue(
+                $result['rounded_tax_base_minor_units'] ?? null,
+                'result.rounded_tax_base_minor_units',
+            ),
+            self::integerValue(
+                $result['tax_before_credits_minor_units'] ?? null,
+                'result.tax_before_credits_minor_units',
+            ),
+            self::creditRows($snapshot['credit_rows'] ?? null),
+            self::integerValue(
+                $result['applied_credits_minor_units'] ?? null,
+                'result.applied_credits_minor_units',
+            ),
+            self::childDocumentRows($snapshot['child_rows'] ?? null),
+            self::integerValue(
+                $result['child_credit_minor_units'] ?? null,
+                'result.child_credit_minor_units',
+            ),
+            self::integerValue(
+                $result['annual_tax_bonus_minor_units'] ?? null,
+                'result.annual_tax_bonus_minor_units',
+            ),
+            self::integerValue(
+                $result['tax_after_all_credits_minor_units'] ?? null,
+                'result.tax_after_all_credits_minor_units',
+            ),
+            self::integerValue($trace['advance_tax_minor_units'] ?? null, 'result.trace.advance_tax_minor_units'),
+            self::integerValue(
+                $trace['monthly_tax_bonus_minor_units'] ?? null,
+                'result.trace.monthly_tax_bonus_minor_units',
+            ),
+            self::integerValue($result['tax_difference_minor_units'] ?? null, 'result.tax_difference_minor_units'),
+            self::integerValue($result['bonus_difference_minor_units'] ?? null, 'result.bonus_difference_minor_units'),
+            self::integerValue(
+                $result['settlement_difference_minor_units'] ?? null,
+                'result.settlement_difference_minor_units',
+            ),
+            self::integerValue($result['payable_minor_units'] ?? null, 'result.payable_minor_units'),
+            self::stringValue($result['outcome'] ?? null, 'result.outcome'),
+            self::integerValue($external['count'] ?? 0, 'result.trace.external_certificates.count'),
+            self::integerValue(
+                $external['advance_base_minor_units'] ?? 0,
+                'result.trace.external_certificates.advance_base_minor_units',
+            ),
+            self::integerValue(
+                $external['advance_tax_minor_units'] ?? 0,
+                'result.trace.external_certificates.advance_tax_minor_units',
+            ),
+            self::integerValue(
+                $external['tax_bonus_minor_units'] ?? 0,
+                'result.trace.external_certificates.tax_bonus_minor_units',
+            ),
         );
     }
 
-    /** @return list<array<string,mixed>> */
-    private static function rows(mixed $value): array
+    /** @return list<array{label:string,amount_minor_units:int}> */
+    private static function creditRows(mixed $value): array
+    {
+        $rows = [];
+        foreach (self::listValue($value) as $item) {
+            $row = self::object($item, 'credit_row');
+            $rows[] = [
+                'label' => self::stringValue($row['label'] ?? null, 'credit_row.label'),
+                'amount_minor_units' => self::integerValue(
+                    $row['amount_minor_units'] ?? null,
+                    'credit_row.amount_minor_units',
+                ),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** @return list<array{label:string,months:int,amount_minor_units:int}> */
+    private static function childDocumentRows(mixed $value): array
+    {
+        $rows = [];
+        foreach (self::listValue($value) as $item) {
+            $row = self::object($item, 'child_row');
+            $rows[] = [
+                'label' => self::stringValue($row['label'] ?? null, 'child_row.label'),
+                'months' => self::integerValue($row['months'] ?? null, 'child_row.months'),
+                'amount_minor_units' => self::integerValue(
+                    $row['amount_minor_units'] ?? null,
+                    'child_row.amount_minor_units',
+                ),
+            ];
+        }
+
+        return $rows;
+    }
+
+    /** @return list<mixed> */
+    private static function listValue(mixed $value): array
     {
         if (!is_array($value) || !array_is_list($value)) {
             throw new \DomainException('Řádky ročního zúčtování nejsou seznam.');
         }
-        $rows = [];
-        foreach ($value as $row) {
-            $rows[] = self::object($row, 'row');
-        }
 
-        return $rows;
+        return $value;
     }
 
     /** @return array<string,mixed> */
@@ -258,7 +362,209 @@ final class AnnualSettlementSnapshotBuilder
             throw new \DomainException("Snapshot ročního zúčtování: {$field} není objekt.");
         }
 
+        $result = [];
+        foreach ($value as $key => $item) {
+            if (!is_string($key)) {
+                throw new \DomainException("Snapshot ročního zúčtování: {$field} má neplatný klíč.");
+            }
+            $result[$key] = $item;
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function childRowsSnapshot(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $rows,
+    ): array {
+        if ($rows === []) {
+            return [];
+        }
+        $requestStatement = $this->db->pdo()->prepare(
+            'SELECT id, other_household_caregiver_status
+               FROM payroll_annual_settlement_requests
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+              FOR UPDATE',
+        );
+        $requestStatement->execute([$supplierId, $employeeId, $taxYear]);
+        $request = self::object(
+            $requestStatement->fetch(PDO::FETCH_ASSOC),
+            'request',
+        );
+        $caregiverStatus = self::stringValue(
+            $request['other_household_caregiver_status'] ?? null,
+            'other_household_caregiver_status',
+        );
+        if (!in_array($caregiverStatus, ['none', 'present'], true)) {
+            throw new \DomainException(
+                'Pro JMHZ chybí údaj o jiné osobě uplatňující dítě.',
+            );
+        }
+        $caregiverStatement = $this->db->pdo()->prepare(
+            'SELECT given_name, family_name, birth_date, months_mask
+               FROM payroll_annual_settlement_other_caregivers
+              WHERE supplier_id = ? AND request_id = ?
+              ORDER BY position, id
+              FOR UPDATE',
+        );
+        $caregiverStatement->execute([
+            $supplierId,
+            self::positiveIntValue($request['id'] ?? null, 'request.id'),
+        ]);
+        $caregivers = [];
+        while (($fetched = $caregiverStatement->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $caregiver = self::object($fetched, 'caregiver');
+            $caregivers[] = [
+                'identity' => [
+                    'given_name' => trim(self::stringValue($caregiver['given_name'] ?? null, 'caregiver.given_name')),
+                    'family_name' => trim(self::stringValue($caregiver['family_name'] ?? null, 'caregiver.family_name')),
+                    'birth_date' => self::stringValue($caregiver['birth_date'] ?? null, 'caregiver.birth_date'),
+                    'birth_number' => null,
+                ],
+                'months_mask' => self::stringValue($caregiver['months_mask'] ?? null, 'caregiver.months_mask'),
+            ];
+        }
+        $hasOtherCaregiver = $caregiverStatus === 'present';
+        if ($hasOtherCaregiver !== ($caregivers !== [])) {
+            throw new \DomainException(
+                'Evidence jiné osoby uplatňující dítě není úplná.',
+            );
+        }
+
+        $result = [];
+        foreach ($rows as $row) {
+            $reference = $row['child_reference'] ?? null;
+            if (!is_string($reference)
+                || preg_match('/^dependant-([1-9][0-9]*)$/D', $reference, $match) !== 1
+            ) {
+                throw new \DomainException(
+                    'Řádek dítěte v ročním zúčtování nemá platnou identitu.',
+                );
+            }
+            $dependantId = (int) $match[1];
+            $statement = $this->db->pdo()->prepare(
+                'SELECT id, given_name, family_name, birth_date
+                   FROM payroll_dependants
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ?
+                  FOR UPDATE',
+            );
+            $statement->execute([$supplierId, $employeeId, $dependantId]);
+            $dependant = $statement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($dependant)) {
+                throw new \DomainException(
+                    'Pro roční zúčtování chybí uplatněné dítě.',
+                );
+            }
+            $claimedMonths = self::monthVector($row['claimed_months'] ?? null);
+            $ztpMonths = self::monthVector($row['ztp_p_claimed_months'] ?? null);
+            $order = self::positiveIntValue($row['order'] ?? null, 'child.order');
+            if ($order < 1 || $order > 20 || $claimedMonths === []) {
+                throw new \DomainException(
+                    'Roční zúčtování nemá přesný měsíční vektor dítěte.',
+                );
+            }
+            $row['given_name'] = is_string($dependant['given_name'] ?? null)
+                ? trim((string) $dependant['given_name'])
+                : null;
+            $row['family_name'] = is_string($dependant['family_name'] ?? null)
+                ? trim((string) $dependant['family_name'])
+                : null;
+            $row['birth_date'] = self::stringValue(
+                $dependant['birth_date'] ?? null,
+                'child.birth_date',
+            );
+            if ($row['given_name'] === '' || $row['family_name'] === '') {
+                throw new \DomainException(
+                    'Uplatněné dítě nemá jméno potřebné pro JMHZ.',
+                );
+            }
+            $row['birth_number'] = null;
+            $row['ztp_p_months_mask'] = self::yesNoMask($ztpMonths);
+            $row['order_months_mask'] = self::orderMask($claimedMonths, $order);
+            $row['other_household_caregiver'] = $hasOtherCaregiver;
+            $row['other_household_caregivers'] = $caregivers;
+            $result[] = $row;
+        }
+
+        return $result;
+    }
+
+    private static function stringValue(mixed $value, string $field): string
+    {
+        if (!is_string($value)) {
+            throw new \DomainException("Snapshot ročního zúčtování: {$field} není text.");
+        }
+
         return $value;
+    }
+
+    private static function positiveIntValue(mixed $value, string $field): int
+    {
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+        if (is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1) {
+            return (int) $value;
+        }
+        throw new \DomainException("Snapshot ročního zúčtování: {$field} není kladné celé číslo.");
+    }
+
+    private static function integerValue(mixed $value, string $field): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_string($value) && preg_match('/^-?[0-9]+$/D', $value) === 1) {
+            return (int) $value;
+        }
+        throw new \DomainException("Snapshot ročního zúčtování: {$field} není celé číslo.");
+    }
+
+    /** @return list<int> */
+    private static function monthVector(mixed $value): array
+    {
+        if (!is_array($value) || !array_is_list($value)) {
+            return [];
+        }
+        $months = [];
+        foreach ($value as $month) {
+            if (!is_int($month) || $month < 1 || $month > 12 || isset($months[$month])) {
+                return [];
+            }
+            $months[$month] = true;
+        }
+        ksort($months);
+
+        return array_keys($months);
+    }
+
+    /** @param list<int> $months */
+    private static function yesNoMask(array $months): string
+    {
+        $set = array_fill_keys($months, true);
+
+        return implode('', array_map(
+            static fn (int $month): string => isset($set[$month]) ? 'A' : 'N',
+            range(1, 12),
+        ));
+    }
+
+    /** @param list<int> $months */
+    private static function orderMask(array $months, int $order): string
+    {
+        $set = array_fill_keys($months, true);
+        $value = (string) min(3, $order);
+
+        return implode('', array_map(
+            static fn (int $month): string => isset($set[$month]) ? $value : 'N',
+            range(1, 12),
+        ));
     }
 
     /** @return array<string,string> */
@@ -309,12 +615,16 @@ final class AnnualSettlementSnapshotBuilder
         $identifier->execute([$supplierId, $employeeId]);
         $identifierRow = $identifier->fetch(PDO::FETCH_ASSOC);
         if (is_array($identifierRow)) {
+            $identifierRow = self::object($identifierRow, 'employee.identifier');
             $label = 'Rodné číslo';
             $value = $this->sensitiveData->reveal(
-                (string) $identifierRow['value_ciphertext'],
+                self::stringValue(
+                    $identifierRow['value_ciphertext'] ?? null,
+                    'employee.identifier.value_ciphertext',
+                ),
                 PayrollSensitiveField::PERSONAL_IDENTIFIER,
                 $supplierId,
-                (int) $identifierRow['id'],
+                self::positiveIntValue($identifierRow['id'] ?? null, 'employee.identifier.id'),
             );
         } elseif (is_string($employeeRow['birth_date'] ?? null)) {
             $label = 'Datum narození';

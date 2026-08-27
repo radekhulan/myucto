@@ -40,7 +40,17 @@ final class PayrollAnnualSettlementRepository
         $statement->execute([$supplierId, $employeeId, $taxYear]);
         $row = $statement->fetch(PDO::FETCH_ASSOC);
 
-        return $row === false ? null : self::castRequest($row);
+        if ($row === false) {
+            return null;
+        }
+        $request = self::castRequest($row);
+        $request['other_household_caregivers'] = $this->otherCaregiversForRequest(
+            $supplierId,
+            (int) $request['id'],
+            $forUpdate,
+        );
+
+        return $request;
     }
 
     /**
@@ -59,27 +69,88 @@ final class PayrollAnnualSettlementRepository
         ?int $expectedRowVersion,
         ?int $actorUserId,
     ): array {
-        $existing = $this->findRequest($supplierId, $employeeId, $taxYear);
-        if ($existing === null) {
-            if ($expectedRowVersion !== null) {
-                throw new PayrollAnnualSettlementConflictException(
-                    'Žádost o roční zúčtování mezitím zanikla.',
-                );
-            }
-            $statement = $this->db->pdo()->prepare(
-                'INSERT INTO payroll_annual_settlement_requests
-                    (supplier_id, employee_id, tax_year, request_status,
-                     requested_on, request_evidence_reference, prior_employers,
-                     prior_documents_received_on, filing_obligation,
-                     filing_obligation_reason, annual_claims, annual_claims_note,
-                     note, created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $existing = $this->findRequest($supplierId, $employeeId, $taxYear, true);
+            $caregiverStatus = (string) (
+                $values['other_household_caregiver_status']
+                ?? $existing['other_household_caregiver_status']
+                ?? 'unknown'
             );
-            try {
+            $caregivers = array_key_exists('other_household_caregivers', $values)
+                ? (array) $values['other_household_caregivers']
+                : (array) ($existing['other_household_caregivers'] ?? []);
+
+            if ($existing === null) {
+                if ($expectedRowVersion !== null) {
+                    throw new PayrollAnnualSettlementConflictException(
+                        'Žádost o roční zúčtování mezitím zanikla.',
+                    );
+                }
+                $statement = $pdo->prepare(
+                    'INSERT INTO payroll_annual_settlement_requests
+                        (supplier_id, employee_id, tax_year, request_status,
+                         requested_on, request_evidence_reference, prior_employers,
+                         prior_documents_received_on, filing_obligation,
+                         filing_obligation_reason, annual_claims, annual_claims_note,
+                         other_household_caregiver_status,
+                         note, created_by, updated_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                );
+                try {
+                    $statement->execute([
+                        $supplierId,
+                        $employeeId,
+                        $taxYear,
+                        $values['request_status'],
+                        $values['requested_on'],
+                        $values['request_evidence_reference'],
+                        $values['prior_employers'],
+                        $values['prior_documents_received_on'],
+                        $values['filing_obligation'],
+                        $values['filing_obligation_reason'],
+                        $values['annual_claims'],
+                        $values['annual_claims_note'],
+                        $caregiverStatus,
+                        $values['note'],
+                        $actorUserId,
+                        $actorUserId,
+                    ]);
+                } catch (PDOException $exception) {
+                    if ((int) ($exception->errorInfo[1] ?? 0) === 1062) {
+                        throw new PayrollAnnualSettlementConflictException(
+                            'Žádost o roční zúčtování mezitím založil někdo jiný.',
+                            previous: $exception,
+                        );
+                    }
+                    throw $exception;
+                }
+                $requestId = (int) $pdo->lastInsertId();
+            } else {
+                $statement = $pdo->prepare(
+                    'UPDATE payroll_annual_settlement_requests
+                        SET request_status = ?,
+                            requested_on = ?,
+                            request_evidence_reference = ?,
+                            prior_employers = ?,
+                            prior_documents_received_on = ?,
+                            filing_obligation = ?,
+                            filing_obligation_reason = ?,
+                            annual_claims = ?,
+                            annual_claims_note = ?,
+                            other_household_caregiver_status = ?,
+                            note = ?,
+                            updated_by = ?,
+                            row_version = row_version + 1
+                      WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+                        AND row_version = ?'
+                );
                 $statement->execute([
-                    $supplierId,
-                    $employeeId,
-                    $taxYear,
                     $values['request_status'],
                     $values['requested_on'],
                     $values['request_evidence_reference'],
@@ -89,66 +160,105 @@ final class PayrollAnnualSettlementRepository
                     $values['filing_obligation_reason'],
                     $values['annual_claims'],
                     $values['annual_claims_note'],
+                    $caregiverStatus,
                     $values['note'],
                     $actorUserId,
-                    $actorUserId,
+                    $supplierId,
+                    $employeeId,
+                    $taxYear,
+                    $expectedRowVersion ?? $existing['row_version'],
                 ]);
-            } catch (PDOException $exception) {
-                if ((int) ($exception->errorInfo[1] ?? 0) === 1062) {
+                if ($statement->rowCount() === 0) {
                     throw new PayrollAnnualSettlementConflictException(
-                        'Žádost o roční zúčtování mezitím založil někdo jiný.',
-                        previous: $exception,
+                        'Žádost o roční zúčtování mezitím změnil někdo jiný.',
                     );
                 }
-                throw $exception;
+                $requestId = (int) $existing['id'];
             }
 
-            return $this->findRequest($supplierId, $employeeId, $taxYear)
-                ?? throw new \RuntimeException('Žádost nelze načíst.');
-        }
-
-        $statement = $this->db->pdo()->prepare(
-            'UPDATE payroll_annual_settlement_requests
-                SET request_status = ?,
-                    requested_on = ?,
-                    request_evidence_reference = ?,
-                    prior_employers = ?,
-                    prior_documents_received_on = ?,
-                    filing_obligation = ?,
-                    filing_obligation_reason = ?,
-                    annual_claims = ?,
-                    annual_claims_note = ?,
-                    note = ?,
-                    updated_by = ?,
-                    row_version = row_version + 1
-              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
-                AND row_version = ?'
-        );
-        $statement->execute([
-            $values['request_status'],
-            $values['requested_on'],
-            $values['request_evidence_reference'],
-            $values['prior_employers'],
-            $values['prior_documents_received_on'],
-            $values['filing_obligation'],
-            $values['filing_obligation_reason'],
-            $values['annual_claims'],
-            $values['annual_claims_note'],
-            $values['note'],
-            $actorUserId,
-            $supplierId,
-            $employeeId,
-            $taxYear,
-            $expectedRowVersion ?? $existing['row_version'],
-        ]);
-        if ($statement->rowCount() === 0) {
-            throw new PayrollAnnualSettlementConflictException(
-                'Žádost o roční zúčtování mezitím změnil někdo jiný.',
+            $this->replaceOtherCaregivers(
+                $supplierId,
+                $requestId,
+                $caregivers,
+                $actorUserId,
             );
-        }
+            $saved = $this->findRequest($supplierId, $employeeId, $taxYear)
+                ?? throw new \RuntimeException('Žádost nelze načíst.');
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
 
-        return $this->findRequest($supplierId, $employeeId, $taxYear)
-            ?? throw new \RuntimeException('Žádost nelze načíst.');
+            return $saved;
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function otherCaregiversForRequest(
+        int $supplierId,
+        int $requestId,
+        bool $forUpdate = false,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, position, given_name, family_name, birth_date, months_mask
+               FROM payroll_annual_settlement_other_caregivers
+              WHERE supplier_id = ? AND request_id = ?
+              ORDER BY position, id'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([$supplierId, $requestId]);
+
+        return array_map(
+            static function (array $row): array {
+                $row['id'] = (int) $row['id'];
+                $row['position'] = (int) $row['position'];
+
+                return $row;
+            },
+            array_values($statement->fetchAll(PDO::FETCH_ASSOC)),
+        );
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private function replaceOtherCaregivers(
+        int $supplierId,
+        int $requestId,
+        array $rows,
+        ?int $actorUserId,
+    ): void {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Evidence jiného pečujícího se ukládá v transakci.');
+        }
+        $delete = $pdo->prepare(
+            'DELETE FROM payroll_annual_settlement_other_caregivers
+              WHERE supplier_id = ? AND request_id = ?'
+        );
+        $delete->execute([$supplierId, $requestId]);
+
+        $insert = $pdo->prepare(
+            'INSERT INTO payroll_annual_settlement_other_caregivers
+                (supplier_id, request_id, position, given_name, family_name,
+                 birth_date, months_mask, created_by, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        foreach (array_values($rows) as $index => $row) {
+            $insert->execute([
+                $supplierId,
+                $requestId,
+                $index + 1,
+                $row['given_name'],
+                $row['family_name'],
+                $row['birth_date'],
+                $row['months_mask'],
+                $actorUserId,
+                $actorUserId,
+            ]);
+        }
     }
 
     /** @return array<string,mixed>|null */
@@ -478,6 +588,50 @@ final class PayrollAnnualSettlementRepository
         ]);
 
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @param list<string> $childReferences */
+    public function childJmhzEvidenceIsComplete(
+        int $supplierId,
+        int $employeeId,
+        array $childReferences,
+        array $request,
+    ): bool {
+        if ($childReferences === []) {
+            return true;
+        }
+        $status = (string) ($request['other_household_caregiver_status'] ?? 'unknown');
+        $caregivers = $request['other_household_caregivers'] ?? [];
+        if (!is_array($caregivers)
+            || ($status === 'none' && $caregivers !== [])
+            || ($status === 'present' && $caregivers === [])
+            || !in_array($status, ['none', 'present'], true)
+        ) {
+            return false;
+        }
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT given_name, family_name, birth_date
+               FROM payroll_dependants
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?'
+        );
+        foreach (array_values(array_unique($childReferences)) as $reference) {
+            if (preg_match('/^dependant-([1-9][0-9]*)$/D', $reference, $match) !== 1) {
+                return false;
+            }
+            $statement->execute([$supplierId, $employeeId, (int) $match[1]]);
+            $row = $statement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)
+                || trim((string) ($row['given_name'] ?? '')) === ''
+                || trim((string) ($row['family_name'] ?? '')) === ''
+                || !is_string($row['birth_date'] ?? null)
+                || $row['birth_date'] === ''
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

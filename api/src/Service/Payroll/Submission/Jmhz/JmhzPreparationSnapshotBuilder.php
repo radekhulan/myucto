@@ -17,7 +17,8 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V6_BUILDER_VERSION = 'jmhz-preparation-source.v6';
     public const PREVIOUS_V7_BUILDER_VERSION = 'jmhz-preparation-source.v7';
     public const PREVIOUS_V8_BUILDER_VERSION = 'jmhz-preparation-source.v8';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v9';
+    public const PREVIOUS_V9_BUILDER_VERSION = 'jmhz-preparation-source.v9';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v10';
 
     private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
 
@@ -35,6 +36,8 @@ final class JmhzPreparationSnapshotBuilder
      *        by víceúčtárenské podání znemožnila.
      * @param array<int,array<string,mixed>>|null $annualEvidenceSources roční
      *        skutečnosti podle `employee_id`, načtené ve stejné transakci
+     * @param array<string,mixed>|null $employerAnnualEvidence prosincová
+     *        neměnná roční evidence zaměstnavatele
      */
     public function build(
         int $supplierId,
@@ -46,6 +49,7 @@ final class JmhzPreparationSnapshotBuilder
         array $eldpSources = [],
         array $ordinaryEvidenceSources = [],
         ?array $annualEvidenceSources = null,
+        ?array $employerAnnualEvidence = null,
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -520,6 +524,57 @@ final class JmhzPreparationSnapshotBuilder
                     $evidence['withholding_certificate']['snapshot_hash'] ?? null,
             ];
         }
+        $employerAnnualVersion = null;
+        $isDecember = substr($periodStart, 5, 2) === '12';
+        if ($isDecember && $employerAnnualEvidence === null) {
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_collective_agreement_missing',
+                'supplier',
+                $supplierId,
+                ['10214'],
+            );
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_ownership_missing',
+                'supplier',
+                $supplierId,
+                ['10220'],
+            );
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_ozp_summary_missing',
+                'supplier',
+                $supplierId,
+                ['10038', '10039', '10452'],
+            );
+        } elseif ($employerAnnualEvidence !== null) {
+            if (($employerAnnualEvidence['schema_reference'] ?? null)
+                    !== JmhzEmployerAnnualEvidenceService::SCHEMA_REFERENCE
+                || ($employerAnnualEvidence['report_year'] ?? null)
+                    !== (int) substr($periodStart, 0, 4)
+                || ($employerAnnualEvidence['spec_manifest_sha256'] ?? null)
+                    !== JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256
+            ) {
+                $this->invalid(
+                    'jmhz_employer_annual_evidence_scope_mismatch',
+                    'Roční evidence zaměstnavatele neodpovídá připravovanému období.',
+                );
+            }
+            $employerAnnualVersion = [
+                'id' => $this->positiveInt(
+                    $employerAnnualEvidence['id'] ?? null,
+                    'employer_annual_evidence.id',
+                ),
+                'report_year' => $employerAnnualEvidence['report_year'],
+                'revision_no' => $this->positiveInt(
+                    $employerAnnualEvidence['revision_no'] ?? null,
+                    'employer_annual_evidence.revision_no',
+                ),
+                'payload_sha256' => $this->hash(
+                    $employerAnnualEvidence['payload_sha256'] ?? null,
+                    'employer_annual_evidence.payload_sha256',
+                ),
+                'spec_manifest_sha256' => $employerAnnualEvidence['spec_manifest_sha256'],
+            ];
+        }
         $registrations = $this->officeRegistrations(
             $source['offices'] ?? null,
             $normalizedPeople,
@@ -570,12 +625,14 @@ final class JmhzPreparationSnapshotBuilder
             ],
             'people' => $normalizedPeople,
             'ordinary_evidence' => $ordinaryPayloads,
+            'employer_annual_evidence' => $employerAnnualEvidence,
             'source_versions' => [
                 'office_id' => is_array($office) ? $office['id'] : null,
                 'office_ids' => array_column($registrations, 'id'),
                 'employments' => $sourceVersions,
                 'ordinary_evidence' => $ordinaryVersions,
                 'annual_evidence' => $annualVersions,
+                'employer_annual_evidence' => $employerAnnualVersion,
             ],
             'readiness_issue_codes' => array_column($issues, 'code'),
             'readiness_issues' => $issues,

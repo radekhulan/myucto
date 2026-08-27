@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   warning: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
+  canWrite: true,
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -64,7 +65,7 @@ vi.mock('@/api/errors', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: () => true }),
+  useAuthStore: () => ({ canWrite: () => m.canWrite }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -217,6 +218,7 @@ function mountPage() {
 describe('Roční zúčtování', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.canWrite = true
     m.listAnnualSettlements.mockResolvedValue(listResponse([person()]))
     m.previewAnnualSettlement.mockResolvedValue(previewResponse())
   })
@@ -463,6 +465,31 @@ describe('Roční zúčtování', () => {
         request_evidence_reference: 'synthetic',
       }),
     )
+  })
+
+  it('read-only uživateli uzamkne celou evidenci jiné osoby uplatňující dítě', async () => {
+    m.canWrite = false
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      request: {
+        ...previewResponse().request,
+        other_household_caregiver_status: 'present',
+        other_household_caregivers: [{
+          given_name: 'Jana',
+          family_name: 'Syntetická',
+          birth_date: '1990-01-01',
+          months_mask: 'ANNNNNNNNNNN',
+        }],
+      },
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="annual-settlement-caregiver-fields"]')
+      .attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="annual-settlement-save-request"]')
+      .attributes('disabled')).toBeDefined()
   })
 
   it('uloží žádost i potvrzení bez volitelných odkazů na podklady', async () => {

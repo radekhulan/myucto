@@ -1942,6 +1942,47 @@ export interface PayrollJmhzPvpojOffice {
   submittable: boolean
 }
 
+export interface PayrollJmhzCodebookEntry {
+  item_code: string
+  label: string
+  ordinal: number
+}
+
+export interface PayrollJmhzEmployerAnnualEvidence {
+  id: number
+  report_year: number
+  revision_no: number
+  previous_revision_id: number | null
+  schema_reference: string
+  spec_manifest_sha256: string
+  collective_agreement_types: string[]
+  ownership_form: string
+  average_headcount_hundredths: number
+  average_disabled_headcount_hundredths: number
+  disabled_share_hundredths: number
+  ozp_reporting_office_id: number | null
+  evidence_reference: string | null
+  payload_sha256: string
+  created_at: string
+}
+
+export interface PayrollJmhzEmployerAnnualEvidenceView {
+  evidence: PayrollJmhzEmployerAnnualEvidence | null
+  offices: Array<{ id: number; code: string; name: string }>
+  collective_agreement_types: PayrollJmhzCodebookEntry[]
+  ownership_forms: PayrollJmhzCodebookEntry[]
+}
+
+export interface PayrollJmhzEmployerAnnualEvidencePayload {
+  expected_revision_id: number | null
+  collective_agreement_types: string[]
+  ownership_form: string
+  average_headcount: string
+  average_disabled_headcount: string
+  ozp_reporting_office_id: number | null
+  evidence_reference: string | null
+}
+
 export interface PayrollJmhzPvpojPreview {
   schema_reference: 'payroll-jmhz-pvpoj-preview.v1'
   document_kind: 'internal_jmhz_pvpoj_preview'
@@ -2687,6 +2728,18 @@ export type PayrollAnnualSettlementAnnualClaims =
   | 'none'
   | 'present_unsupported'
 
+export type PayrollAnnualSettlementCaregiverStatus = 'unknown' | 'none' | 'present'
+
+export interface PayrollAnnualSettlementCaregiver {
+  id?: number
+  position?: number
+  given_name: string
+  family_name: string
+  birth_date: string
+  /** Leden až prosinec; A = uplatňoval(a), N = neuplatňoval(a). */
+  months_mask: string
+}
+
 /** Jak zúčtování dopadlo. */
 export type PayrollAnnualSettlementOutcome =
   | 'overpayment'
@@ -2718,6 +2771,7 @@ export type PayrollAnnualSettlementBlocker =
   | 'credit_evidence_unverified'
   | 'child_evidence_unverified'
   | 'child_claim_conflict'
+  | 'child_jmhz_evidence_incomplete'
   | 'already_settled'
   | 'ruleset_year_not_covered'
 
@@ -2734,6 +2788,8 @@ export interface PayrollAnnualSettlementRequest {
   filing_obligation_reason: string | null
   annual_claims: PayrollAnnualSettlementAnnualClaims
   annual_claims_note: string | null
+  other_household_caregiver_status: PayrollAnnualSettlementCaregiverStatus
+  other_household_caregivers: PayrollAnnualSettlementCaregiver[]
   note: string | null
   row_version: number
 }
@@ -2911,6 +2967,8 @@ export interface PayrollAnnualSettlementRequestPayload {
   filing_obligation_reason: string | null
   annual_claims: PayrollAnnualSettlementAnnualClaims
   annual_claims_note: string | null
+  other_household_caregiver_status: PayrollAnnualSettlementCaregiverStatus
+  other_household_caregivers: PayrollAnnualSettlementCaregiver[]
   note: string | null
   row_version?: number
 }
@@ -3340,6 +3398,8 @@ export interface PayrollDependant {
   id: number
   relation: PayrollDependantRelation
   full_name: string
+  given_name: string | null
+  family_name: string | null
   birth_date: string
   birth_number_masked: string | null
   has_birth_number: boolean
@@ -3363,6 +3423,8 @@ export interface PayrollDependantsResponse {
 export interface PayrollDependantPayload {
   relation: PayrollDependantRelation
   full_name: string
+  given_name: string | null
+  family_name: string | null
   birth_date: string
   birth_number?: string | null
   ztp_p: boolean
@@ -4068,6 +4130,17 @@ export const payrollApi = {
     api.get<{ offices: PayrollJmhzPvpojOffice[] }>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}/offices`,
     ).then(response => response.data.offices),
+  jmhzEmployerAnnualEvidence: (reportYear: number) =>
+    api.get<PayrollJmhzEmployerAnnualEvidenceView>(
+      `/payroll/submissions/jmhz-employer-annual-evidence/${reportYear}`,
+    ).then(response => response.data),
+  saveJmhzEmployerAnnualEvidence: (
+    reportYear: number,
+    payload: PayrollJmhzEmployerAnnualEvidencePayload,
+  ) => api.post<PayrollJmhzEmployerAnnualEvidenceView>(
+    `/payroll/submissions/jmhz-employer-annual-evidence/${reportYear}`,
+    payload,
+  ).then(response => response.data),
   jmhzPvpojPreview: (revisionId: number, officeId?: number | null) =>
     api.get<PayrollJmhzPvpojPreview>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}`,

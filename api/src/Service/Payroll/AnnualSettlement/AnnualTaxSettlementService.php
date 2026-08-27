@@ -344,7 +344,15 @@ final class AnnualTaxSettlementService
         DateTimeImmutable $today,
         bool $lockOutcome = false,
     ): array {
-        $request = $this->loadRequest($supplierId, $employeeId, $taxYear);
+        [$request, $requestRow] = $this->loadRequest($supplierId, $employeeId, $taxYear);
+        $requestPayload = [
+            ...$request->toArray(),
+            'other_household_caregiver_status' =>
+                (string) ($requestRow['other_household_caregiver_status'] ?? 'unknown'),
+            'other_household_caregivers' => is_array(
+                $requestRow['other_household_caregivers'] ?? null,
+            ) ? array_values($requestRow['other_household_caregivers']) : [],
+        ];
         $blockers = [];
 
         $settled = $this->settlements->findOutcome(
@@ -395,6 +403,17 @@ final class AnnualTaxSettlementService
             $taxYear,
         );
         $blockers = [...$blockers, ...$credits['blockers'], ...$children['blockers']];
+        if (!$this->settlements->childJmhzEvidenceIsComplete(
+            $supplierId,
+            $employeeId,
+            array_map(
+                static fn (AnnualSettlementChildMonths $child): string => $child->childReference,
+                $children['children'],
+            ),
+            $requestRow,
+        )) {
+            $blockers[] = AnnualSettlementBlocker::ChildJmhzEvidenceIncomplete;
+        }
 
         $blockers = $this->eligibility->evaluate(
             $request,
@@ -426,7 +445,7 @@ final class AnnualTaxSettlementService
                     $this->unique($blockers),
                     ['rates' => $rates?->toArray()],
                 ),
-                'request' => $request->toArray(),
+                'request' => $requestPayload,
                 'credit_rows' => [],
                 'child_rows' => [],
                 'certificates' => self::certificateRows($certificates),
@@ -454,7 +473,7 @@ final class AnnualTaxSettlementService
 
         return [
             'result' => $result,
-            'request' => $request->toArray(),
+            'request' => $requestPayload,
             'credit_rows' => $this->creditRows($result),
             'child_rows' => $this->childRows($result),
             'certificates' => self::certificateRows($certificates),
@@ -586,7 +605,16 @@ final class AnnualTaxSettlementService
                         ? sprintf(' (průkaz ZTP/P %d měs.)', $ztpPMonths)
                         : '',
                 ),
+                'child_reference' => (string) ($child['child_reference'] ?? ''),
+                'order' => $order,
                 'months' => (int) ($child['months'] ?? 0),
+                'claimed_months' => is_array($child['claimed_months'] ?? null)
+                    ? array_values($child['claimed_months'])
+                    : [],
+                'ztp_p_months' => $ztpPMonths,
+                'ztp_p_claimed_months' => is_array(
+                    $child['ztp_p_claimed_months'] ?? null,
+                ) ? array_values($child['ztp_p_claimed_months']) : [],
                 'amount_minor_units' => (int) ($child['amount_minor_units'] ?? 0),
             ];
         }
@@ -612,17 +640,18 @@ final class AnnualTaxSettlementService
         return sprintf('%s — %d měs.', $name, $months);
     }
 
+    /** @return array{0:AnnualSettlementRequest,1:array<string,mixed>} */
     private function loadRequest(
         int $supplierId,
         int $employeeId,
         int $taxYear,
-    ): AnnualSettlementRequest {
+    ): array {
         $row = $this->settlements->findRequest($supplierId, $employeeId, $taxYear);
         if ($row === null) {
-            return AnnualSettlementRequest::unknown($taxYear);
+            return [AnnualSettlementRequest::unknown($taxYear), []];
         }
 
-        return new AnnualSettlementRequest(
+        return [new AnnualSettlementRequest(
             $taxYear,
             AnnualSettlementRequestStatus::from((string) $row['request_status']),
             self::date($row['requested_on'] ?? null),
@@ -635,7 +664,7 @@ final class AnnualTaxSettlementService
             self::text($row['annual_claims_note'] ?? null),
             self::text($row['note'] ?? null),
             (int) $row['row_version'],
-        );
+        ), $row];
     }
 
     private static function date(mixed $value): ?DateTimeImmutable

@@ -56,6 +56,8 @@ const editingClaimId = ref<number | null>(null)
 const dependantForm = reactive({
   relation: 'child_own' as PayrollDependantRelation,
   full_name: '',
+  given_name: '',
+  family_name: '',
   birth_date: '',
   birth_number: '',
   ztp_p: false,
@@ -148,6 +150,8 @@ function openDependantEditor(dependant: PayrollDependant | null): void {
   editingDependantId.value = dependant?.id ?? null
   dependantForm.relation = dependant?.relation ?? 'child_own'
   dependantForm.full_name = dependant?.full_name ?? ''
+  dependantForm.given_name = dependant?.given_name ?? ''
+  dependantForm.family_name = dependant?.family_name ?? ''
   dependantForm.birth_date = dependant?.birth_date ?? ''
   dependantForm.birth_number = ''
   dependantForm.ztp_p = dependant?.ztp_p ?? false
@@ -204,6 +208,8 @@ function dependantPayload(): PayrollDependantPayload {
   const payload: PayrollDependantPayload = {
     relation: dependantForm.relation,
     full_name: dependantForm.full_name.trim(),
+    given_name: dependantForm.given_name.trim() || null,
+    family_name: dependantForm.family_name.trim() || null,
     birth_date: dependantForm.birth_date,
     ztp_p: dependantForm.ztp_p,
     student: dependantForm.student,
@@ -505,6 +511,15 @@ function creditLabel(claim: PayrollDependantClaim): string {
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.full_name') }} <RequiredMark />
           <input v-model="dependantForm.full_name" required :class="inputClass" data-test="dependant-full-name">
+        </label>
+        <label :class="labelClass">
+          {{ t('payroll.people.dependants.form.given_name') }}
+          <input v-model="dependantForm.given_name" :class="inputClass" maxlength="100" data-test="dependant-given-name">
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.jmhz_name_hint') }}</span>
+        </label>
+        <label :class="labelClass">
+          {{ t('payroll.people.dependants.form.family_name') }}
+          <input v-model="dependantForm.family_name" :class="inputClass" maxlength="100" data-test="dependant-family-name">
         </label>
         <label :class="labelClass">
           {{ t('payroll.people.dependants.form.birth_date') }} <RequiredMark />

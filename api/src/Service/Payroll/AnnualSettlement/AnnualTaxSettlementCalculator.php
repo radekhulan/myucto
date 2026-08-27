@@ -178,6 +178,8 @@ final class AnnualTaxSettlementCalculator
                 'order' => $child->order,
                 'months' => $child->months,
                 'ztp_p_months' => $child->ztpPMonths,
+                'claimed_months' => $child->claimedMonths,
+                'ztp_p_claimed_months' => $child->ztpPClaimedMonths,
                 'amount_minor_units' => $amount,
             ];
             $childEntitlement = TaxIntegerMath::add($childEntitlement, $amount);

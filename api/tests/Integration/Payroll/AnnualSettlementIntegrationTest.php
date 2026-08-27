@@ -616,6 +616,158 @@ final class AnnualSettlementIntegrationTest extends TestCase
         }
     }
 
+    public function testChildIdentityMonthsAndOtherCaregiverAreFrozenForJmhz(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $service = $container->get(AnnualTaxSettlementService::class);
+        $snapshots = $container->get(AnnualSettlementSnapshotBuilder::class);
+        $settlements = $container->get(PayrollAnnualSettlementRepository::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $jmhzAnnual = $container->get(JmhzAnnualEvidenceService::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
+        self::assertInstanceOf(AnnualSettlementSnapshotBuilder::class, $snapshots);
+        self::assertInstanceOf(PayrollAnnualSettlementRepository::class, $settlements);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        self::assertInstanceOf(JmhzAnnualEvidenceService::class, $jmhzAnnual);
+
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+            );
+            $pdo->prepare(
+                'INSERT INTO payroll_dependants
+                    (supplier_id, employee_id, relation, full_name, given_name,
+                     family_name, birth_date, ztp_p, student, existence_from)
+                 VALUES (?, ?, "child_own", "Anna Syntetická", "Anna",
+                         "Syntetická", "2018-04-12", 0, 0, "2018-04-12")',
+            )->execute([$supplierId, $employeeId]);
+            $dependantId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_person_tax_child_claims
+                    (supplier_id, employee_id, dependant_id, child_reference,
+                     child_order, ztp_p, evidence_status, evidence_reference,
+                     shared_household_confirmed, other_claimant_excluded,
+                     effective_from, effective_to)
+                 VALUES (?, ?, ?, ?, 1, 0, "verified", "synthetic-child",
+                         1, 1, ?, ?)',
+            )->execute([
+                $supplierId,
+                $employeeId,
+                $dependantId,
+                'dependant-' . $dependantId,
+                self::YEAR . '-03-01',
+                self::YEAR . '-08-31',
+            ]);
+            $request = $settlements->findRequest(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+            );
+            self::assertIsArray($request);
+            $savedRequest = $settlements->saveRequest(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [
+                    'request_status' => $request['request_status'],
+                    'requested_on' => $request['requested_on'],
+                    'request_evidence_reference' => $request['request_evidence_reference'],
+                    'prior_employers' => $request['prior_employers'],
+                    'prior_documents_received_on' => $request['prior_documents_received_on'],
+                    'filing_obligation' => $request['filing_obligation'],
+                    'filing_obligation_reason' => $request['filing_obligation_reason'],
+                    'annual_claims' => $request['annual_claims'],
+                    'annual_claims_note' => $request['annual_claims_note'],
+                    'other_household_caregiver_status' => 'present',
+                    'other_household_caregivers' => [[
+                        'given_name' => 'Petr',
+                        'family_name' => 'Syntetický',
+                        'birth_date' => '1987-02-03',
+                        'months_mask' => 'AANNNNNNNNNN',
+                    ]],
+                    'note' => $request['note'],
+                ],
+                (int) $request['row_version'],
+                null,
+            );
+            self::assertSame('present', $savedRequest['other_household_caregiver_status']);
+            self::assertCount(1, $savedRequest['other_household_caregivers']);
+
+            $preview = $service->preview(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                new DateTimeImmutable((self::YEAR + 1) . '-03-10'),
+            );
+            self::assertSame([], $preview['result']->blockerCodes());
+            self::assertSame([3, 4, 5, 6, 7, 8], $preview['child_rows'][0]['claimed_months']);
+
+            $built = $snapshots->build(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                $preview['result'],
+                (self::YEAR + 1) . '-03-10',
+                $preview['credit_rows'],
+                $preview['child_rows'],
+                null,
+            );
+            $revisionId = (int) $built['revision']['id'];
+            $settlements->insertOutcome(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [
+                    'annual_revision_id' => $revisionId,
+                    'outcome' => $preview['result']->outcome->value,
+                    'tax_difference_minor' => $preview['result']->taxDifferenceMinorUnits,
+                    'bonus_difference_minor' => $preview['result']->bonusDifferenceMinorUnits,
+                    'settlement_difference_minor' =>
+                        $preview['result']->settlementDifferenceMinorUnits,
+                    'payable_minor' => $preview['result']->payableMinorUnits,
+                    'payout_threshold_minor' =>
+                        AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
+                    'settled_on' => (self::YEAR + 1) . '-03-10',
+                ],
+                null,
+            );
+
+            $frozen = $jmhzAnnual->snapshotsForPreparation(
+                $supplierId,
+                [$employeeId],
+                self::YEAR + 1,
+            )[$employeeId]['settlement']['child_rows'][0];
+            self::assertSame('Anna', $frozen['given_name']);
+            self::assertSame('Syntetická', $frozen['family_name']);
+            self::assertSame('2018-04-12', $frozen['birth_date']);
+            self::assertNull($frozen['birth_number']);
+            self::assertSame('NN111111NNNN', $frozen['order_months_mask']);
+            self::assertTrue($frozen['other_household_caregiver']);
+            self::assertSame(
+                'AANNNNNNNNNN',
+                $frozen['other_household_caregivers'][0]['months_mask'],
+            );
+            self::assertSame(
+                'Petr',
+                $frozen['other_household_caregivers'][0]['identity']['given_name'],
+            );
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
+    }
+
     /**
      * Otisk všech měsíčních dat zaměstnance. Změní-li se cokoli v mzdových
      * revizích, výsledcích osob nebo kumulacích, otisk se rozejde.

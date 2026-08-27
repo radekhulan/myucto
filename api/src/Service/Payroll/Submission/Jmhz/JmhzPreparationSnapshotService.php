@@ -22,7 +22,8 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V6_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v6';
     private const PREVIOUS_V7_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v7';
     private const PREVIOUS_V8_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v8';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v9';
+    private const PREVIOUS_V9_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v9';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v10';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
@@ -31,7 +32,8 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V6_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v6';
     private const PREVIOUS_V7_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v7';
     private const PREVIOUS_V8_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v8';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v9';
+    private const PREVIOUS_V9_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v9';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v10';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -43,6 +45,7 @@ final readonly class JmhzPreparationSnapshotService
         private JmhzEldpEvidenceSnapshotService $eldpEvidence,
         private JmhzOrdinaryEvidenceService $ordinaryEvidence,
         private JmhzAnnualEvidenceService $annualEvidence,
+        private JmhzEmployerAnnualEvidenceService $employerAnnualEvidence,
     ) {}
 
     public function loadVerified(
@@ -229,6 +232,11 @@ final readonly class JmhzPreparationSnapshotService
                 $this->employeeIds($input),
                 (int) substr((string) $revision['period_start'], 0, 4),
             );
+            $employerAnnualEvidence = $this->employerAnnualEvidence
+                ->snapshotForPreparation(
+                    $supplierId,
+                    (string) $revision['period_start'],
+                );
             $snapshot = $this->builder->build(
                 $supplierId,
                 $environment,
@@ -239,6 +247,7 @@ final readonly class JmhzPreparationSnapshotService
                 $eldpSources,
                 $ordinaryEvidence,
                 $annualEvidence,
+                $employerAnnualEvidence,
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -674,6 +683,11 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V8_SCHEMA_REFERENCE,
                 'manifest_schema' => self::PREVIOUS_V8_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_V8_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V9_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V9_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V9_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V9_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,

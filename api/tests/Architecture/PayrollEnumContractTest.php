@@ -197,6 +197,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementFilingObligation',
         'payroll.ts::PayrollAnnualSettlementAnnualClaims'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
+        'payroll.ts::PayrollAnnualSettlementCaregiverStatus'
+            => 'db:payroll_annual_settlement_requests.other_household_caregiver_status',
         'payroll.ts::PayrollAnnualSettlementOutcome'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementOutcome',
         'payroll.ts::PayrollAnnualSettlementBlocker'
@@ -476,6 +478,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementFilingObligation',
         'payroll.annual_settlement.annual_claims_options'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
+        'payroll.annual_settlement.other_caregiver_options'
+            => 'db:payroll_annual_settlement_requests.other_household_caregiver_status',
 
         'payroll.deductions.status'      => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementStatus',
         'payroll.deductions.commands'    => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',

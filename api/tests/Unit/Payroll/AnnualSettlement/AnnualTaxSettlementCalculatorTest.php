@@ -316,7 +316,14 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
                     new AnnualSettlementCreditMonths(TaxCreditKind::Taxpayer, 12),
                 ],
                 childMonths: [
-                    new AnnualSettlementChildMonths('child-a', 1, 12, 6),
+                    new AnnualSettlementChildMonths(
+                        'child-a',
+                        1,
+                        12,
+                        6,
+                        range(1, 12),
+                        range(7, 12),
+                    ),
                 ],
             ),
             $rates,
@@ -329,6 +336,11 @@ final class AnnualTaxSettlementCalculatorTest extends TestCase
         self::assertSame(
             $monthly * 6 + $monthly * 6 * 2,
             $result->childEntitlementMinorUnits,
+        );
+        self::assertSame(range(1, 12), $result->trace['children'][0]['claimed_months']);
+        self::assertSame(
+            range(7, 12),
+            $result->trace['children'][0]['ztp_p_claimed_months'],
         );
     }
 
