@@ -1323,11 +1323,23 @@ final class PayrollSubmissionService
                 }
             }
             if ($trusted
-                && $remoteStatus === 'accepted'
+                && in_array(
+                    $remoteStatus,
+                    ['accepted', 'partially_accepted'],
+                    true,
+                )
                 && $this->registrationReceiptIdentities !== null
             ) {
                 $this->registrationReceiptIdentities
                     ->applyAcceptedVariableSymbolTransfer(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $receiptId,
+                        $importedBy,
+                    );
+                $this->registrationReceiptIdentities
+                    ->applyAcceptedEmploymentRegistration(
                         $supplierId,
                         $submission['environment'],
                         $submissionId,

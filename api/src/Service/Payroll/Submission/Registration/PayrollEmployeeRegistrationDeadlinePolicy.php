@@ -29,7 +29,7 @@ final class PayrollEmployeeRegistrationDeadlinePolicy
      */
     public const SUPPORTED_FROM = '2026-07-01';
 
-    private const REGISTRATION_RULESET_ID =
+    public const REGISTRATION_RULESET_ID =
         'cz-employee-registration-2026-07.v1';
     private const NO_SHOW_RULESET_ID =
         'cz-employee-registration-no-show-2026-07.v1';

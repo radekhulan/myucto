@@ -227,13 +227,21 @@ final class PayrollRegistrationActionTest extends TestCase
 
     public function testApprovedTerminationEventPreparesRegzecA2WithTheFrozenOid(): void
     {
+        $this->seedTrustedReceipt();
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
                 SET actual_start_date = ?, end_date = "2026-08-25",
                     status = "ended"
               WHERE supplier_id = ? AND id = ?'
         )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+        $this->seedRegistrationEventPrerequisites(
+            '10',
+            null,
+            self::START_ON,
+            null,
+            null,
+            true,
+        );
 
         $eventResponse = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -284,15 +292,533 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringNotContainsString('<unemplcomp', $xml);
     }
 
+    public function testA2RejectsManualOicProvenance(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_a2_oic_provenance_invalid',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    public function testA2RejectsManualIdPpvProvenance(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->employmentId = $this->insertAdditionalEmployment(
+            'reg-manual-id-ppv',
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites(
+            '10',
+            null,
+            self::START_ON,
+            null,
+            null,
+            true,
+        );
+        $this->identities->assignEmploymentExternalId(
+            $this->supplierId,
+            $this->employmentId,
+            'test',
+            '300000000000000000003',
+            self::START_ON,
+            'verified_manual_import',
+            'synthetic-manual-id-ppv',
+            null,
+            $this->userId,
+        );
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_a2_id_ppv_provenance_invalid',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    public function testA2RejectsTrustedReceiptWithoutMatchingOutcome(): void
+    {
+        $receiptId = $this->seedTrustedReceipt(false);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites(
+            '10',
+            null,
+            self::START_ON,
+            $receiptId,
+            null,
+        );
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_a2_oic_provenance_invalid',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    public function testTrustedRegistrationReceiptCommitsWithoutReplacingManualIdentities(): void
+    {
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+
+        $receiptId = $this->seedTrustedReceipt(true, false);
+        $identity = $this->identities->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'test',
+            self::START_ON,
+        );
+        $storedReceipt = $this->db->pdo()->prepare(
+            'SELECT verification_status, remote_status
+               FROM payroll_submission_receipts
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $storedReceipt->execute([$this->supplierId, $receiptId]);
+        $receipt = $storedReceipt->fetch(PDO::FETCH_ASSOC);
+
+        self::assertGreaterThan(0, $receiptId);
+        self::assertSame('trusted', $receipt['verification_status'] ?? null);
+        self::assertSame('accepted', $receipt['remote_status'] ?? null);
+        self::assertSame(
+            'verified_manual_import',
+            $identity['person_external_identifier']['source_kind'],
+        );
+        self::assertSame(
+            'verified_manual_import',
+            $identity['employment_external_identifier']['source_kind'],
+        );
+        self::assertNull($identity['person_external_identifier']['source_receipt_id']);
+        self::assertNull($identity['employment_external_identifier']['source_receipt_id']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $response->getStatusCode());
+        self::assertSame(
+            'registration_a2_oic_provenance_invalid',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    public function testTrustedRegistrationReceiptAssignsIdPpvForAnotherEmploymentWithExistingTrustedOic(): void
+    {
+        $firstReceiptId = $this->seedTrustedReceipt();
+        $this->employmentId = $this->insertAdditionalEmployment(
+            'reg-second-employment',
+        );
+
+        $secondReceiptId = $this->seedTrustedReceipt(
+            expectedPersonReceiptId: $firstReceiptId,
+            externalEmploymentReference: '300000000000000000003',
+        );
+        $identity = $this->identities->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'test',
+            self::START_ON,
+            true,
+        );
+
+        self::assertNotSame($firstReceiptId, $secondReceiptId);
+        self::assertSame(
+            $firstReceiptId,
+            $identity['person_external_identifier']['source_receipt_id'],
+        );
+        self::assertSame(
+            $secondReceiptId,
+            $identity['employment_external_identifier']['source_receipt_id'],
+        );
+    }
+
+    public function testTrustedRegistrationReceiptUsesFrozenEffectiveDate(): void
+    {
+        $receiptId = $this->seedTrustedReceipt(
+            expectTrustedIdentities: false,
+            beforeReceipt: function (): void {
+                $this->db->pdo()->prepare(
+                    'UPDATE payroll_employments
+                        SET actual_start_date = "2026-08-23"
+                      WHERE supplier_id = ? AND id = ?',
+                )->execute([$this->supplierId, $this->employmentId]);
+            },
+        );
+        $person = $this->db->pdo()->prepare(
+            'SELECT valid_from FROM payroll_person_external_ids
+              WHERE supplier_id = ? AND employee_id = ?
+                AND environment = "test" AND source_receipt_id = ?',
+        );
+        $person->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $receiptId,
+        ]);
+        $employment = $this->db->pdo()->prepare(
+            'SELECT valid_from FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND employment_id = ?
+                AND environment = "test" AND source_receipt_id = ?',
+        );
+        $employment->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $receiptId,
+        ]);
+
+        self::assertSame(self::START_ON, $person->fetchColumn());
+        self::assertSame(self::START_ON, $employment->fetchColumn());
+    }
+
+    public function testPreRegistrationNoShowReceiptDoesNotAssignIdentities(): void
+    {
+        $this->seedAcceptedPreRegistration();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET status = "no_show"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $receiptId = $this->seedTrustedReceipt(
+            expectTrustedIdentities: false,
+        );
+        $person = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_person_external_ids
+              WHERE supplier_id = ? AND employee_id = ?
+                AND environment = "test" AND source_receipt_id = ?',
+        );
+        $person->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $receiptId,
+        ]);
+        $employment = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND employment_id = ?
+                AND environment = "test" AND source_receipt_id = ?',
+        );
+        $employment->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $receiptId,
+        ]);
+
+        self::assertSame(0, (int) $person->fetchColumn());
+        self::assertSame(0, (int) $employment->fetchColumn());
+    }
+
+    public function testTrustedBatchRegistrationReceiptAssignsEveryOutcome(): void
+    {
+        $secondEmploymentId = $this->insertAdditionalEmployment(
+            'reg-batch-employment',
+        );
+        $prepared = $this->json($this->post());
+        self::assertSame('ready', $prepared['status']);
+        $secondPart = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_submission_parts
+                (supplier_id, environment, submission_id, part_reference,
+                 agenda_code, subject_reference, status, source_entity_type,
+                 source_entity_reference, source_snapshot_hash)
+             VALUES (?, "test", ?, ?, ?, ?, "ready", "payroll_employment",
+                     ?, ?)'
+        );
+        $secondPart->execute([
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            'registration:batch:' . $secondEmploymentId,
+            (string) $prepared['agenda_code'],
+            'payroll_employment:' . $secondEmploymentId,
+            'payroll_employment_registration:' . $secondEmploymentId,
+            str_repeat('f', 64),
+        ]);
+        $secondPartId = (int) $this->db->pdo()->lastInsertId();
+        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
+        $submitted = $submissions->transition(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $prepared['row_version'],
+            'submitted',
+            'synthetic-batch-registration-correlation',
+        );
+        $firstPartId = (int) $prepared['part_id'];
+        $verifier = new class ($firstPartId, $secondPartId) implements PayrollReceiptVerifierInterface {
+            public function __construct(
+                private readonly int $firstPartId,
+                private readonly int $secondPartId,
+            ) {}
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    'accepted',
+                    $expectedCorrelationReference,
+                    [
+                        $this->firstPartId => 'accepted',
+                        $this->secondPartId => 'accepted',
+                    ],
+                    [
+                        new PayrollVerifiedReceiptFormOutcome(
+                            '11111111-2222-4333-8444-555555555550',
+                            null,
+                            1,
+                            'Accepted',
+                            'accepted',
+                            '1000000001',
+                            '400000000000000000004',
+                            [],
+                        ),
+                        new PayrollVerifiedReceiptFormOutcome(
+                            '11111111-2222-4333-8444-555555555551',
+                            $this->firstPartId,
+                            1,
+                            'Accepted',
+                            'accepted',
+                            '1000000001',
+                            '200000000000000000002',
+                            [],
+                        ),
+                        new PayrollVerifiedReceiptFormOutcome(
+                            '11111111-2222-4333-8444-555555555552',
+                            $this->secondPartId,
+                            1,
+                            'Accepted',
+                            'accepted',
+                            '1000000001',
+                            '300000000000000000003',
+                            [],
+                        ),
+                    ],
+                );
+            }
+        };
+        $receipt = $submissions->importReceipt(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $submitted['row_version'],
+            null,
+            '<synthetic-batch-receipt/>',
+            'synthetic-batch-registration-receipt',
+            'synthetic-batch-registration-correlation',
+            'CSSZ_REGZEC',
+            'accepted',
+            'vrep_apep',
+            'synthetic-batch-registration-key',
+            $this->userId,
+            $verifier,
+        );
+
+        foreach ([$this->employmentId, $secondEmploymentId] as $employmentId) {
+            $identity = $this->identities->sensitiveJmhzIdentityAt(
+                $this->supplierId,
+                $this->employeeId,
+                $employmentId,
+                'test',
+                self::START_ON,
+                true,
+            );
+            self::assertSame(
+                $receipt['id'],
+                $identity['employment_external_identifier']['source_receipt_id'],
+            );
+        }
+    }
+
+    public function testPartiallyAcceptedRegistrationReceiptAssignsOnlyAcceptedOutcome(): void
+    {
+        $secondEmploymentId = $this->insertAdditionalEmployment(
+            'reg-partial-batch-employment',
+        );
+        $prepared = $this->json($this->post());
+        $secondPart = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_submission_parts
+                (supplier_id, environment, submission_id, part_reference,
+                 agenda_code, subject_reference, status, source_entity_type,
+                 source_entity_reference, source_snapshot_hash)
+             VALUES (?, "test", ?, ?, ?, ?, "ready", "payroll_employment",
+                     ?, ?)'
+        );
+        $secondPart->execute([
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            'registration:partial-batch:' . $secondEmploymentId,
+            (string) $prepared['agenda_code'],
+            'payroll_employment:' . $secondEmploymentId,
+            'payroll_employment_registration:' . $secondEmploymentId,
+            str_repeat('e', 64),
+        ]);
+        $secondPartId = (int) $this->db->pdo()->lastInsertId();
+        $firstPartId = (int) $prepared['part_id'];
+        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
+        $submitted = $submissions->transition(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $prepared['row_version'],
+            'submitted',
+            'synthetic-partial-batch-correlation',
+        );
+        $verifier = new class ($firstPartId, $secondPartId) implements PayrollReceiptVerifierInterface {
+            public function __construct(
+                private readonly int $firstPartId,
+                private readonly int $secondPartId,
+            ) {}
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                return new PayrollVerifiedReceipt(
+                    'partially_accepted',
+                    $expectedCorrelationReference,
+                    [
+                        $this->firstPartId => 'accepted',
+                        $this->secondPartId => 'rejected',
+                    ],
+                    [
+                        new PayrollVerifiedReceiptFormOutcome(
+                            '11111111-2222-4333-8444-555555555561',
+                            $this->firstPartId,
+                            1,
+                            'Accepted',
+                            'accepted',
+                            '1000000001',
+                            '200000000000000000002',
+                            [],
+                        ),
+                        new PayrollVerifiedReceiptFormOutcome(
+                            '11111111-2222-4333-8444-555555555562',
+                            $this->secondPartId,
+                            2,
+                            'Rejected',
+                            'rejected',
+                            null,
+                            null,
+                            [],
+                        ),
+                    ],
+                );
+            }
+        };
+        $receipt = $submissions->importReceipt(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $submitted['row_version'],
+            null,
+            '<synthetic-partial-batch-receipt/>',
+            'synthetic-partial-batch-receipt',
+            'synthetic-partial-batch-correlation',
+            'CSSZ_REGZEC',
+            'partially_accepted',
+            'vrep_apep',
+            'synthetic-partial-batch-key',
+            $this->userId,
+            $verifier,
+        );
+        $first = $this->identities->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'test',
+            self::START_ON,
+            true,
+        );
+        $second = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND employment_id = ?
+                AND environment = "test" AND source_receipt_id = ?',
+        );
+        $second->execute([
+            $this->supplierId,
+            $secondEmploymentId,
+            (int) $receipt['id'],
+        ]);
+
+        self::assertSame(
+            $receipt['id'],
+            $first['employment_external_identifier']['source_receipt_id'],
+        );
+        self::assertSame(0, (int) $second->fetchColumn());
+    }
+
     public function testA2ReplayKeepsTheOriginalSubmissionAfterLiveIdentityChanges(): void
     {
+        $this->seedTrustedReceipt();
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
                 SET actual_start_date = ?, end_date = "2026-08-25",
                     status = "ended"
               WHERE supplier_id = ? AND id = ?'
         )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+        $this->seedRegistrationEventPrerequisites(
+            '10',
+            null,
+            self::START_ON,
+            null,
+            null,
+            true,
+        );
 
         $eventResponse = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -338,7 +864,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame($firstBody['submission_id'], $replayedBody['submission_id']);
         self::assertSame($firstBody['artifact_sha256'], $replayedBody['artifact_sha256']);
         self::assertSame($firstXml, $this->storedArtifactXml((int) $replayedBody['submission_id']));
-        self::assertSame(1, $this->countSubmissions());
+        self::assertSame(2, $this->countSubmissions());
     }
 
     /**
@@ -348,13 +874,21 @@ final class PayrollRegistrationActionTest extends TestCase
      */
     public function testTerminationEventRejectsUnknownEmploymentTerminationReason(): void
     {
+        $this->seedTrustedReceipt();
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
                 SET actual_start_date = ?, end_date = "2026-08-25",
                     status = "ended"
               WHERE supplier_id = ? AND id = ?',
         )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
-        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+        $this->seedRegistrationEventPrerequisites(
+            '1',
+            '1',
+            self::START_ON,
+            null,
+            null,
+            true,
+        );
 
         $eventResponse = ($this->action)->approveEvent(
             $this->request('POST')->withParsedBody([
@@ -1097,6 +1631,31 @@ final class PayrollRegistrationActionTest extends TestCase
         )->execute([$this->supplierId, $this->employmentId, '2026-01-01']);
     }
 
+    private function insertAdditionalEmployment(string $code): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, office_id, code, relation_type,
+                 status, start_date, is_legacy_projection)
+             VALUES (?, ?, ?, ?, "employment", "planned", ?, 0)',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->officeId,
+            $code,
+            self::START_ON,
+        ]);
+        $employmentId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, due_date)
+             VALUES (?, ?, "onboarding", "social_jmhz_registration", ?)',
+        )->execute([$this->supplierId, $employmentId, '2026-01-01']);
+
+        return $employmentId;
+    }
+
     private function insertBirthNumber(string $value): void
     {
         $pdo = $this->db->pdo();
@@ -1130,6 +1689,9 @@ final class PayrollRegistrationActionTest extends TestCase
         string $activityCode,
         ?string $relationshipDetail,
         string $validFrom,
+        ?int $oicReceiptId = null,
+        ?int $idPpvReceiptId = null,
+        bool $skipIdentityAssignment = false,
     ): void {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_employment_terms
@@ -1147,17 +1709,153 @@ final class PayrollRegistrationActionTest extends TestCase
             $activityCode,
             $relationshipDetail,
         ]);
-        $this->identities->assignManualJmhzIdentity(
+        if ($skipIdentityAssignment) {
+            return;
+        }
+        if ($oicReceiptId === null && $idPpvReceiptId === null) {
+            $this->identities->assignManualJmhzIdentity(
+                $this->supplierId,
+                $this->employmentId,
+                'test',
+                '1000000001',
+                '200000000000000000002',
+                $validFrom,
+                'synthetic-regzec-identity',
+                true,
+                $this->userId,
+            );
+
+            return;
+        }
+        $this->identities->assignPersonExternalId(
+            $this->supplierId,
+            $this->employeeId,
+            'test',
+            '1000000001',
+            $validFrom,
+            $oicReceiptId === null ? 'verified_manual_import' : 'trusted_receipt',
+            'synthetic-regzec-oic',
+            $oicReceiptId,
+            $this->userId,
+        );
+        $this->identities->assignEmploymentExternalId(
             $this->supplierId,
             $this->employmentId,
             'test',
-            '1000000001',
             '200000000000000000002',
             $validFrom,
-            'synthetic-regzec-identity',
-            true,
+            $idPpvReceiptId === null ? 'verified_manual_import' : 'trusted_receipt',
+            'synthetic-regzec-id-ppv',
+            $idPpvReceiptId,
             $this->userId,
         );
+    }
+
+    private function seedTrustedReceipt(
+        bool $withExternalReferences = true,
+        bool $expectTrustedIdentities = true,
+        ?int $expectedPersonReceiptId = null,
+        string $externalEmploymentReference = '200000000000000000002',
+        ?callable $beforeReceipt = null,
+    ): int
+    {
+        $prepared = $this->json($this->post());
+        self::assertSame('ready', $prepared['status']);
+        $correlationReference =
+            'synthetic-a2-provenance-correlation:' . $this->employmentId;
+        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
+        $submitted = $submissions->transition(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $prepared['row_version'],
+            'submitted',
+            $correlationReference,
+        );
+        $partId = (int) $prepared['part_id'];
+        $verifier = new class (
+            $partId,
+            $withExternalReferences,
+            $externalEmploymentReference,
+        ) implements PayrollReceiptVerifierInterface {
+            public function __construct(
+                private readonly int $partId,
+                private readonly bool $withExternalReferences,
+                private readonly string $externalEmploymentReference,
+            ) {}
+
+            public function verify(
+                string $bytes,
+                string $channel,
+                string $environment,
+                ?string $expectedCorrelationReference,
+            ): PayrollVerifiedReceipt {
+                $outcomes = $this->withExternalReferences ? [new PayrollVerifiedReceiptFormOutcome(
+                    '11111111-2222-4333-8444-555555555555',
+                    $this->partId,
+                    1,
+                    'Accepted',
+                    'accepted',
+                    '1000000001',
+                    $this->externalEmploymentReference,
+                    [],
+                )] : [];
+
+                return new PayrollVerifiedReceipt(
+                    'accepted',
+                    $expectedCorrelationReference,
+                    [$this->partId => 'accepted'],
+                    $outcomes,
+                );
+            }
+        };
+        $beforeReceipt?->__invoke();
+        $receipt = $submissions->importReceipt(
+            $this->supplierId,
+            (int) $prepared['submission_id'],
+            (int) $submitted['row_version'],
+            $partId,
+            '<synthetic-receipt/>',
+            'synthetic-a2-provenance-receipt:' . $this->employmentId,
+            $correlationReference,
+            'CSSZ_REGZEC',
+            'accepted',
+            'vrep_apep',
+            'synthetic-a2-provenance-key:' . $this->employmentId,
+            $this->userId,
+            $verifier,
+        );
+        self::assertTrue($receipt['trusted']);
+
+        if (!$withExternalReferences || !$expectTrustedIdentities) {
+            return (int) $receipt['id'];
+        }
+        $identity = $this->identities->sensitiveJmhzIdentityAt(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            'test',
+            self::START_ON,
+            true,
+        );
+        self::assertSame(
+            'trusted_receipt',
+            $identity['person_external_identifier']['source_kind'],
+        );
+        self::assertSame(
+            'trusted_receipt',
+            $identity['employment_external_identifier']['source_kind'],
+        );
+        self::assertSame(
+            $expectedPersonReceiptId ?? $receipt['id'],
+            $identity['person_external_identifier']['source_receipt_id'],
+        );
+        self::assertSame(
+            $receipt['id'],
+            $identity['employment_external_identifier']['source_receipt_id'],
+        );
+
+        return (int) $receipt['id'];
     }
 
     private function storedArtifactXml(int $submissionId): string

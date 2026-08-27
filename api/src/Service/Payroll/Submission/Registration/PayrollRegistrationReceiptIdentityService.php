@@ -89,4 +89,87 @@ final readonly class PayrollRegistrationReceiptIdentityService
 
         return true;
     }
+
+    public function applyAcceptedEmploymentRegistration(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        ?int $actorId,
+    ): bool {
+        $outcomes = $this->submissions->acceptedEmploymentRegistrationOutcomes(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+            PayrollEmployeeRegistrationDeadlinePolicy::REGISTRATION_RULESET_ID,
+        );
+        if ($outcomes === []) {
+            return false;
+        }
+        $changed = false;
+        foreach ($outcomes as $outcome) {
+            $employeeId = (int) $outcome['employee_id'];
+            $employmentId = (int) $outcome['employment_id'];
+            $personReference = (string) $outcome['external_person_reference'];
+            $employmentReference =
+                (string) $outcome['external_employment_reference'];
+            $personMatches =
+                $this->identityService->activePersonExternalIdMatches(
+                    $supplierId,
+                    $employeeId,
+                    $environment,
+                    $personReference,
+                );
+            if ($personMatches === false) {
+                continue;
+            }
+            $employmentMatches =
+                $this->identityService->activeEmploymentExternalIdMatches(
+                    $supplierId,
+                    $employmentId,
+                    $environment,
+                    $employmentReference,
+                );
+            if ($employmentMatches === false) {
+                continue;
+            }
+            $effectiveOn = (string) $outcome['effective_on'];
+            $sourceReference = sprintf(
+                'registration:submission:%d:form:%s',
+                $submissionId,
+                (string) $outcome['form_guid'],
+            );
+            if ($personMatches === null) {
+                $this->identityService->assignPersonExternalId(
+                    $supplierId,
+                    $employeeId,
+                    $environment,
+                    $personReference,
+                    $effectiveOn,
+                    'trusted_receipt',
+                    $sourceReference,
+                    $receiptId,
+                    $actorId,
+                );
+                $changed = true;
+            }
+            if ($employmentMatches === null) {
+                $this->identityService->assignEmploymentExternalId(
+                    $supplierId,
+                    $employmentId,
+                    $environment,
+                    $employmentReference,
+                    $effectiveOn,
+                    'trusted_receipt',
+                    $sourceReference,
+                    $receiptId,
+                    $actorId,
+                );
+                $changed = true;
+            }
+        }
+
+        return $changed;
+    }
 }

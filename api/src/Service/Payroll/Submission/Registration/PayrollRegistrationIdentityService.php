@@ -223,6 +223,7 @@ final readonly class PayrollRegistrationIdentityService
         int $employmentId,
         string $environment,
         string $onDate,
+        bool $requireTrustedReceipt = false,
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
@@ -236,6 +237,7 @@ final readonly class PayrollRegistrationIdentityService
             $employmentId,
             $environment,
             $onDate,
+            $requireTrustedReceipt,
         ): array {
             $employment = $this->repository->lockEmployment(
                 $supplierId,
@@ -312,6 +314,28 @@ final readonly class PayrollRegistrationIdentityService
             );
             self::oic($personIdentifier['value']);
             self::idPpv($employmentIdentifier['value']);
+            if ($requireTrustedReceipt) {
+                $this->assertTrustedReceiptSource(
+                    $personIdentifier,
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $employmentId,
+                    'ik_mpsv',
+                    'registration_a2_oic_provenance_invalid',
+                    'OIČ / IK MPSV',
+                );
+                $this->assertTrustedReceiptSource(
+                    $employmentIdentifier,
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $employmentId,
+                    'id_ppv',
+                    'registration_a2_id_ppv_provenance_invalid',
+                    'ID PPV',
+                );
+            }
 
             return [
                 'environment' => $environment,
@@ -319,6 +343,44 @@ final readonly class PayrollRegistrationIdentityService
                 'employment_external_identifier' => $employmentIdentifier,
             ];
         });
+    }
+
+    /**
+     * @param array{
+     *   id:int,identifier_type:string,value:string,valid_from:string,
+     *   valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *   source_reference_hash:string,row_version:int
+     * } $identifier
+     */
+    private function assertTrustedReceiptSource(
+        array $identifier,
+        int $supplierId,
+        string $environment,
+        int $employeeId,
+        int $employmentId,
+        string $identifierType,
+        string $validationCode,
+        string $label,
+    ): void {
+        $receiptId = $identifier['source_receipt_id'];
+        if ($identifier['source_kind'] !== 'trusted_receipt'
+            || $receiptId === null
+            || !$this->repository->hasAcceptedRegistrationIdentifierReceipt(
+                $supplierId,
+                $environment,
+                $receiptId,
+                $employeeId,
+                $employmentId,
+                $identifierType,
+                $identifier['value'],
+                PayrollEmployeeRegistrationDeadlinePolicy::REGISTRATION_RULESET_ID,
+            )
+        ) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                $validationCode,
+                "REGZEC A2 vyžaduje {$label} z důvěryhodného protokolu stejné firmy a prostředí.",
+            );
+        }
     }
 
     /**
@@ -807,6 +869,108 @@ final readonly class PayrollRegistrationIdentityService
                 'row_version' => 1,
                 'created' => true,
             ];
+        });
+    }
+
+    public function activePersonExternalIdMatches(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+        string $value,
+    ): ?bool {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->environment($environment);
+        $normalizedValue = self::oic($value);
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employeeId,
+            $environment,
+            $normalizedValue,
+        ): ?bool {
+            $existing = $this->repository->activePersonExternalId(
+                $supplierId,
+                $employeeId,
+                $environment,
+                'ik_mpsv',
+            );
+            if ($existing === null) {
+                return null;
+            }
+            $plaintext = $this->sensitiveData->reveal(
+                $existing['value_ciphertext'],
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+                $existing['id'],
+            );
+            $storedHash = $this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            if (!hash_equals($existing['value_hash'], $storedHash)) {
+                throw new \RuntimeException('Otisk OIČ neodpovídá ciphertextu.');
+            }
+            $inputHash = $this->sensitiveData->lookupHash(
+                $normalizedValue,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+
+            return hash_equals($existing['value_hash'], $inputHash);
+        });
+    }
+
+    public function activeEmploymentExternalIdMatches(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        string $value,
+    ): ?bool {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $normalizedValue = self::idPpv($value);
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $environment,
+            $normalizedValue,
+        ): ?bool {
+            $existing = $this->repository->activeExternalId(
+                $supplierId,
+                $employmentId,
+                $environment,
+                'id_ppv',
+            );
+            if ($existing === null) {
+                return null;
+            }
+            $plaintext = $this->sensitiveData->reveal(
+                $existing['value_ciphertext'],
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+                $existing['id'],
+            );
+            $storedHash = $this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            if (!hash_equals($existing['value_hash'], $storedHash)) {
+                throw new \RuntimeException(
+                    'Otisk externího ID neodpovídá ciphertextu.',
+                );
+            }
+            $inputHash = $this->sensitiveData->lookupHash(
+                $normalizedValue,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+
+            return hash_equals($existing['value_hash'], $inputHash);
         });
     }
 

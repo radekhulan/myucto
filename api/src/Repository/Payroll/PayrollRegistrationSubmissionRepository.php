@@ -277,7 +277,19 @@ final class PayrollRegistrationSubmissionRepository
                 AND outcome.environment = receipt.environment
                 AND outcome.submission_id = receipt.submission_id
                 AND outcome.receipt_id = receipt.id
-                AND (outcome.part_id IS NULL OR outcome.part_id = part.id)
+                AND (
+                    outcome.part_id = part.id
+                    OR (
+                        outcome.part_id IS NULL
+                        AND 1 = (
+                            SELECT COUNT(*)
+                              FROM payroll_submission_parts receipt_part
+                             WHERE receipt_part.supplier_id = submission.supplier_id
+                               AND receipt_part.environment = submission.environment
+                               AND receipt_part.submission_id = submission.id
+                        )
+                    )
+                )
               WHERE submission.supplier_id = ?
                 AND submission.environment = ?
                 AND submission.id = ?
@@ -304,6 +316,110 @@ final class PayrollRegistrationSubmissionRepository
                 'employment_id' => (int) $row['employment_id'],
                 'effective_on' => (string) $row['effective_on'],
                 'form_guid' => (string) $row['form_guid'],
+                'external_employment_reference' =>
+                    (string) $row['external_employment_reference'],
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * @return list<array{
+     *   receipt_id:int,employee_id:int,employment_id:int,effective_on:string,
+     *   form_guid:string,external_person_reference:string,
+     *   external_employment_reference:string
+     * }>
+     */
+    public function acceptedEmploymentRegistrationOutcomes(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        int $receiptId,
+        string $registrationRulesetId,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT receipt.id AS receipt_id, employment.employee_id,
+                    employment.id AS employment_id,
+                    obligation.period_end AS effective_on,
+                    outcome.form_guid, outcome.external_person_reference,
+                    outcome.external_employment_reference
+               FROM payroll_submission_parts part
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = part.supplier_id
+                AND submission.environment = part.environment
+                AND submission.id = part.submission_id
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+               JOIN payroll_submission_deadlines deadline
+                 ON deadline.supplier_id = obligation.supplier_id
+                AND deadline.environment = obligation.environment
+                AND deadline.obligation_id = obligation.id
+                AND deadline.deadline_kind = "regular"
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = part.supplier_id
+                AND part.source_entity_type = "payroll_employment"
+                AND part.source_entity_reference =
+                    CONCAT("payroll_employment_registration:", employment.id)
+               JOIN payroll_submission_receipts receipt
+                 ON receipt.supplier_id = submission.supplier_id
+                AND receipt.environment = submission.environment
+                AND receipt.submission_id = submission.id
+                AND receipt.verification_status = "trusted"
+                AND receipt.remote_status IN ("accepted", "partially_accepted")
+               JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.submission_id = receipt.submission_id
+                AND outcome.receipt_id = receipt.id
+                AND (
+                    outcome.part_id = part.id
+                    OR (
+                        outcome.part_id IS NULL
+                        AND 1 = (
+                            SELECT COUNT(*)
+                              FROM payroll_submission_parts receipt_part
+                             WHERE receipt_part.supplier_id = submission.supplier_id
+                               AND receipt_part.environment = submission.environment
+                               AND receipt_part.submission_id = submission.id
+                        )
+                    )
+                )
+              WHERE submission.supplier_id = ?
+                AND submission.environment = ?
+                AND submission.id = ?
+                AND receipt.id = ?
+                AND deadline.ruleset_id = ?
+                AND submission.status IN ("accepted", "partially_accepted")
+                AND submission.submission_kind = "regular"
+                AND part.agenda_code IN ("REGZEC25", "PREZEC26")
+                AND outcome.remote_status = "accepted"
+                AND outcome.external_person_reference IS NOT NULL
+                AND outcome.external_employment_reference IS NOT NULL
+              ORDER BY receipt.id, outcome.id'
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $receiptId,
+            $registrationRulesetId,
+        ]);
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $result[] = [
+                'receipt_id' => (int) $row['receipt_id'],
+                'employee_id' => (int) $row['employee_id'],
+                'employment_id' => (int) $row['employment_id'],
+                'effective_on' => (string) $row['effective_on'],
+                'form_guid' => (string) $row['form_guid'],
+                'external_person_reference' =>
+                    (string) $row['external_person_reference'],
                 'external_employment_reference' =>
                     (string) $row['external_employment_reference'],
             ];

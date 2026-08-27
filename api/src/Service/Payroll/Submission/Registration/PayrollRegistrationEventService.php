@@ -75,6 +75,7 @@ final readonly class PayrollRegistrationEventService
             $employmentId,
             $environment,
             $effectiveOn,
+            $interaction === 'termination',
         );
         $sourceReference = $this->sourceReference(
             $interaction,
