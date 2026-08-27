@@ -134,6 +134,31 @@ final class PayrollRunsAction
         return Json::ok($response, ['run' => $run]);
     }
 
+    /** @param array<string,string> $args */
+    public function history(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        $history = $this->runs->history(
+            $this->currentSupplierId($request),
+            (int) ($args['id'] ?? 0),
+        );
+        if ($history === null) {
+            return Json::error($response, 'not_found', 'Mzdový běh neexistuje.', 404);
+        }
+
+        return Json::ok($response, ['history' => $history]);
+    }
+
     public function create(Request $request, Response $response): Response
     {
         if (($error = $this->authorize(

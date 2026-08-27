@@ -903,6 +903,7 @@ final class Routes
                 [PayrollPostingReconciliationAction::class, 'get'],
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->get('/runs/{id:[0-9]+}/history', [PayrollRunsAction::class, 'history']);
             // Detail existuje kvůli tomu, aby seznam nemusel posílat celý
             // výsledkový snapshot každého běhu — ten se dotahuje na vyžádání.
             $g->get('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'detail']);

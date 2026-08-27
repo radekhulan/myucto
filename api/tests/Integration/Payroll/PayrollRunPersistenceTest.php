@@ -247,6 +247,190 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
+    public function testSessionHistoryReturnsOnlySafeRevisionSummariesAndDirectDiff(): void
+    {
+        $role = new EffectiveRole(
+            91,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            ['payroll' => AccessLevel::READ->value],
+        );
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $this->approvedInput(10_000, 'HISTORY_CORRECTION', 'correction');
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'history-request-correction',
+            $this->actors[2],
+            'Syntetická oprava pro historii.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            'history-reopen-correction',
+            $this->actors[1],
+            'Syntetická oprava pro historii.',
+        );
+        $this->service->calculate(
+            $this->supplierId,
+            $runId,
+            (int) $reopened->run['row_version'],
+            'history-calculate-correction',
+            $this->actors[0],
+        );
+
+        $response = $this->action->history(
+            $this->apiRequest('GET', "/api/payroll/runs/{$runId}/history", $role),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $history = $this->json($response)['history'];
+        self::assertSame($runId, $history['run_id']);
+        self::assertCount(2, $history['revisions']);
+        self::assertNotEmpty($history['events']);
+        self::assertSame([
+            'id',
+            'revision_no',
+            'previous_revision_id',
+            'revision_kind',
+            'status',
+            'created_at',
+            'calculated_at',
+            'reviewed_at',
+            'approved_at',
+            'ruleset_manifest_hash',
+            'input_snapshot_hash',
+            'result_snapshot_hash',
+            'totals',
+            'diff_from_previous',
+        ], array_keys($history['revisions'][0]));
+        self::assertSame([
+            'cash_payable_minor',
+            'enforcement_withheld_minor',
+            'payable_after_enforcement_minor',
+        ], array_keys($history['revisions'][0]['totals']));
+        self::assertSame('regular', $history['revisions'][0]['revision_kind']);
+        self::assertNull($history['revisions'][0]['diff_from_previous']);
+        $correctionEvent = array_values(array_filter(
+            $history['events'],
+            static fn (array $event): bool => $event['reason']
+                === 'Syntetická oprava pro historii.',
+        ));
+        self::assertCount(2, $correctionEvent);
+        self::assertSame('Synthetic approver', $correctionEvent[0]['actor_name']);
+
+        $diff = $history['revisions'][1]['diff_from_previous'];
+        self::assertTrue($diff['input_changed']);
+        self::assertFalse($diff['ruleset_changed']);
+        self::assertTrue($diff['result_changed']);
+        foreach ([
+            'cash_payable_minor',
+            'enforcement_withheld_minor',
+            'payable_after_enforcement_minor',
+        ] as $total) {
+            self::assertSame(
+                ['before', 'after', 'delta'],
+                array_keys($diff['totals'][$total]),
+            );
+            self::assertSame(
+                $diff['totals'][$total]['after'] - $diff['totals'][$total]['before'],
+                $diff['totals'][$total]['delta'],
+            );
+        }
+
+        $encoded = json_encode($history, JSON_THROW_ON_ERROR);
+        foreach ([
+            'input_snapshot_json',
+            'result_snapshot_json',
+            'input_snapshot',
+            'result_snapshot',
+            'metadata_json',
+            'idempotency_key_hash',
+            'calculated_by',
+            'reviewed_by',
+            'approved_by',
+            'actor_user_id',
+        ] as $forbidden) {
+            self::assertStringNotContainsString('"' . $forbidden . '"', $encoded);
+        }
+    }
+
+    public function testHistoryReturnsNotFoundForForeignTenant(): void
+    {
+        $role = new EffectiveRole(
+            92,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            ['payroll' => AccessLevel::READ->value],
+        );
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+
+        $response = $this->action->history(
+            $this->apiRequest('GET', "/api/payroll/runs/{$runId}/history", $role)
+                ->withAttribute(
+                    SupplierScopeMiddleware::ATTR_CURRENT_ID,
+                    $this->otherSupplierId,
+                ),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+
+        self::assertSame(404, $response->getStatusCode());
+        self::assertSame('not_found', $this->json($response)['error']['code']);
+    }
+
+    public function testHistoryRequiresPayrollReadAndSessionAuthentication(): void
+    {
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+        $withoutPayroll = new EffectiveRole(
+            93,
+            'Bez mezd',
+            'staff',
+            true,
+            [],
+        );
+        $forbidden = $this->action->history(
+            $this->apiRequest(
+                'GET',
+                "/api/payroll/runs/{$runId}/history",
+                $withoutPayroll,
+            ),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+        self::assertSame('forbidden', $this->json($forbidden)['error']['code']);
+
+        $payrollRead = new EffectiveRole(
+            94,
+            'Mzdové čtení',
+            'staff',
+            true,
+            ['payroll' => AccessLevel::READ->value],
+        );
+        $bearer = $this->action->history(
+            $this->apiRequest(
+                'GET',
+                "/api/payroll/runs/{$runId}/history",
+                $payrollRead,
+                'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
+    }
+
     protected function tearDown(): void
     {
         if (isset($this->db) && $this->db->pdo()->inTransaction()) {

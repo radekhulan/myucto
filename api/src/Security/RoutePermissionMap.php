@@ -197,6 +197,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/runs/[0-9]+/history$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/runs/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/runs$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/runs/[0-9]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
