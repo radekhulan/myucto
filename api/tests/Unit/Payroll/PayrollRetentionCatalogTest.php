@@ -301,4 +301,20 @@ final class PayrollRetentionCatalogTest extends TestCase
             'Duplicitní tabulka by osobu započítala do kategorie dvakrát.',
         );
     }
+
+    public function testNewBlockingTablesUseTheirActualRetentionCategories(): void
+    {
+        self::assertContains(
+            'payroll_document_batch_items',
+            PayrollRetentionCatalog::rule(PayrollRetentionCatalog::PAYROLL_SHEET)->employeeTables,
+        );
+        self::assertContains(
+            'payroll_enforcement_xmlzam_requests',
+            PayrollRetentionCatalog::rule(PayrollRetentionCatalog::GARNISHMENT)->employeeTables,
+        );
+        self::assertContains(
+            'payroll_statutory_obligation_evidence',
+            PayrollRetentionCatalog::rule(PayrollRetentionCatalog::SICKNESS_INSURANCE)->employeeTables,
+        );
+    }
 }
