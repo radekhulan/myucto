@@ -13,6 +13,7 @@ use MyInvoice\Repository\Payroll\PayrollPeriodExportRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportArchiveBuilder;
+use MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportQueueService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
@@ -33,6 +34,7 @@ final class PayrollPeriodExportServiceTest extends TestCase
     private Connection $db;
     private PayrollPeriodExportService $service;
     private PayrollPeriodExportQueueService $queue;
+    private PayrollPeriodExportJobRepository $jobs;
     private PayrollPeriodExportStorage $storage;
     private PayrollDocumentStorage $documentStorage;
     private PayrollDocumentRepository $documents;
@@ -85,10 +87,8 @@ final class PayrollPeriodExportServiceTest extends TestCase
             $secretEncryption,
             $sensitiveData,
         );
-        $this->queue = new PayrollPeriodExportQueueService(
-            new PayrollPeriodExportJobRepository($connection),
-            $this->service,
-        );
+        $this->jobs = new PayrollPeriodExportJobRepository($connection);
+        $this->queue = new PayrollPeriodExportQueueService($this->jobs, $this->service);
 
         $sourceSupplierId = $this->integer(
             'SELECT id FROM supplier ORDER BY id LIMIT 1',
@@ -465,6 +465,296 @@ final class PayrollPeriodExportServiceTest extends TestCase
         self::assertNull($this->queue->detail($this->otherSupplierId, (int) $queued['id']));
     }
 
+    public function testQueuedExportKeepsCompletedBinaryPartWhenFinalArchiveRunsLater(): void
+    {
+        if (!$this->db->hasTable('payroll_period_export_job_parts')) {
+            self::fail('Migrace 1606 neproběhla.');
+        }
+        [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(1);
+        $bytes = '%PDF-1.4 synthetic resumable payroll export part';
+        $stored = $this->documentStorage->store($this->supplierId, $bytes);
+        $this->documents->insertOrGet([
+            'supplier_id' => $this->supplierId,
+            'run_id' => $runId,
+            'revision_id' => $revisionId,
+            'employee_id' => $employeeIds[0],
+            'document_kind' => 'payslip',
+            'document_revision_no' => 1,
+            'supersedes_document_id' => null,
+            'source_snapshot_hash' => str_repeat('e', 64),
+            'revision_snapshot_hash' => $revisionHash,
+            'template_version' => 'synthetic-v1',
+            'renderer_version' => 'synthetic-v1',
+            'file_sha256' => $stored['file_sha256'],
+            'size_bytes' => $stored['size_bytes'],
+            'mime_type' => 'application/pdf',
+            'storage_key' => $stored['storage_key'],
+            'suggested_filename' => 'synthetic-resumable-payslip.pdf',
+            'manifest_json' => null,
+            'idempotency_key_hash' => hash('sha256', 'resumable-period-export-document'),
+            'created_by' => null,
+        ]);
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+
+        self::assertSame(['processed' => 1, 'succeeded' => 1, 'failed' => 0], $this->queue->processAvailable());
+        $afterPart = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($afterPart);
+        self::assertSame('queued', $afterPart['status']);
+        self::assertNull($afterPart['export_id']);
+        self::assertSame(1, $this->countRows('payroll_period_export_job_parts WHERE status = "completed"'));
+
+        $this->documentStorage->delete($this->supplierId, $stored['storage_key']);
+        self::assertSame(['processed' => 1, 'succeeded' => 1, 'failed' => 0], $this->queue->processAvailable());
+        $completed = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($completed);
+        self::assertSame('completed', $completed['status']);
+        self::assertIsInt($completed['export_id']);
+    }
+
+    public function testResumableExportCompletesMoreThanThreeSuccessfulParts(): void
+    {
+        $this->requirePartsMigration();
+        [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(4);
+        foreach ($employeeIds as $index => $employeeId) {
+            $this->archiveDocument(
+                $runId,
+                $revisionId,
+                $employeeId,
+                $revisionHash,
+                '%PDF-1.4 synthetic resumable part ' . $index,
+                'many-parts-' . $index,
+            );
+        }
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+
+        self::assertSame(
+            ['processed' => 5, 'succeeded' => 5, 'failed' => 0],
+            $this->queue->processAvailable(10),
+        );
+        $completed = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($completed);
+        self::assertSame('completed', $completed['status']);
+        self::assertSame(5, $completed['attempt_count']);
+        self::assertSame(0, $completed['failure_count']);
+        self::assertSame(5, $this->countRows(
+            'payroll_period_export_job_parts WHERE job_id = ' . (int) $queued['id'] . ' AND status = "completed"',
+        ));
+    }
+
+    public function testPartBackoffDoesNotConsumeParentFailureBudget(): void
+    {
+        $this->requirePartsMigration();
+        [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(1);
+        $bytes = '%PDF-1.4 synthetic retryable resumable part';
+        $stored = $this->archiveDocument(
+            $runId,
+            $revisionId,
+            $employeeIds[0],
+            $revisionHash,
+            $bytes,
+            'retryable-part',
+        );
+        $this->documentStorage->delete($this->supplierId, $stored['storage_key']);
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+
+        for ($attempt = 1; $attempt <= 2; ++$attempt) {
+            self::assertSame(
+                ['processed' => 1, 'succeeded' => 0, 'failed' => 1],
+                $this->queue->processAvailable(),
+            );
+            $waiting = $this->queue->detail($this->supplierId, (int) $queued['id']);
+            self::assertIsArray($waiting);
+            self::assertSame('retry_wait', $waiting['status']);
+            self::assertSame(0, $waiting['failure_count']);
+            $this->makePartRetryAvailable((int) $queued['id']);
+        }
+
+        $restored = $this->documentStorage->store($this->supplierId, $bytes);
+        self::assertSame($stored['storage_key'], $restored['storage_key']);
+        self::assertSame(
+            ['processed' => 2, 'succeeded' => 2, 'failed' => 0],
+            $this->queue->processAvailable(2),
+        );
+        $completed = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($completed);
+        self::assertSame('completed', $completed['status']);
+        self::assertSame(4, $completed['attempt_count']);
+        self::assertSame(0, $completed['failure_count']);
+    }
+
+    public function testThirdFailureOfPartFailsParentJobTerminally(): void
+    {
+        $this->requirePartsMigration();
+        [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(1);
+        $stored = $this->archiveDocument(
+            $runId,
+            $revisionId,
+            $employeeIds[0],
+            $revisionHash,
+            '%PDF-1.4 synthetic terminal resumable part',
+            'terminal-part',
+        );
+        $this->documentStorage->delete($this->supplierId, $stored['storage_key']);
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+
+        for ($attempt = 1; $attempt <= PayrollPeriodExportJobRepository::MAX_ATTEMPTS; ++$attempt) {
+            self::assertSame(
+                ['processed' => 1, 'succeeded' => 0, 'failed' => 1],
+                $this->queue->processAvailable(),
+            );
+            if ($attempt < PayrollPeriodExportJobRepository::MAX_ATTEMPTS) {
+                $this->makePartRetryAvailable((int) $queued['id']);
+            }
+        }
+
+        $failed = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($failed);
+        self::assertSame('failed', $failed['status']);
+        self::assertSame(0, $failed['failure_count']);
+        self::assertSame(1, $this->countRows(
+            'payroll_period_export_job_parts WHERE job_id = ' . (int) $queued['id'] . ' AND status = "failed"',
+        ));
+    }
+
+    public function testThirdStalePartAttemptFailsParentBeforeClaimingNextPart(): void
+    {
+        $this->requirePartsMigration();
+        [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(2);
+        foreach ($employeeIds as $index => $employeeId) {
+            $this->archiveDocument(
+                $runId,
+                $revisionId,
+                $employeeId,
+                $revisionHash,
+                '%PDF-1.4 synthetic stale part ' . $index,
+                'stale-part-' . $index,
+            );
+        }
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+        $claim = $this->jobs->claimNext();
+        self::assertIsArray($claim);
+        $this->jobs->ensureParts($claim, $this->service->partPlan(
+            $this->supplierId,
+            PayrollPeriodExportScope::Monthly,
+            '2097-08-01',
+            '2097-08-31',
+        ));
+        $part = $this->jobs->claimPart($claim);
+        self::assertIsArray($part);
+        self::assertSame('document', $part['part_kind']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_period_export_job_part_attempts
+                SET attempt_no = ?
+              WHERE supplier_id = ? AND job_part_id = ? AND lease_token = UNHEX(?)',
+        )->execute([
+            PayrollPeriodExportJobRepository::MAX_ATTEMPTS,
+            $this->supplierId,
+            (int) $part['id'],
+            (string) $part['lease_token'],
+        ]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_period_export_job_parts
+                SET attempt_count = ?, locked_at = UTC_TIMESTAMP() - INTERVAL 31 MINUTE
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            PayrollPeriodExportJobRepository::MAX_ATTEMPTS,
+            $this->supplierId,
+            (int) $part['id'],
+        ]);
+
+        self::assertNull($this->jobs->claimPart($claim));
+        $failed = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($failed);
+        self::assertSame('failed', $failed['status']);
+        self::assertSame('worker_lease_expired', $failed['last_error_code']);
+        self::assertSame('failed', $this->jobAttemptStatus((int) $queued['id'], (int) $claim['attempt_count']));
+        self::assertSame('failed', $this->partStatus((int) $part['id']));
+        self::assertSame(1, $this->countRows(
+            'payroll_period_export_job_parts WHERE job_id = ' . (int) $queued['id']
+            . ' AND part_kind <> "archive" AND status = "queued"',
+        ));
+    }
+
+    public function testFrozenPartPlanRejectsAdditionalSource(): void
+    {
+        $this->requirePartsMigration();
+        $this->approvedRevision(1);
+        $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+        $claim = $this->jobs->claimNext();
+        self::assertIsArray($claim);
+        $plan = $this->service->partPlan(
+            $this->supplierId,
+            PayrollPeriodExportScope::Monthly,
+            '2097-08-01',
+            '2097-08-31',
+        );
+        $this->jobs->ensureParts($claim, $plan);
+        array_unshift($plan, [
+            'part_key' => hash('sha256', 'synthetic-plan-conflict'),
+            'part_kind' => 'document',
+            'source_id' => 999999999,
+            'source_sha256' => hash('sha256', 'synthetic-plan-conflict-bytes'),
+            'source_size_bytes' => 29,
+        ]);
+
+        $this->expectException(\UnexpectedValueException::class);
+        $this->jobs->ensureParts($claim, $plan);
+    }
+
+    public function testParentLeaseConflictRollsBackCompletedPart(): void
+    {
+        $this->requirePartsMigration();
+        $this->approvedRevision(1);
+        $export = $this->service->createMonthly($this->supplierId, '2097-08', $this->userId);
+        $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+        $claim = $this->jobs->claimNext();
+        self::assertIsArray($claim);
+        $this->jobs->ensureParts($claim, $this->service->partPlan(
+            $this->supplierId,
+            PayrollPeriodExportScope::Monthly,
+            '2097-08-01',
+            '2097-08-31',
+        ));
+        $part = $this->jobs->claimPart($claim);
+        self::assertIsArray($part);
+        self::assertSame('archive', $part['part_kind']);
+        $conflictingClaim = $claim;
+        $conflictingClaim['lease_token'] = bin2hex(random_bytes(16));
+
+        try {
+            $this->jobs->completeArchivePartAndJob($conflictingClaim, $part, (int) $export['id']);
+            self::fail('Konflikt parent lease musí atomickou finalizaci odmítnout.');
+        } catch (\RuntimeException) {
+            self::assertSame('processing', $this->partStatus((int) $part['id']));
+        }
+
+        self::assertTrue($this->jobs->failPartAndRelease(
+            $claim,
+            $part,
+            'synthetic_after_complete_race',
+            'Synthetic parent race after part completion update.',
+        ));
+        self::assertSame('retry_wait', $this->partStatus((int) $part['id']));
+
+        $this->makePartRetryAvailable((int) $claim['id']);
+        $retryClaim = $this->jobs->claimNext();
+        self::assertIsArray($retryClaim);
+        $retryPart = $this->jobs->claimPart($retryClaim);
+        self::assertIsArray($retryPart);
+        $this->jobs->completeArchivePartAndJob($retryClaim, $retryPart, (int) $export['id']);
+        self::assertNull($this->jobs->failPartAndRelease(
+            $retryClaim,
+            $retryPart,
+            'synthetic_late_catch',
+            'Synthetic catch after committed completion.',
+        ));
+        self::assertSame('completed', $this->partStatus((int) $retryPart['id']));
+        self::assertSame('completed', $this->queue->detail(
+            $this->supplierId,
+            (int) $retryClaim['id'],
+        )['status'] ?? null);
+    }
+
     public function testQueuedExportSurvivesDeletionOfRequestingUser(): void
     {
         if (!$this->db->hasTable('payroll_period_export_jobs')) {
@@ -580,6 +870,87 @@ final class PayrollPeriodExportServiceTest extends TestCase
         }
 
         return [$runId, $revisionId, $employeeIds, $resultHash];
+    }
+
+    /** @return array{file_sha256:string,size_bytes:int,storage_key:string} */
+    private function archiveDocument(
+        int $runId,
+        int $revisionId,
+        int $employeeId,
+        string $revisionHash,
+        string $bytes,
+        string $key,
+    ): array {
+        $stored = $this->documentStorage->store($this->supplierId, $bytes);
+        $this->documents->insertOrGet([
+            'supplier_id' => $this->supplierId,
+            'run_id' => $runId,
+            'revision_id' => $revisionId,
+            'employee_id' => $employeeId,
+            'document_kind' => 'payslip',
+            'document_revision_no' => 1,
+            'supersedes_document_id' => null,
+            'source_snapshot_hash' => hash('sha256', $key . ':source'),
+            'revision_snapshot_hash' => $revisionHash,
+            'template_version' => 'synthetic-v1',
+            'renderer_version' => 'synthetic-v1',
+            'file_sha256' => $stored['file_sha256'],
+            'size_bytes' => $stored['size_bytes'],
+            'mime_type' => 'application/pdf',
+            'storage_key' => $stored['storage_key'],
+            'suggested_filename' => $key . '.pdf',
+            'manifest_json' => null,
+            'idempotency_key_hash' => hash('sha256', $key),
+            'created_by' => null,
+        ]);
+
+        return $stored;
+    }
+
+    private function requirePartsMigration(): void
+    {
+        if (!$this->db->hasTable('payroll_period_export_job_parts')) {
+            self::fail('Migrace 1606 neproběhla.');
+        }
+    }
+
+    private function makePartRetryAvailable(int $jobId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_period_export_job_parts
+                SET available_at = UTC_TIMESTAMP() - INTERVAL 1 SECOND
+              WHERE supplier_id = ? AND job_id = ? AND status = "retry_wait"',
+        )->execute([$this->supplierId, $jobId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_period_export_jobs
+                SET available_at = UTC_TIMESTAMP() - INTERVAL 1 SECOND
+              WHERE supplier_id = ? AND id = ? AND status = "retry_wait"',
+        )->execute([$this->supplierId, $jobId]);
+    }
+
+    private function partStatus(int $partId): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_period_export_job_parts WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $partId]);
+        $status = $statement->fetchColumn();
+        self::assertIsString($status);
+
+        return $status;
+    }
+
+    private function jobAttemptStatus(int $jobId, int $attemptNo): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_period_export_job_attempts
+              WHERE supplier_id = ? AND job_id = ? AND attempt_no = ?',
+        );
+        $statement->execute([$this->supplierId, $jobId, $attemptNo]);
+        $status = $statement->fetchColumn();
+        self::assertIsString($status);
+
+        return $status;
     }
 
     private function integer(string $sql): int

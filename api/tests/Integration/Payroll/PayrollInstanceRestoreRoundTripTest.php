@@ -308,6 +308,8 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_jobs')?->fetchColumn(),
             'Obnova nesmí oživit provozní exportní job.',
         );
+        self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_job_parts')?->fetchColumn());
+        self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_job_part_attempts')?->fetchColumn());
 
         $artifacts = $this->target->prepare(
             'SELECT artifact_kind, content_ciphertext, artifact_sha256

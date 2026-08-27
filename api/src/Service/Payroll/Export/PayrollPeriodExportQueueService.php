@@ -56,24 +56,60 @@ final class PayrollPeriodExportQueueService
         if ($claim === null) {
             return ['processed' => false, 'succeeded' => null, 'job_id' => null];
         }
+        $part = null;
         try {
             $scope = PayrollPeriodExportScope::from((string) $claim['export_scope']);
-            $export = $scope === PayrollPeriodExportScope::Monthly
-                ? $this->exports->createMonthly(
+            $this->jobs->ensureParts($claim, $this->exports->partPlan(
+                (int) $claim['supplier_id'],
+                $scope,
+                (string) $claim['period_start'],
+                (string) $claim['period_end'],
+            ));
+            $part = $this->jobs->claimPart($claim);
+            if ($part === null) {
+                $detail = $this->jobs->detail((int) $claim['supplier_id'], (int) $claim['id']);
+                if (($detail['status'] ?? null) === 'failed') {
+                    return ['processed' => true, 'succeeded' => false, 'job_id' => (int) $claim['id']];
+                }
+                throw new \RuntimeException('Export mezd nemá dostupnou část k dokončení.');
+            }
+            if ((string) $part['part_kind'] === 'archive') {
+                $export = $this->exports->createFromCompletedParts(
                     (int) $claim['supplier_id'],
-                    substr((string) $claim['period_start'], 0, 7),
+                    $scope,
+                    (string) $claim['period_start'],
+                    (string) $claim['period_end'],
                     $this->requestedBy($claim),
-                )
-                : $this->exports->createAnnual(
-                    (int) $claim['supplier_id'],
-                    (int) substr((string) $claim['period_start'], 0, 4),
-                    $this->requestedBy($claim),
+                    $this->jobs->completedParts($claim),
                 );
-            $this->jobs->complete($claim, (int) $export['id']);
+                $this->jobs->completeArchivePartAndJob($claim, $part, (int) $export['id']);
+            } else {
+                $storageKey = $this->exports->materializePart(
+                    (int) $claim['supplier_id'],
+                    $scope,
+                    (string) $claim['period_start'],
+                    (string) $claim['period_end'],
+                    $part,
+                );
+                if (!is_string($storageKey)) {
+                    throw new \UnexpectedValueException('Binární část exportu nemá uložený otisk.');
+                }
+                $this->jobs->completePartAndRelease($claim, $part, $storageKey);
+            }
             $succeeded = true;
         } catch (\Throwable $exception) {
-            $this->jobs->fail($claim, self::errorCode($exception), $exception->getMessage());
-            $succeeded = false;
+            if (is_array($part)) {
+                $failed = $this->jobs->failPartAndRelease(
+                    $claim,
+                    $part,
+                    self::errorCode($exception),
+                    $exception->getMessage(),
+                );
+                $succeeded = $failed === null;
+            } else {
+                $this->jobs->fail($claim, self::errorCode($exception), $exception->getMessage());
+                $succeeded = false;
+            }
         }
 
         return ['processed' => true, 'succeeded' => $succeeded, 'job_id' => (int) $claim['id']];
