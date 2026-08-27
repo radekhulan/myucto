@@ -22,6 +22,7 @@ import {
   storageUpgradeOptionsGb,
 } from '@/api/instanceHealth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import PayAgainNotice from './PayAgainNotice.vue'
 
 /**
  * Předplatné a provoz — co zákazník má, co mu dochází a co s tím (H-31).
@@ -172,15 +173,31 @@ function fmtPeriodEnd(value: number | string | null): string | null {
   return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString()
 }
 
-/** Chybová hláška ze serveru. ⚠️ Zobrazuje se TA — nevymýšlíme si vlastní. */
-function apiError(e: unknown, fallbackKey: string): { code: string | null; message: string } {
-  const err = e as { response?: { data?: { error?: { code?: string; message?: string } } } }
+/**
+ * Chybová hláška ze serveru. ⚠️ Zobrazuje se TA — nevymýšlíme si vlastní.
+ *
+ * `payUrl` přijde, když doplatek nešlo strhnout z uložené karty. Tehdy je to
+ * jediná nabídka, která dává smysl — opakovat nákup se stejnou kartou dopadne
+ * stejně.
+ */
+function apiError(e: unknown, fallbackKey: string): { code: string | null; message: string; payUrl: string | null } {
+  const err = e as { response?: { data?: { error?: { code?: string; message?: string; pay_url?: string } } } }
+  const error = err.response?.data?.error
 
   return {
-    code: err.response?.data?.error?.code ?? null,
-    message: err.response?.data?.error?.message ?? t(fallbackKey),
+    code: error?.code ?? null,
+    message: error?.message ?? t(fallbackKey),
+    payUrl: error?.pay_url ?? null,
   }
 }
+
+/**
+ * Odkaz na doplacení po odmítnuté kartě.
+ *
+ * ⚠️ Sdílený jeden pro všechny tři nákupy: patří vždycky k chybě, která je
+ * zrovna vidět, a každý nákup si ho na začátku vynuluje.
+ */
+const payUrl = ref<string | null>(null)
 
 // ─── Co mám ────────────────────────────────────────────────────────────────
 
@@ -383,11 +400,14 @@ async function calcTierQuote(): Promise<void> {
   if (quotingTier.value || previewing.value || targetTier.value === status.value?.tier) return
   quotingTier.value = true
   tierError.value = null
+  payUrl.value = null
   tierMessage.value = null
   try {
     tierQuote.value = await licenseApi.tierQuote(targetTier.value)
   } catch (e: unknown) {
-    tierError.value = apiError(e, 'license.tier_change_failed').message
+    const failure = apiError(e, 'license.tier_change_failed')
+    tierError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     quotingTier.value = false
   }
@@ -399,6 +419,7 @@ async function applyTierChange(): Promise<void> {
   if (!confirm(t(quote.scheduled ? 'license.tier_schedule_confirm' : 'license.tier_change_confirm'))) return
   changingTier.value = true
   tierError.value = null
+  payUrl.value = null
   try {
     let result = await licenseApi.changeTier(quote.new_tier, quote.quote_token)
     if (result.pending && result.order_id) {
@@ -413,7 +434,9 @@ async function applyTierChange(): Promise<void> {
     await load()
     await auth.refresh()
   } catch (e: unknown) {
-    tierError.value = apiError(e, 'license.tier_change_failed').message
+    const failure = apiError(e, 'license.tier_change_failed')
+    tierError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     changingTier.value = false
   }
@@ -445,10 +468,13 @@ async function calcUserQuote(): Promise<void> {
   userError.value = null
   userDone.value = null
   userQuote.value = null
+  payUrl.value = null
   try {
     userQuote.value = await licenseApi.upgradeQuote(n)
   } catch (e: unknown) {
-    userError.value = apiError(e, 'license.upgrade_failed').message
+    const failure = apiError(e, 'license.upgrade_failed')
+    userError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     quotingUsers.value = false
   }
@@ -463,6 +489,7 @@ async function buyUsers(): Promise<void> {
   upgradingUsers.value = true
   userError.value = null
   userDone.value = null
+  payUrl.value = null
   try {
     let res = await licenseApi.upgrade(n, userQuote.value.quote_token)
     if (res.pending && res.order_id) {
@@ -478,7 +505,9 @@ async function buyUsers(): Promise<void> {
         : t('license.upgrade_success', { n: res.new_users })
     await auth.refresh()
   } catch (e: unknown) {
-    userError.value = apiError(e, 'license.upgrade_failed').message
+    const failure = apiError(e, 'license.upgrade_failed')
+    userError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     upgradingUsers.value = false
   }
@@ -519,11 +548,14 @@ async function pickSize(gb: number): Promise<void> {
   storageQuote.value = null
   storageError.value = null
   storageDone.value = null
+  payUrl.value = null
   quotingStorage.value = true
   try {
     storageQuote.value = await licenseApi.storageQuote(gb)
   } catch (e: unknown) {
-    storageError.value = apiError(e, 'hosting.storage_order_failed').message
+    const failure = apiError(e, 'hosting.storage_order_failed')
+    storageError.value = failure.message
+    payUrl.value = failure.payUrl
   } finally {
     quotingStorage.value = false
   }
@@ -544,6 +576,7 @@ async function buyStorage(): Promise<void> {
   buyingStorage.value = true
   storageError.value = null
   storageDone.value = null
+  payUrl.value = null
   try {
     let res = await licenseApi.storageUpgrade(quote.new_quota_gb, quote.quote_token)
     if (res.pending && res.order_id) {
@@ -567,8 +600,9 @@ async function buyStorage(): Promise<void> {
     await load()
     await auth.refresh()
   } catch (e: unknown) {
-    const { code, message } = apiError(e, 'hosting.storage_order_failed')
+    const { code, message, payUrl: link } = apiError(e, 'hosting.storage_order_failed')
     storageError.value = message
+    payUrl.value = link
     if (code === 'result_unknown') offerClosed.value = true
   } finally {
     buyingStorage.value = false
@@ -600,6 +634,7 @@ watch(previewScenario, (scenario) => {
   tierQuote.value = null
   tierMessage.value = null
   tierError.value = null
+  payUrl.value = null
   offerClosed.value = false
   selectedGb.value = null
   if (scenario === null) return
@@ -616,6 +651,7 @@ watch(previewScenario, (scenario) => {
   if (ui.outcome === 'storage_pending') storageDone.value = t('hosting.storage_pending', { gb: 22 })
   if (ui.outcome === 'users_done') userDone.value = t('license.upgrade_success', { n: 5 })
   if (ui.error) storageError.value = ui.error
+  if (ui.payUrl) payUrl.value = ui.payUrl
   if (ui.offerClosed) offerClosed.value = true
 // ⚠️ `immediate`: scénář z `?nahled=` je nastavený UŽ při setupu (viz
 // `syncPreviewFromRoute` výš), takže se nikdy „nezmění" a bez tohohle by se
@@ -1004,6 +1040,7 @@ watch(previewScenario, (scenario) => {
               <button
                 type="button" :disabled="buyingStorage || previewing"
                 :class="[btnFilled('success'), 'mt-3']"
+                data-hosting-storage-buy
                 @click="buyStorage"
               >
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
@@ -1023,6 +1060,7 @@ watch(previewScenario, (scenario) => {
         </div>
         <div v-if="storageError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-hosting-storage-error>
           {{ storageError }}
+          <PayAgainNotice v-if="payUrl" :href="payUrl" />
         </div>
 
         <p v-if="!links?.subscription && !links?.expand_storage" class="mt-3 text-xs text-neutral-500">
@@ -1059,7 +1097,10 @@ watch(previewScenario, (scenario) => {
           </button>
         </div>
         <p v-if="tierMessage" class="mt-3 text-sm text-success-700">{{ tierMessage }}</p>
-        <p v-if="tierError" class="mt-3 text-sm text-danger-600">{{ tierError }}</p>
+        <div v-if="tierError" class="mt-3 text-sm text-danger-600">
+          {{ tierError }}
+          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+        </div>
         <p v-if="previewing" class="mt-2 text-xs text-neutral-800">{{ t('hosting.preview_no_orders') }}</p>
       </section>
 
@@ -1078,6 +1119,7 @@ watch(previewScenario, (scenario) => {
           <button
             type="button" :disabled="quotingUsers || previewing || !upgradeUsers || upgradeUsers < 1"
             :class="btnOutline('primary')"
+            data-hosting-users-quote
             @click="calcUserQuote"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
@@ -1096,6 +1138,7 @@ watch(previewScenario, (scenario) => {
           <button
             type="button" :disabled="upgradingUsers || previewing"
             :class="[btnFilled('success'), 'mt-3']"
+            data-hosting-users-buy
             @click="buyUsers"
           >
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
@@ -1105,7 +1148,10 @@ watch(previewScenario, (scenario) => {
         </div>
 
         <div v-if="userDone" class="mt-4 rounded-md border border-success-500/40 bg-success-50 p-3 text-sm text-success-700">{{ userDone }}</div>
-        <div v-if="userError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">{{ userError }}</div>
+        <div v-if="userError" class="mt-4 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
+          {{ userError }}
+          <PayAgainNotice v-if="payUrl" :href="payUrl" />
+        </div>
       </section>
 
       <!-- Co provoz zahrnuje a co ne -->

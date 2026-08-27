@@ -408,7 +408,83 @@ final class LicenseUpgradeActionTest extends TestCase
         self::assertSame('quote_required', $this->body($resp)['error']['code']);
     }
 
+    // ── odmítnutá karta ──────────────────────────────────────────────────────
+    //
+    // ⚠️ Když uložená karta doplatek neuhradí, licenční server objednávku
+    // nezahodí — založí platbu a pošle `pay_url`. Aplikace ten odkaz MUSÍ
+    // propustit až do odpovědi. Dokud ho zahazovala, zákazník viděl jenom
+    // „zkuste to prosím znovu" a se stejnou kartou mačkal totéž dokola;
+    // o doplatku se dozvěděl leda z e-mailu.
+
+    public function testChargeFailedForwardsPayUrlSoAppCanOfferAnotherCard(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('upgrade')
+            ->willReturn(['ok' => false, 'error' => 'charge_failed', 'pay_url' => 'https://myucto.cz/platba?t=abc']);
+
+        $resp = $this->upgrade->__invoke($this->adminRequest(['users' => 5, 'quote_token' => 'quote-1']), new Psr7Response());
+
+        self::assertSame(422, $resp->getStatusCode());
+        self::assertSame('https://myucto.cz/platba?t=abc', $this->body($resp)['error']['pay_url']);
+    }
+
+    public function testChargeFailedWithoutPayUrlDoesNotInventOne(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('upgrade')
+            ->willReturn(['ok' => false, 'error' => 'charge_failed']);
+
+        $resp = $this->upgrade->__invoke($this->adminRequest(['users' => 5, 'quote_token' => 'quote-1']), new Psr7Response());
+
+        self::assertArrayNotHasKey('pay_url', $this->body($resp)['error']);
+    }
+
+    public function testStorageChargeFailedForwardsPayUrl(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('storageUpgrade')
+            ->willReturn(['ok' => false, 'error' => 'charge_failed', 'pay_url' => 'https://myucto.cz/platba?t=sto']);
+
+        $resp = $this->managedStorageUpgrade()->__invoke(
+            $this->adminRequest(['quota_gb' => 22, 'quote_token' => 'storage-quote']),
+            new Psr7Response(),
+        );
+
+        self::assertSame(422, $resp->getStatusCode());
+        self::assertSame('https://myucto.cz/platba?t=sto', $this->body($resp)['error']['pay_url']);
+    }
+
+    public function testTierChangeChargeFailedForwardsPayUrl(): void
+    {
+        $this->seedActivated();
+        $this->client->expects($this->once())
+            ->method('tierChange')
+            ->willReturn(['ok' => false, 'error' => 'charge_failed', 'pay_url' => 'https://myucto.cz/platba?t=tier']);
+
+        $resp = $this->tierChange->__invoke(
+            $this->adminRequest(['tier' => 'multi10', 'quote_token' => 'tier-quote']),
+            new Psr7Response(),
+        );
+
+        self::assertSame(422, $resp->getStatusCode());
+        self::assertSame('https://myucto.cz/platba?t=tier', $this->body($resp)['error']['pay_url']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** Rozšíření místa se prodává jen u hostovaného provozu — pro ten případ vlastní akce. */
+    private function managedStorageUpgrade(): StorageUpgradeAction
+    {
+        $config = new Config([
+            'app' => ['managed' => true],
+            'license' => ['public_key' => $this->licensePublicKeyBase64()],
+        ]);
+
+        return new StorageUpgradeAction($this->service, new ManagedModeGuard($config));
+    }
 
     private function seedActivated(): void
     {

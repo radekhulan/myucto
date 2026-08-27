@@ -111,6 +111,8 @@ export interface PreviewUiState {
   outcome?: 'storage_done' | 'storage_pending' | 'users_done'
   /** Chybová hláška ze serveru, jak by přišla. */
   error?: string
+  /** Odkaz na doplacení jinou kartou — chodí s odmítnutou platbou. */
+  payUrl?: string
   /** Nabídka se po nejistém výsledku zavírá — „zkusit znovu" se NENABÍZÍ. */
   offerClosed?: boolean
 }
@@ -152,10 +154,13 @@ export function previewUiState(scenario: PreviewScenario): PreviewUiState | null
     case 'users_done':
       return { outcome: 'users_done' }
     case 'card_declined':
-      // Kartu lze zkusit znovu — nabídka zůstává otevřená.
+      // ⚠️ Se stejnou kartou nemá opakování smysl — proto se nabízí doplacení
+      // jinou kartou. Odkaz vede na TUTÉŽ objednávku, nic se nezdvojí.
       return {
         storageQuote: PREVIEW_STORAGE_QUOTE,
-        error: 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
+        error: 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
+          + 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
+        payUrl: PREVIEW_DUE.pay_url,
       }
     case 'result_unknown':
       // ⚠️ Peníze MOHLY odejít. Nabídka se zavírá a nikde se nepobízí k opakování.

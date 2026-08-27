@@ -36,7 +36,8 @@ final class StorageUpgradeAction
         'subscription_inactive' => 'Předplatné není aktivní. Nejdřív je potřeba srovnat platbu.',
         'no_parent_payment'     => 'Rozšíření je možné jen u předplatného s uloženou kartou.',
         'cannot_prorate'        => 'Doplatek se nepodařilo spočítat. Ozvěte se prosím podpoře.',
-        'charge_failed'         => 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
+        'charge_failed'         => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
+            . 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
         'charge_pending'        => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
         'payments_disabled'     => 'Platby jsou dočasně pozastavené. Zkuste to prosím později.',
         'server_unreachable'    => 'Licenční server je nedostupný. Zkuste to prosím za chvíli.',
@@ -45,6 +46,23 @@ final class StorageUpgradeAction
             . 'za chvíli obnovte stránku, a pokud se nic nezmění, ozvěte se podpoře.',
         'upgrade_failed'        => 'Rozšíření se nezdařilo. Zkuste to prosím znovu.',
     ];
+
+    /**
+     * Odkaz na zaplacení doplatku, když ho licenční server u odmítnutí poslal.
+     *
+     * ⚠️ Bez něj obrazovka po neprojité kartě jen řekne „zkuste to znovu" —
+     * a druhý pokus se stejnou kartou dopadne stejně. Odkaz vede na platbu
+     * téže objednávky, takže se nic neduplikuje.
+     *
+     * @param  array<string,mixed> $result
+     * @return array<string,string>
+     */
+    private static function payLink(array $result): array
+    {
+        $payUrl = isset($result['pay_url']) ? (string) $result['pay_url'] : '';
+
+        return $payUrl === '' ? [] : ['pay_url' => $payUrl];
+    }
 
     public static function message(string $error): string
     {
@@ -80,7 +98,7 @@ final class StorageUpgradeAction
             $error = (string) ($result['error'] ?? 'upgrade_failed');
             $status = $error === 'server_unreachable' ? 503 : 422;
 
-            return Json::error($response, $error, self::message($error), $status);
+            return Json::error($response, $error, self::message($error), $status, self::payLink($result));
         }
 
         return Json::ok($response, [

@@ -687,6 +687,8 @@
     "storage_done": "Done — storage expanded to {gb} GB.",
     "storage_pending": "Paid. We are provisioning the expansion to {gb} GB, it will show up shortly.",
     "storage_order_failed": "The expansion failed.",
+    "pay_again": "Pay with another card",
+    "pay_again_hint": "Opens a secure payment on myucto.cz. It is the same order, nothing gets duplicated.",
     "storage_largest": "You already have the largest size offered. Support will arrange more.",
     "storage_provisioning_title": "Expansion is being provisioned",
     "storage_provisioning_desc": "The expansion to {gb} GB is paid and we are provisioning it. No need to order it again.",

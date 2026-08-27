@@ -687,6 +687,8 @@
     "storage_done": "Hotovo — úložiště je rozšířené na {gb} GB.",
     "storage_pending": "Zaplaceno. Rozšíření na {gb} GB právě zavádíme, projeví se během chvíle.",
     "storage_order_failed": "Rozšíření se nezdařilo.",
+    "pay_again": "Zaplatit jinou kartou",
+    "pay_again_hint": "Otevře zabezpečenou platbu na myucto.cz. Objednávka zůstává stejná, nic se nezdvojí.",
     "storage_largest": "Máte největší nabízenou velikost. Víc místa vyřídí podpora.",
     "storage_provisioning_title": "Rozšíření se zavádí",
     "storage_provisioning_desc": "Rozšíření na {gb} GB je zaplacené a právě ho zavádíme. Objednávat ho znovu netřeba.",

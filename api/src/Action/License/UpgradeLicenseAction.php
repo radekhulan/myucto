@@ -23,7 +23,8 @@ final class UpgradeLicenseAction
         'not_an_upgrade'        => 'Zadaný počet uživatelů není navýšením oproti aktuálnímu předplatnému.',
         'subscription_inactive' => 'Předplatné není aktivní. Zkontrolujte platbu na myucto.cz.',
         'no_parent_payment'     => 'Navýšení je možné jen u předplatného s uloženou kartou.',
-        'charge_failed'         => 'Platbu se nepodařilo strhnout, zkontrolujte platební kartu.',
+        'charge_failed'         => 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte '
+            . 'jinou kartou přes odkaz níž — poslali jsme ho i e-mailem.',
         'charge_pending'        => 'Platba se zpracovává. Nekupujte prosím znovu — jakmile ji brána potvrdí, změna se projeví sama.',
         'instance_required'     => 'U hostovaného provozu je pro navýšení nutné ověření této instalace.',
         'not_bound'             => 'Tato instalace není k licenci aktivně přiřazená.',
@@ -56,7 +57,10 @@ final class UpgradeLicenseAction
             $error = (string) ($result['error'] ?? 'upgrade_failed');
             $message = self::ERROR_MESSAGES[$error] ?? self::ERROR_MESSAGES['upgrade_failed'];
             $status = $error === 'server_unreachable' ? 503 : 422;
-            return Json::error($response, $error, $message, $status);
+            // ⚠️ `pay_url` musí projít až na obrazovku: po neprojité kartě je to
+            // jediná nabídka, která dává smysl — opakovat totéž nepomůže.
+            $extra = isset($result['pay_url']) ? ['pay_url' => (string) $result['pay_url']] : [];
+            return Json::error($response, $error, $message, $status, $extra);
         }
 
         return Json::ok($response, [

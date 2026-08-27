@@ -33,7 +33,14 @@ final class TierChangeAction
         $result = $this->license->changeTier($tier, $quoteToken);
         if (($result['ok'] ?? false) !== true) {
             $error = (string) ($result['error'] ?? 'change_failed');
-            return Json::error($response, $error, 'Změna tarifu se nezdařila.', $error === 'server_unreachable' ? 503 : 422);
+            $message = $error === 'charge_failed'
+                ? 'Platbu se nepodařilo strhnout z uložené karty. Doplatek zaplatíte jinou kartou '
+                    . 'přes odkaz níž — poslali jsme ho i e-mailem.'
+                : 'Změna tarifu se nezdařila.';
+            // ⚠️ `pay_url` musí projít až na obrazovku: po neprojité kartě je to
+            // jediná nabídka, která dává smysl — opakovat totéž nepomůže.
+            $extra = isset($result['pay_url']) ? ['pay_url' => (string) $result['pay_url']] : [];
+            return Json::error($response, $error, $message, $error === 'server_unreachable' ? 503 : 422, $extra);
         }
         $state = $result['state_local'] ?? $this->license->current();
         unset($result['ok'], $result['state_local']);

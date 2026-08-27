@@ -536,7 +536,7 @@ final class LicenseService
 
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
             $this->logger->warning('license.upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
-            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
+            return $this->rejection($resp, 'upgrade_failed');
         }
 
         $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
@@ -617,7 +617,7 @@ final class LicenseService
 
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
             $this->logger->warning('license.storage_upgrade.rejected', ['error' => (string) ($resp['error'] ?? 'unknown')]);
-            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'upgrade_failed')];
+            return $this->rejection($resp, 'upgrade_failed');
         }
 
         $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
@@ -637,6 +637,27 @@ final class LicenseService
             'order_id'             => $resp['order_id'] ?? null,
             'state'                => $this->current(),
         ];
+    }
+
+    /**
+     * Odmítnutí placené změny licence, i s odkazem na zaplacení, když ho server poslal.
+     *
+     * ⚠️ `pay_url` se NESMÍ zahodit. Když uložená karta neprojde, je to jediná
+     * cesta, jak doplatek zaplatit jinou — bez něj obrazovka nabídne leda
+     * „zkuste to prosím znovu", což s mrtvou kartou nevyjde nikdy.
+     *
+     * @param  array<string,mixed> $resp
+     * @return array{ok:false,error:string,pay_url?:string}
+     */
+    private function rejection(array $resp, string $fallback): array
+    {
+        $out = ['ok' => false, 'error' => (string) ($resp['error'] ?? $fallback)];
+        $payUrl = isset($resp['pay_url']) ? (string) $resp['pay_url'] : '';
+        if ($payUrl !== '') {
+            $out['pay_url'] = $payUrl;
+        }
+
+        return $out;
     }
 
     /** @return array<string,mixed> */
@@ -672,7 +693,7 @@ final class LicenseService
             return ['ok' => false, 'error' => 'result_unknown'];
         }
         if (($resp['ok'] ?? false) !== true && ($resp['error'] ?? '') !== 'charge_pending') {
-            return ['ok' => false, 'error' => (string) ($resp['error'] ?? 'change_failed')];
+            return $this->rejection($resp, 'change_failed');
         }
         $pending = ($resp['error'] ?? '') === 'charge_pending' || ($resp['state'] ?? '') === 'pending';
         $scheduled = ($resp['scheduled'] ?? false) === true || ($resp['change'] ?? '') === 'scheduled';
