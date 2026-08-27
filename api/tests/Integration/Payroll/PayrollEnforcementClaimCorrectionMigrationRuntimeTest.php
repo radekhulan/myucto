@@ -159,6 +159,105 @@ final class PayrollEnforcementClaimCorrectionMigrationRuntimeTest extends TestCa
         );
     }
 
+    public function testFirstPayerPriorityMigrationBackfillsOnlyDeliveredClaimsAndGuardsDrift(): void
+    {
+        $db = $this->db();
+        $this->runMigrator();
+        $this->runMigrator('1594_payroll_enforcement_first_payer_priority.sql');
+
+        self::assertSame(
+            '2026-05-20',
+            (string) $db->query(
+                'SELECT first_payer_delivered_on FROM payroll_enforcement_claims WHERE id = 10',
+            )->fetchColumn(),
+        );
+        self::assertFalse((bool) $db->query(
+            'SELECT first_payer_delivered_on IS NOT NULL FROM payroll_enforcement_claims WHERE id = 15',
+        )->fetchColumn());
+        self::assertSame(
+            '2026-05-18',
+            (string) $db->query(
+                'SELECT first_payer_delivered_on FROM payroll_enforcement_claims WHERE id = 16',
+            )->fetchColumn(),
+        );
+
+        $db->exec(
+            "INSERT INTO payroll_enforcement_claims
+                (id, supplier_id, case_id, claim_key, legal_basis,
+                 outstanding_minor_units, priority_date, first_payer_delivered_on,
+                 order_or_notice_delivered, row_version)
+             VALUES (11, 7, 1, 'claim_derived', 'statutory', 100000,
+                     '2000-01-01', '2026-05-21', 1, 1)",
+        );
+        self::assertSame(
+            '2026-05-21',
+            (string) $db->query(
+                'SELECT priority_date FROM payroll_enforcement_claims WHERE id = 11',
+            )->fetchColumn(),
+        );
+        $db->exec(
+            "UPDATE payroll_enforcement_claims
+                SET priority_date = '2000-01-01' WHERE id = 11",
+        );
+        self::assertSame(
+            '2026-05-21',
+            (string) $db->query(
+                'SELECT priority_date FROM payroll_enforcement_claims WHERE id = 11',
+            )->fetchColumn(),
+        );
+        $db->exec(
+            "UPDATE payroll_enforcement_claims
+                SET first_payer_delivered_on = '2026-05-23', priority_date = '2000-01-01'
+              WHERE id = 15",
+        );
+        self::assertSame(
+            ['2026-05-23', '2026-05-23'],
+            $db->query(
+                'SELECT first_payer_delivered_on, priority_date
+                   FROM payroll_enforcement_claims WHERE id = 15',
+            )->fetch(PDO::FETCH_NUM),
+        );
+        $this->assertBlocked(
+            $db,
+            "UPDATE payroll_enforcement_claims
+                SET first_payer_delivered_on = '2026-05-24' WHERE id = 15",
+            'Statutory enforcement first payer delivery date is immutable',
+        );
+        $this->assertBlocked(
+            $db,
+            "INSERT INTO payroll_enforcement_claims
+                (id, supplier_id, case_id, claim_key, legal_basis,
+                 outstanding_minor_units, row_version)
+             VALUES (12, 7, 1, 'claim_missing_delivery', 'statutory', 100000, 1)",
+            'Statutory enforcement claim requires first payer delivery date',
+        );
+        $db->exec(
+            "INSERT INTO payroll_enforcement_claims
+                (id, supplier_id, case_id, claim_key, legal_basis,
+                 outstanding_minor_units, priority_date, row_version)
+             VALUES (13, 7, 1, 'claim_voluntary', 'voluntary_agreement', 100000,
+                     '2026-05-22', 1)",
+        );
+        self::assertSame(
+            '2026-05-22',
+            (string) $db->query(
+                'SELECT priority_date FROM payroll_enforcement_claims WHERE id = 13',
+            )->fetchColumn(),
+        );
+
+        $db->exec(
+            "DELETE FROM migrations
+              WHERE filename = '1594_payroll_enforcement_first_payer_priority.sql'",
+        );
+        $this->runMigrator('1594_payroll_enforcement_first_payer_priority.sql');
+        self::assertSame(
+            '2026-05-21',
+            (string) $db->query(
+                'SELECT priority_date FROM payroll_enforcement_claims WHERE id = 11',
+            )->fetchColumn(),
+        );
+    }
+
     private function createLegacySchema(): void
     {
         $this->db()->exec(
@@ -172,9 +271,23 @@ final class PayrollEnforcementClaimCorrectionMigrationRuntimeTest extends TestCa
                 supplier_id INT UNSIGNED NOT NULL,
                 case_id BIGINT UNSIGNED NOT NULL,
                 claim_key VARCHAR(64) NOT NULL,
+                enforcement_order_key VARCHAR(64) NULL,
+                legal_basis VARCHAR(32) NOT NULL DEFAULT 'statutory',
+                category VARCHAR(32) NOT NULL DEFAULT 'non_priority',
                 outstanding_minor_units BIGINT UNSIGNED NOT NULL,
+                maintenance_weight_minor_units BIGINT UNSIGNED NULL,
+                priority_date DATE NULL,
+                order_issued_on DATE NULL,
+                legal_title_verified TINYINT(1) NOT NULL DEFAULT 0,
+                order_or_notice_delivered TINYINT(1) NOT NULL DEFAULT 0,
+                priority_classification_verified TINYINT(1) NOT NULL DEFAULT 0,
+                agreement_verified TINYINT(1) NOT NULL DEFAULT 0,
+                due_monetary_claim_verified TINYINT(1) NOT NULL DEFAULT 0,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
                 row_version INT UNSIGNED NOT NULL DEFAULT 1,
-                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP
              ) ENGINE=InnoDB;
              CREATE TABLE payroll_enforcement_month_results (
                 id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -205,19 +318,24 @@ final class PayrollEnforcementClaimCorrectionMigrationRuntimeTest extends TestCa
              INSERT INTO payroll_enforcement_cases (id,supplier_id,status)
              VALUES (1,7,'received');
              INSERT INTO payroll_enforcement_claims
-                (id,supplier_id,case_id,claim_key,outstanding_minor_units,row_version)
-             VALUES (10,7,1,'claim_unused',100000,1)",
+                (id,supplier_id,case_id,claim_key,legal_basis,outstanding_minor_units,
+                 priority_date,order_or_notice_delivered,row_version)
+             VALUES (10,7,1,'claim_unused','statutory',100000,'2026-05-20',1,1),
+                    (15,7,1,'claim_undelivered','statutory',100000,'2026-05-19',0,1),
+                    (16,7,1,'claim_used','statutory',100000,'2026-05-18',1,1);
+             INSERT INTO payroll_enforcement_allocations (supplier_id,claim_id)
+             VALUES (7,16)",
         );
     }
 
-    private function assertBlocked(PDO $db, string $sql): void
+    private function assertBlocked(PDO $db, string $sql, ?string $message = null): void
     {
         try {
             $db->exec($sql);
             self::fail('Databázový fail-closed guard dovolil změnit použitou pohledávku.');
         } catch (PDOException $exception) {
             self::assertStringContainsString(
-                'Payroll enforcement claim has a retained footprint',
+                $message ?? 'Payroll enforcement claim has a retained footprint',
                 $exception->getMessage(),
             );
         }
@@ -238,9 +356,10 @@ final class PayrollEnforcementClaimCorrectionMigrationRuntimeTest extends TestCa
         );
     }
 
-    private function runMigrator(): void
+    private function runMigrator(
+        string $filename = '1560_payroll_enforcement_claim_correction.sql',
+    ): void
     {
-        $filename = '1560_payroll_enforcement_claim_correction.sql';
         $vendorDir = getenv('MYUCTO_TEST_VENDOR_DIR');
         if (!is_string($vendorDir) || $vendorDir === '') {
             $vendorDir = $this->rootDir . '/api/vendor';

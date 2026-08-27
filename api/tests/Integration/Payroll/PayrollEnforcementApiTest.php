@@ -174,7 +174,7 @@ final class PayrollEnforcementApiTest extends TestCase
                     'category' => 'non_priority',
                     'outstanding_minor_units' => 250_000,
                     'maintenance_weight_minor_units' => null,
-                    'priority_date' => '2026-05-20',
+                    'first_payer_delivered_on' => '2026-05-20',
                     'order_issued_on' => '2026-05-15',
                     'legal_title_verified' => true,
                     'order_or_notice_delivered' => true,
@@ -1155,7 +1155,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1257,7 +1257,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-07-10',
+            'first_payer_delivered_on' => '2026-07-10',
             'order_issued_on' => '2026-07-09',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1340,7 +1340,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1501,7 +1501,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1636,7 +1636,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1712,7 +1712,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => false,
             'order_or_notice_delivered' => false,
@@ -1771,7 +1771,6 @@ final class PayrollEnforcementApiTest extends TestCase
             )->withParsedBody([
                 ...$this->claimBody(),
                 'outstanding_minor_units' => 125_000,
-                'priority_date' => '2026-05-21',
                 'row_version' => 1,
             ]),
             new Response(),
@@ -1783,7 +1782,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'claim',
         );
         self::assertSame(125_000, $updatedClaim['outstanding_minor_units']);
-        self::assertSame('2026-05-21', $updatedClaim['priority_date']);
+        self::assertSame('2026-05-20', $updatedClaim['priority_date']);
         self::assertSame(2, $updatedClaim['row_version']);
 
         $deleted = $this->action->deleteClaim(
@@ -1818,6 +1817,142 @@ final class PayrollEnforcementApiTest extends TestCase
             'payroll.enforcement.claim.updated',
             'payroll.enforcement.claim.deleted',
         ], $audit->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function testStatutoryClaimPriorityIsDerivedFromFirstPayerDelivery(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+
+        $created = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-20',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $first = PayrollTimeValue::row($this->json($created)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-20', $first['first_payer_delivered_on']);
+        self::assertSame('2026-05-20', $first['priority_date']);
+
+        $spoofed = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-21',
+                    'priority_date' => '2000-01-01',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(422, $spoofed->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($spoofed));
+
+        $sameOrderBody = [
+            ...$this->statutoryClaimBody(),
+            'category' => 'other_priority',
+            'same_order_as_claim_id' => $first['id'],
+        ];
+        unset($sameOrderBody['first_payer_delivered_on']);
+        $sameOrder = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody($sameOrderBody),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $sameOrder->getStatusCode(), (string) $sameOrder->getBody());
+        $shared = PayrollTimeValue::row($this->json($sameOrder)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-20', $shared['first_payer_delivered_on']);
+        self::assertSame('2026-05-20', $shared['priority_date']);
+
+        $changedDelivery = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$first['id']}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-21',
+                    'row_version' => $first['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $first['id']],
+        );
+        self::assertSame(422, $changedDelivery->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($changedDelivery));
+
+        $earlier = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'category' => 'maintenance_arrears',
+                    'maintenance_weight_minor_units' => 1,
+                    'first_payer_delivered_on' => '2026-05-19',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $earlier->getStatusCode(), (string) $earlier->getBody());
+
+        $detail = $this->repository->findCase($this->supplierId, $caseId);
+        self::assertNotNull($detail);
+        self::assertSame(['2026-05-19', '2026-05-20', '2026-05-20'], array_column(
+            $detail['claims'],
+            'priority_date',
+        ));
+    }
+
+    public function testLegacyStatutoryClaimCanCaptureFirstPayerDeliveryOnce(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, legal_basis, category,
+                 outstanding_minor_units, priority_date)
+             VALUES (?, ?, ?, "voluntary_agreement", "non_priority", ?, ?)',
+        );
+        $insert->execute([
+            $this->supplierId,
+            $caseId,
+            'legacy_claim_' . bin2hex(random_bytes(8)),
+            100_000,
+            '2026-05-19',
+        ]);
+        $claimId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_enforcement_claims
+                SET legal_basis = "statutory"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $claimId]);
+
+        $captured = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-20',
+                    'row_version' => 1,
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(200, $captured->getStatusCode(), (string) $captured->getBody());
+        $claim = PayrollTimeValue::row($this->json($captured)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-20', $claim['first_payer_delivered_on']);
+        self::assertSame('2026-05-20', $claim['priority_date']);
+
+        $changed = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-21',
+                    'row_version' => $claim['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(422, $changed->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($changed));
     }
 
     public function testClaimMutationFailsClosedAfterActivationOrPayrollSnapshot(): void
@@ -1958,12 +2093,18 @@ final class PayrollEnforcementApiTest extends TestCase
     /** @return array<string,mixed> */
     private function claimBody(): array
     {
+        return $this->statutoryClaimBody();
+    }
+
+    /** @return array<string,mixed> */
+    private function statutoryClaimBody(): array
+    {
         return [
             'legal_basis' => 'statutory',
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => false,
             'order_or_notice_delivered' => false,

@@ -1398,12 +1398,12 @@ final class PayrollRunPersistenceTest extends TestCase
             'INSERT INTO payroll_enforcement_claims
                 (supplier_id, case_id, claim_key, enforcement_order_key,
                  legal_basis, category, outstanding_minor_units,
-                 priority_date, order_issued_on, legal_title_verified,
+                 priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified,
                  order_or_notice_delivered, priority_classification_verified,
                  agreement_verified, due_monetary_claim_verified)
              VALUES (?, ?, "synthetic-runtime-claim", "synthetic-runtime-order",
                      "statutory", "non_priority", 10000000,
-                     "2026-05-01", "2026-04-30", 1, 1, 1, 0, 1)'
+                     "2026-05-01", "2026-05-01", "2026-04-30", 1, 1, 1, 0, 1)'
         )->execute([$this->supplierId, $caseId]);
 
         $run = $this->createRun();

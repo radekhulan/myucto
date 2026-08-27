@@ -5316,6 +5316,7 @@
             "outstanding_czk": "Původní výše pohledávky (Kč)",
             "maintenance_weight_czk": "Běžná měsíční výše výživného (Kč)",
             "priority_date": "Den pořadí",
+            "first_payer_delivered_on": "Doručeno prvnímu plátci",
             "order_issued_on": "Rozhodnutí vydáno",
             "same_order_as": "Stejný exekuční příkaz jako",
             "new_order": "Nový samostatný příkaz",

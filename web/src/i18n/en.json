@@ -5316,6 +5316,7 @@
             "outstanding_czk": "Original claim amount (CZK)",
             "maintenance_weight_czk": "Current monthly maintenance (CZK)",
             "priority_date": "Priority date",
+            "first_payer_delivered_on": "Delivered to the first payer",
             "order_issued_on": "Order issued on",
             "same_order_as": "Same enforcement order as",
             "new_order": "New separate order",

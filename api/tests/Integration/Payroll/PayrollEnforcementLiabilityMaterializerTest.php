@@ -1254,7 +1254,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             'category' => $category,
             'outstanding_minor_units' => $outstanding,
             'maintenance_weight_minor_units' => $weight,
-            'priority_date' => $priorityDate,
+            'first_payer_delivered_on' => $priorityDate,
             'order_issued_on' => '2026-01-02',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,

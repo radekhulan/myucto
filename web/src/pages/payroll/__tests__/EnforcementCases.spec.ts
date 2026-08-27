@@ -148,6 +148,7 @@ function verifiedClaim(): EnforcementCaseDetail['claims'][number] {
     outstanding_minor_units: 250_000,
     maintenance_weight_minor_units: null,
     priority_date: '2026-05-01',
+    first_payer_delivered_on: '2026-05-01',
     order_issued_on: '2026-05-01',
     legal_title_verified: true,
     order_or_notice_delivered: true,
@@ -288,6 +289,24 @@ describe('EnforcementCases', () => {
     await wrapper.get('[data-test="enforcement-next-step-action"]').trigger('click')
 
     expect(wrapper.find('[data-test="enforcement-claim-form"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('nechá datum doručení při zakládání opravit před uložením', async () => {
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+    await wrapper.get('[data-test="enforcement-next-step-action"]').trigger('click')
+
+    const input = wrapper.get('[data-test="first-payer-delivered-on"]')
+    expect(input.attributes('readonly')).toBeUndefined()
+    await input.setValue('2026-05-20')
+    expect(input.attributes('readonly')).toBeUndefined()
+    await input.setValue('2026-05-21')
+    expect((input.element as HTMLInputElement).value).toBe('2026-05-21')
     wrapper.unmount()
   })
 

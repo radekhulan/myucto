@@ -306,20 +306,25 @@ final class PayrollEnforcementRepository implements
             $outstanding = self::nonNegativeInt($data, 'outstanding_minor_units');
             $weight = self::nullablePositiveInt($data, 'maintenance_weight_minor_units');
             self::assertMaintenanceWeight($category, $weight);
-            $priorityDate = self::nullableDate($data, 'priority_date');
             $orderIssuedOn = self::nullableDate($data, 'order_issued_on');
             $sameOrderClaimId = self::nullablePositiveInt($data, 'same_order_as_claim_id');
-            $orderKey = $sameOrderClaimId === null
+            $sameOrder = $sameOrderClaimId === null
+                ? null
+                : $this->orderForClaim($supplierId, $caseId, $sameOrderClaimId);
+            $orderKey = $sameOrder === null
                 ? 'order_' . bin2hex(random_bytes(16))
-                : $this->orderKeyForClaim($supplierId, $caseId, $sameOrderClaimId);
+                : PayrollTimeValue::string($sameOrder['enforcement_order_key'] ?? null, 'enforcement_order_key');
+            [$priorityDate, $firstPayerDeliveredOn] = $legalBasis === DeductionLegalBasis::Statutory
+                ? $this->newStatutoryPriority($data, $sameOrder)
+                : $this->voluntaryPriority($data);
             $stmt = $pdo->prepare(
                 'INSERT INTO payroll_enforcement_claims
                     (supplier_id, case_id, claim_key, enforcement_order_key, legal_basis,
                      category, outstanding_minor_units, maintenance_weight_minor_units,
-                     priority_date, order_issued_on, legal_title_verified,
+                     priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified,
                      order_or_notice_delivered, priority_classification_verified,
                      agreement_verified, due_monetary_claim_verified)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -331,6 +336,7 @@ final class PayrollEnforcementRepository implements
                 $outstanding,
                 $weight,
                 $priorityDate,
+                $firstPayerDeliveredOn,
                 $orderIssuedOn,
                 self::boolInt($data, 'legal_title_verified'),
                 self::boolInt($data, 'order_or_notice_delivered'),
@@ -406,12 +412,12 @@ final class PayrollEnforcementRepository implements
             $outstanding = self::nonNegativeInt($data, 'outstanding_minor_units');
             $weight = self::nullablePositiveInt($data, 'maintenance_weight_minor_units');
             self::assertMaintenanceWeight($category, $weight);
-            $priorityDate = self::nullableDate($data, 'priority_date');
             $orderIssuedOn = self::nullableDate($data, 'order_issued_on');
             $storedOrderKey = $claim['enforcement_order_key'] ?? null;
             $orderKey = is_string($storedOrderKey) && $storedOrderKey !== ''
                 ? $storedOrderKey
                 : 'order_' . bin2hex(random_bytes(16));
+            $sameOrder = null;
             if (array_key_exists('same_order_as_claim_id', $data)) {
                 $sameOrderClaimId = self::nullablePositiveInt(
                     $data,
@@ -422,16 +428,25 @@ final class PayrollEnforcementRepository implements
                         'Pohledávka nemůže odkazovat sama na sebe jako na stejný příkaz.',
                     );
                 }
-                $orderKey = $sameOrderClaimId === null
+                $sameOrder = $sameOrderClaimId === null
+                    ? null
+                    : $this->orderForClaim($supplierId, $caseId, $sameOrderClaimId);
+                $orderKey = $sameOrder === null
                     ? 'order_' . bin2hex(random_bytes(16))
-                    : $this->orderKeyForClaim($supplierId, $caseId, $sameOrderClaimId);
+                    : PayrollTimeValue::string(
+                        $sameOrder['enforcement_order_key'] ?? null,
+                        'enforcement_order_key',
+                    );
             }
+            [$priorityDate, $firstPayerDeliveredOn] = $legalBasis === DeductionLegalBasis::Statutory
+                ? $this->existingStatutoryPriority($data, $claim, $sameOrder)
+                : $this->voluntaryPriority($data);
 
             $update = $pdo->prepare(
                 'UPDATE payroll_enforcement_claims
                     SET enforcement_order_key = ?, legal_basis = ?, category = ?,
                         outstanding_minor_units = ?, maintenance_weight_minor_units = ?,
-                        priority_date = ?, order_issued_on = ?, legal_title_verified = ?,
+                        priority_date = ?, first_payer_delivered_on = ?, order_issued_on = ?, legal_title_verified = ?,
                         order_or_notice_delivered = ?, priority_classification_verified = ?,
                         agreement_verified = ?, due_monetary_claim_verified = ?,
                         row_version = row_version + 1
@@ -445,6 +460,7 @@ final class PayrollEnforcementRepository implements
                     $outstanding,
                     $weight,
                     $priorityDate,
+                    $firstPayerDeliveredOn,
                     $orderIssuedOn,
                     self::boolInt($data, 'legal_title_verified'),
                     self::boolInt($data, 'order_or_notice_delivered'),
@@ -1634,7 +1650,7 @@ final class PayrollEnforcementRepository implements
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, case_id, legal_basis, category, outstanding_minor_units,
-                    maintenance_weight_minor_units, priority_date, order_issued_on,
+                    maintenance_weight_minor_units, priority_date, first_payer_delivered_on, order_issued_on,
                     legal_title_verified, order_or_notice_delivered,
                     priority_classification_verified, agreement_verified,
                     due_monetary_claim_verified, is_active, row_version,
@@ -2121,20 +2137,139 @@ final class PayrollEnforcementRepository implements
         throw new PayrollEnforcementConflictException((int) $version);
     }
 
-    private function orderKeyForClaim(int $supplierId, int $caseId, int $claimId): string
+    /** @return array<string,mixed> */
+    private function orderForClaim(int $supplierId, int $caseId, int $claimId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT enforcement_order_key FROM payroll_enforcement_claims
+            'SELECT enforcement_order_key, priority_date, first_payer_delivered_on
+               FROM payroll_enforcement_claims
               WHERE supplier_id = ? AND case_id = ? AND id = ?'
         );
         $stmt->execute([$supplierId, $caseId, $claimId]);
-        $key = $stmt->fetchColumn();
-        if (!is_string($key) || $key === '') {
+        $value = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($value === false) {
             throw new \InvalidArgumentException(
                 'Referenční pohledávka stejného exekučního příkazu nebyla nalezena.',
             );
         }
-        return $key;
+        $reference = PayrollTimeValue::row($value, 'enforcement_order_reference');
+        if (!is_string($reference['enforcement_order_key'] ?? null)
+            || $reference['enforcement_order_key'] === '') {
+            throw new \InvalidArgumentException(
+                'Referenční pohledávka stejného exekučního příkazu nemá platný klíč.',
+            );
+        }
+        return $reference;
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @param array<string,mixed>|null $sameOrder
+     * @return array{0:string,1:string}
+     */
+    private function newStatutoryPriority(array $data, ?array $sameOrder): array
+    {
+        $this->rejectClientPriorityDate($data);
+        if ($sameOrder !== null) {
+            $delivery = self::nullableStringValue(
+                $sameOrder['first_payer_delivered_on'] ?? null,
+                'first_payer_delivered_on',
+            );
+            if ($delivery === null) {
+                throw new \InvalidArgumentException(
+                    'Referenční pohledávka nemá datum doručení prvnímu plátci.',
+                );
+            }
+            if (array_key_exists('first_payer_delivered_on', $data)
+                && self::nullableDate($data, 'first_payer_delivered_on') !== $delivery) {
+                throw new \InvalidArgumentException(
+                    'Stejný exekuční příkaz musí převzít datum doručení prvnímu plátci.',
+                );
+            }
+            return [$delivery, $delivery];
+        }
+
+        $delivery = self::nullableDate($data, 'first_payer_delivered_on');
+        if ($delivery === null) {
+            throw new \InvalidArgumentException(
+                'Pole first_payer_delivered_on je pro zákonnou pohledávku povinné.',
+            );
+        }
+        return [$delivery, $delivery];
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $claim
+     * @param array<string,mixed>|null $sameOrder
+     * @return array{0:?string,1:?string}
+     */
+    private function existingStatutoryPriority(
+        array $data,
+        array $claim,
+        ?array $sameOrder,
+    ): array {
+        $this->rejectClientPriorityDate($data);
+        $storedDelivery = self::nullableStringValue(
+            $claim['first_payer_delivered_on'] ?? null,
+            'first_payer_delivered_on',
+        );
+        $storedPriority = self::nullableStringValue(
+            $claim['priority_date'] ?? null,
+            'priority_date',
+        );
+        $delivery = $storedDelivery;
+        if (array_key_exists('first_payer_delivered_on', $data)) {
+            $requestedDelivery = self::nullableDate($data, 'first_payer_delivered_on');
+            if ($storedDelivery !== null && $requestedDelivery !== $storedDelivery) {
+                throw new \InvalidArgumentException(
+                    'Datum doručení prvnímu plátci nelze po založení pohledávky změnit.',
+                );
+            }
+            if ($storedDelivery === null && $requestedDelivery !== null) {
+                $delivery = $requestedDelivery;
+            }
+        }
+        if ($sameOrder !== null) {
+            $referenceDelivery = self::nullableStringValue(
+                $sameOrder['first_payer_delivered_on'] ?? null,
+                'first_payer_delivered_on',
+            );
+            if ($referenceDelivery === null
+                || ($storedDelivery !== null && $referenceDelivery !== $storedDelivery)) {
+                throw new \InvalidArgumentException(
+                    'Stejný exekuční příkaz nemůže změnit datum doručení prvnímu plátci.',
+                );
+            }
+            $delivery = $referenceDelivery;
+        }
+        return $delivery === null
+            ? [$storedPriority, null]
+            : [$delivery, $delivery];
+    }
+
+    /** @param array<string,mixed> $data */
+    private function rejectClientPriorityDate(array $data): void
+    {
+        if (array_key_exists('priority_date', $data)) {
+            throw new \InvalidArgumentException(
+                'Priorita zákonné pohledávky se odvozuje z data doručení prvnímu plátci.',
+            );
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return array{0:?string,1:null}
+     */
+    private function voluntaryPriority(array $data): array
+    {
+        if (self::nullableDate($data, 'first_payer_delivered_on') !== null) {
+            throw new \InvalidArgumentException(
+                'Dobrovolná dohoda nemá datum doručení prvnímu plátci.',
+            );
+        }
+        return [self::nullableDate($data, 'priority_date'), null];
     }
 
     /** @return array<string,mixed>|null */

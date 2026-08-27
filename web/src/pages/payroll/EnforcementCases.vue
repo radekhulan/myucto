@@ -164,6 +164,7 @@ function emptyClaim(): EnforcementClaimPayload {
     outstanding_minor_units: 0,
     maintenance_weight_minor_units: null,
     priority_date: null,
+    first_payer_delivered_on: null,
     order_issued_on: null,
     legal_title_verified: false,
     order_or_notice_delivered: false,
@@ -833,6 +834,14 @@ async function addClaim() {
       outstanding_minor_units: amount,
       maintenance_weight_minor_units: minorUnits(maintenanceWeightCzk.value, false),
     }
+    if (payload.legal_basis === 'statutory') {
+      delete payload.priority_date
+      if (payload.same_order_as_claim_id !== null) {
+        delete payload.first_payer_delivered_on
+      }
+    } else {
+      payload.first_payer_delivered_on = null
+    }
     if (editingClaimId.value === null) {
       await payrollEnforcementApi.addClaim(current.id, payload)
     } else {
@@ -876,6 +885,7 @@ function editClaim(claim: EnforcementClaim) {
     outstanding_minor_units: claim.outstanding_minor_units,
     maintenance_weight_minor_units: claim.maintenance_weight_minor_units,
     priority_date: claim.priority_date,
+    first_payer_delivered_on: claim.first_payer_delivered_on,
     order_issued_on: claim.order_issued_on,
     legal_title_verified: claim.legal_title_verified,
     order_or_notice_delivered: claim.order_or_notice_delivered,
@@ -905,6 +915,22 @@ function cancelClaimForm() {
 function startNewClaim() {
   cancelClaimForm()
   showClaim.value = true
+}
+
+function claimDeliveryDateReadonly(): boolean {
+  if (newClaim.value.same_order_as_claim_id !== null) return true
+  if (editingClaimId.value === null) return false
+  return detail.value?.claims.find(claim => claim.id === editingClaimId.value)
+    ?.first_payer_delivered_on !== null
+}
+
+function copySameOrderPriority() {
+  if (detail.value?.case_kind === 'voluntary_agreement') return
+  const sameOrderId = newClaim.value.same_order_as_claim_id
+  const reference = sameOrderId === null
+    ? null
+    : detail.value?.claims.find(claim => claim.id === sameOrderId)
+  newClaim.value.first_payer_delivered_on = reference?.first_payer_delivered_on ?? null
 }
 
 async function deleteClaim(claim: EnforcementClaim) {
@@ -1363,9 +1389,10 @@ onMounted(load)
             <h4 class="font-medium text-neutral-900 sm:col-span-2 lg:col-span-4">{{ t(editingClaimId === null ? 'payroll.enforcement.add_claim' : 'payroll.enforcement.edit_claim') }}</h4>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.claim_category') }}<select v-model="newClaim.category" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="category in claimCategories" :key="category" :value="category">{{ t(`payroll.enforcement.categories.${category}`) }}</option></select></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.outstanding_czk') }}<input v-model="claimAmountCzk" required inputmode="decimal" data-test="claim-amount" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-            <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.priority_date') }}<input v-model="newClaim.priority_date" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+            <label v-if="detail.case_kind !== 'voluntary_agreement'" class="text-xs text-neutral-600">{{ t('payroll.enforcement.first_payer_delivered_on') }}<input v-model="newClaim.first_payer_delivered_on" :readonly="claimDeliveryDateReadonly()" required type="date" data-test="first-payer-delivered-on" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+            <label v-else class="text-xs text-neutral-600">{{ t('payroll.enforcement.priority_date') }}<input v-model="newClaim.priority_date" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.order_issued_on') }}<input v-model="newClaim.order_issued_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-            <label v-if="detail.claims.length && editingClaimId === null" class="text-xs text-neutral-600">{{ t('payroll.enforcement.same_order_as') }}<select v-model="newClaim.same_order_as_claim_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">{{ t('payroll.enforcement.new_order') }}</option><option v-for="claim in detail.claims" :key="claim.id" :value="claim.id">{{ t(`payroll.enforcement.categories.${claim.category}`) }} · {{ claim.priority_date || '—' }}</option></select></label>
+            <label v-if="detail.claims.length && editingClaimId === null" class="text-xs text-neutral-600">{{ t('payroll.enforcement.same_order_as') }}<select v-model="newClaim.same_order_as_claim_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="copySameOrderPriority"><option :value="null">{{ t('payroll.enforcement.new_order') }}</option><option v-for="claim in detail.claims" :key="claim.id" :value="claim.id">{{ t(`payroll.enforcement.categories.${claim.category}`) }} · {{ claim.priority_date || '—' }}</option></select></label>
             <label v-if="newClaim.category.includes('maintenance')" class="text-xs text-neutral-600">{{ t('payroll.enforcement.maintenance_weight_czk') }}<input v-model="maintenanceWeightCzk" required inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <div class="space-y-2 text-sm sm:col-span-2 lg:col-span-3"><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.legal_title_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.legal_title') }}</label><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.order_or_notice_delivered" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.delivered') }}</label><label class="flex items-center gap-2"><input v-model="newClaim.priority_classification_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.priority') }}</label><label v-if="detail.case_kind === 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.agreement_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.agreement') }}</label><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.due_monetary_claim_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.due_claim') }}</label></div>
             <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4"><button type="button" :class="btnOutline('neutral')" @click="cancelClaimForm"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" data-test="save-claim" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t(editingClaimId === null ? 'common.save' : 'payroll.enforcement.save_claim_changes') }}</button></div>

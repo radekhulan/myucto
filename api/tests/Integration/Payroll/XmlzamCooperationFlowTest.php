@@ -392,10 +392,10 @@ final class XmlzamCooperationFlowTest extends TestCase
         $claimStmt = $this->pdo->prepare(
             "INSERT INTO payroll_enforcement_claims
                 (supplier_id, case_id, claim_key, enforcement_order_key, legal_basis, category,
-                 outstanding_minor_units, priority_date, order_issued_on, legal_title_verified,
+                 outstanding_minor_units, priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified,
                  order_or_notice_delivered, priority_classification_verified,
                  agreement_verified, due_monetary_claim_verified, is_active)
-             VALUES (?, ?, ?, ?, 'statutory', 'non_priority', 100000, '2026-04-03',
+             VALUES (?, ?, ?, ?, 'statutory', 'non_priority', 100000, '2026-04-03', '2026-04-03',
                      '2026-04-01', 1, 1, 1, 0, 1, 1)"
         );
         $claimStmt->execute([$this->supplierId, $caseId, 'xmlzam-claim-' . $employeeId, 'xmlzam-order-' . $employeeId]);
@@ -648,10 +648,10 @@ final class XmlzamCooperationFlowTest extends TestCase
         $this->pdo->prepare(
             "INSERT INTO payroll_enforcement_claims
                 (supplier_id, case_id, claim_key, enforcement_order_key, legal_basis, category,
-                 outstanding_minor_units, priority_date, order_issued_on, legal_title_verified,
+                 outstanding_minor_units, priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified,
                  order_or_notice_delivered, priority_classification_verified,
                  agreement_verified, due_monetary_claim_verified, is_active)
-             VALUES (?, ?, ?, ?, 'statutory', 'non_priority', 100000, '2026-04-03',
+             VALUES (?, ?, ?, ?, 'statutory', 'non_priority', 100000, '2026-04-03', '2026-04-03',
                      '2026-04-01', 1, 1, 1, 0, 1, 1)"
         )->execute([$this->supplierId, $caseId, 'xmlzam-ready-claim-' . $employeeId, 'xmlzam-ready-order-' . $employeeId]);
         return $caseId;

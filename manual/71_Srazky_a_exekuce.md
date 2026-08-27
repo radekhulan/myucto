@@ -11,7 +11,7 @@ Je nutné oprávnění `payroll.enforcement` a podle případu `payroll.insolven
 ## 71.3 Krokový postup
 
 1. Otevřete **Mzdy → Srážky a exekuce** a založte případ u správné osoby.
-2. Vyplňte rozhodné datum, pořadí, druh pohledávky, spis, příjemce a částky.
+2. Vyplňte datum doručení prvnímu plátci, druh pohledávky, spis, příjemce a částky.
 3. Zkontrolujte vyživované osoby a další údaje ovlivňující nezabavitelnou částku.
 4. Před uzavřením běhu projděte rozdělení srážek a zůstatky všech souběžných případů.
 5. Po úhradě aktualizujte stav; změnu pořadí nebo skončení proveďte podle doložené události.
@@ -22,6 +22,12 @@ vede od pohledávky přes ověření podkladů a zahájení srážení až k ov�
 příjemce a povolení odesílání. Méně časté změny stavu jsou pod volbou **Další
 stavové kroky**; jejich skrytí nemění právní kontroly ani dostupné možnosti.
 Použijte je pouze tehdy, když odpovídají doloženému rozhodnutí.
+
+U zákonné pohledávky aplikace určí den pořadí sama z data doručení prvnímu
+plátci. Pokud více pohledávek patří ke stejnému exekučnímu příkazu, zvolte
+referenční pohledávku a společné datum i pořadí se převezmou automaticky. Datum
+doručení lze u staršího neúplného záznamu jednou doplnit; po uložení je neměnné.
+Chybně zadanou dosud nepoužitou pohledávku smažte a založte znovu podle listiny.
 
 V měsíčních podkladech je běžná kontrola oddělená od výjimek. Rejstřík
 pohledávek a právě uplatněné nároky zkontrolujete přímo. Souběh plátců,
@@ -60,7 +66,8 @@ Stejné pravidlo platí pro jednotlivou pohledávku. Dokud je případ ve stavu
 **Přijato — čeká na ověření** a pohledávka ještě nevstoupila do mzdového
 výsledku, ledgeru ani platebního závazku, můžete ji v tabulce **Opravit** nebo
 **Smazat**. Oprava zachová interní identitu pohledávky, zvýší její verzi a
-znovu označí podklady případu jako neověřené. Po zahájení srážení se původní
+znovu označí podklady případu jako neověřené; již uložené datum doručení prvnímu
+plátci se přitom nemění. Po zahájení srážení se původní
 záznam nemění ani nemaže; použijte navazující právní nebo opravný postup.
 
 ## 71.6 Kontroly a bezpečnost

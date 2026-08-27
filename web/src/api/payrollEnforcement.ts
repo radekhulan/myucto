@@ -61,6 +61,7 @@ export interface EnforcementClaim {
   outstanding_minor_units: number
   maintenance_weight_minor_units: number | null
   priority_date: string | null
+  first_payer_delivered_on: string | null
   order_issued_on: string | null
   legal_title_verified: boolean
   order_or_notice_delivered: boolean
@@ -158,7 +159,8 @@ export interface EnforcementClaimPayload {
   category: EnforcementClaimCategory
   outstanding_minor_units: number
   maintenance_weight_minor_units: number | null
-  priority_date: string | null
+  priority_date?: string | null
+  first_payer_delivered_on?: string | null
   order_issued_on: string | null
   legal_title_verified: boolean
   order_or_notice_delivered: boolean
