@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   tierQuote: vi.fn(),
   changeTier: vi.fn(),
   waitForChange: vi.fn(),
+  refresh: vi.fn(),
 }))
 
 const auth = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock('@/api/license', async (importOriginal) => {
       tierQuote: mocks.tierQuote,
       changeTier: mocks.changeTier,
       waitForChange: mocks.waitForChange,
+      refresh: mocks.refresh,
     },
   }
 })
@@ -61,6 +63,7 @@ beforeEach(() => {
   stopPreview()
   mocks.status.mockResolvedValue(buildPreviewStatus('manual_key', 1_800_000_000))
   mocks.resumePendingChanges.mockResolvedValue([])
+  mocks.refresh.mockResolvedValue({ refreshed: true })
   mocks.tierQuote.mockResolvedValue({
     current_tier: 'multi10',
     new_tier: 'unlimited',
@@ -131,5 +134,20 @@ describe('Hosting — bezpečnost náhledu', () => {
     const { wrapper } = await mountHosting()
 
     expect(wrapper.get('[data-hosting-attention] a[href="#uzivatele"]').text()).toContain(cs.hosting.attention_users)
+  })
+
+  it('po aktualizaci rozsahu si stav načte běžnou cestou, ne z odpovědi obnovy', async () => {
+    // Odpověď obnovy stav nenese. Kdyby se z ní obrazovka skládala, chybějící
+    // blok `instance` by ji shodil do „tahle instalace u nás neběží".
+    const { wrapper } = await mountHosting()
+    expect(wrapper.find('[data-hosting-managed]').exists()).toBe(true)
+
+    await wrapper.get('[data-hosting-refresh]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.refresh).toHaveBeenCalledTimes(1)
+    expect(mocks.status).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-hosting-selfhosted]').exists()).toBe(false)
+    expect(wrapper.find('[data-hosting-managed]').exists()).toBe(true)
   })
 })

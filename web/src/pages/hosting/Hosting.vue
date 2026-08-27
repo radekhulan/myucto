@@ -120,7 +120,11 @@ async function refreshEntitlement(): Promise<void> {
   refreshing.value = true
   errorMsg.value = null
   try {
-    publishInstanceStatus(await licenseApi.refresh())
+    // ⚠️ Stav se čte AŽ POTOM běžnou cestou. Odpověď obnovy ho nenese —
+    // payload `/license/status` je bohatší a jeho druhá, chudší podoba by
+    // obrazovku shodila do „tahle instalace u nás neběží".
+    await licenseApi.refresh()
+    await load()
     await auth.refresh()
   } catch (e: unknown) {
     errorMsg.value = (e as Error)?.message ?? t('hosting.refresh_failed')

@@ -40,9 +40,15 @@ final class RefreshLicenseAction
         try {
             $this->license->forceRenew();
         } catch (\Throwable) {
-            // Stav se stejně čte níž — vrátí se ten, který instalace má.
+            // Výpadek licenčního serveru není chyba instalace — stav zůstane ten,
+            // který instalace má, a klient si ho stejně načte znovu.
         }
 
-        return Json::ok($response, $this->license->current()->toArray($this->license->buyUrl()));
+        // ⚠️ Stav se ZÁMĚRNĚ nevrací. Payload `/license/status` je bohatší
+        // (blok `instance`, `company`, odkazy) a kdyby se sem složil znovu,
+        // rozešel by se: obrazovka provozu z chybějícího `instance` usoudila,
+        // že instalace není spravovaná, a ukázala „tahle instalace u nás
+        // neběží". Klient si po obnově načte stav běžnou cestou.
+        return Json::ok($response, ['refreshed' => true]);
     }
 }

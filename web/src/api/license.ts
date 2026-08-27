@@ -400,7 +400,7 @@ export const licenseApi = {
    * (odkaz z e-mailu, ruční potvrzení obsluhou), by zákazník do té doby koukal
    * na staré počty.
    */
-  refresh: () => api.post<LicenseStatus>('/license/refresh').then((r) => r.data),
+  refresh: () => api.post<{ refreshed: boolean }>('/license/refresh').then((r) => r.data),
 
   /** Admin — vypnutí automatického prodlužování. NENÍ deaktivace: licence běží
    *  do konce zaplaceného období, jen se nestrhne další platba. Idempotentní. */
