@@ -48,10 +48,13 @@ final class CronDispatcherTest extends TestCase
     {
         // 13:37 — v katalogu na tuhle minutu nepadá nic kromě úloh běžících
         // každou minutu, a ty mají bránu na skutečnou práci (SQLite tabulky
-        // neexistují → fail-open → epo se spustí).
+        // neexistují → fail-open → stav EPO i fronta dokumentů se spustí).
         $report = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 13:37:00'));
 
-        self::assertSame(['cron-epo-status'], $report['due']);
+        self::assertSame(
+            ['cron-epo-status', 'cron-payroll-document-worker'],
+            $report['due'],
+        );
         self::assertSame([], $report['errors']);
     }
 
@@ -93,6 +96,7 @@ final class CronDispatcherTest extends TestCase
         $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 13:38:00'));
 
         self::assertSame(2, $this->launcher->countOf('cron-epo-status'));
+        self::assertSame(2, $this->launcher->countOf('cron-payroll-document-worker'));
     }
 
     public function testUnconfiguredJobIsSkippedNotLaunched(): void
