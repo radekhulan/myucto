@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="utf-8"?>
+<schema xmlns="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://schemas.cssz.cz/baseTypes/v2"
+  targetNamespace="http://schemas.cssz.cz/baseTypes/v2" elementFormDefault="qualified" version="1.0">
+
+    <!-- zakladni typy - retezce -->
+    <simpleType name="simpleAType">
+        <annotation>
+            <documentation>
+                Typ A - Znaková množina: alfaznaky (A - Z, a-z) +
+                ŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleL2Type">
+        <annotation>
+            <documentation>Typ L2 - vsechny znaky mimo ridicich znaku XML</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value=".*"/>
+        </restriction>
+    </simpleType>
+
+    <!-- zakladni typy - znamenka -->
+    <simpleType name="simpleZLType">
+        <annotation>
+            <documentation>
+                Typ ZL - Znaková množina: znaménka: pomlčka(-), čárka (,), tečka(.), plus(+),
+                jednoduchý apostrof (‘)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([-,\.\+'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleZZType">
+        <annotation>
+            <documentation>
+                Typ ZZ - Znaková množina: znaménka: pomlčka(-), čárka (,), tečka(.), plus(+),
+                jednoduchý apostrof (‘), lomítko (/), zpětné lomítko (\)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([-,\.\+'/\\])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleZXType">
+        <annotation>
+            <documentation>
+                Typ ZX - Znaková množina: znaménka: pomlčka(-), čárka (,), tečka(.),
+                jednoduchý apostrof (‘)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([-,\.'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleZMType">
+        <annotation>
+            <documentation>
+                Typ ZM - Znaková množina: znaménka: pomlčka(-), tečka(.),	podtržítko(_)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([-\._])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleZNType">
+        <annotation>
+            <documentation>
+                Typ ZN - Znaková množina: znaménka: pomlčka(-), podtržítko(_)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([-_])*"/>
+        </restriction>
+    </simpleType>
+
+    <!-- zakladni typy - cisla -->
+    <simpleType name="simpleNType">
+        <annotation>
+            <documentation>
+                Typ N - Znaková množina: číslo - znaky 0-9, nesmí začínat nulou
+            </documentation>
+        </annotation>
+        <restriction base="nonNegativeInteger">
+            <pattern value="[1-9].*|0"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleNType_string">
+        <annotation>
+            <documentation>
+                Typ N - Znaková množina: číslo - znaky 0-9, nesmí začínat nulou
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="[1-9][0-9]*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleNNType">
+        <annotation>
+            <documentation>
+                Typ NN - Znaková množina: číslo - znaky 0-9, může začínat nulou
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="[0-9]*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleNDType">
+        <annotation>
+            <documentation>
+                Typ ND - Znaková množina: číslo - znaky 0-9, může obsahovat znaménko
+                jako první znak a des. tečku (nebo des. čárku)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="[\+\-]?\d*[,\.]?\d*"/>
+        </restriction>
+    </simpleType>
+
+    <!-- zakladni typy - datumy -->
+    <simpleType name="simpleDType">
+        <restriction base="date"/>
+    </simpleType>
+    <simpleType name="simpleDTType">
+        <annotation>
+            <documentation>
+                Typ DT - Znaková množina: datum a čas ve formátu unicode yyyy-mm-ddThh-mm-ss
+                Pro zpetnou kompatibilitu je zadana i podpora formatu yyyy-mm-dd hh:mm:ss.nnn
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([1-2][0-9]{3}-(([1][0-2])|([0][0-9]))-(([0-2][0-9])|([3][0-1]))T(([01][0-9])|([2][0-3]))-([0-5][0-9])-([0-5][0-9]))|([1-2][0-9]{3}-(([1][0-2])|([0][0-9]))-(([0-2][0-9])|([3][0-1])) (([01][0-9])|([2][0-3])):([0-5][0-9]):([0-5][0-9]).[0-9]{3})"/>
+        </restriction>
+    </simpleType>
+
+    <!-- zakladni typy - logicke hodnoty -->
+    <simpleType name="simpleLType">
+        <annotation>
+            <documentation>Logicka hodnota A/N</documentation>
+        </annotation>
+        <restriction base="string">
+            <enumeration value="A"/>
+            <enumeration value="N"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleL_EmptyType">
+        <annotation>
+            <documentation>Logicka hodnota A/N + ""</documentation>
+        </annotation>
+        <restriction base="string">
+            <enumeration value="A"/>
+            <enumeration value="N"/>
+            <enumeration value=""/>
+        </restriction>
+    </simpleType>
+
+    <!--  kombinovane typy - 2 typy -->
+    <simpleType name="simpleA_NType">
+        <annotation>
+            <documentation>Typ A + N</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_NNType">
+        <annotation>
+            <documentation>Typ A + NN</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_ZZType">
+        <annotation>
+            <documentation>Typ A + ZZ</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+'/\\])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_ZXType">
+        <annotation>
+            <documentation>Typ A + ZX</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleN_ZXType">
+        <annotation>
+            <documentation>Typ N + ZX</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9\-,\.'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleNN_ZLType">
+        <annotation>
+            <documentation>Typ NN + ZL</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="[0-9\-,\.\+']*"/>
+        </restriction>
+    </simpleType>
+
+    <!-- kombinovane typy - 3 typy -->
+    <simpleType name="simpleA_N_ZZType">
+        <annotation>
+            <documentation>Typ A + N + ZZ</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+'/\\])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_N_ZXType">
+        <annotation>
+            <documentation>Typ A + N + ZX</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_NN_ZZType">
+        <annotation>
+            <documentation>Typ A + NN + ZZ</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+'/\\])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_NN_ZXType">
+        <annotation>
+            <documentation>Typ A + NN + ZX</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_NN_ZLType">
+        <annotation>
+            <documentation>Typ A + NN + ZL</documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+'])*"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_ZX_SP_Type">
+        <annotation>
+            <documentation>
+                Typ A + ZX + SP (mezera [U+0020], nesmí být prvním ani posledním znakem)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.']+( +[A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.']+)*)|"/>
+        </restriction>
+    </simpleType>
+
+    <!-- kombinovane typy - 4 typy -->
+    <simpleType name="simpleA_NN_ZX_SP_Type">
+        <annotation>
+            <documentation>
+                Typ A + NN + ZX + SP (mezera [U+0020], nesmí být prvním ani posledním znakem)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.']+( +[0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.']+)*)|"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_NN_ZZ_SP_Type">
+        <annotation>
+            <documentation>
+                Typ A + NN + ZZ + SP (mezera [U+0020], nesmí být prvním ani posledním znakem)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+'/\\]+( +[0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+'/\\]+)*)|"/>
+        </restriction>
+    </simpleType>
+    <simpleType name="simpleA_NN_ZL_SP_Type">
+        <annotation>
+            <documentation>
+                Typ A + NN + ZL + SP (mezera [U+0020], nesmí být prvním ani posledním znakem)
+            </documentation>
+        </annotation>
+        <restriction base="string">
+            <pattern value="([0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+']+( +[0-9A-Za-zŠŚŤŽŹšśťžźŁĄŞŻłąşĽľżŔÁÂĂÄĹĆÇČÉĘËĚÍÎĎĐŃŇÓÔŐÖŘŮÚŰÜÝŢßŕáâăäĺćçčéęëěíîďđńňóôőöřůúűüýţ\-,\.\+']+)*)|"/>
+        </restriction>
+    </simpleType>
+</schema>

@@ -1,0 +1,909 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/nem/NEMPRI25" xmlns:tns="http://schemas.cssz.cz/baseTypes/v2" attributeFormDefault="unqualified" elementFormDefault="qualified" targetNamespace="http://schemas.cssz.cz/nem/NEMPRI25" version="1.0" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:import schemaLocation="baseTypes2.xsd" namespace="http://schemas.cssz.cz/baseTypes/v2"/>
+  <xs:element name="NEMPRI" type="ctNEMPRI"/>
+  <xs:complexType name="ctNEMPRI">
+    <xs:sequence>
+      <xs:element minOccurs="0" maxOccurs="1" name="VENDOR">
+        <xs:complexType>
+          <xs:attribute name="productName" type="xs:string"/>
+          <xs:attribute name="productVersion" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element minOccurs="0" maxOccurs="1" name="SENDER">
+        <xs:complexType>
+          <xs:attribute name="EmailNotifikace" type="xs:string"/>
+          <xs:attribute name="ISDSreport" type="xs:string"/>
+        </xs:complexType>
+      </xs:element>
+      <xs:element maxOccurs="1500" name="datovaVeta" type="CtDatovaVeta"/>
+    </xs:sequence>
+    <xs:attribute name="partialAccept" type="xs:string"/>
+    <xs:attribute name="version" type="xs:string" use="required"/>
+  </xs:complexType>
+  <xs:element name="datovaVeta" type="CtDatovaVeta"/>
+  <xs:complexType name="CtDatovaVeta">
+    <xs:sequence>
+      <xs:element name="dokument" type="CtDokument"/>
+      <xs:element name="pojistenec" type="CtPojistenec"/>
+      <xs:element name="zamestnani" type="CtZamestnani"/>
+      <xs:element minOccurs="0" name="rozhodneObdobi" type="CtRozhodneObdobi"/>
+      <xs:element name="davka" type="CtDruhDavky"/>
+      <xs:element minOccurs="0" name="dalsiSdeleni">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:maxLength value="200"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="kontaktPracovnik" type="CtKontaktniPracovnik"/>
+      <xs:element minOccurs="0" name="platebniSpojeni" type="CtPlatebniSpojeni"/>
+      <xs:element minOccurs="0" name="prilohy" type="CtPrilohy"/>
+    </xs:sequence>
+    <xs:attribute name="poradoveCislo" type="StPoradoveCisloType" use="required">
+      <xs:annotation>
+        <xs:documentation>Pořadové číslo formuláře v rámci podání</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="CtDruhDavky">
+    <xs:choice>
+      <xs:element name="nem" type="CtNem"/>
+      <xs:element name="vpm" type="CtVpm"/>
+      <xs:element name="opp" type="CtOpp"/>
+      <xs:element name="ppm" type="CtPpm"/>
+      <xs:element name="ose" type="CtOse"/>
+      <xs:element name="dlo" type="CtDlo"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:complexType name="CtNem">
+    <xs:sequence>
+      <xs:element name="potvrzeniZamestnavatele" type="CtPotvrzeniZamestnavateleNem"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtVpm">
+    <xs:sequence>
+      <xs:element name="potvrzeniZamestnavatele" type="CtPotvrzeniZamestnavateleVpm"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtOpp">
+    <xs:sequence>
+      <xs:element name="potvrzeniZamestnavatele" type="CtPotvrzeniZamestnavateleBaseType"/>
+      <xs:element name="zadostODavku" type="CtZadostODavkuOpp"/>
+      <xs:element name="podkladyProVyplatDavky" type="CtpodkladyProVyplatDavkyOpp"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtPpm">
+    <xs:sequence>
+      <xs:element name="potvrzeniZamestnavatele" type="CtPotvrzeniZamestnavatelePpm"/>
+      <xs:element name="zadostODavku" type="CtZadostODavkuPpm"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtOse">
+    <xs:sequence>
+      <xs:element name="oseVznik" type="xs:boolean"/>
+      <xs:element name="oseTrvani" type="xs:boolean"/>
+      <xs:element name="oseUkonceni" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="potvrzeniZamestnavatele" type="CtPotvrzeniZamestnavateleOse"/>
+      <xs:element name="zadostODavku" type="CtZadostODavkuOse"/>
+      <xs:element minOccurs="0" name="podkladyProVyplatDavky" type="CtpodkladyProVyplatDavkyOse"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtDlo">
+    <xs:sequence>
+      <xs:element name="dloVznik" type="xs:boolean"/>
+      <xs:element name="dloTrvani" type="xs:boolean"/>
+      <xs:element name="dloUkonceni" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="potvrzeniZamestnavatele" type="CtPotvrzeniZamestnavateleDlo"/>
+      <xs:element name="zadostODavku" type="CtZadostODavkuDlo"/>
+      <xs:element minOccurs="0" name="podkladyProVyplatDavky" type="CtpodkladyProVyplatDavkyDlo"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtOsoba">
+    <xs:sequence>
+      <xs:element name="jmeno">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_ZX_SP_Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="prijmeni">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_ZX_SP_Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="rodneCislo">
+        <xs:annotation>
+          <xs:documentation>Rodné číslo / EČP</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNNType">
+            <xs:minLength value="9"/>
+            <xs:maxLength value="10"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="datumNarozeni" type="xs:date"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtPotvrzeniZamestnavateleBaseType">
+    <xs:sequence>
+      <xs:element name="pracoval" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pocetOdpracovanychHodin">
+        <xs:simpleType>
+          <xs:restriction base="xs:double">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="99999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="pracovniDoba" type="StDoublePracDoba"/>
+      <xs:element minOccurs="0" name="prijemMalyRozsah" type="StPrijemMalyRozsah"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtObdobi">
+    <xs:sequence>
+      <xs:element name="od" type="xs:date"/>
+      <xs:element name="do" type="xs:date"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtDokument">
+    <xs:sequence>
+      <xs:element name="kodOSSZ">
+        <xs:annotation>
+          <xs:documentation>Kód pracoviště z CIS_PRACOVIST</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNType">
+            <xs:minInclusive value="100"/>
+            <xs:maxInclusive value="999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="druhDavky" type="StDruhDavky"/>
+      <xs:element minOccurs="0" name="opravnePodani" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="cisloRozhodnuti">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:maxLength value="18"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="zahranicni" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtKontakt">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="telefon">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NN_ZZ_SP_Type">
+            <xs:maxLength value="33"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="email">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:pattern value="[^@]+@[^\.]+\..+"/>
+            <xs:maxLength value="250"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtKontaktniPracovnik">
+    <xs:complexContent>
+      <xs:extension base="CtKontakt">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="kontaktniPracovnik">
+            <xs:simpleType>
+              <xs:restriction base="tns:simpleA_ZX_SP_Type">
+                <xs:maxLength value="100"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtZamestnani">
+    <xs:sequence>
+      <xs:element name="VSZamestnavatel">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNType_string">
+            <xs:length value="10"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="ICZamestnavatel">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NN_ZZType">
+            <xs:maxLength value="35"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="nazevZamestnavatel">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:minLength value="0"/>
+            <xs:maxLength value="150"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="zamestnanOd" type="xs:date"/>
+      <xs:element minOccurs="0" name="zamestnanDo" type="xs:date">
+        <xs:annotation>
+          <xs:documentation>Vyplňuje se jen při skončení zaměstnání</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="druhCinnosti" type="StCiselnik">
+        <xs:annotation>
+          <xs:documentation>Kód pracoviště z číselníku druhu činností</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtRozhodneObdobi">
+    <xs:sequence>
+      <xs:element name="rozhodneObdobiOd" type="xs:date"/>
+      <xs:element name="rozhodneObdobiDo" type="xs:date"/>
+      <xs:element minOccurs="0" name="seznamObdobi" type="CtSeznamRozhodnehoObdobi"/>
+      <xs:element minOccurs="0" name="zapocitatelnyPrijemCelkem">
+        <xs:simpleType>
+          <xs:restriction base="xs:double">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="9999999999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="vylouceneDnyCelkem">
+        <xs:simpleType>
+          <xs:restriction base="xs:short">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="pravdepodobnaVysePrijmu">
+        <xs:simpleType>
+          <xs:restriction base="xs:nonNegativeInteger">
+            <xs:maxInclusive value="9999999999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtSeznamRozhodnehoObdobi">
+    <xs:annotation>
+      <xs:documentation>max 12 měsíců</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element minOccurs="1" maxOccurs="12" name="obdobi" type="CtPolozkaRozhodnehoObdobi"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtPolozkaRozhodnehoObdobi">
+    <xs:annotation>
+      <xs:documentation>měsíc, rok, započitatelný příjem a vyloučené dny</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="kalendarniMesic">
+        <xs:simpleType>
+          <xs:restriction base="xs:short">
+            <xs:minInclusive value="1"/>
+            <xs:maxInclusive value="12"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="kalendarniRok">
+        <xs:simpleType>
+          <xs:restriction base="xs:short">
+            <xs:minInclusive value="1900"/>
+            <xs:maxInclusive value="2999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="zapocitatelnyPrijem">
+        <xs:simpleType>
+          <xs:restriction base="xs:double">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="9999999999"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="vylouceneDny">
+        <xs:simpleType>
+          <xs:restriction base="xs:short">
+            <xs:minInclusive value="0"/>
+            <xs:maxInclusive value="31"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtPotvrzeniZamestnavateleNem">
+    <xs:complexContent>
+      <xs:extension base="CtPotvrzeniZamestnavateleBaseType">
+        <xs:sequence>
+          <xs:element name="pobiraDuchod" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="druhDuchodu" type="StCiselnik"/>
+          <xs:element name="jeStudentem" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="spadaDoPrazdnin" type="xs:boolean"/>
+          <xs:element name="dobaVolnaPrvniZamestnani" type="xs:boolean"/>
+          <xs:element name="volnoBezNahrady" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="volnoBezNahradyOd" type="xs:date"/>
+          <xs:element minOccurs="0" name="volnoBezNahradyDo" type="xs:date"/>
+          <xs:element minOccurs="0" name="nastupujePPM" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="narozeniDitete" type="xs:date"/>
+          <xs:element name="prevedenaNaJinouPraci" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="datumNaJinouPraci" type="xs:date"/>
+          <xs:element name="exekuce" type="xs:boolean"/>
+          <xs:element name="insolvence" type="xs:boolean"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtPotvrzeniZamestnavateleVpm">
+    <xs:complexContent>
+      <xs:extension base="CtPotvrzeniZamestnavateleBaseType">
+        <xs:sequence>
+          <xs:element name="pobiraDuchod" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="druhDuchodu" type="StCiselnik"/>
+          <xs:element name="jeStudentem" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="spadaDoPrazdnin" type="xs:boolean"/>
+          <xs:element name="dobaVolnaPrvniZamestnani" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="nastupujePPM" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="narozeniDitete" type="xs:date"/>
+          <xs:element name="prevedenaNaJinouPraci" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="datumNaJinouPraci" type="xs:date"/>
+          <xs:element name="exekuce" type="xs:boolean"/>
+          <xs:element name="insolvence" type="xs:boolean"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtPotvrzeniZamestnavatelePpm">
+    <xs:complexContent>
+      <xs:extension base="CtPotvrzeniZamestnavateleBaseType">
+        <xs:sequence>
+          <xs:element name="pobiraDuchod" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="druhDuchodu" type="StCiselnik"/>
+          <xs:element minOccurs="0" name="nastupujePPM" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="narozeniDitete" type="xs:date"/>
+          <xs:element name="prevedenaNaJinouPraci" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="datumNaJinouPraci" type="xs:date"/>
+          <xs:element name="exekuce" type="xs:boolean"/>
+          <xs:element name="insolvence" type="xs:boolean"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtPotvrzeniZamestnavateleOse">
+    <xs:complexContent>
+      <xs:extension base="CtPotvrzeniZamestnavateleBaseType">
+        <xs:sequence>
+          <xs:element name="jeStudentem" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="spadaDoPrazdnin" type="xs:boolean"/>
+          <xs:element name="prevedenaNaJinouPraci" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="datumNaJinouPraci" type="xs:date"/>
+          <xs:element name="volnoBezNahrady" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="volnoBezNahradyOd" type="xs:date"/>
+          <xs:element minOccurs="0" name="volnoBezNahradyDo" type="xs:date"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtPotvrzeniZamestnavateleDlo">
+    <xs:complexContent>
+      <xs:extension base="CtPotvrzeniZamestnavateleBaseType">
+        <xs:sequence>
+          <xs:element name="jeStudentem" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="spadaDoPrazdnin" type="xs:boolean"/>
+          <xs:element name="prevedenaNaJinouPraci" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="datumNaJinouPraci" type="xs:date"/>
+          <xs:element name="volnoBezNahrady" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="volnoBezNahradyOd" type="xs:date"/>
+          <xs:element minOccurs="0" name="volnoBezNahradyDo" type="xs:date"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtPlatebniSpojeni">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="vyplatitUcetCR" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="vyplatitUcetCizina" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="vyplatitAdresa" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="vyplatitHotovost" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="adresa" type="CtAdresa"/>
+      <xs:element minOccurs="0" name="ucetCZ" type="CtUcetCZ"/>
+      <xs:element minOccurs="0" name="ucetZahranicni" type="CtUcetZahranicni"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtAdresa">
+    <xs:sequence>
+      <xs:element name="obec">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NN_ZX_SP_Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="ulice">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NN_ZX_SP_Type">
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="cisloPopis">
+        <xs:annotation>
+          <xs:documentation>Číslo popisné</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_N_ZZType">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="4"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="cisloOrient">
+        <xs:annotation>
+          <xs:documentation>Číslo popisné a orientační</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NN_ZZType">
+            <xs:maxLength value="4"/>
+            <xs:minLength value="1"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="psc">
+        <xs:annotation>
+          <xs:documentation>PSČ</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_N_ZZType">
+            <xs:maxLength value="5"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtUcetCZ">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="predcisli">
+        <xs:annotation>
+          <xs:documentation>Předčíslí účtu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNNType">
+            <xs:maxLength value="6"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="ucetCislo">
+        <xs:annotation>
+          <xs:documentation>Číslo účtu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNNType">
+            <xs:minLength value="2"/>
+            <xs:maxLength value="10"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="specSymbol">
+        <xs:annotation>
+          <xs:documentation>Specifický symbol</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNNType">
+            <xs:maxLength value="10"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="bankaKod">
+        <xs:annotation>
+          <xs:documentation>Kód banky Hodnota z číselníku</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNNType">
+            <xs:length value="4"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtUcetZahranicni">
+    <xs:sequence>
+      <xs:element name="stat" type="StCiselnik"/>
+      <xs:element minOccurs="0" name="IBAN">
+        <xs:annotation>
+          <xs:documentation>IBAN účtu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NNType">
+            <xs:maxLength value="34"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="ucetCislo">
+        <xs:annotation>
+          <xs:documentation>Číslo účtu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NNType">
+            <xs:maxLength value="34"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="ucetNazev">
+        <xs:annotation>
+          <xs:documentation>Název účtu příjemce</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:maxLength value="35"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="bankaNazev">
+        <xs:annotation>
+          <xs:documentation>Název peněžního ústavu</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:maxLength value="35"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="bankaTypId">
+        <xs:annotation>
+          <xs:documentation>Typ ID  banky</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleAType">
+            <xs:maxLength value="3"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="bankaKod">
+        <xs:annotation>
+          <xs:documentation>Typ ID banky</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NNType">
+            <xs:maxLength value="11"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="obec">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="35"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="ulice">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:maxLength value="35"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="cisloPopis">
+        <xs:annotation>
+          <xs:documentation>Číslo popisné</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_N_ZZType">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="12"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="cisloOrient">
+        <xs:annotation>
+          <xs:documentation>Číslo popisné a orientační</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_NN_ZZType">
+            <xs:maxLength value="4"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="psc">
+        <xs:annotation>
+          <xs:documentation>PSČ</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_N_ZZType">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="11"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtPrilohy">
+    <xs:sequence>
+      <xs:element minOccurs="1" maxOccurs="9" name="priloha" type="CtPriloha">
+        <xs:annotation>
+          <xs:documentation>Možnost vložit až 9  příloh typu MIME (Multipurpose Internet Mail Extensions)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="coun">
+      <xs:annotation>
+        <xs:documentation>Počet příloh</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="xs:short">
+          <xs:minInclusive value="1"/>
+          <xs:maxInclusive value="9"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="CtPriloha">
+    <xs:sequence>
+      <xs:element name="nazev">
+        <xs:annotation>
+          <xs:documentation>Název přílohy</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="typ">
+        <xs:annotation>
+          <xs:documentation>Typ přílohy</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="komentar">
+        <xs:annotation>
+          <xs:documentation>Komentář zaměstnavatele</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleL2Type">
+            <xs:maxLength value="256"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="base64data" type="xs:base64Binary">
+        <xs:annotation>
+          <xs:documentation>Přiložený soubor</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:simpleType name="StDruhDavky">
+    <xs:annotation>
+      <xs:documentation>
+        NEM -	nemocenské
+        VPM	- vyrovnávací příspěvek
+        OPP	- otcovská
+        PPM	- peněžitá pomoc v mateřství
+        OSE	- ošetřovné
+        DLO -	dlouhodobé ošetřovné
+      </xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="NEM"/>
+      <xs:enumeration value="VPM"/>
+      <xs:enumeration value="OPP"/>
+      <xs:enumeration value="PPM"/>
+      <xs:enumeration value="OSE"/>
+      <xs:enumeration value="DLO"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="CtPojistenec">
+    <xs:sequence>
+      <xs:element name="jmeno">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_ZX_SP_Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="prijmeni">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_ZX_SP_Type">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="100"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="rodneCislo">
+        <xs:annotation>
+          <xs:documentation>Rodné číslo / EČP</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleNNType">
+            <xs:minLength value="9"/>
+            <xs:maxLength value="10"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="kontakt" type="CtKontakt"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtDite">
+    <xs:complexContent>
+      <xs:extension base="CtOsoba">
+        <xs:sequence>
+          <xs:element name="poradoveCisloDitete">
+            <xs:simpleType>
+              <xs:restriction base="xs:short">
+                <xs:minInclusive value="1"/>
+                <xs:maxInclusive value="10"/>
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="CtZadostODavkuOpp">
+    <xs:sequence>
+      <xs:element name="odeDne" type="xs:date"/>
+      <xs:element name="dite" type="CtOsoba"/>
+      <xs:element name="duvodOtcovske" type="StCiselnik"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtZadostODavkuPpm">
+    <xs:sequence>
+      <xs:element name="odeDne" type="xs:date"/>
+      <xs:element minOccurs="0" name="duvodPece" type="StCiselnik"/>
+      <xs:element minOccurs="0" name="deti" type="CtDeti"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtZadostODavkuDlo">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="odeDne" type="xs:date"/>
+      <xs:element minOccurs="0" name="doDne" type="xs:date"/>
+      <xs:element minOccurs="0" name="osetrovanaOsoba" type="CtOsoba"/>
+      <xs:element minOccurs="0" name="kodVztah" type="StCiselnik"/>
+      <xs:element minOccurs="0" name="jeStridani" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="narokNaPPMjinouOsobou" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="jinaFOParagraf57" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="spolecnaDomacnost" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pecovalOsobne" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pecovalVeDnech" type="CtSeznamObodobi"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtDeti">
+    <xs:sequence>
+      <xs:element maxOccurs="10" name="dite" type="CtDite"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtZadostODavkuOse">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="odeDne" type="xs:date"/>
+      <xs:element minOccurs="0" name="doDne" type="xs:date"/>
+      <xs:element minOccurs="0" name="osetrovanaOsoba" type="CtOsoba"/>
+      <xs:choice minOccurs="0">
+        <xs:element name="onemocnela" type="xs:boolean"/>
+        <xs:element name="narizenaKarantena" type="xs:boolean"/>
+        <xs:element name="nemuzePecovatODite" type="xs:boolean"/>
+        <xs:element name="uzavrenaSkola" type="CtZarizeniSkoly"/>
+      </xs:choice>
+      <xs:element minOccurs="0" name="spolecnaDomacnost" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="jeOsamely" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="vPeciDiteDo16Let" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="narokNaPPMjinouOsobou" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="narokNaRPjinaOsobaNecerpaVolnoNeboOSVC" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="jinaFOParagraf57" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pecovalOsobne" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pecovalVeDnech" type="CtSeznamObodobi"/>
+      <xs:element minOccurs="0" name="kodRodVztah" type="StCiselnik"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtObodobi">
+    <xs:sequence>
+      <xs:element name="od" type="xs:date"/>
+      <xs:element name="do" type="xs:date"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtSeznamObodobi">
+    <xs:sequence>
+      <xs:element minOccurs="1" maxOccurs="unbounded" name="obdobi" type="CtObdobi"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtZarizeniSkoly">
+    <xs:sequence>
+      <xs:element name="nazevZarizeniSkoly">
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="200"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element minOccurs="0" name="ICZarizeniSkoly">
+        <xs:simpleType>
+          <xs:restriction base="tns:simpleA_N_ZZType">
+            <xs:minLength value="1"/>
+            <xs:maxLength value="35"/>
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtpodkladyProVyplatDavkyOpp">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="pracovniDobaPoslDenPD" type="StDoublePracDoba"/>
+      <xs:element minOccurs="0" name="pocetOdpracHodinPoslDenPD" type="StDoublePracDoba"/>
+      <xs:element name="planovaneSmeny" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="planovaneSmenyOdpracoval" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="datumNavratDoPrace" type="xs:date"/>
+      <xs:element minOccurs="0" name="seznamPraceVeDnech" type="CtSeznamObodobi"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtpodkladyProVyplatDavkyOse">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="pracovalPoslDenPD" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pracovniDobaPoslDenPD" type="StDoublePracDoba"/>
+      <xs:element minOccurs="0" name="pocetOdpracHodinPoslDenPD" type="StDoublePracDoba"/>
+      <xs:element minOccurs="0" name="planovaneSmeny" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="planovaneSmenyOdpracoval" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="seznamPraceVeDnech" type="CtSeznamObodobi"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="CtpodkladyProVyplatDavkyDlo">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="pracovniDobaPoslDenPD" type="StDoublePracDoba"/>
+      <xs:element minOccurs="0" name="pocetOdpracHodinPoslDenPD" type="StDoublePracDoba"/>
+      <xs:element minOccurs="0" name="datumNavratDoPrace" type="xs:date"/>
+      <xs:element minOccurs="0" name="planovaneSmeny" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="seznamRozvrhuSmen" type="CtSeznamObodobi"/>
+      <xs:element minOccurs="0" name="seznamPraceVeDnech" type="CtSeznamObodobi"/>
+      <xs:element minOccurs="0" name="maVolno" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="pracovniVolno" type="CtSeznamObodobi"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:simpleType name="StPoradoveCisloType">
+    <xs:annotation>
+      <xs:documentation>Pořadové číslo položky, 1-1500</xs:documentation>
+    </xs:annotation>
+    <xs:restriction base="xs:int">
+      <xs:minInclusive value="1"/>
+      <xs:maxInclusive value="1500"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="StPrijemMalyRozsah">
+    <xs:restriction base="xs:nonNegativeInteger">
+      <xs:maxInclusive value="9999999999"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="StCiselnik">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9A-Z]{1,3}"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="StDoublePracDoba">
+    <xs:restriction base="xs:double">
+      <xs:minInclusive value="0"/>
+      <xs:maxInclusive value="24"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>
+
+
+
