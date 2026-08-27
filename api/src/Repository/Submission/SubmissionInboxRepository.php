@@ -173,7 +173,7 @@ final class SubmissionInboxRepository
 
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
-        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        return array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []));
     }
 
     /** @return array<string,mixed>|null */
@@ -224,7 +224,7 @@ final class SubmissionInboxRepository
         );
         $stmt->execute([$supplierId, $environment]);
 
-        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        return array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []));
     }
 
     /**
@@ -303,6 +303,7 @@ final class SubmissionInboxRepository
         foreach ([
             'defect_notice' => 'SELECT 1 FROM submission_defect_notices WHERE supplier_id = ? AND inbox_message_id = ? LIMIT 1',
             'receipt' => 'SELECT 1 FROM submission_outbox WHERE supplier_id = ? AND receipt_inbox_message_id = ? LIMIT 1',
+            'payroll_xmlzam_request' => 'SELECT 1 FROM payroll_enforcement_xmlzam_requests WHERE supplier_id = ? AND inbox_message_id = ? LIMIT 1',
         ] as $code => $sql) {
             $stmt = $this->db->pdo()->prepare($sql);
             $stmt->execute([$supplierId, $id]);
@@ -327,6 +328,11 @@ final class SubmissionInboxRepository
                     hidden_by = ?, lifecycle_row_version = lifecycle_row_version + 1
               WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?'
             . ' AND classification = \'unclassified\' AND matched_outbox_id IS NULL'
+            . ' AND NOT EXISTS (
+                  SELECT 1 FROM payroll_enforcement_xmlzam_requests request_row
+                   WHERE request_row.supplier_id = ' . self::TABLE . '.supplier_id
+                     AND request_row.inbox_message_id = ' . self::TABLE . '.id
+                )'
         );
         $stmt->execute([$hidden ? $userId : null, $supplierId, $id, $expectedVersion]);
         return $stmt->rowCount() === 1;
@@ -344,7 +350,12 @@ final class SubmissionInboxRepository
                     lifecycle_row_version = lifecycle_row_version + 1
               WHERE supplier_id = ? AND id = ? AND lifecycle_row_version = ?
                 AND local_content_state = \'available\'
-                AND classification = \'unclassified\' AND matched_outbox_id IS NULL'
+                AND classification = \'unclassified\' AND matched_outbox_id IS NULL
+                AND NOT EXISTS (
+                  SELECT 1 FROM payroll_enforcement_xmlzam_requests request_row
+                   WHERE request_row.supplier_id = ' . self::TABLE . '.supplier_id
+                     AND request_row.inbox_message_id = ' . self::TABLE . '.id
+                )'
         );
         $stmt->execute([$supplierId, $id, $expectedVersion]);
         return $stmt->rowCount() === 1;
@@ -529,7 +540,7 @@ final class SubmissionInboxRepository
         );
         $stmt->execute([$supplierId, $environment]);
 
-        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        return array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []));
     }
 
     // ───────────────────────── stav dotazování ─────────────────────────

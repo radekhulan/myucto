@@ -78,6 +78,64 @@ final class XmlzamCooperationCoreTest extends TestCase
             ->validateResponse($payload, $xml);
     }
 
+    public function testSerializerOmitsEveryUnrequestedCooperationScopeWithoutDefaults(): void
+    {
+        $serializer = new XmlzamCooperationResponseSerializer();
+
+        $employmentOnly = $serializer->serialize(self::response(
+            priority: null,
+            sharedPriority: null,
+            wages: null,
+            enforcements: null,
+        ));
+        self::assertStringNotContainsString('poradi_exekucniho_prikazu', $employmentOnly);
+        self::assertStringContainsString('<pracovni_pomer>', $employmentOnly);
+        self::assertStringContainsString('<aktivni>true</aktivni>', $employmentOnly);
+        self::assertStringNotContainsString('mzda_prehled', $employmentOnly);
+        self::assertStringNotContainsString('exekuce_prehled', $employmentOnly);
+
+        $priorityOnly = $serializer->serialize(self::response(
+            employmentActive: null,
+            employedFrom: null,
+            employedTo: null,
+            wages: null,
+        ));
+        self::assertStringContainsString('poradi_exekucniho_prikazu', $priorityOnly);
+        self::assertStringNotContainsString('<aktivni>', $priorityOnly);
+        self::assertStringNotContainsString('<zamestnan_od>', $priorityOnly);
+        self::assertStringNotContainsString('mzda_prehled', $priorityOnly);
+        self::assertStringContainsString('<exekuce_prehled', $priorityOnly);
+
+        $wagesOnly = $serializer->serialize(self::response(
+            priority: null,
+            sharedPriority: null,
+            employmentActive: null,
+            employedFrom: null,
+            employedTo: null,
+            enforcements: null,
+        ));
+        self::assertStringNotContainsString('poradi_exekucniho_prikazu', $wagesOnly);
+        self::assertStringNotContainsString('<aktivni>', $wagesOnly);
+        self::assertStringNotContainsString('<zamestnan_od>', $wagesOnly);
+        self::assertStringContainsString('<mzda_prehled>', $wagesOnly);
+        self::assertStringNotContainsString('exekuce_prehled', $wagesOnly);
+    }
+
+    public function testPinnedOfficialXsdRejectsSelectiveResponseInsteadOfFillingUnrequestedFields(): void
+    {
+        $payload = self::response(
+            priority: null,
+            sharedPriority: null,
+            wages: null,
+            enforcements: null,
+        );
+        $xml = (new XmlzamCooperationResponseSerializer())->serialize($payload);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('neodpovídá oficiálnímu schématu');
+        (new XmlzamValidator(new XmlzamSchemaCatalog()))->validateResponse($payload, $xml);
+    }
+
     public function testRejectsRequestWhoseDeclaredTypeIsNotCooperation(): void
     {
         $xml = str_replace('xs:type="soucinnost"', 'xs:type="zustatek"', self::requestXml());
@@ -139,5 +197,41 @@ final class XmlzamCooperationCoreTest extends TestCase
   <prilohy></prilohy>
 </dokument>
 XML;
+    }
+
+    /**
+     * @param list<array{period:string,gross_minor:int,withheld_minor:int,dependants:int}>|null $wages
+     * @param list<array{priority:int,subject:string,chamber:string,case_reference:string,claim_kind:string,delivered_on:string,priority_on:string,outstanding_minor:int}>|null $enforcements
+     */
+    private static function response(
+        ?int $priority = 2,
+        ?bool $sharedPriority = true,
+        ?bool $employmentActive = true,
+        ?string $employedFrom = '2025-01-01',
+        ?string $employedTo = null,
+        ?array $wages = [[
+            'period' => '2026-07',
+            'gross_minor' => 3500050,
+            'withheld_minor' => 612325,
+            'dependants' => 1,
+        ]],
+        ?array $enforcements = [],
+    ): XmlzamCooperationResponse {
+        return new XmlzamCooperationResponse(
+            identifier: '123-12345678-R1',
+            reactionTo: '123-12345678-A1',
+            issuedOn: '2026-08-27',
+            note: null,
+            debtorContact: null,
+            employerContact: null,
+            priority: $priority,
+            sharedPriority: $sharedPriority,
+            employmentActive: $employmentActive,
+            employedFrom: $employedFrom,
+            employedTo: $employedTo,
+            wages: $wages,
+            enforcements: $enforcements,
+            attachments: [],
+        );
     }
 }

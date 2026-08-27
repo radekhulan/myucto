@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Submission;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Document\DocumentStorage;
+use MyInvoice\Service\Payroll\Garnishment\Xmlzam\XmlzamCooperationArtifactStore;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use PDO;
 use Psr\Log\LoggerInterface;
@@ -25,6 +26,7 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         private Connection $db,
         private DocumentStorage $storage,
         private PayrollSubmissionService $payroll,
+        private XmlzamCooperationArtifactStore $xmlzam,
         private LoggerInterface $logger,
     ) {}
 
@@ -33,6 +35,7 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         return match ($artifactKind) {
             'tax_submission' => $this->taxSubmission($supplierId, $artifactId),
             'payroll_submission' => $this->payrollArtifact($supplierId, $artifactId),
+            'payroll_xmlzam' => $this->xmlzam->resolve($supplierId, $artifactId),
             'document' => $this->document($supplierId, $artifactId),
             default => null,
         };

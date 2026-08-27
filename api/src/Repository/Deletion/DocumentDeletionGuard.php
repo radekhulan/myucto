@@ -66,6 +66,13 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ['table' => 'payroll_insolvency_payment_instructions', 'column' => 'decision_document_id'],
                 ],
             ],
+            'payroll_enforcement_xmlzam_source' => [
+                'message' => 'Doklad je ověřenou zdrojovou přílohou požadavku XMLZAM na součinnost '
+                    . 'exekutorovi (%d vazeb). Je součástí neměnné důkazní stopy a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'payroll_enforcement_xmlzam_requests', 'column' => 'source_document_id'],
+                ],
+            ],
             'payroll_production_qualification' => [
                 'message' => 'Doklad prokazuje připravenost firmy k ostrému provozu mezd '
                     . '(%d vazeb). Je součástí neměnné kvalifikační stopy a nelze ho odstranit.',

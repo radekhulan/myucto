@@ -83,6 +83,7 @@ use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
+use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
@@ -750,6 +751,12 @@ final class Routes
                 [PayrollDeductionAgreementAction::class, 'transition'],
             );
             $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
+            $g->get('/enforcement/cooperation/candidates', [PayrollXmlzamCooperationAction::class, 'candidates']);
+            $g->get('/enforcement/cooperation/requests/{id:[0-9]+}', [PayrollXmlzamCooperationAction::class, 'detail']);
+            $g->post('/enforcement/cooperation/requests/import', [PayrollXmlzamCooperationAction::class, 'import']);
+            $g->post('/enforcement/cooperation/requests/{id:[0-9]+}/preview', [PayrollXmlzamCooperationAction::class, 'preview']);
+            $g->post('/enforcement/cooperation/requests/{id:[0-9]+}/responses', [PayrollXmlzamCooperationAction::class, 'freeze']);
+            $g->post('/enforcement/cooperation/responses/{id:[0-9]+}/enqueue', [PayrollXmlzamCooperationAction::class, 'enqueue']);
             $g->post('/enforcement/cases', [PayrollEnforcementAction::class, 'create']);
             $g->get('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'detail']);
             $g->delete('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'delete']);

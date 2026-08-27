@@ -38,35 +38,46 @@ final class XmlzamCooperationResponseSerializer
             'email' => 'email',
         ]);
 
-        $priority = $this->text($document, $root, 'poradi_exekucniho_prikazu', (string) $response->priority);
-        $priority->setAttribute('sdilene_poradi', $response->sharedPriority ? 'true' : 'false');
-
-        $employment = $document->createElement('pracovni_pomer');
-        $root->appendChild($employment);
-        $this->text($document, $employment, 'aktivni', $response->employmentActive ? 'true' : 'false');
-        $this->text($document, $employment, 'zamestnan_od', $response->employedFrom);
-        $this->text($document, $employment, 'zamestnan_do', $response->employedTo ?? '');
-
-        $wages = $document->createElement('mzda_prehled');
-        $employment->appendChild($wages);
-        foreach ($response->wages as $row) {
-            $wage = $this->text($document, $wages, 'mzda', self::money($row['gross_minor']));
-            $wage->setAttribute('obdobi', $row['period']);
-            $wage->setAttribute('srazeno_celkem', self::money($row['withheld_minor']));
-            $wage->setAttribute('vyzivovane_osoby', (string) $row['dependants']);
+        if ($response->priority !== null) {
+            $priority = $this->text($document, $root, 'poradi_exekucniho_prikazu', (string) $response->priority);
+            $priority->setAttribute('sdilene_poradi', $response->sharedPriority === true ? 'true' : 'false');
         }
 
-        $enforcements = $document->createElement('exekuce_prehled');
-        $employment->appendChild($enforcements);
-        foreach ($response->enforcements as $row) {
-            $enforcement = $this->text($document, $enforcements, 'exekuce', self::money($row['outstanding_minor']));
-            $enforcement->setAttribute('poradi', (string) $row['priority']);
-            $enforcement->setAttribute('subjekt', $row['subject']);
-            $enforcement->setAttribute('senat', $row['chamber']);
-            $enforcement->setAttribute('spisova_znacka', $row['case_reference']);
-            $enforcement->setAttribute('druh_pohledavky', $row['claim_kind']);
-            $enforcement->setAttribute('datum_doruceni', $row['delivered_on']);
-            $enforcement->setAttribute('datum_poradi', $row['priority_on']);
+        if ($response->employmentActive !== null
+            || $response->wages !== null
+            || $response->enforcements !== null
+        ) {
+            $employment = $document->createElement('pracovni_pomer');
+            $root->appendChild($employment);
+            if ($response->employmentActive !== null) {
+                $this->text($document, $employment, 'aktivni', $response->employmentActive ? 'true' : 'false');
+                $this->text($document, $employment, 'zamestnan_od', $response->employedFrom ?? '');
+                $this->text($document, $employment, 'zamestnan_do', $response->employedTo ?? '');
+            }
+            if ($response->wages !== null) {
+                $wages = $document->createElement('mzda_prehled');
+                $employment->appendChild($wages);
+                foreach ($response->wages as $row) {
+                    $wage = $this->text($document, $wages, 'mzda', self::money($row['gross_minor']));
+                    $wage->setAttribute('obdobi', $row['period']);
+                    $wage->setAttribute('srazeno_celkem', self::money($row['withheld_minor']));
+                    $wage->setAttribute('vyzivovane_osoby', (string) $row['dependants']);
+                }
+            }
+            if ($response->enforcements !== null) {
+                $enforcements = $document->createElement('exekuce_prehled');
+                $employment->appendChild($enforcements);
+                foreach ($response->enforcements as $row) {
+                    $enforcement = $this->text($document, $enforcements, 'exekuce', self::money($row['outstanding_minor']));
+                    $enforcement->setAttribute('poradi', (string) $row['priority']);
+                    $enforcement->setAttribute('subjekt', $row['subject']);
+                    $enforcement->setAttribute('senat', $row['chamber']);
+                    $enforcement->setAttribute('spisova_znacka', $row['case_reference']);
+                    $enforcement->setAttribute('druh_pohledavky', $row['claim_kind']);
+                    $enforcement->setAttribute('datum_doruceni', $row['delivered_on']);
+                    $enforcement->setAttribute('datum_poradi', $row['priority_on']);
+                }
+            }
         }
 
         if ($response->attachments !== []) {

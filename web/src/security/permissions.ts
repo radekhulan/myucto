@@ -20,7 +20,7 @@ export const PERMISSION_KEYS = [
   'payroll', 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.person.write',
   'payroll.employment.write', 'payroll.time.write', 'payroll.inputs.write',
   'payroll.calculate', 'payroll.review', 'payroll.approve', 'payroll.reopen',
-  'payroll.post', 'payroll.payments', 'payroll.submissions', 'payroll.enforcement',
+  'payroll.post', 'payroll.payments', 'payroll.submissions', 'payroll.enforcement', 'payroll.enforcement.cooperation',
   'payroll.insolvency', 'payroll.reports', 'payroll.rulesets', 'payroll.documents',
   'payroll.retention', 'payroll.erasure',
   'cash', 'cash.document.write', 'cash.close',

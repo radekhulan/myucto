@@ -52,7 +52,7 @@ final class SubmissionRecipientRepository
 
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
-        return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        return array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []));
     }
 
     /** @return array<string,mixed>|null */
@@ -66,6 +66,30 @@ final class SubmissionRecipientRepository
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? self::normalize($row) : null;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function findActiveVisibleByExactBoxId(int $supplierId, string $boxId): array
+    {
+        $this->assertAvailable();
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . ' recipient
+              WHERE recipient.is_active = 1
+                AND LOWER(recipient.isds_box_id) = LOWER(?)
+                AND (
+                  recipient.supplier_id = ?
+                  OR (
+                    recipient.supplier_id IS NULL
+                    AND NOT EXISTS (
+                      SELECT 1 FROM ' . self::TABLE . ' own
+                       WHERE own.supplier_id = ? AND own.code = recipient.code
+                    )
+                  )
+                )
+              ORDER BY recipient.supplier_id IS NULL ASC, recipient.id ASC'
+        );
+        $stmt->execute([$boxId, $supplierId, $supplierId]);
+        return array_values(array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []));
     }
 
     /**

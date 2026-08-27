@@ -144,6 +144,8 @@ final class RoutePermissionMap
         // Konkrétní pravidla musí předcházet obecnému `/api/payroll/*` fallbacku
         // i pravidlu na `/people`, jinak by `retention` spadlo do modulového práva.
         ['GET', '#^/api/payroll/retention(/(assessment|holds))?$#', 'payroll.retention', AccessLevel::READ],
+        ['GET', '#^/api/payroll/enforcement/cooperation/(candidates|requests/[0-9]+)$#', 'payroll.enforcement.cooperation', AccessLevel::READ],
+        ['*', '#^/api/payroll/enforcement/cooperation(/|$)#', 'payroll.enforcement.cooperation', AccessLevel::WRITE],
         ['*', '#^/api/payroll/retention/(holds(/[0-9]+)?|policies/[a-z_]+)$#', 'payroll.retention', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/retention/erasure(/[0-9]+)?$#', 'payroll.erasure', AccessLevel::READ],
         ['POST', '#^/api/payroll/retention/erasure(/[0-9]+/(approve|reject|execute))?$#', 'payroll.erasure', AccessLevel::WRITE],
