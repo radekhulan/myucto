@@ -4,15 +4,26 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\Deletion\DocumentDeletionGuard;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpManualCompletionService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
+use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Data jsou zjevně syntetická a nic tady nesahá na síť ani na ČSSZ.
@@ -24,9 +35,16 @@ final class EldpStatementServiceTest extends TestCase
 
     private Connection $db;
     private EldpStatementService $service;
+    private EldpManualCompletionService $completions;
+    private DocumentStorage $documentStorage;
+    private DocumentRepository $documents;
+    private DocumentDeletionGuard $documentDeletionGuard;
+    private PayrollEldpAction $action;
     private int $supplierId;
     private int $employmentId;
     private int $createdBy;
+    /** @var list<string> */
+    private array $storedEvidencePaths = [];
 
     protected function setUp(): void
     {
@@ -38,12 +56,19 @@ final class EldpStatementServiceTest extends TestCase
         $service = $container->get(EldpStatementService::class);
         self::assertInstanceOf(EldpStatementService::class, $service);
         $this->service = $service;
+        $this->completions = $container->get(EldpManualCompletionService::class);
+        $this->documentStorage = $container->get(DocumentStorage::class);
+        $this->documents = $container->get(DocumentRepository::class);
+        $this->documentDeletionGuard = $container->get(DocumentDeletionGuard::class);
+        $this->action = $container->get(PayrollEldpAction::class);
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         $this->createdBy = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
         self::assertGreaterThan(0, $this->createdBy);
         $sourceSupplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
+        $pdo->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')
+            ->execute([$this->supplierId]);
         $this->employmentId = $this->source($pdo);
     }
 
@@ -51,6 +76,11 @@ final class EldpStatementServiceTest extends TestCase
     {
         if (isset($this->db) && $this->db->pdo()->inTransaction()) {
             $this->db->pdo()->rollBack();
+        }
+        foreach ($this->storedEvidencePaths as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
         }
     }
 
@@ -184,6 +214,184 @@ final class EldpStatementServiceTest extends TestCase
         );
     }
 
+    public function testManualEvidenceKeepsControlXmlPreparedAndFulfilsOnlyAcceptedOutcome(): void
+    {
+        $prepared = $this->prepare();
+        $submittedDocument = $this->evidenceDocument(
+            'submitted.pdf',
+            '%PDF-1.7 synthetic ELDP submission confirmation',
+        );
+        $acceptedDocument = $this->evidenceDocument(
+            'accepted.pdf',
+            '%PDF-1.7 synthetic ELDP acceptance confirmation',
+        );
+
+        $submittedResponse = $this->action->complete(
+            $this->request('session', [
+                'payroll.submissions' => AccessLevel::WRITE->value,
+                'documents' => AccessLevel::READ->value,
+            ])->withParsedBody([
+                'environment' => 'test',
+                'expected_obligation_row_version' => 2,
+                'authority_status' => 'submitted',
+                'confirmation_document_id' => $submittedDocument,
+                'authority_reference' => 'CSSZ-SYNTHETIC-SUBMITTED-2025',
+                'confirmed_on' => '2026-01-05',
+                'idempotency_key' => 'synthetic-eldp-manual-submitted',
+            ]),
+            new Response(),
+            ['statementId' => (string) $prepared['statement_id']],
+        );
+        self::assertSame(200, $submittedResponse->getStatusCode());
+        $submittedPayload = json_decode((string) $submittedResponse->getBody(), true);
+        self::assertIsArray($submittedPayload);
+        $submitted = $submittedPayload['manual_completion'] ?? null;
+        self::assertIsArray($submitted);
+
+        self::assertTrue($submitted['created']);
+        self::assertSame('submitted', $submitted['authority_status']);
+        self::assertSame('submitted', $submitted['obligation_status']);
+        self::assertSame('prepared', $submitted['local_submission_status']);
+        self::assertSame(3, $submitted['obligation_row_version']);
+        $audit = $this->db->pdo()->prepare(
+            'SELECT entity_id, payload FROM activity_log
+              WHERE supplier_id = ? AND action = "payroll.eldp.manual_completion_recorded"
+              ORDER BY id DESC LIMIT 1'
+        );
+        $audit->execute([$this->supplierId]);
+        $auditRow = $audit->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($auditRow);
+        self::assertSame((int) $submitted['id'], (int) $auditRow['entity_id']);
+        self::assertStringContainsString('submitted', (string) $auditRow['payload']);
+
+        $accepted = $this->completions->record(
+            $this->supplierId,
+            'test',
+            $prepared['statement_id'],
+            $submitted['obligation_row_version'],
+            'accepted',
+            $acceptedDocument,
+            'CSSZ-SYNTHETIC-ACCEPTED-2025',
+            '2026-01-06',
+            'synthetic-eldp-manual-accepted',
+            $this->createdBy,
+        );
+
+        self::assertTrue($accepted['created']);
+        self::assertSame('accepted', $accepted['authority_status']);
+        self::assertSame('fulfilled', $accepted['obligation_status']);
+        self::assertSame('prepared', $accepted['local_submission_status']);
+        self::assertSame(4, $accepted['obligation_row_version']);
+
+        $replay = $this->completions->record(
+            $this->supplierId,
+            'test',
+            $prepared['statement_id'],
+            $submitted['obligation_row_version'],
+            'accepted',
+            $acceptedDocument,
+            'CSSZ-SYNTHETIC-ACCEPTED-2025',
+            '2026-01-06',
+            'synthetic-eldp-manual-accepted',
+            $this->createdBy,
+        );
+        self::assertFalse($replay['created']);
+        self::assertSame(4, $replay['obligation_row_version']);
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT authority_status, confirmation_document_id,
+                    confirmation_sha256, confirmation_byte_size,
+                    authority_reference, confirmed_on
+               FROM payroll_eldp_manual_completions
+              WHERE supplier_id = ? AND statement_id = ?
+              ORDER BY id'
+        );
+        $stored->execute([$this->supplierId, $prepared['statement_id']]);
+        $rows = $stored->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(2, $rows);
+        self::assertSame('submitted', $rows[0]['authority_status']);
+        self::assertSame('accepted', $rows[1]['authority_status']);
+        self::assertSame($acceptedDocument, (int) $rows[1]['confirmation_document_id']);
+        self::assertSame(
+            hash('sha256', '%PDF-1.7 synthetic ELDP acceptance confirmation'),
+            $rows[1]['confirmation_sha256'],
+        );
+        self::assertSame(
+            strlen('%PDF-1.7 synthetic ELDP acceptance confirmation'),
+            (int) $rows[1]['confirmation_byte_size'],
+        );
+        $blockedDocuments = $this->documentDeletionGuard->blockedTrashDocuments(
+            $this->supplierId,
+            [$acceptedDocument],
+        );
+        self::assertArrayHasKey($acceptedDocument, $blockedDocuments);
+        self::assertSame(
+            1,
+            $blockedDocuments[$acceptedDocument]->counts['payroll_eldp_manual_completion'] ?? 0,
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET deleted_at = NOW() WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $acceptedDocument]);
+        $replayAfterTrash = $this->completions->record(
+            $this->supplierId,
+            'test',
+            $prepared['statement_id'],
+            $submitted['obligation_row_version'],
+            'accepted',
+            $acceptedDocument,
+            'CSSZ-SYNTHETIC-ACCEPTED-2025',
+            '2026-01-06',
+            'synthetic-eldp-manual-accepted',
+            $this->createdBy,
+        );
+        self::assertFalse($replayAfterTrash['created']);
+        self::assertSame(4, $replayAfterTrash['obligation_row_version']);
+
+        $submissionStatus = $this->db->pdo()->prepare(
+            'SELECT status FROM payroll_submissions WHERE supplier_id = ? AND id = ?'
+        );
+        $submissionStatus->execute([$this->supplierId, $prepared['submission_id']]);
+        self::assertSame('prepared', $submissionStatus->fetchColumn());
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_eldp_manual_completions
+                    SET authority_reference = "tampered"
+                  WHERE supplier_id = ? AND id = ?'
+            )->execute([$this->supplierId, $accepted['id']]);
+            self::fail('Doložené ruční dokončení ELDP musí být neměnné.');
+        } catch (\PDOException $exception) {
+            self::assertStringContainsString(
+                'ELDP manual completion is immutable',
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    public function testManualCompletionRequiresSessionAndBothPermissions(): void
+    {
+        $bearer = $this->action->complete(
+            $this->request('bearer', [
+                'payroll.submissions' => AccessLevel::WRITE->value,
+                'documents' => AccessLevel::READ->value,
+            ]),
+            new Response(),
+            ['statementId' => '1'],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->errorCode($bearer));
+
+        $withoutDocuments = $this->action->complete(
+            $this->request('session', [
+                'payroll.submissions' => AccessLevel::WRITE->value,
+            ]),
+            new Response(),
+            ['statementId' => '1'],
+        );
+        self::assertSame(403, $withoutDocuments->getStatusCode());
+        self::assertSame('forbidden', $this->errorCode($withoutDocuments));
+    }
+
     /** @return array<string,mixed> */
     private function prepare(): array
     {
@@ -201,6 +409,64 @@ final class EldpStatementServiceTest extends TestCase
             'synthetic-eldp-statement',
             $this->createdBy,
         );
+    }
+
+    private function evidenceDocument(string $name, string $bytes): int
+    {
+        $stored = $this->documentStorage->storeFromBytes(
+            $bytes,
+            $this->supplierId,
+            $name,
+        );
+        $this->storedEvidencePaths[] = $this->documentStorage->pathFor(
+            $this->supplierId,
+            $stored['sha256'],
+            $stored['filename'],
+        );
+
+        return $this->documents->insert([
+            'supplier_id' => $this->supplierId,
+            'folder_id' => null,
+            'title' => 'Syntetický důkaz ELDP ' . $name,
+            'description' => null,
+            'original_name' => $name,
+            'filename' => $stored['filename'],
+            'sha256' => $stored['sha256'],
+            'mime_type' => $stored['mime_type'],
+            'size_bytes' => $stored['size_bytes'],
+            'doc_type' => $stored['doc_type'],
+            'source' => 'manual',
+            'uploaded_by' => $this->createdBy,
+            'scope' => 'company',
+        ]);
+    }
+
+    /** @param array<string,int> $permissions */
+    private function request(string $authMethod, array $permissions): \Psr\Http\Message\ServerRequestInterface
+    {
+        return (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/payroll/submissions/eldp/1/manual-completion')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => $this->createdBy,
+                'role' => 'accountant',
+            ])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, $authMethod)
+            ->withAttribute('auth.effective_role', new EffectiveRole(
+                159,
+                'Syntetická ELDP role',
+                'staff',
+                true,
+                $permissions,
+            ));
+    }
+
+    private function errorCode(Response $response): string
+    {
+        $response->getBody()->rewind();
+        $payload = json_decode((string) $response->getBody(), true);
+        self::assertIsArray($payload);
+        return (string) ($payload['error']['code'] ?? '');
     }
 
     private function source(PDO $pdo): int

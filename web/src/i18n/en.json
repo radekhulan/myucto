@@ -4315,6 +4315,42 @@
             "manualCompletionNotice": "Download the control XML, verify the values and complete the filing manually in the current official CSSA interface. We do not label the file as directly importable.",
             "downloadControlXml": "Download control XML",
             "downloading": "Downloading control XML…",
+            "manual": {
+                "title": "Record manual completion",
+                "description": "After completing the filing in the official interface, select an active company DMS document and enter the result reference and date. The application reads and fingerprints the actual document bytes on the server.",
+                "controlXmlStaysPrepared": "The control XML remains Prepared only and is never represented as sent.",
+                "resultLabel": "Result in the official interface",
+                "status": {
+                    "submitted": "Submitted, awaiting result",
+                    "accepted": "Accepted by the authority"
+                },
+                "statusExplanation": {
+                    "submitted": "Submitted confirms only delivery through the official interface. The obligation is not fulfilled yet.",
+                    "accepted": "Use Accepted only with evidence of acceptance by the authority. Only this proof fulfils the ELDP obligation."
+                },
+                "documentLabel": "DMS confirmation",
+                "documentPlaceholder": "Search active company documents…",
+                "serverHashNotice": "Only the document ID is sent. The server verifies its hash, size and bytes within this company.",
+                "referenceLabel": "Result reference",
+                "confirmedOnLabel": "Result date",
+                "documentLink": "Document #{id}",
+                "hashLine": "SHA-256: {hash} · {bytes} B",
+                "save": "Save evidenced result",
+                "fulfilled": "Authority acceptance is supported by immutable evidence; the ELDP obligation is fulfilled.",
+                "permissionRequired": "Recording a result requires permission to write payroll submissions and read documents.",
+                "confirm": {
+                    "submitted": "Are you confirming submission through the official interface only? This will not fulfil the obligation yet.",
+                    "accepted": "Do you confirm that the selected document actually proves the authority accepted the ELDP?"
+                },
+                "saved": {
+                    "submitted": "Submission was evidenced. The obligation is awaiting acceptance confirmation.",
+                    "accepted": "Authority acceptance was evidenced and the ELDP obligation is fulfilled."
+                },
+                "errors": {
+                    "documentSearchFailed": "Documents could not be searched.",
+                    "saveFailed": "The evidenced ELDP result could not be saved."
+                }
+            },
             "kind": {
                 "annual": "Regular annual",
                 "termination": "On leaving insurance"

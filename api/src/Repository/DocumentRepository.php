@@ -173,6 +173,36 @@ final class DocumentRepository
         ];
     }
 
+    /** @return array{id:int,sha256:string,filename:string,size_bytes:int,mime_type:string}|null */
+    public function findActiveFileReferenceForUpdate(
+        int $id,
+        int $supplierId,
+        DocumentViewerContext $viewer,
+    ): ?array {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, sha256, filename, size_bytes, mime_type
+               FROM documents
+              WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL'
+            . $scopeSql
+            . ' FOR UPDATE'
+        );
+        $stmt->execute(array_merge([$id, $supplierId], $scopeParams));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || !is_string($row['sha256'] ?? null)
+            || !is_string($row['filename'] ?? null) || !is_string($row['mime_type'] ?? null)
+        ) {
+            return null;
+        }
+        return [
+            'id' => (int) $row['id'],
+            'sha256' => (string) $row['sha256'],
+            'filename' => (string) $row['filename'],
+            'size_bytes' => (int) $row['size_bytes'],
+            'mime_type' => (string) $row['mime_type'],
+        ];
+    }
+
     /**
      * WHERE fragment (bez SELECT/ORDER/LIMIT) pro aktivní dokumenty ve složce — sdílené
      * mezi {@see listInFolder()} a {@see countInFolder()}, aby COUNT a data dotaz vždy

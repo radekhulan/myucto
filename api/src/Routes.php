@@ -1213,6 +1213,10 @@ final class Routes
                 '/submissions/eldp',
                 [PayrollEldpAction::class, 'prepare'],
             );
+            $g->post(
+                '/submissions/eldp/{statementId:[0-9]+}/manual-completion',
+                [PayrollEldpAction::class, 'complete'],
+            );
             // Přihlášení pracovního vztahu u ČSSZ. Cesta nenese kód formuláře:
             // PREZEC vs. REGZEC rozhoduje resolver z faktů, ne volající.
             $g->get(

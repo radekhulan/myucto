@@ -2552,6 +2552,41 @@ export interface PayrollEldpSupport {
   deadline_rulesets: string[]
 }
 
+export type PayrollEldpAuthorityStatus = 'submitted' | 'accepted'
+
+export interface PayrollEldpManualEvidence {
+  id: number
+  statement_id: number
+  obligation_id: number
+  authority_status: PayrollEldpAuthorityStatus
+  confirmation_document_id: number
+  confirmation_sha256: string
+  confirmation_byte_size: number
+  confirmation_mime_type: string
+  authority_reference: string
+  confirmed_on: string
+  recorded_by: number
+  recorded_at: string | null
+}
+
+export interface PayrollEldpManualCompletionOverview {
+  statement_id: number
+  obligation_id: number
+  obligation_status: string
+  obligation_row_version: number
+  submission_id: number
+  local_submission_status: string
+  evidence: PayrollEldpManualEvidence[]
+}
+
+export interface PayrollEldpManualCompletionResult extends PayrollEldpManualEvidence {
+  created: boolean
+  obligation_status: string
+  obligation_row_version: number
+  local_submission_status: string
+  submission_id: number
+}
+
 export interface PayrollRegzelSnapshot {
   id: number
   environment: PayrollRegzelEnvironment
@@ -4567,6 +4602,7 @@ export const payrollApi = {
     api.get<{
       statement: PayrollEldpStatement | null
       supported: PayrollEldpSupport
+      manual_completion: PayrollEldpManualCompletionOverview | null
     }>('/payroll/submissions/eldp', { params })
       .then(response => response.data),
   prepareEldp: (payload: {
@@ -4582,6 +4618,19 @@ export const payrollApi = {
   }) =>
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
+  completeEldp: (statementId: number, payload: {
+    environment: PayrollRegzelEnvironment
+    expected_obligation_row_version: number
+    authority_status: PayrollEldpAuthorityStatus
+    confirmation_document_id: number
+    authority_reference: string
+    confirmed_on: string
+    idempotency_key: string
+  }) =>
+    api.post<{ manual_completion: PayrollEldpManualCompletionResult }>(
+      `/payroll/submissions/eldp/${statementId}/manual-completion`,
+      payload,
+    ).then(response => response.data.manual_completion),
   regzelProfile: () =>
     api.get<PayrollRegzelProfileResponse>('/payroll/submissions/regzel/profile')
       .then(response => response.data),

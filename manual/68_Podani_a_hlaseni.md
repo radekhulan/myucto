@@ -305,6 +305,18 @@ Budoucí měsíce se nevyžadují. Chybí-li ale některá revize uvnitř takto
 vymezeného období, příprava zůstane zablokovaná, protože by nebylo možné
 doložit souvislou dobu pojištění ani vyměřovací základ.
 
+Vygenerované XML slouží pouze ke kontrole údajů. Není to transportní datová
+věta a MyÚčto je neodesílá ani nevkládá do datové schránky. ELDP dokončete
+v aktuálním oficiálním rozhraní ČSSZ a výsledek potom doložte aktivním firemním
+dokumentem z DMS, referencí potvrzení a skutečným datem.
+
+Rozlišujte dva výsledky. **Podáno (`submitted`)** znamená, že máte doklad o
+podání, ale ještě ne konečné přijetí; povinnost proto zůstává ve stavu čekání
+na výsledek. **Přijato (`accepted`)** použijte jen tehdy, když připojený dokument
+výslovně dokládá konečné přijetí. Teprve tento důkaz označí zákonnou povinnost
+za splněnou. Kontrolní XML přitom zůstává stále jen ve stavu připraveno a nikdy
+se nevykazuje jako odeslané.
+
 ## 68.11 Podání zdravotním pojišťovnám
 
 Záložky zdravotních pojišťoven oddělují dvě povinnosti:

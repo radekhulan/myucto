@@ -93,6 +93,16 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ],
                 ],
             ],
+            'payroll_eldp_manual_completion' => [
+                'message' => 'Doklad prokazuje ruční dokončení ELDP v oficiálním rozhraní '
+                    . '(%d vazeb). Je součástí neměnné důkazní stopy a nelze ho odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_eldp_manual_completions',
+                        'column' => 'confirmation_document_id',
+                    ],
+                ],
+            ],
             'tax_submission_artifact' => [
                 'message' => 'Doklad je součástí podání na finanční správu — odeslané XML, podepsaný '
                     . 'soubor nebo potvrzení EPO (%d vazeb). Kdyby zmizel, ztratíte důkaz o tom, '

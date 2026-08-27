@@ -41,6 +41,8 @@ final class SupportMatrixTest extends TestCase
         self::assertTrue($features['registration_submission']['available']);
         self::assertTrue($features['health_insurer_submission']['available']);
         self::assertTrue($features['eldp_control_export']['available']);
+        self::assertTrue($features['eldp_manual_completion']['available']);
+        self::assertSame('manual_review', $features['eldp_manual_completion']['status']);
         self::assertFalse($features['eldp_submission']['available']);
         self::assertSame('not_supported', $features['direct_submission']['status']);
 

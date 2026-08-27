@@ -2,16 +2,18 @@
 /*
  * Evidenční list důchodového pojištění.
  *
- * Obrazovka končí přípravou. Žádné tlačítko tady neodesílá — podání se zastaví
- * ve stavu „připraveno" a nabízí jen kontrolní XML. Je to záměr, ne
- * rozestavěnost: datová věta odesílaného ELDP není v připnuté oficiální sadě,
- * takže podání musí člověk dokončit v oficiálním rozhraní ČSSZ.
+ * Žádné tlačítko tady neodesílá — lokální podání se zastaví ve stavu
+ * „připraveno" a nabízí jen kontrolní XML. Člověk podání dokončí v oficiálním
+ * rozhraní ČSSZ a tady následně uloží jen doložený výsledek z firemního DMS.
  */
 import { computed, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
+import { documentsApi, type DocItem } from '@/api/documents'
 import {
   payrollApi,
+  type PayrollEldpAuthorityStatus,
+  type PayrollEldpManualCompletionOverview,
   type PayrollEldpPrepared,
   type PayrollEldpStatement,
   type PayrollEmployment,
@@ -45,8 +47,35 @@ const blockers = ref<Array<{ code: string, message: string }>>([])
 const error = ref('')
 const success = ref('')
 const downloadError = ref('')
+const manualCompletion = ref<PayrollEldpManualCompletionOverview | null>(null)
+const authorityStatus = ref<PayrollEldpAuthorityStatus>('submitted')
+const confirmationDocumentQuery = ref('')
+const confirmationDocuments = ref<DocItem[]>([])
+const confirmationDocument = ref<DocItem | null>(null)
+const authorityReference = ref('')
+const confirmedOn = ref(new Date().toLocaleDateString('sv-SE'))
+const completing = ref(false)
+const completionError = ref('')
+const completionSuccess = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
+const canReadDocuments = computed(() => auth.canRead('documents'))
+const hasAcceptedEvidence = computed(() => manualCompletion.value?.evidence
+  .some(item => item.authority_status === 'accepted') ?? false)
+const hasSelectedStatusEvidence = computed(() => manualCompletion.value?.evidence
+  .some(item => item.authority_status === authorityStatus.value) ?? false)
+const canComplete = computed(() =>
+  canWrite.value
+  && canReadDocuments.value
+  && !completing.value
+  && statement.value !== null
+  && manualCompletion.value !== null
+  && confirmationDocument.value !== null
+  && authorityReference.value.trim().length >= 1
+  && authorityReference.value.trim().length <= 190
+  && /^\d{4}-\d{2}-\d{2}$/.test(confirmedOn.value)
+  && !hasAcceptedEvidence.value
+  && !hasSelectedStatusEvidence.value)
 const employmentOptions = computed(() =>
   employments.value.map(employment => ({
     value: employment.id,
@@ -104,8 +133,75 @@ async function loadStatement(): Promise<void> {
       environment: environment.value,
     })
     statement.value = response.statement
+    manualCompletion.value = response.manual_completion
   } catch {
     statement.value = null
+    manualCompletion.value = null
+  }
+}
+
+async function searchConfirmationDocuments(): Promise<void> {
+  const query = confirmationDocumentQuery.value.trim()
+  if (query.length < 2) {
+    confirmationDocuments.value = []
+    return
+  }
+  completionError.value = ''
+  try {
+    confirmationDocuments.value = (await documentsApi.search(query))
+      .filter(document => document.scope !== 'user' && document.deleted_at === null)
+  } catch {
+    confirmationDocuments.value = []
+    completionError.value = t('payroll.eldp.manual.errors.documentSearchFailed')
+  }
+}
+
+function chooseConfirmationDocument(document: DocItem): void {
+  confirmationDocument.value = document
+  confirmationDocumentQuery.value = document.title
+  confirmationDocuments.value = []
+}
+
+function clearConfirmationDocument(): void {
+  confirmationDocument.value = null
+  confirmationDocumentQuery.value = ''
+  confirmationDocuments.value = []
+}
+
+async function completeManually(): Promise<void> {
+  if (!canComplete.value || statement.value === null || manualCompletion.value === null
+    || confirmationDocument.value === null
+  ) return
+  if (!window.confirm(t(`payroll.eldp.manual.confirm.${authorityStatus.value}`))) return
+
+  completing.value = true
+  completionError.value = ''
+  completionSuccess.value = ''
+  try {
+    const result = await payrollApi.completeEldp(statement.value.id, {
+      environment: environment.value,
+      expected_obligation_row_version: manualCompletion.value.obligation_row_version,
+      authority_status: authorityStatus.value,
+      confirmation_document_id: confirmationDocument.value.id,
+      authority_reference: authorityReference.value.trim(),
+      confirmed_on: confirmedOn.value,
+      idempotency_key: `eldp-manual:${environment.value}:${statement.value.id}:${authorityStatus.value}`,
+    })
+    completionSuccess.value = t(`payroll.eldp.manual.saved.${result.authority_status}`)
+    clearConfirmationDocument()
+    authorityReference.value = ''
+    await loadStatement()
+  } catch (exception) {
+    if (isAxiosError(exception)) {
+      const payload = exception.response?.data?.error
+      completionError.value = typeof payload?.message === 'string'
+        ? payload.message
+        : t('payroll.eldp.manual.errors.saveFailed')
+    } else {
+      completionError.value = t('payroll.eldp.manual.errors.saveFailed')
+    }
+  } finally {
+    completing.value = false
   }
 }
 
@@ -178,6 +274,10 @@ watch(personId, value => {
 })
 watch([employmentId, year, environment], () => {
   prepared.value = null
+  manualCompletion.value = null
+  completionError.value = ''
+  completionSuccess.value = ''
+  clearConfirmationDocument()
   blockers.value = []
   void loadStatement()
 })
@@ -375,6 +475,191 @@ watch(requestedByAuthority, value => {
           {{ downloading ? t('payroll.eldp.downloading') : t('payroll.eldp.downloadControlXml') }}
         </button>
       </div>
+
+      <section
+        v-if="statement && manualCompletion"
+        class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4"
+        data-test="eldp-manual-completion"
+      >
+        <div>
+          <h4 class="font-semibold text-neutral-900">
+            {{ t('payroll.eldp.manual.title') }}
+          </h4>
+          <p class="mt-1 max-w-prose text-xs text-neutral-600">
+            {{ t('payroll.eldp.manual.description') }}
+          </p>
+          <p class="mt-1 max-w-prose text-xs font-medium text-warning-700">
+            {{ t('payroll.eldp.manual.controlXmlStaysPrepared') }}
+          </p>
+        </div>
+
+        <div v-if="manualCompletion.evidence.length" class="space-y-2" data-test="eldp-manual-history">
+          <article
+            v-for="evidence in manualCompletion.evidence"
+            :key="evidence.id"
+            class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-xs text-neutral-700"
+            :data-test="`eldp-evidence-${evidence.authority_status}`"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span
+                class="rounded-full px-2 py-0.5 font-semibold"
+                :class="evidence.authority_status === 'accepted'
+                  ? 'bg-success-100 text-success-700'
+                  : 'bg-warning-100 text-warning-700'"
+              >
+                {{ t(`payroll.eldp.manual.status.${evidence.authority_status}`) }}
+              </span>
+              <span>{{ evidence.confirmed_on }}</span>
+            </div>
+            <p class="mt-2 font-medium text-neutral-900">{{ evidence.authority_reference }}</p>
+            <a
+              :href="`/documents/${evidence.confirmation_document_id}`"
+              class="mt-1 inline-flex text-primary-700 hover:underline"
+            >
+              {{ t('payroll.eldp.manual.documentLink', { id: evidence.confirmation_document_id }) }}
+            </a>
+            <p class="mt-1 break-all text-neutral-500">
+              {{ t('payroll.eldp.manual.hashLine', {
+                hash: evidence.confirmation_sha256,
+                bytes: evidence.confirmation_byte_size,
+              }) }}
+            </p>
+          </article>
+        </div>
+
+        <p
+          v-if="hasAcceptedEvidence"
+          class="rounded-md border border-success-500/30 bg-success-50 p-3 text-sm text-success-700"
+          data-test="eldp-fulfilled"
+        >
+          {{ t('payroll.eldp.manual.fulfilled') }}
+        </p>
+
+        <div v-else-if="canWrite && canReadDocuments" class="space-y-3 border-t border-neutral-200 pt-4">
+          <label class="block text-sm font-medium text-neutral-700">
+            {{ t('payroll.eldp.manual.resultLabel') }}
+            <select
+              v-model="authorityStatus"
+              data-test="eldp-authority-status"
+              class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-neutral-900 sm:max-w-md"
+            >
+              <option value="submitted" :disabled="manualCompletion.evidence.some(item => item.authority_status === 'submitted')">
+                {{ t('payroll.eldp.manual.status.submitted') }}
+              </option>
+              <option value="accepted">
+                {{ t('payroll.eldp.manual.status.accepted') }}
+              </option>
+            </select>
+          </label>
+          <p
+            class="max-w-prose rounded-md p-3 text-xs"
+            :class="authorityStatus === 'accepted'
+              ? 'bg-success-50 text-success-700'
+              : 'bg-warning-50 text-warning-700'"
+            data-test="eldp-authority-status-explanation"
+          >
+            {{ t(`payroll.eldp.manual.statusExplanation.${authorityStatus}`) }}
+          </p>
+
+          <div class="relative">
+            <label class="block text-sm font-medium text-neutral-700">
+              {{ t('payroll.eldp.manual.documentLabel') }}
+              <span class="mt-1 flex flex-wrap gap-2">
+                <input
+                  v-model="confirmationDocumentQuery"
+                  type="search"
+                  :readonly="confirmationDocument !== null"
+                  :placeholder="t('payroll.eldp.manual.documentPlaceholder')"
+                  class="h-10 min-w-64 flex-1 rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  data-test="eldp-document-query"
+                  @keyup.enter.prevent="searchConfirmationDocuments"
+                >
+                <button
+                  v-if="confirmationDocument === null"
+                  type="button"
+                  :class="btnOutline('neutral')"
+                  data-test="eldp-document-search"
+                  @click="searchConfirmationDocuments"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.search" />
+                  </svg>
+                  {{ t('common.search') }}
+                </button>
+                <button v-else type="button" :class="btnOutline('neutral')" @click="clearConfirmationDocument">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.edit" />
+                  </svg>
+                  {{ t('common.edit') }}
+                </button>
+              </span>
+            </label>
+            <div
+              v-if="confirmationDocuments.length"
+              class="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-md border border-neutral-200 bg-surface shadow-lg"
+            >
+              <button
+                v-for="document in confirmationDocuments"
+                :key="document.id"
+                type="button"
+                class="block w-full px-3 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-100"
+                data-test="eldp-document-option"
+                @click="chooseConfirmationDocument(document)"
+              >
+                <span class="font-medium">{{ document.title }}</span>
+                <span class="ml-2 text-xs text-neutral-500">{{ document.original_name }}</span>
+              </button>
+            </div>
+            <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.eldp.manual.serverHashNotice') }}</p>
+          </div>
+
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="text-sm font-medium text-neutral-700">
+              {{ t('payroll.eldp.manual.referenceLabel') }}
+              <input
+                v-model="authorityReference"
+                maxlength="190"
+                class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-neutral-900"
+                data-test="eldp-authority-reference"
+              >
+            </label>
+            <label class="text-sm font-medium text-neutral-700">
+              {{ t('payroll.eldp.manual.confirmedOnLabel') }}
+              <input
+                v-model="confirmedOn"
+                type="date"
+                class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-neutral-900"
+                data-test="eldp-confirmed-on"
+              >
+            </label>
+          </div>
+
+          <p v-if="completionError" class="text-sm text-danger-700" role="alert" data-test="eldp-completion-error">
+            {{ completionError }}
+          </p>
+          <p v-if="completionSuccess" class="text-sm text-success-700" role="status" data-test="eldp-completion-success">
+            {{ completionSuccess }}
+          </p>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              :class="btnFilled(authorityStatus === 'accepted' ? 'success' : 'primary')"
+              :disabled="!canComplete"
+              data-test="eldp-complete"
+              @click="completeManually"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.check" />
+              </svg>
+              {{ completing ? t('common.saving') : t('payroll.eldp.manual.save') }}
+            </button>
+          </div>
+        </div>
+
+        <p v-else class="text-xs text-neutral-500">
+          {{ t('payroll.eldp.manual.permissionRequired') }}
+        </p>
+      </section>
 
       <div class="flex justify-end border-t border-neutral-200 pt-4">
         <button

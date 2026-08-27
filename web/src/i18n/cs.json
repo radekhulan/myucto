@@ -4315,6 +4315,42 @@
             "manualCompletionNotice": "Stáhněte kontrolní XML, ověřte údaje a podání dokončete ručně v aktuálním oficiálním rozhraní ČSSZ. Soubor neoznačujeme jako přímo importovatelný.",
             "downloadControlXml": "Stáhnout kontrolní XML",
             "downloading": "Stahuji kontrolní XML…",
+            "manual": {
+                "title": "Doložit ruční dokončení",
+                "description": "Po dokončení v oficiálním rozhraní vyberte aktivní firemní dokument z DMS, uveďte referenci výsledku a datum. Aplikace načte a otiskne skutečné bajty dokumentu na serveru.",
+                "controlXmlStaysPrepared": "Kontrolní XML zůstává pouze ve stavu Připraveno a nikdy se nevydává za odeslané.",
+                "resultLabel": "Výsledek v oficiálním rozhraní",
+                "status": {
+                    "submitted": "Odesláno, čeká na výsledek",
+                    "accepted": "Přijato úřadem"
+                },
+                "statusExplanation": {
+                    "submitted": "Stav Odesláno potvrzuje jen předání do oficiálního rozhraní. Povinnost ještě není splněná.",
+                    "accepted": "Stav Přijato použijte jen s potvrzením přijetí úřadem. Teprve tento důkaz pravdivě splní povinnost ELDP."
+                },
+                "documentLabel": "Potvrzení v DMS",
+                "documentPlaceholder": "Hledat aktivní firemní dokument…",
+                "serverHashNotice": "Posílá se jen ID dokumentu. Hash, velikost a bajty ověří server v rámci této firmy.",
+                "referenceLabel": "Reference výsledku",
+                "confirmedOnLabel": "Datum výsledku",
+                "documentLink": "Dokument #{id}",
+                "hashLine": "SHA-256: {hash} · {bytes} B",
+                "save": "Uložit doložený výsledek",
+                "fulfilled": "Přijetí úřadem je doloženo neměnným důkazem; povinnost ELDP je splněná.",
+                "permissionRequired": "K doložení výsledku potřebujete oprávnění zapisovat mzdová podání a číst dokumenty.",
+                "confirm": {
+                    "submitted": "Potvrzujete pouze odeslání v oficiálním rozhraní? Povinnost tím ještě nebude splněná.",
+                    "accepted": "Potvrzujete, že vybraný dokument skutečně dokládá přijetí ELDP úřadem?"
+                },
+                "saved": {
+                    "submitted": "Odeslání bylo doloženo. Povinnost čeká na potvrzení přijetí.",
+                    "accepted": "Přijetí úřadem bylo doloženo a povinnost ELDP je splněná."
+                },
+                "errors": {
+                    "documentSearchFailed": "Dokumenty se nepodařilo vyhledat.",
+                    "saveFailed": "Doložený výsledek ELDP se nepodařilo uložit."
+                }
+            },
             "kind": {
                 "annual": "Řádný roční",
                 "termination": "Při skončení účasti"
