@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1SelectorResolver;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioSelectorResolver;
 use PDO;
 
 final class PayrollCompanyCapabilityService
@@ -20,7 +20,7 @@ final class PayrollCompanyCapabilityService
         'statutory_body' => 'statutory_body',
     ];
 
-    private ?JmhzScenario1SelectorResolver $scenarioResolver = null;
+    private ?JmhzScenarioSelectorResolver $scenarioResolver = null;
 
     public function __construct(
         private readonly Connection $db,
@@ -158,8 +158,8 @@ final class PayrollCompanyCapabilityService
                     $activityCode,
                     self::nullableString($row, 'jmhz_relationship_detail_code'),
                 );
-                if (!$selection['supported']
-                    && $selection['issue_code'] === 'jmhz_scenario_not_supported'
+                if (!$selection['preparation_supported']
+                    && $selection['readiness_issue_code'] !== null
                     && !($featureCapabilities['jmhz_special_scenarios'] ?? false)
                 ) {
                     $blockers[] = $this->blocker(
@@ -175,6 +175,8 @@ final class PayrollCompanyCapabilityService
                                 $row,
                                 'jmhz_relationship_detail_code',
                             ),
+                            'scenario_key' => $selection['evidence']['scenario_key'] ?? null,
+                            'readiness_issue_code' => $selection['readiness_issue_code'],
                         ],
                     );
                 }
@@ -325,9 +327,9 @@ final class PayrollCompanyCapabilityService
         ];
     }
 
-    private function scenarioResolver(): JmhzScenario1SelectorResolver
+    private function scenarioResolver(): JmhzScenarioSelectorResolver
     {
-        return $this->scenarioResolver ??= JmhzScenario1SelectorResolver::load();
+        return $this->scenarioResolver ??= JmhzScenarioSelectorResolver::load();
     }
 
     /**
