@@ -86,6 +86,7 @@ use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
@@ -1452,6 +1453,8 @@ final class Routes
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
+            $g->get('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'list']);
+            $g->post('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'create']);
             $g->get('/settings/policies', [PayrollEmployerPolicyAction::class, 'list']);
             $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
             $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);

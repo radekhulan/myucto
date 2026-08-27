@@ -198,6 +198,8 @@ final class PayrollRunSnapshotBuilder
 
         /** @var array<int,array{employee:array<string,mixed>,employments:list<array<string,mixed>>}> $people */
         $people = [];
+        /** @var array<int,array<string,mixed>|null> $officeRegistrations */
+        $officeRegistrations = [];
         foreach ($employments as $row) {
             $employmentId = (int) $row['employment_id'];
             $employeeId = (int) $row['employee_id'];
@@ -229,6 +231,25 @@ final class PayrollRunSnapshotBuilder
                     'Pracovní vztah nemá mzdovou účtárnu. Bez ní nelze vykázat'
                     . ' odvod sociálního pojistného.',
                     "/payroll/employees/{$employeeId}",
+                );
+            }
+            $officeId = $row['office_id'] === null ? null : (int) $row['office_id'];
+            if ($officeId !== null && !array_key_exists($officeId, $officeRegistrations)) {
+                $officeRegistrations[$officeId] = $this->officeRegistration(
+                    $supplierId,
+                    $officeId,
+                    $periodStart,
+                );
+            }
+            $officeRegistration = $officeId === null ? null : $officeRegistrations[$officeId];
+            if ($row['office_id'] !== null && $officeRegistration === null) {
+                $validations[] = new PayrollRunValidation(
+                    'blocker',
+                    'office_registration_history_missing',
+                    'office',
+                    (int) $row['office_id'],
+                    'Mzdová účtárna nemá pro období doloženou účinnou registraci ČSSZ.',
+                    '/payroll/settings',
                 );
             }
             $timeMonth = isset($timeMonthRows[$employmentId])
@@ -432,6 +453,7 @@ final class PayrollRunSnapshotBuilder
                     'office_id' => $row['office_id'] === null
                         ? null
                         : (int) $row['office_id'],
+                    'office_registration' => $officeRegistration,
                     'code' => (string) $row['employment_code'],
                     'relation_type' => (string) $row['relation_type'],
                     'status' => (string) $row['employment_status'],
@@ -951,6 +973,34 @@ final class PayrollRunSnapshotBuilder
             ...($officeId === null ? [] : [$officeId]),
         ]);
         return array_values($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** @return array<string,mixed>|null */
+    private function officeRegistration(int $supplierId, int $officeId, string $onDate): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT version.id, version.effective_from, version.social_security_variable_symbol,
+                    version.source_reference, office.code, office.name
+               FROM payroll_office_registration_versions version
+               JOIN payroll_offices office
+                 ON office.supplier_id = version.supplier_id AND office.id = version.office_id
+              WHERE version.supplier_id = ? AND version.office_id = ?
+                AND version.effective_from <= ?
+              ORDER BY version.effective_from DESC, version.id DESC LIMIT 1',
+        );
+        $statement->execute([$supplierId, $officeId, $onDate]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) return null;
+        $data = [
+            'id' => (int) $row['id'],
+            'effective_from' => (string) $row['effective_from'],
+            'social_security_variable_symbol' => (string) $row['social_security_variable_symbol'],
+            'source_reference' => (string) $row['source_reference'],
+            'office_code' => (string) $row['code'],
+            'office_name' => (string) $row['name'],
+        ];
+        $data['sha256'] = hash('sha256', CanonicalJson::encode($data));
+        return $data;
     }
 
     /**

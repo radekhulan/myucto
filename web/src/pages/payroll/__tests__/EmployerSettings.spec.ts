@@ -9,6 +9,8 @@ import type {
 const m = vi.hoisted(() => ({
   employerSettings: vi.fn(),
   saveEmployerSettings: vi.fn(),
+  officeRegistrations: vi.fn(),
+  createOfficeRegistration: vi.fn(),
   accountOptions: vi.fn(),
   institutionAccounts: vi.fn(),
   createInstitutionAccount: vi.fn(),
@@ -34,6 +36,8 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     employerSettings: m.employerSettings,
     saveEmployerSettings: m.saveEmployerSettings,
+    officeRegistrations: m.officeRegistrations,
+    createOfficeRegistration: m.createOfficeRegistration,
     accountOptions: m.accountOptions,
     institutionAccounts: m.institutionAccounts,
     createInstitutionAccount: m.createInstitutionAccount,
@@ -169,6 +173,16 @@ async function mountPage(value = settings()) {
     ownership_forms: [],
   })
   m.saveEmployerSettings.mockResolvedValue(value)
+  m.officeRegistrations.mockResolvedValue([])
+  m.createOfficeRegistration.mockResolvedValue({
+    id: 22,
+    office_id: 1,
+    effective_from: '2026-09-01',
+    social_security_variable_symbol: '0012345678',
+    source_reference: 'synthetic-approved-source',
+    created_by: 1,
+    created_at: '2026-08-27 12:00:00',
+  })
   const wrapper = mount(EmployerSettings, { attachTo: document.body })
   await flushPromises()
   return wrapper
@@ -183,6 +197,24 @@ describe('EmployerSettings — účtová osnova', () => {
     vi.clearAllMocks()
     m.routeQuery = {}
     document.body.innerHTML = ''
+  })
+
+  it('uloží VS pouze přes dialog účinné registrace, ne přes bulk nastavení', async () => {
+    const wrapper = await mountPage()
+    const open = wrapper.findAll('button').find(button => button.text().includes('manage_registration'))
+    await open!.trigger('click')
+    await flushPromises()
+    await wrapper.find('[data-registration-vs]').setValue('0012345678')
+    await wrapper.find('[data-registration-source]').setValue('synthetic-approved-source')
+    const save = Array.from(document.querySelectorAll('[role="dialog"] button'))
+      .find(button => button.textContent === 'common.save') as HTMLButtonElement
+    await save.click()
+    await flushPromises()
+    expect(m.createOfficeRegistration).toHaveBeenCalledWith(1, expect.objectContaining({
+      social_security_variable_symbol: '0012345678',
+      source_reference: 'synthetic-approved-source',
+    }))
+    wrapper.unmount()
   })
 
   it('otevře záložku podání podle query vedlejšího routeru', async () => {

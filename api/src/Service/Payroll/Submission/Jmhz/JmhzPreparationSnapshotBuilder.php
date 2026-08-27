@@ -694,14 +694,11 @@ final class JmhzPreparationSnapshotBuilder
         int $runId,
         array &$issues,
     ): array {
-        $known = [];
-        foreach ($this->rows($catalog ?? [], 'offices') as $office) {
-            $id = $office['id'] ?? null;
-            if (is_int($id) && $id > 0) {
-                $known[$id] = $office;
-            }
-        }
-        $officeIds = [];
+        // The live office catalogue is deliberately not a source of a VS here.
+        // A locked payroll revision carries the resolved immutable registration.
+        unset($catalog);
+        $registrations = [];
+        $registrationIdentities = [];
         foreach ($people as $person) {
             foreach ($this->rows(
                 $person['employments'] ?? null,
@@ -721,55 +718,81 @@ final class JmhzPreparationSnapshotBuilder
                     );
                     continue;
                 }
-                $officeIds[$officeId] = true;
+                $registration = is_array($source) ? ($source['office_registration'] ?? null) : null;
+                if (!is_array($registration)) {
+                    $issues[] = $this->issue(
+                        'office_registration_history_missing',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $versionId = $registration['id'] ?? null;
+                $hash = $registration['sha256'] ?? null;
+                $symbol = $registration['social_security_variable_symbol'] ?? null;
+                $identityValid = is_int($versionId) && $versionId > 0
+                    && is_string($hash) && preg_match('/^[a-f0-9]{64}$/D', $hash) === 1;
+                if (!$identityValid) {
+                    $issues[] = $this->issue(
+                        'office_registration_history_missing',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $identity = ['version_id' => $versionId, 'sha256' => $hash];
+                if (isset($registrationIdentities[$officeId])
+                    && $registrationIdentities[$officeId] !== $identity) {
+                    $issues[] = $this->issue(
+                        'office_registration_snapshot_mismatch',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $registrationIdentities[$officeId] = $identity;
+                $valid = is_string($symbol) && preg_match('/^[0-9]{10}$/D', $symbol) === 1;
+                if (!$valid) {
+                    $issues[] = $this->issue(
+                        'social_security_variable_symbol_missing',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                }
+                $frozen = [
+                    'id' => $officeId,
+                    'code' => is_string($registration['office_code'] ?? null) ? $registration['office_code'] : '',
+                    'name' => is_string($registration['office_name'] ?? null) ? $registration['office_name'] : '',
+                    'social_security_variable_symbol' => $valid ? $symbol : null,
+                ];
+                if (isset($registrations[$officeId])
+                    && $registrations[$officeId]['social_security_variable_symbol'] !== $symbol) {
+                    $issues[] = $this->issue(
+                        'office_registration_snapshot_mismatch',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $registrations[$officeId] = $frozen;
             }
         }
-        $ids = array_keys($officeIds);
-        sort($ids, SORT_NUMERIC);
-        if ($ids === []) {
+        if ($registrations === []) {
             $issues[] = $this->issue(
                 'social_security_variable_symbol_missing',
                 'run',
                 $runId,
                 ['10221'],
             );
-
-            return [];
         }
-        $registrations = [];
-        foreach ($ids as $officeId) {
-            $office = $known[$officeId] ?? null;
-            if ($office === null) {
-                $issues[] = $this->issue(
-                    'jmhz_social_office_unknown',
-                    'office',
-                    $officeId,
-                    ['10221'],
-                );
-                continue;
-            }
-            $symbol = $office['social_security_variable_symbol'] ?? null;
-            // Deset číslic je totéž, co vynucuje serializér u atributu 10221;
-            // kratší hodnota by prošla přípravou a spadla až na XSD.
-            $valid = is_string($symbol)
-                && preg_match('/^[0-9]{10}$/D', $symbol) === 1;
-            if (!$valid) {
-                $issues[] = $this->issue(
-                    'social_security_variable_symbol_missing',
-                    'office',
-                    $officeId,
-                    ['10221'],
-                );
-            }
-            $registrations[] = [
-                'id' => $officeId,
-                'code' => is_string($office['code'] ?? null) ? $office['code'] : '',
-                'name' => is_string($office['name'] ?? null) ? $office['name'] : '',
-                'social_security_variable_symbol' => $valid ? (string) $symbol : null,
-            ];
-        }
+        ksort($registrations, SORT_NUMERIC);
 
-        return $registrations;
+        return array_values($registrations);
     }
 
     /**

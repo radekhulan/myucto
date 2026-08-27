@@ -621,6 +621,13 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'id' => 101,
                 'employee_id' => 11,
                 'office_id' => 9,
+                'office_registration' => [
+                    'id' => 91,
+                    'sha256' => str_repeat('9', 64),
+                    'office_code' => 'UC9',
+                    'office_name' => 'Mzdová účtárna 9',
+                    'social_security_variable_symbol' => '1234567890',
+                ],
                 'relation_type' => 'employment',
                 'is_primary' => true,
             ],
@@ -773,7 +780,16 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
     public function testRegistrationWithoutVariableSymbolNamesItsOffice(): void
     {
         $source = $this->sourceWithTwoOffices();
-        $source['offices'][1]['social_security_variable_symbol'] = null;
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][1]['employments'][0]['employment']['office_registration']['social_security_variable_symbol'] = null;
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash('sha256', $source['revision']['input_snapshot_json']);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
 
         $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
             7,
@@ -1081,6 +1097,13 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         $person['employments'][0]['employment']['id'] = 102;
         $person['employments'][0]['employment']['employee_id'] = 12;
         $person['employments'][0]['employment']['office_id'] = 12;
+        $person['employments'][0]['employment']['office_registration'] = [
+            'id' => 121,
+            'sha256' => str_repeat('2', 64),
+            'office_code' => 'UC12',
+            'office_name' => 'Mzdová účtárna 12',
+            'social_security_variable_symbol' => '9990001234',
+        ];
         $person['employments'][0]['term']['id'] = 202;
         $input['people'][] = $person;
 

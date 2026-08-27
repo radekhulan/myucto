@@ -1656,6 +1656,16 @@ export interface PayrollOffice {
   row_version: number
 }
 
+export interface PayrollOfficeRegistration {
+  id: number
+  office_id: number
+  effective_from: string
+  social_security_variable_symbol: string
+  source_reference: string
+  created_by: number | null
+  created_at: string
+}
+
 export interface PayrollEmployerSettings {
   supplier_id: number
   row_version: number
@@ -4346,6 +4356,13 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  officeRegistrations: (officeId: number) =>
+    api.get<{ registrations: PayrollOfficeRegistration[] }>(`/payroll/settings/offices/${officeId}/registrations`)
+      .then(response => response.data.registrations),
+  createOfficeRegistration: (officeId: number, payload: Pick<PayrollOfficeRegistration,
+    'effective_from' | 'social_security_variable_symbol' | 'source_reference'>) =>
+    api.post<{ registration: PayrollOfficeRegistration }>(`/payroll/settings/offices/${officeId}/registrations`, payload)
+      .then(response => response.data.registration),
   /**
    * `agenda_group` filtruje na SERVERU. Odfiltrovat si skupinu až z přijaté
    * stránky by znamenalo pager počítaný přes všechny agendy nad tabulkou,
