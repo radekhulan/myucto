@@ -9,6 +9,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
+use MyInvoice\Service\Payroll\Run\PayrollRunCalculator;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -22,6 +24,8 @@ final class PayrollAbsenceApiTest extends TestCase
 
     private Connection $db;
     private PayrollAbsenceAction $action;
+    private PayrollSicknessInputMaterializer $sicknessInputs;
+    private PayrollRunCalculator $runCalculator;
     private int $userId;
     private int $supplierId;
     private int $otherSupplierId;
@@ -37,6 +41,8 @@ final class PayrollAbsenceApiTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
+            $this->sicknessInputs = $container->get(PayrollSicknessInputMaterializer::class);
+            $this->runCalculator = $container->get(PayrollRunCalculator::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -161,6 +167,136 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame(480, $calculation['segments'][0]['eligible_minutes']);
         self::assertGreaterThan(0, $calculation['compensation_minor']);
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $calculation['ruleset_hash']);
+    }
+
+    public function testApprovedDpnMaterializesIdempotentCanonicalInputAndItsRunBases(): void
+    {
+        $averageId = $this->createApprovedAverage();
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+        $payload = $this->absencePayload($averageId);
+        $payload['absence_type'] = 'dpn';
+        $created = $this->action->create(
+            $this->request('POST')->withParsedBody($payload),
+            new Response(),
+        );
+        self::assertSame(201, $created->getStatusCode());
+        $absence = $this->json($created)['absence'];
+
+        $approved = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+                'first_day_fully_worked' => false,
+                'insurance_eligibility_confirmed' => true,
+                'conflicting_benefit_excluded' => true,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $calculation = $this->json($approved)['calculation'];
+
+        $materialized = $this->db->pdo()->prepare(
+            'SELECT input.*, materialization.id AS materialization_id,
+                    materialization.source_snapshot_json
+               FROM payroll_sickness_input_materializations materialization
+               JOIN payroll_inputs input
+                 ON input.supplier_id = materialization.supplier_id
+                AND input.id = materialization.input_id
+              WHERE materialization.supplier_id = ?
+                AND materialization.sickness_event_id = ?
+                AND materialization.materialization_kind = "original"',
+        );
+        $materialized->execute([$this->supplierId, $calculation['id']]);
+        $input = $materialized->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($input);
+        self::assertSame('absence', $input['source_kind']);
+        self::assertSame('approved', $input['status']);
+        self::assertSame((int) $calculation['compensation_minor'], (int) $input['amount_minor']);
+        self::assertNotNull($input['component_snapshot_json']);
+        $source = json_decode((string) $input['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame('sickness_compensation.v1', $source['kind']);
+        self::assertSame($calculation['id'], $source['sickness_event_id']);
+
+        $component = json_decode((string) $input['component_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $run = $this->runCalculator->calculate([
+            'schema_version' => 'payroll-run-input.v2',
+            'people' => [[
+                'employee' => ['id' => (int) $input['employee_id']],
+                'employments' => [[
+                    'employment' => ['id' => $this->employmentId],
+                    'inputs' => [[
+                        'id' => (int) $input['id'],
+                        'amount_minor' => (int) $input['amount_minor'],
+                        'component' => $component,
+                    ]],
+                ]],
+            ]],
+        ]);
+        self::assertSame('NAHRADA_MZDY_DPN', $component['code']);
+        self::assertSame('exempt', $component['tax_treatment']);
+        self::assertSame('statutory_exempt', $component['exemption_basis']);
+        self::assertSame((int) $input['amount_minor'], $run['totals']['cash_payable_minor']);
+        self::assertSame(0, $run['totals']['tax_base_minor']);
+        self::assertSame(0, $run['totals']['social_base_minor']);
+        self::assertSame(0, $run['totals']['health_base_minor']);
+        self::assertSame((int) $input['amount_minor'], $run['totals']['enforcement_base_minor']);
+        self::assertSame((int) $input['amount_minor'], $run['totals']['jmhz_amount_minor']);
+
+        $replay = $this->sicknessInputs->materialize(
+            $this->supplierId,
+            (int) $calculation['id'],
+            $this->userId,
+        );
+        self::assertSame(0, $replay['created_count']);
+        self::assertSame(1, $replay['replayed_count']);
+
+        $approvedAbsence = $this->json($approved)['absence'];
+        $cancelled = $this->action->cancel(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $approvedAbsence['row_version'],
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+        self::assertTrue($this->json($cancelled)['absence']['correction_pending']);
+
+        $reversal = $this->db->pdo()->prepare(
+            'SELECT reversal_input.amount_minor, reversal_input.status,
+                    original_input.component_snapshot_hash = reversal_input.component_snapshot_hash
+                        AS keeps_component_snapshot
+               FROM payroll_sickness_input_materializations reversal
+               JOIN payroll_sickness_input_materializations original
+                 ON original.supplier_id = reversal.supplier_id
+                AND original.id = reversal.reverses_materialization_id
+               JOIN payroll_inputs original_input
+                 ON original_input.supplier_id = original.supplier_id
+                AND original_input.id = original.input_id
+               JOIN payroll_inputs reversal_input
+                 ON reversal_input.supplier_id = reversal.supplier_id
+                AND reversal_input.id = reversal.input_id
+              WHERE reversal.supplier_id = ?
+                AND reversal.sickness_event_id = ?
+                AND reversal.materialization_kind = "reversal"',
+        );
+        $reversal->execute([$this->supplierId, $calculation['id']]);
+        $reversalInput = $reversal->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($reversalInput);
+        self::assertSame(-(int) $input['amount_minor'], (int) $reversalInput['amount_minor']);
+        self::assertSame('approved', $reversalInput['status']);
+        self::assertSame(1, (int) $reversalInput['keeps_component_snapshot']);
+
+        try {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_sickness_input_materializations
+                    SET period_start = "2026-07-01"
+                  WHERE supplier_id = ? AND id = ?',
+            )->execute([$this->supplierId, $input['materialization_id']]);
+            self::fail('Auditní vazbu DPN nelze přepsat.');
+        } catch (\PDOException $exception) {
+            self::assertStringContainsString('append-only', $exception->getMessage());
+        }
     }
 
     public function testVacationRejectsAverageFromDifferentQuarter(): void

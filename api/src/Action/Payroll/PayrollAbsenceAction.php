@@ -22,6 +22,7 @@ use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
+use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -46,6 +47,7 @@ final class PayrollAbsenceAction
         private readonly LeaveEntitlementCalculator $leaveCalculator,
         private readonly AutomaticLeaveEntitlementService $automaticLeaveEntitlements,
         private readonly SicknessCompensationCalculator $sicknessCalculator,
+        private readonly PayrollSicknessInputMaterializer $sicknessInputs,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollAverageEarningDeletionRepository $averageDeletion,
@@ -191,6 +193,16 @@ final class PayrollAbsenceAction
                     $decision,
                     $this->userId($request),
                 );
+                if ($decision === 'approved'
+                    && in_array($absence['absence_type'], ['dpn', 'quarantine'], true)
+                    && is_array($calculation)
+                ) {
+                    $this->sicknessInputs->materialize(
+                        $supplierId,
+                        (int) $calculation['id'],
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -238,6 +250,15 @@ final class PayrollAbsenceAction
                     $version,
                     $this->userId($request),
                 );
+                if (in_array($before['absence_type'], ['dpn', 'quarantine'], true)
+                    && $before['status'] === 'approved'
+                ) {
+                    $this->sicknessInputs->reverseForAbsence(
+                        $supplierId,
+                        $id,
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
