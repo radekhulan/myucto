@@ -1075,13 +1075,20 @@ final class PayrollRunRepository
     public function revisions(int $supplierId, int $runId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_run_revisions
+            'SELECT id, supplier_id, run_id, revision_no, previous_revision_id,
+                    revision_kind, status, schema_version, ruleset_manifest_hash,
+                    input_snapshot_hash, result_snapshot_hash, calculated_by,
+                    reviewed_by, approved_by, calculated_at, reviewed_at, approved_at,
+                    created_at,
+                    (input_snapshot_json IS NOT NULL) AS has_input_snapshot,
+                    (result_snapshot_json IS NOT NULL) AS has_result_snapshot
+               FROM payroll_run_revisions
               WHERE supplier_id = ? AND run_id = ?
               ORDER BY revision_no'
         );
         $stmt->execute([$supplierId, $runId]);
         return array_values(array_map(
-            self::castRevision(...),
+            self::castRevisionSummary(...),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
         ));
     }
@@ -1796,6 +1803,27 @@ final class PayrollRunRepository
                 );
         }
         unset($row['idempotency_key_hash']);
+        return $row;
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private static function castRevisionSummary(array $row): array
+    {
+        foreach (['id', 'supplier_id', 'run_id', 'revision_no'] as $field) {
+            $row[$field] = (int) $row[$field];
+        }
+        foreach ([
+            'previous_revision_id',
+            'calculated_by',
+            'reviewed_by',
+            'approved_by',
+        ] as $field) {
+            $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        foreach (['has_input_snapshot', 'has_result_snapshot'] as $field) {
+            $row[$field] = (bool) (int) $row[$field];
+        }
+
         return $row;
     }
 

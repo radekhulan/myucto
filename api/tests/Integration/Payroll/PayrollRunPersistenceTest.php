@@ -1707,6 +1707,49 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('Doplatek syntetické prémie.', $correctionEvent['reason']);
     }
 
+    public function testRevisionSummariesOmitSnapshotsButKeepMetadataAndHashes(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $revisionId = (int) $approved->revision['id'];
+
+        $summaries = $this->runs->revisions($this->supplierId, $runId);
+
+        self::assertCount(1, $summaries);
+        self::assertSame($revisionId, $summaries[0]['id']);
+        self::assertSame(1, $summaries[0]['revision_no']);
+        self::assertSame('approved', $summaries[0]['status']);
+        self::assertSame(
+            $approved->revision['input_snapshot_hash'],
+            $summaries[0]['input_snapshot_hash'],
+        );
+        self::assertSame(
+            $approved->revision['result_snapshot_hash'],
+            $summaries[0]['result_snapshot_hash'],
+        );
+        self::assertTrue($summaries[0]['has_input_snapshot']);
+        self::assertTrue($summaries[0]['has_result_snapshot']);
+        self::assertArrayNotHasKey('input_snapshot_json', $summaries[0]);
+        self::assertArrayNotHasKey('result_snapshot_json', $summaries[0]);
+        self::assertArrayNotHasKey('input_snapshot', $summaries[0]);
+        self::assertArrayNotHasKey('result_snapshot', $summaries[0]);
+
+        $fullRevision = $this->runs->revision($this->supplierId, $revisionId);
+        self::assertIsArray($fullRevision['input_snapshot']);
+        self::assertIsArray($fullRevision['result_snapshot']);
+
+        $currentRevision = $this->runs->currentRevision($this->supplierId, $runId);
+        self::assertIsArray($currentRevision['input_snapshot']);
+        self::assertIsArray($currentRevision['result_snapshot']);
+
+        $latestApproved = $this->runs->latestApprovedRevision(
+            $this->supplierId,
+            $runId,
+        );
+        self::assertIsArray($latestApproved['input_snapshot']);
+        self::assertIsArray($latestApproved['result_snapshot']);
+    }
+
     public function testCancelledUnapprovedRunReopensFromCurrentInputsAsRegularRevision(): void
     {
         $run = $this->createRun();
