@@ -1735,7 +1735,130 @@ onUnmounted(clearMobileStatusTimer)
 
       <EmptyState v-if="!loading && inbox.length === 0" icon="inbox" :title="t('databox.inbox.empty')" />
 
-      <div class="overflow-x-auto">
+      <div v-if="inbox.length" class="space-y-3 md:hidden" data-test="inbox-mobile-list">
+        <article
+          v-for="m in inbox"
+          :key="m.id"
+          class="rounded-lg border border-neutral-200 bg-surface p-4"
+          data-test="inbox-mobile-card"
+        >
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h3 class="break-words font-medium">{{ m.subject ?? '—' }}</h3>
+              <p class="mt-1 break-words text-sm text-neutral-500">
+                {{ m.sender_name ?? m.sender_box_id ?? '—' }}
+              </p>
+            </div>
+            <span
+              class="shrink-0 rounded-full px-2 py-0.5 text-xs"
+              :class="m.classification === 'unclassified'
+                ? 'bg-neutral-100 text-neutral-600'
+                : 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'"
+            >
+              {{ t(`databox.classification.${m.classification}`) }}
+            </span>
+          </div>
+
+          <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+            <div>
+              <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.deliveredAt') }}</dt>
+              <dd class="mt-1 break-words">{{ m.delivered_at ?? '—' }}</dd>
+            </div>
+            <div>
+              <dt class="text-xs uppercase text-neutral-400">{{ t('databox.delivery.column') }}</dt>
+              <dd v-if="m.classification === 'delivery_receipt'" class="mt-1 text-xs text-neutral-500">
+                {{ t('databox.delivery.notApplicable') }}
+              </dd>
+              <dd v-else class="mt-1">
+                <span class="rounded-full px-2 py-0.5 text-xs" :class="deliveryTone(m.delivery_basis)">
+                  {{ t(`databox.delivery.basis.${m.delivery_basis ?? 'unknown'}`) }}
+                </span>
+                <div v-if="m.delivered_on" class="mt-1 text-xs text-neutral-600">
+                  {{ t('databox.delivery.deliveredOn', { date: m.delivered_on }) }}
+                </div>
+                <div v-else-if="m.fiction_due_on" class="mt-1 text-xs text-neutral-500">
+                  {{ t('databox.delivery.fictionDueOn', { date: m.fiction_due_on }) }}
+                </div>
+                <div v-if="m.delivery_note" class="mt-1 break-words text-xs text-neutral-500">
+                  {{ m.delivery_note }}
+                </div>
+              </dd>
+            </div>
+          </dl>
+
+          <div class="mt-4 flex flex-wrap gap-2">
+            <RouterLink
+              v-if="m.document_id"
+              :to="{ name: 'document-detail', params: { id: m.document_id } }"
+              :class="btnOutlineSm('primary')"
+              data-test="inbox-mobile-open-message"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" />
+              </svg>
+              {{ t('databox.inbox.openMessage') }}
+            </RouterLink>
+            <span
+              v-else-if="m.local_content_state === 'purged'"
+              class="inline-flex h-7 items-center rounded-full bg-neutral-100 px-2 text-xs text-neutral-600"
+            >
+              {{ t('databox.inbox.privacy.contentPurged') }}
+            </span>
+            <span
+              v-else-if="m.local_content_state === 'purging'"
+              class="inline-flex h-7 items-center rounded-full bg-warning-50 px-2 text-xs text-warning-700 dark:bg-warning-900/30 dark:text-warning-200"
+            >
+              {{ t('databox.inbox.privacy.contentPurging') }}
+            </span>
+            <button type="button" :class="btnOutlineSm('neutral')" @click="startNoticeFromMessage(m)">
+              {{ t('databox.notices.recordFromMessage') }}
+            </button>
+            <button
+              v-if="canManageInboxPrivacy(m) && inboxVisibility === 'active'"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="privacyBusyId === m.id"
+              data-test="inbox-hide"
+              @click="hideInboxMessage(m)"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
+              </svg>
+              {{ t('databox.inbox.privacy.hide') }}
+            </button>
+            <button
+              v-if="canManageInboxPrivacy(m) && inboxVisibility === 'hidden'"
+              type="button"
+              :class="btnOutlineSm('neutral')"
+              :disabled="privacyBusyId === m.id"
+              data-test="inbox-restore"
+              @click="restoreInboxMessage(m)"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" />
+              </svg>
+              {{ t('databox.inbox.privacy.restore') }}
+            </button>
+            <button
+              v-if="canManageInboxPrivacy(m) && m.local_content_state !== 'purged'"
+              type="button"
+              :class="btnOutlineSm('danger')"
+              :disabled="privacyBusyId === m.id"
+              data-test="inbox-purge-content"
+              @click="purgeInboxLocalContent(m)"
+            >
+              <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
+              </svg>
+              {{ t(m.local_content_state === 'purging'
+                ? 'databox.inbox.privacy.purgeRetry'
+                : 'databox.inbox.privacy.purge') }}
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <div class="hidden overflow-x-auto md:block">
         <table v-if="inbox.length" class="w-full text-sm">
           <thead>
             <tr class="text-left text-xs uppercase text-neutral-400">

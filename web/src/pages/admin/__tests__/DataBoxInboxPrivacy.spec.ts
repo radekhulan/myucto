@@ -94,6 +94,25 @@ describe('DataBox — soukromí příchozích zpráv', () => {
     expect(m.toastSuccess).toHaveBeenCalledWith('databox.inbox.privacy.hidden')
   })
 
+  it('zobrazuje příchozí zprávy jako mobilní karty se všemi důležitými akcemi', async () => {
+    m.inbox.mockResolvedValue({ items: [message()], state: null })
+
+    const wrapper = mount(DataBox, {
+      global: { stubs: { EmptyState: true, RouterLink: true } },
+    })
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    const card = wrapper.get('[data-test="inbox-mobile-card"]')
+    expect(wrapper.get('[data-test="inbox-mobile-list"]').classes()).toContain('md:hidden')
+    expect(card.text()).toContain('Soukromá zpráva')
+    expect(card.text()).toContain('Soukromý odesílatel')
+    expect(card.find('[data-test="inbox-mobile-open-message"]').exists()).toBe(true)
+    expect(card.text()).toContain('databox.notices.recordFromMessage')
+    expect(card.find('[data-test="inbox-hide"]').exists()).toBe(true)
+    expect(card.find('[data-test="inbox-purge-content"]').exists()).toBe(true)
+  })
+
   it('načte skryté hlavičky a nevratné smazání odešle až po potvrzení', async () => {
     const hidden = message({ hidden_at: '2026-08-27 00:01:00' })
     m.inbox
