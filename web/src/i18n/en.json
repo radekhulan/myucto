@@ -4219,9 +4219,12 @@
             "requestedByAuthority": "The record sheet is being prepared at the request of the authority.",
             "authorityRequestReceivedOn": "Request received on",
             "authorityRequestReceivedOnHint": "The eight-day deadline starts on this date. For a request made during the year, the sheet ends with the last month whose payroll has already been approved; future months are not required.",
-            "noSendNotice": "Preparation stops at the prepared state. A person triggers sending from Submission status; the outgoing ELDP data message is not part of the pinned official schema set yet.",
-            "preparedCreated": "The record sheet was built and the submission is ready to be sent.",
+            "noSendNotice": "This control XML is not the official standalone ELDP submission message. The application will neither send it nor queue it in the data box.",
+            "preparedCreated": "The record sheet was built as a control document.",
             "preparedReplayed": "The record sheet already existed; repeating did not create a second submission.",
+            "manualCompletionNotice": "Download the control XML, verify the values and complete the filing manually in the current official CSSA interface. We do not label the file as directly importable.",
+            "downloadControlXml": "Download control XML",
+            "downloading": "Downloading control XML…",
             "kind": {
                 "annual": "Regular annual",
                 "termination": "On leaving insurance"
@@ -4236,7 +4239,8 @@
             },
             "errors": {
                 "loadFailed": "The record sheet source data could not be loaded.",
-                "prepareFailed": "The record sheet could not be built."
+                "prepareFailed": "The record sheet could not be built.",
+                "downloadFailed": "The record sheet control XML could not be downloaded."
             }
         },
         "regzel": {

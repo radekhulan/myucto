@@ -4219,9 +4219,12 @@
             "requestedByAuthority": "Evidenční list se sestavuje na výzvu ČSSZ/ÚSSZ.",
             "authorityRequestReceivedOn": "Datum doručení výzvy",
             "authorityRequestReceivedOnHint": "Od tohoto dne běží osmidenní lhůta. Při výzvě během roku list skončí posledním měsícem, za který už byla schválena mzda; budoucí měsíce nevyžaduje.",
-            "noSendNotice": "Příprava končí ve stavu připraveno. Odeslání spouští člověk ve Stavu odeslání; datová věta odesílaného ELDP zatím není v připnuté oficiální sadě.",
-            "preparedCreated": "Evidenční list byl sestaven a podání je připravené k odeslání.",
+            "noSendNotice": "Toto kontrolní XML není datová věta samostatného elektronického podání ELDP a aplikace je neodešle ani nezařadí do datové schránky.",
+            "preparedCreated": "Evidenční list byl sestaven jako kontrolní podklad.",
             "preparedReplayed": "Evidenční list už byl sestaven dřív; opakování nevytvořilo druhé podání.",
+            "manualCompletionNotice": "Stáhněte kontrolní XML, ověřte údaje a podání dokončete ručně v aktuálním oficiálním rozhraní ČSSZ. Soubor neoznačujeme jako přímo importovatelný.",
+            "downloadControlXml": "Stáhnout kontrolní XML",
+            "downloading": "Stahuji kontrolní XML…",
             "kind": {
                 "annual": "Řádný roční",
                 "termination": "Při skončení účasti"
@@ -4236,7 +4239,8 @@
             },
             "errors": {
                 "loadFailed": "Podklady evidenčního listu se nepodařilo načíst.",
-                "prepareFailed": "Evidenční list se nepodařilo sestavit."
+                "prepareFailed": "Evidenční list se nepodařilo sestavit.",
+                "downloadFailed": "Kontrolní XML evidenčního listu se nepodařilo stáhnout."
             }
         },
         "regzel": {

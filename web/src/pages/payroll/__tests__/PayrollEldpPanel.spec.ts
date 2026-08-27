@@ -6,6 +6,8 @@ const m = vi.hoisted(() => ({
   person: vi.fn(),
   eldpStatement: vi.fn(),
   prepareEldp: vi.fn(),
+  submissionDetail: vi.fn(),
+  downloadSubmissionArtifact: vi.fn(),
   canWrite: true,
 }))
 
@@ -15,6 +17,8 @@ vi.mock('@/api/payroll', () => ({
     person: m.person,
     eldpStatement: m.eldpStatement,
     prepareEldp: m.prepareEldp,
+    submissionDetail: m.submissionDetail,
+    downloadSubmissionArtifact: m.downloadSubmissionArtifact,
   },
 }))
 
@@ -78,6 +82,15 @@ function setup(): void {
     xml_sha256: 'a'.repeat(64),
     environment: 'production',
   })
+  m.submissionDetail.mockResolvedValue({
+    submission: { id: 9 },
+    parts: [],
+    artifacts: [{ id: 13, mime_type: 'application/xml', artifact_kind: 'payload' }],
+    receipts: [],
+    issues: [],
+    events: [],
+  })
+  m.downloadSubmissionArtifact.mockResolvedValue(undefined)
 }
 
 describe('PayrollEldpPanel', () => {
@@ -138,6 +151,25 @@ describe('PayrollEldpPanel', () => {
     expect(m.prepareEldp).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-test="eldp-success"]').text())
       .toContain('payroll.eldp.preparedCreated')
+  })
+
+  it('nabídne pouze stažení kontrolního XML a nikdy odeslání', async () => {
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+    await wrapper.get('[data-test="eldp-prepare"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="eldp-download"]').trigger('click')
+    await flushPromises()
+
+    expect(m.submissionDetail).toHaveBeenCalledWith(9)
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(
+      9,
+      expect.objectContaining({ id: 13 }),
+    )
+    expect(wrapper.text()).toContain('payroll.eldp.manualCompletionNotice')
+    expect(wrapper.find('[data-test="eldp-send"]').exists()).toBe(false)
   })
 
   it('u výzvy vyžádá datum doručení a předá je serveru', async () => {

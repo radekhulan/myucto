@@ -3,9 +3,9 @@
  * Evidenční list důchodového pojištění.
  *
  * Obrazovka končí přípravou. Žádné tlačítko tady neodesílá — podání se zastaví
- * ve stavu „připraveno" a odeslání spouští člověk ve Stavu odeslání. Je to
- * záměr, ne rozestavěnost: datová věta odesílaného ELDP není v připnuté
- * oficiální sadě, takže odeslat by stejně nešlo bez ověřeného schématu.
+ * ve stavu „připraveno" a nabízí jen kontrolní XML. Je to záměr, ne
+ * rozestavěnost: datová věta odesílaného ELDP není v připnuté oficiální sadě,
+ * takže podání musí člověk dokončit v oficiálním rozhraní ČSSZ.
  */
 import { computed, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
@@ -20,12 +20,13 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 
 const preparing = ref(false)
+const downloading = ref(false)
 const employments = ref<PayrollEmployment[]>([])
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
@@ -43,6 +44,7 @@ const prepared = ref<PayrollEldpPrepared | null>(null)
 const blockers = ref<Array<{ code: string, message: string }>>([])
 const error = ref('')
 const success = ref('')
+const downloadError = ref('')
 
 const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 const employmentOptions = computed(() =>
@@ -145,6 +147,24 @@ async function prepare(): Promise<void> {
     }
   } finally {
     preparing.value = false
+  }
+}
+
+async function downloadControlXml(): Promise<void> {
+  if (!prepared.value || downloading.value) return
+  downloading.value = true
+  downloadError.value = ''
+  try {
+    const detail = await payrollApi.submissionDetail(prepared.value.submission_id)
+    const artifact = detail.artifacts.find(item => item.id === prepared.value?.artifact_id)
+    if (!artifact) {
+      throw new Error('ELDP artifact is missing.')
+    }
+    await payrollApi.downloadSubmissionArtifact(prepared.value.submission_id, artifact)
+  } catch {
+    downloadError.value = t('payroll.eldp.errors.downloadFailed')
+  } finally {
+    downloading.value = false
   }
 }
 
@@ -338,7 +358,24 @@ watch(requestedByAuthority, value => {
         {{ t('payroll.eldp.noSendNotice') }}
       </p>
 
-      <!-- Jedno společné Uložit: příprava je jediná akce téhle obrazovky. -->
+      <div v-if="prepared" class="rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-neutral-700">
+        <p class="max-w-prose">{{ t('payroll.eldp.manualCompletionNotice') }}</p>
+        <p v-if="downloadError" class="mt-2 text-danger-700" role="alert">{{ downloadError }}</p>
+        <button
+          type="button"
+          :class="btnOutline('neutral')"
+          :disabled="downloading"
+          data-test="eldp-download"
+          class="mt-3"
+          @click="downloadControlXml"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.download" />
+          </svg>
+          {{ downloading ? t('payroll.eldp.downloading') : t('payroll.eldp.downloadControlXml') }}
+        </button>
+      </div>
+
       <div class="flex justify-end border-t border-neutral-200 pt-4">
         <button
           type="button"
