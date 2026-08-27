@@ -1195,6 +1195,53 @@
             "enforcement_withheld": "Exekuční srážka a paušál",
             "payable_after": "K výplatě po srážce",
             "validations": "Kontroly běhu",
+            "history": {
+                "show": "Zobrazit historii a změny",
+                "hide": "Skrýt historii a změny",
+                "title": "Historie revizí a kroků",
+                "hint": "Auditní stopa běhu a bezpečný souhrn změn proti předchozí revizi. Osobní vstupy ani celé snapshoty se zde nezobrazují.",
+                "load_failed": "Historii běhu se nepodařilo načíst. Nejde o prázdnou historii; zkuste načtení znovu.",
+                "retry": "Zkusit načíst znovu",
+                "empty": "Běh zatím nemá žádnou revizi ani auditní událost.",
+                "revisions": "Revize",
+                "events": "Auditní kroky",
+                "actor": "Provedl(a): {name}",
+                "revision_label": "Revize {revision}",
+                "first_revision": "První revize nemá předchozí stav k porovnání.",
+                "input_changed": "Vstupy se změnily",
+                "input_unchanged": "Vstupy beze změny",
+                "ruleset_changed": "Pravidla se změnila",
+                "ruleset_unchanged": "Pravidla beze změny",
+                "result_changed": "Výsledek se změnil",
+                "result_unchanged": "Výsledek beze změny",
+                "delta": "rozdíl {value}",
+                "kind": {
+                    "regular": "řádná",
+                    "correction": "opravná"
+                },
+                "total": {
+                    "cash_payable_minor": "Peněžní příjem před srážkou",
+                    "enforcement_withheld_minor": "Exekuční srážka a paušál",
+                    "payable_after_enforcement_minor": "K výplatě po srážce"
+                },
+                "event": {
+                    "created": "Běh vytvořen",
+                    "lock_inputs": "Vstupy uzamčeny",
+                    "calculate": "Mzdy spočítány",
+                    "review": "Kontrola dokončena",
+                    "approve": "Běh schválen",
+                    "post": "Mzdy zaúčtovány",
+                    "prepare_payments": "Platby připraveny",
+                    "mark_paid": "Úhrady potvrzeny",
+                    "request_correction": "Vyžádána oprava",
+                    "reopen": "Běh znovu otevřen",
+                    "cancel": "Běh zrušen",
+                    "close": "Běh uzavřen",
+                    "validation_override": "Schválena výjimka kontroly",
+                    "validation_override_revoked": "Výjimka kontroly odvolána",
+                    "unknown": "Další auditní krok"
+                }
+            },
             "validation": {
                 "draft_inputs_one": "Jeden pracovní vztah má neschválené mzdové vstupy. Schvalte je v agendě Mzdové složky a potom otevřete novou revizi běhu.",
                 "draft_inputs_many": "Neschválené mzdové vstupy mají pracovní vztahy v počtu {count}. Schvalte je v agendě Mzdové složky a potom otevřete novou revizi běhu.",

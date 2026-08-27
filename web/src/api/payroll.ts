@@ -3559,6 +3559,58 @@ export interface PayrollRun {
   validations: PayrollRunValidation[]
 }
 
+export type PayrollRunHistoryTotalKey =
+  | 'cash_payable_minor'
+  | 'enforcement_withheld_minor'
+  | 'payable_after_enforcement_minor'
+
+export interface PayrollRunHistoryTotalDiff {
+  before: number | null
+  after: number | null
+  delta: number | null
+}
+
+export interface PayrollRunRevisionDiff {
+  input_changed: boolean
+  ruleset_changed: boolean
+  result_changed: boolean
+  totals: Partial<Record<PayrollRunHistoryTotalKey, PayrollRunHistoryTotalDiff>>
+}
+
+export interface PayrollRunRevisionHistory {
+  id: number
+  revision_no: number
+  previous_revision_id: number | null
+  revision_kind: 'regular' | 'correction'
+  status: string
+  created_at: string
+  calculated_at: string | null
+  reviewed_at: string | null
+  approved_at: string | null
+  ruleset_manifest_hash: string
+  input_snapshot_hash: string
+  result_snapshot_hash: string | null
+  totals: Partial<Record<PayrollRunHistoryTotalKey, number | null>> | null
+  diff_from_previous: PayrollRunRevisionDiff | null
+}
+
+export interface PayrollRunHistoryEvent {
+  id: number
+  revision_id: number | null
+  event_type: string
+  from_status: PayrollRunStatus | null
+  to_status: PayrollRunStatus | null
+  reason: string | null
+  actor_name: string | null
+  created_at: string
+}
+
+export interface PayrollRunHistory {
+  run_id: number
+  revisions: PayrollRunRevisionHistory[]
+  events: PayrollRunHistoryEvent[]
+}
+
 export interface PayrollRunsPage {
   runs: PayrollRun[]
   total: number
@@ -4989,6 +5041,10 @@ export const payrollApi = {
   run: (runId: number) =>
     api.get<{ run: PayrollRun }>(`/payroll/runs/${runId}`)
       .then(response => response.data.run),
+  /** Lehká auditní historie bez vstupních a výsledkových snapshotů. */
+  runHistory: (runId: number) =>
+    api.get<{ history: PayrollRunHistory }>(`/payroll/runs/${runId}/history`)
+      .then(response => response.data.history),
   createRun: (payload: {
     period_start: string
     payment_date: string

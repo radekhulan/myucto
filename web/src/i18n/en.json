@@ -1195,6 +1195,53 @@
             "enforcement_withheld": "Enforcement withholding and fee",
             "payable_after": "Payable after enforcement",
             "validations": "Run checks",
+            "history": {
+                "show": "Show history and changes",
+                "hide": "Hide history and changes",
+                "title": "Revision and action history",
+                "hint": "The run audit trail and a safe summary of changes from the previous revision. Personal inputs and full snapshots are not displayed here.",
+                "load_failed": "The run history could not be loaded. This is not an empty history; try loading it again.",
+                "retry": "Try loading again",
+                "empty": "The run has no revision or audit event yet.",
+                "revisions": "Revisions",
+                "events": "Audit actions",
+                "actor": "Performed by: {name}",
+                "revision_label": "Revision {revision}",
+                "first_revision": "The first revision has no previous state to compare.",
+                "input_changed": "Inputs changed",
+                "input_unchanged": "Inputs unchanged",
+                "ruleset_changed": "Rules changed",
+                "ruleset_unchanged": "Rules unchanged",
+                "result_changed": "Result changed",
+                "result_unchanged": "Result unchanged",
+                "delta": "difference {value}",
+                "kind": {
+                    "regular": "regular",
+                    "correction": "correction"
+                },
+                "total": {
+                    "cash_payable_minor": "Cash income before enforcement",
+                    "enforcement_withheld_minor": "Enforcement withholding and fee",
+                    "payable_after_enforcement_minor": "Payable after enforcement"
+                },
+                "event": {
+                    "created": "Run created",
+                    "lock_inputs": "Inputs locked",
+                    "calculate": "Payroll calculated",
+                    "review": "Review completed",
+                    "approve": "Run approved",
+                    "post": "Payroll posted",
+                    "prepare_payments": "Payments prepared",
+                    "mark_paid": "Payments confirmed",
+                    "request_correction": "Correction requested",
+                    "reopen": "Run reopened",
+                    "cancel": "Run cancelled",
+                    "close": "Run closed",
+                    "validation_override": "Check exception approved",
+                    "validation_override_revoked": "Check exception revoked",
+                    "unknown": "Another audit action"
+                }
+            },
             "validation": {
                 "draft_inputs_one": "One employment relationship has unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",
                 "draft_inputs_many": "There are {count} employment relationships with unapproved payroll inputs. Approve them under Payroll components, then open a new run revision.",

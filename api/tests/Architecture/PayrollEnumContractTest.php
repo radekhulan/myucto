@@ -345,6 +345,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const CLIENT_ONLY_UNIONS = [
+        'payroll.ts::PayrollRunHistoryTotalKey' =>
+            'Bezpečný read model historie zpřístupňuje jen tři výslovně vybrané součty '
+            . 'z JSON výsledku; nejde o uložený stav ani samostatný backendový číselník.',
         'payroll.ts::PayrollPersonProfileStatus' =>
             'Sloupec `payroll_employee_profiles.profile_status` zná legacy/setup/ready; '
             . '`missing` je čistě klientský stav „profil ještě nevznikl" a v DB být nemůže.',
