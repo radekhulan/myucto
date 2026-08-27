@@ -14035,6 +14035,7 @@
     "run_now_failed": "Failed to start script {script}.",
     "mode_title": "Scheduling mode",
     "mode_subtitle": "Controls who launches the jobs. What the individual jobs do does not change — only how many entries have to be scheduled.",
+    "mode_managed": "Job scheduling is run by us — the mode cannot be switched on a managed installation. If jobs stop running, please contact support.",
     "mode_individual": "Individual jobs",
     "mode_dispatcher": "Single dispatcher",
     "mode_individual_desc": "Every job is its own crontab / Task Scheduler entry ({count} entries). Transparent and debuggable one job at a time — a failure of one does not affect the others.",

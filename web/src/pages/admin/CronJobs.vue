@@ -5,9 +5,11 @@ import { adminApi, type CronJob, type CronJobHealth, type CronInstallContext, ty
 import { useToast } from '@/composables/useToast'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import { useSessionAwarePolling } from '@/composables/useSessionAwarePolling'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const toast = useToast()
+const auth = useAuthStore()
 
 const jobs = ref<CronJob[]>([])
 const install = ref<CronInstallContext | null>(null)
@@ -292,7 +294,16 @@ async function copySetup() {
           <h2 class="text-sm font-semibold text-neutral-900">{{ t('cron_jobs.mode_title') }}</h2>
           <p class="text-xs text-neutral-500 mt-0.5 max-w-2xl">{{ t('cron_jobs.mode_subtitle') }}</p>
         </div>
-        <div class="flex gap-2 shrink-0" role="radiogroup" :aria-label="t('cron_jobs.mode_title')">
+        <!-- ⚠️ U spravovaného provozu se přepínač NENABÍZÍ. Plánování drží
+             provozovatel jedinou položkou `cron-dispatch`; přepnutí na
+             „jednotlivé úlohy" znamená, že dispatcher skončí bez práce
+             a nespustí se NIC — a heartbeat u toho tiká dál, takže si toho
+             instalace ani nevšimne. Server to odmítá taky, tohle je jen
+             poctivé UI. -->
+        <p v-if="auth.isManagedInstallation" class="text-xs text-neutral-600 shrink-0 max-w-sm">
+          {{ t('cron_jobs.mode_managed') }}
+        </p>
+        <div v-else class="flex gap-2 shrink-0" role="radiogroup" :aria-label="t('cron_jobs.mode_title')">
           <button
             v-for="m in schedule.modes"
             :key="m"

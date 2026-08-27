@@ -14035,6 +14035,7 @@
     "run_now_failed": "Spuštění skriptu {script} se nezdařilo.",
     "mode_title": "Režim plánování",
     "mode_subtitle": "Určuje, kdo úlohy spouští. Na tom, co jednotlivé úlohy dělají, se nic nemění — mění se jen počet položek, které musí být naplánované.",
+    "mode_managed": "Plánování úloh řídíme my — u spravované instalace se režim nepřepíná. Kdyby se úlohy nespouštěly, ozvěte se prosím podpoře.",
     "mode_individual": "Jednotlivé úlohy",
     "mode_dispatcher": "Jeden dispatcher",
     "mode_individual_desc": "Každá úloha je samostatná položka v crontabu / Task Scheduleru ({count} položek). Průhledné a laditelné po jedné úloze — výpadek jedné se ostatních nedotkne.",

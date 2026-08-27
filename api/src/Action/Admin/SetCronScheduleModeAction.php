@@ -12,6 +12,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Cron\CronCatalog;
 use MyInvoice\Service\Cron\CronScheduleMode;
 use MyInvoice\Service\Cron\DockerCrontabGenerator;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -36,6 +37,7 @@ final class SetCronScheduleModeAction
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
+        private readonly ManagedModeGuard $managed,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -43,6 +45,23 @@ final class SetCronScheduleModeAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::isSuperadmin($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        }
+
+        // ⚠️ U spravovaného provozu režim NEPATŘÍ zákazníkovi. Plánování drží
+        // provozovatel: na jeho straně běží jediná položka `cron-dispatch`
+        // a přepnutí na `individual` znamená, že dispatcher skončí bez práce
+        // a NEBĚŽÍ NIC — žádné obnovy licence, žádné zálohy, žádná avíza.
+        // Heartbeat přitom tiká dál, takže se na to přijde až z monitoringu
+        // provozovatele; přesně tak se to 27. 8. 2026 stalo (třikrát za večer,
+        // pokaždé po obnově databáze, která smazala řádek `cron_settings`).
+        if ($this->managed->isManaged()) {
+            return Json::error(
+                $response,
+                ManagedModeGuard::ERROR_CODE,
+                'Plánování úloh u nás řídí provoz — přepínat režim nejde. '
+                . 'Kdyby se úlohy nespouštěly, ozvěte se prosím podpoře.',
+                ManagedModeGuard::HTTP_STATUS,
+            );
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
