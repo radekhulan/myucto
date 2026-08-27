@@ -17,6 +17,7 @@ use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseCommand;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseLifecycle;
@@ -821,10 +822,7 @@ final class PayrollEnforcementAction
 
     private function documentViewer(Request $request): DocumentViewerContext
     {
-        return DocumentViewerContext::fromAuthorization(
-            RequestAuthorization::isSuperadmin($request),
-            $this->userId($request),
-        );
+        return DocumentViewerResolver::fromRequest($request);
     }
 
     /**

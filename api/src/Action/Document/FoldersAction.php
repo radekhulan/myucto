@@ -65,6 +65,13 @@ final class FoldersAction
         if ($folder === null) {
             return Json::error($response, 'not_found', 'Složka nenalezena.', 404);
         }
+        if (!$this->folders->canMutateSubtree(
+            $sid,
+            $this->folders->descendantIds($id, $sid),
+            $this->viewer($request),
+        )) {
+            return Json::error($response, 'folder_access_denied', 'Složku nelze změnit.', 403);
+        }
         $body = (array) $request->getParsedBody();
         $name = mb_substr(trim((string) ($body['name'] ?? '')), 0, 255);
         if ($name === '') {
@@ -86,6 +93,13 @@ final class FoldersAction
         $id = (int) ($args['id'] ?? 0);
         if ($this->folders->find($id, $sid) === null) {
             return Json::error($response, 'not_found', 'Složka nenalezena.', 404);
+        }
+        if (!$this->folders->canMutateSubtree(
+            $sid,
+            $this->folders->descendantIds($id, $sid),
+            $this->viewer($request),
+        )) {
+            return Json::error($response, 'folder_access_denied', 'Složku nelze změnit.', 403);
         }
         $body = (array) $request->getParsedBody();
         $newParent = $this->optInt($body['parent_id'] ?? null);
@@ -113,7 +127,20 @@ final class FoldersAction
         if ($this->folders->find($id, $sid) === null) {
             return Json::error($response, 'not_found', 'Složka nenalezena.', 404);
         }
-        $ids = $this->folders->softDeleteSubtree($id, $sid, $this->userId($request), $this->viewer($request));
+        $viewer = $this->viewer($request);
+        $subtreeIds = $this->folders->descendantIds($id, $sid);
+        if (!$this->folders->canMutateSubtree($sid, $subtreeIds, $viewer)) {
+            return Json::error($response, 'folder_access_denied', 'Složku nelze odstranit.', 403);
+        }
+        if ($this->folders->containsRetainedEvidence($sid, $subtreeIds)) {
+            return Json::error(
+                $response,
+                'folder_retained_evidence',
+                'Složka obsahuje neměnný dokument a nelze ji odstranit.',
+                409,
+            );
+        }
+        $ids = $this->folders->softDeleteSubtree($id, $sid, $this->userId($request), $viewer);
         $this->logger->log('document.folder_trashed', $this->userId($request), 'document_folder', $id,
             ['folder_count' => count($ids)], $this->clientIp($request), $request->getHeaderLine('User-Agent'), $sid);
         return Json::ok($response, ['ok' => true, 'trashed_folders' => count($ids)]);

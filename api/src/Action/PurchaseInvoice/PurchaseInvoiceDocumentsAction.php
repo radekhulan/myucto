@@ -11,10 +11,10 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\DocumentLinkRepository;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
-use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\DocumentLockService;
+use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -135,8 +135,6 @@ final class PurchaseInvoiceDocumentsAction
     /** DMS viewer kontext z ATTR_USER (role admin → vidí vše tenanta; jinak company + vlastní). */
     private function viewer(Request $request): DocumentViewerContext
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $uid = isset($user['id']) ? (int) $user['id'] : null;
-        return DocumentViewerContext::fromAuthorization(RequestAuthorization::isSuperadmin($request), $uid);
+        return DocumentViewerResolver::fromRequest($request);
     }
 }

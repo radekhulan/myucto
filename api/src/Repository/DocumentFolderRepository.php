@@ -28,17 +28,7 @@ final class DocumentFolderRepository
      */
     private function scopeClause(DocumentViewerContext $viewer, string $alias = ''): array
     {
-        if ($viewer->isAdmin) {
-            return ['', []];
-        }
-        $col = $alias !== '' ? $alias . '.' : '';
-        if ($viewer->userId === null) {
-            return [" AND {$col}scope = 'company'", []];
-        }
-        return [
-            " AND ({$col}scope = 'company' OR ({$col}scope = 'user' AND {$col}owner_user_id = ?))",
-            [$viewer->userId],
-        ];
+        return DocumentVisibility::clause($viewer, $alias);
     }
 
     /** @return list<array<string,mixed>> Aktivní složky daného rodiče (NULL = root). */
@@ -173,14 +163,14 @@ final class DocumentFolderRepository
     public function softDeleteSubtree(int $id, int $supplierId, ?int $userId, DocumentViewerContext $viewer): array
     {
         $ids = $this->descendantIds($id, $supplierId);
+        if (
+            $this->containsRetainedEvidence($supplierId, $ids)
+            || !$this->canMutateSubtree($supplierId, $ids, $viewer)
+        ) {
+            return [];
+        }
         $in = implode(',', array_fill(0, count($ids), '?'));
         $pdo = $this->db->pdo();
-
-        $stmt = $pdo->prepare(
-            "UPDATE document_folders SET deleted_at = CURRENT_TIMESTAMP
-              WHERE supplier_id = ? AND deleted_at IS NULL AND id IN ($in)"
-        );
-        $stmt->execute(array_merge([$supplierId], $ids));
 
         [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
         $stmt = $pdo->prepare(
@@ -189,7 +179,59 @@ final class DocumentFolderRepository
         );
         $stmt->execute(array_merge([$userId, $supplierId], $ids, $scopeParams));
 
+        $stmt = $pdo->prepare(
+            "UPDATE document_folders SET deleted_at = CURRENT_TIMESTAMP
+              WHERE supplier_id = ? AND deleted_at IS NULL AND id IN ($in)"
+        );
+        $stmt->execute(array_merge([$supplierId], $ids));
+
         return $ids;
+    }
+
+    /** @param list<int> $folderIds */
+    public function canMutateSubtree(
+        int $supplierId,
+        array $folderIds,
+        DocumentViewerContext $viewer,
+    ): bool {
+        if ($folderIds === []) {
+            return false;
+        }
+        $in = implode(',', array_fill(0, count($folderIds), '?'));
+        $base = " FROM documents
+                   WHERE supplier_id = ? AND deleted_at IS NULL
+                     AND folder_id IN ($in)";
+        $params = array_merge([$supplierId], $folderIds);
+        $all = $this->db->pdo()->prepare('SELECT COUNT(*)' . $base);
+        $all->execute($params);
+
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $visible = $this->db->pdo()->prepare('SELECT COUNT(*)' . $base . $scopeSql);
+        $visible->execute(array_merge($params, $scopeParams));
+
+        return (int) $all->fetchColumn() === (int) $visible->fetchColumn();
+    }
+
+    /** @param list<int> $folderIds */
+    public function containsRetainedEvidence(int $supplierId, array $folderIds): bool
+    {
+        if ($folderIds === []) {
+            return false;
+        }
+        $in = implode(',', array_fill(0, count($folderIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM documents document
+               JOIN payroll_enforcement_case_documents payroll_evidence
+                 ON payroll_evidence.supplier_id = document.supplier_id
+                AND (payroll_evidence.dms_document_id = document.id
+                  OR payroll_evidence.dms_document_id = document.parent_document_id)
+              WHERE document.supplier_id = ?
+                AND document.folder_id IN ($in)
+              LIMIT 1"
+        );
+        $stmt->execute(array_merge([$supplierId], $folderIds));
+        return $stmt->fetchColumn() !== false;
     }
 
     public function restore(int $id, int $supplierId): bool

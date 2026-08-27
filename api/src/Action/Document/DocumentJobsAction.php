@@ -105,11 +105,11 @@ final class DocumentJobsAction
             return Json::error($response, 'no_ids', 'Nebyly vybrány žádné položky.', 400);
         }
 
-        // Zachyť admin status tvůrce pro scope-aware export (§4.2) — job běží na pozadí
-        // později, takže viewer kontext se persistuje do params (userId = created_by).
-        $isAdmin = $this->viewer($request)->isAdmin;
+        // Job běží později bez HTTP requestu, proto zachová přesný viewer kontext
+        // včetně kategoriálního oprávnění k citlivým mzdovým důkazům.
+        $viewerParams = $this->viewer($request)->toJobParams();
         $jobId = $this->jobs->create($sid, 'document_zip_export',
-            ['ids' => $ids, 'folder_ids' => $folderIds, 'viewer_is_admin' => $isAdmin], $userId ?? 0);
+            array_merge(['ids' => $ids, 'folder_ids' => $folderIds], $viewerParams), $userId ?? 0);
         if ($this->jobSourceMissing($jobId, $sid, 'document_zip_export')) {
             return $this->migrationError($response);
         }

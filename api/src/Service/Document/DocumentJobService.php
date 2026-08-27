@@ -46,13 +46,10 @@ final class DocumentJobService
             } elseif ($source === 'document_folder_import') {
                 $this->runFolderImport($jobId, $sid, $params, (int) ($job['created_by'] ?? 0) ?: null);
             } elseif ($source === 'document_zip_export') {
-                // Scope-aware export (§4.2): viewer rekonstruován z jobu, aby se
-                // user-scoped doklad neprosákl do company ZIP. Admin (viewer_is_admin)
-                // vidí vše tenanta; jinak jen company + vlastní user doklady tvůrce.
+                // Viewer se rekonstruuje z request-time snapshotu; starý job bez
+                // kategoriálního příznaku zůstává vůči mzdovým důkazům fail-closed.
                 $createdBy = (int) ($job['created_by'] ?? 0) ?: null;
-                $viewer = ((bool) ($params['viewer_is_admin'] ?? false))
-                    ? DocumentViewerContext::admin($createdBy)
-                    : DocumentViewerContext::forUser($createdBy);
+                $viewer = DocumentViewerContext::fromJobParams($params, $createdBy);
                 $this->runExport($jobId, $sid, $params, $viewer);
             } else {
                 $this->jobs->markFailed($jobId, "Source '{$source}' není podporován.");

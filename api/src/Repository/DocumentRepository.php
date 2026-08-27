@@ -33,17 +33,7 @@ final class DocumentRepository
      */
     private function scopeClause(DocumentViewerContext $viewer, string $alias = ''): array
     {
-        if ($viewer->isAdmin) {
-            return ['', []];
-        }
-        $col = $alias !== '' ? $alias . '.' : '';
-        if ($viewer->userId === null) {
-            return [" AND {$col}scope = 'company'", []];
-        }
-        return [
-            " AND ({$col}scope = 'company' OR ({$col}scope = 'user' AND {$col}owner_user_id = ?))",
-            [$viewer->userId],
-        ];
+        return DocumentVisibility::clause($viewer, $alias);
     }
 
     /**

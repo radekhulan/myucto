@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Document\DocumentsAction;
+use MyInvoice\Action\Document\FoldersAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
@@ -50,6 +54,9 @@ final class PayrollEnforcementApiTest extends TestCase
     private PayrollModuleAccess $access;
     private IpMatcher $ipMatcher;
     private DocumentRepository $documents;
+    private DocumentFolderRepository $documentFolders;
+    private DocumentsAction $documentsAction;
+    private FoldersAction $foldersAction;
     private int $supplierId;
     private int $otherSupplierId;
     private int $employeeId;
@@ -70,6 +77,9 @@ final class PayrollEnforcementApiTest extends TestCase
         $access = $container->get(PayrollModuleAccess::class);
         $ipMatcher = $container->get(IpMatcher::class);
         $documents = $container->get(DocumentRepository::class);
+        $documentFolders = $container->get(DocumentFolderRepository::class);
+        $documentsAction = $container->get(DocumentsAction::class);
+        $foldersAction = $container->get(FoldersAction::class);
         if (
             !$db instanceof Connection
             || !$action instanceof PayrollEnforcementAction
@@ -79,6 +89,9 @@ final class PayrollEnforcementApiTest extends TestCase
             || !$access instanceof PayrollModuleAccess
             || !$ipMatcher instanceof IpMatcher
             || !$documents instanceof DocumentRepository
+            || !$documentFolders instanceof DocumentFolderRepository
+            || !$documentsAction instanceof DocumentsAction
+            || !$foldersAction instanceof FoldersAction
         ) {
             throw new \RuntimeException('Služby srážek nejsou dostupné.');
         }
@@ -93,6 +106,9 @@ final class PayrollEnforcementApiTest extends TestCase
         $this->access = $access;
         $this->ipMatcher = $ipMatcher;
         $this->documents = $documents;
+        $this->documentFolders = $documentFolders;
+        $this->documentsAction = $documentsAction;
+        $this->foldersAction = $foldersAction;
         $pdo = $db->pdo();
         $sourceSupplierId = $this->firstId($pdo, 'supplier');
         $this->userId = $this->firstId($pdo, 'users');
@@ -386,6 +402,177 @@ final class PayrollEnforcementApiTest extends TestCase
         );
         self::assertSame(409, $paid->getStatusCode());
         self::assertSame('invalid_case_transition', $this->errorCode($paid));
+    }
+
+    public function testClassifiedDecisionDocumentRequiresSessionPayrollPermissionInGenericDms(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $folderId = $this->documentFolders->create(
+            $this->supplierId,
+            null,
+            'Syntetická omezená složka',
+            $this->userId,
+        );
+        $documentId = $this->document($this->supplierId, str_repeat('e', 64));
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ? WHERE supplier_id = ? AND id = ?'
+        )->execute([$folderId, $this->supplierId, $documentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_case_documents
+                (supplier_id, case_id, dms_document_id, evidence_kind,
+                 document_sha256, verified_by)
+             VALUES (?, ?, ?, "initial_order", ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $caseId,
+            $documentId,
+            str_repeat('e', 64),
+            $this->userId,
+        ]);
+
+        $documentsOnly = new EffectiveRole(
+            91,
+            'Dokumenty bez mezd',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $payrollReader = new EffectiveRole(
+            92,
+            'Mzdová účetní',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.enforcement' => 1],
+        );
+
+        $restricted = $this->request('GET', "/api/documents/{$documentId}")
+            ->withAttribute('auth.effective_role', $documentsOnly);
+        $detail = $this->documentsAction->get(
+            $restricted,
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(404, $detail->getStatusCode());
+
+        $text = $this->documentsAction->text(
+            $restricted->withUri($restricted->getUri()->withPath("/api/documents/{$documentId}/text")),
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(404, $text->getStatusCode());
+
+        $restrictedViewer = DocumentViewerContext::forUser($this->userId);
+        self::assertNull(
+            $this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                $restrictedViewer,
+            ),
+        );
+        self::assertNotContains(
+            $documentId,
+            array_column(
+                $this->documents->listInFolder(
+                    $this->supplierId,
+                    null,
+                    $restrictedViewer,
+                ),
+                'id',
+            ),
+        );
+        $restrictedFolder = array_values(array_filter(
+            $this->documentFolders->listChildren(
+                $this->supplierId,
+                null,
+                $restrictedViewer,
+            ),
+            static fn (array $folder): bool => (int) $folder['id'] === $folderId,
+        ))[0] ?? self::fail('Syntetická složka chybí.');
+        self::assertSame(0, $restrictedFolder['file_count']);
+        self::assertSame(0, $restrictedFolder['total_bytes']);
+        self::assertFalse($this->documentFolders->canMutateSubtree(
+            $this->supplierId,
+            [$folderId],
+            $restrictedViewer,
+        ));
+        self::assertTrue($this->documentFolders->containsRetainedEvidence(
+            $this->supplierId,
+            [$folderId],
+        ));
+        self::assertSame([], $this->documentFolders->softDeleteSubtree(
+            $folderId,
+            $this->supplierId,
+            $this->userId,
+            $restrictedViewer,
+        ));
+        self::assertNotNull($this->documentFolders->find($folderId, $this->supplierId));
+        $restrictedDelete = $this->foldersAction->delete(
+            $restricted
+                ->withMethod('DELETE')
+                ->withUri($restricted->getUri()->withPath("/api/document-folders/{$folderId}")),
+            new Response(),
+            ['id' => (string) $folderId],
+        );
+        self::assertSame(403, $restrictedDelete->getStatusCode());
+        self::assertSame('folder_access_denied', $this->errorCode($restrictedDelete));
+
+        $search = $this->documentsAction->search(
+            $restricted
+                ->withUri($restricted->getUri()->withPath('/api/documents/search'))
+                ->withQueryParams(['q' => 'Syntetické']),
+            new Response(),
+        );
+        $searchRows = PayrollTimeValue::rows(
+            $this->json($search)['documents'] ?? null,
+            'documents',
+        );
+        self::assertNotContains(
+            $documentId,
+            array_column($searchRows, 'id'),
+        );
+
+        $allowed = $restricted->withAttribute('auth.effective_role', $payrollReader);
+        $detail = $this->documentsAction->get(
+            $allowed,
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(200, $detail->getStatusCode());
+        self::assertNotNull(
+            $this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                DocumentViewerContext::forUser($this->userId, true),
+            ),
+        );
+        $allowedFolder = array_values(array_filter(
+            $this->documentFolders->listChildren(
+                $this->supplierId,
+                null,
+                DocumentViewerContext::forUser($this->userId, true),
+            ),
+            static fn (array $folder): bool => (int) $folder['id'] === $folderId,
+        ))[0] ?? self::fail('Syntetická složka chybí mzdové účetní.');
+        self::assertSame(1, $allowedFolder['file_count']);
+        self::assertSame(1, $allowedFolder['total_bytes']);
+        $retainedDelete = $this->foldersAction->delete(
+            $allowed
+                ->withMethod('DELETE')
+                ->withUri($allowed->getUri()->withPath("/api/document-folders/{$folderId}")),
+            new Response(),
+            ['id' => (string) $folderId],
+        );
+        self::assertSame(409, $retainedDelete->getStatusCode());
+        self::assertSame('folder_retained_evidence', $this->errorCode($retainedDelete));
+
+        $bearer = $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer');
+        $detail = $this->documentsAction->get(
+            $bearer,
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(404, $detail->getStatusCode());
     }
 
     public function testZeroProtectedAmountOverrideIsAcceptedForMultiplePayers(): void

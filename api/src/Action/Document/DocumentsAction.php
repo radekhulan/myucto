@@ -436,8 +436,12 @@ final class DocumentsAction
                 }
                 // Složky: zákaz přesunu do sebe / vlastního potomka (cyklus).
                 foreach ($folderIds as $fid) {
+                    $subtreeIds = $this->folders->descendantIds($fid, $sid);
+                    if (!$this->folders->canMutateSubtree($sid, $subtreeIds, $viewer)) {
+                        continue;
+                    }
                     if ($folderId !== null && ($folderId === $fid
-                        || in_array($folderId, $this->folders->descendantIds($fid, $sid), true))) {
+                        || in_array($folderId, $subtreeIds, true))) {
                         continue;
                     }
                     if ($this->folders->move($fid, $sid, $folderId)) $affected++;
@@ -452,7 +456,16 @@ final class DocumentsAction
                 }
                 foreach ($folderIds as $fid) {
                     if ($this->folders->find($fid, $sid) === null) continue;
-                    $this->folders->softDeleteSubtree($fid, $sid, $userId, $viewer);
+                    $subtreeIds = $this->folders->descendantIds($fid, $sid);
+                    if (
+                        $this->folders->containsRetainedEvidence($sid, $subtreeIds)
+                        || !$this->folders->canMutateSubtree($sid, $subtreeIds, $viewer)
+                    ) {
+                        continue;
+                    }
+                    if ($this->folders->softDeleteSubtree($fid, $sid, $userId, $viewer) === []) {
+                        continue;
+                    }
                     $affected++;
                 }
                 break;
