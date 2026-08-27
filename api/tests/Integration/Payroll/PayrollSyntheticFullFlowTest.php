@@ -455,7 +455,14 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                 (supplier_id, code, name, social_security_variable_symbol, is_active)
              VALUES (?, ?, ?, ?, 1)',
         )->execute([$this->supplierId, $code, $name, $variableSymbol]);
-        return (int) $this->db->pdo()->lastInsertId();
+        $officeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from,
+                 social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", ?, "synthetic:full-flow")',
+        )->execute([$this->supplierId, $officeId, $variableSymbol]);
+        return $officeId;
     }
 
     private function configureSocialInsuranceOutput(int $officeId): void

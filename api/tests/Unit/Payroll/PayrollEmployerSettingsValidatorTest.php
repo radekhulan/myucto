@@ -56,6 +56,16 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
         );
     }
 
+    public function testRejectsLegacyOfficeVariableSymbolWrite(): void
+    {
+        $input = $this->input('205');
+        $input['offices'][0]['social_security_variable_symbol'] = '0012345678';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('VS ČSSZ spravujte přes účinnou historii registrace mzdové účtárny.');
+        $this->validator()->validate(1, $input);
+    }
+
     /**
      * Délkový limit 16 sám o sobě propouštěl „PSSZ" i „11" — obojí by skončilo
      * v podání na ČSSZ.
@@ -111,7 +121,7 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
             'offices' => [[
                 'code' => 'MAIN',
                 'name' => 'Hlavní účtárna',
-                'social_security_variable_symbol' => '0012345678',
+                'social_security_variable_symbol' => null,
                 'is_active' => true,
             ]],
             'accounts' => PayrollAccountingDefaults::codes(),
