@@ -735,7 +735,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
                         'employee_id' => $employeeId,
                         'office_id' => 4,
                         'office_registration' => [
-                            'id' => 400 + $employmentId,
+                            'id' => 404,
                             'sha256' => str_repeat('4', 64),
                             'office_code' => 'UC4',
                             'office_name' => 'Mzdová účtárna 4',

@@ -204,8 +204,13 @@ describe('EmployerSettings — účtová osnova', () => {
     const open = wrapper.findAll('button').find(button => button.text().includes('manage_registration'))
     await open!.trigger('click')
     await flushPromises()
-    await wrapper.find('[data-registration-vs]').setValue('0012345678')
-    await wrapper.find('[data-registration-source]').setValue('synthetic-approved-source')
+    const variableSymbol = document.querySelector<HTMLInputElement>('[data-registration-vs]')!
+    variableSymbol.value = '0012345678'
+    variableSymbol.dispatchEvent(new Event('input', { bubbles: true }))
+    const source = document.querySelector<HTMLInputElement>('[data-registration-source]')!
+    source.value = 'synthetic-approved-source'
+    source.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
     const save = Array.from(document.querySelectorAll('[role="dialog"] button'))
       .find(button => button.textContent === 'common.save') as HTMLButtonElement
     await save.click()
@@ -300,13 +305,9 @@ describe('EmployerSettings — účtová osnova', () => {
     wrapper.unmount()
   })
 
-  it('zachová validní ČSSZ VS u mzdové účtárny v payloadu', async () => {
+  it('hromadné nastavení neposílá živý VS mimo účinnou historii', async () => {
     const wrapper = await mountPage()
-    const inputs = wrapper.findAll('[data-office-social-vs]')
-    expect(inputs).toHaveLength(2)
-    expect((inputs[0].element as HTMLInputElement).value).toBe('0012345678')
-
-    await inputs[0].setValue('0000000042')
+    expect(wrapper.findAll('[data-office-social-vs]')).toHaveLength(0)
     const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
     await save!.trigger('click')
     await flushPromises()
@@ -314,24 +315,23 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
     expect(m.saveEmployerSettings.mock.calls[0][0].offices[0]).toMatchObject({
       code: 'MAIN',
-      social_security_variable_symbol: '0000000042',
+      social_security_variable_symbol: null,
     })
     expect(m.saveEmployerSettings.mock.calls[0][0]).not.toHaveProperty('health_insurance_payer_number')
 
     wrapper.unmount()
   })
 
-  it('neodešle nečíselný ČSSZ VS účtárny', async () => {
-    const wrapper = await mountPage()
-    const input = wrapper.findAll('[data-office-social-vs]')[0]
-    await input.setValue('VS-42')
-
+  it('legacy neplatný VS neblokuje opravu jiného nastavení a neposílá se zpět', async () => {
+    const legacy = settings()
+    legacy.offices[0]!.social_security_variable_symbol = 'VS-42'
+    const wrapper = await mountPage(legacy)
     const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
     await save!.trigger('click')
+    await flushPromises()
 
-    expect(m.saveEmployerSettings).not.toHaveBeenCalled()
-    expect(input.attributes('aria-invalid')).toBe('true')
-    expect(wrapper.text()).toContain('payroll.employer.validation.social_security_variable_symbol')
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].offices[0].social_security_variable_symbol).toBeNull()
 
     wrapper.unmount()
   })
