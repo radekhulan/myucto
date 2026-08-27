@@ -73,4 +73,15 @@ final class JmhzBlockerExplainerTest extends TestCase
         self::assertStringNotContainsString('10228', $message);
         self::assertStringNotContainsString('Evidenční list DP', $message);
     }
+
+    public function testExplainsMixedScenarioWithoutPretendingAFieldIsMissing(): void
+    {
+        $message = JmhzBlockerExplainer::describe([
+            new JmhzScenario1Blocker('jmhz_scenario1_scope_unsupported', 'preparation', 501),
+        ]);
+
+        self::assertStringContainsString('smíšené nebo zvláštní scénáře JMHZ', $message);
+        self::assertStringContainsString('zpracujte individuálně', $message);
+        self::assertStringNotContainsString('Chybí zákonný údaj', $message);
+    }
 }

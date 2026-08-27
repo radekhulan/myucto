@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v10',
+            'payroll-jmhz-preparation-source.v11',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -96,6 +96,35 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             ],
             $snapshot->payload['people'][0]['employments'][0]
                 ['earnings_by_attribute_minor'],
+        );
+    }
+
+    public function testMixedScenarioSetIsFrozenPerEmploymentAndBlockedWithoutXmlSupport(): void
+    {
+        $source = $this->sourceWithTwoOffices();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+        $input['people'][1]['employments'][0]['term']['activity_code'] = 'M';
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash('sha256', $source['revision']['input_snapshot_json']);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
+
+        self::assertSame('payroll-jmhz-preparation-source.v11', $snapshot->payload['schema_reference']);
+        self::assertArrayNotHasKey('scenario_key', $snapshot->payload['scope']);
+        self::assertSame(['scenario_1', 'scenario_2'], $snapshot->payload['scope']['scenario_set']);
+        self::assertSame(
+            'scenario_2',
+            $snapshot->payload['people'][1]['employments'][0]['scenario_resolution']['scenario_key'],
+        );
+        self::assertContains(
+            'jmhz_scenario_2_preparation_unsupported',
+            $snapshot->payload['readiness_issue_codes'],
         );
     }
 

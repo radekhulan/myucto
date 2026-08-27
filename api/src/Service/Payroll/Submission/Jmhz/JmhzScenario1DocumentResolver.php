@@ -20,6 +20,7 @@ final class JmhzScenario1DocumentResolver
         JmhzPreparationSnapshotBuilder::PREVIOUS_V7_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V8_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::PREVIOUS_V9_BUILDER_VERSION,
+        JmhzPreparationSnapshotBuilder::PREVIOUS_V10_BUILDER_VERSION,
         JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
     ];
 
@@ -82,6 +83,26 @@ final class JmhzScenario1DocumentResolver
 
         $blockers = [];
         $scope = $this->object($preparation->payload['scope'] ?? null);
+        if ($preparation->builderVersion === JmhzPreparationSnapshotBuilder::BUILDER_VERSION) {
+            if (($scope['scenario_set'] ?? null) !== ['scenario_1']) {
+                return new JmhzScenario1Resolution(null, [
+                    $this->blocker(
+                        'jmhz_scenario1_scope_unsupported',
+                        'preparation',
+                        $preparation->id,
+                    ),
+                ]);
+            }
+            $scope['scenario_key'] = 'scenario_1';
+        } elseif (($scope['scenario_key'] ?? null) !== 'scenario_1') {
+            return new JmhzScenario1Resolution(null, [
+                $this->blocker(
+                    'jmhz_scenario1_scope_unsupported',
+                    'preparation',
+                    $preparation->id,
+                ),
+            ]);
+        }
         $sourceRevision = $this->object(
             $preparation->payload['source_revision'] ?? null,
         );

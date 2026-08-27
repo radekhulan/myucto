@@ -44,7 +44,9 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
         self::assertSame($entrypoint, $resolution['evidence']['xsd_entrypoint'] ?? null);
         self::assertFalse($resolution['preparation_supported']);
         self::assertSame(
-            "jmhz_{$scenarioKey}_preparation_unsupported",
+            $scenarioKey === 'scenario_8'
+                ? 'deferred_income_evidence_missing'
+                : "jmhz_{$scenarioKey}_preparation_unsupported",
             $resolution['readiness_issue_code'],
         );
         self::assertNotEmpty($resolution['readiness_attribute_ids']);
@@ -63,6 +65,14 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
         $resolution = JmhzScenarioSelectorResolver::load()->resolve('A', '1');
 
         self::assertSame('scenario_1', $resolution['evidence']['scenario_key'] ?? null);
+    }
+
+    public function testDeferredIncomeIsForbiddenForActivityKindTen(): void
+    {
+        $resolution = JmhzScenarioSelectorResolver::load()->resolve('10', null, 'scenario_8');
+
+        self::assertFalse($resolution['supported']);
+        self::assertSame('jmhz_scenario_8_activity_10_forbidden', $resolution['issue_code']);
     }
 
     public function testRejectsUnknownManualScenario(): void

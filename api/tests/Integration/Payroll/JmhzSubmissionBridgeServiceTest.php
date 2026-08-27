@@ -1519,7 +1519,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
                 'revision_no' => 1,
                 'period_start' => self::PERIOD_START,
                 'period_end' => self::PERIOD_END,
-                'scenario_key' => 'scenario_1',
+                'scenario_set' => ['scenario_1'],
             ],
             'specification' => [
                 'package_key' => 'synthetic-package',

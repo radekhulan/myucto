@@ -18,9 +18,10 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V7_BUILDER_VERSION = 'jmhz-preparation-source.v7';
     public const PREVIOUS_V8_BUILDER_VERSION = 'jmhz-preparation-source.v8';
     public const PREVIOUS_V9_BUILDER_VERSION = 'jmhz-preparation-source.v9';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v10';
+    public const PREVIOUS_V10_BUILDER_VERSION = 'jmhz-preparation-source.v10';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v11';
 
-    private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
+    private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
 
     /**
      * @param array<string,mixed> $source
@@ -111,6 +112,7 @@ final class JmhzPreparationSnapshotBuilder
         $normalizedPeople = [];
         $sourceVersions = [];
         $seenEmployments = [];
+        $scenarioSet = [];
         $usedOrdinaryEvidence = [];
         $usedAnnualEvidence = [];
         $annualEvidenceProvided = $annualEvidenceSources !== null;
@@ -197,6 +199,23 @@ final class JmhzPreparationSnapshotBuilder
                         );
                     } else {
                         $scenarioResolution = $selection['evidence'];
+                        $scenarioKey = $scenarioResolution['scenario_key'] ?? null;
+                        if (!is_string($scenarioKey)) {
+                            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil klíč scénáře.');
+                        }
+                        $scenarioSet[$scenarioKey] = true;
+                        if (!$selection['preparation_supported']) {
+                            $issueCode = $selection['readiness_issue_code'];
+                            if (!is_string($issueCode)) {
+                                throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil readiness blocker.');
+                            }
+                            $issues[] = $this->issue(
+                                $issueCode,
+                                'employment',
+                                $employmentId,
+                                $selection['readiness_attribute_ids'],
+                            );
+                        }
                     }
                 }
                 $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
@@ -587,6 +606,8 @@ final class JmhzPreparationSnapshotBuilder
                 : null;
 
         $issues = $this->normalizeIssues($issues);
+        $scenarioSet = array_keys($scenarioSet);
+        sort($scenarioSet, SORT_STRING);
         $payload = [
             'schema_reference' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
             'builder_version' => self::BUILDER_VERSION,
@@ -598,7 +619,7 @@ final class JmhzPreparationSnapshotBuilder
                 'revision_no' => $revisionNo,
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
-                'scenario_key' => 'scenario_1',
+                'scenario_set' => $scenarioSet,
             ],
             'specification' => [
                 'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
@@ -980,9 +1001,9 @@ final class JmhzPreparationSnapshotBuilder
         return $average;
     }
 
-    private function scenarioSelector(): JmhzScenario1SelectorResolver
+    private function scenarioSelector(): JmhzScenarioSelectorResolver
     {
-        return $this->scenarioSelector ??= JmhzScenario1SelectorResolver::load();
+        return $this->scenarioSelector ??= JmhzScenarioSelectorResolver::load();
     }
 
     /**

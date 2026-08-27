@@ -61,7 +61,6 @@ final class JmhzScenarioSelectorResolver
         if ($activityCode === null || $activityCode === '') {
             throw new \UnexpectedValueException('Resolver scénáře 1 přijal neplatný druh činnosti.');
         }
-
         $scenarioKey = match (true) {
             $activityCode === 'M' => 'scenario_2',
             in_array($activityCode, ['K', 'N', 'O', 'P', 'Q', 'R', 'S'], true),
@@ -111,6 +110,9 @@ final class JmhzScenarioSelectorResolver
         }
         if ($activityCode === null || $activityCode === '') {
             throw new \UnexpectedValueException('Resolver scénáře 1 přijal neplatný druh činnosti.');
+        }
+        if ($activityCode === '10') {
+            return $this->blocked('jmhz_scenario_8_activity_10_forbidden', ['10239', '10548']);
         }
 
         return $this->classified(
@@ -165,7 +167,9 @@ final class JmhzScenarioSelectorResolver
                 'matrix_source_sheet' => $matrix->sourceSheet,
             ],
             'preparation_supported' => false,
-            'readiness_issue_code' => "jmhz_{$scenarioKey}_preparation_unsupported",
+            'readiness_issue_code' => $scenarioKey === 'scenario_8'
+                ? 'deferred_income_evidence_missing'
+                : "jmhz_{$scenarioKey}_preparation_unsupported",
             'readiness_attribute_ids' => $attributes,
         ];
     }

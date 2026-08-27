@@ -199,7 +199,8 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
 
         self::assertSame($created['id'], $verified->id);
         self::assertSame($this->revisionId, $verified->sourceRevisionId);
-        self::assertSame('scenario_1', $verified->scenarioKey);
+        self::assertSame('mixed', $verified->scenarioKey);
+        self::assertSame([], $verified->payload['scope']['scenario_set'] ?? null);
         self::assertSame(
             JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
             $verified->payload['schema_reference'],
@@ -305,9 +306,7 @@ final class JmhzPreparationSnapshotRepositoryTest extends TestCase
             static fn ($blocker): string => $blocker->code,
             $resolution->blockers,
         );
-        self::assertContains('jmhz_interaction_in13_unresolved', $codes);
-        self::assertContains('jmhz_interaction_in28_unresolved', $codes);
-        self::assertContains('jmhz_interaction_in30_unresolved', $codes);
+        self::assertSame(['jmhz_scenario1_scope_unsupported'], $codes);
         self::assertSame($before, $this->tableCounts(array_keys($before)));
     }
 
