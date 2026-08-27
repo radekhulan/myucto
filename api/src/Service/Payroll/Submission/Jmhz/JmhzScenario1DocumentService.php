@@ -11,6 +11,7 @@ final readonly class JmhzScenario1DocumentService
         private JmhzPvpojPreviewService $pvpoj,
         private JmhzScenario1DocumentResolver $resolver,
         private JmhzScenario2DocumentResolver $scenario2Resolver,
+        private JmhzSpecialScenarioDocumentResolver $specialScenarios,
     ) {}
 
     public function resolveScenario2(
@@ -19,6 +20,20 @@ final readonly class JmhzScenario1DocumentService
         int $preparationId,
     ): JmhzScenario2Resolution {
         return $this->scenario2Resolver->resolve(
+            $this->preparations->loadVerified(
+                $supplierId,
+                $environment,
+                $preparationId,
+            ),
+        );
+    }
+
+    public function resolveSpecialScenarios(
+        int $supplierId,
+        string $environment,
+        int $preparationId,
+    ): ?JmhzSpecialScenarioResolution {
+        return $this->specialScenarios->resolve(
             $this->preparations->loadVerified(
                 $supplierId,
                 $environment,

@@ -75,6 +75,22 @@ final readonly class JmhzScenario1XmlDryRunService
                         $scenario2->blockers,
                     ),
                 ];
+                $specialScenarios = $this->documents->resolveSpecialScenarios(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                );
+                if ($specialScenarios !== null) {
+                    $result['special_scenarios'] = [
+                        'status' => $specialScenarios->status(),
+                        'candidate' => $specialScenarios->candidate?->payload,
+                        'candidate_sha256' => $specialScenarios->candidate?->sha256(),
+                        'blockers' => array_map(
+                            static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
+                            $specialScenarios->blockers,
+                        ),
+                    ];
+                }
             }
 
             return $result;
