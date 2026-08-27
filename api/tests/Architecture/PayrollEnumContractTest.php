@@ -183,6 +183,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollInstitutionType'          => 'enum:MyInvoice\Service\Payroll\InstitutionAccountType',
         'payroll.ts::PayrollInstitutionAccountSource' => 'enum:MyInvoice\Service\Payroll\InstitutionAccountSourceKind',
         'payroll.ts::PayrollDocumentKind'             => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+        'payroll.ts::PayrollDocumentBatchStatus'      => 'db:payroll_document_batches.status',
+        'payroll.ts::PayrollDocumentBatchItemStatus'  => 'db:payroll_document_batch_items.status',
         // Způsob skončení vztahu na odděleném potvrzení podle § 313 odst. 2
         // zákoníku práce. Doménu drží doklad, protože právě on ji tiskne.
         'payroll.ts::PayrollTerminationReasonKind'
