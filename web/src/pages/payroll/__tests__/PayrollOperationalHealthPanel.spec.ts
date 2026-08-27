@@ -45,6 +45,12 @@ describe('PayrollOperationalHealthPanel', () => {
       },
       submissions: { rejected: 5, correction_required: 6, open_blocker_or_error_issues: 7 },
       isds_outbox: { failed: 8, send_uncertain: 9, rejected: 10 },
+      archive_capacity: {
+        measured: true,
+        content_bytes: 1_572_864,
+        object_count: 16,
+        components: {},
+      },
       overdue_unpaid_liabilities: 11,
     })
   })
@@ -67,6 +73,8 @@ describe('PayrollOperationalHealthPanel', () => {
     expect(wrapper.get('[data-test="submission-rejected"]').text()).toBe('5')
     expect(wrapper.get('[data-test="submission-issues"]').text()).toBe('7')
     expect(wrapper.get('[data-test="outbox-uncertain"]').text()).toBe('9')
+    expect(wrapper.get('[data-test="archive-capacity-bytes"]').text()).toContain('1,5 MiB')
+    expect(wrapper.get('[data-test="archive-capacity-objects"]').text()).toContain('16')
     expect(wrapper.get('[data-test="liabilities-overdue"]').text()).toBe('11')
     expect(wrapper.get('[data-test="liabilities-card"]').classes()).toContain('bg-warning-50')
     expect(wrapper.text()).not.toContain('Synthetic health test')
@@ -94,6 +102,12 @@ describe('PayrollOperationalHealthPanel', () => {
       },
       submissions: { rejected: 0, correction_required: 0, open_blocker_or_error_issues: 0 },
       isds_outbox: { failed: 0, send_uncertain: 0, rejected: 0 },
+      archive_capacity: {
+        measured: false,
+        content_bytes: null,
+        object_count: null,
+        components: {},
+      },
       overdue_unpaid_liabilities: 0,
     })
     const wrapper = mount(PayrollOperationalHealthPanel)
@@ -101,6 +115,9 @@ describe('PayrollOperationalHealthPanel', () => {
 
     expect(wrapper.get('[data-test="liabilities-card"]').classes()).toContain('bg-success-50')
     expect(wrapper.get('[data-test="liabilities-card"]').classes()).not.toContain('bg-warning-50')
+    expect(wrapper.get('[data-test="archive-capacity-card"]').classes()).toContain('bg-warning-50')
+    expect(wrapper.get('[data-test="archive-capacity-bytes"]').text())
+      .toContain('payroll.dashboard.operational_health.archive_measurement_failed')
   })
 
   it('shows a retryable neutral warning when the health request is unavailable', async () => {

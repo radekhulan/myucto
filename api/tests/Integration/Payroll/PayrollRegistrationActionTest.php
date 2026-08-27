@@ -284,6 +284,63 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringNotContainsString('<unemplcomp', $xml);
     }
 
+    public function testA2ReplayKeepsTheOriginalSubmissionAfterLiveIdentityChanges(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::START_ON);
+
+        $eventResponse = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $eventResponse->getStatusCode());
+        $event = $this->json($eventResponse);
+
+        $first = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $first->getStatusCode(), (string) $first->getBody());
+        $firstBody = $this->json($first);
+        $firstXml = $this->storedArtifactXml((int) $firstBody['submission_id']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history
+                SET title_prefix = "Mgr.", row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->identityId]);
+
+        $replayed = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $replayed->getStatusCode(), (string) $replayed->getBody());
+        $replayedBody = $this->json($replayed);
+        self::assertFalse($replayedBody['created']);
+        self::assertSame($firstBody['submission_id'], $replayedBody['submission_id']);
+        self::assertSame($firstBody['artifact_sha256'], $replayedBody['artifact_sha256']);
+        self::assertSame($firstXml, $this->storedArtifactXml((int) $replayedBody['submission_id']));
+        self::assertSame(1, $this->countSubmissions());
+    }
+
     /**
      * Tvar 1–3 číslice není důkaz, že důvod ukončení existuje. ČSSZ ho má
      * přímo v připnutém datovém slovníku JMHZ; neznámý kód proto nesmí projít

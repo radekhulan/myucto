@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Export\Instance\CompleteInstanceRestoreService;
 use MyInvoice\Service\Export\Instance\InstanceExportService;
+use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -39,6 +40,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         'payroll_document_batches',
         'payroll_document_batch_items',
         'payroll_document_batch_attempts',
+        'payroll_period_exports',
         'payroll_obligations',
         'payroll_submissions',
         'payroll_submission_artifacts',
@@ -165,6 +167,9 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
                 'payroll-documents/sup-' . $this->supplierId,
             ));
             $this->removeDirectory(RuntimePaths::storage(
+                'payroll-period-exports/sup-' . $this->supplierId,
+            ));
+            $this->removeDirectory(RuntimePaths::storage(
                 'documents/sup-' . $this->supplierId,
             ));
         }
@@ -228,6 +233,15 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             'DMS důkazní soubor musí být součástí obnovitelného archivu.',
         );
         self::assertSame($fixture['dms_sha256'], $assets[$fixture['dms_storage_path']]['sha256'] ?? null);
+        self::assertArrayHasKey(
+            $fixture['period_export_storage_path'],
+            $assets,
+            'Měsíční nebo roční mzdový archiv musí být součástí obnovitelného exportu.',
+        );
+        self::assertSame(
+            $fixture['period_export_ciphertext_sha256'],
+            $assets[$fixture['period_export_storage_path']]['sha256'] ?? null,
+        );
         self::assertSame(
             'denylist',
             $result['manifest']['sections']['data']['skipped_tables']['payroll_period_export_jobs'] ?? null,
@@ -277,6 +291,18 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         self::assertSame($fixture['dms_bytes'], file_get_contents($restoredDms));
         self::assertSame($fixture['dms_sha256'], hash_file('sha256', $restoredDms));
 
+        $restoredPeriodExport = $this->targetStorage . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $fixture['period_export_storage_path']);
+        self::assertFileExists($restoredPeriodExport);
+        self::assertSame(
+            $fixture['period_export_ciphertext'],
+            file_get_contents($restoredPeriodExport),
+        );
+        self::assertSame(
+            $fixture['period_export_ciphertext_sha256'],
+            hash_file('sha256', $restoredPeriodExport),
+        );
+
         self::assertSame(
             0,
             (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_jobs')?->fetchColumn(),
@@ -319,6 +345,8 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
      *   bank_statement_id:int,
      *   pdf_storage_path:string,pdf_bytes:string,pdf_sha256:string,
      *   dms_storage_path:string,dms_bytes:string,dms_sha256:string,
+     *   period_export_storage_path:string,period_export_ciphertext:string,
+     *   period_export_ciphertext_sha256:string,
      *   xml_bytes:string,xml_ciphertext:string,
      *   protocol_bytes:string,protocol_ciphertext:string,
      *   bank_bytes:string
@@ -577,6 +605,37 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
              VALUES (?, "monthly", "2099-01-01", "2099-01-31", "queued", "2099-02-02 10:00:00", ?)',
         )->execute([$this->supplierId, $actorId]);
 
+        $periodExportBytes = "synthetic MZ-31 monthly archive\n";
+        $periodStorage = Bootstrap::buildContainer()->get(PayrollPeriodExportStorage::class);
+        self::assertInstanceOf(PayrollPeriodExportStorage::class, $periodStorage);
+        $storedPeriodExport = $periodStorage->store(
+            $this->supplierId,
+            $periodExportBytes,
+        );
+        $periodExportHash = (string) $storedPeriodExport['storage_key'];
+        $periodExportStoragePath = 'payroll-period-exports/sup-'
+            . $this->supplierId . '/' . substr($periodExportHash, 0, 2)
+            . '/' . $periodExportHash;
+        $periodExportCiphertext = file_get_contents(
+            RuntimePaths::storage($periodExportStoragePath),
+        );
+        self::assertIsString($periodExportCiphertext);
+        $pdo->prepare(
+            'INSERT INTO payroll_period_exports
+                (supplier_id, export_scope, period_start, period_end,
+                 source_manifest_hash, manifest_json, file_sha256, size_bytes,
+                 mime_type, storage_key, suggested_filename, created_by)
+             VALUES (?, "monthly", "2099-01-01", "2099-01-31", ?, "{}", ?, ?,
+                     "application/zip", ?, "mzdy-2099-01.zip", ?)'
+        )->execute([
+            $this->supplierId,
+            hash('sha256', "mz31-period-source-{$this->supplierId}"),
+            $periodExportHash,
+            strlen($periodExportBytes),
+            $periodExportHash,
+            $actorId,
+        ]);
+
         $pdo->prepare(
             'INSERT INTO payroll_obligations
                 (supplier_id, environment, agenda_code, subject_type,
@@ -761,6 +820,9 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             'dms_storage_path' => $dmsStoragePath,
             'dms_bytes' => $dmsBytes,
             'dms_sha256' => $dmsHash,
+            'period_export_storage_path' => $periodExportStoragePath,
+            'period_export_ciphertext' => $periodExportCiphertext,
+            'period_export_ciphertext_sha256' => hash('sha256', $periodExportCiphertext),
             'xml_bytes' => $xmlBytes,
             'xml_ciphertext' => $xmlCiphertext,
             'protocol_bytes' => $protocolBytes,

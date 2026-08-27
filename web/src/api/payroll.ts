@@ -1888,6 +1888,15 @@ export interface PayrollOperationalHealth {
     send_uncertain: number
     rejected: number
   }
+  archive_capacity: {
+    measured: boolean
+    content_bytes: number | null
+    object_count: number | null
+    components: Record<
+      'generated_documents' | 'payment_exports' | 'period_exports' | 'submission_artifacts',
+      { measured: boolean; content_bytes: number | null; object_count: number | null }
+    >
+  }
   overdue_unpaid_liabilities: number
 }
 

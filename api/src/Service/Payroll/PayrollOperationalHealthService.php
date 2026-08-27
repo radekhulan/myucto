@@ -37,6 +37,10 @@ final class PayrollOperationalHealthService
      *   },
      *   submissions:array{rejected:int,correction_required:int,open_blocker_or_error_issues:int},
      *   isds_outbox:array{failed:int,send_uncertain:int,rejected:int},
+     *   archive_capacity:array{
+     *     measured:bool,content_bytes:?int,object_count:?int,
+     *     components:array<string,array{measured:bool,content_bytes:?int,object_count:?int}>
+     *   },
      *   overdue_unpaid_liabilities:int
      * }
      */
@@ -47,6 +51,7 @@ final class PayrollOperationalHealthService
             'period_export_jobs' => $this->periodExportJobs($supplierId),
             'submissions' => $this->submissions($supplierId),
             'isds_outbox' => $this->isdsOutbox($supplierId),
+            'archive_capacity' => $this->archiveCapacity($supplierId),
             'overdue_unpaid_liabilities' => $this->overdueUnpaidLiabilities($supplierId),
         ];
     }
@@ -228,5 +233,102 @@ final class PayrollOperationalHealthService
         );
         $statement->execute([$supplierId]);
         return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * Logical size of canonical, re-downloadable payroll artifacts. CAS-backed
+     * files count once per storage key; DB-backed submission artifacts count
+     * once per immutable row. This is not the hosting/filesystem quota.
+     *
+     * @return array{
+     *   measured:bool,content_bytes:?int,object_count:?int,
+     *   components:array<string,array{measured:bool,content_bytes:?int,object_count:?int}>
+     * }
+     */
+    private function archiveCapacity(int $supplierId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT "generated_documents" AS component,
+                    COALESCE(SUM(cas.size_bytes), 0) AS content_bytes,
+                    COUNT(*) AS object_count,
+                    COALESCE(SUM(cas.min_size <> cas.max_size), 0) AS inconsistent
+               FROM (
+                    SELECT storage_key, MIN(size_bytes) AS size_bytes,
+                           MIN(size_bytes) AS min_size, MAX(size_bytes) AS max_size
+                      FROM payroll_generated_documents
+                     WHERE supplier_id = ?
+                     GROUP BY storage_key
+               ) cas
+             UNION ALL
+             SELECT "payment_exports",
+                    COALESCE(SUM(cas.size_bytes), 0), COUNT(*),
+                    COALESCE(SUM(cas.min_size <> cas.max_size), 0)
+               FROM (
+                    SELECT storage_key, MIN(size_bytes) AS size_bytes,
+                           MIN(size_bytes) AS min_size, MAX(size_bytes) AS max_size
+                      FROM payroll_payment_exports
+                     WHERE supplier_id = ?
+                     GROUP BY storage_key
+               ) cas
+             UNION ALL
+             SELECT "period_exports",
+                    COALESCE(SUM(cas.size_bytes), 0), COUNT(*),
+                    COALESCE(SUM(cas.min_size <> cas.max_size), 0)
+               FROM (
+                    SELECT storage_key, MIN(size_bytes) AS size_bytes,
+                           MIN(size_bytes) AS min_size, MAX(size_bytes) AS max_size
+                      FROM payroll_period_exports
+                     WHERE supplier_id = ?
+                     GROUP BY storage_key
+               ) cas
+             UNION ALL
+             SELECT "submission_artifacts",
+                    COALESCE(SUM(byte_size), 0), COUNT(*), 0
+               FROM payroll_submission_artifacts
+              WHERE supplier_id = ?',
+        );
+        $statement->execute([
+            $supplierId,
+            $supplierId,
+            $supplierId,
+            $supplierId,
+        ]);
+
+        $components = [];
+        $measured = true;
+        $contentBytes = 0;
+        $objectCount = 0;
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $component = (string) ($row['component'] ?? '');
+            if (!in_array($component, [
+                'generated_documents',
+                'payment_exports',
+                'period_exports',
+                'submission_artifacts',
+            ], true)) {
+                throw new \RuntimeException('Neznámá komponenta kapacity mzdového archivu.');
+            }
+            $componentMeasured = (int) ($row['inconsistent'] ?? 0) === 0;
+            $componentBytes = (int) ($row['content_bytes'] ?? 0);
+            $componentCount = (int) ($row['object_count'] ?? 0);
+            $components[$component] = [
+                'measured' => $componentMeasured,
+                'content_bytes' => $componentMeasured ? $componentBytes : null,
+                'object_count' => $componentMeasured ? $componentCount : null,
+            ];
+            if (!$componentMeasured) {
+                $measured = false;
+                continue;
+            }
+            $contentBytes += $componentBytes;
+            $objectCount += $componentCount;
+        }
+
+        return [
+            'measured' => $measured,
+            'content_bytes' => $measured ? $contentBytes : null,
+            'object_count' => $measured ? $objectCount : null,
+            'components' => $components,
+        ];
     }
 }

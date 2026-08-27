@@ -42,6 +42,20 @@ function formatCompletedAt(value: string | null): string {
   }).format(new Date(value))
 }
 
+function formatBytes(value: number | null): string {
+  if (value === null) return t('payroll.dashboard.operational_health.archive_measurement_failed')
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let amount = value
+  let unit = 0
+  while (amount >= 1024 && unit < units.length - 1) {
+    amount /= 1024
+    unit += 1
+  }
+  return new Intl.NumberFormat(locale.value, {
+    maximumFractionDigits: amount >= 10 || unit === 0 ? 0 : 1,
+  }).format(amount) + ' ' + units[unit]
+}
+
 onMounted(load)
 </script>
 
@@ -60,7 +74,7 @@ onMounted(load)
       </p>
     </div>
 
-    <div class="mt-4 grid gap-3 lg:grid-cols-5">
+    <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
       <div class="rounded-lg bg-neutral-50 p-3">
         <h3 class="text-sm font-medium text-neutral-800">
           {{ t('payroll.dashboard.operational_health.document_batches') }}
@@ -147,6 +161,29 @@ onMounted(load)
           <dt>{{ t('payroll.dashboard.operational_health.rejected') }}</dt>
           <dd class="text-right font-semibold text-danger-700">{{ health.isds_outbox.rejected }}</dd>
         </dl>
+      </div>
+
+      <div
+        class="rounded-lg p-3"
+        :class="health.archive_capacity.measured ? 'bg-neutral-50' : 'bg-warning-50'"
+        data-test="archive-capacity-card"
+      >
+        <h3 class="text-sm font-medium text-neutral-800">
+          {{ t('payroll.dashboard.operational_health.archive_capacity') }}
+        </h3>
+        <p class="mt-2 text-2xl font-semibold text-neutral-900" data-test="archive-capacity-bytes">
+          {{ formatBytes(health.archive_capacity.content_bytes) }}
+        </p>
+        <p
+          v-if="health.archive_capacity.measured"
+          class="mt-1 text-sm text-neutral-600"
+          data-test="archive-capacity-objects"
+        >
+          {{ t('payroll.dashboard.operational_health.archive_objects', { count: health.archive_capacity.object_count }) }}
+        </p>
+        <p class="mt-2 text-xs text-neutral-500">
+          {{ t('payroll.dashboard.operational_health.archive_capacity_hint') }}
+        </p>
       </div>
 
       <div

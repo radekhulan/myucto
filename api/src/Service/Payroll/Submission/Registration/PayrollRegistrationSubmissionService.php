@@ -19,10 +19,9 @@ use Psr\Clock\ClockInterface;
  *
  * Čtyři rozhodnutí, na kterých vrstva stojí:
  *
- * 1. **Interakci vybírá resolver, ne volající.** Endpoint nepřijímá kód
- *    formuláře. Kdyby ho přijímal, dal by se allowlist PREZEC P1/P2 a REGZEC A1
- *    obejít jedním řetězcem v těle požadavku a opravy či storna by se
- *    serializovaly bez odporu.
+ * 1. **Interakci vybírá resolver nebo schválený event, ne volající.** Běžný
+ *    endpoint nepřijímá kód formuláře; REGZEC A2–A8 se připravují pouze ze
+ *    samostatně schváleného a neměnného zdroje.
  * 2. **Zmrazené XML je pravda podání.** Vzniká právě jednou, uloží se jako
  *    artefakt a při idempotentním opakování se NESTAVÍ ZNOVU — nové GUIDy by
  *    pod týmž podáním vyrobily jiný dokument a přijatou duplicitu nelze u ČSSZ
@@ -495,12 +494,12 @@ final readonly class PayrollRegistrationSubmissionService
             'interaction' => $interaction,
             'snapshot' => $snapshot,
             'xml' => $xml,
-            'source_hash' => hash('sha256', CanonicalJson::encode([
-                'identity' => $snapshot->toArray(),
-                'event_fingerprint' => $event === null
-                    ? null
-                    : $this->eventFingerprint($event),
-            ])),
+            'source_hash' => $event === null
+                ? hash('sha256', CanonicalJson::encode([
+                    'identity' => $snapshot->toArray(),
+                    'event_fingerprint' => null,
+                ]))
+                : $this->eventFingerprint($event),
             'schema_version' => $interaction->documentType,
             'deadline' => $this->deadlineFor(
                 $interaction,

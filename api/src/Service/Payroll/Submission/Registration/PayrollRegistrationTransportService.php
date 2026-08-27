@@ -209,7 +209,7 @@ final readonly class PayrollRegistrationTransportService
         }
         $agenda = $obligation['agenda_code'];
         if (!isset(self::DOCUMENTS[$agenda])) {
-            throw new \DomainException('Transport podporuje pouze PREZEC P1/P2 a REGZEC A1.');
+            throw new \DomainException('Transport podporuje pouze registrační agendy PREZEC a REGZEC.');
         }
 
         return [

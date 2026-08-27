@@ -194,6 +194,33 @@ final class PayrollOperationalHealthActionTest extends TestCase
                 'send_uncertain' => 1,
                 'rejected' => 1,
             ],
+            'archive_capacity' => [
+                'measured' => true,
+                'content_bytes' => 1,
+                'object_count' => 1,
+                'components' => [
+                    'generated_documents' => [
+                        'measured' => true,
+                        'content_bytes' => 0,
+                        'object_count' => 0,
+                    ],
+                    'payment_exports' => [
+                        'measured' => true,
+                        'content_bytes' => 0,
+                        'object_count' => 0,
+                    ],
+                    'period_exports' => [
+                        'measured' => true,
+                        'content_bytes' => 1,
+                        'object_count' => 1,
+                    ],
+                    'submission_artifacts' => [
+                        'measured' => true,
+                        'content_bytes' => 0,
+                        'object_count' => 0,
+                    ],
+                ],
+            ],
             'overdue_unpaid_liabilities' => 3,
         ], $body);
     }
@@ -225,6 +252,118 @@ final class PayrollOperationalHealthActionTest extends TestCase
         self::assertNull($body['period_export_jobs']['oldest_pending_at']);
         self::assertNull($body['period_export_jobs']['oldest_pending_age_seconds']);
         self::assertNull($body['period_export_jobs']['last_completed_at']);
+        self::assertSame([
+            'measured' => true,
+            'content_bytes' => 0,
+            'object_count' => 0,
+            'components' => [
+                'generated_documents' => ['measured' => true, 'content_bytes' => 0, 'object_count' => 0],
+                'payment_exports' => ['measured' => true, 'content_bytes' => 0, 'object_count' => 0],
+                'period_exports' => ['measured' => true, 'content_bytes' => 0, 'object_count' => 0],
+                'submission_artifacts' => ['measured' => true, 'content_bytes' => 0, 'object_count' => 0],
+            ],
+        ], $body['archive_capacity']);
+    }
+
+    public function testArchiveCapacityCountsTenantArtifactsAndDeduplicatesCasObjects(): void
+    {
+        $documentKey = hash('sha256', 'shared generated document');
+        $this->generatedDocument($this->supplierId, $documentKey, 100, 'one');
+        $this->generatedDocument($this->supplierId, $documentKey, 100, 'two');
+        $this->generatedDocument(
+            $this->otherSupplierId,
+            hash('sha256', 'foreign document'),
+            9_999,
+            'foreign',
+        );
+
+        $paymentKey = hash('sha256', 'shared payment export');
+        $this->paymentExport($this->supplierId, $paymentKey, 200, 'one');
+        $this->paymentExport($this->supplierId, $paymentKey, 200, 'two');
+        $this->paymentExport(
+            $this->supplierId,
+            hash('sha256', 'second payment export'),
+            300,
+            'three',
+        );
+        $this->paymentExport(
+            $this->otherSupplierId,
+            hash('sha256', 'foreign payment export'),
+            9_999,
+            'foreign',
+        );
+
+        $this->periodExport($this->supplierId, 400, '2026-01-01');
+        $this->periodExport($this->otherSupplierId, 9_999, '2026-02-01');
+
+        $firstSubmission = $this->submission($this->supplierId, 'rejected', 'capacity-one');
+        $secondSubmission = $this->submission($this->supplierId, 'rejected', 'capacity-two');
+        $this->submissionArtifact($this->supplierId, $firstSubmission, 50, 'one');
+        $this->submissionArtifact($this->supplierId, $secondSubmission, 60, 'two');
+        $foreignSubmission = $this->submission(
+            $this->otherSupplierId,
+            'rejected',
+            'capacity-foreign',
+        );
+        $this->submissionArtifact(
+            $this->otherSupplierId,
+            $foreignSubmission,
+            9_999,
+            'foreign',
+        );
+
+        $body = $this->json(($this->action)($this->request(), new Response()));
+
+        self::assertSame([
+            'measured' => true,
+            'content_bytes' => 1_110,
+            'object_count' => 6,
+            'components' => [
+                'generated_documents' => [
+                    'measured' => true,
+                    'content_bytes' => 100,
+                    'object_count' => 1,
+                ],
+                'payment_exports' => [
+                    'measured' => true,
+                    'content_bytes' => 500,
+                    'object_count' => 2,
+                ],
+                'period_exports' => [
+                    'measured' => true,
+                    'content_bytes' => 400,
+                    'object_count' => 1,
+                ],
+                'submission_artifacts' => [
+                    'measured' => true,
+                    'content_bytes' => 110,
+                    'object_count' => 2,
+                ],
+            ],
+        ], $body['archive_capacity']);
+    }
+
+    public function testArchiveCapacityDoesNotInventATotalForInconsistentCasMetadata(): void
+    {
+        $storageKey = hash('sha256', 'inconsistent generated document');
+        $this->generatedDocument($this->supplierId, $storageKey, 100, 'first-size');
+        $this->generatedDocument($this->supplierId, $storageKey, 101, 'second-size');
+
+        $capacity = $this->json(
+            ($this->action)($this->request(), new Response()),
+        )['archive_capacity'];
+
+        self::assertFalse($capacity['measured']);
+        self::assertNull($capacity['content_bytes']);
+        self::assertNull($capacity['object_count']);
+        self::assertSame([
+            'measured' => false,
+            'content_bytes' => null,
+            'object_count' => null,
+        ], $capacity['components']['generated_documents']);
+        self::assertTrue($capacity['components']['payment_exports']['measured']);
+        self::assertTrue($capacity['components']['period_exports']['measured']);
+        self::assertTrue($capacity['components']['submission_artifacts']['measured']);
     }
 
     public function testPendingAgeUsesElapsedUtcTimeAcrossDaylightSavingChanges(): void
@@ -352,6 +491,133 @@ final class PayrollOperationalHealthActionTest extends TestCase
             $exportId,
             $createdAt,
             $completedAt,
+        ]);
+    }
+
+    private function generatedDocument(
+        int $supplierId,
+        string $storageKey,
+        int $sizeBytes,
+        string $suffix,
+    ): void {
+        [$runId, $revisionId, $snapshotHash] = $this->approvedRevision(
+            $supplierId,
+            "archive-document-{$suffix}",
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_generated_documents
+                (supplier_id, run_id, revision_id, document_kind,
+                 document_revision_no, revision_snapshot_hash,
+                 source_snapshot_hash, template_version, renderer_version,
+                 file_sha256, size_bytes, mime_type, storage_key,
+                 suggested_filename, manifest_json, idempotency_key_hash)
+             VALUES (?, ?, ?, "payslip", 1, ?, ?, "health-template.v1",
+                     "health-renderer.v1", ?, ?, "application/pdf", ?,
+                     ?, "{}", UNHEX(?))',
+        )->execute([
+            $supplierId,
+            $runId,
+            $revisionId,
+            $snapshotHash,
+            $snapshotHash,
+            $storageKey,
+            $sizeBytes,
+            $storageKey,
+            "health-{$supplierId}-{$suffix}.pdf",
+            hash('sha256', "health-document:{$supplierId}:{$suffix}"),
+        ]);
+    }
+
+    private function paymentExport(
+        int $supplierId,
+        string $storageKey,
+        int $sizeBytes,
+        string $suffix,
+    ): void {
+        $reference = "health-export-{$supplierId}-{$suffix}";
+        $snapshotHash = hash('sha256', "{$reference}:snapshot");
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_batches
+                (supplier_id, batch_reference, channel, export_format, direction,
+                 planned_payment_date, currency_code, payer_reference,
+                 declared_total_minor, declared_item_count, snapshot_ciphertext,
+                 snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, "bank", "manual", "outgoing", "2026-01-15", "CZK",
+                     "payer:synthetic", 1, 1, "enc:v2:synthetic", ?, UNHEX(?))',
+        )->execute([
+            $supplierId,
+            $reference,
+            $snapshotHash,
+            hash('sha256', "{$reference}:batch"),
+        ]);
+        $batchId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_exports
+                (supplier_id, batch_id, export_format, export_revision_no,
+                 source_snapshot_hash, exporter_version, file_sha256,
+                 size_bytes, mime_type, storage_key, suggested_filename,
+                 manifest_json, idempotency_key_hash)
+             VALUES (?, ?, "manual", 1, ?, "health-exporter.v1", ?, ?,
+                     "application/octet-stream", ?, ?, "{}", UNHEX(?))',
+        )->execute([
+            $supplierId,
+            $batchId,
+            $snapshotHash,
+            $storageKey,
+            $sizeBytes,
+            $storageKey,
+            "{$reference}.bin",
+            hash('sha256', "{$reference}:export"),
+        ]);
+    }
+
+    private function periodExport(
+        int $supplierId,
+        int $sizeBytes,
+        string $periodStart,
+    ): void {
+        $periodEnd = (new \DateTimeImmutable($periodStart))
+            ->modify('last day of this month')
+            ->format('Y-m-d');
+        $storageKey = hash('sha256', "health-period:{$supplierId}:{$periodStart}");
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_period_exports
+                (supplier_id, export_scope, period_start, period_end,
+                 source_manifest_hash, manifest_json, file_sha256, size_bytes,
+                 storage_key, suggested_filename)
+             VALUES (?, "monthly", ?, ?, ?, "{}", ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            hash('sha256', "health-period-source:{$supplierId}:{$periodStart}"),
+            $storageKey,
+            $sizeBytes,
+            $storageKey,
+            "health-period-{$supplierId}-{$periodStart}.zip",
+        ]);
+    }
+
+    private function submissionArtifact(
+        int $supplierId,
+        int $submissionId,
+        int $byteSize,
+        string $suffix,
+    ): void {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_submission_artifacts
+                (supplier_id, environment, submission_id, artifact_kind,
+                 direction, mime_type, content_ciphertext, byte_size,
+                 artifact_sha256, channel, idempotency_key_hash)
+             VALUES (?, "production", ?, "manual_attachment", "internal",
+                     "application/octet-stream", "enc:v2:synthetic", ?, ?,
+                     "manual_upload", UNHEX(?))',
+        )->execute([
+            $supplierId,
+            $submissionId,
+            $byteSize,
+            hash('sha256', "health-artifact:{$supplierId}:{$suffix}:bytes"),
+            hash('sha256', "health-artifact:{$supplierId}:{$suffix}:key"),
         ]);
     }
 

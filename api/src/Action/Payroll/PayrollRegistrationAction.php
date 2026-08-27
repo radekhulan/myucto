@@ -17,10 +17,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Přihlášení pracovního vztahu u ČSSZ (PREZEC / REGZEC).
  *
- * Endpoint NEPŘIJÍMÁ kód formuláře ani kód akce. Kdyby je přijímal, stačil by
- * jeden řetězec v těle požadavku k tomu, aby se serializovaly opravy a storna
- * (REGZEC A2–A8), které tenhle core vědomě neumí. Interakci vybírá výhradně
- * `PayrollRegistrationInteractionResolver` z faktů o pracovním vztahu.
+ * Běžný preview/prepare NEPŘIJÍMÁ kód formuláře ani kód akce. Registrace A1
+ * vybírá interakci z faktů o pracovním vztahu; A2–A8 vznikají jen z odděleného
+ * schváleného a neměnného eventu.
  *
  * Session-only jako ostatní podání: `preview` vrací celý obsah přihlášky včetně
  * osobních identifikátorů a `prepare` zakládá úřední podání.

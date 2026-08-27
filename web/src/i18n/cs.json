@@ -5055,6 +5055,10 @@
                 "age_minutes": "{count} min",
                 "age_hours": "{count} h",
                 "age_days": "{count} d",
+                "archive_capacity": "Archiv mezd",
+                "archive_capacity_hint": "Velikost původního obsahu trvale archivovaných dokumentů, exportů a podání.",
+                "archive_measurement_failed": "Velikost se nepodařilo zjistit",
+                "archive_objects": "{count} archivovaných položek",
                 "liabilities": "Mzdové závazky",
                 "overdue_unpaid": "Po splatnosti a ne zcela uhrazené"
             },

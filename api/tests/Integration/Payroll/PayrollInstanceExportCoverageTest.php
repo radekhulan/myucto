@@ -123,6 +123,7 @@ final class PayrollInstanceExportCoverageTest extends TestCase
             $this->removeDir(RuntimePaths::storage('instance-exports/sup-' . $this->supplierId));
             $this->removeDir(RuntimePaths::storage('payroll-documents/sup-' . $this->supplierId));
             $this->removeDir(RuntimePaths::storage('payroll-payment-exports/sup-' . $this->supplierId));
+            $this->removeDir(RuntimePaths::storage('payroll-period-exports/sup-' . $this->supplierId));
         }
         if (isset($this->db) && $this->inTx && $this->db->pdo()->inTransaction()) {
             $this->db->pdo()->rollBack();
@@ -358,6 +359,15 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         $paymentPath = $paymentDir . '/' . $paymentStorageKey;
         self::assertSame(strlen($paymentBytes), file_put_contents($paymentPath, $paymentBytes));
 
+        $periodStorageKey = str_repeat('b', 64);
+        $periodBytes = 'enc:v2:synthetic-encrypted-period-export';
+        $periodDir = RuntimePaths::storage(
+            'payroll-period-exports/sup-' . $this->supplierId . '/bb',
+        );
+        self::assertTrue(@mkdir($periodDir, 0750, true) || is_dir($periodDir));
+        $periodPath = $periodDir . '/' . $periodStorageKey;
+        self::assertSame(strlen($periodBytes), file_put_contents($periodPath, $periodBytes));
+
         $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_FILES]);
         $this->tempPaths[] = (string) $result['abs_path'];
         $this->tempPaths[] = (string) $result['abs_path'] . '.sha256';
@@ -369,15 +379,19 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         $documentStoragePath = 'payroll-documents/sup-' . $this->supplierId . '/'
             . substr($documentHash, 0, 2) . '/' . $documentHash;
         $paymentStoragePath = 'payroll-payment-exports/sup-' . $this->supplierId . '/aa/' . $paymentStorageKey;
+        $periodStoragePath = 'payroll-period-exports/sup-' . $this->supplierId . '/bb/' . $periodStorageKey;
         self::assertArrayHasKey($documentStoragePath, $assets, 'Výplatní PDF je obnovitelná příloha.');
         self::assertArrayHasKey($paymentStoragePath, $assets, 'Zašifrovaný bankovní export mezd je obnovitelná příloha.');
+        self::assertArrayHasKey($periodStoragePath, $assets, 'Zašifrovaný měsíční nebo roční archiv mezd je obnovitelná příloha.');
         self::assertSame($documentHash, $assets[$documentStoragePath]['sha256'] ?? null);
         self::assertSame(hash('sha256', $paymentBytes), $assets[$paymentStoragePath]['sha256'] ?? null);
+        self::assertSame(hash('sha256', $periodBytes), $assets[$periodStoragePath]['sha256'] ?? null);
 
         $archive = new ZipArchive();
         self::assertTrue($archive->open((string) $result['abs_path']) === true);
         self::assertSame($documentBytes, $archive->getFromName((string) $assets[$documentStoragePath]['entry']));
         self::assertSame($paymentBytes, $archive->getFromName((string) $assets[$paymentStoragePath]['entry']));
+        self::assertSame($periodBytes, $archive->getFromName((string) $assets[$periodStoragePath]['entry']));
         $archive->close();
     }
 

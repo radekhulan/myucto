@@ -5055,6 +5055,10 @@
                 "age_minutes": "{count} min",
                 "age_hours": "{count} h",
                 "age_days": "{count} d",
+                "archive_capacity": "Payroll archive",
+                "archive_capacity_hint": "Original content size of permanently archived documents, exports, and filings.",
+                "archive_measurement_failed": "Size could not be measured",
+                "archive_objects": "{count} archived items",
                 "liabilities": "Payroll liabilities",
                 "overdue_unpaid": "Overdue and not fully paid"
             },
