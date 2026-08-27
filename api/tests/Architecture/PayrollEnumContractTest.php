@@ -233,6 +233,8 @@ final class PayrollEnumContractTest extends TestCase
         // Podání
         'payroll.ts::PayrollStatutoryAgendaCapability'
             => 'const:MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog::CAPABILITIES',
+        'payroll.ts::PayrollEldpAuthorityStatus'
+            => 'db:payroll_eldp_manual_completions.authority_status',
         'payroll.ts::PayrollSubmissionObligationStatus'     => 'db:payroll_obligations.status',
         'payroll.ts::PayrollSubmissionInboxStatus'          => 'db:payroll_submission_inbox_items.status',
         'payroll.ts::PayrollSubmissionInboxProblemKind'     => 'db:payroll_submission_inbox_items.problem_kind',
