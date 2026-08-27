@@ -186,6 +186,39 @@ final class SetupProvisionTokenTest extends TestCase
         self::assertSame('validation_failed', $this->errorCode($response));
     }
 
+    public function testManagedSetupRefusesMalformedLicenseKey(): void
+    {
+        // Licenční klíč přichází ze zřizovacího požadavku, ne od uživatele —
+        // překlep v něm znamená, že by instalace tiše naběhla bez licence.
+        $response = $this->invokeSetup(
+            $this->guard(managed: true, configured: self::TOKEN),
+            [ProvisionTokenGuard::BODY_FIELD => self::TOKEN, 'license_key' => 'a b'],
+            null,
+            null,
+        );
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($response));
+    }
+
+    public function testManagedSetupAcceptsWellFormedLicenseKey(): void
+    {
+        // Dál než k validaci těla se v integračním běhu nedostaneme (setup
+        // vyžaduje prázdnou `users`), ale klíč správného tvaru NESMÍ skončit
+        // na 400 — jinak by zřízení spadlo na tom, co ho má opravit.
+        $response = $this->invokeSetup(
+            $this->guard(managed: true, configured: self::TOKEN),
+            [ProvisionTokenGuard::BODY_FIELD => self::TOKEN, 'license_key' => 'MYU-AAAA-BBBB-CCCC-DDDD'],
+            null,
+            null,
+        );
+
+        self::assertSame(400, $response->getStatusCode());
+        $body = (string) $response->getBody();
+        self::assertStringNotContainsString('license_key', $body, 'klíč správného tvaru není důvod odmítnutí');
+        self::assertStringNotContainsString('MYU-AAAA', $body, 'klíč se nesmí vracet v odpovědi');
+    }
+
     /**
      * @param array<string,mixed> $body
      */
@@ -238,6 +271,9 @@ final class SetupProvisionTokenTest extends TestCase
             new PasswordSetupLinkIssuer(),
             $this->container->get(ManagedModeGuard::class),
             $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class),
+            $this->container->get(\MyInvoice\Service\License\LicenseService::class),
+            $this->container->get(\MyInvoice\Service\Ares\CrpDphClient::class),
+            $this->container->get(\Psr\Log\LoggerInterface::class),
         );
     }
 
