@@ -184,7 +184,7 @@ describe('Hosting — neúspěšná kontrola licence', () => {
   // `billing` chodí uvnitř bloku `instance`, ne vedle něj — obrazovka ho čte
   // přes instanceStatus, ne ze stavu licence.
   function withBilling(lastCheckOk: boolean) {
-    const base = buildPreviewStatus('manual_key', 1_800_000_000) as Record<string, unknown>
+    const base = buildPreviewStatus('manual_key', 1_800_000_000) as unknown as Record<string, unknown>
     const instance = { ...(base.instance as Record<string, unknown>) }
     const billing = { ...(instance.billing as Record<string, unknown> ?? {}) }
 
