@@ -134,6 +134,7 @@ use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionInboxAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
+use MyInvoice\Action\Payroll\PayrollStatutoryObligationAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Payroll\PayrollTravelAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
@@ -1140,6 +1141,14 @@ final class Routes
             $g->get(
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
+            );
+            $g->get(
+                '/submissions/statutory-obligations',
+                [PayrollStatutoryObligationAction::class, 'overview'],
+            );
+            $g->post(
+                '/submissions/statutory-obligations/evidence',
+                [PayrollStatutoryObligationAction::class, 'record'],
             );
             $g->get(
                 '/submissions/inbox',

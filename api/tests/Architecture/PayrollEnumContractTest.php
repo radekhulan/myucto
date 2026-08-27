@@ -229,6 +229,8 @@ final class PayrollEnumContractTest extends TestCase
         'payrollRetention.ts::PayrollErasureOutcome'      => 'db:payroll_erasure_proposal_items.outcome',
 
         // Podání
+        'payroll.ts::PayrollStatutoryAgendaCapability'
+            => 'const:MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog::CAPABILITIES',
         'payroll.ts::PayrollSubmissionObligationStatus'     => 'db:payroll_obligations.status',
         'payroll.ts::PayrollSubmissionInboxStatus'          => 'db:payroll_submission_inbox_items.status',
         'payroll.ts::PayrollSubmissionInboxProblemKind'     => 'db:payroll_submission_inbox_items.problem_kind',
@@ -443,6 +445,9 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Component\PayrollBenefitBasketUsage::LIMIT_BASES',
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+
+        'payroll.submissions.statutory.capability'
+            => 'const:MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog::CAPABILITIES',
 
         // Rozklad pojistného skládá klíče dynamicky (`t(\`…allocation_blocker.${reason}\`)`).
         // Chybějící věta by u rozdělení, které nevzniklo, vypsala syrový kód —

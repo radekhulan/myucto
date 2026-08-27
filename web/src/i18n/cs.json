@@ -3568,6 +3568,7 @@
                 "eldp": "Evidenční list DP",
                 "health": "Zdravotní pojišťovny",
                 "health_notifications": "ZP — oznámení",
+                "statutory": "Další povinnosti",
                 "other": "Ostatní",
                 "inbox": "Inbox",
                 "certificate": "Certifikát"
@@ -3579,6 +3580,80 @@
             "jmhz_fail_closed": "JMHZ připravíte ze schválené neměnné revize, otestujete jeho XML a poté je odešlete přes ISDS nebo VREP. Ostré podání je dostupné až od začátku zákonné lhůty.",
             "health_title": "Hlášení zdravotním pojišťovnám",
             "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
+            "statutory": {
+                "title": "Nemocenské a další zákonné povinnosti",
+                "description": "Pravdivá matice rozsahu pro zvolené období. NEMPRI a HZUPN se nyní vyřizují ručně v oficiálním kanálu; MyÚčto uchová jen neměnnou vazbu na skutečnou doručenku v DMS. Nic zde samo neodesílá.",
+                "environment": "Prostředí",
+                "period": "Období",
+                "matrix_version": "Matice {version} · SHA-256 {hash}",
+                "error": "Přehled zákonných povinností se nepodařilo načíst nebo uložit.",
+                "saved": "Důkaz ručního splnění byl neměnně uložen.",
+                "replacement": "Vztah k JMHZ",
+                "transport": "Transport z MyÚčta",
+                "transport_not_supported": "Není implementován",
+                "record_evidence": "Zapsat doručenku",
+                "agenda": {
+                    "NEMPRI": "Oznámení zaměstnavatele o žádosti o dávku",
+                    "HZUPN": "Hlášení při ukončení pracovní neschopnosti",
+                    "ELDP": "Evidenční list důchodového pojištění",
+                    "STATUTORY_ACCIDENT_INSURANCE": "Zákonné úrazové pojištění"
+                },
+                "capability": {
+                    "manual_review": "Ruční povinnost",
+                    "prepared_only": "Jen příprava",
+                    "not_supported": "Nepodporováno"
+                },
+                "replacement_mode": {
+                    "fully_replaced": "Plně nahrazeno",
+                    "partially_replaced": "Nahrazeno jen částečně",
+                    "standalone": "Samostatná povinnost",
+                    "unknown": "Neověřeno"
+                },
+                "reason": {
+                    "nempri_legacy_variant_not_supported": "Historická varianta NEMPRI do roku 2024 není tímto workflow podporována. Použijte dobový postup a nic zde neoznačujte jako splněné.",
+                    "nempri_only_partially_in_jmhz": "JMHZ převzalo jen část údajů. NEMPRI zůstává samostatným úkonem a nelze je automaticky vypnout.",
+                    "nempri_standalone_manual": "NEMPRI je pro toto období samostatná povinnost. Obsah i odeslání musí účetní dokončit v oficiálním kanálu.",
+                    "hzupn_remains_standalone": "HZUPN zůstává samostatným hlášením i vedle JMHZ. MyÚčto negeneruje ani neodesílá jeho datovou větu.",
+                    "eldp_historic_preparation_available": "Historický ELDP lze připravit v samostatné záložce. Tento přehled jeho data ani stav neduplikuje.",
+                    "eldp_jmhz_default_on_demand_exception": "Od roku 2026 vychází běžný ELDP z JMHZ, ale historický a on-demand scénář zůstává. Příprava je v samostatné záložce.",
+                    "accident_insurance_calculation_output_liability_not_supported": "Výpočet základu a sazby, předpis, výstup ani platební závazek zákonného úrazového pojištění nejsou implementované. Povinnost není nahrazena JMHZ. MyÚčto dovolí pouze doložit externě ověřenou částku a skutečně provedenou úhradu."
+                },
+                "workflow": {
+                    "verify_case_and_source_data": "Ověřte konkrétní případ, rozhodné období a podklady včetně příjmů a směn mimo tento P0 přehled.",
+                    "submit_in_official_channel": "Vyplňte a odešlete podání v ověřeném oficiálním kanálu ČSSZ.",
+                    "store_official_receipt_in_company_dms": "Uložte skutečnou doručenku nebo protokol jako firemní dokument do DMS.",
+                    "record_receipt_evidence": "Teprve potom zapište níže referenci a DMS dokument jako důkaz ručního splnění.",
+                    "use_eldp_workspace": "Použijte samostatnou záložku Evidenční list DP; příprava nekončí tvrzením o odeslání.",
+                    "calculate_accident_insurance_externally": "Z odborně ověřených externích podkladů určete období, základ, sazbu a částku; MyÚčto je nepočítá ani nekontroluje.",
+                    "pay_accident_insurance_externally": "Proveďte skutečnou úhradu mimo MyÚčto a ověřte její částku i identifikaci příjemce.",
+                    "store_payment_evidence_in_company_dms": "Uložte potvrzení úhrady nebo konkrétní oficiální doklad jako firemní dokument do DMS.",
+                    "record_payment_evidence": "Teprve potom zapište částku, reference a DMS dokument jako neměnný důkaz ručního splnění."
+                },
+                "form": {
+                    "title": "Důkaz ručního splnění — {agenda}",
+                    "description": "Záznam je append-only. Oprava se provádí novým důkazem, původní se nepřepisuje ani nemaže.",
+                    "employee": "Zaměstnanec",
+                    "payment_amount": "Externě ověřená a uhrazená částka",
+                    "completed_on": "Datum odeslání nebo splnění",
+                    "paid_on": "Datum skutečné úhrady",
+                    "case_reference": "Reference případu / eDPN",
+                    "obligation_reference": "Reference povinnosti / období",
+                    "receipt_reference": "Reference doručenky / protokolu",
+                    "payment_reference": "Reference úhrady / oficiálního dokladu",
+                    "document_id": "ID firemního dokumentu v DMS",
+                    "document_hint": "Server přijme jen aktivní firemní dokument této firmy a sám zmrazí jeho SHA-256.",
+                    "confirmation": "Potvrzuji, že podání bylo skutečně dokončeno v oficiálním externím kanálu a uvedený firemní DMS dokument je jeho skutečná doručenka nebo protokol.",
+                    "payment_confirmation": "Potvrzuji, že částka byla určena odborně ověřeným externím postupem, skutečně uhrazena a uvedený firemní DMS dokument je potvrzení úhrady nebo konkrétní oficiální doklad. MyÚčto výpočet ani platbu neověřilo.",
+                    "save": "Neměnně uložit důkaz"
+                },
+                "evidence": {
+                    "title": "Uložené důkazy",
+                    "description": "Neměnné záznamy oddělené podle firmy, prostředí a období.",
+                    "empty": "Pro toto období a prostředí není uložen žádný důkaz.",
+                    "document": "DMS #{id} — {title}",
+                    "payment_amount": "Doložená úhrada: {amount} {currency}"
+                }
+            },
             "transport": {
                 "title": "Odeslaná podání a jejich stav",
                 "description": "Přehled všech pokusů o odeslání na ČSSZ, od nejnovějšího. Odesílá se při zmrazení podání — tady se stav sleduje a dotahuje výsledek.",

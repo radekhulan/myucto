@@ -3568,6 +3568,7 @@
                 "eldp": "Pension record sheet",
                 "health": "Health insurers",
                 "health_notifications": "HI — notifications",
+                "statutory": "Other obligations",
                 "other": "Other",
                 "inbox": "Inbox",
                 "certificate": "Certificate"
@@ -3579,6 +3580,80 @@
             "jmhz_fail_closed": "Prepare JMHZ from an approved immutable revision and, after a validation dry run, submit it through ISDS or VREP. Production filing becomes available when the statutory window opens.",
             "health_title": "Health-insurer reports",
             "health_fail_closed": "Direct health-insurer submissions are not available yet. The system will not mark them as sent or accepted without a verified channel and receipt.",
+            "statutory": {
+                "title": "Sickness and other statutory obligations",
+                "description": "A truthful capability matrix for the selected period. NEMPRI and HZUPN currently require a manual official-channel workflow; MyÚčto only preserves an immutable link to a real DMS receipt. Nothing is transmitted here.",
+                "environment": "Environment",
+                "period": "Period",
+                "matrix_version": "Matrix {version} · SHA-256 {hash}",
+                "error": "The statutory-obligation overview could not be loaded or saved.",
+                "saved": "The manual-completion evidence was stored immutably.",
+                "replacement": "Relationship to JMHZ",
+                "transport": "Transport from MyÚčto",
+                "transport_not_supported": "Not implemented",
+                "record_evidence": "Record receipt",
+                "agenda": {
+                    "NEMPRI": "Employer notice of an employee benefit claim",
+                    "HZUPN": "Employer report at the end of incapacity for work",
+                    "ELDP": "Pension insurance record sheet",
+                    "STATUTORY_ACCIDENT_INSURANCE": "Statutory accident insurance"
+                },
+                "capability": {
+                    "manual_review": "Manual obligation",
+                    "prepared_only": "Preparation only",
+                    "not_supported": "Not supported"
+                },
+                "replacement_mode": {
+                    "fully_replaced": "Fully replaced",
+                    "partially_replaced": "Only partially replaced",
+                    "standalone": "Standalone obligation",
+                    "unknown": "Unverified"
+                },
+                "reason": {
+                    "nempri_legacy_variant_not_supported": "The pre-2025 NEMPRI variant is not supported by this workflow. Use the period-specific procedure and do not mark anything as fulfilled here.",
+                    "nempri_only_partially_in_jmhz": "JMHZ only absorbed part of the data. NEMPRI remains a separate action and must not be switched off automatically.",
+                    "nempri_standalone_manual": "NEMPRI is a standalone obligation for this period. An accountant must complete both its content and submission in an official channel.",
+                    "hzupn_remains_standalone": "HZUPN remains a standalone report alongside JMHZ. MyÚčto neither generates nor transmits its data message.",
+                    "eldp_historic_preparation_available": "A historic ELDP can be prepared on its dedicated tab. This overview does not duplicate its data or status.",
+                    "eldp_jmhz_default_on_demand_exception": "From 2026, ordinary ELDP data comes from JMHZ, but historic and on-demand scenarios remain. Preparation is available on the dedicated tab.",
+                    "accident_insurance_calculation_output_liability_not_supported": "Assessment-base and rate calculation, assessment, output and payment liability for statutory accident insurance are not implemented. JMHZ does not replace the obligation. MyÚčto can only preserve evidence of an externally verified amount and an actually completed payment."
+                },
+                "workflow": {
+                    "verify_case_and_source_data": "Verify the specific case, relevant period and source data, including earnings and shifts, outside this P0 overview.",
+                    "submit_in_official_channel": "Complete and submit the report through a verified official ČSSZ channel.",
+                    "store_official_receipt_in_company_dms": "Store the real receipt or protocol as a company-scoped DMS document.",
+                    "record_receipt_evidence": "Only then record the reference and DMS document below as evidence of manual completion.",
+                    "use_eldp_workspace": "Use the dedicated Pension record sheet tab; preparation never implies that the form was submitted.",
+                    "calculate_accident_insurance_externally": "Determine the period, assessment base, rate and amount from professionally verified external sources; MyÚčto neither calculates nor validates them.",
+                    "pay_accident_insurance_externally": "Make the actual payment outside MyÚčto and verify both its amount and the payee identification.",
+                    "store_payment_evidence_in_company_dms": "Store the payment confirmation or a specific official document as a company-scoped DMS document.",
+                    "record_payment_evidence": "Only then record the amount, references and DMS document as immutable manual-completion evidence."
+                },
+                "form": {
+                    "title": "Manual-completion evidence — {agenda}",
+                    "description": "The record is append-only. Corrections are added as new evidence; the original is neither edited nor deleted.",
+                    "employee": "Employee",
+                    "payment_amount": "Externally verified and paid amount",
+                    "completed_on": "Submission or completion date",
+                    "paid_on": "Actual payment date",
+                    "case_reference": "Case / eDPN reference",
+                    "obligation_reference": "Obligation / period reference",
+                    "receipt_reference": "Receipt / protocol reference",
+                    "payment_reference": "Payment / official document reference",
+                    "document_id": "Company DMS document ID",
+                    "document_hint": "The server accepts only an active company-scoped document owned by this tenant and freezes its SHA-256 itself.",
+                    "confirmation": "I confirm that the submission was actually completed in an official external channel and the specified company DMS document is its real receipt or protocol.",
+                    "payment_confirmation": "I confirm that the amount was determined using a professionally verified external procedure, actually paid, and the specified company DMS document is its payment confirmation or a specific official document. MyÚčto did not verify the calculation or payment.",
+                    "save": "Store evidence immutably"
+                },
+                "evidence": {
+                    "title": "Stored evidence",
+                    "description": "Immutable records separated by tenant, environment and period.",
+                    "empty": "No evidence is stored for this period and environment.",
+                    "document": "DMS #{id} — {title}",
+                    "payment_amount": "Documented payment: {amount} {currency}"
+                }
+            },
             "transport": {
                 "title": "Sent submissions and their status",
                 "description": "Every dispatch attempt to ČSSZ, newest first. Sending happens when a submission is frozen — this screen tracks the status and fetches the result.",

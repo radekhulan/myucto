@@ -83,6 +83,16 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ],
                 ],
             ],
+            'payroll_statutory_obligation_evidence' => [
+                'message' => 'Doklad je neměnným důkazem ručně splněné mzdové zákonné povinnosti '
+                    . '(%d vazeb). Doručenku, protokol nebo potvrzení úhrady nelze z důkazní stopy odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_statutory_obligation_evidence',
+                        'column' => 'document_id',
+                    ],
+                ],
+            ],
             'tax_submission_artifact' => [
                 'message' => 'Doklad je součástí podání na finanční správu — odeslané XML, podepsaný '
                     . 'soubor nebo potvrzení EPO (%d vazeb). Kdyby zmizel, ztratíte důkaz o tom, '

@@ -18,6 +18,7 @@ import PayrollDiscountIntentsPanel from './PayrollDiscountIntentsPanel.vue'
 import PayrollHealthNotificationPanel from './PayrollHealthNotificationPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
+import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel.vue'
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
@@ -26,7 +27,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
   'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
-  | 'other' | 'inbox' | 'certificate'
+  | 'statutory' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -50,7 +51,7 @@ const activeTab = ref<SubmissionTab>('transport')
 // filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
 const tabs: SubmissionTab[] = [
   'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
-  'other', 'inbox', 'certificate',
+  'statutory', 'other', 'inbox', 'certificate',
 ]
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
@@ -603,6 +604,11 @@ onMounted(loadInboxBadge)
       v-else-if="activeTab === 'inbox'"
       v-model:environment="environment"
       @update:open-count="inboxOpenCount = $event"
+    />
+
+    <PayrollStatutoryObligationsPanel
+      v-else-if="activeTab === 'statutory'"
+      v-model:environment="environment"
     />
 
     <PayrollSigningCertificatePanel

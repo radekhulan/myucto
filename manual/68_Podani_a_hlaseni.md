@@ -343,3 +343,30 @@ stejného centrálního katalogu pojišťoven jako sestavení souboru. Akci vžd
 spustí uživatel; vytvoření záznamu ve frontě ani konceptu není odeslání.
 Zkontrolujte adresáta, období a přílohu, v ISDS koncept výslovně schvalte
 a následně ověřte doručenku i věcnou odpověď pojišťovny.
+
+## 68.12 Nemocenské a další zákonné povinnosti
+
+Záložka **Další povinnosti** ukazuje pro vybraný měsíc přesnou matici toho,
+co MyÚčto umí a co musí zůstat ruční. NEMPRI je po zavedení JMHZ nahrazené
+jen částečně a HZUPN zůstává samostatným hlášením. MyÚčto pro ně nevytváří
+XML ani je neodesílá. Účetní ověří případ a zdrojová data, podání dokončí
+v oficiálním kanálu ČSSZ a skutečnou doručenku nebo protokol uloží jako
+firemní dokument do DMS.
+
+Po ručním splnění lze u NEMPRI nebo HZUPN zapsat zaměstnance, referenci
+případu, referenci doručenky, datum a ID firemního DMS dokumentu. Server
+ověří vlastnictví dokumentu firmou a sám zmrazí jeho SHA-256. Záznam je
+neměnný; oprava se přidává jako nový důkaz. Produkční a testovací důkazy se
+nemíchají. Samotné vyplnění formuláře v MyÚčtu nikdy nenahrazuje podání
+v oficiálním kanálu.
+
+**Zákonné úrazové pojištění** je v matici výslovně uvedené jako samostatná
+ruční povinnost. MyÚčto nyní nepočítá základ ani sazbu, nevytváří předpis,
+výstup nebo platební závazek a nenabízí transport. Částku proto určete podle
+odborně ověřených externích podkladů a skutečnou úhradu proveďte mimo MyÚčto.
+Potvrzení úhrady nebo konkrétní oficiální doklad uložte jako firemní dokument
+do DMS. Teprve potom lze zapsat externě ověřenou částku v CZK, referenci
+povinnosti, referenci platby a DMS dokument jako neměnný důkaz. Zápis je
+výslovné potvrzení uživatele; MyÚčto správnost výpočtu ani provedení platby
+automaticky neověřuje. Absence automatizace neznamená, že povinnost zanikla
+nebo ji nahradilo JMHZ.

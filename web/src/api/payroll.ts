@@ -1781,6 +1781,76 @@ export interface PayrollSubmissionOverviewResponse {
   offset: number
 }
 
+export type PayrollStatutoryAgendaCapability =
+  | 'manual_review'
+  | 'prepared_only'
+  | 'not_supported'
+
+export interface PayrollStatutoryAgendaCapabilityItem {
+  agenda_code: 'NEMPRI' | 'HZUPN' | 'ELDP' | 'STATUTORY_ACCIDENT_INSURANCE'
+  replacement_mode: 'fully_replaced' | 'partially_replaced' | 'standalone' | 'unknown'
+  capability: PayrollStatutoryAgendaCapability
+  transport_capability: 'not_supported'
+  evidence_supported: boolean
+  reason_code: string
+  workflow_codes: string[]
+}
+
+export interface PayrollStatutoryObligationEvidence {
+  id: number
+  environment: PayrollRegzelEnvironment
+  agenda_code: 'NEMPRI' | 'HZUPN' | 'STATUTORY_ACCIDENT_INSURANCE'
+  employee_id: number | null
+  full_name: string | null
+  period_start: string
+  period_end: string
+  case_reference: string
+  receipt_reference: string
+  completed_on: string
+  payment_amount_minor: number | null
+  payment_currency: 'CZK' | null
+  document_id: number
+  document_title: string
+  document_sha256: string
+  capability_matrix_version: string
+  capability_matrix_sha256: string
+  attestation_version: string
+  created_by: number
+  created_at: string
+}
+
+export interface PayrollStatutoryObligationOverview {
+  environment: PayrollRegzelEnvironment
+  period: string
+  matrix_version: string
+  matrix_sha256: string
+  agendas: PayrollStatutoryAgendaCapabilityItem[]
+  evidence: PayrollStatutoryObligationEvidence[]
+}
+
+interface PayrollStatutoryObligationEvidencePayloadBase {
+  environment: PayrollRegzelEnvironment
+  period: string
+  case_reference: string
+  receipt_reference: string
+  completed_on: string
+  document_id: number
+}
+
+export type PayrollStatutoryObligationEvidencePayload =
+  PayrollStatutoryObligationEvidencePayloadBase & (
+    | {
+      agenda_code: 'NEMPRI' | 'HZUPN'
+      employee_id: number
+      manual_submission_confirmed: true
+    }
+    | {
+      agenda_code: 'STATUTORY_ACCIDENT_INSURANCE'
+      payment_amount: string
+      manual_payment_confirmed: true
+    }
+  )
+
 export interface PayrollSubmissionDetail {
   submission: {
     id: number
@@ -4168,6 +4238,24 @@ export const payrollApi = {
         ...pageParams(options),
       },
     }).then(response => response.data),
+  statutoryObligationOverview: (
+    environment: PayrollRegzelEnvironment,
+    period: string,
+  ) => api.get<PayrollStatutoryObligationOverview>(
+    '/payroll/submissions/statutory-obligations',
+    { params: { environment, period } },
+  ).then(response => response.data),
+  recordStatutoryObligationEvidence: (
+    payload: PayrollStatutoryObligationEvidencePayload,
+    idempotencyKey: string,
+  ) => api.post<{
+    evidence: PayrollStatutoryObligationEvidence
+    created: boolean
+  }>(
+    '/payroll/submissions/statutory-obligations/evidence',
+    payload,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
   submissionDetail: (submissionId: number) =>
     api.get<PayrollSubmissionDetail>(`/payroll/submissions/${submissionId}`)
       .then(response => response.data),
