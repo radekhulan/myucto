@@ -13,6 +13,7 @@ use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Security\PermissionResolver;
+use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\License\LicenseService;
@@ -63,6 +64,8 @@ final class MeActionTest extends TestCase
                 'allowed_mfa_methods' => ['passkey', 'totp'],
             ],
         ]);
+        $offers = $this->createMock(MfaOfferService::class);
+        $offers->expects(self::once())->method('shouldOffer')->with(17, true)->willReturn(false);
         $action = new MeAction(
             $db,
             $config,
@@ -71,6 +74,7 @@ final class MeActionTest extends TestCase
             $license,
             $credentials,
             new MfaPolicyService($config),
+            $offers,
             new SessionLockPolicy($config),
             $clock,
         );
@@ -101,6 +105,9 @@ final class MeActionTest extends TestCase
         self::assertTrue($body['user']['mfa_enabled']);
         self::assertSame(1, $body['user']['passkey_count']);
         self::assertFalse($body['user']['must_setup_mfa']);
+        // Nabídka dobrovolného MFA při `require_mfa = true` neexistuje — kdyby ano,
+        // nesla by s sebou tlačítko „pokračovat bez ověření".
+        self::assertFalse($body['user']['should_offer_mfa']);
         self::assertTrue($body['require_mfa']);
         self::assertSame(['passkey', 'totp'], $body['allowed_mfa_methods']);
         self::assertSame('active', $body['session_state']);
@@ -108,5 +115,74 @@ final class MeActionTest extends TestCase
         self::assertSame('2026-07-24T12:00:00.000000Z', $body['server_time']);
         self::assertSame('2026-07-24T12:03:00.000000Z', $body['idle_expires_at']);
         self::assertSame(str_repeat('b', 64), $body['csrf_token']);
+    }
+
+    /**
+     * Bez tohohle pole frontend o dobrovolné nabídce neví a stránka /setup-mfa se
+     * při `require_mfa = false` nikdy nezobrazí — přesně stav před opravou.
+     */
+    public function testUcetBezFaktoruDostaneNabidkuKdyzSeMfaNevynucuje(): void
+    {
+        $supplierStatement = $this->createMock(\PDOStatement::class);
+        $supplierStatement->method('fetchAll')->willReturn([]);
+        $pdo = $this->createMock(\PDO::class);
+        $pdo->method('prepare')->willReturn($supplierStatement);
+        $db = $this->createMock(Connection::class);
+        $db->method('hasColumn')->willReturn(true);
+        $db->method('pdo')->willReturn($pdo);
+
+        $permissions = $this->createMock(PermissionResolver::class);
+        $permissions->method('resolve')->willReturn(EffectiveRole::denied());
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->method('countActiveForUser')->willReturn(0);
+        $clock = $this->createMock(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-07-24 12:00:00 UTC'));
+        $config = new Config([
+            'session' => ['lock_after_minutes' => 15],
+            'auth' => [
+                'require_mfa' => false,
+                'require_totp' => false,
+                'allowed_mfa_methods' => ['passkey', 'totp'],
+            ],
+        ]);
+        $offers = $this->createMock(MfaOfferService::class);
+        $offers->expects(self::once())->method('shouldOffer')->with(17, false)->willReturn(true);
+
+        $action = new MeAction(
+            $db,
+            $config,
+            $this->createMock(UserSupplierRepository::class),
+            $permissions,
+            $this->createMock(LicenseService::class),
+            $credentials,
+            new MfaPolicyService($config),
+            $offers,
+            new SessionLockPolicy($config),
+            $clock,
+        );
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/auth/me')
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 17,
+                'email' => 'synthetic@example.invalid',
+                'name' => 'Synthetic User',
+                'role' => 'admin',
+                'is_superadmin' => true,
+                'locale' => 'cs',
+                'totp_enabled' => false,
+            ])
+            ->withAttribute(AuthMiddleware::ATTR_SESSION, [
+                'csrf_token' => str_repeat('b', 64),
+                'assurance_level' => 'setup',
+            ])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+
+        $response = $action($request, (new ResponseFactory())->createResponse());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertTrue($body['user']['should_offer_mfa']);
+        // Nabídka NIC neblokuje — `must_setup_mfa` musí zůstat false i pro setup session.
+        self::assertFalse($body['user']['must_setup_mfa']);
+        self::assertFalse($body['require_mfa']);
     }
 }

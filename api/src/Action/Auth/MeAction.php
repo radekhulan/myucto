@@ -15,6 +15,7 @@ use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Security\PermissionCatalog;
 use MyInvoice\Security\PermissionResolver;
+use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
@@ -35,6 +36,7 @@ final class MeAction
         private readonly LicenseService $license,
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
+        private readonly MfaOfferService $mfaOffers,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly ClockInterface $clock,
         ?EntityCache $cache = null,
@@ -179,6 +181,10 @@ final class MeAction
         // `must_setup_mfa: true` a frontend by ji držel na `/setup-mfa`.
         // Viz {@see \MyInvoice\Middleware\RequireMfaMiddleware}, kde platí totéž.
         $mustSetupMfa = $assurance === 'setup' && $this->mfaPolicy->isRequired();
+        // Protipól `must_setup_mfa`: když se MFA NEvynucuje, uživatel se o něm
+        // jinak nedozví — /setup-mfa se mu nikdy nezobrazí. Nabídku dostane, dokud
+        // nemá žádný faktor a dokud ji neodmítl (users.mfa_offer_dismissed_at).
+        $shouldOfferMfa = $this->mfaOffers->shouldOffer($userId, $mfaMethods !== []);
         $now = $this->clock->now()->setTimezone(new \DateTimeZone('UTC'));
         $userTimeout = ($user['session_lock_after_minutes'] ?? null) !== null
             ? (int) $user['session_lock_after_minutes']
@@ -209,6 +215,7 @@ final class MeAction
                 'mfa_methods'     => $mfaMethods,
                 'passkey_count'   => $passkeyCount,
                 'must_setup_mfa'  => $mustSetupMfa,
+                'should_offer_mfa' => $shouldOfferMfa,
             ],
             'csrf_token'          => $session['csrf_token'] ?? '',
             'current_supplier_id' => $currentSupplierId,

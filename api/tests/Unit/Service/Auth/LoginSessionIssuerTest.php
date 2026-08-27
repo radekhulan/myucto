@@ -11,6 +11,7 @@ use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
+use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionLockPolicy;
@@ -101,6 +102,7 @@ final class LoginSessionIssuerTest extends TestCase
             $clock,
             $credentials,
             new MfaPolicyService($config),
+            $this->offersStub(),
             new SessionLockPolicy($config),
             $this->roleProfileStub(),
         );
@@ -132,11 +134,15 @@ final class LoginSessionIssuerTest extends TestCase
             'mfa_methods' => ['passkey'],
             'passkey_count' => 2,
             'must_setup_mfa' => false,
+            // Přihlašovací odpověď musí nést tytéž příznaky jako /me, jinak by
+            // frontend do prvního refresh() četl chybějící pole jako „nenabízet".
+            'should_offer_mfa' => false,
         ], array_intersect_key($body['user'], array_flip([
             'mfa_enabled',
             'mfa_methods',
             'passkey_count',
             'must_setup_mfa',
+            'should_offer_mfa',
         ])));
         self::assertTrue($body['require_mfa']);
         self::assertSame(['passkey', 'totp'], $body['allowed_mfa_methods']);
@@ -153,6 +159,13 @@ final class LoginSessionIssuerTest extends TestCase
      * MyÚčto posílá roli jako objekt z tabulky `roles`; tenhle test ověřuje
      * vydání session, ne autorizaci, takže stačí prázdný profil.
      */
+    private function offersStub(): MfaOfferService
+    {
+        $offers = $this->createMock(MfaOfferService::class);
+        $offers->method('shouldOffer')->willReturn(false);
+        return $offers;
+    }
+
     private function roleProfileStub(): UserRoleProfile
     {
         $roleProfile = $this->createMock(UserRoleProfile::class);

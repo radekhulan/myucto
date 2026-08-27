@@ -15587,7 +15587,11 @@
         "transition_totp_hint": "This account already has TOTP enabled. Confirm the secure transition to a passkey with its current code.",
         "transition_totp_required": "Enter a valid 6-digit TOTP code to register the passkey.",
         "no_method_available": "This installation allows no method you could activate here. Adjust auth.allowed_mfa_methods in cfg.php or contact an administrator.",
-        "logout_hint": "Until MFA is completed, the account can only sign out."
+        "logout_hint": "Until MFA is completed, the account can only sign out.",
+        "offer_title": "Add a second factor to your account",
+        "offer_intro": "Two-factor authentication is not mandatory on this installation, but it makes the account far harder to abuse even if someone knows your password. Turn it on now, or continue and enable it later.",
+        "offer_skip": "Continue without two-factor authentication",
+        "offer_skip_hint": "You will not see this offer again. You can enable two-factor authentication at any time under Profile → Security."
     },
     "webauthn": {
         "waiting_title": "Waiting for the security dialog",

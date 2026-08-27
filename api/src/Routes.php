@@ -399,6 +399,9 @@ final class Routes
             $g->post  ('/mfa/step-up/recovery',               [MfaStepUpAction::class, 'recovery']);
             $g->get   ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'status']);
             $g->post  ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'generate']);
+            // Dobrovolná nabídka MFA — „pokračovat bez ověření". Jen když se MFA nevynucuje;
+            // při require_mfa = true endpoint odpoví 409 (viz MfaOfferService::dismiss).
+            $g->post  ('/mfa/offer/dismiss',                  [\MyInvoice\Action\Auth\MfaOfferAction::class, 'dismiss']);
             $g->get   ('/session/status',                     [SessionAction::class, 'status']);
             $g->post  ('/session/activity',                   [SessionAction::class, 'activity']);
             $g->post  ('/session/lock',                       [SessionAction::class, 'lock']);

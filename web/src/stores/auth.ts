@@ -34,6 +34,10 @@ export const useAuthStore = defineStore('auth', () => {
   const isManagedInstallation = computed(() => setupStatus.value?.managed === true)
   const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
   const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
+  // Dobrovolná nabídka MFA. Na rozdíl od `mustSetupMfa` NIC neblokuje — router
+  // podle ní jen otevře /setup-mfa tomu, kdo tam přijde po přihlášení. Fail-closed
+  // na `false`: dokud server nabídku nepotvrdí, nikoho nikam neposíláme.
+  const shouldOfferMfa = computed(() => user.value?.should_offer_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
   // ⚠️ Odemyká placené moduly TARIF? Bez toho obrazovka nerozliší „licence
   // propadla, zaplaťte" od „tenhle tarif to nikdy neměl" — a bezplatnému
@@ -249,6 +253,7 @@ export const useAuthStore = defineStore('auth', () => {
     isManagedInstallation,
     mustSetupTotp,
     mustSetupMfa,
+    shouldOfferMfa,
     hasCommercialFeatures,
     tierUnlocksCommercial,
     newUserBlocked,

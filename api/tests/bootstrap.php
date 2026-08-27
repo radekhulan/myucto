@@ -58,6 +58,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Auth/BruteForceGuard.php',
     '*/api/src/Service/Auth/EmailOtpService.php',
     '*/api/src/Service/Auth/LoginSessionIssuer.php',
+    '*/api/src/Service/Auth/MfaOfferService.php',
     '*/api/src/Service/Auth/MfaPolicyService.php',
     '*/api/src/Service/Auth/MfaRecoveryCodeService.php',
     '*/api/src/Service/Auth/MfaStepUpProofStore.php',

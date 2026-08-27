@@ -37,6 +37,9 @@ final class RoutePermissionMap
         // Vlastní záložní kódy spravuje jen jejich majitel — generování si navíc
         // vynucuje čerstvý step-up skutečným faktorem (MfaRecoveryCodeAction).
         '/api/auth/mfa/recovery-codes',
+        // Odmítnutí dobrovolné nabídky MFA je rozhodnutí o vlastním účtu — žádné
+        // oprávnění k němu neexistuje a existovat nemá.
+        '/api/auth/mfa/offer/dismiss',
         '/api/auth/session/status', '/api/auth/session/activity', '/api/auth/session/lock',
         '/api/auth/session/lock-preference',
         '/api/auth/domain-login/authorize',
