@@ -56,14 +56,20 @@ final class PayrollNetRepository
             try {
                 $stmt = $this->db->pdo()->prepare(
                     'INSERT INTO payroll_net_results
-                        (supplier_id, revision_id, employee_id,
+                        (supplier_id, revision_id, period_start, employee_id,
                          cash_income_minor, non_cash_income_minor,
                          employee_social_minor, employee_health_minor,
                          advance_tax_minor, withholding_tax_minor,
                          tax_bonus_minor, correction_minor,
                          annual_settlement_minor, deducted_minor,
                          net_payable_minor, result_json, result_hash)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     SELECT ?, ?, run.period_start, ?,
+                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                       FROM payroll_run_revisions revision
+                       JOIN payroll_runs run
+                         ON run.supplier_id = revision.supplier_id
+                        AND run.id = revision.run_id
+                      WHERE revision.supplier_id = ? AND revision.id = ?'
                 );
                 $stmt->execute([
                     $supplierId,
@@ -82,7 +88,12 @@ final class PayrollNetRepository
                     $result->netPayableMinorUnits,
                     $json,
                     $hash,
+                    $supplierId,
+                    $revisionId,
                 ]);
+                if ($stmt->rowCount() !== 1) {
+                    throw new \DomainException('Revize mzdového běhu nemá platné období.');
+                }
                 $resultId = (int) $this->db->pdo()->lastInsertId();
             } catch (PDOException $e) {
                 if (!$this->isDuplicateKey($e)) {

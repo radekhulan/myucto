@@ -18,9 +18,11 @@ final class PayrollAnnualDocumentRepository
         int $employeeId,
         int $taxYear,
     ): array {
+        $periodFrom = sprintf('%04d-01-01', $taxYear);
+        $periodUntil = sprintf('%04d-01-01', $taxYear + 1);
         $statement = $this->db->pdo()->prepare(
             'SELECT run.id AS run_id,
-                    run.period_start,
+                    person.period_start,
                     run.payment_date,
                     revision.id AS revision_id,
                     revision.input_snapshot_json,
@@ -29,19 +31,20 @@ final class PayrollAnnualDocumentRepository
                     revision.result_snapshot_hash,
                     person.result_json AS person_result_json,
                     person.result_hash AS person_result_hash
-               FROM payroll_runs run
+               FROM payroll_run_persons person
                JOIN payroll_run_revisions revision
-                 ON revision.supplier_id = run.supplier_id
-                AND revision.run_id = run.id
-               JOIN payroll_run_persons person
-                 ON person.supplier_id = revision.supplier_id
-                AND person.revision_id = revision.id
+                 ON revision.supplier_id = person.supplier_id
+                AND revision.id = person.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE person.supplier_id = ?
                 AND person.employee_id = ?
+                AND person.period_start >= ?
+                AND person.period_start < ?
                 AND person.status = "calculated"
                 AND person.result_json IS NOT NULL
                 AND person.result_hash IS NOT NULL
-              WHERE run.supplier_id = ?
-                AND YEAR(run.period_start) = ?
                 AND revision.status IN ("approved", "superseded")
                 AND revision.result_snapshot_json IS NOT NULL
                 AND revision.result_snapshot_hash IS NOT NULL
@@ -54,10 +57,10 @@ final class PayrollAnnualDocumentRepository
                        AND newer.status IN ("approved", "superseded")
                        AND newer.result_snapshot_hash IS NOT NULL
                 )
-              ORDER BY run.period_start, run.id
+              ORDER BY person.period_start, run.id
               FOR UPDATE'
         );
-        $statement->execute([$employeeId, $supplierId, $taxYear]);
+        $statement->execute([$supplierId, $employeeId, $periodFrom, $periodUntil]);
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
     }
 

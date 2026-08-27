@@ -1418,23 +1418,24 @@ final class PayrollRunRepository
         int $revisionId,
         PayrollRunInputSnapshot $snapshot,
     ): void {
+        $periodStart = $this->periodStartForRevision($supplierId, $revisionId);
         $personInsert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_persons
-                (supplier_id, revision_id, employee_id)
-             VALUES (?, ?, ?)'
+                (supplier_id, revision_id, period_start, employee_id)
+             VALUES (?, ?, ?, ?)'
         );
         $employmentInsert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_employments
-                (supplier_id, revision_id, employee_id, employment_id,
+                (supplier_id, revision_id, period_start, employee_id, employment_id,
                  input_json, input_hash)
-             VALUES (?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($snapshot->data['people'] as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
                 throw new \UnexpectedValueException('Snapshot osoby není platný.');
             }
             $employeeId = (int) $person['employee']['id'];
-            $personInsert->execute([$supplierId, $revisionId, $employeeId]);
+            $personInsert->execute([$supplierId, $revisionId, $periodStart, $employeeId]);
             foreach ($person['employments'] ?? [] as $employment) {
                 if (!is_array($employment)
                     || !is_array($employment['employment'] ?? null)
@@ -1445,6 +1446,7 @@ final class PayrollRunRepository
                 $employmentInsert->execute([
                     $supplierId,
                     $revisionId,
+                    $periodStart,
                     $employeeId,
                     (int) $employment['employment']['id'],
                     $json,
@@ -1471,6 +1473,25 @@ final class PayrollRunRepository
                 $validation->requiresOverride ? 1 : 0,
             ]);
         }
+    }
+
+    private function periodStartForRevision(int $supplierId, int $revisionId): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE revision.supplier_id = ? AND revision.id = ?'
+        );
+        $statement->execute([$supplierId, $revisionId]);
+        $periodStart = $statement->fetchColumn();
+        if (!is_string($periodStart) || $periodStart === '') {
+            throw new \DomainException('Revize mzdového běhu nemá platné období.');
+        }
+
+        return $periodStart;
     }
 
     public function lockApprovedInputs(

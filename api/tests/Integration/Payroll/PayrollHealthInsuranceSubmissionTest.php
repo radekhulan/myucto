@@ -1049,8 +1049,8 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         )->execute([$this->supplierId, (int) $regular['run_id']]);
         $pdo->prepare(
             'INSERT INTO payroll_run_persons
-                (supplier_id, revision_id, employee_id, status)
-             SELECT supplier_id, ?, employee_id, "calculated"
+                (supplier_id, revision_id, period_start, employee_id, status)
+             SELECT supplier_id, ?, period_start, employee_id, "calculated"
                FROM payroll_run_persons
               WHERE supplier_id = ? AND revision_id = ?'
         )->execute([$revisionId, $this->supplierId, $this->revisionId]);
