@@ -471,10 +471,13 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Devět včetně vlastní záložky pro záměr uplatňovat slevu
+    // Deset včetně vlastní záložky pro záměr uplatňovat slevu
     // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
-    // „Ostatní" zůstává záchytná skupina; zdravotní povinnosti mají jednu kartu.
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(9)
+    // „Další povinnosti" vede explicitní NEMPRI/HZUPN/ELDP/úrazovou matici,
+    // zatímco „Ostatní" zůstává záchytná skupina pro neznámé kódy.
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(10)
+    expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
