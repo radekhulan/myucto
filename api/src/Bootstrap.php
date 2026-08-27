@@ -583,6 +583,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\License\LicenseService::class),
                 $c->get(\MyInvoice\Repository\PasskeyCredentialRepository::class),
                 $c->get(\MyInvoice\Service\Auth\MfaPolicyService::class),
+                $c->get(\MyInvoice\Service\Auth\MfaOfferService::class),
                 $c->get(\MyInvoice\Service\Auth\SessionLockPolicy::class),
                 $c->get(ClockInterface::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),

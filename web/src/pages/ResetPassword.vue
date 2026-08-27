@@ -44,7 +44,11 @@ async function submit() {
     // false a chování je nezměněné — přesměrování na přihlášení.
     await auth.refresh()
     if (auth.isAuthenticated) {
-      router.push(auth.mustSetupMfa || auth.mustSetupTotp ? '/setup-mfa' : '/')
+      // `shouldOfferMfa` posílá na tutéž obrazovku, jen s možností odejít bez
+      // ověření. Právě po nastavení hesla je na nabídku nejlepší chvíle — jinak
+      // uživatel spadne rovnou do aplikace a o MFA se nedozví.
+      const mfaScreen = auth.mustSetupMfa || auth.mustSetupTotp || auth.shouldOfferMfa
+      router.push(mfaScreen ? '/setup-mfa' : '/')
       return
     }
     setTimeout(() => router.push('/login'), 2000)

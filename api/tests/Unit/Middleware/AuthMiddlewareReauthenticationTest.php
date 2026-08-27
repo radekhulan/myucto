@@ -15,6 +15,7 @@ use Psr\Log\NullLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
+use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionLockPolicy;
@@ -87,6 +88,8 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             ->method('now')
             ->willReturn(new \DateTimeImmutable('@1774690800'));
 
+        $mfaOffers = $this->createMock(MfaOfferService::class);
+        $mfaOffers->method('shouldOffer')->willReturn(false);
         $issuer = new LoginSessionIssuer(
             $db,
             $sessions,
@@ -97,6 +100,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             $clock,
             $credentials,
             new MfaPolicyService($config),
+            $mfaOffers,
             new SessionLockPolicy($config),
             $this->roleProfileStub(),
         );

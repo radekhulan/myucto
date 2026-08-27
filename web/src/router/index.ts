@@ -377,7 +377,12 @@ export async function authorizationGuard(
   if (auth.isAuthenticated && mustSetupMfa && !mfaSetupRoute && requiresAuth) {
     return { name: 'setup-mfa' }
   }
-  if (auth.isAuthenticated && !mustSetupMfa && mfaSetupRoute) {
+  // Dobrovolná nabídka (`should_offer_mfa`) stránku POUZE otevírá — sem uživatele
+  // posílá jen Login/ResetPassword po přihlášení, guard nikdy. Kdyby nabídka
+  // uměla i přesměrovat dovnitř jako `must_setup_mfa`, byla by z ní vynucená MFA
+  // bez politiky a odmítnutí by muselo dorazit dřív než další navigace — přesně
+  // ta závislost vyrobila smyčku home → setup-mfa → home (#5).
+  if (auth.isAuthenticated && !mustSetupMfa && !auth.shouldOfferMfa && mfaSetupRoute) {
     return { name: 'home' }
   }
 

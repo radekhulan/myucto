@@ -147,9 +147,7 @@ onMounted(async () => {
   await auth.refresh()
   if (auth.isAuthenticated) {
     if (await finishDomainLoginIfNeeded()) return
-    router.replace((auth.mustSetupMfa || auth.mustSetupTotp)
-      ? '/setup-mfa'
-      : (auth.domainContext?.locked ? requestedDomainReturnPath() : '/'))
+    router.replace(postLoginTarget(auth.domainContext?.locked ? requestedDomainReturnPath() : '/'))
     return
   }
   if (auth.domainContext?.locked) {
@@ -182,6 +180,20 @@ onMounted(async () => {
     }
   }
 })
+
+/**
+ * Kam po úspěšném přihlášení. Vynucené MFA má přednost před vším ostatním.
+ *
+ * Dobrovolná nabídka (`should_offer_mfa`) se ukáže jen na canonical doméně: na
+ * vlastní klientské doméně vede /setup-mfa přes handoff zpět na canonical login
+ * (WebAuthn ceremony nesmí běžet na cizím originu), a to je na pouhou nabídku
+ * nepřiměřené. Nabídka nezmizí — server ji drží, dokud ji uživatel neodmítne.
+ */
+function postLoginTarget(fallback: string): string {
+  if (auth.mustSetupMfa || auth.mustSetupTotp) return '/setup-mfa'
+  if (auth.domainContext?.locked) return fallback
+  return auth.shouldOfferMfa ? '/setup-mfa' : fallback
+}
 
 function requestedDomainReturnPath(): string {
   const candidate = route.query.return_to
@@ -243,7 +255,7 @@ async function submit() {
     // Ruční přihlášení uspělo — počítadlo odrazů už nemá co hlídat.
     clearLoginBounces()
     if (await finishDomainLoginIfNeeded()) return
-    router.push(auth.isClientRole ? '/portal' : '/')
+    router.push(postLoginTarget(auth.isClientRole ? '/portal' : '/'))
   } catch (e: any) {
     const code = e?.response?.data?.error?.code
     const msg  = e?.response?.data?.error?.message

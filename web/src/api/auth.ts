@@ -14,6 +14,12 @@ export interface User {
   mfa_methods?: Array<'passkey' | 'totp'>
   passkey_count?: number
   must_setup_mfa?: boolean
+  /**
+   * Protipól `must_setup_mfa` pro instalace, kde se MFA nevynucuje: server nabízí
+   * zapnutí účtu bez jediného faktoru, dokud uživatel nabídku neodmítne. Nabídku
+   * lze přeskočit — na rozdíl od `must_setup_mfa` nic neblokuje.
+   */
+  should_offer_mfa?: boolean
 }
 
 export interface RoleSummary {
@@ -377,6 +383,10 @@ export const authApi = {
   recoveryStepUp: (operation: string, code: string) =>
     api.post<{ step_up_token: string; remaining: number }>('/auth/mfa/step-up/recovery', { operation, code })
       .then(r => r.data),
+
+  /** „Pokračovat bez dvoufázového ověření" — nabídku už server znovu nepošle. */
+  dismissMfaOffer: () =>
+    api.post<{ dismissed: boolean }>('/auth/mfa/offer/dismiss').then(r => r.data),
 
   recoveryCodeStatus: () =>
     api.get<RecoveryCodeStatus>('/auth/mfa/recovery-codes').then(r => r.data),

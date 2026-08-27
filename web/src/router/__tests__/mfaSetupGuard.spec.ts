@@ -64,6 +64,7 @@ function signIn(overrides: Record<string, unknown> = {}) {
     is_superadmin: false,
     must_setup_mfa: false,
     must_setup_totp: false,
+    should_offer_mfa: false,
     ...overrides,
   } as never
   // Bez naplněného stavu by si guard sáhl na /api/auth/session/status.
@@ -107,6 +108,33 @@ describe('router guard vynuceného nastavení MFA', () => {
     const { final } = await followRedirects({ name: 'setup-mfa' })
 
     expect(final).not.toBe('setup-mfa')
+    expect(final).toBe('home')
+  })
+
+  it('dobrovolnou nabídku na setup-mfa pustí, i když MFA není povinná', async () => {
+    signIn({ must_setup_mfa: false, should_offer_mfa: true })
+
+    const { path, final } = await followRedirects({ name: 'setup-mfa' })
+
+    expect(final).toBe('setup-mfa')
+    // Žádný skok: nabídka stránku jen otevírá, nikam nepřesměrovává.
+    expect(path).toEqual(['setup-mfa'])
+  })
+
+  it('dobrovolná nabídka NIKOHO na setup-mfa neposílá — jinak by z ní bylo vynucení', async () => {
+    signIn({ must_setup_mfa: false, should_offer_mfa: true })
+
+    const { path, final } = await followRedirects({ name: 'home' })
+
+    expect(final).toBe('home')
+    expect(path).toEqual(['home'])
+  })
+
+  it('nabídka nesmí odblokovat setup-mfa tomu, kdo ji odmítl nebo faktor už má', async () => {
+    signIn({ must_setup_mfa: false, should_offer_mfa: false })
+
+    const { final } = await followRedirects({ name: 'setup-mfa' })
+
     expect(final).toBe('home')
   })
 

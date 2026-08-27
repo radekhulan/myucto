@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppShell from '@/components/layout/AppShell.vue'
+import { BTN_BASE, ICONS, OUTLINE } from '@/components/ui/buttonStyles'
 import { authApi, type TotpSetup } from '@/api/auth'
 import { createCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
@@ -31,6 +32,11 @@ async function continueAfterSetup(): Promise<void> {
   }
   await router.replace('/')
 }
+
+// Vynucená varianta odsud nepustí jinam než odhlášením; nabídka ano. Rozhoduje
+// politika ze serveru, ne to, že uživatel na stránce zrovna stojí — jinak by se
+// tlačítko „pokračovat bez ověření" objevilo i tam, kde je MFA povinná.
+const offerOnly = computed(() => !auth.mustSetupMfa && !auth.mustSetupTotp && auth.shouldOfferMfa)
 
 const allowed = computed<Array<'passkey' | 'totp'>>(() => auth.allowedMfaMethods.length > 0
   ? auth.allowedMfaMethods
@@ -124,6 +130,24 @@ async function completeTotp() {
   }
 }
 
+async function skipMfa() {
+  if (busy.value || !offerOnly.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    // Odmítnutí se ukládá na serveru (users.mfa_offer_dismissed_at), takže
+    // nabídka nepřežije ani odhlášení. Bez `refresh()` by store dál hlásil
+    // `should_offer_mfa` a router by stránku pořád držel otevřenou.
+    await authApi.dismissMfaOffer()
+    await auth.refresh()
+    await continueAfterSetup()
+  } catch (e: any) {
+    error.value = e?.response?.data?.error?.message || t('common.error')
+  } finally {
+    busy.value = false
+  }
+}
+
 async function logout() {
   if (busy.value) return
   busy.value = true
@@ -159,12 +183,17 @@ onMounted(async () => {
 </script>
 
 <template>
-  <AppShell :title="t('mfa_setup.title')">
+  <AppShell :title="offerOnly ? t('mfa_setup.offer_title') : t('mfa_setup.title')">
     <div class="w-full max-w-lg">
-      <div class="bg-surface border border-warning-300 rounded-lg shadow-sm p-6 space-y-5">
+      <div :class="['bg-surface border rounded-lg shadow-sm p-6 space-y-5',
+                    offerOnly ? 'border-primary-500/40' : 'border-warning-300']">
         <div>
-          <h1 class="text-lg font-semibold text-warning-700">{{ t('mfa_setup.title') }}</h1>
-          <p class="text-sm text-neutral-600 mt-1">{{ t('mfa_setup.intro') }}</p>
+          <h1 :class="['text-lg font-semibold', offerOnly ? 'text-primary-700' : 'text-warning-700']">
+            {{ offerOnly ? t('mfa_setup.offer_title') : t('mfa_setup.title') }}
+          </h1>
+          <p class="text-sm text-neutral-600 mt-1">
+            {{ offerOnly ? t('mfa_setup.offer_intro') : t('mfa_setup.intro') }}
+          </p>
         </div>
 
         <div v-if="passkeyAllowed && totpAllowed" class="grid grid-cols-2 gap-2">
@@ -236,9 +265,18 @@ onMounted(async () => {
           {{ error }}
         </p>
 
-        <div class="pt-4 border-t border-neutral-200 flex justify-between items-center">
-          <p class="text-xs text-neutral-500">{{ t('mfa_setup.logout_hint') }}</p>
-          <button type="button" @click="logout" :disabled="busy"
+        <div class="pt-4 border-t border-neutral-200 flex flex-wrap gap-3 justify-between items-center">
+          <p class="text-xs text-neutral-500 max-w-xs">
+            {{ offerOnly ? t('mfa_setup.offer_skip_hint') : t('mfa_setup.logout_hint') }}
+          </p>
+          <button v-if="offerOnly" type="button" data-test="mfa-skip" @click="skipMfa" :disabled="busy"
+                  :class="[BTN_BASE, OUTLINE.neutral]">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" />
+            </svg>
+            {{ t('mfa_setup.offer_skip') }}
+          </button>
+          <button v-else type="button" data-test="mfa-logout" @click="logout" :disabled="busy"
                   class="text-sm text-neutral-600 hover:text-neutral-800 underline disabled:opacity-60">
             {{ t('auth.logout') }}
           </button>

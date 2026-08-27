@@ -25,6 +25,7 @@ final class LoginSessionIssuer
         private readonly ClockInterface $clock,
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
+        private readonly MfaOfferService $mfaOffers,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly UserRoleProfile $roleProfile,
     ) {}
@@ -121,6 +122,9 @@ final class LoginSessionIssuer
         // ⚠️ Viz {@see \MyInvoice\Middleware\RequireMfaMiddleware} — o vynucení
         // rozhoduje aktuální politika, ne úroveň zapsaná do session při vydání.
         $mustSetupMfa = $authContext->assuranceLevel === 'setup' && $this->mfaPolicy->isRequired();
+        // Musí být i tady, ne jen v MeAction: přihlašovací odpověď je pro frontend
+        // první podoba uživatele a chybějící pole by se četlo jako „nenabízet".
+        $shouldOfferMfa = $this->mfaOffers->shouldOffer($userId, $mfaMethods !== []);
         $userTimeout = ($user['session_lock_after_minutes'] ?? null) !== null
             ? (int) $user['session_lock_after_minutes']
             : null;
@@ -147,6 +151,7 @@ final class LoginSessionIssuer
                 'mfa_methods' => $mfaMethods,
                 'passkey_count' => $passkeyCount,
                 'must_setup_mfa' => $mustSetupMfa,
+                'should_offer_mfa' => $shouldOfferMfa,
             ],
             'csrf_token' => $session['csrf_token'],
             'require_totp' => $requireTotp,

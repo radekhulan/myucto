@@ -15587,7 +15587,11 @@
         "transition_totp_hint": "Účet už má aktivní TOTP. Potvrď jeho aktuálním kódem bezpečný přechod na přístupový klíč.",
         "transition_totp_required": "Pro registraci přístupového klíče zadej platný 6místný TOTP kód.",
         "no_method_available": "Tato instalace nemá povolenou žádnou metodu, kterou bys tu mohl aktivovat. Uprav auth.allowed_mfa_methods v cfg.php nebo se obrať na správce.",
-        "logout_hint": "Bez dokončení MFA lze účet pouze odhlásit."
+        "logout_hint": "Bez dokončení MFA lze účet pouze odhlásit.",
+        "offer_title": "Zabezpeč si účet druhým faktorem",
+        "offer_intro": "Dvoufázové ověření není na této instalaci povinné, ale výrazně ztíží zneužití účtu, i kdyby někdo znal tvoje heslo. Zapneš ho teď, nebo pokračuješ dál a zapneš si ho kdykoli později.",
+        "offer_skip": "Pokračovat bez dvoufázového ověření",
+        "offer_skip_hint": "Nabídku už znovu neuvidíš. Dvoufázové ověření si můžeš kdykoli zapnout v Profil → Zabezpečení."
     },
     "webauthn": {
         "waiting_title": "Čekám na potvrzení bezpečnostního dialogu",
