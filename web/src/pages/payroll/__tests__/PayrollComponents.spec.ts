@@ -117,9 +117,7 @@ describe('PayrollComponents', () => {
     // do dalších a ty by měřily něco jiného, než co mají v názvu.
     m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
-    // PayrollRiskySavingsPanel se montuje uvnitř této obrazovky a načítá se sám.
-    // Bez těchto dvou mocků skončí jeho `load()` v catch větvi a vyhodí toast,
-    // který pak měří testy o něčem úplně jiném.
+    // PayrollRiskySavingsPanel se načte po otevření vlastní záložky.
     m.riskySavings.mockResolvedValue({
       items: [],
       minimum_shift_eighths: 24,
@@ -302,6 +300,22 @@ describe('PayrollComponents', () => {
       annual_after_minor: null,
       exemption_basket: null,
     })
+  })
+
+  it('keeps hazardous-work savings out of the monthly-input workflow', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('payroll.risky_savings.title')
+    expect(m.riskySavings).not.toHaveBeenCalled()
+
+    const riskyTab = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.risky_savings')
+    await riskyTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.risky_savings.title')
+    expect(m.riskySavings).toHaveBeenCalledWith('2026-08')
   })
 
   /**

@@ -1668,6 +1668,7 @@
                 "catalog": "Katalog složek",
                 "recurring": "Pravidelné předpisy",
                 "inputs": "Měsíční vstupy",
+                "risky_savings": "Rizikové spoření",
                 "import": "CSV / XLSX import"
             },
             "catalog": {

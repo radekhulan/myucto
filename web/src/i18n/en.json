@@ -1668,6 +1668,7 @@
                 "catalog": "Component catalogue",
                 "recurring": "Recurring assignments",
                 "inputs": "Monthly inputs",
+                "risky_savings": "Hazardous-work savings",
                 "import": "CSV / XLSX import"
             },
             "catalog": {

@@ -60,7 +60,7 @@ import {
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor } from '@/composables/useFormat'
 
-type Tab = 'catalog' | 'recurring' | 'inputs' | 'import'
+type Tab = 'catalog' | 'recurring' | 'inputs' | 'risky_savings' | 'import'
 
 interface ComponentForm extends Omit<PayrollComponentPayload, 'annual_limit_minor'> {
   annual_limit: string
@@ -95,7 +95,7 @@ const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
-const TABS: readonly Tab[] = ['catalog', 'recurring', 'inputs', 'import']
+const TABS: readonly Tab[] = ['catalog', 'recurring', 'inputs', 'risky_savings', 'import']
 const requestedTab = payrollQueryValue(route.query, 'tab')
 const activeTab = ref<Tab>(
   requestedTab !== null && (TABS as readonly string[]).includes(requestedTab)
@@ -1231,7 +1231,7 @@ onMounted(load)
       :aria-label="t('payroll.components.tabs.label')"
     >
       <button
-        v-for="tab in (['catalog', 'recurring', 'inputs', 'import'] as Tab[])"
+        v-for="tab in TABS"
         :key="tab"
         type="button"
         class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
@@ -1416,8 +1416,11 @@ onMounted(load)
         </section>
       </section>
 
-      <section v-if="activeTab === 'inputs'" class="space-y-4">
+      <section v-if="activeTab === 'risky_savings'">
         <PayrollRiskySavingsPanel :period="period" :employments="employments" />
+      </section>
+
+      <section v-if="activeTab === 'inputs'" class="space-y-4">
         <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.inputs.title') }}</h2><p class="text-sm text-neutral-500">{{ t('payroll.components.inputs.hint') }}</p></div><button v-if="canWrite" :class="btnFilled('primary')" @click="openNewInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.inputs.add') }}</button></div>
         <p v-if="inputError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ inputError }}</p>
 
