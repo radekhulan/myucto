@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\Deletion\DocumentDeletionGuard;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
@@ -282,6 +283,19 @@ final class EldpStatementServiceTest extends TestCase
         self::assertSame('fulfilled', $accepted['obligation_status']);
         self::assertSame('prepared', $accepted['local_submission_status']);
         self::assertSame(4, $accepted['obligation_row_version']);
+        self::assertNull(
+            $this->documents->findRaw(
+                $acceptedDocument,
+                $this->supplierId,
+                DocumentViewerContext::forUser($this->createdBy),
+            ),
+            'Potvrzení ELDP nesmí být dostupné přes obecné Dokumenty bez práva k podáním.',
+        );
+        self::assertNotNull($this->documents->findRaw(
+            $acceptedDocument,
+            $this->supplierId,
+            DocumentViewerContext::forUser($this->createdBy, false, false, true),
+        ));
 
         $replay = $this->completions->record(
             $this->supplierId,

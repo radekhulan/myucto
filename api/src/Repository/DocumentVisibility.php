@@ -48,6 +48,13 @@ final class DocumentVisibility
                    AND (submission_evidence.document_id = {$table}.id
                      OR submission_evidence.document_id = {$table}.parent_document_id)
             )";
+            $sql .= " AND NOT EXISTS (
+                SELECT 1
+                  FROM payroll_eldp_manual_completions eldp_evidence
+                 WHERE eldp_evidence.confirmation_document_supplier_id = {$table}.supplier_id
+                   AND (eldp_evidence.confirmation_document_id = {$table}.id
+                     OR eldp_evidence.confirmation_document_id = {$table}.parent_document_id)
+            )";
         }
         return [$sql, $params];
     }
