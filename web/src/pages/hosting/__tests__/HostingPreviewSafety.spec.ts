@@ -103,4 +103,33 @@ describe('Hosting — bezpečnost náhledu', () => {
 
     expect(wrapper.get('[data-hosting-attention] a[href="#klic"]').text()).toContain(cs.hosting.attention_key)
   })
+
+  it('vyčerpaná kapacita se do souhrnu pozornosti nedostane', async () => {
+    // Kdo má 1 uživatele z 1 zaplaceného, využívá přesně to, co si koupil.
+    // Dokud rovnost se stropem padala do souhrnu, uvítala čerstvě zřízená
+    // instalace zákazníka při prvním přihlášení výstrahou.
+    mocks.status.mockResolvedValue({
+      ...buildPreviewStatus('manual_key', 1_800_000_000),
+      users_licensed: 1,
+      users_active: 1,
+      max_companies: 1,
+      companies_active: 1,
+    })
+
+    const { wrapper } = await mountHosting()
+
+    expect(wrapper.find('[data-hosting-attention]').exists()).toBe(false)
+  })
+
+  it('překročený strop uživatelů do souhrnu pozornosti patří', async () => {
+    mocks.status.mockResolvedValue({
+      ...buildPreviewStatus('manual_key', 1_800_000_000),
+      users_licensed: 1,
+      users_active: 2,
+    })
+
+    const { wrapper } = await mountHosting()
+
+    expect(wrapper.get('[data-hosting-attention] a[href="#uzivatele"]').text()).toContain(cs.hosting.attention_users)
+  })
 })

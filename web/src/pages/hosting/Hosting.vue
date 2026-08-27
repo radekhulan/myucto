@@ -308,13 +308,25 @@ const openFeatures = computed(() => (tm('license.open_features') as unknown[]).m
 
 // ─── Co mi dochází ─────────────────────────────────────────────────────────
 
-/** Souhrn nahoře. Prázdný seznam = není co řešit a nic se nekreslí. */
+/**
+ * Souhrn nahoře. Prázdný seznam = není co řešit a nic se nekreslí.
+ *
+ * ⚠️ VYČERPANÁ KAPACITA SEM NEPATŘÍ. Kdo má 1 uživatele z 1 zaplaceného,
+ * využívá přesně to, co si koupil — je to správný stav, ne nález. Dokud tady
+ * byl, přivítala čerstvě zřízená instalace zákazníka při prvním přihlášení
+ * výstrahou „Vyžaduje pozornost", protože 1 z 1 se rovná stropu. Že na víc
+ * místa není, říká chip „Na stropu" na kartě a tlačítka Dokoupit / Změnit
+ * tarif — ta informace se tím neztrácí, jen přestává vypadat jako porucha.
+ *
+ * Docházející MÍSTO je něco jiného a v souhrnu zůstává i jako `notice`: 80 %
+ * je trajektorie k problému, ne ustálený stav.
+ */
 const attention = computed(() => {
   const items: Array<{ key: string; anchor: string; tone: Tone }> = []
   if (billingTone.value !== 'ok') items.push({ key: 'hosting.attention_billing', anchor: '#platba', tone: billingTone.value })
   if (licenseKeyTone.value !== 'ok') items.push({ key: 'hosting.attention_key', anchor: '#klic', tone: licenseKeyTone.value })
-  if (usersTone.value !== 'ok') items.push({ key: 'hosting.attention_users', anchor: '#uzivatele', tone: usersTone.value })
-  if (companiesTone.value !== 'ok') items.push({ key: 'hosting.attention_companies', anchor: '#tarif', tone: companiesTone.value })
+  if (usersTone.value === 'critical') items.push({ key: 'hosting.attention_users', anchor: '#uzivatele', tone: usersTone.value })
+  if (companiesTone.value === 'critical') items.push({ key: 'hosting.attention_companies', anchor: '#tarif', tone: companiesTone.value })
   if (storageTone.value !== 'ok') items.push({ key: 'hosting.attention_storage', anchor: '#misto', tone: storageTone.value })
 
   return items
