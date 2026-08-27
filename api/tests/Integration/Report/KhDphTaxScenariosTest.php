@@ -789,6 +789,53 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
+     * Upstream #273 — přiznání složené výhradně ze samovyměření musí mít
+     * `trans="A"`, i když vlastní daň vyjde na nulu.
+     *
+     * ⚠️ `trans` NENÍ znaménko daně, ale zaškrtávátko „Neexistují-li údaje pro
+     * C. oddíl". Dokud se odvozovalo z vlastní daně, dostalo tohle přiznání
+     * `N`, EPO oddíl C PŘEŠKRTLO a obsahová kontrola shodila podání:
+     *
+     *   CHYBA 36 — JE ZAŠKRTNUTO, ŽE NEEXISTUJÍ ÚDAJE PRO C. ODDÍL,
+     *   NESMÍ BÝT VYPLNĚNY ÚDAJE V ODDÍLE C.
+     *
+     * Přitom Veta1 i Veta4 byly vyplněné správně — soubor byl bez ručního
+     * zásahu nepodatelný.
+     */
+    public function testSelfAssessmentOnlyReturnKeepsSectionCVisible(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $vend = $this->client('Dodavatel služba EU trans', $this->deId, 'DE222222222', vendor: true);
+        $this->purchase('P-2099-273', $vend, '24', false, 'invoice', $d(10), $d(10), [[10000, 0, 21]]);
+
+        $dphXml = new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']);
+        $dp = $dphXml->DPHDP3;
+
+        // Předpoklad scénáře: daň na výstupu i zrcadlový odpočet ve stejné výši.
+        $this->assertSame('2100', (string) $dp->Veta6['dan_zocelk'], 'ř.62 daň na výstupu');
+        $this->assertSame('2100', (string) $dp->Veta6['odp_zocelk'], 'ř.63 odpočet celkem');
+
+        $this->assertSame(
+            'A',
+            (string) $dp->VetaD['trans'],
+            'oddíl C je vyplněný, takže se nesmí tvrdit, že údaje neexistují'
+        );
+    }
+
+    /**
+     * Protipól: v období, kde se opravdu nic nestalo, zůstává `trans="N"`.
+     * Jinak by se oddíl C nabízel i tam, kde ho není čím naplnit.
+     */
+    public function testEmptyPeriodStillDeclaresNoSectionCData(): void
+    {
+        $dphXml = new \SimpleXMLElement(
+            $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']
+        );
+
+        $this->assertSame('N', (string) $dphXml->DPHDP3->VetaD['trans']);
+    }
+
+    /**
      * Issue #164 — přijatá služba z JČS (EU) v reverse charge (kód 24e, § 9 odst. 1)
      * patří v KH do oddílu A.2, NE do B.1. VetaA2.vatid_dod musí zachovat alfanumerické
      * EU VAT ID bez kódu země (IE3668997OH → 3668997OH), ne jen číslice.

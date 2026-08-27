@@ -74,7 +74,7 @@ Naše DB tyto sloupce drží separátně (`supplier.street`, `street_number_pop`
 | **Ulice** (`street`) | `ulice` | Název ulice bez čísla, např. `Vodičkova` |
 | **Číslo popisné** (`street_number_pop`) | `c_pop` | Popisné číslo budovy, např. `1104` |
 | **Číslo orientační** (`street_number_orient`) | `c_orient` | Orientační číslo, např. `36` |
-| **Město** (`city`) | `naz_obce` | EPO vyžaduje VELKÝMI PÍSMENY, builder převede automaticky |
+| **Město** (`city`) | `naz_obce` | Posílá se beze změny; velikost písmen si normalizuje EPO samo |
 | **PSČ** (`zip`) | `psc` | Bez mezer, builder odstraní |
 | **Země** (`country_id` → ISO) | `stat` | Defaultně `CZE` (Česká republika) |
 
@@ -701,8 +701,14 @@ v cizí měně:
    `dphdp3_line_secondary` v `vat_classifications`).
 
 Příklad: faktura z DE, 1 000 € @ kurz 25, vat_classification_code='23' →
-ř. 3 (`p_zb23=25000`, `dan_pzb23=5250`) + ř. 43 (`odp_rezim=25000`,
-`odp_rez_nar=5250`) + KH sekce A.2.
+ř. 3 (`p_zb23=25000`, `dan_pzb23=5250`) + ř. 43 (`nar_zdp23=25000`,
+`od_zdp23=5250`) + KH sekce A.2.
+
+> **Pozor na `odp_rezim` / `odp_rez_nar`.** Tahle dvojice patří na **ř. 45**
+> (korekce odpočtu podle § 75, § 77 a § 79 — registrace, vyrovnání), ne na
+> ř. 43. Zrcadlový odpočet ze samovyměření nese `nar_zdp23` / `od_zdp23`.
+> Kdo by se řídil dřívějším zněním téhle sekce při ruční editaci XML, vykázal
+> by korekci odpočtu místo odpočtu ze samovyměření.
 
 ### 36.4.8 Pořízení dlouhodobého majetku
 
