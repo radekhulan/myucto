@@ -167,24 +167,24 @@ watch(id, () => {
     </nav>
 
     <!-- Header -->
-    <div class="flex items-start gap-3">
+    <div class="flex flex-wrap items-start gap-3" data-test="document-detail-header">
       <button type="button" class="text-neutral-400 hover:text-neutral-700 mt-1" @click="router.back()">
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
       </button>
       <span :class="['shrink-0 px-2 py-1 rounded text-xs font-semibold', docTypeBadge(doc.doc_type).class]">{{ docTypeBadge(doc.doc_type).label }}</span>
-      <div class="min-w-0 flex-1">
-        <h1 class="text-lg font-semibold text-neutral-800 truncate flex items-center gap-2">
+      <div class="min-w-0 flex-1 basis-[calc(100%-5.5rem)] sm:basis-auto">
+        <h1 class="text-lg font-semibold text-neutral-800 break-all sm:truncate flex items-center gap-2">
           {{ doc.title }}
           <span v-if="doc.scope === 'user'" class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-accent-50 text-accent-700 inline-flex items-center gap-1" :title="doc.owner_name || ''">
             <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
             {{ t('documents.scope.user') }}<template v-if="doc.owner_name"> · {{ doc.owner_name }}</template>
           </span>
         </h1>
-        <p class="text-xs text-neutral-500">
+        <p class="text-xs text-neutral-500 break-all sm:truncate">
           {{ doc.original_name }} · {{ formatBytes(doc.size_bytes) }} · {{ doc.created_at.slice(0, 16) }}
         </p>
       </div>
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex flex-wrap items-center justify-end gap-2 basis-full pl-8 sm:basis-auto sm:pl-0 sm:justify-start shrink-0" data-test="document-detail-actions">
         <a :href="documentsApi.downloadUrl(doc.id)" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('documents.download') }}

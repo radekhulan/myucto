@@ -91,4 +91,13 @@ describe('DocumentDetail', () => {
     expect(m.get).toHaveBeenLastCalledWith(2607)
     expect(wrapper.text()).toContain('DŮLEŽITÉ_OZNÁMENÍ.html')
   })
+
+  it('na úzkém displeji přesune akce pod název dokumentu', async () => {
+    const wrapper = shallowMount(DocumentDetail)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="document-detail-header"]').classes()).toContain('flex-wrap')
+    expect(wrapper.get('[data-test="document-detail-actions"]').classes()).toContain('basis-full')
+    expect(wrapper.get('h1').classes()).toContain('break-all')
+  })
 })
