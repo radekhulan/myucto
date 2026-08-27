@@ -123,7 +123,8 @@ final class PayrollEnumContractTest extends TestCase
 
         // Pracovní vztah a jeho podmínky
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
-        'payroll.ts::PayrollRelationType'            => 'db:payroll_employments.relation_type',
+        'payroll.ts::PayrollRelationType'
+            => 'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
         'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
         // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
@@ -726,6 +727,23 @@ final class PayrollEnumContractTest extends TestCase
         sort($sortedColumn);
         self::assertSame($sortedColumn, $states, 'PayrollEmploymentLifecycle zná jiné stavy než sloupec.');
         self::assertSame([], $unknownTargets, 'Přechod míří na stav, který sloupec nepřipouští.');
+    }
+
+    public function testPayrollRelationTypeEnumMatchesDatabaseColumn(): void
+    {
+        $enum = $this->domain(
+            'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
+        );
+        $column = $this->domain('db:payroll_employments.relation_type');
+        sort($enum, SORT_STRING);
+        sort($column, SORT_STRING);
+
+        self::assertNotEmpty($column, 'Doména payroll_employments.relation_type je prázdná.');
+        self::assertSame(
+            $column,
+            $enum,
+            'Společný enum pracovních vztahů se rozešel s databázovým sloupcem.',
+        );
     }
 
     /**

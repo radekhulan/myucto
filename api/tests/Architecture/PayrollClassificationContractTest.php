@@ -1,0 +1,66 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Architecture;
+
+use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
+use MyInvoice\Service\Payroll\Garnishment\ClaimCategory;
+use MyInvoice\Service\Payroll\HealthInsurance\HealthRelationshipKindMapper;
+use MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKindMapper;
+use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+#[Group('architecture')]
+final class PayrollClassificationContractTest extends TestCase
+{
+    public function testEveryRelationTypeIsHandledByEveryStatutoryMapper(): void
+    {
+        $health = new HealthRelationshipKindMapper();
+        $social = new SocialRelationshipKindMapper();
+        $tax = new EmploymentRelationshipKindMapper();
+
+        foreach (PayrollRelationType::cases() as $relationType) {
+            $health->fromDatabaseRelationType($relationType->value);
+            $social->fromRelationType($relationType->value);
+            $tax->fromDatabaseRelationType($relationType->value);
+            $this->addToAssertionCount(3);
+        }
+    }
+
+    public function testMaintenanceClassificationHasOneOrderedSourceOfTruth(): void
+    {
+        self::assertSame([
+            ClaimCategory::CurrentMaintenance,
+            ClaimCategory::MaintenanceArrears,
+            ClaimCategory::SubstituteMaintenance,
+        ], ClaimCategory::maintenanceCategories());
+
+        foreach (ClaimCategory::cases() as $category) {
+            self::assertSame(
+                in_array($category, ClaimCategory::maintenanceCategories(), true),
+                $category->requiresMaintenanceWeight(),
+            );
+        }
+
+        $duplicates = [];
+        foreach ([
+            'src/Service/Payroll/Garnishment/GarnishmentCalculator.php',
+            'src/Repository/Payroll/PayrollEnforcementRepository.php',
+        ] as $relativePath) {
+            $source = (string) file_get_contents(dirname(__DIR__, 2) . '/' . $relativePath);
+            if (preg_match(
+                '/ClaimCategory::(?:CurrentMaintenance|MaintenanceArrears|SubstituteMaintenance)/',
+                $source,
+            ) === 1) {
+                $duplicates[] = $relativePath;
+            }
+        }
+
+        self::assertSame([], $duplicates, sprintf(
+            'Klasifikace výživného je znovu opsaná mimo ClaimCategory: %s',
+            implode(', ', $duplicates),
+        ));
+    }
+}

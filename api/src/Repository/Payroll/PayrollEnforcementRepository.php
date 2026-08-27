@@ -246,7 +246,10 @@ final class PayrollEnforcementRepository implements
             try {
                 $delete->execute([$supplierId, $caseId, $expectedVersion]);
             } catch (\PDOException $e) {
-                $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+                $errorInfoState = $e->errorInfo[0] ?? null;
+                $sqlState = is_string($errorInfoState)
+                    ? $errorInfoState
+                    : (string) $e->getCode();
                 if (!in_array($sqlState, ['23000', '45000'], true)) {
                     throw $e;
                 }
@@ -866,7 +869,12 @@ final class PayrollEnforcementRepository implements
                 $insolvency->value,
                 self::boolInt($data, 'insolvency_decision_verified'),
                 self::boolInt($data, 'insolvency_recipient_verified'),
-                $instruction === null ? null : (int) $instruction['id'],
+                $instruction === null
+                    ? null
+                    : PayrollTimeValue::int(
+                        $instruction['id'] ?? null,
+                        'insolvency_payment_instruction.id',
+                    ),
                 $courtAmount,
                 $userId,
             ];
@@ -1921,14 +1929,7 @@ final class PayrollEnforcementRepository implements
         ClaimCategory $category,
         ?int $weight,
     ): void {
-        if (
-            in_array($category, [
-                ClaimCategory::CurrentMaintenance,
-                ClaimCategory::MaintenanceArrears,
-                ClaimCategory::SubstituteMaintenance,
-            ], true)
-            && $weight === null
-        ) {
+        if ($category->requiresMaintenanceWeight() && $weight === null) {
             throw new \InvalidArgumentException(
                 'Pohledávka výživného vyžaduje kladnou měsíční výši.',
             );
@@ -2198,7 +2199,11 @@ final class PayrollEnforcementRepository implements
                         'protected_amount_override_verified',
                         'insolvency_decision_verified', 'insolvency_recipient_verified'],
                 );
-                $rows[(int) $cast['employee_id']] ??= $cast;
+                $employeeId = PayrollTimeValue::int(
+                    $cast['employee_id'] ?? null,
+                    'enforcement_month_evidence.employee_id',
+                );
+                $rows[$employeeId] ??= $cast;
             }
         }
 
@@ -2473,6 +2478,9 @@ final class PayrollEnforcementRepository implements
                 'released_for_remittance' => 'released',
                 'remitted' => 'remitted',
                 'released_to_employee' => 'returned',
+                default => throw new \UnexpectedValueException(
+                    'Neznámý druh pohybu depozita exekuce.',
+                ),
             };
             $balances[$key][$bucket] += $amount;
         }

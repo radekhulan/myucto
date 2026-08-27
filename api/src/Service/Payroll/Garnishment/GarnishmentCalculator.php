@@ -319,11 +319,7 @@ final class GarnishmentCalculator
     {
         $allocated = [];
 
-        foreach ([
-            ClaimCategory::CurrentMaintenance,
-            ClaimCategory::MaintenanceArrears,
-            ClaimCategory::SubstituteMaintenance,
-        ] as $category) {
+        foreach (ClaimCategory::maintenanceCategories() as $category) {
             $group = array_values(array_filter(
                 $claims,
                 static fn (DeductionClaim $claim): bool => $claim->category === $category,
@@ -693,16 +689,7 @@ final class GarnishmentCalculator
                 }
             }
 
-            if (
-                in_array(
-                    $claim->category,
-                    [
-                        ClaimCategory::CurrentMaintenance,
-                        ClaimCategory::MaintenanceArrears,
-                        ClaimCategory::SubstituteMaintenance,
-                    ],
-                    true,
-                )
+            if ($claim->category->requiresMaintenanceWeight()
                 && ($claim->maintenanceWeightMinorUnits ?? 0) <= 0
             ) {
                 $issues[] = "claim:{$claim->id}:maintenance_weight_missing";

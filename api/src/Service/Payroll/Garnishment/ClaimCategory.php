@@ -16,4 +16,19 @@ enum ClaimCategory: string
     {
         return $this !== self::NonPriority;
     }
+
+    /** @return list<self> */
+    public static function maintenanceCategories(): array
+    {
+        return [
+            self::CurrentMaintenance,
+            self::MaintenanceArrears,
+            self::SubstituteMaintenance,
+        ];
+    }
+
+    public function requiresMaintenanceWeight(): bool
+    {
+        return in_array($this, self::maintenanceCategories(), true);
+    }
 }

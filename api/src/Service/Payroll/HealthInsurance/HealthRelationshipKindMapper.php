@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\HealthInsurance;
 
+use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
 use UnexpectedValueException;
 
 final class HealthRelationshipKindMapper
@@ -21,14 +22,20 @@ final class HealthRelationshipKindMapper
      */
     public function fromDatabaseRelationType(string $relationType): HealthEmploymentKind
     {
-        return match ($relationType) {
-            'employment', 'small_scale_employment' => HealthEmploymentKind::Employment,
-            'dpp' => HealthEmploymentKind::Dpp,
-            'dpc' => HealthEmploymentKind::Dpc,
-            'partner_dependent', 'statutory_body' => HealthEmploymentKind::CorporateBody,
-            default => throw new UnexpectedValueException(
+        $type = PayrollRelationType::tryFrom($relationType);
+        if ($type === null) {
+            throw new UnexpectedValueException(
                 "Unsupported payroll relation type {$relationType}.",
-            ),
+            );
+        }
+
+        return match ($type) {
+            PayrollRelationType::Employment,
+            PayrollRelationType::SmallScaleEmployment => HealthEmploymentKind::Employment,
+            PayrollRelationType::Dpp => HealthEmploymentKind::Dpp,
+            PayrollRelationType::Dpc => HealthEmploymentKind::Dpc,
+            PayrollRelationType::PartnerDependent,
+            PayrollRelationType::StatutoryBody => HealthEmploymentKind::CorporateBody,
         };
     }
 }
