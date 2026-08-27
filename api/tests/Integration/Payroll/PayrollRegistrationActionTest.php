@@ -268,7 +268,12 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringNotContainsString('<unemplcomp', $xml);
     }
 
-    public function testQ1ChangeUsesRegzecWithoutRestartingTheOriginalDeadline(): void
+    /**
+     * A3 musí projít celou produkční cestou: schválená událost je neměnná,
+     * XML je validované proti připnutému XSD a zmrazený artefakt zůstává
+     * připravený pro samostatně potvrzený transport.
+     */
+    public function testA3ChangeIsFrozenValidatedAndReadyForTransport(): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employments
@@ -302,8 +307,139 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
         $body = $this->json($prepared);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('change', $body['interaction']);
+        self::assertSame('ready', $body['status']);
         self::assertSame('2026-03-30', $body['deadline']['earliest_registration_on']);
         self::assertSame('2026-04-07', $body['deadline']['due_on']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="3"', $xml);
+        self::assertStringContainsString('fro="2026-03-30"', $xml);
+        self::assertStringContainsString('ikmpsv="1000000001"', $xml);
+        self::assertStringContainsString('oid="200000000000000000002"', $xml);
+        self::assertStringContainsString('<name tit="Mgr."/>', $xml);
+        self::assertSame($body['artifact_sha256'], hash('sha256', $xml));
+
+        // Opakování smí vrátit jen tytéž zmrazené bajty, nikoli nový dokument.
+        $replayed = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $replayed->getStatusCode());
+        self::assertFalse($this->json($replayed)['created']);
+        self::assertSame($body['artifact_sha256'], $this->json($replayed)['artifact_sha256']);
+    }
+
+    /**
+     * A6: přechod na české právní předpisy nese jen zmrazený podklad o
+     * zahraničním nositeli; po přípravě nesmí tvrdit, že jej ČSSZ přijala.
+     */
+    public function testA6CzechLegislationStartIsValidatedAndFrozenForTransport(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            self::TODAY,
+            self::TODAY,
+            $this->supplierId,
+            $this->employmentId,
+        ]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::TODAY);
+
+        $event = $this->json(($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'czech_legislation_start',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a6-jurisdiction',
+                'foreign_insurance' => [
+                    'current' => 'P',
+                    'name' => 'Syntetická zahraniční instituce',
+                    'country_code' => 'SK',
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $body = $this->json($prepared);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('czech_legislation_start', $body['interaction']);
+        self::assertSame('ready', $body['status']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="6"', $xml);
+        self::assertStringContainsString('fro="' . self::TODAY . '"', $xml);
+        self::assertStringContainsString('oid="200000000000000000002"', $xml);
+        self::assertStringContainsString('<forin cur="P" nam="Syntetická zahraniční instituce" cnt="SK"/>', $xml);
+        self::assertSame($body['artifact_sha256'], hash('sha256', $xml));
+    }
+
+    /** A7: ukončení českých právních předpisů vyžaduje identifikátor nositele. */
+    public function testA7CzechLegislationEndIsValidatedAndFrozenForTransport(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = ?, actual_start_date = ?, status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            self::TODAY,
+            self::TODAY,
+            $this->supplierId,
+            $this->employmentId,
+        ]);
+        $this->seedRegistrationEventPrerequisites('10', null, self::TODAY);
+
+        $event = $this->json(($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'czech_legislation_end',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a7-jurisdiction',
+                'foreign_insurance' => [
+                    'current' => 'S',
+                    'name' => 'Syntetická zahraniční instituce',
+                    'country_code' => 'SK',
+                    'identifier' => 'SYN-INS-123',
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $prepared->getStatusCode(), (string) $prepared->getBody());
+        $body = $this->json($prepared);
+        self::assertSame('REGZEC25', $body['agenda_code']);
+        self::assertSame('czech_legislation_end', $body['interaction']);
+        self::assertSame('ready', $body['status']);
+        $xml = $this->storedArtifactXml((int) $body['submission_id']);
+        self::assertStringContainsString('act="7"', $xml);
+        self::assertStringContainsString('fro="' . self::TODAY . '"', $xml);
+        self::assertStringContainsString('oid="200000000000000000002"', $xml);
+        self::assertStringContainsString('<forin cur="S" nam="Syntetická zahraniční instituce" cnt="SK" id="SYN-INS-123"/>', $xml);
+        self::assertSame($body['artifact_sha256'], hash('sha256', $xml));
     }
 
     public function testA4MustUseTheExactDateAndIdentityOfTheAcceptedSourceArtifact(): void
