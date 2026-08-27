@@ -63,6 +63,8 @@ final class SetupAction
         private readonly \MyInvoice\Service\License\LicenseService $license,
         // Zveřejněné bankovní účty z registru plátců DPH (doplnění podle DIČ).
         private readonly \MyInvoice\Service\Ares\CrpDphClient $crpdph,
+        // Plátcovství se eviduje v čase; historie je jediná zapisovací cesta.
+        private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
         private readonly \Psr\Log\LoggerInterface $log,
     ) {}
 
@@ -138,14 +140,10 @@ final class SetupAction
         }
     }
 
-    private function fillPublishedBankAccount(int $supplierId, array $supplier): void
+    private function applyVatRegistryData(int $supplierId, array $supplier): void
     {
-        // Účet, který přišel ve zřizovacím požadavku, má přednost — registr
-        // by ho přepsal jiným, který si zákazník nevybral.
-        if (isset($supplier['bank_account']) && is_array($supplier['bank_account'])
-            && trim((string) ($supplier['bank_account']['account_number'] ?? '')) !== '') {
-            return;
-        }
+        $ownAccount = isset($supplier['bank_account']) && is_array($supplier['bank_account'])
+            && trim((string) ($supplier['bank_account']['account_number'] ?? '')) !== '';
         $dic = trim((string) ($supplier['dic'] ?? ''));
         if ($dic === '') {
             return;
@@ -153,10 +151,32 @@ final class SetupAction
 
         try {
             $res = $this->crpdph->lookup($dic);
+
+            // ⚠️ PLÁTCOVSTVÍ DPH. Zřizovací požadavek ho nenese — provozovatel
+            // ho nezná — a výchozí hodnota je „neplátce". Firma zapsaná
+            // v registru plátců tak naběhla jako NEPLÁTCE a všechny doklady
+            // by vznikaly bez daně. Registr přitom odpověděl už kvůli účtům.
+            //
+            // ⚠️ Zapisuje se přes historii (VH-01), ne přímo do `supplier` —
+            // plátcovství se eviduje v čase a `supplier.is_vat_payer` je jen
+            // živá cache dopočtená z historie.
+            if (($res['found'] ?? false) === true && !array_key_exists('is_vat_payer', $supplier)) {
+                $this->vatStatus->upsert($supplierId, '1900-01-01', true, false, 'Zjištěno z registru plátců DPH při zřízení.');
+                $this->vatStatus->refreshLiveCache($supplierId);
+                $this->log->info('setup: firma je podle registru plátce DPH', ['supplier_id' => $supplierId]);
+            }
+
             $accounts = is_array($res['accounts'] ?? null) ? $res['accounts'] : [];
             if (!$accounts) {
                 return;
             }
+            // ⚠️ Účet ze zřizovacího požadavku má přednost — registr by ho
+            // přepsal jiným, který si zákazník nevybral. Plátcovství výš se
+            // ale zjistit muselo, proto se nekončí dřív.
+            if ($ownAccount) {
+                return;
+            }
+
             // První zveřejněný účet je ten, který plátce uvádí jako hlavní.
             $first = $accounts[0];
             $number = trim((string) ($first['prefix'] ?? '')) !== ''
@@ -410,7 +430,7 @@ final class SetupAction
         // registrů, co jde (čísla domu, NACE, spisová značka, typ poplatníka, kód FÚ).
         if ($createdSupplierId !== null) {
             $this->enricher->enrich($createdSupplierId, $supplier['ic'] ?? null, $supplier['dic'] ?? null);
-            $this->fillPublishedBankAccount($createdSupplierId, $supplier ?? []);
+            $this->applyVatRegistryData($createdSupplierId, $supplier ?? []);
             $this->alignAccountingModeWithLegalForm($createdSupplierId, $supplier ?? []);
         }
 

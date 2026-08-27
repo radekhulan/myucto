@@ -273,6 +273,7 @@ final class SetupProvisionTokenTest extends TestCase
             $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class),
             $this->container->get(\MyInvoice\Service\License\LicenseService::class),
             $this->container->get(\MyInvoice\Service\Ares\CrpDphClient::class),
+            $this->container->get(\MyInvoice\Service\Vat\VatStatusService::class),
             $this->container->get(\Psr\Log\LoggerInterface::class),
         );
     }
