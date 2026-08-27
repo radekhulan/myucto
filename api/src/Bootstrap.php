@@ -312,6 +312,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\PayrollModuleActivationService::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
+                    ),
                 ),
             // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
             // s obálkou. Verze se čte ze souboru VERSION, aby v protokolu

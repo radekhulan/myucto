@@ -984,6 +984,18 @@ final class Routes
                 [PayrollDocumentAction::class, 'generateBatch'],
             );
             $g->get(
+                '/documents/batches/{batchId:[0-9]+}',
+                [PayrollDocumentAction::class, 'batchDetail'],
+            );
+            $g->get(
+                '/documents/batches/{batchId:[0-9]+}/items',
+                [PayrollDocumentAction::class, 'batchItems'],
+            );
+            $g->post(
+                '/documents/batches/{batchId:[0-9]+}/items/{itemId:[0-9]+}/retry',
+                [PayrollDocumentAction::class, 'retryBatchItem'],
+            );
+            $g->get(
                 '/employments/{id:[0-9]+}/documents/exit',
                 [PayrollEmploymentExitDocumentAction::class, 'list'],
             );

@@ -1202,7 +1202,7 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
-    public function testApprovalWithPayslipGenerationRejectsOuterTransaction(): void
+    public function testApprovalInOuterTransactionOnlyPersistsDocumentQueueIntent(): void
     {
         $run = $this->createRun();
         $locked = $this->service->lockInputs(
@@ -1230,7 +1230,7 @@ final class PayrollRunPersistenceTest extends TestCase
         $approvedPosting = $this->createMock(
             PayrollApprovedRevisionPostingService::class,
         );
-        $approvedPosting->expects(self::never())->method('post');
+        $approvedPosting->method('post')->willReturn([]);
         $approvedPayslips = $this->createMock(
             ApprovedRevisionPayslipBatchService::class,
         );
@@ -1251,25 +1251,22 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->container->get(PayrollPeriodOwnershipService::class),
             $approvedPosting,
             $approvedPayslips,
+            null,
+            null,
+            null,
+            null,
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
+            ),
         );
 
-        try {
-            $service->approve(
-                $this->supplierId,
-                (int) $run['id'],
-                (int) $reviewed->run['row_version'],
-                'approve-in-outer-transaction',
-                $this->actors[2],
-            );
-            self::fail(
-                'Generování výplatních pásek nesmí proběhnout v cizí transakci.',
-            );
-        } catch (\DomainException $e) {
-            self::assertStringContainsString(
-                'samostatné databázové transakci',
-                $e->getMessage(),
-            );
-        }
+        $approved = $service->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'approve-in-outer-transaction',
+            $this->actors[2],
+        );
 
         $persistedRun = $this->runs->find(
             $this->supplierId,
@@ -1279,13 +1276,25 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             (int) $reviewed->revision['id'],
         );
-        self::assertSame('reviewed', $persistedRun['status']);
+        self::assertSame('approved', $approved->run['status']);
+        self::assertSame('approved', $persistedRun['status']);
+        self::assertSame('approved', $persistedRevision['status']);
         self::assertSame(
-            (int) $reviewed->run['row_version'],
-            (int) $persistedRun['row_version'],
+            1,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_document_batches
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $reviewed->revision['id']],
+            ),
         );
-        self::assertSame('reviewed', $persistedRevision['status']);
-        self::assertNull($persistedRevision['approved_by']);
+        self::assertSame(
+            0,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_generated_documents
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $reviewed->revision['id']],
+            ),
+        );
     }
 
     public function testProductionPipelineBlocksApprovalUntilRulesetIsActive(): void

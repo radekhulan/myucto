@@ -12,6 +12,9 @@ const m = vi.hoisted(() => ({
   generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
   generateDocumentBatch: vi.fn(),
+  documentBatch: vi.fn(),
+  documentBatchItems: vi.fn(),
+  retryDocumentBatchItem: vi.fn(),
   downloadPeriodExport: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
@@ -36,6 +39,9 @@ vi.mock('@/api/payroll', () => ({
     generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
     generateDocumentBatch: m.generateDocumentBatch,
+    documentBatch: m.documentBatch,
+    documentBatchItems: m.documentBatchItems,
+    retryDocumentBatchItem: m.retryDocumentBatchItem,
     downloadPeriodExport: m.downloadPeriodExport,
     downloadDocument: m.downloadDocument,
   },
@@ -146,29 +152,55 @@ describe('PayrollDocuments', () => {
       size_bytes: 9876,
     })
     m.generateDocumentBatch.mockResolvedValue({
+      id: 81,
       run_id: 11,
       revision_id: 12,
       period_start: '2026-07-01',
-      period_end: '2026-07-31',
-      complete: false,
-      payslips: { required: 1, archived: 1 },
-      employment_exits: [{
-        employment_id: 73,
-        employee_id: 31,
-        employee_name: null,
-        end_date: '2026-07-31',
-        relation_type: 'employment',
-        documents: {
-          employment_certificate: {
-            required: true,
-            archived: false,
-            document_id: null,
-            available: false,
-            readiness_code: 'weekly_hours_evidence_missing',
-          },
-        },
-      }],
+      status: 'queued',
+      item_count: 2,
+      succeeded_count: 0,
+      failed_count: 0,
+      bundle_document_id: null,
+      bundle_filename: null,
+      created_at: '2026-08-01 08:00:00',
+      started_at: null,
+      completed_at: null,
+      updated_at: '2026-08-01 08:00:00',
     })
+    m.documentBatch.mockResolvedValue({
+      id: 81,
+      run_id: 11,
+      revision_id: 12,
+      period_start: '2026-07-01',
+      status: 'failed',
+      item_count: 2,
+      succeeded_count: 1,
+      failed_count: 1,
+      bundle_document_id: null,
+      bundle_filename: null,
+      created_at: '2026-08-01 08:00:00',
+      started_at: '2026-08-01 08:00:01',
+      completed_at: null,
+      updated_at: '2026-08-01 08:00:04',
+    })
+    m.documentBatchItems.mockResolvedValue({
+      items: [{
+        id: 91,
+        batch_id: 81,
+        employee_id: 31,
+        employee_name: 'Testovací Zaměstnanec',
+        status: 'failed',
+        attempt_count: 3,
+        available_at: '2026-08-01 08:00:04',
+        document_id: null,
+        last_error_code: 'render_domain_exception',
+        last_error_message: 'Chybí povinný podklad výplatní pásky.',
+        completed_at: null,
+        updated_at: '2026-08-01 08:00:04',
+      }],
+      total: 1,
+    })
+    m.retryDocumentBatchItem.mockResolvedValue({ status: 'queued' })
     m.listAnnualDocuments.mockResolvedValue({
       year: 2026,
       items: [],
@@ -226,13 +258,11 @@ describe('PayrollDocuments', () => {
     expect(wrapper.text()).not.toContain('a'.repeat(64))
   })
 
-  it('creates an idempotent monthly bundle and downloads individual artifacts', async () => {
+  it('downloads individual artifacts without offering a premature ZIP action', async () => {
     const wrapper = mount(PayrollDocuments)
     await flushPromises()
 
-    await wrapper.get('[data-test="generate-bundle"]').trigger('click')
-    await flushPromises()
-    expect(m.generateMonthlyBundle).toHaveBeenCalledWith(11, 12, expect.any(String))
+    expect(wrapper.find('[data-test="generate-bundle"]').exists()).toBe(false)
 
     const buttons = wrapper.findAll('[data-test="download-document"]')
     await buttons[0].trigger('click')
@@ -241,7 +271,7 @@ describe('PayrollDocuments', () => {
     )
   })
 
-  it('v dávkovém výsledku přeloží blokaci a nepoužije interní ID jako jméno', async () => {
+  it('polls asynchronous progress and retries one failed person', async () => {
     const wrapper = mount(PayrollDocuments)
     await flushPromises()
 
@@ -249,10 +279,17 @@ describe('PayrollDocuments', () => {
     await flushPromises()
 
     const report = wrapper.get('[data-test="document-batch-report"]')
-    expect(report.text()).toContain('Chybí doložená týdenní pracovní doba.')
-    expect(report.text()).toContain('payroll.documents.batch_exit_employee_unknown')
-    expect(report.text()).not.toContain('weekly_hours_evidence_missing')
-    expect(report.text()).not.toContain('73')
+    expect(m.documentBatch).toHaveBeenCalledWith(81)
+    expect(m.documentBatchItems).toHaveBeenCalledWith(81, { limit: 100, offset: 0 })
+    expect(report.text()).toContain('Testovací Zaměstnanec')
+    expect(report.text()).toContain('Chybí povinný podklad výplatní pásky.')
+    expect(report.text()).toContain('payroll.documents.batch_progress')
+    expect(report.text()).not.toContain('render_domain_exception')
+
+    await wrapper.get('[data-test="retry-document-batch-item"]').trigger('click')
+    await flushPromises()
+    expect(m.retryDocumentBatchItem).toHaveBeenCalledWith(81, 91)
+    wrapper.unmount()
   })
 
   it('exports monthly and annual archives without loading the employee list', async () => {

@@ -10,7 +10,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\AnnualPayrollSheetService;
-use MyInvoice\Service\Payroll\Document\ApprovedRevisionDocumentBatchService;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -25,7 +25,7 @@ final class PayrollDocumentAction
         private readonly PayrollDocumentService $documents,
         private readonly PayrollDocumentRepository $documentRepository,
         private readonly AnnualPayrollSheetService $annualPayrollSheets,
-        private readonly ApprovedRevisionDocumentBatchService $batch,
+        private readonly PayrollDocumentBatchQueueService $batch,
         private readonly PayrollModuleAccess $moduleAccess,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
@@ -205,6 +205,15 @@ final class PayrollDocumentAction
             return Json::error($response, 'validation_failed', 'Požadavek na mzdový balíček je neplatný.', 422);
         }
         try {
+            $batch = $this->batch->forRevision($supplierId, $revisionId);
+            if ($batch === null
+                || (int) $batch['run_id'] !== $runId
+                || (string) $batch['status'] !== 'completed'
+            ) {
+                throw new \DomainException(
+                    'Měsíční ZIP vznikne až po úspěšném dokončení všech osob ve frontě.',
+                );
+            }
             $document = $this->documents->generateMonthlyBundle(
                 $supplierId,
                 $runId,
@@ -214,6 +223,8 @@ final class PayrollDocumentAction
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'bundle_not_ready', $exception->getMessage(), 409);
         } catch (\Throwable) {
             return Json::error($response, 'bundle_failed', 'Mzdový balíček nelze vytvořit.', 409);
         }
@@ -265,7 +276,13 @@ final class PayrollDocumentAction
             );
         }
         try {
-            $report = $this->batch->generate($supplierId, $runId, $revisionId, $userId);
+            $report = $this->batch->enqueueApprovedRevision(
+                $supplierId,
+                $runId,
+                $revisionId,
+                $userId,
+                $request->getHeaderLine('Idempotency-Key'),
+            );
         } catch (\InvalidArgumentException $exception) {
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
         } catch (\Throwable) {
@@ -277,21 +294,104 @@ final class PayrollDocumentAction
             );
         }
         $this->activity->log(
-            'payroll.document_batch_generated',
+            'payroll.document_batch_queued',
             $userId,
             'payroll_run_revision',
             $revisionId,
             [
                 'run_id' => $runId,
-                'payslips' => $report['payslips']['archived'],
-                'complete' => $report['complete'],
+                'item_count' => $report['item_count'],
+                'status' => $report['status'],
             ],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'),
             $supplierId,
         );
 
-        return Json::ok($response, $report, 201)
+        return Json::ok($response, ['batch' => $report], 202)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function batchDetail(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::READ,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $batch = $this->batch->detail(
+            $this->currentSupplierId($request),
+            (int) ($args['batchId'] ?? 0),
+        );
+        if ($batch === null) {
+            return Json::error($response, 'not_found', 'Dávka dokumentů nebyla nalezena.', 404);
+        }
+        return Json::ok($response, ['batch' => $batch])
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function batchItems(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::READ,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $query = $request->getQueryParams();
+        try {
+            $items = $this->batch->items(
+                $this->currentSupplierId($request),
+                (int) ($args['batchId'] ?? 0),
+                max(1, min(100, (int) ($query['limit'] ?? 50))),
+                max(0, (int) ($query['offset'] ?? 0)),
+            );
+        } catch (\OutOfBoundsException) {
+            return Json::error($response, 'not_found', 'Dávka dokumentů nebyla nalezena.', 404);
+        }
+        return Json::ok($response, $items)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function retryBatchItem(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        try {
+            $item = $this->batch->retry(
+                $this->currentSupplierId($request),
+                (int) ($args['batchId'] ?? 0),
+                (int) ($args['itemId'] ?? 0),
+            );
+        } catch (\DomainException $exception) {
+            return Json::error(
+                $response,
+                'document_batch_retry_invalid',
+                $exception->getMessage(),
+                409,
+            );
+        }
+        return Json::ok($response, ['item' => $item], 202)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
     }

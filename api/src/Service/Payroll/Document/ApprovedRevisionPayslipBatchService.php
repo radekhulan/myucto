@@ -80,6 +80,101 @@ final class ApprovedRevisionPayslipBatchService
         );
     }
 
+    /** @return array<string,mixed> */
+    public function generateEmployee(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        int $employeeId,
+        ?int $actorUserId,
+    ): array {
+        if ($supplierId <= 0 || $runId <= 0 || $revisionId <= 0 || $employeeId <= 0) {
+            throw new \InvalidArgumentException(
+                'Identita položky výplatní pásky není platná.',
+            );
+        }
+        $source = $this->sources->source($supplierId, $runId, $revisionId);
+        if ($source === null) {
+            throw new \DomainException(
+                'Výplatní pásku lze připravit pouze ze schválené mzdové revize.',
+            );
+        }
+        $prepared = $this->preparedEmployee($source, $revisionId, $employeeId);
+        $artifact = $this->documents->renderPayslip($prepared['document']);
+        $scope = $this->beginStorageScope();
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT ' . self::SAVEPOINT);
+        }
+        try {
+            $lockedSource = $this->sources->lockSource(
+                $supplierId,
+                $runId,
+                $revisionId,
+            );
+            if ($lockedSource === null
+                || !hash_equals(
+                    $this->sourceFingerprint($source),
+                    $this->sourceFingerprint($lockedSource),
+                )
+            ) {
+                throw new \DomainException(
+                    'Zdroj výplatní pásky se během vykreslování změnil. Spusťte položku znovu.',
+                );
+            }
+            $locked = $this->preparedEmployee(
+                $lockedSource,
+                $revisionId,
+                $employeeId,
+            );
+            if (!hash_equals($prepared['source_hash'], $locked['source_hash'])
+                || !hash_equals($locked['source_hash'], $artifact->sourceSnapshotHash)
+            ) {
+                throw new \DomainException(
+                    'Podklad výplatní pásky se během vykreslování změnil.',
+                );
+            }
+            $document = $this->documents->archivePayslip(
+                $supplierId,
+                $runId,
+                $revisionId,
+                $employeeId,
+                $artifact,
+                $this->idempotencyKey(
+                    $supplierId,
+                    $runId,
+                    $revisionId,
+                    $employeeId,
+                    $prepared['source_hash'],
+                ),
+                $actorUserId,
+                null,
+                $scope,
+            );
+            if ($ownsTransaction) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT ' . self::SAVEPOINT);
+            }
+            $this->commitStorageScope($scope);
+            return $document;
+        } catch (\Throwable $exception) {
+            $this->rollback($pdo, $ownsTransaction);
+            try {
+                $this->cleanupStorageScope($supplierId, $scope);
+            } catch (\Throwable $cleanupException) {
+                throw new \RuntimeException(
+                    'Položka pásky selhala a osiřelý soubor se nepodařilo uklidit.',
+                    previous: $cleanupException,
+                );
+            }
+            throw $exception;
+        }
+    }
+
     /** @return list<array<string,mixed>> */
     public function archivePrepared(
         PreparedApprovedRevisionPayslipBatch $prepared,
@@ -289,6 +384,101 @@ final class ApprovedRevisionPayslipBatchService
             throw new \DomainException('Schválená revize neobsahuje žádnou vypočtenou osobu.');
         }
         return $prepared;
+    }
+
+    /**
+     * @param array{
+     *   period_start:string,
+     *   result_snapshot_json:string,
+     *   result_snapshot_hash:string,
+     *   people:list<array<string,mixed>>
+     * } $source
+     * @return array{employee_id:int,source_hash:string,document:PayslipDocumentData}
+     */
+    private function preparedEmployee(
+        array $source,
+        int $revisionId,
+        int $employeeId,
+    ): array {
+        $revisionJson = $source['result_snapshot_json'];
+        $revisionHash = $source['result_snapshot_hash'];
+        $this->assertHash($revisionHash, 'schválené revize');
+        if (!hash_equals($revisionHash, hash('sha256', $revisionJson))) {
+            throw new \DomainException('Otisk výsledku schválené revize nesouhlasí.');
+        }
+        $revision = json_decode($revisionJson, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($revision) || array_is_list($revision)) {
+            throw new \DomainException('Výsledek schválené revize není objekt.');
+        }
+        $rootPeople = $revision['people'] ?? null;
+        if (!is_array($rootPeople) || !array_is_list($rootPeople)) {
+            throw new \DomainException('Schválená revize nemá seznam výsledků osob.');
+        }
+        $rootByEmployee = [];
+        foreach ($rootPeople as $value) {
+            $person = $this->object($value, 'Výsledek osoby ve schválené revizi');
+            $id = $this->positiveInteger(
+                $person['employee_id'] ?? null,
+                'employee_id výsledku osoby',
+            );
+            if (isset($rootByEmployee[$id])) {
+                throw new \DomainException('Schválená revize nemá jednoznačné výsledky osob.');
+            }
+            $rootByEmployee[$id] = $person;
+        }
+        if (count($rootByEmployee) !== count($source['people'])) {
+            throw new \DomainException('Schválená revize nemá výsledek každé zmrazené osoby.');
+        }
+        $target = null;
+        foreach ($source['people'] as $stored) {
+            $id = $this->positiveInteger(
+                $stored['employee_id'] ?? null,
+                'employee_id zmrazené osoby',
+            );
+            $storedJson = $stored['result_json'] ?? null;
+            $storedHash = $stored['result_hash'] ?? null;
+            if (($stored['status'] ?? null) !== 'calculated'
+                || !is_string($storedJson)
+                || !is_string($storedHash)
+                || !isset($rootByEmployee[$id])
+            ) {
+                throw new \DomainException(
+                    "Zmrazená osoba {$id} nemá úplný vypočtený výsledek.",
+                );
+            }
+            $this->assertHash($storedHash, "výsledku osoby {$id}");
+            if (!hash_equals($storedHash, hash('sha256', $storedJson))
+                || !hash_equals(
+                    $storedHash,
+                    hash('sha256', CanonicalJson::encode($rootByEmployee[$id])),
+                )
+            ) {
+                throw new \DomainException(
+                    "Otisk výsledku osoby {$id} nesouhlasí se schválenou revizí.",
+                );
+            }
+            if ($id === $employeeId) {
+                $target = [
+                    'employee_id' => $id,
+                    'source_hash' => $storedHash,
+                    'document' => $this->hydrator->hydrate(
+                        $this->object(
+                            $rootByEmployee[$id]['payslip_document'] ?? null,
+                            "Výsledek osoby {$id} nemá snapshot výplatní pásky",
+                        ),
+                        'revision-' . $revisionId,
+                        $storedHash,
+                        substr($source['period_start'], 0, 7),
+                    ),
+                ];
+            }
+        }
+        if ($target !== null) {
+            return $target;
+        }
+        throw new \OutOfBoundsException(
+            'Zaměstnanec do schválené revize nepatří.',
+        );
     }
 
     private function idempotencyKey(

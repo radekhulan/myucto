@@ -3147,33 +3147,50 @@ export interface PayrollAverageEarningsStatementEvidence {
   correction_reason: string | null
 }
 
-export interface PayrollDocumentBatchExitDocument {
-  required: boolean
-  archived: boolean
-  document_id: number | null
-  available: boolean
-  readiness_code: string | null
-}
+export type PayrollDocumentBatchStatus =
+  | 'queued'
+  | 'running'
+  | 'retry_wait'
+  | 'failed'
+  | 'completed'
 
-export interface PayrollDocumentBatchExit {
-  employment_id: number
-  employee_id: number
-  employee_name: string | null
-  end_date: string
-  relation_type: string
-  documents: Record<string, PayrollDocumentBatchExitDocument>
-}
+export type PayrollDocumentBatchItemStatus =
+  | 'queued'
+  | 'processing'
+  | 'retry_wait'
+  | 'failed'
+  | 'succeeded'
 
-export interface PayrollDocumentBatchReport {
+export interface PayrollDocumentBatch {
+  id: number
   run_id: number
   revision_id: number
   period_start: string
-  period_end: string
-  payslips: { archived: number, document_ids: number[] }
-  monthly_bundle: { document_id: number }
-  employment_exits: PayrollDocumentBatchExit[]
-  missing: string[]
-  complete: boolean
+  status: PayrollDocumentBatchStatus
+  item_count: number
+  succeeded_count: number
+  failed_count: number
+  bundle_document_id: number | null
+  bundle_filename: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+}
+
+export interface PayrollDocumentBatchItem {
+  id: number
+  batch_id: number
+  employee_id: number
+  employee_name: string
+  status: PayrollDocumentBatchItemStatus
+  attempt_count: number
+  available_at: string
+  document_id: number | null
+  last_error_code: string | null
+  last_error_message: string | null
+  completed_at: string | null
+  updated_at: string
 }
 
 export interface PayrollEmploymentCertificateDeductionEvidence {
@@ -4756,10 +4773,25 @@ export const payrollApi = {
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
   generateDocumentBatch: (runId: number, revisionId: number) =>
-    api.post<PayrollDocumentBatchReport>(
+    api.post<{ batch: PayrollDocumentBatch }>(
       `/payroll/runs/${runId}/revisions/${revisionId}/documents/batch`,
       {},
+      { headers: { 'Idempotency-Key': `payroll-document-batch:${runId}:${revisionId}` } },
+    ).then(response => response.data.batch),
+  documentBatch: (batchId: number) =>
+    api.get<{ batch: PayrollDocumentBatch }>(
+      `/payroll/documents/batches/${batchId}`,
+    ).then(response => response.data.batch),
+  documentBatchItems: (batchId: number, page?: PayrollPageParams) =>
+    api.get<{ items: PayrollDocumentBatchItem[], total: number }>(
+      `/payroll/documents/batches/${batchId}/items`,
+      { params: pageParams(page) },
     ).then(response => response.data),
+  retryDocumentBatchItem: (batchId: number, itemId: number) =>
+    api.post<{ item: PayrollDocumentBatchItem }>(
+      `/payroll/documents/batches/${batchId}/items/${itemId}/retry`,
+      {},
+    ).then(response => response.data.item),
   /**
    * Stránka seznamu běhů. `result_snapshot` nese jen `totals` — osobní rozpad
    * v seznamu není, ten se dotahuje přes `run()` pro jeden konkrétní běh.

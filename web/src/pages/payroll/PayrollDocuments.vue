@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollDocument,
-  type PayrollDocumentBatchExit,
-  type PayrollDocumentBatchReport,
+  type PayrollDocumentBatch,
+  type PayrollDocumentBatchItem,
   type PayrollDocumentList,
   type PayrollPeriodExportScope,
   type PayrollTaxCertificateKind,
@@ -25,10 +25,8 @@ import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgenda
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
-import { usePayrollLabels } from '@/composables/usePayrollLabels'
 
 const { t } = useI18n()
-const { employmentExitReadinessLabel } = usePayrollLabels()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
@@ -55,9 +53,10 @@ const annualItems = ref<PayrollDocument[]>([])
 const focusPersonName = ref<string | null>(null)
 const selectedEmployeeId = ref<number | null>(focusPersonId.value)
 const loading = ref(true)
-const generatingRevisionId = ref<number | null>(null)
 const generatingBatchId = ref<number | null>(null)
-const batchReport = ref<PayrollDocumentBatchReport | null>(null)
+const documentBatch = ref<PayrollDocumentBatch | null>(null)
+const documentBatchItems = ref<PayrollDocumentBatchItem[]>([])
+const retryingBatchItemId = ref<number | null>(null)
 type AnnualGenerationKind = 'payroll_sheet' | PayrollTaxCertificateKind
 const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
 const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
@@ -65,6 +64,7 @@ const correctionReason = ref('')
 const downloadingId = ref<number | null>(null)
 const exportingScope = ref<PayrollPeriodExportScope | null>(null)
 let loadSequence = 0
+let batchPollTimer: ReturnType<typeof setTimeout> | null = null
 
 const COLUMNS: ColumnDef[] = [
   { key: 'document', labelKey: 'payroll.documents.document', required: true },
@@ -362,16 +362,12 @@ async function generateBatch(revision: PayrollDocumentList['revisions'][number])
   if (generatingBatchId.value !== null) return
   generatingBatchId.value = revision.revision_id
   try {
-    batchReport.value = await payrollApi.generateDocumentBatch(
+    documentBatch.value = await payrollApi.generateDocumentBatch(
       revision.run_id,
       revision.revision_id,
     )
-    toast.success(t(
-      batchReport.value.complete
-        ? 'payroll.documents.batch_complete'
-        : 'payroll.documents.batch_incomplete',
-    ))
-    await load()
+    toast.success(t('payroll.documents.batch_queued'))
+    await loadDocumentBatch(true)
   } catch (error) {
     toast.error(apiErrorMessage(error, t('payroll.documents.batch_failed')))
   } finally {
@@ -379,36 +375,67 @@ async function generateBatch(revision: PayrollDocumentList['revisions'][number])
   }
 }
 
-async function generateBundle(revision: PayrollDocumentList['revisions'][number]): Promise<void> {
-  if (generatingRevisionId.value !== null) return
-  generatingRevisionId.value = revision.revision_id
+function clearBatchPoll(): void {
+  if (batchPollTimer !== null) clearTimeout(batchPollTimer)
+  batchPollTimer = null
+}
+
+async function loadAllBatchItems(batchId: number): Promise<void> {
+  const items: PayrollDocumentBatchItem[] = []
+  let nextOffset = 0
+  let total = 1
+  while (nextOffset < total) {
+    const page = await payrollApi.documentBatchItems(batchId, {
+      limit: 100,
+      offset: nextOffset,
+    })
+    items.push(...page.items)
+    total = page.total
+    nextOffset += page.items.length
+    if (page.items.length === 0) break
+  }
+  if (documentBatch.value?.id === batchId) documentBatchItems.value = items
+}
+
+async function loadDocumentBatch(loadItems = false): Promise<void> {
+  const batchId = documentBatch.value?.id
+  if (!batchId) return
+  clearBatchPoll()
   try {
-    await payrollApi.generateMonthlyBundle(
-      revision.run_id,
-      revision.revision_id,
-      `payroll-monthly-bundle:${revision.run_id}:${revision.revision_id}`,
-    )
-    toast.success(t('payroll.documents.bundle_created'))
-    await load()
-  } catch {
-    toast.error(t('payroll.documents.bundle_failed'))
-  } finally {
-    generatingRevisionId.value = null
+    const previous = documentBatch.value
+    const current = await payrollApi.documentBatch(batchId)
+    if (documentBatch.value?.id !== batchId) return
+    documentBatch.value = current
+    const changed = previous === null
+      || previous.status !== current.status
+      || previous.succeeded_count !== current.succeeded_count
+      || previous.failed_count !== current.failed_count
+    if (loadItems || changed) await loadAllBatchItems(batchId)
+    if (current.status === 'completed') {
+      toast.success(t('payroll.documents.batch_complete'))
+      await load()
+      return
+    }
+    if (current.status === 'failed') return
+    batchPollTimer = setTimeout(() => void loadDocumentBatch(), 2500)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_poll_failed')))
   }
 }
 
-function batchExitLabel(exit: PayrollDocumentBatchExit): string {
-  const certificate = exit.documents.employment_certificate
-  if (certificate?.archived) return t('payroll.documents.batch_exit_archived')
-  if (certificate?.available) return t('payroll.documents.batch_exit_pending')
-  return t('payroll.documents.batch_exit_blocked', {
-    reason: employmentExitReadinessLabel(certificate?.readiness_code),
-  })
-}
-
-function batchExitEmployeeLabel(exit: PayrollDocumentBatchExit): string {
-  return exit.employee_name?.trim()
-    || t('payroll.documents.batch_exit_employee_unknown')
+async function retryBatchItem(item: PayrollDocumentBatchItem): Promise<void> {
+  const batchId = documentBatch.value?.id
+  if (!batchId || retryingBatchItemId.value !== null) return
+  retryingBatchItemId.value = item.id
+  try {
+    await payrollApi.retryDocumentBatchItem(batchId, item.id)
+    toast.success(t('payroll.documents.batch_retry_queued'))
+    await loadDocumentBatch(true)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_retry_failed')))
+  } finally {
+    retryingBatchItemId.value = null
+  }
 }
 
 async function download(item: PayrollDocument): Promise<void> {
@@ -424,11 +451,13 @@ async function download(item: PayrollDocument): Promise<void> {
 }
 
 watch(activeTab, () => {
+  clearBatchPoll()
   cancelCorrection()
   reload()
 })
 watch([selectedEmployeeId, year], cancelCorrection)
 onMounted(load)
+onBeforeUnmount(clearBatchPoll)
 </script>
 
 <template>
@@ -475,31 +504,10 @@ onMounted(load)
         <template v-if="activeTab === 'monthly'">
           <button
             v-for="revision in canGenerate ? data?.revisions ?? [] : []"
-            :key="revision.revision_id"
-            type="button"
-            data-test="generate-bundle"
-            :class="btnFilled('primary')"
-            :disabled="generatingRevisionId !== null"
-            @click="generateBundle(revision)"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path :d="ICONS.archive" />
-            </svg>
-            {{
-              t(
-                generatingRevisionId === revision.revision_id
-                  ? 'payroll.documents.generating_bundle'
-                  : 'payroll.documents.generate_bundle',
-                { office: revision.office_name || t('payroll.documents.company') },
-              )
-            }}
-          </button>
-          <button
-            v-for="revision in canGenerate ? data?.revisions ?? [] : []"
             :key="`batch-${revision.revision_id}`"
             type="button"
             data-test="generate-document-batch"
-            :class="btnOutline('primary')"
+            :class="btnFilled('primary')"
             :disabled="generatingBatchId !== null"
             @click="generateBatch(revision)"
           >
@@ -520,37 +528,59 @@ onMounted(load)
     </header>
 
     <section
-      v-if="batchReport"
+      v-if="documentBatch"
       class="rounded-lg border p-4"
-      :class="batchReport.complete
+      :class="documentBatch.status === 'completed'
         ? 'border-success-500/30 bg-success-50'
-        : 'border-warning-500/30 bg-warning-50'"
+        : documentBatch.status === 'failed'
+          ? 'border-danger-500/30 bg-danger-50'
+          : 'border-warning-500/30 bg-warning-50'"
       data-test="document-batch-report"
       role="status"
     >
-      <h2 class="text-sm font-semibold text-neutral-900">
-        {{ t('payroll.documents.batch_title') }}
-      </h2>
-      <p class="mt-1 text-sm text-neutral-700">
-        {{ t('payroll.documents.batch_summary', {
-          payslips: batchReport.payslips.archived,
-          from: batchReport.period_start,
-          to: batchReport.period_end,
-        }) }}
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 class="text-sm font-semibold text-neutral-900">{{ t('payroll.documents.batch_title') }}</h2>
+          <p class="mt-1 text-sm text-neutral-700">
+            {{ t('payroll.documents.batch_progress', {
+              done: documentBatch.succeeded_count,
+              total: documentBatch.item_count,
+              failed: documentBatch.failed_count,
+            }) }}
+          </p>
+        </div>
+        <span class="rounded-full bg-surface px-2.5 py-1 text-xs font-medium text-neutral-700">
+          {{ t(`payroll.documents.batch_status.${documentBatch.status}`) }}
+        </span>
+      </div>
+      <div class="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200" role="progressbar" :aria-valuemin="0" :aria-valuemax="documentBatch.item_count" :aria-valuenow="documentBatch.succeeded_count">
+        <div class="h-full bg-success-500 transition-all" :style="{ width: `${documentBatch.item_count ? Math.round(documentBatch.succeeded_count * 100 / documentBatch.item_count) : 0}%` }" />
+      </div>
+      <p v-if="documentBatch.bundle_document_id" class="mt-3 text-sm font-medium text-success-700">
+        {{ t('payroll.documents.batch_bundle_ready') }}
       </p>
-      <p class="mt-1 text-sm font-medium text-neutral-900">
-        {{ t(batchReport.complete
-          ? 'payroll.documents.batch_complete'
-          : 'payroll.documents.batch_incomplete') }}
-      </p>
-      <ul v-if="batchReport.employment_exits.length" class="mt-3 space-y-1 text-sm text-neutral-700">
-        <li v-for="exit in batchReport.employment_exits" :key="exit.employment_id">
-          {{ batchExitEmployeeLabel(exit) }} · {{ exit.end_date }} · {{ batchExitLabel(exit) }}
-        </li>
-      </ul>
-      <p v-else class="mt-3 text-sm text-neutral-600">
-        {{ t('payroll.documents.batch_no_exits') }}
-      </p>
+      <div v-if="documentBatchItems.length" class="mt-4 max-h-80 overflow-auto rounded-md border border-neutral-200 bg-surface">
+        <div v-for="item in documentBatchItems" :key="item.id" class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-3 py-2 text-sm last:border-b-0" data-test="document-batch-item">
+          <div class="min-w-0">
+            <p class="truncate font-medium text-neutral-900">{{ item.employee_name }}</p>
+            <p class="text-xs text-neutral-500">
+              {{ t(`payroll.documents.batch_item_status.${item.status}`) }} · {{ t('payroll.documents.batch_attempts', { count: item.attempt_count }) }}
+            </p>
+            <p v-if="item.last_error_message" class="mt-1 break-words text-xs text-danger-700">{{ item.last_error_message }}</p>
+          </div>
+          <button
+            v-if="item.status === 'failed' || item.status === 'retry_wait'"
+            type="button"
+            :class="btnOutline('warning')"
+            :disabled="retryingBatchItemId !== null"
+            data-test="retry-document-batch-item"
+            @click="retryBatchItem(item)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>
+            {{ t('payroll.documents.batch_retry') }}
+          </button>
+        </div>
+      </div>
     </section>
 
     <PayrollFocusNotice

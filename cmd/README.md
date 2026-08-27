@@ -63,6 +63,7 @@ má vždy přednost před oběma.
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
+| `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí (`--supplier=N`, `--days=N`, `--dry-run`) |
 | `cron-payroll-post.{cmd,sh}` | **1× měsíčně** — zaúčtuje mzdovou rekapitulaci za předchozí měsíc zaměstnancům, kteří mají na kartě „Účtovat automaticky" a vyplněnou pravidelnou hrubou mzdu (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`). Jen podvojné účetnictví; datum zápisu je poslední den účtovaného měsíce |
 | `cron-vat-clearing.{cmd,sh}` | **1× měsíčně** — interní doklad zúčtování DPH: převede daň zdaňovacího období z analytik 343.100 (vstup) a 343.200 (výstup) na zúčtovací 343.900 (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`, `--force`). Jen plátci v podvojném účetnictví; datum zápisu je poslední den období, zaúčtování idempotentní |
@@ -164,6 +165,7 @@ chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
 | `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
+| `cron-payroll-document-worker` | každou minutu | `* * * * *` |
 | `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
 | `cron-vat-status-apply` | 1× denně (po půlnoci) | 00:30 |
 | `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
@@ -233,6 +235,7 @@ schtasks /create /tn "MyUcto JmhzPoll"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cr
 schtasks /create /tn "MyUcto Recurring"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-automation-digest.cmd" /sc hourly /mo 1 /st 06:00 /et 08:59 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
+schtasks /create /tn "MyUcto Payroll Documents" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-document-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Rule Miner"     /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-rule-miner.cmd" /sc daily /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VatStatusApply"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-status-apply.cmd"          /sc daily /st 00:30 /ru SYSTEM
 schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
@@ -292,6 +295,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  30  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
   0  6-8 *   *   *    /var/www/myucto.cz/cmd/cron-automation-digest.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh
+  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-document-worker.sh
   0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh
  30  0  *   *   *    /var/www/myucto.cz/cmd/cron-vat-status-apply.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
@@ -357,6 +361,7 @@ k dispozici `--dry-run`:
 ```cmd
 cmd\cron-send-reminders.cmd --dry-run
 cmd\cron-send-reminders.cmd --days=5 --cooldown=14
+pwsh -File cmd\cron-payroll-document-worker.ps1 -Limit 100
 ```
 
 ## Docker
