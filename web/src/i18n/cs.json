@@ -10220,7 +10220,10 @@
     "totp_fallback": "Nemáte-li klíč po ruce, zadejte kód z autentikátoru a zkuste to znovu.",
     "failed": "Vygenerování záložních kódů se nepodařilo.",
     "file_header": "{app} — záložní kódy pro účet {email}. Každý kód funguje právě jednou.",
-    "file_footer": "Ulož je mimo počítač, ze kterého se přihlašuješ (tisk, trezor, správce hesel)."
+    "file_footer": "Ulož je mimo počítač, ze kterého se přihlašuješ (tisk, trezor, správce hesel).",
+    "once_title": "Uložte si záložní kódy — zobrazíme je jen teď",
+    "once_desc": "Jednorázové kódy pro případ, že přijdete o autentikátor. Server je neukládá, takže podruhé je nikde nenajdete — bez nich zbývá jen zásah na serveru.",
+    "saved": "Mám je uložené, pokračovat"
   },
   "auth": {
     "login": "Přihlásit",

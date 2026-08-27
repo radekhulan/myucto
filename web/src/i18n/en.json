@@ -10220,7 +10220,10 @@
     "totp_fallback": "If your key is not at hand, enter the authenticator code and try again.",
     "failed": "Generating the backup codes failed.",
     "file_header": "{app} — backup codes for account {email}. Each code works exactly once.",
-    "file_footer": "Keep them away from the computer you sign in from (print, safe, password manager)."
+    "file_footer": "Keep them away from the computer you sign in from (print, safe, password manager).",
+    "once_title": "Save your backup codes — this is the only time we show them",
+    "once_desc": "One-time codes in case you lose your authenticator. The server does not store them, so you will not find them anywhere later — without them the only way back is a server-side intervention.",
+    "saved": "I have saved them, continue"
   },
   "auth": {
     "login": "Sign in",

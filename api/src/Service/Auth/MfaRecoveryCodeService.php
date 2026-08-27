@@ -97,6 +97,37 @@ final class MfaRecoveryCodeService
      * který z nich vyhrál. Kontrola „nejdřív SELECT, pak UPDATE" by tenhle závod
      * prohrála a pustila by oba.
      */
+    /**
+     * První sada k čerstvě zapnutému druhému faktoru.
+     *
+     * ⚠️ Volá se ze VŠECH cest, kterými se dá druhý faktor zapnout — TOTP
+     * i passkey. Dokud to uměl jen TOTP, prošel uživatel, který si zvolil
+     * passkey, celým prvním přihlášením a skončil na nástěnce bez jediného
+     * záložního kódu; kdyby o klíč přišel, zbýval zásah na serveru.
+     *
+     * ⚠️ Existující sadu NEPŘEPISUJE. {@see self::generate()} starou zneplatní,
+     * takže přidání druhého faktoru by tiše sebralo kódy, které si uživatel
+     * dávno uložil.
+     *
+     * ⚠️ NIKDY nevyhodí výjimku. Faktor je v tu chvíli už zapnutý; chyba by
+     * volajícímu tvrdila, že se nic nestalo, a uživatel by při dalším pokusu
+     * narazil na „už je zapnuté". Kódy si pak vydá v nastavení bezpečnosti.
+     *
+     * @return list<string> prázdné, když už použitelné kódy má nebo se zápis nepovedl
+     */
+    public function issueFirstBatch(int $userId): array
+    {
+        try {
+            if ($this->hasUsable($userId)) {
+                return [];
+            }
+
+            return $this->generate($userId);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
     public function consume(int $userId, string $code, ?string $ip = null): bool
     {
         $normalized = self::normalize($code);

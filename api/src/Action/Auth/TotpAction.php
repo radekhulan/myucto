@@ -15,6 +15,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\MfaRecoveryCodeService;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\SessionManager;
@@ -42,6 +43,7 @@ final class TotpAction
         private readonly IpMatcher $ipMatcher,
         private readonly SecretEncryption $crypto,
         private readonly MfaPolicyService $mfaPolicy,
+        private readonly MfaRecoveryCodeService $recoveryCodes,
         private readonly SessionManager $sessions,
         private readonly SessionCookieFactory $sessionCookies,
         private readonly ClockInterface $clock,
@@ -132,9 +134,11 @@ final class TotpAction
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('auth.totp_enabled', (int) $user['id'], 'user', (int) $user['id'], null, $ip, $request->getHeaderLine('User-Agent'));
 
+        $recovery = $this->issueFirstRecoveryCodes((int) $user['id'], $ip, $request->getHeaderLine('User-Agent'));
+
         $session = $request->getAttribute(AuthMiddleware::ATTR_SESSION);
         if (!is_array($session) || ($session['assurance_level'] ?? 'legacy') !== 'setup') {
-            return Json::ok($response, ['enabled' => true]);
+            return Json::ok($response, ['enabled' => true] + $recovery);
         }
         $token = (string) $request->getAttribute(AuthMiddleware::ATTR_TOKEN, '');
         try {
@@ -154,7 +158,7 @@ final class TotpAction
             'csrf_token' => $completed['csrf_token'],
             'session_state' => 'active',
             'must_setup_mfa' => false,
-        ])->withHeader('Set-Cookie', $this->sessionCookies->create(
+        ] + $recovery)->withHeader('Set-Cookie', $this->sessionCookies->create(
             $completed['token'],
             $completed['expires_at'],
         ));
@@ -173,4 +177,31 @@ final class TotpAction
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         return $row ?: null;
     }
+    /**
+     * První sada záložních kódů se vydá HNED se zapnutím TOTP.
+     *
+     * ⚠️ Dokud se nevydávala, končilo zapnutí druhého faktoru bez jakéhokoliv
+     * break-glass: uživatel, který přišel o autentikátor, se do instalace
+     * nedostal vůbec a zbýval jedině zásah na serveru. Nabídnout kódy až
+     * v nastavení bezpečnosti nestačí — tam je uživatel po prvním přihlášení
+     * neuvidí a nedojde tam právě ten, komu by pomohly nejvíc.
+     *
+     * Rozhodnutí „vydat, nebo nechat být" i ošetření chyb drží
+     * {@see MfaRecoveryCodeService::issueFirstBatch()} — sdílí ho i registrace
+     * passkey, aby se obě cesty nemohly rozejít.
+     *
+     * @return array{recovery_codes?:list<string>}
+     */
+    private function issueFirstRecoveryCodes(int $userId, ?string $ip, string $userAgent): array
+    {
+        $codes = $this->recoveryCodes->issueFirstBatch($userId);
+        if ($codes === []) {
+            return [];
+        }
+
+        $this->logger->log('auth.recovery_codes_generated', $userId, 'user', $userId, ['reason' => 'totp_enabled'], $ip, $userAgent);
+
+        return ['recovery_codes' => $codes];
+    }
+
 }

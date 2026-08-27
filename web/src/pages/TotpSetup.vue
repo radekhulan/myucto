@@ -4,11 +4,13 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { authApi, type TotpSetup } from '@/api/auth'
 import { useToast } from '@/composables/useToast'
+import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 
 const status = ref<{ enabled: boolean } | null>(null)
+const recoveryCodes = ref<string[] | null>(null)
 const setup = ref<TotpSetup | null>(null)
 const code = ref('')
 const busy = ref(false)
@@ -38,10 +40,16 @@ async function activate() {
   busy.value = true
   error.value = ''
   try {
-    await authApi.totpEnable(code.value)
+    const result = await authApi.totpEnable(code.value)
     toast.success(t('auth.totp_enabled_done'))
     setup.value = null
     code.value = ''
+    // ⚠️ Sada chodí PRÁVĚ JEDNOU a jen tomu, kdo ještě žádnou použitelnou
+    // neměl. Kdo ji tady nezobrazí, už ji nikde nedohledá — server plaintext
+    // neukládá.
+    if (result.recovery_codes?.length) {
+      recoveryCodes.value = result.recovery_codes
+    }
     await loadStatus()
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('auth.totp_invalid')
@@ -61,6 +69,15 @@ onMounted(loadStatus)
         {{ t('api_tokens.title') }} →
       </RouterLink>
     </div>
+
+    <!-- ⚠️ Nad vším ostatním: sada se ukazuje jen jednou a uživatel ji musí
+         odkliknutím potvrdit, jinak odejde s druhým faktorem bez break-glass. -->
+    <RecoveryCodesOnce
+      v-if="recoveryCodes"
+      class="mb-4"
+      :codes="recoveryCodes"
+      @confirm="recoveryCodes = null"
+    />
 
     <div class="bg-surface border border-neutral-200 rounded-lg p-6 shadow-sm space-y-4">
       <div v-if="status">

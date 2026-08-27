@@ -31,6 +31,7 @@ use MyInvoice\Service\IpMatcher;
 use Psr\Clock\ClockInterface;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Service\Auth\MfaRecoveryCodeService;
 
 final class PasskeyAction
 {
@@ -51,6 +52,7 @@ final class PasskeyAction
         private readonly BruteForceGuard $bruteForce,
         private readonly PasskeySessionTransitionService $sessionTransitions,
         private readonly MfaProtectedOperationService $protectedOperations,
+        private readonly MfaRecoveryCodeService $recoveryCodes,
     ) {}
 
     public function credentials(Request $request, Response $response): Response
@@ -230,6 +232,19 @@ final class PasskeyAction
         $payload = [
             'credential' => $credential !== null ? self::publicCredential($credential) : null,
         ];
+
+        // ⚠️ První sada záložních kódů patří ke KAŽDÉMU způsobu, jak si uživatel
+        // zapne druhý faktor — ne jen k TOTP. Dokud to uměl jen TOTP, prošel
+        // uživatel, který si zvolil passkey, celým prvním přihlášením a skončil
+        // na nástěnce bez jediného kódu; kdyby o klíč přišel, zbýval zásah na
+        // serveru. Existující sadu to nepřepisuje ani nespadne, viz
+        // {@see MfaRecoveryCodeService::issueFirstBatch()}.
+        $codes = $this->recoveryCodes->issueFirstBatch($context['user_id']);
+        if ($codes !== []) {
+            $payload['recovery_codes'] = $codes;
+            $this->log($request, 'auth.recovery_codes_generated', $context['user_id'], $credentialId, ['reason' => 'passkey_registered']);
+        }
+
         if ($context['assurance_level'] !== 'setup') {
             return Json::ok($response, $payload, 201);
         }

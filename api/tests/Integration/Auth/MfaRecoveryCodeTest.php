@@ -229,4 +229,52 @@ final class MfaRecoveryCodeTest extends TestCase
         self::assertSame(0, $this->codes->remaining($this->userId));
         self::assertFalse($this->codes->consume($this->userId, $codes[0]));
     }
+    // ── Vydání se zapnutím TOTP ──────────────────────────────────────────
+    //
+    // ⚠️ Dokud se sada nevydávala rovnou, končilo zapnutí druhého faktoru bez
+    // jakéhokoliv break-glass: kdo přišel o autentikátor, se do instalace
+    // nedostal vůbec a zbýval zásah na serveru. Nabídnout kódy až v nastavení
+    // bezpečnosti nestačí — po prvním přihlášení tam uživatel nedojde.
+
+    public function testFirstBatchIsIssuedWhenUserHasNone(): void
+    {
+        self::assertFalse($this->codes->hasUsable($this->userId), 'předpoklad: uživatel žádné kódy nemá');
+
+        $issued = $this->issueFirstBatch();
+
+        self::assertCount(MfaRecoveryCodeService::BATCH_SIZE, $issued);
+        self::assertTrue($this->codes->hasUsable($this->userId));
+    }
+
+    public function testExistingBatchIsNeverSilentlyReplaced(): void
+    {
+        // Opakované zapnutí TOTP nesmí sebrat kódy, které si uživatel dávno
+        // uložil — `generate()` starou sadu zneplatní.
+        $original = $this->codes->generate($this->userId);
+
+        $issued = $this->issueFirstBatch();
+
+        self::assertSame([], $issued, 'kdo použitelné kódy má, novou sadu nedostane');
+        self::assertTrue(
+            $this->codes->consume($this->userId, $original[0]),
+            'původní sada musí dál platit'
+        );
+    }
+
+    /**
+     * Volá tutéž privátní cestu jako `TotpAction::enable()` — bez ní by test
+     * ověřoval jen službu, ne rozhodnutí „vydat, nebo nechat být".
+     *
+     * @return list<string>
+     */
+    private function issueFirstBatch(): array
+    {
+        $action = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Action\Auth\TotpAction::class);
+        $method = new \ReflectionMethod($action, 'issueFirstRecoveryCodes');
+        $method->setAccessible(true);
+        $result = (array) $method->invoke($action, $this->userId, '127.0.0.1', 'phpunit');
+
+        return $result['recovery_codes'] ?? [];
+    }
+
 }

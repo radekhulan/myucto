@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import AppShell from '@/components/layout/AppShell.vue'
+import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import { BTN_BASE, ICONS, OUTLINE } from '@/components/ui/buttonStyles'
 import { authApi, type TotpSetup } from '@/api/auth'
 import { createCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
@@ -23,6 +24,9 @@ const error = ref('')
 const currentPassword = ref('')
 const passkeyLabel = ref('')
 const totpSetup = ref<TotpSetup | null>(null)
+// ⚠️ Sada přijde ze zapnutí TOTP a jde ukázat PRÁVĚ JEDNOU — server plaintext
+// neukládá. Dokud ji uživatel nepotvrdí, setup se nedokončí.
+const recoveryCodes = ref<string[] | null>(null)
 const totpCode = ref('')
 
 async function continueAfterSetup(): Promise<void> {
@@ -88,6 +92,12 @@ async function completePasskey() {
     if (result.csrf_token) auth.setSessionCsrfToken(result.csrf_token)
     await auth.refresh()
     await sessionSecurity.refresh({ force: true })
+    // ⚠️ Stejně jako u TOTP: kódy PŘED dokončením setupu, jinak je odnaviguje
+    // pryč a uživatel skončí s klíčem, ale bez jediné cesty zpět.
+    if (result.recovery_codes?.length) {
+      recoveryCodes.value = result.recovery_codes
+      return
+    }
     await continueAfterSetup()
   } catch (e: any) {
     const ceremonyError = webAuthnErrorKey(e)
@@ -122,9 +132,26 @@ async function completeTotp() {
     const result = await authApi.totpEnable(totpCode.value)
     if (result.csrf_token) auth.setSessionCsrfToken(result.csrf_token)
     await auth.refresh()
+    // ⚠️ Kódy se ukazují PŘED dokončením setupu. Kdyby se pokračovalo rovnou,
+    // odnavigovalo by je pryč a uživatel by je už nikde nenašel — druhý faktor
+    // by měl zapnutý bez jakéhokoliv break-glass.
+    if (result.recovery_codes?.length) {
+      recoveryCodes.value = result.recovery_codes
+      return
+    }
     await continueAfterSetup()
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('auth.totp_invalid')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function confirmRecoveryCodes() {
+  if (busy.value) return
+  busy.value = true
+  try {
+    await continueAfterSetup()
   } finally {
     busy.value = false
   }
@@ -196,7 +223,8 @@ onMounted(async () => {
           </p>
         </div>
 
-        <div v-if="passkeyAllowed && totpAllowed" class="grid grid-cols-2 gap-2">
+        <!-- Nad zobrazenými kódy už není co vybírat — faktor je zapnutý. -->
+        <div v-if="!recoveryCodes && passkeyAllowed && totpAllowed" class="grid grid-cols-2 gap-2">
           <button type="button" @click="selectMethod('passkey')"
             :class="['h-10 rounded-md border font-medium', method === 'passkey' ? 'border-primary-600 bg-primary-50 text-primary-700' : 'border-neutral-300']">
             {{ t('mfa_setup.passkey') }}
@@ -207,7 +235,7 @@ onMounted(async () => {
           </button>
         </div>
 
-        <div v-if="method === 'passkey' && passkeyAllowed" class="space-y-4">
+        <div v-if="!recoveryCodes && method === 'passkey' && passkeyAllowed" class="space-y-4">
           <p class="text-sm text-neutral-600">{{ t('mfa_setup.passkey_hint') }}</p>
           <p v-if="!passkeySupported" class="rounded-md bg-warning-50 px-3 py-2 text-sm text-warning-700">
             {{ t('mfa_setup.passkey_unsupported') }}
@@ -234,7 +262,18 @@ onMounted(async () => {
           </template>
         </div>
 
-        <div v-if="method === 'totp' && totpAllowed" class="space-y-4">
+        <!-- ⚠️ Záložní kódy překryjí všechno ostatní. Zobrazí se jen jednou
+             a bez potvrzení se ze setupu nepokračuje — jinak by uživatel odešel
+             se zapnutým druhým faktorem a bez jediné cesty zpět, kdyby o něj
+             přišel. -->
+        <RecoveryCodesOnce
+          v-if="recoveryCodes"
+          :codes="recoveryCodes"
+          :busy="busy"
+          @confirm="confirmRecoveryCodes"
+        />
+
+        <div v-else-if="method === 'totp' && totpAllowed" class="space-y-4">
           <template v-if="totpSetup">
             <p class="text-sm text-neutral-700">{{ t('auth.totp_setup_step1') }}</p>
             <div class="flex justify-center bg-neutral-50 rounded-md p-4">

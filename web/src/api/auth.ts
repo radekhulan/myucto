@@ -200,6 +200,12 @@ export interface MfaSetupCompletion {
 
 export interface PasskeyRegistrationResult extends MfaSetupCompletion {
   credential: PasskeyCredential
+  /**
+   * První sada záložních kódů — chodí PRÁVĚ JEDNOU a jen tomu, kdo ještě žádné
+   * použitelné neměl. Server plaintext neukládá, takže kdo je hned nezobrazí,
+   * už je nikde nedohledá.
+   */
+  recovery_codes?: string[]
 }
 
 export interface TotpSetup {
@@ -422,6 +428,16 @@ export const authApi = {
   // TOTP / 2FA
   totpStatus: () => api.get<{ enabled: boolean }>('/auth/totp/status').then(r => r.data),
   totpSetup:  () => api.post<TotpSetup>('/auth/totp/setup').then(r => r.data),
+  /**
+   * Zapne TOTP.
+   *
+   * ⚠️ `recovery_codes` chodí PRÁVĚ JEDNOU a jen tomu, kdo ještě žádné
+   * použitelné neměl — server plaintext neukládá. Kdo je v tu chvíli
+   * nezobrazí, už je nikde nedohledá.
+   */
   totpEnable: (code: string) =>
-    api.post<{ enabled: boolean } & MfaSetupCompletion>('/auth/totp/enable', { code }).then(r => r.data),
+    api.post<{ enabled: boolean; recovery_codes?: string[] } & MfaSetupCompletion>(
+      '/auth/totp/enable',
+      { code },
+    ).then(r => r.data),
 }

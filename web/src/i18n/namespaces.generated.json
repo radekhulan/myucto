@@ -189,7 +189,8 @@
     ],
     "setup-mfa": [
       "app",
-      "mfa_setup"
+      "mfa_setup",
+      "recovery_codes"
     ],
     "forgot": [
       "app"
