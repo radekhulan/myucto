@@ -34,6 +34,15 @@ final class SetupRegistryEnrichmentTest extends TestCase
      */
     private const DIC = 'CZ00000019';
 
+    /**
+     * Účet, který v testovací databázi nesmí patřit nikomu jinému.
+     *
+     * ⚠️ Ověřený placeholder `1000000005` tu použít NEJDE: mají ho ukázková
+     * data, takže by doplnění zablokoval guard proti nárokování cizího účtu
+     * (SEC-01) — a test by padal jen v prostředí se seedy, tedy v CI.
+     */
+    private const ACCOUNT = '9911223344';
+
     /** Klíčem cache je DIČ bez písmen ({@see CrpDphClient::normalizeDic()}). */
     private const DIC_KEY = '00000019';
 
@@ -196,21 +205,25 @@ final class SetupRegistryEnrichmentTest extends TestCase
     public function testPublishedAccountFillsEmptyCzkCurrency(): void
     {
         $id = $this->makeSupplier();
-        $this->seedRegistry(true, [['prefix' => '', 'number' => '1000000005', 'bank_code' => '0100', 'iban' => null, 'display' => '']]);
+        $this->seedRegistry(true, [['prefix' => '', 'number' => self::ACCOUNT, 'bank_code' => '0100', 'iban' => null, 'display' => '']]);
+
+        $owned = $this->container->get(\MyInvoice\Repository\BankStatementOwnershipResolver::class)
+            ->accountClaimedByOtherSupplier($id, self::ACCOUNT, null);
+        self::assertFalse($owned, 'předpoklad testu: účet nesmí patřit jinému dodavateli');
 
         $this->applyRegistry($id, ['dic' => self::DIC]);
 
         $stmt = $this->db->pdo()->prepare("SELECT account_number, bank_code FROM currencies WHERE supplier_id = ? AND code = 'CZK'");
         $stmt->execute([$id]);
         $row = (array) $stmt->fetch(\PDO::FETCH_ASSOC);
-        self::assertSame('1000000005', (string) $row['account_number']);
+        self::assertSame(self::ACCOUNT, (string) $row['account_number']);
         self::assertSame('0100', (string) $row['bank_code']);
     }
 
     public function testOwnAccountFromRequestWins(): void
     {
         $id = $this->makeSupplier();
-        $this->seedRegistry(true, [['prefix' => '', 'number' => '1000000005', 'bank_code' => '0100', 'iban' => null, 'display' => '']]);
+        $this->seedRegistry(true, [['prefix' => '', 'number' => self::ACCOUNT, 'bank_code' => '0100', 'iban' => null, 'display' => '']]);
 
         $this->applyRegistry($id, [
             'dic' => self::DIC,
