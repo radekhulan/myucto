@@ -125,9 +125,21 @@ final class PayrollBenefitBasketService
         int $usedBeforeMinor,
         int $amountMinor,
         int $shiftEntitlements = 0,
+        ?int $usedShiftEntitlements = null,
     ): PayrollBenefitBasketSplit {
         $limit = $this->limitMinor($basket, $periodStart, $shiftEntitlements);
         $amount = max(0, $amountMinor);
+        if ($basket->scalesWithShifts()) {
+            return $this->splitMeal(
+                $basket,
+                $limit,
+                max(0, $usedBeforeMinor),
+                $amount,
+                $shiftEntitlements,
+                $usedShiftEntitlements,
+                $periodStart,
+            );
+        }
         $headroom = max(0, $limit - max(0, $usedBeforeMinor));
         $exempt = min($amount, $headroom);
 
@@ -139,6 +151,76 @@ final class PayrollBenefitBasketService
             exemptMinor: $exempt,
             taxableMinor: $amount - $exempt,
             shiftEntitlements: $basket->scalesWithShifts() ? $shiftEntitlements : null,
+        );
+    }
+
+    private function splitMeal(
+        PayrollBenefitExemptionBasket $basket,
+        int $limitMinor,
+        int $usedBeforeMinor,
+        int $amountMinor,
+        int $shiftEntitlements,
+        ?int $usedShiftEntitlements,
+        string $periodStart,
+    ): PayrollBenefitBasketSplit {
+        if ($usedBeforeMinor > 0 && $usedShiftEntitlements !== $shiftEntitlements) {
+            throw new PayrollRulesetException(
+                'Počet nároků se proti dříve schválenému příspěvku změnil; '
+                . 'před dalším schválením je nutné předchozí vstup stornovat a přepočítat.',
+            );
+        }
+        if ($shiftEntitlements === 0) {
+            return new PayrollBenefitBasketSplit(
+                basket: $basket,
+                limitMinor: 0,
+                usedBeforeMinor: $usedBeforeMinor,
+                amountMinor: $amountMinor,
+                exemptMinor: 0,
+                taxableMinor: $amountMinor,
+                shiftEntitlements: 0,
+                allocation: [
+                    'mode' => 'no_entitlement',
+                    'entitlement_count' => 0,
+                    'amount_per_entitlement_minor' => 0,
+                    'limit_per_entitlement_minor' => 0,
+                    'exempt_per_entitlement_minor' => 0,
+                    'taxable_per_entitlement_minor' => 0,
+                ],
+            );
+        }
+        if ($amountMinor % $shiftEntitlements !== 0
+            || $usedBeforeMinor % $shiftEntitlements !== 0
+        ) {
+            throw new PayrollRulesetException(
+                'Částka příspěvku na stravování musí být mezi doložené nároky rozdělena '
+                . 'rovnoměrně; zadaný měsíční úhrn takto rozdělit nelze.',
+            );
+        }
+        $perShiftLimit = $this->limitMinor($basket, $periodStart, 1);
+        $amountPerEntitlement = intdiv($amountMinor, $shiftEntitlements);
+        $usedPerEntitlement = intdiv($usedBeforeMinor, $shiftEntitlements);
+        $exemptPerEntitlement = min(
+            $amountPerEntitlement,
+            max(0, $perShiftLimit - $usedPerEntitlement),
+        );
+        $exempt = $exemptPerEntitlement * $shiftEntitlements;
+
+        return new PayrollBenefitBasketSplit(
+            basket: $basket,
+            limitMinor: $limitMinor,
+            usedBeforeMinor: $usedBeforeMinor,
+            amountMinor: $amountMinor,
+            exemptMinor: $exempt,
+            taxableMinor: $amountMinor - $exempt,
+            shiftEntitlements: $shiftEntitlements,
+            allocation: [
+                'mode' => 'uniform_per_entitlement',
+                'entitlement_count' => $shiftEntitlements,
+                'amount_per_entitlement_minor' => $amountPerEntitlement,
+                'limit_per_entitlement_minor' => $perShiftLimit,
+                'exempt_per_entitlement_minor' => $exemptPerEntitlement,
+                'taxable_per_entitlement_minor' => $amountPerEntitlement - $exemptPerEntitlement,
+            ],
         );
     }
 }

@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
+use MyInvoice\Repository\Payroll\PayrollMealEntitlementBasisLockedException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
@@ -150,6 +151,33 @@ final class PayrollEmploymentAction
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
+        return Json::ok($response, ['employment' => $employment]);
+    }
+
+    /** @param array{id:string} $args */
+    public function setMealEntitlementBasis(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $employment = $this->employments->setMealEntitlementBasis(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $this->validator->requiredMealEntitlementBasis($body),
+                $this->validator->rowVersion($body),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
         return Json::ok($response, ['employment' => $employment]);
     }
 
@@ -345,6 +373,12 @@ final class PayrollEmploymentAction
                 $e->getMessage(),
                 409,
                 ['current_row_version' => $e->currentVersion],
+            ),
+            $e instanceof PayrollMealEntitlementBasisLockedException => Json::error(
+                $response,
+                'meal_entitlement_basis_locked',
+                $e->getMessage(),
+                409,
             ),
             $e instanceof \DomainException => Json::error(
                 $response,

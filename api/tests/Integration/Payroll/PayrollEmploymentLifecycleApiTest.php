@@ -278,6 +278,94 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(422, $invalid->getStatusCode());
     }
 
+    public function testMealEntitlementBasisIsExplicitAndEditable(): void
+    {
+        $employment = $this->create($this->employeeId, 'STRAVNE-1', 'employment', true);
+        self::assertSame('shift', $employment['meal_entitlement_basis']);
+
+        $response = $this->action->setMealEntitlementBasis(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/meal-entitlement-basis",
+                [
+                    'row_version' => $employment['row_version'],
+                    'meal_entitlement_basis' => 'calendar_day',
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'calendar_day',
+            $this->json($response)['employment']['meal_entitlement_basis'],
+        );
+
+        $missing = $this->action->setMealEntitlementBasis(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/meal-entitlement-basis",
+                ['row_version' => $employment['row_version'] + 1],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $missing->getStatusCode(), (string) $missing->getBody());
+        self::assertSame(
+            'calendar_day',
+            $this->db->pdo()->query(
+                'SELECT meal_entitlement_basis FROM payroll_employments'
+                . ' WHERE id = ' . (int) $employment['id'],
+            )->fetchColumn(),
+        );
+
+        $invalid = $this->action->setMealEntitlementBasis(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/meal-entitlement-basis",
+                [
+                    'row_version' => $employment['row_version'] + 1,
+                    'meal_entitlement_basis' => 'inferred',
+                ],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $invalid->getStatusCode());
+    }
+
+    public function testMealEntitlementBasisPatchCannotReachAnotherTenant(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, monthly_gross_minor, is_legacy_projection)
+             VALUES (?, ?, "CIZI-STRAVNE", "employment", "active",
+                     "2026-01-01", "2026-01-01", 4000000, 0)'
+        )->execute([$this->otherSupplierId, $this->otherEmployeeId]);
+        $foreignEmploymentId = (int) $this->db->pdo()->lastInsertId();
+
+        $response = $this->action->setMealEntitlementBasis(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$foreignEmploymentId}/meal-entitlement-basis",
+                ['row_version' => 1, 'meal_entitlement_basis' => 'calendar_day'],
+            ),
+            new Response(),
+            ['id' => (string) $foreignEmploymentId],
+        );
+
+        self::assertSame(404, $response->getStatusCode());
+        self::assertSame(
+            'shift',
+            $this->db->pdo()->query(
+                'SELECT meal_entitlement_basis FROM payroll_employments'
+                . ' WHERE id = ' . $foreignEmploymentId,
+            )->fetchColumn(),
+        );
+    }
+
     public function testPrimaryUniquenessTenantBoundarySessionAndPermissionFailClosed(): void
     {
         $this->create($this->employeeId, 'HPP-PRIMARY', 'employment', true);

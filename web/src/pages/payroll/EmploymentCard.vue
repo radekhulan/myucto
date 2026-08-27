@@ -7,6 +7,7 @@ import {
   type PayrollEmployment,
   type PayrollEmploymentStatus,
   type PayrollEmploymentJmhzEvidenceOptions,
+  type PayrollMealEntitlementBasis,
   type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentTermsPayload,
 } from '@/api/payroll'
@@ -284,6 +285,28 @@ async function saveCode() {
     const message = (error as { response?: { data?: { error?: { message?: string } } } })
       ?.response?.data?.error?.message
     toast.error(message ?? t('payroll.people.mutation_failed'))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function saveMealEntitlementBasis(event: Event) {
+  const basis = (event.target as HTMLSelectElement).value as PayrollMealEntitlementBasis
+  if (busy.value || basis === props.employment.meal_entitlement_basis) return
+  busy.value = true
+  try {
+    emit('updated', await payrollApi.setEmploymentMealEntitlementBasis(
+      props.employment.id,
+      props.employment.row_version,
+      basis,
+    ))
+  } catch (error) {
+    const detail = (error as {
+      response?: { data?: { error?: { code?: string, message?: string } } }
+    })?.response?.data?.error
+    toast.error(detail?.code === 'meal_entitlement_basis_locked'
+      ? t('payroll.people.meal_entitlement_basis.locked')
+      : detail?.message ?? t('payroll.people.mutation_failed'))
   } finally {
     busy.value = false
   }
@@ -698,6 +721,22 @@ const actions = computed<ActionItem[]>(() => [
       <div><dt class="text-neutral-500">{{ t('payroll.people.actual_start') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.actual_start_date) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.end_date') }}</dt><dd class="mt-0.5 text-neutral-800">{{ formatDate(employment.end_date) }}</dd></div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.office_label') }}</dt><dd class="mt-0.5 text-neutral-800" data-test="employment-office">{{ employment.office_name ?? '—' }}</dd></div>
+      <div>
+        <dt class="text-neutral-500">{{ t('payroll.people.meal_entitlement_basis.label') }}</dt>
+        <dd class="mt-0.5">
+          <select
+            :value="employment.meal_entitlement_basis"
+            class="w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-xs text-neutral-800 disabled:cursor-not-allowed disabled:opacity-70"
+            data-test="employment-meal-entitlement-basis"
+            :disabled="!canWrite || busy"
+            @change="saveMealEntitlementBasis"
+          >
+            <option value="shift">{{ t('payroll.people.meal_entitlement_basis.shift') }}</option>
+            <option value="calendar_day">{{ t('payroll.people.meal_entitlement_basis.calendar_day') }}</option>
+          </select>
+          <span class="mt-1 block text-neutral-500">{{ t('payroll.people.meal_entitlement_basis.hint') }}</span>
+        </dd>
+      </div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.accounting') }}</dt><dd class="mt-0.5 text-neutral-800">{{ employment.accounting.gross_debit }}/{{ employment.accounting.gross_credit }} · {{ employment.accounting.employer_insurance_debit }}/{{ employment.accounting.employer_insurance_credit }}</dd></div>
     </dl>
 

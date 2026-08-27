@@ -124,6 +124,7 @@ final class PayrollEnumContractTest extends TestCase
         // Pracovní vztah a jeho podmínky
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'            => 'db:payroll_employments.relation_type',
+        'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
         // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
         // má navíc `automatic`, protože to není volba uživatele, ale zařazení,
@@ -362,6 +363,10 @@ final class PayrollEnumContractTest extends TestCase
             . 'tabulek, sám o sobě to číselník domény není.',
         'payroll.ts::PayrollSigningEnvironment' => 'Totéž co PayrollRegzelEnvironment, pro podepisování.',
         'payroll.ts::PayrollJmhzTransportEnvironment' => 'Totéž co PayrollRegzelEnvironment, pro cJMHZ.',
+        'payroll.ts::PayrollRegistrationEventInteraction' =>
+            'Editor následných událostí nabízí jen A2 až A8; backendový katalog '
+            . 'PayrollRegistrationInteraction::SUPPORTED navíc obsahuje vstupní P1 a A1, '
+            . 'které vznikají jinými průvodci a v tomto unionu být nesmějí.',
         'payrollPayments.ts::PayrollPaymentLiabilityState' =>
             'Stav závazku se neukládá — PayrollPaymentQueryService ho dopočítává '
             . 'z pokrytí dávkami a spárováním.',

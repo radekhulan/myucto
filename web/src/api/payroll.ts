@@ -126,6 +126,7 @@ export interface PayrollEmployment {
   office_name: string | null
   code: string
   relation_type: PayrollRelationType
+  meal_entitlement_basis: PayrollMealEntitlementBasis
   status: PayrollEmploymentStatus
   is_primary: boolean
   start_date: string | null
@@ -267,9 +268,12 @@ export type PayrollEmploymentTermsPayload = Omit<
 export interface PayrollEmploymentCreatePayload {
   code: string
   relation_type: PayrollRelationType
+  meal_entitlement_basis?: PayrollMealEntitlementBasis
   monthly_gross_minor: number | null
   terms: PayrollEmploymentTermsPayload
 }
+
+export type PayrollMealEntitlementBasis = 'shift' | 'calendar_day'
 
 export interface PayrollPerson extends PayrollPersonListItem {
   employments: PayrollEmployment[]
@@ -1083,6 +1087,14 @@ export interface PayrollBenefitBasketUsage {
   exempt_minor: number
   taxable_minor: number
   limit_exceeded: boolean
+  allocation?: {
+    mode: 'uniform_per_entitlement' | 'no_entitlement'
+    entitlement_count: number
+    amount_per_entitlement_minor: number
+    limit_per_entitlement_minor: number
+    exempt_per_entitlement_minor: number
+    taxable_per_entitlement_minor: number
+  } | null
 }
 
 export interface PayrollComponent {
@@ -1506,6 +1518,7 @@ export interface PayrollInputPreview {
   annual_after_minor: number
   annual_limit_exceeded: boolean
   exemption_basket: PayrollBenefitBasketUsage | null
+  meal_entitlement?: PayrollMealShiftEntitlement | null
 }
 
 export interface PayrollRecurringMaterialization {
@@ -3959,6 +3972,15 @@ export const payrollApi = {
     api.patch<{ employment: PayrollEmployment }>(
       `/payroll/employments/${employmentId}/code`,
       { row_version: rowVersion, code },
+    ).then(response => response.data.employment),
+  setEmploymentMealEntitlementBasis: (
+    employmentId: number,
+    rowVersion: number,
+    mealEntitlementBasis: PayrollMealEntitlementBasis,
+  ) =>
+    api.patch<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/meal-entitlement-basis`,
+      { row_version: rowVersion, meal_entitlement_basis: mealEntitlementBasis },
     ).then(response => response.data.employment),
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)

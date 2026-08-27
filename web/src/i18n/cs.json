@@ -1753,6 +1753,7 @@
                 "basket_usage": "Koš {basket} podle {statute}: po tomto plnění vyčerpáno {used} z {limit}, zbývá {remaining}.",
                 "basket_over_limit": "Zákonný limit koše je překročen: osvobozeno {exempt}, zdanitelných {taxable} — nadlimitní část vstupuje do daně i do vyměřovacích základů pojistného.",
                 "meal_entitlement_summary": "Nároků celkem {count}: {qualifying} základních a {second} druhých příspěvků.",
+                "meal_allocation_uniform": "Auditní rozdělení: {count} nároků × {amount}; na každý nárok limit {limit}, osvobozeno {exempt} a zdanitelné {taxable}.",
                 "meal_basis_label": "Použitý režim: {basis}.",
                 "meal_basis": {
                     "shift": "rozvržené směny",
@@ -1764,7 +1765,10 @@
                 "meal_missing": {
                     "employment_missing": "Osoba nemá pro období pracovní vztah.",
                     "attendance_missing": "Za období chybí docházka, směny i odpracovaný čas.",
-                    "attendance_month_open": "Docházkový měsíc není uzavřený."
+                    "attendance_month_open": "Docházkový měsíc není uzavřený.",
+                    "shift_schedule_missing": "Ve směnovém režimu chybí publikovaný rozvrh směn.",
+                    "meal_basis_conflict": "Zvolený kalendářní režim je v rozporu s publikovanými směnami.",
+                    "calendar_day_break_allocation_missing": "U intervalu přes půlnoc není doloženo, ke kterému kalendářnímu dni patří přestávka. Rozdělte interval nebo zpřesněte evidenci."
                 }
             },
             "import": {
@@ -3136,6 +3140,13 @@
             "rename_action": "Označení pro import docházky",
             "rename_label": "Označení vztahu",
             "rename_hint": "Používá se jen k párování při importu docházky z CSV. Na úřední výstupy nemá vliv.",
+            "meal_entitlement_basis": {
+                "label": "Režim nároku na stravování",
+                "shift": "Práce rozvržená na směny",
+                "calendar_day": "Výkon práce nerozvržený na směny",
+                "hint": "Určuje zákonnou větev § 6 odst. 9 písm. b) ZDP. Absence směn v docházce režim automaticky nemění.",
+                "locked": "Režim už nelze změnit, protože zaměstnanec má schválený příspěvek na stravování. Nejdřív příspěvek stornujte."
+            },
             "not_applicable": "Netýká se",
             "reopen": "Vrátit",
             "start_date": "Od",

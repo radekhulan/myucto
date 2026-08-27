@@ -1753,6 +1753,7 @@
                 "basket_usage": "Basket {basket} under {statute}: after this benefit {used} of {limit} is used, {remaining} remains.",
                 "basket_over_limit": "The statutory basket limit is exceeded: {exempt} exempt, {taxable} taxable — the excess enters income tax and both insurance assessment bases.",
                 "meal_entitlement_summary": "{count} entitlements in total: {qualifying} primary and {second} second contributions.",
+                "meal_allocation_uniform": "Audit allocation: {count} entitlements × {amount}; per entitlement limit {limit}, {exempt} exempt and {taxable} taxable.",
                 "meal_basis_label": "Applied basis: {basis}.",
                 "meal_basis": {
                     "shift": "scheduled shifts",
@@ -1764,7 +1765,10 @@
                 "meal_missing": {
                     "employment_missing": "The person has no employment for the period.",
                     "attendance_missing": "Attendance, shifts and worked time are missing for the period.",
-                    "attendance_month_open": "The attendance month is not closed."
+                    "attendance_month_open": "The attendance month is not closed.",
+                    "shift_schedule_missing": "The published shift schedule is missing for a shift-based employment.",
+                    "meal_basis_conflict": "The selected calendar-day regime conflicts with published shifts.",
+                    "calendar_day_break_allocation_missing": "A cross-midnight interval does not document which calendar day contains the break. Split the interval or provide more precise evidence."
                 }
             },
             "import": {
@@ -3136,6 +3140,13 @@
             "rename_action": "Label for attendance import",
             "rename_label": "Relationship label",
             "rename_hint": "Used only for matching rows when importing attendance from CSV. It has no effect on official filings.",
+            "meal_entitlement_basis": {
+                "label": "Meal entitlement regime",
+                "shift": "Work scheduled in shifts",
+                "calendar_day": "Work not scheduled in shifts",
+                "hint": "Selects the statutory branch under Section 6(9)(b). Missing attendance shifts never changes the regime automatically.",
+                "locked": "The regime can no longer be changed because the employee has an approved meal contribution. Reverse the contribution first."
+            },
             "not_applicable": "Not applicable",
             "reopen": "Reopen",
             "start_date": "From",

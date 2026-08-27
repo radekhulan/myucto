@@ -499,6 +499,7 @@ function employmentDraft(
   return {
     code,
     relation_type: relationType,
+    meal_entitlement_basis: 'shift',
     monthly_gross_minor: monthlyGrossMinor,
     terms: {
       office_id: null,

@@ -6,6 +6,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     transitionEmployment: vi.fn(),
     renameEmployment: vi.fn(),
+    setEmploymentMealEntitlementBasis: vi.fn(),
     addEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
     deleteEmployment: vi.fn(),
@@ -94,6 +95,7 @@ function employment(): PayrollEmployment {
     office_name: null,
     code: 'HPP-1',
     relation_type: 'employment',
+    meal_entitlement_basis: 'shift',
     status: 'planned',
     is_primary: true,
     start_date: '2026-01-01',
@@ -784,6 +786,49 @@ describe('EmploymentCard', () => {
     await flushPromises()
 
     expect(payrollApi.renameEmployment).toHaveBeenCalledWith(10, 1, 'DOCHAZKA-7')
+  })
+
+  it('uloží explicitní zákonný režim nároku na stravování', async () => {
+    const updated = { ...employment(), meal_entitlement_basis: 'calendar_day' as const }
+    vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockResolvedValue(updated)
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="employment-meal-entitlement-basis"]')
+      .setValue('calendar_day')
+    await flushPromises()
+
+    expect(payrollApi.setEmploymentMealEntitlementBasis)
+      .toHaveBeenCalledWith(10, 1, 'calendar_day')
+    expect(wrapper.emitted('updated')).toEqual([[updated]])
+  })
+
+  it('česky vysvětlí zámek režimu po schváleném příspěvku', async () => {
+    toastMocks.error.mockClear()
+    vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            code: 'meal_entitlement_basis_locked',
+            message: 'Serverová technická zpráva.',
+          },
+        },
+      },
+    })
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="employment-meal-entitlement-basis"]')
+      .setValue('calendar_day')
+    await flushPromises()
+
+    expect(toastMocks.error)
+      .toHaveBeenCalledWith('payroll.people.meal_entitlement_basis.locked')
+    expect(wrapper.emitted('updated')).toBeUndefined()
   })
 
   /**

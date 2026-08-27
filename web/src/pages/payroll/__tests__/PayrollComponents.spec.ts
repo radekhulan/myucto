@@ -854,6 +854,14 @@ describe('PayrollComponents', () => {
         exempt_minor: 30000,
         taxable_minor: 0,
         limit_exceeded: false,
+        allocation: {
+          mode: 'uniform_per_entitlement',
+          entitlement_count: 3,
+          amount_per_entitlement_minor: 10000,
+          limit_per_entitlement_minor: 12950,
+          exempt_per_entitlement_minor: 10000,
+          taxable_per_entitlement_minor: 0,
+        },
         entitlement: {
           period_start: '2026-06-01',
           basis: 'mixed',
@@ -884,37 +892,31 @@ describe('PayrollComponents', () => {
     expect(entitlement.text()).toContain('payroll.components.inputs.meal_entitlement_summary')
     expect(entitlement.attributes('data-basis')).toBe('mixed')
     expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_complete')
+    expect(wrapper.get('[data-testid="payroll-input-meal-allocation"]').text())
+      .toContain('payroll.components.inputs.meal_allocation_uniform')
     wrapper.unmount()
   })
 
   it('warns with a translated reason when meal evidence is incomplete', async () => {
     m.previewInput.mockResolvedValue({
-      support_status: 'supported',
-      blocker: null,
+      support_status: 'manual_review',
+      blocker: 'Chybí úplný podklad: calendar_day_break_allocation_missing.',
       annual_limit_exceeded: false,
       annual_limit_minor: null,
       annual_used_minor: 0,
       annual_after_minor: 10000,
-      exemption_basket: {
-        basket: 'meal_per_shift',
-        statute: '§ 6 odst. 9 písm. b) ZDP',
-        shift_entitlements: 0,
-        limit_minor: 0,
-        used_before_minor: 0,
-        used_after_minor: 10000,
-        remaining_minor: 0,
-        exempt_minor: 0,
-        taxable_minor: 10000,
-        limit_exceeded: true,
-        entitlement: {
-          period_start: '2026-06-01',
-          basis: 'shift',
-          qualifying_count: 0,
-          second_contribution_count: 0,
-          count: 0,
-          complete: false,
-          missing: ['attendance_month_open'],
-        },
+      exemption_basket: null,
+      meal_entitlement: {
+        period_start: '2026-06-01',
+        basis: 'calendar_day',
+        qualifying_count: 0,
+        second_contribution_count: 0,
+        count: 0,
+        complete: false,
+        missing: [
+          'attendance_month_open',
+          'calendar_day_break_allocation_missing',
+        ],
       },
     })
 
@@ -936,6 +938,9 @@ describe('PayrollComponents', () => {
     expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_incomplete')
     expect(entitlement.text()).toContain(
       'payroll.components.inputs.meal_missing.attendance_month_open',
+    )
+    expect(entitlement.text()).toContain(
+      'payroll.components.inputs.meal_missing.calendar_day_break_allocation_missing',
     )
     expect(wrapper.get('[data-testid="payroll-input-preview"]').classes())
       .toContain('border-warning-500/40')

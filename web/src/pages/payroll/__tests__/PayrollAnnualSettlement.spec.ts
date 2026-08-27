@@ -153,16 +153,16 @@ function result(overrides: Record<string, unknown> = {}) {
     tax_before_credits_minor_units: 7_500_000,
     annual_credits_minor_units: 3_084_000,
     applied_credits_minor_units: 3_084_000,
-    child_entitlement_minor_units: 0,
+    child_entitlement_minor_units: 1_520_400,
     child_credit_minor_units: 0,
-    annual_tax_bonus_minor_units: 0,
+    annual_tax_bonus_minor_units: 1_520_400,
     tax_after_all_credits_minor_units: 4_416_000,
     tax_difference_minor_units: 120_000,
-    bonus_difference_minor_units: 0,
-    settlement_difference_minor_units: 120_000,
-    payable_minor_units: 120_000,
+    bonus_difference_minor_units: 253_400,
+    settlement_difference_minor_units: 373_400,
+    payable_minor_units: 373_400,
     annual_bonus_threshold_met: true,
-    annual_bonus_candidate_minor_units: 10_000,
+    annual_bonus_candidate_minor_units: 1_520_400,
     annual_bonus_income_threshold_met: true,
     annual_bonus_amount_threshold_met: true,
     annual_bonus_eligible: true,
@@ -305,8 +305,11 @@ describe('Roční zúčtování', () => {
       .toContain('134 400')
     expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text())
       .toContain('payroll.annual_settlement.row_annual_tax_bonus')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('15 204')
     expect(wrapper.get('[data-test="annual-tax-bonus-paid-monthly"]').text())
       .toContain('payroll.annual_settlement.row_monthly_tax_bonus')
+    expect(wrapper.get('[data-test="annual-tax-bonus-paid-monthly"]').text()).toContain('12 670')
+    expect(wrapper.get('[data-test="annual-settlement-result"]').text()).toContain('2 534')
     const settle = wrapper.find('[data-action="settle"]')
     expect(settle.attributes('disabled')).toBeUndefined()
 

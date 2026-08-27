@@ -53,6 +53,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  * @phpstan-type EmploymentCreateInput array{
  *   code:string,
  *   relation_type:string,
+ *   meal_entitlement_basis:string,
  *   monthly_gross_minor:?int,
  *   terms:TermsInput
  * }
@@ -67,6 +68,7 @@ final class PayrollEmploymentValidator
         'partner_dependent',
         'statutory_body',
     ];
+    private const MEAL_ENTITLEMENT_BASES = ['shift', 'calendar_day'];
 
     private const INSURANCE_MODES = ['automatic', 'included', 'excluded', 'foreign'];
     private const TAX_REGIMES = ['advance', 'withholding', 'foreign', 'manual_review'];
@@ -153,9 +155,35 @@ final class PayrollEmploymentValidator
         return [
             'code' => $code,
             'relation_type' => $relationType,
+            'meal_entitlement_basis' => $this->mealEntitlementBasis($input),
             'monthly_gross_minor' => $gross,
             'terms' => $terms,
         ];
+    }
+
+    /** @param array<string,mixed> $input */
+    public function mealEntitlementBasis(array $input): string
+    {
+        $basis = $this->inputString($input['meal_entitlement_basis'] ?? 'shift');
+        if (!in_array($basis, self::MEAL_ENTITLEMENT_BASES, true)) {
+            throw new \InvalidArgumentException(
+                'Režim nároku na příspěvek na stravování není podporován.',
+            );
+        }
+
+        return $basis;
+    }
+
+    /** @param array<string,mixed> $input */
+    public function requiredMealEntitlementBasis(array $input): string
+    {
+        if (!array_key_exists('meal_entitlement_basis', $input)) {
+            throw new \InvalidArgumentException(
+                'Vyberte režim nároku na příspěvek na stravování.',
+            );
+        }
+
+        return $this->mealEntitlementBasis($input);
     }
 
     /**

@@ -32,12 +32,14 @@ final class PayrollMealShiftEvidenceRepository
      * `month_status` je NULL, když měsíc docházky vůbec nevznikl — to není totéž
      * jako otevřený měsíc, ale pro doloženost nároku je následek stejný.
      *
-     * @return list<array{employment_id:int, month_status:?string}>
+     * @return list<array{employment_id:int, meal_entitlement_basis:string, month_status:?string}>
      */
     public function employments(int $supplierId, int $employeeId, string $periodStart): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT employment.id AS employment_id, month.status AS month_status
+            'SELECT employment.id AS employment_id,
+                    employment.meal_entitlement_basis,
+                    month.status AS month_status
                FROM payroll_employments employment
                LEFT JOIN payroll_time_months month
                  ON month.supplier_id = employment.supplier_id
@@ -45,14 +47,24 @@ final class PayrollMealShiftEvidenceRepository
                 AND month.period_start = ?
               WHERE employment.supplier_id = ?
                 AND employment.employee_id = ?
-                AND employment.status IN ("planned", "preregistered", "active", "suspended", "ended")
+                AND employment.status IN ("active", "suspended", "ended")
+                AND COALESCE(employment.actual_start_date, employment.start_date, ?) < DATE_ADD(?, INTERVAL 1 MONTH)
+                AND (employment.end_date IS NULL OR employment.end_date >= ?)
               ORDER BY employment.id'
         );
-        $stmt->execute([$periodStart, $supplierId, $employeeId]);
+        $stmt->execute([
+            $periodStart,
+            $supplierId,
+            $employeeId,
+            $periodStart,
+            $periodStart,
+            $periodStart,
+        ]);
         $rows = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $rows[] = [
                 'employment_id' => (int) $row['employment_id'],
+                'meal_entitlement_basis' => (string) $row['meal_entitlement_basis'],
                 'month_status' => $row['month_status'] === null
                     ? null
                     : (string) $row['month_status'],

@@ -282,9 +282,12 @@ const manualInputPayload = computed<PayrollInputPayload | null>(() => {
   }
 })
 const manualInputFingerprint = computed(() => JSON.stringify(manualInputPayload.value))
-const mealEvidenceIncomplete = computed(() =>
-  inputPreview.value?.exemption_basket?.entitlement?.complete === false,
+const mealEntitlement = computed(() =>
+  inputPreview.value?.meal_entitlement
+  ?? inputPreview.value?.exemption_basket?.entitlement
+  ?? null,
 )
+const mealEvidenceIncomplete = computed(() => mealEntitlement.value?.complete === false)
 const canSaveInput = computed(() =>
   manualInputPayload.value !== null
   && inputPreview.value !== null
@@ -1444,43 +1447,54 @@ onMounted(load)
             <p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p>
             <template v-if="inputPreview.exemption_basket">
               <p data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor), limit: formatMoney(inputPreview.exemption_basket.limit_minor), remaining: formatMoney(inputPreview.exemption_basket.remaining_minor) }) }}</p>
-              <div
-                v-if="inputPreview.exemption_basket.entitlement"
-                data-testid="payroll-input-meal-entitlement"
-                :data-basis="inputPreview.exemption_basket.entitlement.basis"
-                class="mt-2 rounded-md border border-current/20 p-3"
-              >
-                <p class="font-medium">
-                  {{ t('payroll.components.inputs.meal_entitlement_summary', {
-                    count: inputPreview.exemption_basket.entitlement.count,
-                    qualifying: inputPreview.exemption_basket.entitlement.qualifying_count,
-                    second: inputPreview.exemption_basket.entitlement.second_contribution_count,
-                  }) }}
-                </p>
-                <p class="mt-1">
-                  {{ t('payroll.components.inputs.meal_basis_label', {
-                    basis: t(`payroll.components.inputs.meal_basis.${inputPreview.exemption_basket.entitlement.basis}`),
-                  }) }}
-                </p>
-                <p v-if="inputPreview.exemption_basket.entitlement.complete" class="mt-1">
-                  {{ t('payroll.components.inputs.meal_evidence_complete') }}
-                </p>
-                <template v-else>
-                  <p class="mt-1 font-medium">
-                    {{ t('payroll.components.inputs.meal_evidence_incomplete') }}
-                  </p>
-                  <ul class="mt-1 list-disc space-y-1 pl-5">
-                    <li
-                      v-for="reason in inputPreview.exemption_basket.entitlement.missing"
-                      :key="reason"
-                    >
-                      {{ t(`payroll.components.inputs.meal_missing.${reason}`) }}
-                    </li>
-                  </ul>
-                </template>
-              </div>
               <p v-if="inputPreview.exemption_basket.limit_exceeded" data-testid="payroll-input-basket-over" class="mt-1">{{ t('payroll.components.inputs.basket_over_limit', { exempt: formatMoney(inputPreview.exemption_basket.exempt_minor), taxable: formatMoney(inputPreview.exemption_basket.taxable_minor) }) }}</p>
+              <p
+                v-if="inputPreview.exemption_basket.allocation?.mode === 'uniform_per_entitlement'"
+                class="mt-1"
+                data-testid="payroll-input-meal-allocation"
+              >{{ t('payroll.components.inputs.meal_allocation_uniform', {
+                count: inputPreview.exemption_basket.allocation.entitlement_count,
+                amount: formatMoney(inputPreview.exemption_basket.allocation.amount_per_entitlement_minor),
+                limit: formatMoney(inputPreview.exemption_basket.allocation.limit_per_entitlement_minor),
+                exempt: formatMoney(inputPreview.exemption_basket.allocation.exempt_per_entitlement_minor),
+                taxable: formatMoney(inputPreview.exemption_basket.allocation.taxable_per_entitlement_minor),
+              }) }}</p>
             </template>
+            <div
+              v-if="mealEntitlement"
+              data-testid="payroll-input-meal-entitlement"
+              :data-basis="mealEntitlement.basis"
+              class="mt-2 rounded-md border border-current/20 p-3"
+            >
+              <p class="font-medium">
+                {{ t('payroll.components.inputs.meal_entitlement_summary', {
+                  count: mealEntitlement.count,
+                  qualifying: mealEntitlement.qualifying_count,
+                  second: mealEntitlement.second_contribution_count,
+                }) }}
+              </p>
+              <p class="mt-1">
+                {{ t('payroll.components.inputs.meal_basis_label', {
+                  basis: t(`payroll.components.inputs.meal_basis.${mealEntitlement.basis}`),
+                }) }}
+              </p>
+              <p v-if="mealEntitlement.complete" class="mt-1">
+                {{ t('payroll.components.inputs.meal_evidence_complete') }}
+              </p>
+              <template v-else>
+                <p class="mt-1 font-medium">
+                  {{ t('payroll.components.inputs.meal_evidence_incomplete') }}
+                </p>
+                <ul class="mt-1 list-disc space-y-1 pl-5">
+                  <li
+                    v-for="reason in mealEntitlement.missing"
+                    :key="reason"
+                  >
+                    {{ t(`payroll.components.inputs.meal_missing.${reason}`) }}
+                  </li>
+                </ul>
+              </template>
+            </div>
           </div>
           <div class="mt-5 flex flex-wrap justify-end gap-2"><button :class="btnOutline('neutral')" :disabled="saving || !manualInputPayload" @click="previewManualInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>{{ t('payroll.components.inputs.preview') }}</button><button :class="btnFilled('primary')" :disabled="saving || !canSaveInput" @click="saveInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
         </section>

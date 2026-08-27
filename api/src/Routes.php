@@ -1019,6 +1019,7 @@ final class Routes
             $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
             $g->patch('/employments/{id:[0-9]+}/code', [PayrollEmploymentAction::class, 'rename']);
+            $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
                 [PayrollEmploymentAction::class, 'transition'],
