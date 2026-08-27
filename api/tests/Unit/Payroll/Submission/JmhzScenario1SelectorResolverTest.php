@@ -21,7 +21,7 @@ final class JmhzScenario1SelectorResolverTest extends TestCase
             'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
             'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'ZA', 'ZB', 'ZC',
         ] as $code) {
-            yield "direct-{$code}" => [$code, '1', null];
+            yield "direct-{$code}" => [$code, null, null];
         }
     }
 
@@ -55,7 +55,7 @@ final class JmhzScenario1SelectorResolverTest extends TestCase
         yield 'missing detail' => ['1', null, 'jmhz_scenario_relationship_detail_missing'];
         yield 'other scenario prison' => ['1', '2', 'jmhz_scenario_not_supported'];
         yield 'other scenario group' => ['9', '3', 'jmhz_scenario_not_supported'];
-        yield 'missing direct detail' => ['A', null, 'jmhz_scenario_relationship_detail_missing'];
+        yield 'detail forbidden for direct activity' => ['A', '1', 'jmhz_scenario_relationship_detail_not_applicable'];
         yield 'other direct scenario' => ['M', '1', 'jmhz_scenario_not_supported'];
     }
 

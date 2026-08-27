@@ -6,6 +6,12 @@ namespace MyInvoice\Tests\Unit\Payroll\RiskySavings;
 
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsCalculator;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 use PHPUnit\Framework\TestCase;
 
 final class PayrollRiskySavingsCalculatorTest extends TestCase
@@ -17,6 +23,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_234_567,
             $this->evidence(24),
+            $this->defaultRules(),
         );
 
         self::assertSame('calculated', $result['status']);
@@ -31,6 +38,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             $this->evidence(24),
+            $this->defaultRules(),
         );
 
         self::assertSame(40_000, $result['contribution_minor']);
@@ -43,6 +51,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             20_000_000,
             $this->evidence(24),
+            $this->defaultRules(),
         );
 
         self::assertSame(800_000, $result['contribution_minor']);
@@ -55,6 +64,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             $this->evidence(23),
+            $this->defaultRules(),
         );
 
         self::assertSame('not_due', $result['status']);
@@ -71,6 +81,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
                 ...$this->evidence(24),
                 'right_claimed_on' => '2025-11-30',
             ],
+            $this->defaultRules(),
         );
 
         self::assertSame('not_due', $result['status']);
@@ -85,6 +96,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             $this->evidence(24),
+            $this->defaultRules(),
         );
 
         self::assertSame('calculated', $result['status']);
@@ -97,6 +109,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             $this->evidence(24),
+            $this->defaultRules(),
         );
 
         self::assertSame('calculated', $result['status']);
@@ -112,6 +125,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
                 ...$this->evidence(24),
                 'right_claimed_on' => '2026-08-01',
             ],
+            $this->defaultRules(),
         );
 
         self::assertSame('not_due', $result['status']);
@@ -127,6 +141,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
                 '2026-08-01',
                 1_000_000,
                 [...$this->evidence(24), 'risk_factor' => $factor],
+                $this->defaultRules(),
             );
             self::assertSame('calculated', $result['status'], $factor);
         }
@@ -136,6 +151,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             [...$this->evidence(24), 'risk_factor' => 'noise'],
+            $this->defaultRules(),
         );
         self::assertSame('manual_review', $wrongFactor['status']);
         self::assertContains('risky_savings_risk_factor_invalid', $wrongFactor['issues']);
@@ -145,6 +161,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             [...$this->evidence(24), 'work_category' => 2],
+            $this->defaultRules(),
         );
         self::assertSame('manual_review', $wrongCategory['status']);
         self::assertContains('risky_savings_work_category_invalid', $wrongCategory['issues']);
@@ -160,6 +177,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             $evidence,
+            $this->defaultRules(),
         );
 
         self::assertSame('calculated', $result['status']);
@@ -180,6 +198,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
                 ...$this->evidence(24),
                 'right_claimed_on' => '2026-11-30',
             ],
+            $this->defaultRules(),
         );
 
         self::assertSame('2027-01-31', $result['payment_due_on']);
@@ -195,6 +214,7 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
             '2026-08-01',
             1_000_000,
             $evidence,
+            $this->defaultRules(),
         );
 
         self::assertSame('manual_review', $result['status']);
@@ -202,6 +222,42 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
         self::assertSame([
             'risky_savings_evidence_not_approved',
         ], $result['issues']);
+    }
+
+    /**
+     * Změna zákona se nesmí lovit z konstanty při přepočtu staré revize.
+     * Účinný customer override se při locku uloží jako samostatný rulesetový
+     * snapshot a kalkulátor používá právě jeho sazbu, minimum i splatnost.
+     */
+    public function testUsesValuesLockedFromEffectiveRulesetOverride(): void
+    {
+        $rules = PayrollRiskySavingsRules::fromProvider(
+            $this->providerWithRiskySavingsOverride(),
+            '2026-08-01',
+        );
+
+        $result = $this->calculator()->calculate(
+            17,
+            '2026-08-01',
+            1_000_000,
+            $this->evidence(23),
+            PayrollRiskySavingsRules::fromSnapshot($rules->toSnapshot()),
+        );
+
+        self::assertSame('calculated', $result['status']);
+        self::assertSame(50_000, $result['contribution_minor']);
+        self::assertSame('2026-10-31', $result['payment_due_on']);
+        self::assertSame('2026-01-01', $result['ruleset']['effective_from']);
+        self::assertSame('0.05', $result['ruleset']['rate']);
+        self::assertSame(23, $result['ruleset']['minimum_shift_eighths']);
+        self::assertSame(
+            2,
+            $result['ruleset']['payment_due_months_after_period'],
+        );
+        self::assertSame(
+            'last_day_of_month',
+            $result['ruleset']['payment_due_rule'],
+        );
     }
 
     /** @return array<string,mixed> */
@@ -229,5 +285,45 @@ final class PayrollRiskySavingsCalculatorTest extends TestCase
     private function calculator(): PayrollRiskySavingsCalculator
     {
         return new PayrollRiskySavingsCalculator(new PayrollRiskySavingsPolicy());
+    }
+
+    private function defaultRules(): PayrollRiskySavingsRules
+    {
+        return PayrollRiskySavingsRules::fromProvider(
+            CzechPayrollRulesets2026::provider(),
+            '2026-01-01',
+        );
+    }
+
+    private function providerWithRiskySavingsOverride(): PayrollRulesetProvider
+    {
+        $versions = CzechPayrollRulesets2026::provider()->versions();
+        foreach ($versions as $index => $version) {
+            if ($version->domain !== PayrollRulesetDomain::SocialInsurance) {
+                continue;
+            }
+            $parameters = $version->parameters;
+            $parameters['risky_savings.minimum_shift_eighths'] =
+                PayrollRuleValue::integer(23);
+            $parameters['risky_savings.payment_due.months_after_period'] =
+                PayrollRuleValue::integer(2);
+            $parameters['risky_savings.rate'] = PayrollRuleValue::rate('0.05');
+            ksort($parameters, SORT_STRING);
+            $versions[$index] = new PayrollRulesetVersion(
+                $version->id,
+                $version->version,
+                $version->domain,
+                $version->effectiveFrom,
+                $version->effectiveTo,
+                $version->lifecycle,
+                $version->capability,
+                $version->sources,
+                $parameters,
+                $version->approval,
+                $version->technicalReview,
+            );
+        }
+
+        return new PayrollRulesetProvider($versions);
     }
 }

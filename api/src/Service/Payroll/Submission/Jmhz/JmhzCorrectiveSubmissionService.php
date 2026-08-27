@@ -48,7 +48,7 @@ final readonly class JmhzCorrectiveSubmissionService
         private PayrollObligationService $obligations,
         private JmhzFrozenPayloadReader $frozen,
         private ClockInterface $clock,
-        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
+        private JmhzDeadlinePolicy $deadlines,
         private JmhzCancellationXmlSerializer $cancellations = new JmhzCancellationXmlSerializer(),
         private JmhzComponentCancellationXmlSerializer $componentCancellations
             = new JmhzComponentCancellationXmlSerializer(),

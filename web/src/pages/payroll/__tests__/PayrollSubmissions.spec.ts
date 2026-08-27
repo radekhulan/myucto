@@ -269,8 +269,16 @@ function setup() {
       filename: `zp-prehled-2026-08-111-revize-${revisionId}.json`,
     }],
     electronic_submission: {
-      supported: false,
-      reason_code: 'health_insurance_transport_unavailable',
+      direct_portal: {
+        supported: false,
+        reason_code: 'health_insurance_portal_transport_undocumented',
+      },
+      isds: {
+        supported: true,
+        requires_ready: true,
+        requires_production_gate: true,
+        requires_user_confirmation: true,
+      },
     },
   }))
   m.prepareHealthOverview.mockResolvedValue({
@@ -649,6 +657,42 @@ describe('PayrollSubmissions', () => {
     expect(m.downloadJmhzPreview).toHaveBeenCalledWith(
       expect.objectContaining({ revision_id: 18, workflow_status: 'preview_only' }),
     )
+  })
+
+  it('stará immutable ordinary evidence vede účetní k nové revizi, ne k editaci vztahu', async () => {
+    m.jmhzOrdinaryEvidence.mockResolvedValue({
+      scopes: [{
+        employee_id: 3,
+        employment_id: 4,
+        employee_name: 'Cyril Syntetický',
+        confirmed: false,
+        resolution: 'attention_required',
+        attention_code: 'jmhz_ordinary_evidence_scope_mismatch',
+        attention_message: 'Zmrazené potvrzení už neodpovídá aktuální specifikaci.',
+      }],
+      evidences: [],
+    })
+
+    const wrapper = mount(PayrollSubmissions, {
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a :data-to="to"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await clickTab(wrapper, 'jmhz')
+    await flushPromises()
+
+    const evidence = wrapper.get('[data-test="jmhz-ordinary-evidence"]')
+    expect(evidence.text()).toContain('Zmrazené potvrzení už neodpovídá aktuální specifikaci.')
+    expect(evidence.text())
+      .toContain('payroll.submissions.overview.jmhz_evidence_attention_revision_action')
+    expect(evidence.text())
+      .not.toContain('payroll.submissions.overview.jmhz_evidence_attention_employment_action')
   })
 
   /**

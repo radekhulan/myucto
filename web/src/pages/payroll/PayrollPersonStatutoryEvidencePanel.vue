@@ -507,6 +507,18 @@ onMounted(() => {
                   </select>
 
                   <input
+                    v-else-if="field.kind === 'document'"
+                    :value="fieldValue(row, field.key)"
+                    type="number"
+                    min="1"
+                    inputmode="numeric"
+                    :disabled="!editing || saving || isFrozen(section, row)"
+                    :data-test="`${section.key}-${index}-${field.key}`"
+                    class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm disabled:bg-neutral-100"
+                    @input="onInput(section, row, field.key, $event)"
+                  >
+
+                  <input
                     v-else-if="field.kind === 'date'"
                     :value="fieldValue(row, field.key)"
                     type="date"

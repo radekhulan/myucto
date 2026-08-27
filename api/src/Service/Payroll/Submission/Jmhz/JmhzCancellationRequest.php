@@ -23,7 +23,7 @@ final readonly class JmhzCancellationRequest
         string $variableSymbol,
         int $year,
         int $month,
-        JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
+        JmhzDeadlinePolicy $deadlines,
         ?string $today = null,
     ): self {
         if (preg_match('/^\d{10}$/D', $variableSymbol) !== 1) {

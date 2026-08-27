@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use PHPUnit\Framework\TestCase;
 
 final class JmhzDeadlinePolicyTest extends TestCase
@@ -13,7 +15,7 @@ final class JmhzDeadlinePolicyTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->policy = new JmhzDeadlinePolicy();
+        $this->policy = new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider());
     }
 
     public function testUsesTransitionWindowForFirstQuarterOf2026(): void
@@ -79,9 +81,22 @@ final class JmhzDeadlinePolicyTest extends TestCase
         self::assertNotSame($transition->rulesetHash, $regular->rulesetHash);
     }
 
+    public function testReadsTheEffectiveVersionedRulesetAndItsFingerprint(): void
+    {
+        $ruleset = CzechPayrollRulesets2026::provider()->forCalculation(
+            PayrollRulesetDomain::Deadlines,
+            '2026-04-01',
+        );
+        $window = $this->policy->forPeriod('2026-04-01');
+
+        self::assertSame($ruleset->id, $window->rulesetId);
+        self::assertSame($ruleset->canonicalHash, $window->rulesetHash);
+        self::assertNotEmpty($ruleset->sources);
+    }
+
     public function testRejectsUnsupportedOrNonMonthlyPeriod(): void
     {
-        foreach (['2025-12-01', '2026-04-02', '2026-13-01'] as $period) {
+        foreach (['2025-12-01', '2026-04-02', '2026-13-01', '2027-01-01'] as $period) {
             try {
                 $this->policy->forPeriod($period);
                 self::fail("Období {$period} musí být odmítnuto.");

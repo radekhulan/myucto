@@ -32,14 +32,28 @@ final class HealthInsurerChannelCatalogTest extends TestCase
         ], $formats);
     }
 
-    public function testZpMvKeepsTextPdfForIsdsAfterXmlGatewayLaunch(): void
+    public function testOnlyUndocumentedPdfRulesEndFailClosedAtEndOf2026(): void
+    {
+        $catalog = new HealthInsurerChannelCatalog();
+        foreach (['111', '201', '209'] as $insurerCode) {
+            $channel = $catalog->forInsurer($insurerCode);
+            self::assertSame(
+                HealthInsurerIsdsAttachmentFormat::TextPdf,
+                $channel->isdsAttachmentFormatOn('2026-12-31'),
+                $insurerCode,
+            );
+            self::assertSame(
+                HealthInsurerIsdsAttachmentFormat::None,
+                $channel->isdsAttachmentFormatOn('2027-01-01'),
+                $insurerCode,
+            );
+        }
+    }
+
+    public function testZpMvKeepsPdfForIsdsAfterThe2026Transition(): void
     {
         $channel = (new HealthInsurerChannelCatalog())->forInsurer('211');
 
-        self::assertSame(
-            HealthInsurerIsdsAttachmentFormat::TextPdf,
-            $channel->isdsAttachmentFormatOn('2026-09-30'),
-        );
         self::assertSame(
             HealthInsurerIsdsAttachmentFormat::TextPdf,
             $channel->isdsAttachmentFormatOn('2026-10-01'),
@@ -47,6 +61,16 @@ final class HealthInsurerChannelCatalogTest extends TestCase
         self::assertSame(
             HealthInsurerIsdsAttachmentFormat::TextPdf,
             $channel->isdsAttachmentFormatOn('2027-01-01'),
+        );
+    }
+
+    public function testRbpUsesTheDocumentedSharedXml(): void
+    {
+        $channel = (new HealthInsurerChannelCatalog())->forInsurer('213');
+
+        self::assertSame(
+            HealthInsurerIsdsAttachmentFormat::Xml,
+            $channel->isdsAttachmentFormatOn('2026-08-25'),
         );
     }
 

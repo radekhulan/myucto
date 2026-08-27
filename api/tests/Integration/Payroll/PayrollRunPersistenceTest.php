@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -245,6 +246,36 @@ final class PayrollRunPersistenceTest extends TestCase
             'session_required',
             $this->json($bearerResponse)['error']['code'],
         );
+    }
+
+    public function testCreateReturnsConflictWhenLegacyPayrollOwnsPeriod(): void
+    {
+        $role = new EffectiveRole(
+            93,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            ['payroll.inputs.write' => AccessLevel::WRITE->value],
+        );
+        $this->container->get(PayrollPeriodOwnershipService::class)->claimLegacy(
+            $this->supplierId,
+            2026,
+            6,
+            9001,
+            $this->actors[0],
+        );
+
+        $response = $this->action->create(
+            $this->apiRequest('POST', '/api/payroll/runs', $role)
+                ->withParsedBody([
+                    'period_start' => '2026-06-01',
+                    'payment_date' => '2026-07-15',
+                ]),
+            new Response(),
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('payroll_period_owned', $this->json($response)['error']['code']);
     }
 
     public function testSessionHistoryReturnsOnlySafeRevisionSummariesAndDirectDiff(): void
@@ -1695,6 +1726,59 @@ final class PayrollRunPersistenceTest extends TestCase
                   WHERE supplier_id = ? AND revision_id = ?',
                 [$this->supplierId, $approved->revision['id']],
             ),
+        );
+    }
+
+    public function testStatutoryClaimDeliveredAfterPayDateIsNotSelectedUntilDelivery(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status,
+                 effective_from, evidence_complete, recipient_verified,
+                 created_by, updated_by)
+             VALUES (?, ?, "synthetic-future-delivery-case", "enforcement",
+                     "withhold_and_hold", "2026-06-01", 1, 1, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->actors[0],
+            $this->actors[0],
+        ]);
+        $caseId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, enforcement_order_key,
+                 legal_basis, category, outstanding_minor_units,
+                 priority_date, first_payer_delivered_on, order_issued_on,
+                 legal_title_verified, order_or_notice_delivered,
+                 priority_classification_verified, agreement_verified,
+                 due_monetary_claim_verified)
+             VALUES (?, ?, "synthetic-future-delivery-claim", "synthetic-future-delivery-order",
+                     "statutory", "non_priority", 100000,
+                     "2026-07-20", "2026-07-20", "2026-07-01", 1, 1, 1, 0, 1)',
+        )->execute([$this->supplierId, $caseId]);
+
+        $enforcement = $this->container->get(PayrollEnforcementRepository::class);
+        self::assertInstanceOf(PayrollEnforcementRepository::class, $enforcement);
+
+        $beforeDelivery = $enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06',
+            '2026-07-15',
+        );
+        self::assertSame([], $beforeDelivery->claims);
+
+        $afterDelivery = $enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06',
+            '2026-07-20',
+        );
+        self::assertCount(1, $afterDelivery->claims);
+        self::assertSame(
+            'synthetic-future-delivery-claim',
+            $afterDelivery->claims[0]->id,
         );
     }
 

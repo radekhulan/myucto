@@ -222,12 +222,23 @@ final class DocumentFolderRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT 1
                FROM documents document
-               JOIN payroll_enforcement_case_documents payroll_evidence
-                 ON payroll_evidence.supplier_id = document.supplier_id
-                AND (payroll_evidence.dms_document_id = document.id
-                  OR payroll_evidence.dms_document_id = document.parent_document_id)
               WHERE document.supplier_id = ?
                 AND document.folder_id IN ($in)
+                AND (
+                  EXISTS (
+                    SELECT 1 FROM payroll_enforcement_case_documents payroll_evidence
+                     WHERE payroll_evidence.supplier_id = document.supplier_id
+                       AND (payroll_evidence.dms_document_id = document.id
+                         OR payroll_evidence.dms_document_id = document.parent_document_id)
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM payroll_person_health_coverage_history health_evidence
+                     WHERE health_evidence.supplier_id = document.supplier_id
+                       AND health_evidence.health_evidence_document_id IS NOT NULL
+                       AND (health_evidence.health_evidence_document_id = document.id
+                         OR health_evidence.health_evidence_document_id = document.parent_document_id)
+                  )
+                )
               LIMIT 1"
         );
         $stmt->execute(array_merge([$supplierId], $folderIds));

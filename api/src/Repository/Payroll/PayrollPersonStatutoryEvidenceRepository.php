@@ -31,6 +31,7 @@ final class PayrollPersonStatutoryEvidenceRepository
                 'columns' => 'id, jurisdiction, foreign_country_code,
                             jurisdiction_evidence_reference, insurer_status,
                             insurer_code, insurer_evidence_reference,
+                            health_evidence_document_id, health_evidence_document_sha256,
                             effective_from, effective_to, row_version',
                 'order' => 'effective_from, id',
             ],
@@ -182,6 +183,8 @@ final class PayrollPersonStatutoryEvidenceRepository
                 'insurer_status',
                 'insurer_code',
                 'insurer_evidence_reference',
+                'health_evidence_document_id',
+                'health_evidence_document_sha256',
             ],
         ],
         'health_month_evidence' => [
@@ -440,6 +443,7 @@ final class PayrollPersonStatutoryEvidenceRepository
                 $plans,
                 $effectiveOn,
             );
+            $this->resolveHealthEvidenceDocuments($supplierId, $employeeId, $plans);
 
             $counts = $this->executePlan(
                 $supplierId,
@@ -902,7 +906,7 @@ final class PayrollPersonStatutoryEvidenceRepository
 
         $dates = [$effectiveOn => true];
         $planned = self::PLANNED_ID_BASE;
-        foreach (self::EDITABLE as $key => $spec) {
+            foreach (self::EDITABLE as $key => $spec) {
             foreach ($plans[$key] as $row) {
                 $candidate = $row['values'];
                 if ($spec['kind'] === 'month') {
@@ -925,6 +929,107 @@ final class PayrollPersonStatutoryEvidenceRepository
     }
 
     /**
+     * DMS vazba není klientský údaj: klient smí vybrat jen ID aktivního
+     * firemního dokumentu, jeho otisk se vždy přečte pod zámkem ze serveru.
+     * Tím nejde připojit doklad cizí firmy ani podstrčit jiný hash.
+     *
+     * Staré textové reference zůstávají metadaty. Nový řádek, který textovou
+     * referenci uvádí, ale musí mít i skutečný DMS důkaz.
+     *
+     * @param array<string,list<array<string,mixed>>> $plans
+     */
+    private function resolveHealthEvidenceDocuments(int $supplierId, int $employeeId, array &$plans): void
+    {
+        foreach ($plans['health_coverages'] as &$row) {
+            $values = &$row['values'];
+            $documentId = $this->positiveDocumentId(
+                $values['health_evidence_document_id'] ?? null,
+            );
+            $existingDocument = $row['id'] === null
+                ? null
+                : $this->existingHealthEvidenceDocument($supplierId, $employeeId, (int) $row['id']);
+
+            if ($existingDocument !== null && $documentId === null) {
+                $values['health_evidence_document_id'] = (string) $existingDocument['id'];
+                $values['health_evidence_document_sha256'] = $existingDocument['sha256'];
+                continue;
+            }
+            if ($existingDocument !== null && $documentId !== $existingDocument['id']) {
+                throw new InvalidArgumentException(
+                    'DMS důkaz zdravotního pojištění je po připojení neměnný.',
+                );
+            }
+            if ($documentId === null) {
+                if ($row['id'] === null
+                    && $values['insurer_evidence_reference'] !== null
+                ) {
+                    throw new InvalidArgumentException(
+                        'Nový důkaz zdravotního pojištění musí obsahovat dokument z úložiště.',
+                    );
+                }
+                $values['health_evidence_document_id'] = null;
+                $values['health_evidence_document_sha256'] = null;
+                continue;
+            }
+
+            $document = $this->db->pdo()->prepare(
+                'SELECT id, sha256
+                   FROM documents
+                  WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL
+                  FOR UPDATE',
+            );
+            $document->execute([$supplierId, $documentId]);
+            $reference = $document->fetch(PDO::FETCH_ASSOC);
+            if ($reference === false || !is_string($reference['sha256'] ?? null)) {
+                throw new InvalidArgumentException(
+                    'Důkaz zdravotního pojištění musí být aktivní dokument této firmy.',
+                );
+            }
+            $values['health_evidence_document_id'] = (string) $documentId;
+            $values['health_evidence_document_sha256'] = $reference['sha256'];
+        }
+        unset($row, $values);
+    }
+
+    private function positiveDocumentId(mixed $value): ?int
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $id = filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        if (!is_int($id)) {
+            throw new InvalidArgumentException('ID důkazu zdravotního pojištění musí být kladné celé číslo.');
+        }
+        return $id;
+    }
+
+    /** @return array{id:int,sha256:string}|null */
+    private function existingHealthEvidenceDocument(
+        int $supplierId,
+        int $employeeId,
+        int $coverageId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT health_evidence_document_id, health_evidence_document_sha256
+               FROM payroll_person_health_coverage_history
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?
+              FOR UPDATE',
+        );
+        $statement->execute([$supplierId, $employeeId, $coverageId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['health_evidence_document_id'] === null
+            || !is_string($row['health_evidence_document_sha256'] ?? null)
+        ) {
+            return null;
+        }
+
+        return [
+            'id' => (int) $row['health_evidence_document_id'],
+            'sha256' => $row['health_evidence_document_sha256'],
+        ];
+    }
+
+    /**
      * @param array<string,list<array<string,mixed>>> $plans
      * @param array<string,list<int>> $deletions
      * @return array{inserted:int,updated:int,deleted:int}
@@ -937,7 +1042,7 @@ final class PayrollPersonStatutoryEvidenceRepository
         ?int $userId,
     ): array {
         $counts = ['inserted' => 0, 'updated' => 0, 'deleted' => 0];
-        foreach (self::EDITABLE as $key => $spec) {
+            foreach (self::EDITABLE as $key => $spec) {
             $table = self::COLLECTIONS[$spec['section']][$spec['collection']]['table'];
             $dateColumns = $spec['kind'] === 'month'
                 ? ['period_start']
@@ -1128,6 +1233,16 @@ final class PayrollPersonStatutoryEvidenceRepository
     {
         $values = [];
         foreach ($fields as $field) {
+            if ($field === 'health_evidence_document_sha256') {
+                // Otisk se nikdy nebere z HTTP; resolveHealthEvidenceDocuments()
+                // ho odvodí z uzamčeného DMS řádku.
+                $values[$field] = null;
+                continue;
+            }
+            if ($field === 'health_evidence_document_id') {
+                $values[$field] = $this->nullableText($row[$field] ?? null);
+                continue;
+            }
             $value = $row[$field] ?? null;
             if ($value !== null && !is_string($value)) {
                 throw new InvalidArgumentException(sprintf(

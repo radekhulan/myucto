@@ -85,8 +85,16 @@ describe('payroll REGZEL API', () => {
       data: {
         items: [],
         electronic_submission: {
-          supported: false,
-          reason_code: 'health_insurance_transport_unavailable',
+          direct_portal: {
+            supported: false,
+            reason_code: 'health_insurance_portal_transport_undocumented',
+          },
+          isds: {
+            supported: true,
+            requires_ready: true,
+            requires_production_gate: true,
+            requires_user_confirmation: true,
+          },
         },
       },
     })

@@ -74,6 +74,16 @@ final class PayrollEnumContractTest extends TestCase
         // Mzdový běh
         'payroll.ts::PayrollPeriodExportScope'
             => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
+        'payroll.ts::PayrollPeriodExportJobStatus'
+            => 'const:MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository::STATUSES',
+        'payroll.ts::PayrollForeignPermitKind'
+            => 'db:payroll_person_foreign_permits.permit_kind',
+        'payroll.ts::PayrollForeignPermitStatus'
+            => 'const:MyInvoice\Repository\Payroll\PayrollForeignPermitRepository::STATUSES',
+        'payroll.ts::PayrollYearCloseStatus'
+            => 'db:payroll_year_closures.status',
+        'payroll.ts::PayrollYearCloseBlockerCode'
+            => 'const:MyInvoice\Service\Payroll\PayrollYearCloseService::BLOCKER_CODES',
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři

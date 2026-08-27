@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-domains-document-submissions-v1';
+    public const VERSION = '2026-08-domains-document-submissions-health-evidence-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -102,6 +102,7 @@ final class PermissionCatalog
             ['payroll.post', 'payroll', 'Zaúčtovat mzdy', $staffOnly],
             ['payroll.payments', 'payroll', 'Spravovat výplaty a odvody', $staffOnly],
             ['payroll.submissions', 'payroll', 'Spravovat mzdová podání', $staffOnly],
+            ['payroll.health_evidence', 'payroll', 'Spravovat důkazy zdravotního pojištění', $staffOnly],
             ['payroll.enforcement', 'payroll', 'Spravovat exekuční srážky', $staffOnly],
             ['payroll.enforcement.cooperation', 'payroll', 'Vyřizovat součinnost exekutorům', $staffOnly],
             ['payroll.insolvency', 'payroll', 'Spravovat insolvence zaměstnanců', $staffOnly],
@@ -189,7 +190,7 @@ final class PermissionCatalog
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
                 'settings.company.write', 'settings.domains', 'utilities.import',
                 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
-                'payroll.reopen', 'payroll.enforcement', 'payroll.enforcement.cooperation', 'payroll.insolvency', 'payroll.rulesets',
+                'payroll.reopen', 'payroll.health_evidence', 'payroll.enforcement', 'payroll.enforcement.cooperation', 'payroll.insolvency', 'payroll.rulesets',
                 // Výmaz osobních údajů je nevratný a právně významný — patří ke
                 // schválení běhu, ne k běžné mzdové práci. Retenční lhůty naopak
                 // ve výchozím stavu zůstávají: prodloužit lhůtu nebo zadržet výmaz

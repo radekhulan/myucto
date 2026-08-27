@@ -8,11 +8,13 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
+use MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository;
 use MyInvoice\Repository\Payroll\PayrollPeriodExportRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportArchiveBuilder;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportService;
+use MyInvoice\Service\Payroll\Export\PayrollPeriodExportQueueService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -30,6 +32,7 @@ final class PayrollPeriodExportServiceTest extends TestCase
 
     private Connection $db;
     private PayrollPeriodExportService $service;
+    private PayrollPeriodExportQueueService $queue;
     private PayrollPeriodExportStorage $storage;
     private PayrollDocumentStorage $documentStorage;
     private PayrollDocumentRepository $documents;
@@ -81,6 +84,10 @@ final class PayrollPeriodExportServiceTest extends TestCase
             $submissionService,
             $secretEncryption,
             $sensitiveData,
+        );
+        $this->queue = new PayrollPeriodExportQueueService(
+            new PayrollPeriodExportJobRepository($connection),
+            $this->service,
         );
 
         $sourceSupplierId = $this->integer(
@@ -413,6 +420,95 @@ final class PayrollPeriodExportServiceTest extends TestCase
         }
     }
 
+    public function testPeriodExportQueueDefersRenderingAndCompletesUnderLease(): void
+    {
+        if (!$this->db->hasTable('payroll_period_export_jobs')) {
+            self::fail('Migrace 1604 neproběhla.');
+        }
+        $this->approvedRevision(100);
+
+        $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+        self::assertSame('queued', $queued['status']);
+        self::assertNull($queued['export_id']);
+        self::assertSame(
+            0,
+            $this->countRows('payroll_period_exports'),
+            'HTTP enqueue nesmí blokovat renderováním ZIPu.',
+        );
+
+        $repeat = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
+        self::assertSame($queued['id'], $repeat['id']);
+        self::assertSame(
+            ['processed' => 1, 'succeeded' => 1, 'failed' => 0],
+            $this->queue->processAvailable(),
+        );
+
+        $completed = $this->queue->detail($this->supplierId, (int) $queued['id']);
+        self::assertIsArray($completed);
+        self::assertSame('completed', $completed['status']);
+        self::assertIsInt($completed['export_id']);
+        $afterCompleted = $this->queue->enqueueMonthly(
+            $this->supplierId,
+            '2097-08',
+            $this->userId,
+        );
+        self::assertNotSame($queued['id'], $afterCompleted['id']);
+        self::assertSame('queued', $afterCompleted['status']);
+
+        $grant = $this->service->issueDownloadGrant(
+            $this->supplierId,
+            $completed['export_id'],
+            $this->userId,
+            60,
+        );
+        self::assertSame($completed['export_id'], $grant['export_id']);
+        self::assertNull($this->queue->detail($this->otherSupplierId, (int) $queued['id']));
+    }
+
+    public function testQueuedExportSurvivesDeletionOfRequestingUser(): void
+    {
+        if (!$this->db->hasTable('payroll_period_export_jobs')) {
+            self::fail('Migrace 1604 neproběhla.');
+        }
+        $this->approvedRevision(1);
+        $pdo = $this->db->pdo();
+        $email = 'payroll-export-' . bin2hex(random_bytes(8)) . '@example.test';
+        $pdo->prepare(
+            'INSERT INTO users
+                (email, password_hash, name, role, role_id, locale, is_active)
+             SELECT ?, password_hash, ?, role, role_id, locale, 1
+               FROM users
+              WHERE id = ?',
+        )->execute([$email, 'Syntetický autor exportu', $this->userId]);
+        $requestingUserId = (int) $pdo->lastInsertId();
+
+        $queued = $this->queue->enqueueMonthly(
+            $this->supplierId,
+            '2097-08',
+            $requestingUserId,
+        );
+        $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$requestingUserId]);
+        $jobStatement = $pdo->prepare(
+            'SELECT requested_by FROM payroll_period_export_jobs WHERE id = ?',
+        );
+        $jobStatement->execute([(int) $queued['id']]);
+        $jobRow = $jobStatement->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($jobRow);
+        self::assertNull($jobRow['requested_by']);
+
+        self::assertSame(
+            ['processed' => 1, 'succeeded' => 1, 'failed' => 0],
+            $this->queue->processAvailable(),
+        );
+        $completed = $this->queue->detail(
+            $this->supplierId,
+            (int) $queued['id'],
+        );
+        self::assertIsArray($completed);
+        self::assertSame('completed', $completed['status']);
+        self::assertIsInt($completed['export_id']);
+    }
+
     /** @return array{int,int,list<int>,string} */
     private function approvedRevision(int $personCount): array
     {
@@ -492,6 +588,11 @@ final class PayrollPeriodExportServiceTest extends TestCase
         self::assertInstanceOf(\PDOStatement::class, $statement);
 
         return (int) $statement->fetchColumn();
+    }
+
+    private function countRows(string $table): int
+    {
+        return (int) $this->db->pdo()->query('SELECT COUNT(*) FROM ' . $table)->fetchColumn();
     }
 
     /** @return list<string> */

@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
 use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
@@ -22,6 +23,7 @@ final class PayrollRunCommandService
 {
     private const COMMAND_SAVEPOINT = 'payroll_run_command';
     private const DELETE_SAVEPOINT = 'payroll_run_delete';
+    private readonly PayrollYearCloseGuard $yearClose;
 
     public function __construct(
         private readonly Connection $db,
@@ -43,7 +45,9 @@ final class PayrollRunCommandService
             $moduleActivation = null,
         private readonly ?PayrollDocumentBatchQueueService
             $documentQueue = null,
-    ) {}
+    ) {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /** @return array<string,mixed> */
     public function createRun(
@@ -63,6 +67,7 @@ final class PayrollRunCommandService
         }
         try {
             $this->assertModuleAvailable($supplierId, $periodStart);
+            $this->assertYearOpen($supplierId, $periodStart);
             $run = $this->runs->createOrGet(
                 $supplierId,
                 $periodStart,
@@ -310,6 +315,7 @@ final class PayrollRunCommandService
                 $supplierId,
                 (string) $run['period_start'],
             );
+            $this->assertYearOpen($supplierId, (string) $run['period_start']);
             $currentVersion = (int) $run['row_version'];
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollRunConflictException($currentVersion);
@@ -467,6 +473,7 @@ final class PayrollRunCommandService
                 $supplierId,
                 (string) $run['period_start'],
             );
+            $this->assertYearOpen($supplierId, (string) $run['period_start']);
             $currentVersion = (int) $run['row_version'];
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollRunConflictException($currentVersion);
@@ -1018,6 +1025,11 @@ final class PayrollRunCommandService
         ) {
             throw new \DomainException('Období předchází aktivaci plného mzdového modulu.');
         }
+    }
+
+    private function assertYearOpen(int $supplierId, string $periodStart): void
+    {
+        $this->yearClose->assertOpenForDateRange($supplierId, $periodStart, $periodStart);
     }
 
     private function period(string $periodStart): \DateTimeImmutable

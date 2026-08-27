@@ -417,6 +417,10 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         $options = $this->json($response)['options'];
         self::assertSame(64, strlen((string) $options['manifest_sha256']));
         self::assertCount(44, $options['activity_codes']);
+        $activityOptions = array_column($options['activity_codes'], null, 'code');
+        self::assertSame('select', $activityOptions['1']['relationship_detail_mode']);
+        self::assertSame('forbidden', $activityOptions['A']['relationship_detail_mode']);
+        self::assertSame('fixed_none', $activityOptions['S']['relationship_detail_mode']);
         self::assertSame(
             ['1', '2', '3'],
             array_column($options['relationship_detail_codes'], 'code'),
@@ -587,7 +591,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
                     'relation_type' => 'statutory_body',
                     'monthly_gross_minor' => 4500000,
                     'terms' => [
-                        ...$this->termsPayload(true, '2026-08-16'),
+                        ...$this->termsPayload(true, '2026-08-16', 'statutory_body'),
                         'planned_start_on' => '2025-04-01',
                         'fixed_term_end_on' => null,
                     ],
@@ -792,8 +796,9 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
     ): array
     {
         [$activityCode, $relationshipDetailCode] = match ($relationType) {
-            'dpc' => ['A', '1'],
-            'dpp' => ['T', '1'],
+            'dpc' => ['A', null],
+            'dpp' => ['T', null],
+            'statutory_body' => ['S', '1'],
             default => ['1', '1'],
         };
 

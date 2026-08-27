@@ -246,6 +246,22 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         self::assertSame(201, $eventResponse->getStatusCode(), (string) $eventResponse->getBody());
         $event = $this->json($eventResponse);
+        $events = Bootstrap::buildContainer()->get(PayrollRegistrationEventService::class);
+        self::assertInstanceOf(PayrollRegistrationEventService::class, $events);
+        $snapshot = $events->load(
+            $this->supplierId,
+            'test',
+            $this->employmentId,
+            (int) $event['id'],
+        );
+        self::assertSame(
+            'jmhz-xsd-1.4.3.4_dictionary-1.4.1.6_controls-source-1.4.2.8_manifest-v1',
+            $snapshot['jmhz_codebook']['package_key'] ?? null,
+        );
+        self::assertMatchesRegularExpression(
+            '/^[a-f0-9]{64}$/D',
+            (string) ($snapshot['jmhz_codebook']['manifest_sha256'] ?? ''),
+        );
 
         $prepared = ($this->action)->prepare(
             $this->request('POST')->withParsedBody([
@@ -266,6 +282,49 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringNotContainsString(' fro=', $xml);
         self::assertStringNotContainsString('endbydeath=', $xml);
         self::assertStringNotContainsString('<unemplcomp', $xml);
+    }
+
+    /**
+     * Tvar 1–3 číslice není důkaz, že důvod ukončení existuje. ČSSZ ho má
+     * přímo v připnutém datovém slovníku JMHZ; neznámý kód proto nesmí projít
+     * až do XML a teprve tam selhat u protistrany.
+     */
+    public function testTerminationEventRejectsUnknownEmploymentTerminationReason(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON);
+
+        $eventResponse = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+                'ended_by_death' => false,
+                'unemployment' => [
+                    'mode' => 'provided',
+                    'average_net_earnings' => 25_000,
+                    'pension_periods' => [[
+                        'from' => self::START_ON,
+                        'to' => '2026-08-25',
+                    ]],
+                    'employment_type' => '1',
+                    'termination_reason' => '99',
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $eventResponse->getStatusCode());
+        self::assertStringContainsString(
+            'Důvod ukončení pracovního vztahu',
+            $this->json($eventResponse)['error']['message'],
+        );
     }
 
     /**
@@ -332,6 +391,35 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(200, $replayed->getStatusCode());
         self::assertFalse($this->json($replayed)['created']);
         self::assertSame($body['artifact_sha256'], $this->json($replayed)['artifact_sha256']);
+    }
+
+    public function testA3ChangeRejectsUnknownHealthInsuranceCode(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-03-01", actual_start_date = "2026-03-01",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, '2026-03-01');
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => '2026-03-30',
+                'source_reference' => 'synthetic-invalid-health-insurer',
+                'changes' => ['health_insurance_code' => '999'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString(
+            'Kód zdravotní pojišťovny',
+            $this->json($response)['error']['message'],
+        );
     }
 
     /**

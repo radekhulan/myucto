@@ -116,10 +116,20 @@ final class PayrollHealthInsuranceOverviewActionTest extends TestCase
 
         self::assertSame(200, $response->getStatusCode());
         $body = $this->json($response);
-        self::assertFalse($body['electronic_submission']['supported']);
+        self::assertFalse(
+            $body['electronic_submission']['direct_portal']['supported'],
+        );
         self::assertSame(
-            'health_insurance_transport_unavailable',
-            $body['electronic_submission']['reason_code'],
+            'health_insurance_portal_transport_undocumented',
+            $body['electronic_submission']['direct_portal']['reason_code'],
+        );
+        self::assertTrue($body['electronic_submission']['isds']['supported']);
+        self::assertTrue($body['electronic_submission']['isds']['requires_ready']);
+        self::assertTrue(
+            $body['electronic_submission']['isds']['requires_production_gate'],
+        );
+        self::assertTrue(
+            $body['electronic_submission']['isds']['requires_user_confirmation'],
         );
         self::assertCount(1, $body['items']);
         self::assertSame('111', $body['items'][0]['insurer']['code']);

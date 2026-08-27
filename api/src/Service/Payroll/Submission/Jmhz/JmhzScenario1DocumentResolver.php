@@ -84,7 +84,13 @@ final class JmhzScenario1DocumentResolver
         $blockers = [];
         $scope = $this->object($preparation->payload['scope'] ?? null);
         if ($preparation->builderVersion === JmhzPreparationSnapshotBuilder::BUILDER_VERSION) {
-            if (($scope['scenario_set'] ?? null) !== ['scenario_1']) {
+            $scenarioSet = $scope['scenario_set'] ?? null;
+            if (!is_array($scenarioSet)
+                || !array_is_list($scenarioSet)
+                || $scenarioSet === []
+                || array_values(array_unique($scenarioSet)) !== $scenarioSet
+                || array_diff($scenarioSet, ['scenario_1', 'scenario_3']) !== []
+            ) {
                 return new JmhzScenario1Resolution(null, [
                     $this->blocker(
                         'jmhz_scenario1_scope_unsupported',
@@ -93,7 +99,9 @@ final class JmhzScenario1DocumentResolver
                     ),
                 ]);
             }
-            $scope['scenario_key'] = 'scenario_1';
+            $scope['scenario_key'] = count($scenarioSet) === 1
+                ? $scenarioSet[0]
+                : 'scenario_1';
         } elseif (($scope['scenario_key'] ?? null) !== 'scenario_1') {
             return new JmhzScenario1Resolution(null, [
                 $this->blocker(
@@ -102,6 +110,8 @@ final class JmhzScenario1DocumentResolver
                     $preparation->id,
                 ),
             ]);
+        } else {
+            $scenarioSet = ['scenario_1'];
         }
         $sourceRevision = $this->object(
             $preparation->payload['source_revision'] ?? null,
@@ -253,6 +263,26 @@ final class JmhzScenario1DocumentResolver
                     ? $employment['employment_id']
                     : null;
                 $employmentSource = $this->object($employment['employment'] ?? null);
+                $selector = $this->object($employment['scenario_resolution'] ?? null);
+                $scenarioKey = $selector['scenario_key'] ?? null;
+                if (!is_string($scenarioKey)
+                    || !in_array($scenarioKey, $scenarioSet, true)
+                    || ($scenarioKey === 'scenario_3'
+                        && (!in_array(
+                            $employmentSource['relation_type'] ?? null,
+                            ['partner_dependent', 'statutory_body'],
+                            true,
+                        )
+                            || ($selector['activity_code'] ?? null) !== 'S'
+                            || ($selector['relationship_detail_code'] ?? null) !== '1'))
+                ) {
+                    $blockers[] = $this->blocker(
+                        'jmhz_scenario_profile_unsupported',
+                        'employment',
+                        $employmentId,
+                        ['10239', '10502'],
+                    );
+                }
                 if (($employmentSource['is_primary'] ?? null) !== true) {
                     $blockers[] = $this->blocker(
                         'jmhz_primary_employment_unresolved',

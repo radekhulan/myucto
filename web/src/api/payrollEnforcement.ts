@@ -170,6 +170,43 @@ export interface EnforcementClaimPayload {
   same_order_as_claim_id?: number | null
 }
 
+export interface EnforcementCaseParty {
+  id: number
+  party_role: 'court' | 'executor' | 'beneficiary'
+  revision_no: number
+  effective_from: string
+  party_name: string
+  party_reference: string | null
+  source_document_id: number
+  created_at: string
+}
+
+export interface EnforcementClaimBreakdown {
+  id: number
+  revision_no: number
+  principal_minor_units: number
+  interest_minor_units: number
+  costs_minor_units: number
+  maintenance_minor_units: number
+  total_minor_units: number
+  source_document_id: number
+  change_reason: string | null
+  created_at: string
+}
+
+export interface EnforcementRecipientInstruction {
+  id: number
+  revision_no: number
+  effective_from: string
+  recipient_party_id: number
+  party_role: 'executor' | 'beneficiary'
+  party_name: string
+  payment_account_id: number
+  source_document_id: number
+  change_reason: string | null
+  created_at: string
+}
+
 export interface EnforcementMonthEvidence {
   id: number | null
   employee_id: number
@@ -355,6 +392,52 @@ export const payrollEnforcementApi = {
     }>(`/payroll/enforcement/cases/${caseId}/claims/${claimId}`, {
       data: { row_version: rowVersion },
     }).then(response => response.data),
+  parties: (caseId: number) =>
+    api.get<{ items: EnforcementCaseParty[] }>(
+      `/payroll/enforcement/cases/${caseId}/parties`,
+    ).then(response => response.data.items),
+  appendParty: (caseId: number, payload: {
+    party_role: EnforcementCaseParty['party_role']
+    effective_from: string
+    party_name: string
+    party_reference?: string | null
+    source_document_id: number
+  }) =>
+    api.post<{ party: EnforcementCaseParty }>(
+      `/payroll/enforcement/cases/${caseId}/parties`,
+      payload,
+    ).then(response => response.data.party),
+  claimBreakdowns: (caseId: number, claimId: number) =>
+    api.get<{ items: EnforcementClaimBreakdown[] }>(
+      `/payroll/enforcement/cases/${caseId}/claims/${claimId}/breakdowns`,
+    ).then(response => response.data.items),
+  appendClaimBreakdown: (caseId: number, claimId: number, payload: {
+    principal_minor_units: number
+    interest_minor_units: number
+    costs_minor_units: number
+    maintenance_minor_units: number
+    source_document_id: number
+    change_reason?: string | null
+  }) =>
+    api.post<{ breakdown: EnforcementClaimBreakdown }>(
+      `/payroll/enforcement/cases/${caseId}/claims/${claimId}/breakdowns`,
+      payload,
+    ).then(response => response.data.breakdown),
+  recipientInstructions: (caseId: number) =>
+    api.get<{ items: EnforcementRecipientInstruction[] }>(
+      `/payroll/enforcement/cases/${caseId}/recipient-instructions`,
+    ).then(response => response.data.items),
+  appendRecipientInstruction: (caseId: number, payload: {
+    effective_from: string
+    recipient_party_id: number
+    payment_account_id: number
+    source_document_id: number
+    change_reason?: string | null
+  }) =>
+    api.post<{ instruction: EnforcementRecipientInstruction }>(
+      `/payroll/enforcement/cases/${caseId}/recipient-instructions`,
+      payload,
+    ).then(response => response.data.instruction),
   updateEvidence: (
     caseId: number,
     payload: {

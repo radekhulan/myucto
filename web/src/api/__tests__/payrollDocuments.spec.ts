@@ -76,17 +76,23 @@ describe('payroll document downloads', () => {
     )
   })
 
-  it('creates a period archive and keeps its one-time token in a POST body', async () => {
+  it('queues a period archive and keeps its one-time token in a POST body', async () => {
     m.post
       .mockResolvedValueOnce({
         data: {
-          id: 91,
+          id: 81,
           scope: 'monthly',
           period_start: '2026-08-01',
           period_end: '2026-08-31',
-          file_sha256: 'e'.repeat(64),
-          size_bytes: 12345,
-          suggested_filename: 'mzdy-2026-08-abcdef123456.zip',
+          status: 'completed',
+          attempt_count: 1,
+          available_at: '2026-08-03 12:00:00',
+          export_id: 91,
+          last_error_code: null,
+          last_error_message: null,
+          created_at: '2026-08-03 12:00:00',
+          started_at: '2026-08-03 12:00:00',
+          completed_at: '2026-08-03 12:00:01',
         },
       })
       .mockResolvedValueOnce({
@@ -108,7 +114,7 @@ describe('payroll document downloads', () => {
     )
     expect(m.post).toHaveBeenNthCalledWith(
       2,
-      '/payroll/exports/91/download-grants',
+      '/payroll/exports/jobs/81/download-grants',
       { ttl_seconds: 120 },
     )
     expect(m.post).toHaveBeenNthCalledWith(

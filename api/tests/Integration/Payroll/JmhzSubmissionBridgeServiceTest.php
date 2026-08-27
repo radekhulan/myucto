@@ -12,6 +12,8 @@ use MyInvoice\Repository\Payroll\JmhzPreparationSnapshotRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
@@ -727,7 +729,9 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         $service = new JmhzContentCorrectionSubmissionService(
             $documents,
             new JmhzScenario1XmlValidator(),
-            JmhzScenario1ControlValidator::create(),
+            JmhzScenario1ControlValidator::create(
+                CzechPayrollRulesets2026::provider(),
+            ),
             new JmhzSubmissionGuidFactory(),
             new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
             $frozen,
@@ -737,6 +741,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->submissions,
             $this->obligations,
             new MockClock('2037-12-31 11:30:00 Europe/Prague'),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
         $method = new \ReflectionMethod($service, 'correctionObligation');
         $method->invoke(
@@ -1148,12 +1153,15 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         return new JmhzSubmissionBridgeService(
             $documents,
             new JmhzScenario1XmlValidator(),
-            JmhzScenario1ControlValidator::create(),
+            JmhzScenario1ControlValidator::create(
+                CzechPayrollRulesets2026::provider(),
+            ),
             new JmhzSubmissionGuidFactory(),
             $this->submissionRepository,
             $this->submissions,
             new MockClock('2026-08-05 11:30:00 Europe/Prague'),
             $this->obligations,
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
     }
 
@@ -1224,7 +1232,9 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         return new JmhzContentCorrectionSubmissionService(
             $documents,
             new JmhzScenario1XmlValidator(),
-            JmhzScenario1ControlValidator::create(),
+            JmhzScenario1ControlValidator::create(
+                CzechPayrollRulesets2026::provider(),
+            ),
             new JmhzSubmissionGuidFactory(),
             new JmhzEffectiveFormLedgerResolver($this->submissionRepository, $frozen),
             $frozen,
@@ -1234,6 +1244,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             $this->submissions,
             $this->obligations,
             $clock,
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
     }
 
@@ -1261,12 +1272,15 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         return new JmhzSubmissionBridgeService(
             $documents,
             new JmhzScenario1XmlValidator(),
-            JmhzScenario1ControlValidator::create(),
+            JmhzScenario1ControlValidator::create(
+                CzechPayrollRulesets2026::provider(),
+            ),
             new JmhzSubmissionGuidFactory(),
             $this->submissionRepository,
             $this->submissions,
             new MockClock($now),
             $this->obligations,
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
     }
 

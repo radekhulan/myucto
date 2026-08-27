@@ -6,10 +6,6 @@ namespace MyInvoice\Service\Payroll\RiskySavings;
 
 final class PayrollRiskySavingsPolicy
 {
-    public const EFFECTIVE_FROM = '2026-01-01';
-    public const MINIMUM_SHIFT_EIGHTHS = 24;
-    public const RATE_BASIS_POINTS = 400;
-
     /**
      * @param array<string,mixed> $evidence
      * @return list<string>
@@ -86,18 +82,25 @@ final class PayrollRiskySavingsPolicy
     }
 
     /** @param array<string,mixed> $evidence */
-    public function obligationArises(array $evidence, string $periodStart): bool
+    public function obligationArises(
+        array $evidence,
+        string $periodStart,
+        PayrollRiskySavingsRules $rules,
+    ): bool
     {
         return $this->issues($evidence, $periodStart) === []
-            && $periodStart >= self::EFFECTIVE_FROM
+            && $periodStart >= $rules->effectiveFrom
             && $evidence['right_claimed_on'] < $periodStart
-            && $evidence['qualifying_shift_eighths'] >= self::MINIMUM_SHIFT_EIGHTHS;
+            && $evidence['qualifying_shift_eighths'] >= $rules->minimumShiftEighths;
     }
 
-    public function dueOn(string $periodStart): string
+    public function dueOn(string $periodStart, PayrollRiskySavingsRules $rules): string
     {
         $period = new \DateTimeImmutable($periodStart);
-        return $period->modify('last day of next month')->format('Y-m-d');
+        return $period
+            ->modify('+' . $rules->paymentDueMonthsAfterPeriod . ' months')
+            ->modify('last day of this month')
+            ->format('Y-m-d');
     }
 
     private function date(string $value): bool

@@ -24,7 +24,7 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzScenario1XmlValidator $validator,
         private JmhzSubmissionGuidFactory $guids,
         private JmhzScenario1ControlValidator $controls,
-        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
+        private JmhzDeadlinePolicy $deadlines,
     ) {}
 
     /**

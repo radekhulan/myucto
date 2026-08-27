@@ -229,6 +229,10 @@ final readonly class JmhzPreparationSnapshotService
                 $sourceRevisionId,
                 $createdBy,
             );
+            $sourceIssues = [
+                ...$sourceIssues,
+                ...$ordinaryEvidence['issues'],
+            ];
             $annualEvidence = $this->annualEvidence->snapshotsForPreparation(
                 $supplierId,
                 $this->employeeIds($input),
@@ -247,7 +251,7 @@ final readonly class JmhzPreparationSnapshotService
                 $mappingSources,
                 $sourceIssues,
                 $eldpSources,
-                $ordinaryEvidence,
+                $ordinaryEvidence['sources'],
                 $annualEvidence,
                 $employerAnnualEvidence,
             );

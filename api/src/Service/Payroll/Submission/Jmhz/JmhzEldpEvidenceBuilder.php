@@ -154,9 +154,15 @@ final class JmhzEldpEvidenceBuilder
         }
         $relationshipDetailCode = $term['jmhz_relationship_detail_code'] ?? null;
         $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
-        $selection = JmhzScenario1SelectorResolver::load()->resolve($activityCode, $relationshipDetailCode);
+        $selectorRelationshipDetailCode = is_string($relationshipDetailCode) ? $relationshipDetailCode : null;
+        $selection = JmhzScenarioSelectorResolver::load()->resolve($activityCode, $selectorRelationshipDetailCode);
         if (!$selection['supported']) {
-            $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného standardního scénáře.');
+            $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného scénáře.');
+        }
+        $scenarioResolution = $selection['evidence'] ?? null;
+        $scenarioKey = is_array($scenarioResolution) ? ($scenarioResolution['scenario_key'] ?? null) : null;
+        if (!is_string($scenarioKey)) {
+            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil klíč scénáře.');
         }
         $absences = $entry['absences'] ?? null;
         if (!is_array($absences) || !array_is_list($absences) || $absences !== []) {
@@ -253,7 +259,7 @@ final class JmhzEldpEvidenceBuilder
                 'employee_id' => $employeeId,
                 'employment_id' => $employmentId,
                 'period_start' => $periodStart,
-                'scenario_key' => 'scenario_1',
+                'scenario_key' => $scenarioKey,
             ],
             'specification' => [
                 'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
@@ -276,7 +282,7 @@ final class JmhzEldpEvidenceBuilder
                 'work_summary_id' => $workSummary['id'],
                 'work_summary_sha256' => $workSummary['summary_sha256'],
                 'social_relationship' => $relationship,
-                'scenario_resolution' => $selection['evidence'],
+                'scenario_resolution' => $scenarioResolution,
                 'attribute_ids' => self::ATTRIBUTE_IDS,
             ],
             'insurance_interval' => [
@@ -392,9 +398,10 @@ final class JmhzEldpEvidenceBuilder
             'employment' => 'employment',
             'dpc' => 'dpc',
             'dpp' => 'dpp',
+            'partner_dependent', 'statutory_body' => 'corporate_body',
             default => $this->invalid(
                 'jmhz_eldp_relationship_kind_unsupported',
-                'První ELDP řez podporuje pracovní poměr, účastnou DPČ a neúčastnou DPP.',
+                'ELDP podporuje pracovní poměr, DPČ, DPP a člena statutárního orgánu.',
             ),
         };
         $status = $participation['status'] ?? null;
@@ -404,7 +411,7 @@ final class JmhzEldpEvidenceBuilder
         ) {
             $this->invalid('jmhz_eldp_social_relationship_unsupported', 'Druh vztahu a výsledek sociální účasti si odporují.');
         }
-        if (in_array($relationType, ['employment', 'dpc'], true)
+        if (in_array($relationType, ['employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'], true)
             && $status === 'participates'
         ) {
             return true;
@@ -414,7 +421,7 @@ final class JmhzEldpEvidenceBuilder
         }
         $this->invalid(
             'jmhz_eldp_social_relationship_unsupported',
-            'První ELDP řez podporuje účastný pracovní poměr nebo DPČ a podlimitní neúčastnou DPP.',
+            'ELDP podporuje účastný pracovní poměr, DPČ, DPP, člena statutárního orgánu a podlimitní neúčastnou DPP.',
         );
     }
 

@@ -9,7 +9,6 @@ use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
-use Psr\Clock\ClockInterface;
 
 /** Zařazení ověřeného přehledu zdravotní pojišťovny do obecné ISDS fronty. */
 final readonly class HealthInsuranceIsdsSubmissionService
@@ -22,7 +21,6 @@ final readonly class HealthInsuranceIsdsSubmissionService
         private SubmissionRecipientRepository $recipients,
         private SubmissionOutboxService $outbox,
         private HealthInsurerChannelCatalog $channels,
-        private ClockInterface $clock,
         private ?IsdsGatewayRegistrationService $gateway = null,
     ) {}
 
@@ -40,16 +38,7 @@ final readonly class HealthInsuranceIsdsSubmissionService
         string $insurerCode,
         ?int $userId,
     ): array {
-        $channel = $this->channels->forInsurer($insurerCode);
-        $format = $channel->isdsAttachmentFormatOn($this->today());
-        if ($format === HealthInsurerIsdsAttachmentFormat::None) {
-            throw new SubmissionChannelException(
-                'zp_isds_attachment_undocumented',
-                'Pojišťovna ' . $insurerCode
-                    . ' nemá pro dnešní den doložený formát přílohy datové zprávy.',
-                409,
-            );
-        }
+        $this->channels->forInsurer($insurerCode);
         $submission = $this->submissions->findSubmission($supplierId, $submissionId);
         if ($submission === null) {
             throw new SubmissionChannelException(
@@ -94,13 +83,11 @@ final readonly class HealthInsuranceIsdsSubmissionService
             );
         }
 
-        $artifactKind = match ($format) {
-            HealthInsurerIsdsAttachmentFormat::Xml => 'outbound_xml',
-            HealthInsurerIsdsAttachmentFormat::TextPdf => 'outbound_pdf',
-            HealthInsurerIsdsAttachmentFormat::None => throw new \LogicException(
-                'Formát přílohy ISDS nebyl určen.',
-            ),
-        };
+        [$format, $artifactKind, $artifactId] = $this->frozenAttachment(
+            $supplierId,
+            $environment,
+            $submissionId,
+        );
         $mimeType = match ($format) {
             HealthInsurerIsdsAttachmentFormat::Xml => 'application/xml',
             HealthInsurerIsdsAttachmentFormat::TextPdf => 'application/pdf',
@@ -108,25 +95,6 @@ final readonly class HealthInsuranceIsdsSubmissionService
                 'MIME přílohy ISDS nebylo určeno.',
             ),
         };
-        $artifactId = $format === HealthInsurerIsdsAttachmentFormat::Xml
-            ? $this->submissions->findOutboundXmlArtifactId(
-                $supplierId,
-                $environment,
-                $submissionId,
-            )
-            : $this->submissions->findOutboundPdfArtifactId(
-                $supplierId,
-                $environment,
-                $submissionId,
-            );
-        if ($artifactId === null) {
-            throw new SubmissionChannelException(
-                'health_submission_artifact_missing',
-                'Podání nemá uloženou přílohu ve formátu '
-                    . $format->value . '.',
-                409,
-            );
-        }
         $artifact = $this->submissions->findArtifact($supplierId, $artifactId);
         if ($artifact === null
             || (string) $artifact['environment'] !== $environment
@@ -208,6 +176,51 @@ final readonly class HealthInsuranceIsdsSubmissionService
         return $recipient;
     }
 
+    /** @return array{HealthInsurerIsdsAttachmentFormat,string,int} */
+    private function frozenAttachment(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): array {
+        /** @var list<array{0:HealthInsurerIsdsAttachmentFormat,1:string}> $candidates */
+        $candidates = [
+            [HealthInsurerIsdsAttachmentFormat::Xml, 'outbound_xml'],
+            [HealthInsurerIsdsAttachmentFormat::TextPdf, 'outbound_pdf'],
+        ];
+        /** @var list<array{0:HealthInsurerIsdsAttachmentFormat,1:string,2:int}> $frozen */
+        $frozen = [];
+        foreach ($candidates as [$format, $artifactKind]) {
+            $artifactId = $this->submissions->findOutboundArtifactIdByCatalogVersion(
+                $supplierId,
+                $environment,
+                $submissionId,
+                $artifactKind,
+                HealthInsuranceSubmissionService::isdsAttachmentCatalogVersion(
+                    $format,
+                ),
+            );
+            if ($artifactId !== null) {
+                $frozen[] = [$format, $artifactKind, $artifactId];
+            }
+        }
+        if (count($frozen) === 1) {
+            return $frozen[0];
+        }
+        if (count($frozen) > 1) {
+            throw new SubmissionChannelException(
+                'health_submission_attachment_ambiguous',
+                'Připravené podání má více zmrazených formátů přílohy ISDS.',
+                409,
+            );
+        }
+
+        throw new SubmissionChannelException(
+            'health_submission_attachment_unfrozen',
+            'Připravené podání nemá zmrazený doložený formát přílohy ISDS.',
+            409,
+        );
+    }
+
     /** @return array{automatic:bool,channel:string,reason:?string} */
     private function transportAvailability(string $environment): array
     {
@@ -222,10 +235,4 @@ final readonly class HealthInsuranceIsdsSubmissionService
         ];
     }
 
-    private function today(): string
-    {
-        return \DateTimeImmutable::createFromInterface($this->clock->now())
-            ->setTimezone(new \DateTimeZone('Europe/Prague'))
-            ->format('Y-m-d');
-    }
 }

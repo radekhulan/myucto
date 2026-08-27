@@ -32,10 +32,6 @@ final class PayrollCalendarYearPinGuardTest extends TestCase
      * @var array<string, list<string>> relativní cesta => jména symbolů
      */
     private const ALLOWED_SYMBOLS = [
-        // JMHZ vzniklo zákonem 323/2025 Sb. k 1. 1. 2026 a přechodné ustanovení
-        // dává za Q1/2026 jediný termín 1. 4. – 30. 6. 2026. Jsou to konkrétní
-        // data z přechodného ustanovení, ne rok podpory modulu.
-        'Service/Payroll/Submission/Jmhz/JmhzDeadlinePolicy.php' => ['forPeriod'],
         // Totéž přechodné ustanovení z druhé strany: od 1. 1. 2026 sestavuje
         // evidenční list ČSSZ z měsíčního hlášení a samostatný list zůstává
         // zaměstnavateli jen za starší roky, při skončení účasti před

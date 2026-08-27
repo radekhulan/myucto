@@ -31,4 +31,26 @@ enum ClaimCategory: string
     {
         return in_array($this, self::maintenanceCategories(), true);
     }
+
+    /** @return list<self> */
+    public static function paymentPriorityOrder(): array
+    {
+        return [
+            self::CurrentMaintenance,
+            self::MaintenanceArrears,
+            self::SubstituteMaintenance,
+            self::OtherPriority,
+            self::NonPriority,
+        ];
+    }
+
+    public function paymentPriorityRank(): int
+    {
+        $rank = array_search($this, self::paymentPriorityOrder(), true);
+        if ($rank === false) {
+            throw new \LogicException('Kategorie pohledávky nemá pořadí platby.');
+        }
+
+        return $rank;
+    }
 }

@@ -45,7 +45,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         foreach ([['dpc', 'A'], ['dpp', 'T']] as [$relationType, $activityCode]) {
             $terms = $this->terms();
             $terms['activity_code'] = $activityCode;
-            $terms['jmhz_relationship_detail_code'] = '1';
+            $terms['jmhz_relationship_detail_code'] = null;
 
             $result = $this->validator()->create([
                 'code' => strtoupper($relationType) . '-1',
@@ -60,10 +60,15 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
     public function testRejectsActivityFamilyMismatchingRelation(): void
     {
-        foreach ([['dpc', 'T'], ['dpp', 'A'], ['dpp', '1']] as [$relationType, $activityCode]) {
+        foreach ([
+            ['dpc', 'T'],
+            ['dpp', 'A'],
+            ['dpp', '1'],
+            ['partner_dependent', '1'],
+        ] as [$relationType, $activityCode]) {
             $terms = $this->terms();
             $terms['activity_code'] = $activityCode;
-            $terms['jmhz_relationship_detail_code'] = '1';
+            $terms['jmhz_relationship_detail_code'] = $activityCode === '1' ? '1' : null;
 
             try {
                 $this->validator()->create([
@@ -395,15 +400,16 @@ final class PayrollEmploymentValidatorTest extends TestCase
 
         $direct = $valid;
         $direct['activity_code'] = 'A';
-        self::assertSame('1', $this->validator()->terms($direct)['jmhz_relationship_detail_code']);
+        $direct['jmhz_relationship_detail_code'] = null;
+        self::assertNull($this->validator()->terms($direct)['jmhz_relationship_detail_code']);
 
-        $missingDirect = $direct;
-        $missingDirect['jmhz_relationship_detail_code'] = null;
+        $invalidDirect = $direct;
+        $invalidDirect['jmhz_relationship_detail_code'] = '1';
         try {
-            $this->validator()->terms($missingDirect);
-            self::fail('Přímý druh činnosti musí mít bližší určení 1.');
+            $this->validator()->terms($invalidDirect);
+            self::fail('Přímý druh činnosti nesmí mít bližší určení.');
         } catch (\InvalidArgumentException $exception) {
-            self::assertStringContainsString('vyžaduje bližší určení', $exception->getMessage());
+            self::assertStringContainsString('zakazuje bližší určení', $exception->getMessage());
         }
 
         $activityTen = $valid;

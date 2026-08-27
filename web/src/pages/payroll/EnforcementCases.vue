@@ -30,6 +30,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
+import EnforcementLegalFacts from '@/pages/payroll/EnforcementLegalFacts.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
@@ -1262,6 +1263,16 @@ onMounted(load)
           </ul>
           <p v-else class="mt-2 text-sm text-neutral-500">{{ t('payroll.enforcement.settlement.empty') }}</p>
         </section>
+
+        <EnforcementLegalFacts
+          :key="detail.id"
+          :case-id="detail.id"
+          :case-status="detail.status"
+          :claims="detail.claims"
+          :can-write="canWrite"
+          :can-read-documents="canReadDocuments"
+          :recipient-accounts="recipientAccounts"
+        />
 
         <section v-if="canManageInsolvency && monthEvidence" ref="monthlySection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
           <div class="flex flex-wrap items-start justify-between gap-3">

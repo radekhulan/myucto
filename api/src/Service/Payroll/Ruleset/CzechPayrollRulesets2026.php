@@ -82,7 +82,7 @@ final class CzechPayrollRulesets2026
             self::travelAllowancesUntilMay($technicalReview),
             self::travelAllowancesFromJune($technicalReview),
             self::enforcementDeductions($technicalReview),
-            self::deadlines($technicalReview),
+            ...self::deadlines($technicalReview),
             self::codebooks($technicalReview),
             self::submissions($technicalReview),
         ]);
@@ -305,6 +305,11 @@ final class CzechPayrollRulesets2026
                 'maximum_assessment_base.yearly' => PayrollRuleValue::moneyMinor(235_041_600),
                 'participation.dpp.minimum' => PayrollRuleValue::moneyMinor(1_200_000),
                 'participation.small_scale.minimum' => PayrollRuleValue::moneyMinor(450_000),
+                'risky_savings.effective_from' => PayrollRuleValue::text('2026-01-01'),
+                'risky_savings.minimum_shift_eighths' => PayrollRuleValue::integer(24),
+                'risky_savings.payment_due.months_after_period' => PayrollRuleValue::integer(1),
+                'risky_savings.payment_due.rule' => PayrollRuleValue::text('last_day_of_month'),
+                'risky_savings.rate' => PayrollRuleValue::rate('0.04'),
             ],
             $technicalReview,
         );
@@ -540,19 +545,72 @@ final class CzechPayrollRulesets2026
         );
     }
 
-    private static function deadlines(RulesetTechnicalReview $technicalReview): PayrollRulesetVersion
+    /** @return list<PayrollRulesetVersion> */
+    private static function deadlines(RulesetTechnicalReview $technicalReview): array
     {
-        return self::version(
-            'cz-payroll-2026.deadlines.v1',
+        return [
+            self::jmhzDeadlineRuleset(
+                'cz-jmhz-deadlines-2026.transition.v1',
+                '2026.1.0',
+                '2026-01-01',
+                '2026-03-31',
+                [
+                    'jmhz.deadline.calendar_basis' => PayrollRuleValue::text('business_days'),
+                    'jmhz.deadline.cancellation_allowed' => PayrollRuleValue::boolean(false),
+                    'jmhz.deadline.due_on' => PayrollRuleValue::text('2026-06-30'),
+                    'jmhz.deadline.due_shift' => PayrollRuleValue::text('next_czech_working_day'),
+                    'jmhz.deadline.earliest_submission_on' => PayrollRuleValue::text('2026-04-01'),
+                    'jmhz.deadline.rule' => PayrollRuleValue::text('transition_fixed_window'),
+                ],
+                $technicalReview,
+            ),
+            self::jmhzDeadlineRuleset(
+                'cz-jmhz-deadlines-2026.regular.v1',
+                '2026.1.0',
+                '2026-04-01',
+                '2026-12-31',
+                [
+                    'jmhz.deadline.calendar_basis' => PayrollRuleValue::text('business_days'),
+                    'jmhz.deadline.cancellation_allowed' => PayrollRuleValue::boolean(true),
+                    'jmhz.deadline.due_day' => PayrollRuleValue::integer(20),
+                    'jmhz.deadline.due_shift' => PayrollRuleValue::text('next_czech_working_day'),
+                    'jmhz.deadline.earliest_day' => PayrollRuleValue::integer(1),
+                    'jmhz.deadline.month_offset' => PayrollRuleValue::integer(1),
+                    'jmhz.deadline.rule' => PayrollRuleValue::text('following_month_day_window'),
+                ],
+                $technicalReview,
+            ),
+        ];
+    }
+
+    /**
+     * @param non-empty-array<string, PayrollRuleValue> $parameters
+     */
+    private static function jmhzDeadlineRuleset(
+        string $id,
+        string $version,
+        string $effectiveFrom,
+        string $effectiveTo,
+        array $parameters,
+        RulesetTechnicalReview $technicalReview,
+    ): PayrollRulesetVersion {
+        ksort($parameters, SORT_STRING);
+
+        return new PayrollRulesetVersion(
+            $id,
+            $version,
             PayrollRulesetDomain::Deadlines,
-            PayrollRulesetCapability::ManualReview,
-            [self::jmhzDocumentation()],
+            $effectiveFrom,
+            $effectiveTo,
+            PayrollRulesetLifecycle::Active,
+            PayrollRulesetCapability::Supported,
             [
-                'submission_calendar' => PayrollRuleValue::manualReview(
-                    'Lhůty závisí na agendě, události, kanálu podání a přechodných ustanoveních; '
-                    . 'aplikace je neodvozuje a termín u konkrétního hlášení ukazuje stránka Podání.',
-                ),
+                self::jmhzAct(),
+                self::jmhzGovernmentRegulation(),
+                self::jmhzDocumentation(),
             ],
+            $parameters,
+            VendorRulesetApprover::approval($technicalReview),
             $technicalReview,
         );
     }
@@ -783,6 +841,26 @@ final class CzechPayrollRulesets2026
             'mpsv-jmhz-documentation',
             'MPSV: technická dokumentace JMHZ',
             'https://developers.mpsv.cz/api-list/jednotne-mesicni-hlaseni-zamestnavatelu/documentation/4589f5c6-30e8-4e2b-b341-fe8481ad4e70',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function jmhzAct(): RulesetSource
+    {
+        return new RulesetSource(
+            'e-sbirka-jmhz-act-2025',
+            'e-Sbírka: zákon č. 323/2025 Sb., o jednotném měsíčním hlášení zaměstnavatele',
+            'https://www.e-sbirka.cz/sb/2025/323',
+            self::RETRIEVED_ON,
+        );
+    }
+
+    private static function jmhzGovernmentRegulation(): RulesetSource
+    {
+        return new RulesetSource(
+            'e-sbirka-jmhz-regulation-2025',
+            'e-Sbírka: nařízení vlády č. 417/2025 Sb., o náležitostech jednotného měsíčního hlášení zaměstnavatele',
+            'https://www.e-sbirka.cz/sb/2025/417',
             self::RETRIEVED_ON,
         );
     }

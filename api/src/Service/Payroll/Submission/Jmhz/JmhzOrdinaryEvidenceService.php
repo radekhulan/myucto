@@ -23,6 +23,7 @@ final readonly class JmhzOrdinaryEvidenceService
         private SecretEncryption $encryption,
         private ClockInterface $clock,
         private ActivityLogger $logger,
+        private JmhzOrdinaryEvidenceApplicability $applicability,
     ) {}
 
     /**
@@ -43,23 +44,47 @@ final readonly class JmhzOrdinaryEvidenceService
                     'Zdrojová revize nebyla nalezena.',
                 );
             }
+            $revision = $source['revision'] ?? null;
+            if (!is_array($revision) || array_is_list($revision)) {
+                throw new \UnexpectedValueException('Zdrojová revize ordinary evidence není objekt.');
+            }
             $evidences = [];
             $confirmed = [];
             foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
-                $evidence = $this->publicResult($stored, $this->verifyStored($stored), false);
+                $payload = $this->verifyStored($stored);
+                $evidence = $this->publicResult($stored, $payload, false);
                 $evidences[] = $evidence;
-                $confirmed[(int) $stored['employment_id']] = $evidence;
+                $confirmed[(int) $stored['employment_id']] = $this->preparationSource($stored, $payload);
             }
             $scopes = [];
             foreach ($this->frozenScopes($source) as $scope) {
+                $term = $scope['term'];
+                unset($scope['term']);
                 $stored = $confirmed[$scope['employment_id']] ?? null;
                 if (is_array($stored)) {
-                    $scopes[] = $scope + [
-                        'confirmed' => true,
-                        'resolution' => 'confirmed',
-                        'attention_code' => null,
-                        'attention_message' => null,
-                    ];
+                    try {
+                        $this->applicability->assertApplicable(
+                            $stored,
+                            $supplierId,
+                            $revision,
+                            $scope['employee_id'],
+                            $scope['employment_id'],
+                            $term,
+                        );
+                        $scopes[] = $scope + [
+                            'confirmed' => true,
+                            'resolution' => 'confirmed',
+                            'attention_code' => null,
+                            'attention_message' => null,
+                        ];
+                    } catch (JmhzOrdinaryEvidenceApplicabilityException $exception) {
+                        $scopes[] = $scope + [
+                            'confirmed' => false,
+                            'resolution' => 'attention_required',
+                            'attention_code' => $exception->validationCode,
+                            'attention_message' => $exception->getMessage(),
+                        ];
+                    }
                     continue;
                 }
                 try {
@@ -95,7 +120,7 @@ final readonly class JmhzOrdinaryEvidenceService
      * Pracovní vztahy zmrazené v revizi — rozsah, za který se evidence potvrzuje.
      *
      * @param array<string,mixed> $source
-     * @return list<array{employee_id:int,employment_id:int,employee_name:string}>
+     * @return list<array{employee_id:int,employment_id:int,employee_name:string,term:array<string,mixed>}>
      */
     private function frozenScopes(array $source): array
     {
@@ -127,6 +152,7 @@ final readonly class JmhzOrdinaryEvidenceService
             }
             foreach ($employments as $entry) {
                 $employment = is_array($entry) ? ($entry['employment'] ?? null) : null;
+                $term = is_array($entry) ? ($entry['term'] ?? null) : null;
                 $employmentId = is_array($employment) && is_int($employment['id'] ?? null)
                     ? $employment['id']
                     : 0;
@@ -137,6 +163,7 @@ final readonly class JmhzOrdinaryEvidenceService
                     'employee_id' => $employeeId,
                     'employment_id' => $employmentId,
                     'employee_name' => $name,
+                    'term' => is_array($term) && !array_is_list($term) ? $term : [],
                 ];
             }
         }
@@ -345,7 +372,10 @@ final readonly class JmhzOrdinaryEvidenceService
      * Klíčem je `employment_id` a mapa je seřazená, aby z ní příprava stavěla
      * deterministický (a tedy stabilně otisknutelný) snapshot.
      *
-     * @return array<int,array<string,mixed>>
+     * @return array{
+     *   sources:array<int,array<string,mixed>>,
+     *   issues:list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}>
+     * }
      */
     public function snapshotsForPreparation(
         int $supplierId,
@@ -356,7 +386,9 @@ final readonly class JmhzOrdinaryEvidenceService
         if ($confirmedBy !== null) {
             $state = $this->evidence($supplierId, $revisionId);
             foreach ($state['scopes'] as $scope) {
-                if (($scope['confirmed'] ?? false) === true) {
+                if (($scope['confirmed'] ?? false) === true
+                    || ($scope['resolution'] ?? null) !== 'automatic_on_preparation'
+                ) {
                     continue;
                 }
                 $employmentId = (int) ($scope['employment_id'] ?? 0);
@@ -377,6 +409,7 @@ final readonly class JmhzOrdinaryEvidenceService
                     );
                 } catch (JmhzOrdinaryEvidenceException $exception) {
                     if (!in_array($exception->validationCode, [
+                        'jmhz_ordinary_evidence_scenario_unsupported',
                         'jmhz_ordinary_evidence_profile_missing',
                         'jmhz_ordinary_evidence_profile_incomplete',
                         'jmhz_ordinary_evidence_monthly_exception_required',
@@ -387,19 +420,51 @@ final readonly class JmhzOrdinaryEvidenceService
                 }
             }
         }
+        $state = $this->evidence($supplierId, $revisionId);
+        $attention = [];
+        foreach ($state['scopes'] as $scope) {
+            if (($scope['resolution'] ?? null) !== 'attention_required') {
+                continue;
+            }
+            $code = $scope['attention_code'] ?? null;
+            $employmentId = $scope['employment_id'] ?? null;
+            if (is_string($code) && is_int($employmentId) && $employmentId > 0) {
+                $attention[$employmentId] = [
+                    'code' => $code,
+                    'entity_type' => 'employment',
+                    'entity_id' => $employmentId,
+                    'attribute_ids' => ['10116', '10546'],
+                ];
+            }
+        }
         $sources = [];
         foreach ($this->repository->findAllByRevision($supplierId, $revisionId) as $stored) {
-            $sources[(int) $stored['employment_id']] = [
-                'id' => $stored['id'],
-                'employee_id' => $stored['employee_id'],
-                'employment_id' => $stored['employment_id'],
-                'source_manifest_sha256' => $stored['source_manifest_sha256'],
-                'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
-                'payload' => $this->verifyStored($stored),
-            ];
+            $employmentId = (int) $stored['employment_id'];
+            if (isset($attention[$employmentId])) {
+                continue;
+            }
+            $sources[$employmentId] = $this->preparationSource($stored, $this->verifyStored($stored));
         }
         ksort($sources, SORT_NUMERIC);
-        return $sources;
+        ksort($attention, SORT_NUMERIC);
+        return ['sources' => $sources, 'issues' => array_values($attention)];
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private function preparationSource(array $stored, array $payload): array
+    {
+        return [
+            'id' => $stored['id'],
+            'employee_id' => $stored['employee_id'],
+            'employment_id' => $stored['employment_id'],
+            'source_manifest_sha256' => $stored['source_manifest_sha256'],
+            'snapshot_fingerprint' => $stored['snapshot_fingerprint'],
+            'payload' => $payload,
+        ];
     }
 
     /** @return array<string,false> */

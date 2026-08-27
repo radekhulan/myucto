@@ -39,6 +39,9 @@ use Psr\Clock\ClockInterface;
  */
 final readonly class HealthInsuranceSubmissionService
 {
+    /** Namespaced immutable metadata of the one PPZ artifact selected for ISDS. */
+    public const ISDS_ATTACHMENT_CATALOG_VERSION_PREFIX =
+        'health-isds-attachment.v1:';
     public const AGENDA_BULK_NOTIFICATION = HealthInsuranceSchemaCatalog::HOZ;
     public const AGENDA_PAYMENT_OVERVIEW = HealthInsuranceSchemaCatalog::PPZ;
 
@@ -497,6 +500,41 @@ final readonly class HealthInsuranceSubmissionService
         $xml = $documents['xml'];
         $pdf = $documents['pdf'];
         $channel = $documents['channel'];
+        $isdsAttachmentFormat = HealthInsurerIsdsAttachmentFormat::tryFrom(
+            (string) ($channel['isds_attachment_format'] ?? ''),
+        );
+        if ($isdsAttachmentFormat === null
+            || $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::None
+        ) {
+            throw new HealthNotificationException(
+                'zp_isds_attachment_undocumented',
+                'Pro tuto zdravotní pojišťovnu není k dnešnímu dni doložený formát přílohy datové zprávy.',
+            );
+        }
+        $isdsAttachmentCatalogVersion = self::isdsAttachmentCatalogVersion(
+            $isdsAttachmentFormat,
+        );
+        $regularDocuments = null;
+        if ($overview->revisionKind === 'correction') {
+            $regularPayload = $this->payload(
+                $supplierId,
+                $overview,
+                'regular',
+            );
+            $regularDocuments = [
+                'payload' => $regularPayload,
+                'xml' => $this->serializer->serializePaymentOverview(
+                    $regularPayload,
+                ),
+                'pdf' => $this->pdfRenderer->renderPayload(
+                    $regularPayload,
+                    is_string($channel['insurer_name'] ?? null)
+                        ? $channel['insurer_name']
+                        : null,
+                    $this->today(),
+                ),
+            ];
+        }
         $window = $this->deadlines->forPaymentOverview($overview->period);
         $submissionKind = $overview->revisionKind;
         $subjectReference =
@@ -522,6 +560,9 @@ final readonly class HealthInsuranceSubmissionService
             $periodStart,
             $periodEnd,
             $channel,
+            $isdsAttachmentFormat,
+            $isdsAttachmentCatalogVersion,
+            $regularDocuments,
             $createdBy,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
@@ -541,16 +582,21 @@ final readonly class HealthInsuranceSubmissionService
                         $sourceEventReference,
                     );
                 if ($existingSource !== null) {
-                    if ($existingSource['submission_kind'] !== 'correction'
-                        || $existingSource['corrects_submission_id'] === null
+                    if ($existingSource['submission_kind'] === 'regular'
+                        && $existingSource['corrects_submission_id'] === null
                     ) {
+                        $submissionKind = 'regular';
+                    } elseif ($existingSource['submission_kind'] === 'correction'
+                        && $existingSource['corrects_submission_id'] !== null
+                    ) {
+                        $correctsSubmissionId =
+                            $existingSource['corrects_submission_id'];
+                    } else {
                         throw new HealthNotificationException(
                             'zp_correction_source_conflict',
                             'Zdroj opravného přehledu už patří jinému druhu podání.',
                         );
                     }
-                    $correctsSubmissionId =
-                        $existingSource['corrects_submission_id'];
                 } else {
                     $predecessor = $this->submissionRepository
                         ->latestSubmissionForScopeForUpdate(
@@ -564,15 +610,25 @@ final readonly class HealthInsuranceSubmissionService
                             PayrollAgendaCorrectionPolicy::correctableStatuses(
                                 self::AGENDA_PAYMENT_OVERVIEW,
                             ),
-                        );
+                    );
                     if ($predecessor === null) {
-                        throw new HealthNotificationException(
-                            'zp_correction_predecessor_missing',
-                            'Opravný přehled nemá rozhodnuté předchozí podání stejné pojišťovny a období.',
-                        );
+                        $submissionKind = 'regular';
+                    } else {
+                        $correctsSubmissionId = $predecessor['id'];
                     }
-                    $correctsSubmissionId = $predecessor['id'];
                 }
+            }
+            if ($submissionKind === 'regular'
+                && $overview->revisionKind === 'correction'
+            ) {
+                if ($regularDocuments === null) {
+                    throw new \LogicException(
+                        'Chybí řádná varianta přehledu z opravné mzdové revize.',
+                    );
+                }
+                $payload = $regularDocuments['payload'];
+                $xml = $regularDocuments['xml'];
+                $pdf = $regularDocuments['pdf'];
             }
             $sourceHash = hash('sha256', CanonicalJson::encode([
                 'schema_reference' =>
@@ -586,6 +642,7 @@ final readonly class HealthInsuranceSubmissionService
                 'pdf_template_reference' =>
                     $this->pdfRenderer->templateReference($insurerCode),
                 'isds_attachment_rules' => $channel['isds_attachment_rules'],
+                'isds_attachment_format' => $isdsAttachmentFormat->value,
             ]));
             $obligation = $this->obligations->register(
                 $supplierId,
@@ -705,7 +762,9 @@ final readonly class HealthInsuranceSubmissionService
                 'application/xml',
                 $xml,
                 HealthInsuranceSchemaCatalog::XSD_VERSION,
-                null,
+                $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::Xml
+                    ? $isdsAttachmentCatalogVersion
+                    : null,
                 self::CHANNEL,
                 $keys['xml_artifact'],
                 $createdBy,
@@ -730,7 +789,9 @@ final readonly class HealthInsuranceSubmissionService
                 'application/pdf',
                 $pdf,
                 null,
-                null,
+                $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::TextPdf
+                    ? $isdsAttachmentCatalogVersion
+                    : null,
                 self::CHANNEL,
                 $keys['pdf_artifact'],
                 $createdBy,
@@ -1325,6 +1386,7 @@ final readonly class HealthInsuranceSubmissionService
     private function payload(
         int $supplierId,
         HealthPaymentOverview $overview,
+        ?string $submissionKind = null,
     ): HealthPaymentOverviewPayload {
         $employer = $this->requireEmployer(
             $supplierId,
@@ -1343,7 +1405,7 @@ final readonly class HealthInsuranceSubmissionService
 
         return new HealthPaymentOverviewPayload(
             insurerCode: $overview->insurerCode,
-            overviewKind: $overview->revisionKind === 'correction'
+            overviewKind: ($submissionKind ?? $overview->revisionKind) === 'correction'
                 ? HealthPaymentOverviewPayload::KIND_CORRECTIVE
                 : HealthPaymentOverviewPayload::KIND_REGULAR,
             employer: $employer,
@@ -1506,6 +1568,20 @@ final readonly class HealthInsuranceSubmissionService
             'xml_artifact' => 'health-overview-xml-artifact:' . $fingerprint,
             'pdf_artifact' => 'health-overview-pdf-artifact:' . $fingerprint,
         ];
+    }
+
+    public static function isdsAttachmentCatalogVersion(
+        HealthInsurerIsdsAttachmentFormat $format,
+    ): string
+    {
+        return match ($format) {
+            HealthInsurerIsdsAttachmentFormat::Xml,
+            HealthInsurerIsdsAttachmentFormat::TextPdf =>
+                self::ISDS_ATTACHMENT_CATALOG_VERSION_PREFIX . $format->value,
+            HealthInsurerIsdsAttachmentFormat::None => throw new \InvalidArgumentException(
+                'Nedoložený formát přílohy ISDS nelze zmrazit.',
+            ),
+        };
     }
 
     private function today(): string

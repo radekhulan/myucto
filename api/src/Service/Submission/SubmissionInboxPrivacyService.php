@@ -126,7 +126,9 @@ final readonly class SubmissionInboxPrivacyService
                         }
                         $survivors = $this->documents->hardDeleteTrashedByIds(
                             $supplierId,
-                            DocumentViewerContext::admin($userId),
+                            DocumentViewerContext::internalInboxPrivacyPurge(
+                                $userId,
+                            ),
                             $documentIds,
                         );
                         if ($survivors !== []) {

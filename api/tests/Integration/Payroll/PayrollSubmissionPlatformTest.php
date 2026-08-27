@@ -876,6 +876,61 @@ final class PayrollSubmissionPlatformTest extends TestCase
         self::assertSame('rejected', $late['submission_status']);
     }
 
+    public function testTrustedReceiptCanFinishAfterClosedYearIsReopened(): void
+    {
+        $submitted = $this->submittedSubmission('closed-year-receipt');
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_year_closures
+                (supplier_id, calendar_year, status, row_version, closed_at)
+             VALUES (?, 2026, 'closed', 1, NOW())",
+        )->execute([$this->supplierId]);
+        $bytes = '<receipt status="accepted"/>';
+        $first = $this->submissions->importReceipt(
+            $this->supplierId,
+            $submitted['id'],
+            $submitted['row_version'],
+            null,
+            $bytes,
+            'receipt:closed-year',
+            'synthetic-correlation-closed-year-receipt',
+            'REMOTE',
+            'accepted',
+            'manual_upload',
+            'receipt-closed-year',
+            null,
+            $this->trustedVerifier('accepted'),
+        );
+        self::assertTrue($first['created']);
+        self::assertSame('submitted', $first['submission_status']);
+        self::assertTrue($first['year_close_reopen_required']);
+
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_year_closures
+                SET status = 'open', row_version = row_version + 1,
+                    closed_at = NULL, reopened_at = NOW()
+              WHERE supplier_id = ? AND calendar_year = 2026",
+        )->execute([$this->supplierId]);
+        $replayed = $this->submissions->importReceipt(
+            $this->supplierId,
+            $submitted['id'],
+            $first['submission_row_version'],
+            null,
+            $bytes,
+            'receipt:closed-year',
+            'synthetic-correlation-closed-year-receipt',
+            'REMOTE',
+            'accepted',
+            'manual_upload',
+            'receipt-closed-year',
+            null,
+            $this->trustedVerifier('accepted'),
+        );
+
+        self::assertFalse($replayed['created']);
+        self::assertSame('accepted', $replayed['submission_status']);
+        self::assertFalse($replayed['year_close_reopen_required']);
+    }
+
     public function testTrustedReceiptUpdatesOnlyVerifiedPartMonotonically(): void
     {
         $submission = $this->preparedSubmission();

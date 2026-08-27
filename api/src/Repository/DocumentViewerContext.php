@@ -25,6 +25,10 @@ final readonly class DocumentViewerContext
         public bool $canViewPayrollEnforcementEvidence,
         public bool $canViewPayrollInsolvencyEvidence,
         public bool $canViewPayrollSubmissionEvidence,
+        public bool $canViewPayrollForeignPermitEvidence,
+        public bool $canViewPayrollHealthEvidence,
+        public bool $canViewPayrollDocuments,
+        public bool $canViewHiddenSubmissionInboxDocuments,
     ) {}
 
     /** Admin tenanta — vidí vše (i user-scoped cizích uživatelů). */
@@ -33,6 +37,9 @@ final readonly class DocumentViewerContext
         bool $canViewPayrollEnforcementEvidence = false,
         bool $canViewPayrollInsolvencyEvidence = false,
         bool $canViewPayrollSubmissionEvidence = false,
+        bool $canViewPayrollForeignPermitEvidence = false,
+        bool $canViewPayrollHealthEvidence = false,
+        bool $canViewPayrollDocuments = false,
     ): self
     {
         return new self(
@@ -41,6 +48,10 @@ final readonly class DocumentViewerContext
             $canViewPayrollEnforcementEvidence,
             $canViewPayrollInsolvencyEvidence,
             $canViewPayrollSubmissionEvidence,
+            $canViewPayrollForeignPermitEvidence,
+            $canViewPayrollHealthEvidence,
+            $canViewPayrollDocuments,
+            false,
         );
     }
 
@@ -50,6 +61,9 @@ final readonly class DocumentViewerContext
         bool $canViewPayrollEnforcementEvidence = false,
         bool $canViewPayrollInsolvencyEvidence = false,
         bool $canViewPayrollSubmissionEvidence = false,
+        bool $canViewPayrollForeignPermitEvidence = false,
+        bool $canViewPayrollHealthEvidence = false,
+        bool $canViewPayrollDocuments = false,
     ): self
     {
         return new self(
@@ -58,19 +72,35 @@ final readonly class DocumentViewerContext
             $canViewPayrollEnforcementEvidence,
             $canViewPayrollInsolvencyEvidence,
             $canViewPayrollSubmissionEvidence,
+            $canViewPayrollForeignPermitEvidence,
+            $canViewPayrollHealthEvidence,
+            $canViewPayrollDocuments,
+            false,
         );
     }
 
     /** Non-admin bez identity — fail-closed (jen company doklady). */
     public static function companyOnly(): self
     {
-        return new self(null, false, false, false, false);
+        return new self(null, false, false, false, false, false, false, false, false);
     }
 
     /** Důvěryhodný serverový tok ověřující firemní referenci, nikdy HTTP viewer. */
     public static function internalCompany(): self
     {
-        return new self(null, false, true, true, true);
+        return new self(null, false, true, true, true, true, true, true, false);
+    }
+
+    /** Důvěryhodný serverový tok pro vazbu firemního podkladu pobytu/práce. */
+    public static function internalCompanyForeignPermit(): self
+    {
+        return new self(null, false, false, false, false, true, false, false, false);
+    }
+
+    /** Důvěryhodný přesně cílený tok fyzického odstranění skryté ISDS zprávy. */
+    public static function internalInboxPrivacyPurge(?int $userId): self
+    {
+        return new self($userId, true, true, true, true, true, true, true, true);
     }
 
     public static function fromAuthorization(
@@ -79,6 +109,9 @@ final readonly class DocumentViewerContext
         bool $canViewPayrollEnforcementEvidence = false,
         bool $canViewPayrollInsolvencyEvidence = false,
         bool $canViewPayrollSubmissionEvidence = false,
+        bool $canViewPayrollForeignPermitEvidence = false,
+        bool $canViewPayrollHealthEvidence = false,
+        bool $canViewPayrollDocuments = false,
     ): self
     {
         return $isSuperadmin
@@ -87,12 +120,18 @@ final readonly class DocumentViewerContext
                 $canViewPayrollEnforcementEvidence,
                 $canViewPayrollInsolvencyEvidence,
                 $canViewPayrollSubmissionEvidence,
+                $canViewPayrollForeignPermitEvidence,
+                $canViewPayrollHealthEvidence,
+                $canViewPayrollDocuments,
             )
             : self::forUser(
                 $userId,
                 $canViewPayrollEnforcementEvidence,
                 $canViewPayrollInsolvencyEvidence,
                 $canViewPayrollSubmissionEvidence,
+                $canViewPayrollForeignPermitEvidence,
+                $canViewPayrollHealthEvidence,
+                $canViewPayrollDocuments,
             );
     }
 
@@ -102,7 +141,7 @@ final readonly class DocumentViewerContext
         return self::fromAuthorization($role === 'admin', $userId);
     }
 
-    /** @return array{viewer_is_admin:bool,viewer_can_view_payroll_enforcement_evidence:bool,viewer_can_view_payroll_insolvency_evidence:bool,viewer_can_view_payroll_submission_evidence:bool} */
+    /** @return array{viewer_is_admin:bool,viewer_can_view_payroll_enforcement_evidence:bool,viewer_can_view_payroll_insolvency_evidence:bool,viewer_can_view_payroll_submission_evidence:bool,viewer_can_view_payroll_foreign_permit_evidence:bool,viewer_can_view_payroll_health_evidence:bool,viewer_can_view_payroll_documents:bool} */
     public function toJobParams(): array
     {
         return [
@@ -110,6 +149,9 @@ final readonly class DocumentViewerContext
             'viewer_can_view_payroll_enforcement_evidence' => $this->canViewPayrollEnforcementEvidence,
             'viewer_can_view_payroll_insolvency_evidence' => $this->canViewPayrollInsolvencyEvidence,
             'viewer_can_view_payroll_submission_evidence' => $this->canViewPayrollSubmissionEvidence,
+            'viewer_can_view_payroll_foreign_permit_evidence' => $this->canViewPayrollForeignPermitEvidence,
+            'viewer_can_view_payroll_health_evidence' => $this->canViewPayrollHealthEvidence,
+            'viewer_can_view_payroll_documents' => $this->canViewPayrollDocuments,
         ];
     }
 
@@ -122,6 +164,9 @@ final readonly class DocumentViewerContext
             (bool) ($params['viewer_can_view_payroll_enforcement_evidence'] ?? false),
             (bool) ($params['viewer_can_view_payroll_insolvency_evidence'] ?? false),
             (bool) ($params['viewer_can_view_payroll_submission_evidence'] ?? false),
+            (bool) ($params['viewer_can_view_payroll_foreign_permit_evidence'] ?? false),
+            (bool) ($params['viewer_can_view_payroll_health_evidence'] ?? false),
+            (bool) ($params['viewer_can_view_payroll_documents'] ?? false),
         );
     }
 }

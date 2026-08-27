@@ -140,7 +140,7 @@ final class Bootstrap
                 ),
             \MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class =>
                 fn (ContainerInterface $c) => $c->get(
-                    \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor::class,
+                    \MyInvoice\Service\Submission\CompositeSubmissionInboxMessageProcessor::class,
                 ),
             \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPdfTemplateProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
@@ -247,8 +247,10 @@ final class Bootstrap
             // zdrojového XLSX, což je na každý požadavek zbytečně drahé —
             // kontejner ho proto drží jako singleton.
             \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::class =>
-                static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
-                    => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(),
+                static fn (ContainerInterface $c): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
+                    => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(
+                        $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                    ),
             // Volitelný class-parametr PHP-DI neautowiruje — bez tohohle bindu
             // by se doplatek z ročního zúčtování do mzdového běhu nikdy
             // nedostal a přeplatek by se zaměstnanci nevrátil.

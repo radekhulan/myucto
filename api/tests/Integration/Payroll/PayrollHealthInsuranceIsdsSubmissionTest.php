@@ -44,6 +44,7 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
     private SubmissionOutboxService $outbox;
     private HealthInsuranceIsdsSubmissionService $isds;
     private IsdsGatewayAction $gatewayAction;
+    private MockClock $clock;
     private int $supplierId;
     private int $userId;
 
@@ -69,20 +70,19 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         self::assertGreaterThan(0, $this->userId);
 
         $repository = new PayrollSubmissionRepository($connection);
-        $clock = new MockClock('2026-08-25 12:00:00 Europe/Prague');
-        $this->obligations = new PayrollObligationService($repository, $clock);
+        $this->clock = new MockClock('2026-08-25 12:00:00 Europe/Prague');
+        $this->obligations = new PayrollObligationService($repository, $this->clock);
         $this->submissions = new PayrollSubmissionService(
             $repository,
             new PayrollSubmissionStateMachine(),
             $encryption,
-            $clock,
+            $this->clock,
         );
         $this->isds = new HealthInsuranceIsdsSubmissionService(
             $repository,
             new SubmissionRecipientRepository($connection),
             $outbox,
             new HealthInsurerChannelCatalog(),
-            $clock,
         );
         $this->gatewayAction = $container->get(IsdsGatewayAction::class);
     }
@@ -357,6 +357,51 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         self::assertSame(hash('sha256', self::PDF), $result['attachment']['sha256']);
     }
 
+    public function testRbpUsesTheFrozenXmlAttachment(): void
+    {
+        $result = $this->isds->enqueue(
+            $this->supplierId,
+            $this->readySubmission('rbp-xml', '213'),
+            '213',
+            null,
+        );
+
+        self::assertSame('edyadmh', $result['recipient']['box_id']);
+        self::assertSame('application/xml', $result['attachment']['mime']);
+        self::assertSame('xml', $result['attachment']['format']);
+    }
+
+    public function testEnqueueKeepsTheFormatFrozenWhenTheCalendarMoves(): void
+    {
+        $submissionId = $this->readySubmission('frozen-vzp-pdf', '111');
+        $this->clock->modify('+130 days');
+
+        $result = $this->isds->enqueue(
+            $this->supplierId,
+            $submissionId,
+            '111',
+            null,
+        );
+
+        self::assertSame('application/pdf', $result['attachment']['mime']);
+        self::assertSame('text_pdf', $result['attachment']['format']);
+    }
+
+    public function testLegacyUnfrozenAttachmentFailsClosed(): void
+    {
+        $submissionId = $this->readySubmission('legacy-unfrozen', '205', false);
+
+        try {
+            $this->isds->enqueue($this->supplierId, $submissionId, '205', null);
+            self::fail('Staré podání bez zmrazeného formátu se nesmí odhadovat.');
+        } catch (SubmissionChannelException $exception) {
+            self::assertSame(
+                'health_submission_attachment_unfrozen',
+                $exception->errorCode,
+            );
+        }
+    }
+
     public function testRecipientDatabaseIsTheSingleRuntimeSourceOfTruth(): void
     {
         $submissionId = $this->readySubmission('e');
@@ -399,7 +444,11 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         }
     }
 
-    private function readySubmission(string $key, string $insurer = self::INSURER): int
+    private function readySubmission(
+        string $key,
+        string $insurer = self::INSURER,
+        bool $freezeAttachment = true,
+    ): int
     {
         $obligation = $this->obligations->register(
             $this->supplierId,
@@ -440,7 +489,10 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
             'application/xml',
             self::XML,
             '2026.1',
-            null,
+            $freezeAttachment
+                && ($insurer === '205' || $insurer === '207' || $insurer === '213')
+                ? 'health-isds-attachment.v1:xml'
+                : null,
             'health_portal',
             'health-isds-artifact:' . $key . ':' . $insurer,
         );
@@ -454,7 +506,10 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
             'application/pdf',
             self::PDF,
             null,
-            null,
+            $freezeAttachment
+                && in_array($insurer, ['111', '201', '209', '211'], true)
+                ? 'health-isds-attachment.v1:text_pdf'
+                : null,
             'health_portal',
             'health-isds-pdf-artifact:' . $key . ':' . $insurer,
         );

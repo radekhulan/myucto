@@ -10,7 +10,11 @@ final class PayrollEmploymentJmhzActivityFamily
 
     public static function appliesTo(string $relationType): bool
     {
-        return in_array($relationType, ['employment', 'small_scale_employment', 'dpc', 'dpp'], true);
+        return in_array(
+            $relationType,
+            ['employment', 'small_scale_employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'],
+            true,
+        );
     }
 
     public static function matches(
@@ -22,8 +26,10 @@ final class PayrollEmploymentJmhzActivityFamily
             'employment', 'small_scale_employment' => preg_match('/^[1-9]$/D', $activityCode) === 1
                 && $relationshipDetailCode === '1',
             'dpc' => preg_match('/^[A-J]$/D', $activityCode) === 1
-                && $relationshipDetailCode === '1',
+                && $relationshipDetailCode === null,
             'dpp' => in_array($activityCode, self::DPP_ACTIVITY_CODES, true)
+                && $relationshipDetailCode === null,
+            'partner_dependent', 'statutory_body' => $activityCode === 'S'
                 && $relationshipDetailCode === '1',
             default => false,
         };

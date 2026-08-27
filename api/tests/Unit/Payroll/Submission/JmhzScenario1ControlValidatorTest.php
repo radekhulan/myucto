@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlEvaluationReport;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlFinding;
@@ -287,6 +289,7 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         // jen odvození z přítomnosti atributů.
         $evaluator = new JmhzScenario1ControlEvaluator(
             JmhzControlSourceCatalog::load()->parameters(),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
         $notApplicable = array_values(array_filter(
             $report->findings,
@@ -331,7 +334,10 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
     {
         $catalog = JmhzControlSourceCatalog::load();
         $parameters = $catalog->parameters();
-        $evaluator = new JmhzScenario1ControlEvaluator($parameters);
+        $evaluator = new JmhzScenario1ControlEvaluator(
+            $parameters,
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+        );
         $declared = $evaluator->declaredParameterKeys();
 
         $unenforced = $evaluator->unenforcedParameterKeys();
@@ -361,6 +367,7 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         );
         $evaluator = new JmhzScenario1ControlEvaluator(
             JmhzControlSourceCatalog::load()->parameters(),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
 
         foreach ($evaluator->declaredParameterKeys() as $controlId => $keys) {
@@ -1147,7 +1154,9 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         string $xml,
         ?JmhzControlContext $context = null,
     ): JmhzControlEvaluationReport {
-        return JmhzScenario1ControlValidator::create()->validate(
+        return JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate(
             $xml,
             $context ?? new JmhzControlContext('2026-08-14'),
         );

@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
@@ -88,6 +89,10 @@ final class PayrollRunSnapshotBuilder
         $statutoryPeriod = ($this->periods ?? new PayrollStatutoryPeriodResolver())
             ->resolve($periodStart, $paymentDate);
         $manifest = $this->rulesets->canonicalManifest();
+        $riskySavingsRules = PayrollRiskySavingsRules::fromProvider(
+            $this->rulesets,
+            $periodStart,
+        );
         $manifestJson = CanonicalJson::encode(['rulesets' => $manifest]);
         $employerPolicy = $this->employerPolicySnapshot(
             $supplierId,
@@ -508,6 +513,7 @@ final class PayrollRunSnapshotBuilder
             'period_end' => $periodEnd,
             'payment_date' => $paymentDate,
             'statutory_period' => $statutoryPeriod->toSnapshot(),
+            'risky_savings_ruleset' => $riskySavingsRules->toSnapshot(),
             'employer_policy' => $employerPolicy,
             'employer' => $employer,
             'office_id' => $officeId,

@@ -6,15 +6,20 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use PDO;
 
 final class PayrollAbsenceRepository
 {
+    private readonly PayrollYearCloseGuard $yearClose;
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRulesetProvider $rulesets,
-    ) {}
+    ) {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /** @return list<array<string,mixed>> */
     public function employments(int $supplierId): array
@@ -116,6 +121,11 @@ final class PayrollAbsenceRepository
             $pdo->beginTransaction();
         }
         try {
+            $this->yearClose->assertOpenForDateRange(
+                $supplierId,
+                (string) $data['date_from'],
+                (string) $data['date_to'],
+            );
             $this->lockEmployment($supplierId, (int) $data['employment_id']);
             $overlap = $pdo->prepare(
                 "SELECT id
@@ -194,16 +204,40 @@ final class PayrollAbsenceRepository
         if (!in_array($decision, ['approved', 'rejected'], true)) {
             throw new \InvalidArgumentException('Rozhodnutí absence není platné.');
         }
-        $stmt = $this->db->pdo()->prepare(
-            "UPDATE payroll_absences
-                SET status = ?, decided_by = ?, decided_at = NOW(),
-                    row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ? AND row_version = ? AND status = 'requested'"
-        );
-        $stmt->execute([$decision, $userId, $supplierId, $id, $expectedVersion]);
-        if ($stmt->rowCount() !== 1) {
-            $this->throwConflictOrInvalid($supplierId, $id, $expectedVersion);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
         }
+        try {
+            $absence = $this->find($supplierId, $id);
+            if ($absence !== null) {
+                $this->yearClose->assertOpenForDateRange(
+                    $supplierId,
+                    (string) $absence['date_from'],
+                    (string) $absence['date_to'],
+                );
+            }
+            $stmt = $pdo->prepare(
+                "UPDATE payroll_absences
+                    SET status = ?, decided_by = ?, decided_at = NOW(),
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ? AND status = 'requested'"
+            );
+            $stmt->execute([$decision, $userId, $supplierId, $id, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) {
+                $this->throwConflictOrInvalid($supplierId, $id, $expectedVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
         return $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Rozhodnutá absence nebyla nalezena.');
     }
@@ -215,18 +249,42 @@ final class PayrollAbsenceRepository
         int $expectedVersion,
         ?int $userId,
     ): array {
-        $stmt = $this->db->pdo()->prepare(
-            "UPDATE payroll_absences
-                SET correction_pending = IF(status = 'approved', 1, correction_pending),
-                    status = 'cancelled',
-                    decided_by = ?, decided_at = NOW(), row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ? AND row_version = ?
-                AND status IN ('requested','approved')"
-        );
-        $stmt->execute([$userId, $supplierId, $id, $expectedVersion]);
-        if ($stmt->rowCount() !== 1) {
-            $this->throwConflictOrInvalid($supplierId, $id, $expectedVersion);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
         }
+        try {
+            $absence = $this->find($supplierId, $id);
+            if ($absence !== null) {
+                $this->yearClose->assertOpenForDateRange(
+                    $supplierId,
+                    (string) $absence['date_from'],
+                    (string) $absence['date_to'],
+                );
+            }
+            $stmt = $pdo->prepare(
+                "UPDATE payroll_absences
+                    SET correction_pending = IF(status = 'approved', 1, correction_pending),
+                        status = 'cancelled',
+                        decided_by = ?, decided_at = NOW(), row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND status IN ('requested','approved')"
+            );
+            $stmt->execute([$userId, $supplierId, $id, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) {
+                $this->throwConflictOrInvalid($supplierId, $id, $expectedVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
         return $this->find($supplierId, $id)
             ?? throw new \RuntimeException('Zrušená absence nebyla nalezena.');
     }

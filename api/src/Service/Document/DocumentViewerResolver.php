@@ -38,6 +38,27 @@ final class DocumentViewerResolver
                 'payroll.submissions',
                 AccessLevel::READ,
             );
+        $canViewPayrollForeignPermitEvidence =
+            $isSession
+            && RequestAuthorization::allows(
+                $request,
+                'payroll',
+                AccessLevel::READ,
+            );
+        $canViewPayrollHealthEvidence =
+            $isSession
+            && RequestAuthorization::allows(
+                $request,
+                'payroll.health_evidence',
+                AccessLevel::READ,
+            );
+        $canViewPayrollDocuments =
+            $isSession
+            && RequestAuthorization::allows(
+                $request,
+                'payroll.documents',
+                AccessLevel::READ,
+            );
 
         return DocumentViewerContext::fromAuthorization(
             RequestAuthorization::isSuperadmin($request),
@@ -45,6 +66,9 @@ final class DocumentViewerResolver
             $canViewPayrollEnforcementEvidence,
             $canViewPayrollInsolvencyEvidence,
             $canViewPayrollSubmissionEvidence,
+            $canViewPayrollForeignPermitEvidence,
+            $canViewPayrollHealthEvidence,
+            $canViewPayrollDocuments,
         );
     }
 

@@ -318,6 +318,24 @@ describe('PayrollComponents', () => {
     expect(m.riskySavings).toHaveBeenCalledWith('2026-08')
   })
 
+  it('uses at most three backend requests while mounting the default inputs tab', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const requestCount = [
+      m.components,
+      m.recurringComponents,
+      m.inputs,
+      m.absenceContext,
+      m.accountOptions,
+      m.componentJmhzTargets,
+      m.componentJmhzMappings,
+    ].reduce((total, request) => total + request.mock.calls.length, 0)
+
+    expect(requestCount).toBeLessThanOrEqual(3)
+    wrapper.unmount()
+  })
+
   /**
    * Zúžení z karty zaměstnance musí jít na server u OBOU seznamů — opakovaných
    * složek i mzdových vstupů. Vstupy dřív zužoval prohlížeč nad načtenou
@@ -326,6 +344,10 @@ describe('PayrollComponents', () => {
   it('sends the narrowing to the server for both recurring components and inputs', async () => {
     m.routeQuery = { employment: '12' }
     const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.recurring')!
+      .trigger('click')
     await flushPromises()
 
     expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 0 })
@@ -549,14 +571,17 @@ describe('PayrollComponents', () => {
   it('uses searchable selectors including account suggestions in the catalogue editor', async () => {
     const wrapper = mount(PayrollComponents)
     await flushPromises()
-    expect(m.accountOptions).toHaveBeenCalledTimes(1)
+    expect(m.accountOptions).not.toHaveBeenCalled()
 
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')!
       .trigger('click')
+    await flushPromises()
+    expect(m.accountOptions).toHaveBeenCalledTimes(1)
 
     const editor = wrapper.get('[data-testid="payroll-component-editor"]')
     expect(editor.find('select').exists()).toBe(false)
@@ -650,6 +675,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.recurring')!
       .trigger('click')
+    await flushPromises()
 
     await wrapper.findAll('[data-testid="payroll-recurring-delete"]')[0].trigger('click')
     await flushPromises()
@@ -733,6 +759,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.recurring')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.recurring.add')!
       .trigger('click')
@@ -751,6 +778,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.inputs')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.inputs.add')!
       .trigger('click')

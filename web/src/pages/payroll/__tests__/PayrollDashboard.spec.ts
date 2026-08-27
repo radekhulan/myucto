@@ -62,6 +62,13 @@ function mountDashboard() {
           props: ['state', 'matrixVersion', 'productionReady'],
           template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" :data-production-ready="String(productionReady)" />',
         },
+        PayrollAnnualReportPanel: {
+          props: ['initialYear'],
+          template: '<div data-test="annual-report-panel-stub" :data-year="initialYear" />',
+        },
+        PayrollOperationalHealthPanel: {
+          template: '<div data-test="operational-health-panel-stub" />',
+        },
       },
     },
   })

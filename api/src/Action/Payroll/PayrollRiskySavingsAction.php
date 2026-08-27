@@ -13,6 +13,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -23,6 +25,7 @@ final class PayrollRiskySavingsAction
     public function __construct(
         private readonly PayrollRiskySavingsRepository $repository,
         private readonly PayrollRiskySavingsPolicy $policy,
+        private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -40,14 +43,18 @@ final class PayrollRiskySavingsAction
         }
         try {
             $period = $this->month($request->getQueryParams()['period'] ?? null);
+            $rules = $this->rules($period);
             return $this->noStore(Json::ok($response, [
                 'items' => $this->repository->listPeriod(
                     $this->currentSupplierId($request),
                     $period,
                 ),
-                'minimum_shift_eighths' =>
-                    PayrollRiskySavingsPolicy::MINIMUM_SHIFT_EIGHTHS,
-                'rate_basis_points' => PayrollRiskySavingsPolicy::RATE_BASIS_POINTS,
+                'minimum_shift_eighths' => $rules->minimumShiftEighths,
+                'rate' => $rules->rate->toCanonicalString(),
+                'rate_basis_points' => intdiv(
+                    $rules->rate->numerator * 10_000,
+                    $rules->rate->denominator,
+                ),
             ]));
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
@@ -76,6 +83,7 @@ final class PayrollRiskySavingsAction
         }
         try {
             $period = $this->month($body['period'] ?? null);
+            $rules = $this->rules($period);
             $accountId = $this->positiveInt(
                 $body['institution_account_id'] ?? null,
                 'institution_account_id',
@@ -83,7 +91,7 @@ final class PayrollRiskySavingsAction
             $paymentTarget = $this->repository->paymentTarget(
                 $this->currentSupplierId($request),
                 $accountId,
-                $this->policy->dueOn($period),
+                $this->policy->dueOn($period, $rules),
             );
             $evidence = [
                 'status' => $status,
@@ -217,6 +225,11 @@ final class PayrollRiskySavingsAction
             throw new \InvalidArgumentException('Období musí být ve formátu YYYY-MM.');
         }
         return $this->date($value . '-01', 'period');
+    }
+
+    private function rules(string $period): PayrollRiskySavingsRules
+    {
+        return PayrollRiskySavingsRules::fromProvider($this->rulesets, $period);
     }
 
     private function date(mixed $value, string $field): string

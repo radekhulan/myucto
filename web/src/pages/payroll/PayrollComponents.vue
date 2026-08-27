@@ -169,7 +169,10 @@ const focusName = computed(() => {
  */
 const focusMissing = computed(() =>
   focusEmploymentId.value !== null && !loading.value && !loadFailed.value
-  && recurringTotal.value === 0 && inputsTotal.value === 0)
+  && (
+    (activeTab.value === 'inputs' && inputsTotal.value === 0)
+    || (activeTab.value === 'recurring' && recurringTotal.value === 0)
+  ))
 const chartAccounts = ref<PayrollAccountOption[]>([])
 const componentError = ref('')
 const jmhzError = ref('')
@@ -526,45 +529,52 @@ async function loadEmploymentOptions() {
   employments.value = payrollEmploymentOptionsFromContext(await payrollAbsenceApi.context())
 }
 
+async function loadJmhzConfiguration() {
+  jmhzLoading.value = true
+  try {
+    const [targets, mappings] = await Promise.all([
+      payrollApi.componentJmhzTargets(),
+      payrollApi.componentJmhzMappings(),
+    ])
+    jmhzTargets.value = targets.targets
+    setJmhzMappings(mappings)
+  } catch (error: any) {
+    toast.error(apiErrorMessage(error, t('payroll.components.jmhz.load_failed')))
+  } finally {
+    jmhzLoading.value = false
+  }
+}
+
 async function load() {
   loading.value = true
   loadFailed.value = false
-  jmhzLoading.value = true
-  void Promise.all([
-    payrollApi.componentJmhzTargets(),
-    payrollApi.componentJmhzMappings(),
-  ]).then((jmhz) => {
-    jmhzTargets.value = jmhz[0].targets
-    setJmhzMappings(jmhz[1])
-  }).catch((error: any) => {
-    toast.error(apiErrorMessage(error, t('payroll.components.jmhz.load_failed')))
-  }).finally(() => {
-    jmhzLoading.value = false
-  })
   try {
-    const [catalog, recurringItems, periodInputs, , accounts] = await Promise.all([
-      payrollApi.components(),
-      payrollApi.recurringComponents(focusEmploymentId.value ?? undefined, {
-        limit: recurringPageSize,
-        offset: recurringOffset.value,
-      }),
-      payrollApi.inputs(
-        period.value,
-        { limit: inputsPageSize, offset: inputsOffset.value },
-        focusEmploymentId.value ?? undefined,
-      ),
-      loadEmploymentOptions(),
-      payrollApi.accountOptions(),
-    ])
-    components.value = catalog
-    recurring.value = recurringItems.recurring_components
-    recurringTotal.value = recurringItems.total
-    inputs.value = periodInputs.items
-    inputsTotal.value = periodInputs.total
-    chartAccounts.value = accounts
+    if (activeTab.value === 'catalog') {
+      // Nečekáme na volitelný katalog JMHZ: běžná správa složek musí zůstat
+      // použitelná i při dočasně nedostupném podkladu pro mapování.
+      void loadJmhzConfiguration()
+      const catalog = await payrollApi.components()
+      components.value = catalog
+    } else if (activeTab.value === 'recurring') {
+      const [catalog] = await Promise.all([
+        payrollApi.components(),
+        loadEmploymentOptions(),
+        loadRecurringPage(),
+      ])
+      components.value = catalog
+    } else if (activeTab.value === 'inputs') {
+      const [catalog] = await Promise.all([
+        payrollApi.components(),
+        loadEmploymentOptions(),
+        loadInputsPage(),
+      ])
+      components.value = catalog
+    } else if (activeTab.value === 'risky_savings') {
+      await loadEmploymentOptions()
+    }
   } catch (error: any) {
-    // Katalog, opakující se složky ani vstupy se nemažou — po výpadku sítě
-    // by prázdný katalog vypadal jako „mzdové složky nejsou nastavené".
+    // Aktivní obsah se nemaže — po výpadku sítě by prázdný stav lhal, že v
+    // právě otevřené agendě nic není.
     loadFailed.value = true
     toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
   } finally {
@@ -668,14 +678,26 @@ async function reloadPeriod() {
   }
 }
 
-function openNewComponent() {
+async function openNewComponent() {
+  try {
+    chartAccounts.value = await payrollApi.accountOptions()
+  } catch (error: any) {
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
+    return
+  }
   editingComponent.value = null
   componentForm.value = newComponentForm()
   componentError.value = ''
   componentEditorOpen.value = true
 }
 
-function editComponent(component: PayrollComponent) {
+async function editComponent(component: PayrollComponent) {
+  try {
+    chartAccounts.value = await payrollApi.accountOptions()
+  } catch (error: any) {
+    toast.error(apiErrorMessage(error, t('payroll.components.load_failed')))
+    return
+  }
   editingComponent.value = component
   componentForm.value = {
     code: component.code,
@@ -1183,6 +1205,10 @@ async function applyImport() {
 
 watch(manualInputFingerprint, () => {
   if (inputPreviewFingerprint.value !== manualInputFingerprint.value) inputPreview.value = null
+})
+
+watch(activeTab, () => {
+  void load()
 })
 
 function clearFocus() {

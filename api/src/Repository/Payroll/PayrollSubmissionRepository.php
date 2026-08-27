@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Submission\PayrollAgendaGroupCatalog;
 use PDO;
 
@@ -86,9 +87,11 @@ final class PayrollSubmissionRepository
                        obligation.id ASC';
 
     private int $savepointSequence = 0;
+    private readonly PayrollYearCloseGuard $yearClose;
 
     public function __construct(private readonly Connection $db)
     {
+        $this->yearClose = new PayrollYearCloseGuard($db);
     }
 
     /**
@@ -504,17 +507,7 @@ final class PayrollSubmissionRepository
         ?int $responsibleUserId,
         ?int $createdBy,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'INSERT INTO payroll_obligations
-                (supplier_id, environment, agenda_code, subject_type,
-                 subject_reference, period_start, period_end,
-                 obligation_kind, preferred_channel,
-                 responsible_user_id, source_event_type,
-                 source_event_reference, source_event_hash,
-                 request_fingerprint, idempotency_key_hash, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
             $supplierId,
             $environment,
             $agendaCode,
@@ -531,9 +524,41 @@ final class PayrollSubmissionRepository
             $requestFingerprint,
             $idempotencyKeyHash,
             $createdBy,
-        ]);
+        ): int {
+            if ($environment === 'production') {
+                $this->yearClose->assertOpenForDateRange($supplierId, $periodStart, $periodEnd);
+            }
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_obligations
+                    (supplier_id, environment, agenda_code, subject_type,
+                     subject_reference, period_start, period_end,
+                     obligation_kind, preferred_channel,
+                     responsible_user_id, source_event_type,
+                     source_event_reference, source_event_hash,
+                     request_fingerprint, idempotency_key_hash, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            );
+            $statement->execute([
+                $supplierId,
+                $environment,
+                $agendaCode,
+                $subjectType,
+                $subjectReference,
+                $periodStart,
+                $periodEnd,
+                $obligationKind,
+                $channel,
+                $responsibleUserId,
+                $sourceEventType,
+                $sourceEventReference,
+                $sourceEventHash,
+                $requestFingerprint,
+                $idempotencyKeyHash,
+                $createdBy,
+            ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+            return (int) $this->db->pdo()->lastInsertId();
+        });
     }
 
     public function insertDeadline(
@@ -588,46 +613,57 @@ final class PayrollSubmissionRepository
      */
     public function insertObligationsBatch(array $rows): void
     {
-        foreach (array_chunk($rows, 200) as $chunk) {
-            if ($chunk === []) {
-                continue;
+        $this->transaction(function () use ($rows): void {
+            foreach ($rows as $row) {
+                if ($row['environment'] === 'production') {
+                    $this->yearClose->assertOpenForDateRange(
+                        $row['supplier_id'],
+                        $row['period_start'],
+                        $row['period_end'],
+                    );
+                }
             }
-            $values = [];
-            $parameters = [];
-            foreach ($chunk as $row) {
-                $values[] = '(' . implode(',', array_fill(0, 16, '?')) . ')';
-                array_push(
-                    $parameters,
-                    $row['supplier_id'],
-                    $row['environment'],
-                    $row['agenda_code'],
-                    $row['subject_type'],
-                    $row['subject_reference'],
-                    $row['period_start'],
-                    $row['period_end'],
-                    $row['obligation_kind'],
-                    $row['preferred_channel'],
-                    $row['responsible_user_id'],
-                    $row['source_event_type'],
-                    $row['source_event_reference'],
-                    $row['source_event_hash'],
-                    $row['request_fingerprint'],
-                    $row['idempotency_key_hash'],
-                    $row['created_by'],
+            foreach (array_chunk($rows, 200) as $chunk) {
+                if ($chunk === []) {
+                    continue;
+                }
+                $values = [];
+                $parameters = [];
+                foreach ($chunk as $row) {
+                    $values[] = '(' . implode(',', array_fill(0, 16, '?')) . ')';
+                    array_push(
+                        $parameters,
+                        $row['supplier_id'],
+                        $row['environment'],
+                        $row['agenda_code'],
+                        $row['subject_type'],
+                        $row['subject_reference'],
+                        $row['period_start'],
+                        $row['period_end'],
+                        $row['obligation_kind'],
+                        $row['preferred_channel'],
+                        $row['responsible_user_id'],
+                        $row['source_event_type'],
+                        $row['source_event_reference'],
+                        $row['source_event_hash'],
+                        $row['request_fingerprint'],
+                        $row['idempotency_key_hash'],
+                        $row['created_by'],
+                    );
+                }
+                $statement = $this->db->pdo()->prepare(
+                    'INSERT INTO payroll_obligations
+                        (supplier_id, environment, agenda_code, subject_type,
+                         subject_reference, period_start, period_end,
+                         obligation_kind, preferred_channel,
+                         responsible_user_id, source_event_type,
+                         source_event_reference, source_event_hash,
+                         request_fingerprint, idempotency_key_hash, created_by)
+                     VALUES ' . implode(',', $values),
                 );
+                $statement->execute($parameters);
             }
-            $statement = $this->db->pdo()->prepare(
-                'INSERT INTO payroll_obligations
-                    (supplier_id, environment, agenda_code, subject_type,
-                     subject_reference, period_start, period_end,
-                     obligation_kind, preferred_channel,
-                     responsible_user_id, source_event_type,
-                     source_event_reference, source_event_hash,
-                     request_fingerprint, idempotency_key_hash, created_by)
-                 VALUES ' . implode(',', $values),
-            );
-            $statement->execute($parameters);
-        }
+        });
     }
 
     /**
@@ -1032,15 +1068,7 @@ final class PayrollSubmissionRepository
         string $idempotencyKeyHash,
         ?int $createdBy,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'INSERT INTO payroll_submissions
-                (supplier_id, environment, obligation_id, corrects_submission_id,
-                 submission_kind, channel, source_revision_id,
-                 source_snapshot_hash, request_fingerprint,
-                 idempotency_key_hash, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
             $supplierId,
             $environment,
             $obligationId,
@@ -1052,9 +1080,32 @@ final class PayrollSubmissionRepository
             $requestFingerprint,
             $idempotencyKeyHash,
             $createdBy,
-        ]);
+        ): int {
+            $this->yearClose->assertOpenForObligation($supplierId, $obligationId);
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_submissions
+                    (supplier_id, environment, obligation_id, corrects_submission_id,
+                     submission_kind, channel, source_revision_id,
+                     source_snapshot_hash, request_fingerprint,
+                     idempotency_key_hash, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            );
+            $statement->execute([
+                $supplierId,
+                $environment,
+                $obligationId,
+                $correctsSubmissionId,
+                $submissionKind,
+                $channel,
+                $sourceRevisionId,
+                $sourceSnapshotHash,
+                $requestFingerprint,
+                $idempotencyKeyHash,
+                $createdBy,
+            ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+            return (int) $this->db->pdo()->lastInsertId();
+        });
     }
 
     public function insertPart(
@@ -1068,14 +1119,7 @@ final class PayrollSubmissionRepository
         string $sourceEntityReference,
         string $sourceSnapshotHash,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'INSERT INTO payroll_submission_parts
-                (supplier_id, environment, submission_id, part_reference,
-                 agenda_code, subject_reference, source_entity_type,
-                 source_entity_reference, source_snapshot_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
             $supplierId,
             $environment,
             $submissionId,
@@ -1085,9 +1129,29 @@ final class PayrollSubmissionRepository
             $sourceEntityType,
             $sourceEntityReference,
             $sourceSnapshotHash,
-        ]);
+        ): int {
+            $this->yearClose->assertOpenForSubmission($supplierId, $submissionId);
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_submission_parts
+                    (supplier_id, environment, submission_id, part_reference,
+                     agenda_code, subject_reference, source_entity_type,
+                     source_entity_reference, source_snapshot_hash)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            );
+            $statement->execute([
+                $supplierId,
+                $environment,
+                $submissionId,
+                $partReference,
+                $agendaCode,
+                $subjectReference,
+                $sourceEntityType,
+                $sourceEntityReference,
+                $sourceSnapshotHash,
+            ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+            return (int) $this->db->pdo()->lastInsertId();
+        });
     }
 
     public function partBelongsToSubmission(
@@ -1309,6 +1373,46 @@ final class PayrollSubmissionRepository
             $submissionId,
             'outbound_pdf',
         );
+    }
+
+    public function findOutboundArtifactIdByCatalogVersion(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $artifactKind,
+        string $catalogVersion,
+    ): ?int
+    {
+        if (!in_array($artifactKind, ['outbound_xml', 'outbound_pdf'], true)) {
+            throw new \InvalidArgumentException('Druh odchozího artefaktu není podporovaný.');
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_submission_artifacts
+              WHERE supplier_id = ?
+                AND environment = ?
+                AND submission_id = ?
+                AND artifact_kind = ?
+                AND direction = "outbound"
+                AND catalog_version = ?
+              ORDER BY id
+              LIMIT 2',
+        );
+        $statement->execute([
+            $supplierId,
+            $environment,
+            $submissionId,
+            $artifactKind,
+            $catalogVersion,
+        ]);
+        $ids = $statement->fetchAll(PDO::FETCH_COLUMN);
+        if (count($ids) > 1) {
+            throw new \UnexpectedValueException(
+                'Podání má více artefaktů se stejnou zmrazenou volbou přílohy.',
+            );
+        }
+
+        return $ids === [] ? null : (int) $ids[0];
     }
 
     private function findOutboundArtifactId(
@@ -1667,34 +1771,47 @@ final class PayrollSubmissionRepository
         ?string $submittedAt,
         ?string $decidedAt,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'UPDATE payroll_submissions
-                SET status = ?,
-                    correlation_reference =
-                      COALESCE(?, correlation_reference),
-                    submitted_at = COALESCE(?, submitted_at),
-                    decided_at = COALESCE(?, decided_at),
-                    row_version = row_version + 1
-              WHERE supplier_id = ?
-                AND id = ?
-                AND row_version = ?',
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
+            $supplierId,
+            $submissionId,
+            $expectedRowVersion,
             $status,
             $correlationReference,
             $submittedAt,
             $decidedAt,
-            $supplierId,
-            $submissionId,
-            $expectedRowVersion,
-        ]);
-        if ($statement->rowCount() !== 1) {
-            throw new PayrollSubmissionConflictException(
-                'Podání se mezitím změnilo.',
+        ): int {
+            if (!in_array($status, ['accepted', 'superseded', 'cancelled_in_time'], true)) {
+                $this->yearClose->assertOpenForSubmission($supplierId, $submissionId);
+            }
+            $statement = $this->db->pdo()->prepare(
+                'UPDATE payroll_submissions
+                    SET status = ?,
+                        correlation_reference =
+                          COALESCE(?, correlation_reference),
+                        submitted_at = COALESCE(?, submitted_at),
+                        decided_at = COALESCE(?, decided_at),
+                        row_version = row_version + 1
+                  WHERE supplier_id = ?
+                    AND id = ?
+                    AND row_version = ?',
             );
-        }
+            $statement->execute([
+                $status,
+                $correlationReference,
+                $submittedAt,
+                $decidedAt,
+                $supplierId,
+                $submissionId,
+                $expectedRowVersion,
+            ]);
+            if ($statement->rowCount() !== 1) {
+                throw new PayrollSubmissionConflictException(
+                    'Podání se mezitím změnilo.',
+                );
+            }
 
-        return $expectedRowVersion + 1;
+            return $expectedRowVersion + 1;
+        });
     }
 
     public function bumpSubmissionVersion(

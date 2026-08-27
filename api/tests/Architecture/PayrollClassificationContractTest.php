@@ -63,4 +63,29 @@ final class PayrollClassificationContractTest extends TestCase
             implode(', ', $duplicates),
         ));
     }
+
+    public function testEnforcementPaymentPriorityHasOneSourceOfTruth(): void
+    {
+        self::assertSame([
+            ClaimCategory::CurrentMaintenance->value,
+            ClaimCategory::MaintenanceArrears->value,
+            ClaimCategory::SubstituteMaintenance->value,
+            ClaimCategory::OtherPriority->value,
+            ClaimCategory::NonPriority->value,
+        ], array_map(
+            static fn (ClaimCategory $category): string => $category->value,
+            ClaimCategory::paymentPriorityOrder(),
+        ));
+
+        foreach (ClaimCategory::paymentPriorityOrder() as $rank => $category) {
+            self::assertSame($rank, $category->paymentPriorityRank());
+        }
+
+        $materializer = (string) file_get_contents(
+            dirname(__DIR__, 2)
+                . '/src/Service/Payroll/Payment/'
+                . 'PayrollEnforcementLiabilityMaterializer.php',
+        );
+        self::assertStringNotContainsString('CATEGORY_RANK', $materializer);
+    }
 }

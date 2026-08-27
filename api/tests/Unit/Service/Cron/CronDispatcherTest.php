@@ -52,7 +52,11 @@ final class CronDispatcherTest extends TestCase
         $report = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 13:37:00'));
 
         self::assertSame(
-            ['cron-epo-status', 'cron-payroll-document-worker'],
+            [
+                'cron-epo-status',
+                'cron-payroll-document-worker',
+                'cron-payroll-period-export-worker',
+            ],
             $report['due'],
         );
         self::assertSame([], $report['errors']);

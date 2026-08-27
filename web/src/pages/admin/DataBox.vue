@@ -1765,6 +1765,10 @@ onUnmounted(clearMobileStatusTimer)
               <dd class="mt-1 break-words">{{ m.delivered_at ?? '—' }}</dd>
             </div>
             <div>
+              <dt class="text-xs uppercase text-neutral-400">{{ t('databox.inbox.messageId') }}</dt>
+              <dd class="mt-1 break-all font-mono text-xs" data-test="inbox-mobile-message-id">{{ m.external_message_id }}</dd>
+            </div>
+            <div>
               <dt class="text-xs uppercase text-neutral-400">{{ t('databox.delivery.column') }}</dt>
               <dd v-if="m.classification === 'delivery_receipt'" class="mt-1 text-xs text-neutral-500">
                 {{ t('databox.delivery.notApplicable') }}
@@ -1866,6 +1870,7 @@ onUnmounted(clearMobileStatusTimer)
               <th class="py-2 pr-3">{{ t('databox.inbox.sender') }}</th>
               <th class="py-2 pr-3">{{ t('databox.inbox.classification') }}</th>
               <th class="py-2 pr-3">{{ t('databox.inbox.deliveredAt') }}</th>
+              <th class="py-2 pr-3">{{ t('databox.inbox.messageId') }}</th>
               <th class="py-2 pr-3">{{ t('databox.delivery.column') }}</th>
               <th class="py-2 pr-3"></th>
             </tr>
@@ -1885,6 +1890,7 @@ onUnmounted(clearMobileStatusTimer)
                 </span>
               </td>
               <td class="py-2 pr-3">{{ m.delivered_at ?? '—' }}</td>
+              <td class="py-2 pr-3 font-mono text-xs break-all" data-test="inbox-desktop-message-id">{{ m.external_message_id }}</td>
               <!--
                 Rozhodný den doručení. Odznak nikdy neříká jen „doručeno" —
                 u fikce i u běžící lhůty musí být poznat, čím je to podložené,

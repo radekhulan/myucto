@@ -173,6 +173,87 @@ final class PayrollEnforcementPaymentRepository
     }
 
     /**
+     * The payment target is never inferred from the case's legacy institution
+     * pointer. This returns only the latest documented recipient instruction
+     * effective for the particular payroll payment date.
+     *
+     * @return array{recipient_party_id:int,payment_account_id:int,institution_type:string,
+     *   institution_code:string,authority_current:bool,beneficiary_current:bool,
+     *   recipient_party_current:bool,source_document_id:int,source_document_sha256:string}|null
+     */
+    public function documentedRecipientForPayment(
+        int $supplierId,
+        int $caseId,
+        string $effectiveOn,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT instruction.recipient_party_id, instruction.payment_account_id,
+                    institution.institution_type, institution.institution_code,
+                    instruction.source_document_id,
+                    instruction.source_document_sha256,
+                    EXISTS(
+                      SELECT 1 FROM payroll_enforcement_case_parties authority
+                       WHERE authority.supplier_id = instruction.supplier_id
+                         AND authority.case_id = instruction.case_id
+                         AND authority.party_role IN ("court", "executor")
+                         AND authority.effective_from <= ?
+                    ) AS authority_current,
+                    EXISTS(
+                      SELECT 1 FROM payroll_enforcement_case_parties beneficiary
+                       WHERE beneficiary.supplier_id = instruction.supplier_id
+                         AND beneficiary.case_id = instruction.case_id
+                         AND beneficiary.party_role = "beneficiary"
+                         AND beneficiary.effective_from <= ?
+                    ) AS beneficiary_current,
+                    NOT EXISTS(
+                      SELECT 1 FROM payroll_enforcement_case_parties newer
+                       WHERE newer.supplier_id = party.supplier_id
+                         AND newer.case_id = party.case_id
+                         AND newer.party_role = party.party_role
+                         AND newer.effective_from <= ?
+                         AND newer.revision_no > party.revision_no
+                    ) AS recipient_party_current
+               FROM payroll_enforcement_recipient_instructions instruction
+               JOIN payroll_enforcement_case_parties party
+                 ON party.supplier_id = instruction.supplier_id
+                AND party.id = instruction.recipient_party_id
+               JOIN payroll_institution_accounts account
+                 ON account.supplier_id = instruction.supplier_id
+                AND account.id = instruction.payment_account_id
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE instruction.supplier_id = ? AND instruction.case_id = ?
+                AND instruction.effective_from <= ?
+              ORDER BY instruction.effective_from DESC, instruction.revision_no DESC
+              LIMIT 1',
+        );
+        $stmt->execute([
+            $effectiveOn,
+            $effectiveOn,
+            $effectiveOn,
+            $supplierId,
+            $caseId,
+            $effectiveOn,
+        ]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        return [
+            'recipient_party_id' => self::integer($row, 'recipient_party_id'),
+            'payment_account_id' => self::integer($row, 'payment_account_id'),
+            'institution_type' => self::string($row, 'institution_type'),
+            'institution_code' => self::string($row, 'institution_code'),
+            'authority_current' => self::integer($row, 'authority_current') === 1,
+            'beneficiary_current' => self::integer($row, 'beneficiary_current') === 1,
+            'recipient_party_current' => self::integer($row, 'recipient_party_current') === 1,
+            'source_document_id' => self::integer($row, 'source_document_id'),
+            'source_document_sha256' => self::string($row, 'source_document_sha256'),
+        ];
+    }
+
+    /**
      * Rozpad případu na „sraženo / deponováno / odesláno / zbývá".
      *
      * @return list<array{

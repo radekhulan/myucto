@@ -100,4 +100,59 @@ describe('DocumentDetail', () => {
     expect(wrapper.get('[data-test="document-detail-actions"]').classes()).toContain('basis-full')
     expect(wrapper.get('h1').classes()).toContain('break-all')
   })
+
+  it('zobrazí ZFO metadata a všechny přílohy se bezpečným preview a stažením', async () => {
+    m.get.mockResolvedValueOnce({
+      ...document(2605, 'datova-zprava-1752953337.zfo'),
+      mime_type: 'application/octet-stream',
+      doc_type: 'zfo',
+      dms_message: {
+        dm_id: '1752953337',
+        direction: 'received',
+        sender_box_id: 'abc1234',
+        sender_name: 'Syntetický odesílatel',
+        sender_address: null,
+        recipient_box_id: 'def5678',
+        recipient_name: 'Syntetický příjemce',
+        recipient_address: null,
+        annotation: 'Syntetická datová zpráva',
+        sender_ref_number: null,
+        recipient_ref_number: null,
+        dm_type: 'datova_zprava',
+        dm_status: 'delivered',
+        delivery_time: '2026-08-27 10:00:00',
+        acceptance_time: null,
+      },
+      attachments: [
+        {
+          ...document(2606, 'potvrzeni.pdf'),
+          doc_type: 'pdf',
+          mime_type: 'application/pdf',
+        },
+        {
+          ...document(2607, 'oznameni.html'),
+          title: '<img src=x onerror=alert(1)>',
+          mime_type: 'application/octet-stream',
+        },
+      ],
+    })
+
+    const wrapper = shallowMount(DocumentDetail)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('documents.dms.title')
+    expect(wrapper.text()).toContain('1752953337')
+    expect(wrapper.text()).toContain('potvrzeni.pdf')
+    expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>')
+    expect(wrapper.html()).not.toContain('<img src=x onerror=alert(1)>')
+
+    const downloadUrls = wrapper.findAll('a')
+      .map(anchor => anchor.attributes('href'))
+    expect(downloadUrls).toContain('/api/documents/2605/download')
+    expect(downloadUrls).toContain('/api/documents/2606/download')
+    expect(downloadUrls).toContain('/api/documents/2607/download')
+    expect(wrapper.find('iframe').attributes('src')).toBe(
+      '/api/documents/2606/preview#view=FitH',
+    )
+  })
 })

@@ -517,6 +517,49 @@ export interface PayrollStatutoryEvidencePayload {
   sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
 }
 
+export type PayrollForeignPermitKind = 'residence' | 'work'
+export type PayrollForeignPermitStatus = 'future' | 'valid' | 'expiring' | 'expired' | 'superseded'
+
+export interface PayrollForeignPermit {
+  id: number
+  permit_kind: PayrollForeignPermitKind
+  permit_label: string
+  issuing_country_code: string
+  effective_from: string
+  valid_until: string
+  document_id: number | null
+  supersedes_permit_id: number | null
+  recorded_at: string
+  status: PayrollForeignPermitStatus
+}
+
+export interface PayrollForeignPermitAlert {
+  permit_id: number
+  permit_kind: PayrollForeignPermitKind
+  permit_label: string
+  valid_until: string
+  status: Extract<PayrollForeignPermitStatus, 'expiring' | 'expired'>
+  days_remaining: number
+}
+
+export interface PayrollForeignPermitView {
+  employee_id: number
+  as_of: string
+  warning_days: number
+  history: PayrollForeignPermit[]
+  alerts: PayrollForeignPermitAlert[]
+}
+
+export interface PayrollForeignPermitPayload {
+  permit_kind: PayrollForeignPermitKind
+  permit_label: string
+  issuing_country_code: string
+  effective_from: string
+  valid_until: string
+  document_id: number
+  supersedes_permit_id?: number | null
+}
+
 export interface PayrollPersonProfile {
   employee_id: number
   full_name: string
@@ -1237,7 +1280,11 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
     verified_through: string
     base_spec_manifest_sha256: string
   }
-  activity_codes: Array<{ code: string; label: string }>
+  activity_codes: Array<{
+    code: string
+    label: string
+    relationship_detail_mode: 'forbidden' | 'select' | 'fixed_none'
+  }>
   relationship_detail_codes: Array<{ code: string; label: string }>
   apz_instruments: Array<{ code: string; label: string }>
   countries: Array<{ code: string; label: string }>
@@ -1810,6 +1857,32 @@ export interface PayrollSubmissionOverviewResponse {
   total: number
   limit: number
   offset: number
+}
+
+export interface PayrollOperationalHealth {
+  document_batches: {
+    queued: number
+    running: number
+    retry_wait: number
+    failed: number
+  }
+  period_export_jobs: {
+    queued: number
+    processing: number
+    retry_wait: number
+    failed: number
+  }
+  submissions: {
+    rejected: number
+    correction_required: number
+    open_blocker_or_error_issues: number
+  }
+  isds_outbox: {
+    failed: number
+    send_uncertain: number
+    rejected: number
+  }
+  overdue_unpaid_liabilities: number
 }
 
 export type PayrollStatutoryAgendaCapability =
@@ -2942,6 +3015,86 @@ export interface PayrollPeriodExport {
   file_sha256: string
   size_bytes: number
   suggested_filename: string
+}
+
+export type PayrollPeriodExportJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'retry_wait'
+  | 'failed'
+  | 'completed'
+
+export interface PayrollPeriodExportJob {
+  id: number
+  scope: PayrollPeriodExportScope
+  period_start: string
+  period_end: string
+  status: PayrollPeriodExportJobStatus
+  attempt_count: number
+  available_at: string
+  export_id: number | null
+  last_error_code: string | null
+  last_error_message: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export type PayrollYearCloseStatus = 'open' | 'closed'
+
+export type PayrollYearCloseBlockerCode =
+  | 'schema_unavailable'
+  | 'missing_months'
+  | 'open_corrections'
+  | 'open_submissions'
+  | 'open_liabilities'
+  | 'open_leave'
+  | 'open_enforcement'
+  | 'reconciliation_differences'
+
+export interface PayrollYearCloseBlocker {
+  code: PayrollYearCloseBlockerCode
+  count?: number
+  months?: string[]
+  tables?: string[]
+}
+
+export interface PayrollYearClose {
+  id: number | null
+  supplier_id: number
+  calendar_year: number
+  status: PayrollYearCloseStatus
+  row_version: number
+  closed_at: string | null
+  closed_by: number | null
+  reopened_at: string | null
+  reopened_by: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PayrollYearCloseStatusResponse {
+  closure: PayrollYearClose
+  blockers: PayrollYearCloseBlocker[]
+}
+
+export interface PayrollAnnualReportMonth {
+  period: string
+  approved_revision_count: number
+  headcount: number
+  gross_minor: number | null
+  employer_cost_minor: number | null
+}
+
+export interface PayrollAnnualReport {
+  year: number
+  totals: {
+    approved_revision_count: number
+    headcount_person_months: number
+    gross_minor: number | null
+    employer_cost_minor: number | null
+  }
+  months: PayrollAnnualReportMonth[]
 }
 
 /* ── Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP) ─────────────── */
@@ -4176,6 +4329,16 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/statutory-evidence`,
       payload,
     ).then(response => response.data.evidence),
+  foreignPermits: (employeeId: number, asOf?: string) =>
+    api.get<{ permits: PayrollForeignPermitView }>(
+      `/payroll/people/${employeeId}/foreign-permits`,
+      { params: asOf === undefined ? {} : { as_of: asOf } },
+    ).then(response => response.data.permits),
+  createForeignPermit: (employeeId: number, payload: PayrollForeignPermitPayload) =>
+    api.post<{ permits: PayrollForeignPermitView }>(
+      `/payroll/people/${employeeId}/foreign-permits`,
+      payload,
+    ).then(response => response.data.permits),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(
@@ -4381,6 +4544,9 @@ export const payrollApi = {
         ...pageParams(options),
       },
     }).then(response => response.data),
+  operationalHealth: () =>
+    api.get<PayrollOperationalHealth>('/payroll/operational-health')
+      .then(response => response.data),
   statutoryObligationOverview: (
     environment: PayrollRegzelEnvironment,
     period: string,
@@ -4671,7 +4837,15 @@ export const payrollApi = {
   healthPaymentOverviews: (revisionId: number) =>
     api.get<{
       items: PayrollHealthPaymentOverview[]
-      electronic_submission: { supported: false; reason_code: string }
+      electronic_submission: {
+        direct_portal: { supported: false; reason_code: string }
+        isds: {
+          supported: true
+          requires_ready: true
+          requires_production_gate: true
+          requires_user_confirmation: true
+        }
+      }
     }>(`/payroll/submissions/health-overviews/${revisionId}`)
       .then(response => response.data),
   downloadHealthPaymentOverview: async (
@@ -4922,6 +5096,21 @@ export const payrollApi = {
       `/payroll/annual-settlements/${year}/people/${employeeId}/settle`,
       {},
     ).then(response => response.data),
+  yearCloseStatus: (year: number) =>
+    api.get<PayrollYearCloseStatusResponse>(`/payroll/year-close/${year}`)
+      .then(response => response.data),
+  closeYear: (year: number, rowVersion: number) =>
+    api.post<{ closure: PayrollYearClose }>(`/payroll/year-close/${year}/close`, {
+      row_version: rowVersion,
+    }).then(response => response.data.closure),
+  reopenYear: (year: number, rowVersion: number, reason: string) =>
+    api.post<{ closure: PayrollYearClose }>(`/payroll/year-close/${year}/reopen`, {
+      row_version: rowVersion,
+      reason,
+    }).then(response => response.data.closure),
+  annualReport: (year: number) =>
+    api.get<{ report: PayrollAnnualReport }>(`/payroll/reports/annual/${year}`)
+      .then(response => response.data.report),
   generatePayrollSheet: (employeeId: number, year: number) =>
     api.post<PayrollDocument>(
       `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,
@@ -4951,17 +5140,29 @@ export const payrollApi = {
     scope: PayrollPeriodExportScope,
     period: string | number,
   ): Promise<PayrollPeriodExport> => {
-    const exported = await api.post<PayrollPeriodExport>(
+    let job = await api.post<PayrollPeriodExportJob>(
       `/payroll/exports/${scope}/${period}`,
       {},
     ).then(response => response.data)
+    for (let poll = 0; job.status !== 'completed' && poll < 120; poll += 1) {
+      if (job.status === 'failed') {
+        throw new Error(job.last_error_message ?? 'Export mezd selhal.')
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
+      job = await api.get<PayrollPeriodExportJob>(
+        `/payroll/exports/jobs/${job.id}`,
+      ).then(response => response.data)
+    }
+    if (job.status !== 'completed' || job.export_id === null) {
+      throw new Error('Export mezd se nedokončil v očekávaném čase.')
+    }
     const grant = await api.post<{
       grant_id: number
       export_id: number
       token: string
       expires_at: string
     }>(
-      `/payroll/exports/${exported.id}/download-grants`,
+      `/payroll/exports/jobs/${job.id}/download-grants`,
       { ttl_seconds: 120 },
     ).then(response => response.data)
     const response = await api.post<Blob>(
@@ -4973,7 +5174,7 @@ export const payrollApi = {
     try {
       const anchor = document.createElement('a')
       anchor.href = objectUrl
-      anchor.download = exported.suggested_filename
+      anchor.download = `mzdy-${scope === 'monthly' ? String(period) : String(period)}.zip`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -4981,7 +5182,15 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
 
-    return exported
+    return {
+      id: job.export_id,
+      scope: job.scope,
+      period_start: job.period_start,
+      period_end: job.period_end,
+      file_sha256: '',
+      size_bytes: 0,
+      suggested_filename: `mzdy-${scope === 'monthly' ? String(period) : String(period)}.zip`,
+    }
   },
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(

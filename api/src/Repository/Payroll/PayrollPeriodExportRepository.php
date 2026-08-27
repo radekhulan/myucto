@@ -375,7 +375,7 @@ final class PayrollPeriodExportRepository
     }
 
     /**
-     * @param array{supplier_id:int,export_scope:string,period_start:string,period_end:string,source_manifest_hash:string,manifest_json:string,file_sha256:string,size_bytes:int,mime_type:string,storage_key:string,suggested_filename:string,created_by:int} $record
+     * @param array{supplier_id:int,export_scope:string,period_start:string,period_end:string,source_manifest_hash:string,manifest_json:string,file_sha256:string,size_bytes:int,mime_type:string,storage_key:string,suggested_filename:string,created_by:?int} $record
      * @return array{id:int,export_scope:string,period_start:string,period_end:string,source_manifest_hash:string,manifest_json:string,file_sha256:string,size_bytes:int,mime_type:string,storage_key:string,suggested_filename:string,created_at:string}
      */
     public function insertOrGet(array $record): array

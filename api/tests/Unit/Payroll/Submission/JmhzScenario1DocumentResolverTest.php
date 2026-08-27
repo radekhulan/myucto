@@ -167,6 +167,72 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
         );
     }
 
+    public function testV11OrdinaryAndStatutoryProfilesShareOneRegularDocument(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
+        $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
+        unset($payload['scope']['scenario_key']);
+        $payload['scope']['scenario_set'] = ['scenario_1', 'scenario_3'];
+        $payload['ordinary_evidence'] = [
+            [
+                'scope' => ['employee_id' => 11, 'employment_id' => 101],
+                'attribute_values' => ['10116' => false, '10546' => false],
+            ],
+            [
+                'scope' => ['employee_id' => 12, 'employment_id' => 102],
+                'attribute_values' => ['10546' => false],
+            ],
+        ];
+        $payload['source_versions']['ordinary_evidence'] = [
+            ['employment_id' => 101],
+            ['employment_id' => 102],
+        ];
+        $statutoryPerson = $payload['people'][0];
+        $statutoryPerson['employee_id'] = 12;
+        $statutoryEmployment = &$statutoryPerson['employments'][0];
+        $statutoryEmployment['employment_id'] = 102;
+        $statutoryEmployment['employment']['relation_type'] = 'partner_dependent';
+        $statutoryEmployment['term']['activity_code'] = 'S';
+        $statutoryEmployment['term']['jmhz_relationship_detail_code'] = '1';
+        $statutoryEmployment['scenario_resolution'] = [
+            'scenario_key' => 'scenario_3',
+            'activity_code' => 'S',
+            'relationship_detail_code' => '1',
+        ];
+        $statutoryEmployment['insurance']['relationship_id'] = 'employment:102';
+        $statutoryEmployment['insurance']['participation']['relationship_id'] = 'employment:102';
+        $statutoryPerson['person_summary']['statutory']['net_pay']['relationships'] = [
+            ['relationship_id' => 'employment:102'],
+        ];
+        unset($statutoryEmployment);
+        $payload['people'][] = $statutoryPerson;
+        $preparation = $this->withVersionedPayload(
+            $preparation,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            $payload,
+        );
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+        );
+
+        self::assertSame('resolved', $resolution->status());
+        self::assertSame([], $resolution->blockers);
+        self::assertSame(
+            ['scenario_1', 'scenario_3'],
+            array_column(
+                array_map(
+                    static fn (array $person): array => $person['employments'][0]['selector'],
+                    $resolution->candidate?->payload['people'] ?? [],
+                ),
+                'scenario_key',
+            ),
+        );
+    }
+
     public function testUsesFrozenPayslipAllocationForEmployerSocialContribution(): void
     {
         $preparation = $this->preparation();

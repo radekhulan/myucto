@@ -11,6 +11,7 @@ use MyInvoice\Repository\Submission\SubmissionInboxRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxAttemptRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
+use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Document\DocumentIngestService;
@@ -401,6 +402,47 @@ final class SubmissionInboxServiceTest extends TestCase
             'test',
             visibility: 'hidden',
         ));
+        $documentRepository = new DocumentRepository($this->db);
+        $viewer = DocumentViewerContext::admin($this->userId);
+        $rootDocumentId = (int) $stored['document_id'];
+        $childDocumentId = (int) array_values(array_filter(
+            array_column($rows, 'id'),
+            static fn (mixed $id): bool => (int) $id !== $rootDocumentId,
+        ))[0];
+        self::assertNull($documentRepository->find(
+            $rootDocumentId,
+            $this->supplierId,
+            $viewer,
+        ));
+        self::assertNull($documentRepository->find(
+            $childDocumentId,
+            $this->supplierId,
+            $viewer,
+        ));
+
+        $restored = $this->privacy->restore(
+            $this->supplierId,
+            (int) $stored['id'],
+            (int) $hidden['lifecycle_row_version'],
+            $this->userId,
+        );
+        self::assertNull($restored['hidden_at']);
+        self::assertNotNull($documentRepository->find(
+            $rootDocumentId,
+            $this->supplierId,
+            $viewer,
+        ));
+        self::assertNotNull($documentRepository->find(
+            $childDocumentId,
+            $this->supplierId,
+            $viewer,
+        ));
+        $hidden = $this->privacy->hide(
+            $this->supplierId,
+            (int) $stored['id'],
+            (int) $restored['lifecycle_row_version'],
+            $this->userId,
+        );
 
         $purged = $this->privacy->purgeLocalContent(
             $this->supplierId,

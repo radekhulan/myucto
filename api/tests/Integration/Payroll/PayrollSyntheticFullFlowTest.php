@@ -179,8 +179,10 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         if (!$runRepository instanceof PayrollRunRepository) {
             throw new \RuntimeException('Repository mzdového běhu není dostupné.');
         }
-        $posting = $this->createStub(PayrollApprovedRevisionPostingService::class);
-        $posting->method('post')->willReturn([]);
+        $posting = $this->container->get(PayrollApprovedRevisionPostingService::class);
+        if (!$posting instanceof PayrollApprovedRevisionPostingService) {
+            throw new \RuntimeException('Služba zaúčtování schválené revize není dostupná.');
+        }
         $this->runs = new PayrollRunCommandService(
             $db,
             $runRepository,
@@ -276,8 +278,18 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         );
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $overview = $this->json($response);
-        self::assertFalse($overview['electronic_submission']['supported']);
-        self::assertSame('health_insurance_transport_unavailable', $overview['electronic_submission']['reason_code']);
+        self::assertFalse(
+            $overview['electronic_submission']['direct_portal']['supported'],
+        );
+        self::assertSame(
+            'health_insurance_portal_transport_undocumented',
+            $overview['electronic_submission']['direct_portal']['reason_code'],
+        );
+        self::assertTrue($overview['electronic_submission']['isds']['supported']);
+        self::assertTrue($overview['electronic_submission']['isds']['requires_ready']);
+        self::assertTrue(
+            $overview['electronic_submission']['isds']['requires_production_gate'],
+        );
         self::assertNotEmpty($overview['items']);
         self::assertSame('111', $overview['items'][0]['insurer']['code']);
         self::assertCount(3, $overview['items'][0]['people']);
@@ -302,22 +314,81 @@ final class PayrollSyntheticFullFlowTest extends TestCase
 
     public function testLowIncomeHppWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(): void
     {
+        $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+            'hpp',
+            'employment',
+            'employee',
+            4,
+            'jmhz-hpp-4500',
+        );
+    }
+
+    public function testStatutoryBodyAt4500WithoutDeclarationOrTaxpayerCreditReachesValidScenarioThreeSubmissionWithoutTransport(): void
+    {
+        $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+            'statutory_body',
+            'statutory_body',
+            'managing_partner',
+            5,
+            'jmhz-statutory-body-4500',
+            false,
+            'ineligible',
+            true,
+            false,
+        );
+    }
+
+    public function testPartnerDependentAt4500WithoutDeclarationOrTaxpayerCreditReachesValidScenarioThreeSubmissionWithoutTransport(): void
+    {
+        $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+            'hpp',
+            'partner_dependent',
+            'managing_partner',
+            6,
+            'jmhz-partner-dependent-4500',
+            false,
+            'ineligible',
+            true,
+            false,
+        );
+    }
+
+    private function assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+        string $employmentType,
+        string $relationType,
+        string $taxpayerType,
+        int $sequence,
+        string $scenario,
+        ?bool $taxpayerCreditTaxpayer = null,
+        ?string $otherWithholdingEligibility = null,
+        bool $scenarioThree = false,
+        bool $withAverageEarning = true,
+    ): void {
         $officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '9990001234');
         $person = $this->createEmployment(
             $officeId,
             'Dana Testovací',
-            4,
-            'hpp',
-            'employment',
+            $sequence,
+            $employmentType,
+            $relationType,
             40,
             10_000,
             false,
             '2026-07-01',
             false,
+            $taxpayerType,
+            $taxpayerCreditTaxpayer,
+            $otherWithholdingEligibility,
         );
-        $this->completeJmhzEmployment($person);
+        $this->assertEmployeeTaxConfiguration($person['employee_id'], false, $taxpayerCreditTaxpayer ?? false);
+        if ($otherWithholdingEligibility !== null) {
+            $this->assertOtherWithholdingEligibility($person['employment_id'], $otherWithholdingEligibility);
+        }
+        $this->completeJmhzEmployment($person, $scenarioThree ? 'S' : '1');
         $this->createApprovedTimeMonth($person['employment_id'], '2026-07');
-        $this->createApprovedAverage($person['employment_id'], 3);
+        if ($withAverageEarning) {
+            $this->createApprovedAverage($person['employment_id'], 3);
+        }
         $this->assignJmhzIdentity($person);
 
         $baseComponentId = $this->componentId('MZDA_MESICNI_FLOW');
@@ -326,7 +397,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             throw new \RuntimeException('Mapování mzdových složek JMHZ není dostupné.');
         }
         $mappings->put($this->supplierId, $baseComponentId, '10329', null, $this->actors[0]);
-        $this->createApprovedInput($person, $baseComponentId, 450_000, 'jmhz-base', '2026-07-01');
+        $this->createApprovedInput($person, $baseComponentId, 450_000, $scenario . '-base', '2026-07-01');
 
         $run = $this->runs->createRun(
             $this->supplierId,
@@ -355,6 +426,13 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame(241_600, $health['employee_minimum_top_up_minor_units']);
         self::assertSame(261_900, $health['employee_contribution_minor_units']);
         self::assertSame(40_500, $health['employer_contribution_minor_units']);
+        if ($scenarioThree) {
+            $statutory = $calculated->revision['result_snapshot']['statutory']['people'][0];
+            self::assertSame('advance', $statutory['income_tax']['relationships'][0]['regime']);
+            self::assertSame(450_000, $statutory['income_tax']['advance_tax']['taxable_income_minor_units']);
+            self::assertSame(67_500, $statutory['income_tax']['advance_tax']['tax_after_credits_minor_units']);
+            self::assertSame(450_000, $statutory['social_insurance']['relationships'][0]['assessment_base_minor_units']);
+        }
         $reviewed = $this->runs->review(
             $this->supplierId,
             (int) $run['id'],
@@ -382,7 +460,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         }
         $preparationResponse = $prepare(
             $this->request('POST', "/api/payroll/jmhz/preparations/{$revisionId}")
-                ->withHeader('Idempotency-Key', 'synthetic-jmhz-full-flow')
+                ->withHeader('Idempotency-Key', $scenario)
                 ->withParsedBody(['environment' => 'test']),
             new Response(),
             ['revisionId' => (string) $revisionId],
@@ -402,13 +480,23 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame(200, $dryRunResponse->getStatusCode(), (string) $dryRunResponse->getBody());
         $tested = $this->json($dryRunResponse);
         self::assertSame('dry_run_valid', $tested['status'], CanonicalJson::encode($tested));
+        self::assertTrue($tested['controls']['submittable'], CanonicalJson::encode($tested['controls']));
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $tested['xml_sha256']);
         self::assertSame(hash('sha256', $tested['xml']), $tested['xml_sha256']);
         self::assertStringContainsString('<form:zuctovanoCelkem>4500</form:zuctovanoCelkem>', $tested['xml']);
         self::assertStringContainsString('<form:vypoctenaZaloha>675</form:vypoctenaZaloha>', $tested['xml']);
         self::assertStringContainsString('<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>', $tested['xml']);
         self::assertMatchesRegularExpression('/<form:zdravPojZamestnanec>\s*<form:zdravotniPojisteni>2619<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnanec>/', $tested['xml']);
-        self::assertMatchesRegularExpression('/<form:zdravPojZamestnavatel>\s*<form:zdravotniPojisteni>405<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnavatel>/', $tested['xml']);
+        if ($scenarioThree) {
+            self::assertStringContainsString('<form:cinnostKS ', $tested['xml']);
+            self::assertStringNotContainsString('<form:bezPriznaku>', $tested['xml']);
+            self::assertStringNotContainsString('<form:zdravPojZamestnavatel>', $tested['xml']);
+            self::assertStringNotContainsString('<form:vymerovaciZakladParagraf5>', $tested['xml']);
+            self::assertStringContainsString('<form:kod>S++</form:kod>', $tested['xml']);
+            self::assertStringContainsString('<form:vymerovaciZaklad>4500</form:vymerovaciZaklad>', $tested['xml']);
+        } else {
+            self::assertMatchesRegularExpression('/<form:zdravPojZamestnavatel>\s*<form:zdravotniPojisteni>405<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnavatel>/', $tested['xml']);
+        }
         self::assertStringContainsString('<form:socialniPojisteni>320</form:socialniPojisteni>', $tested['xml']);
         self::assertStringContainsString('<form:socialniPojisteni>1116</form:socialniPojisteni>', $tested['xml']);
 
@@ -424,6 +512,36 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame('ready', $submission['status']);
         self::assertTrue($submission['created']);
         self::assertSame(0, $this->transportAttemptCount((int) $submission['submission_id']));
+    }
+
+    private function assertEmployeeTaxConfiguration(
+        int $employeeId,
+        bool $taxDeclarationSigned,
+        bool $taxpayerCreditTaxpayer,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT tax_declaration_signed, tax_credit_taxpayer
+               FROM payroll_employees
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $employeeId]);
+        $configuration = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($configuration);
+        self::assertSame($taxDeclarationSigned ? 1 : 0, (int) $configuration['tax_declaration_signed']);
+        self::assertSame($taxpayerCreditTaxpayer ? 1 : 0, (int) $configuration['tax_credit_taxpayer']);
+    }
+
+    private function assertOtherWithholdingEligibility(int $employmentId, string $eligibility): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT other_withholding_eligibility
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1',
+        );
+        $statement->execute([$this->supplierId, $employmentId]);
+        self::assertSame($eligibility, $statement->fetchColumn());
     }
 
     /** @return array<string,mixed> */
@@ -528,15 +646,26 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         bool $taxDeclarationSigned = true,
         string $periodStart = '2026-06-01',
         bool $withHealthMonthEvidence = true,
+        string $taxpayerType = 'employee',
+        ?bool $taxpayerCreditTaxpayer = null,
+        ?string $otherWithholdingEligibility = null,
     ): array {
         $pdo = $this->db->pdo();
+        $taxpayerCreditTaxpayer ??= $taxDeclarationSigned;
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, employment_type,
                  tax_declaration_signed, tax_credit_taxpayer, child_count,
                  monthly_gross, auto_post, is_active)
-             VALUES (?, ?, "employee", ?, ?, ?, 0, 0, 0, 1)',
-        )->execute([$this->supplierId, $name, $employmentType, $taxDeclarationSigned ? 1 : 0, $taxDeclarationSigned ? 1 : 0]);
+             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 1)',
+        )->execute([
+            $this->supplierId,
+            $name,
+            $taxpayerType,
+            $employmentType,
+            $taxDeclarationSigned ? 1 : 0,
+            $taxpayerCreditTaxpayer ? 1 : 0,
+        ]);
         $employeeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employee_profiles
@@ -568,14 +697,27 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             $workloadBasisPoints,
             $taxDeclarationSigned ? 1 : 0,
         ]);
+        if ($otherWithholdingEligibility !== null) {
+            $pdo->prepare(
+                'UPDATE payroll_employment_terms
+                    SET other_withholding_eligibility = ?
+                  WHERE supplier_id = ? AND employment_id = ?',
+            )->execute([$otherWithholdingEligibility, $this->supplierId, $employmentId]);
+        }
         $evidence = $this->container->get(PayrollPersonStatutoryEvidenceRepository::class);
         if (!$evidence instanceof PayrollPersonStatutoryEvidenceRepository) {
             throw new \RuntimeException('Zákonná evidence osoby není dostupná.');
         }
+        $healthEvidenceDocumentId = $this->createHealthEvidenceDocument($sequence);
         $evidence->save(
             $this->supplierId,
             $employeeId,
-            $this->statutoryEvidence($periodStart, $taxDeclarationSigned, $withHealthMonthEvidence),
+            $this->statutoryEvidence(
+                $periodStart,
+                $taxDeclarationSigned,
+                $withHealthMonthEvidence,
+                $healthEvidenceDocumentId,
+            ),
             date('Y-m-t', strtotime($periodStart)),
             $this->actors[0],
             null,
@@ -739,11 +881,11 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @param array{employee_id:int,employment_id:int,name:string} $person */
-    private function completeJmhzEmployment(array $person): void
+    private function completeJmhzEmployment(array $person, string $activityCode = '1'): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms
-                SET activity_code = "1",
+                SET activity_code = ?,
                     jmhz_relationship_detail_code = "1",
                     work_place = "Hlavní město Praha",
                     jmhz_workplace_municipality_code = "554782",
@@ -756,6 +898,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     risky_work = 0
               WHERE supplier_id = ? AND employment_id = ?',
         )->execute([
+            $activityCode,
             JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
             JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
             $this->supplierId,
@@ -891,7 +1034,12 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function statutoryEvidence(string $periodStart, bool $taxDeclarationSigned, bool $withHealthMonthEvidence): array
+    private function statutoryEvidence(
+        string $periodStart,
+        bool $taxDeclarationSigned,
+        bool $withHealthMonthEvidence,
+        int $healthEvidenceDocumentId,
+    ): array
     {
         return [
             'effective_on' => date('Y-m-t', strtotime($periodStart)),
@@ -932,6 +1080,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     'insurer_status' => 'verified',
                     'insurer_code' => '111',
                     'insurer_evidence_reference' => 'document:synthetic-health-card',
+                    'health_evidence_document_id' => $healthEvidenceDocumentId,
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
                 ]],
@@ -944,6 +1093,26 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                 ]] : [],
             ],
         ];
+    }
+
+    private function createHealthEvidenceDocument(int $sequence): int
+    {
+        $sha256 = hash('sha256', 'synthetic-health-evidence-' . $sequence);
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope)
+             VALUES (?, "Syntetický zdravotní důkaz", "health-evidence.pdf", ?, ?,
+                     "application/pdf", 1, "pdf", "manual", ?, "company")',
+        );
+        $statement->execute([
+            $this->supplierId,
+            $sha256 . '.pdf',
+            $sha256,
+            $this->actors[0],
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
     }
 
     private function createOpeningBalances(int $employeeId, int $sequence): void

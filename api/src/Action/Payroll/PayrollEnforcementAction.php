@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseLifecycle;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementCaseStatus;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementDecisionDocumentReference;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -125,6 +126,8 @@ final class PayrollEnforcementAction
                     return $case;
                 },
             ), 'enforcement_case');
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -156,6 +159,8 @@ final class PayrollEnforcementAction
                     return $case;
                 },
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -208,6 +213,8 @@ final class PayrollEnforcementAction
                     return $claim;
                 },
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\ValueError|\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\DomainException $e) {
@@ -244,6 +251,8 @@ final class PayrollEnforcementAction
                     return $claim;
                 },
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\ValueError|\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -288,6 +297,8 @@ final class PayrollEnforcementAction
             $deleted = $deletedValue === null
                 ? null
                 : PayrollTimeValue::row($deletedValue, 'deleted_claim');
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -460,6 +471,8 @@ final class PayrollEnforcementAction
                     return $case;
                 },
             ), 'enforcement_case');
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\ValueError|\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -608,6 +621,8 @@ final class PayrollEnforcementAction
                     return $evidence;
                 },
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\ValueError|\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -661,6 +676,8 @@ final class PayrollEnforcementAction
                     return $evidence;
                 },
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollEnforcementConflictException $e) {
@@ -711,6 +728,8 @@ final class PayrollEnforcementAction
                     return $dependant;
                 },
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }

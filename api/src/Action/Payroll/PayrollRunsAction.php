@@ -13,6 +13,8 @@ use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
+use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentsUnsettledException;
@@ -192,6 +194,10 @@ final class PayrollRunsAction
                 $officeId,
                 $this->requiredUserId($request),
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+        } catch (PayrollPeriodOwnedException $e) {
+            return Json::error($response, 'payroll_period_owned', $e->getMessage(), 409);
         } catch (\InvalidArgumentException|\DomainException|\OutOfBoundsException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -234,6 +240,8 @@ final class PayrollRunsAction
                 $version,
                 $this->requiredUserId($request),
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (PayrollRunConflictException $e) {
             return Json::error(
                 $response,
@@ -325,6 +333,8 @@ final class PayrollRunsAction
                 $this->requiredUserId($request),
                 $reason,
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (PayrollRunConflictException $e) {
             return Json::error(
                 $response,

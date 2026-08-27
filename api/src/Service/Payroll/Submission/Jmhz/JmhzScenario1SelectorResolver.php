@@ -76,6 +76,12 @@ final class JmhzScenario1SelectorResolver
                 return $this->blocked('jmhz_scenario_relationship_detail_invalid', ['10502']);
             }
         }
+        if (in_array($activityCode, self::DIRECT_ACTIVITY_CODES, true)) {
+            if ($relationshipDetailCode !== null) {
+                return $this->blocked('jmhz_scenario_relationship_detail_not_applicable', ['10502']);
+            }
+            return $this->supported($activityCode, null);
+        }
         try {
             $relationshipDetailCode = PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
                 $activityCode,
@@ -88,10 +94,6 @@ final class JmhzScenario1SelectorResolver
                     : 'jmhz_scenario_relationship_detail_not_applicable',
                 ['10502'],
             );
-        }
-
-        if (in_array($activityCode, self::DIRECT_ACTIVITY_CODES, true)) {
-            return $this->supported($activityCode, null);
         }
         if (preg_match('/^[1-9]$/D', $activityCode) === 1) {
             if ($relationshipDetailCode === null) {

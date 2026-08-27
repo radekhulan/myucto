@@ -291,6 +291,9 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                     'term_row_version' => 1,
                     'work_summary_id' => 301,
                     'work_summary_sha256' => str_repeat('d', 64),
+                    'scenario_resolution' => [
+                        'scenario_key' => 'scenario_1',
+                    ],
                 ],
                 'eldp_sections' => [[
                     'ordinal' => 1,
@@ -959,6 +962,54 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertSame('employment', $missing[0]['entity_type']);
         self::assertSame(102, $missing[0]['entity_id']);
         self::assertSame('blocked', $snapshot->readiness()['status']);
+    }
+
+    public function testEvidenceFromPreviousScenarioClassificationHasSpecificFailure(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+        $input['people'][0]['employments'][0]['term']['activity_code'] = 'M';
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        try {
+            (new JmhzPreparationSnapshotBuilder())->build(
+                7,
+                'test',
+                $source,
+                [],
+                [],
+                [],
+                [],
+                [101 => $this->ordinaryEvidenceSource($source, 11, 101, 701)],
+            );
+            self::fail('Evidence z předchozí klasifikace scénáře musí být odmítnuta.');
+        } catch (JmhzPreparationSnapshotException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_selector_mismatch',
+                $exception->validationCode,
+            );
+        }
     }
 
     /** Evidence patřící vztahu mimo revizi je pojmenovaná chyba, ne nález. */

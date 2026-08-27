@@ -517,9 +517,9 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         $byDomain = array_column($domains, null, 'domain');
 
         // Ruční posouzení drží CAPABILITY, ne stav. Překlopení dodané sady na
-        // `active` proto na těchhle čtyřech doménách nesmí změnit vůbec nic —
+        // `active` proto na těchhle třech doménách nesmí změnit vůbec nic —
         // aplikace tu vědomě netvrdí žádné číslo.
-        foreach (['compensation_averages', 'deadlines', 'codebooks', 'submissions'] as $domain) {
+        foreach (['compensation_averages', 'codebooks', 'submissions'] as $domain) {
             self::assertSame('manual_review', $byDomain[$domain]['status'], $domain);
             self::assertFalse($byDomain[$domain]['calculation_ready'], $domain);
             self::assertTrue($byDomain[$domain]['manual_review_by_design'], $domain);
@@ -533,41 +533,45 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         }
 
         $deadlines = $byDomain['deadlines'];
-        self::assertSame(1, $deadlines['manual_review_parameter_count']);
-        self::assertSame(1, $deadlines['parameter_count']);
-        self::assertIsString($deadlines['manual_review_explanation']);
+        self::assertSame('ready', $deadlines['status']);
+        self::assertTrue($deadlines['calculation_ready']);
+        self::assertFalse($deadlines['manual_review_by_design']);
+        self::assertSame(0, $deadlines['manual_review_parameter_count']);
+        self::assertSame(9, $deadlines['parameter_count']);
 
         // Sociální pojištění ruční posouzení MÁ, ale jen u části parametrů —
         // doména jako celek zůstává použitelná.
         $social = $byDomain['social_insurance'];
         self::assertFalse($social['manual_review_by_design']);
         self::assertSame(1, $social['manual_review_parameter_count']);
-        self::assertSame(16, $social['parameter_count']);
+        self::assertSame(21, $social['parameter_count']);
         self::assertNotSame('manual_review', $social['status']);
     }
 
     public function testManualReviewParameterExplainsWhatTheUserShouldDo(): void
     {
-        $detail = $this->service->detail('cz-payroll-2026.deadlines.v1')
-            ?? self::fail('Vestavěný ruleset lhůt chybí.');
+        $detail = $this->service->detail('cz-payroll-2026.social-insurance.v1')
+            ?? self::fail('Vestavěný ruleset sociálního pojištění chybí.');
         /** @var list<array<string, mixed>> $parameters */
         $parameters = $detail['parameters'];
-        $calendar = array_column($parameters, null, 'key')['submission_calendar'];
+        $discount = array_column($parameters, null, 'key')[
+            'employee.discount.agriculture_dpp'
+        ];
 
-        self::assertSame('manual_review', $calendar['capability']);
-        self::assertIsString($calendar['manual_review_why']);
-        self::assertIsString($calendar['manual_review_action']);
-        self::assertStringContainsString('neschvalujete', $calendar['manual_review_action']);
+        self::assertSame('manual_review', $discount['capability']);
+        self::assertIsString($discount['manual_review_why']);
+        self::assertIsString($discount['manual_review_action']);
+        self::assertStringContainsString('uplatněte slevu ručně', $discount['manual_review_action']);
 
         /** @var list<array<string, mixed>> $warnings */
         $warnings = $detail['warnings'];
         $codes = array_column($warnings, 'code');
-        self::assertContains('manual_review_capability', $codes);
+        self::assertNotContains('manual_review_capability', $codes);
         self::assertContains('manual_review_parameters', $codes);
         foreach ($warnings as $warning) {
             if ($warning['code'] === 'manual_review_parameters') {
                 self::assertSame(1, $warning['context']['manual_review_count']);
-                self::assertSame(1, $warning['context']['parameter_count']);
+                self::assertSame(21, $warning['context']['parameter_count']);
             }
         }
     }

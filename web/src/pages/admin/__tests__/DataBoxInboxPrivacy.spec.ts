@@ -107,6 +107,8 @@ describe('DataBox — soukromí příchozích zpráv', () => {
     expect(wrapper.get('[data-test="inbox-mobile-list"]').classes()).toContain('md:hidden')
     expect(card.text()).toContain('Soukromá zpráva')
     expect(card.text()).toContain('Soukromý odesílatel')
+    expect(card.get('[data-test="inbox-mobile-message-id"]').text()).toContain('synthetic-51')
+    expect(wrapper.get('[data-test="inbox-desktop-message-id"]').text()).toContain('synthetic-51')
     expect(card.find('[data-test="inbox-mobile-open-message"]').exists()).toBe(true)
     expect(card.text()).toContain('databox.notices.recordFromMessage')
     expect(card.find('[data-test="inbox-hide"]').exists()).toBe(true)

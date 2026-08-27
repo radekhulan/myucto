@@ -125,12 +125,35 @@ final class JmhzOrdinaryEvidenceBuilder
         $profileSource = $this->ordinaryProfileSource($employment, $sourceKind);
         $this->assertNoKnownDeductionConflict($person, $result, $employeeId);
         $term = $this->object($employment['term'] ?? null, 'term');
-        $selection = JmhzScenario1SelectorResolver::load()->resolve(
-            $term['activity_code'] ?? null,
-            $term['jmhz_relationship_detail_code'] ?? null,
+        $employmentSource = $this->object($employment['employment'] ?? null, 'employment');
+        $selectorActivityCode = is_string($term['activity_code'] ?? null)
+            ? $term['activity_code']
+            : null;
+        $selectorRelationshipDetailCode = is_string($term['jmhz_relationship_detail_code'] ?? null)
+            ? $term['jmhz_relationship_detail_code']
+            : null;
+        $selection = JmhzScenarioSelectorResolver::load()->resolve(
+            $selectorActivityCode,
+            $selectorRelationshipDetailCode,
         );
-        if ($selection['supported'] !== true) {
-            $this->invalid('jmhz_ordinary_evidence_scenario_unsupported', 'Revize nepatří do podporovaného scenario_1.');
+        $scenarioResolution = $selection['evidence'] ?? null;
+        $scenarioKey = is_array($scenarioResolution)
+            ? ($scenarioResolution['scenario_key'] ?? null)
+            : null;
+        $supportedProfile = $scenarioKey === 'scenario_1'
+            || ($scenarioKey === 'scenario_3'
+                && in_array(
+                    $employmentSource['relation_type'] ?? null,
+                    ['partner_dependent', 'statutory_body'],
+                    true,
+                )
+                && ($term['activity_code'] ?? null) === 'S'
+                && ($term['jmhz_relationship_detail_code'] ?? null) === '1');
+        if ($selection['supported'] !== true || !$supportedProfile) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_scenario_unsupported',
+                'Revize nepatří do podporovaného běžného profilu JMHZ.',
+            );
         }
 
         $catalog = JmhzScenarioRequirementSourceCatalog::load();
@@ -145,14 +168,15 @@ final class JmhzOrdinaryEvidenceBuilder
         }
         $in36 = $catalog->interaction('IN36');
         $requirements = [];
-        foreach ($catalog->requirementsForMatrix('scenario_1') as $requirement) {
-            if (in_array($requirement->attributeId, ['10116', '10546'], true)) {
+        $expectedRequirementIds = $scenarioKey === 'scenario_1'
+            ? ['10116', '10546']
+            : ['10546'];
+        foreach ($catalog->requirementsForMatrix($scenarioKey) as $requirement) {
+            if (in_array($requirement->attributeId, $expectedRequirementIds, true)) {
                 $requirements[$requirement->attributeId] = $requirement->rowHash;
             }
         }
-        if (count($requirements) !== 2
-            || !isset($requirements[10116], $requirements[10546])
-        ) {
+        if (array_map('strval', array_keys($requirements)) !== $expectedRequirementIds) {
             $this->invalid('jmhz_ordinary_evidence_catalog_mismatch', 'Katalog ordinary evidence není úplný.');
         }
         $periodEnd = (new \DateTimeImmutable($periodStart))
@@ -172,7 +196,7 @@ final class JmhzOrdinaryEvidenceBuilder
                 'employment_id' => $employmentId,
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
-                'scenario_key' => 'scenario_1',
+                'scenario_key' => $scenarioKey,
             ],
             'specification' => [
                 'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,

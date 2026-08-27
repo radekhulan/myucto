@@ -192,9 +192,9 @@ final class JmhzScenario1ControlEvaluator
 
     public function __construct(
         private readonly JmhzControlParameterCatalog $parameters,
+        private readonly JmhzDeadlinePolicy $deadlines,
         private readonly ?JmhzExternalCodebookCatalog $externalCodebooks = null,
         private readonly ?JmhzCodebookCatalog $codebooks = null,
-        private readonly JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
 
     /** @return list<int> */

@@ -110,6 +110,56 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(12_000, $confirmation['assessment_base_czk']);
     }
 
+    public function testDerivesStatutoryBodyAsSPlusPlusInScenarioThree(): void
+    {
+        $source = $this->agreementSource(
+            'statutory_body',
+            'S',
+            'corporate_body',
+            'participates',
+            450_000,
+            450_000,
+            450_000,
+        );
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values']['evidence_days'] = 31;
+        $source = $this->withInput($source, $input);
+        $builder = new JmhzEldpEvidenceBuilder();
+
+        $snapshot = $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+
+        self::assertSame('scenario_3', $snapshot->payload['scope']['scenario_key']);
+        self::assertSame('S++', $snapshot->payload['eldp_sections'][0]['code']);
+        self::assertSame(4_500, $snapshot->payload['eldp_sections'][0]['assessment_base_czk']);
+        self::assertSame(31, $snapshot->payload['eldp_sections'][0]['insurance_days']);
+    }
+
+    public function testDerivesPartnerDependentActivityAsSPlusPlusInScenarioThree(): void
+    {
+        $source = $this->agreementSource(
+            'partner_dependent',
+            'S',
+            'corporate_body',
+            'participates',
+            450_000,
+            450_000,
+            450_000,
+        );
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values']['evidence_days'] = 31;
+        $source = $this->withInput($source, $input);
+        $builder = new JmhzEldpEvidenceBuilder();
+
+        $snapshot = $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+
+        self::assertSame('scenario_3', $snapshot->payload['scope']['scenario_key']);
+        self::assertSame('S++', $snapshot->payload['eldp_sections'][0]['code']);
+        self::assertSame(4_500, $snapshot->payload['eldp_sections'][0]['assessment_base_czk']);
+        self::assertSame(31, $snapshot->payload['eldp_sections'][0]['insurance_days']);
+    }
+
     public function testDerivesNonParticipatingDppAsCodeLessZeroDaySection(): void
     {
         $source = $this->agreementSource('dpp', 'T', 'dpp', 'does_not_participate', 640_000, 0, 0);
@@ -137,13 +187,17 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
-    public function testKeepsParticipatingDppFailClosed(): void
+    public function testDerivesParticipatingDppWithPinnedTPlusPlusCode(): void
     {
         $source = $this->agreementSource('dpp', 'T', 'dpp', 'participates', 640_000, 640_000, 640_000);
+        $builder = new JmhzEldpEvidenceBuilder();
 
-        $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('podlimitní neúčastnou DPP');
-        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+        $snapshot = $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source));
+
+        self::assertSame('T++', $snapshot->payload['eldp_sections'][0]['code']);
+        self::assertSame(6_400, $snapshot->payload['eldp_sections'][0]['assessment_base_czk']);
+        self::assertSame(31, $snapshot->payload['eldp_sections'][0]['insurance_days']);
+        self::assertNotNull($snapshot->payload['specification']['eldp_code_row_sha256']);
     }
 
     public function testKeepsNonParticipatingDpcFailClosed(): void
@@ -151,7 +205,7 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         $source = $this->agreementSource('dpc', 'A', 'dpc', 'does_not_participate', 300_000, 0, 0);
 
         $this->expectException(JmhzEldpEvidenceException::class);
-        $this->expectExceptionMessage('účastný pracovní poměr nebo DPČ');
+        $this->expectExceptionMessage('účastný pracovní poměr, DPČ, DPP');
         (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
     }
 
@@ -303,7 +357,8 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertIsArray($input);
         $input['people'][0]['employments'][0]['employment']['relation_type'] = $relationType;
         $input['people'][0]['employments'][0]['term']['activity_code'] = $activityCode;
-        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] = '1';
+        $input['people'][0]['employments'][0]['term']['jmhz_relationship_detail_code'] =
+            in_array($relationType, ['dpc', 'dpp'], true) ? null : '1';
         $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values']['evidence_days'] = 0;
         $source = $this->withInput($source, $input);
 

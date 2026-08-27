@@ -17,6 +17,9 @@ import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
 import PayrollProductionQualificationPanel from '@/pages/payroll/PayrollProductionQualificationPanel.vue'
+import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.vue'
+import PayrollOperationalHealthPanel from '@/pages/payroll/PayrollOperationalHealthPanel.vue'
+import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -329,6 +332,8 @@ onMounted(load)
 
         <PayrollGuide ref="guide" />
 
+        <PayrollOperationalHealthPanel />
+
         <section
           class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
           data-test="monthly-workspace"
@@ -398,6 +403,10 @@ onMounted(load)
             </RouterLink>
           </div>
         </section>
+
+        <PayrollYearClosePanel :initial-year="Number(currentPeriod.slice(0, 4))" />
+
+        <PayrollAnnualReportPanel :initial-year="Number(currentPeriod.slice(0, 4))" />
 
         <PayrollEmployeeCards :period="currentPeriod" />
       </div>

@@ -251,6 +251,75 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
         self::assertSame(1, $batch['declared_item_count']);
     }
 
+    public function testInstructionWithAccountNotEffectiveOnPayDateBlocksMaterialization(): void
+    {
+        $caseId = $this->createCase();
+        $claim = $this->createClaim($caseId, 'non_priority', 500_00, '2026-05-01');
+        $this->setCaseStatus($caseId, 'remit');
+        $lateAccount = $this->institutions->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'EXEK-LATE',
+            'institution_name' => 'Syntetický pozdní příjemce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '9876543210',
+            'specific_symbol' => null,
+            'constant_symbol' => '0558',
+            'valid_from' => '2026-07-11',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:late-recipient',
+            'verified_on' => '2026-07-11',
+        ], $this->actorId);
+        $this->appendRecipientInstruction(
+            $caseId,
+            $this->beneficiaryPartyId($caseId),
+            (int) $lateAccount['id'],
+            '2026-06-01',
+            2,
+        );
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeMonthResult(
+            $revisionId,
+            [$claim['claim_key'] => 500_00],
+            'synthetic-non-current-recipient-account',
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nemá k datu výplaty ověřený účet');
+        $this->materializer->materialize($this->supplierId, $revisionId, $this->actorId);
+    }
+
+    public function testLaterRecipientPartyRevisionCannotAlterFrozenHistoricalPayment(): void
+    {
+        $caseId = $this->createCase();
+        $claim = $this->createClaim($caseId, 'non_priority', 500_00, '2026-05-01');
+        $this->setCaseStatus($caseId, 'remit');
+        $revisionId = $this->createRevision(1, 'regular', null);
+        $this->storeMonthResult(
+            $revisionId,
+            [$claim['claim_key'] => 500_00],
+            'synthetic-frozen-recipient-party',
+        );
+        $created = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+        $liabilityId = $created['liability_ids'][0];
+        $before = $this->liability($liabilityId);
+        $this->appendBeneficiaryRevisionAndInstruction($caseId, '2026-08-01');
+        $after = $this->liability($liabilityId);
+
+        self::assertSame($before['source_snapshot_json'], $after['source_snapshot_json']);
+        $snapshot = json_decode((string) $after['source_snapshot_json'], true);
+        self::assertIsArray($snapshot);
+        self::assertSame(
+            $this->beneficiaryPartyId($caseId, 1),
+            $snapshot['recipient_party_id'] ?? null,
+        );
+    }
+
     public function testDecisionReleasesHistoricalDepositExactlyOnceAndPaymentReconciles(): void
     {
         $caseId = $this->createCase();
@@ -834,7 +903,7 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             self::fail('Případ bez příjemce z katalogu nesmí vytvořit závazek.');
         } catch (\DomainException $exception) {
             self::assertStringContainsString(
-                'katalogu platebních účtů',
+                'explicitní backfill',
                 $exception->getMessage(),
             );
         }
@@ -1238,7 +1307,115 @@ final class PayrollEnforcementLiabilityMaterializerTest extends TestCase
             $this->actorId,
         ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+        $caseId = (int) $this->db->pdo()->lastInsertId();
+        if ($institutionId === $this->recipientInstitutionId) {
+            $this->recordDocumentedRecipient($caseId);
+        }
+        return $caseId;
+    }
+
+    private function recordDocumentedRecipient(int $caseId): void
+    {
+        $pdo = $this->db->pdo();
+        $hash = $pdo->prepare(
+            'SELECT sha256 FROM documents WHERE supplier_id = ? AND id = ?',
+        );
+        $hash->execute([$this->supplierId, $this->decisionDocumentId]);
+        $documentHash = PayrollTimeValue::string(
+            $hash->fetchColumn(),
+            'decision_document_sha256',
+        );
+        $party = $pdo->prepare(
+            'INSERT INTO payroll_enforcement_case_parties
+                (supplier_id, case_id, party_role, revision_no, effective_from,
+                 party_name, party_reference, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, ?, 1, "2026-01-01", ?, ?, ?, ?, ?)',
+        );
+        $party->execute([
+            $this->supplierId, $caseId, 'court', 'Syntetický soud',
+            'SYNTH-COURT', $this->decisionDocumentId, $documentHash,
+            $this->actorId,
+        ]);
+        $party->execute([
+            $this->supplierId, $caseId, 'beneficiary', 'Syntetický oprávněný',
+            'SYNTH-BENEFICIARY', $this->decisionDocumentId, $documentHash,
+            $this->actorId,
+        ]);
+        $beneficiaryId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_recipient_instructions
+                (supplier_id, case_id, revision_no, effective_from,
+                 recipient_party_id, payment_account_id, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, 1, "2026-01-01", ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId, $caseId, $beneficiaryId,
+            $this->recipientAccountId, $this->decisionDocumentId, $documentHash,
+            $this->actorId,
+        ]);
+    }
+
+    private function beneficiaryPartyId(int $caseId, int $revisionNo = 1): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_enforcement_case_parties
+              WHERE supplier_id = ? AND case_id = ? AND party_role = "beneficiary"
+                AND revision_no = ?',
+        );
+        $stmt->execute([$this->supplierId, $caseId, $revisionNo]);
+        return PayrollTimeValue::int($stmt->fetchColumn(), 'beneficiary_party_id');
+    }
+
+    private function appendRecipientInstruction(
+        int $caseId,
+        int $partyId,
+        int $accountId,
+        string $effectiveFrom,
+        int $revisionNo,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT sha256 FROM documents WHERE supplier_id = ? AND id = ?',
+        );
+        $stmt->execute([$this->supplierId, $this->decisionDocumentId]);
+        $hash = PayrollTimeValue::string($stmt->fetchColumn(), 'decision_document_sha256');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_recipient_instructions
+                (supplier_id, case_id, revision_no, effective_from,
+                 recipient_party_id, payment_account_id, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId, $caseId, $revisionNo, $effectiveFrom, $partyId,
+            $accountId, $this->decisionDocumentId, $hash, $this->actorId,
+        ]);
+    }
+
+    private function appendBeneficiaryRevisionAndInstruction(int $caseId, string $effectiveFrom): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT sha256 FROM documents WHERE supplier_id = ? AND id = ?',
+        );
+        $stmt->execute([$this->supplierId, $this->decisionDocumentId]);
+        $hash = PayrollTimeValue::string($stmt->fetchColumn(), 'decision_document_sha256');
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_case_parties
+                (supplier_id, case_id, party_role, revision_no, effective_from,
+                 party_name, party_reference, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, "beneficiary", 2, ?, "Syntetický oprávněný II",
+                     "SYNTH-BENEFICIARY-2", ?, ?, ?)',
+        )->execute([
+            $this->supplierId, $caseId, $effectiveFrom,
+            $this->decisionDocumentId, $hash, $this->actorId,
+        ]);
+        $this->appendRecipientInstruction(
+            $caseId,
+            (int) $this->db->pdo()->lastInsertId(),
+            $this->recipientAccountId,
+            $effectiveFrom,
+            2,
+        );
     }
 
     /** @return array{id:int,claim_key:string} */

@@ -126,7 +126,7 @@ final class JmhzScenarioSelectorResolver
     /**
      * @return array{
      *   supported:true,issue_code:null,attribute_ids:list<string>,evidence:array<string,mixed>,
-     *   preparation_supported:false,readiness_issue_code:string,readiness_attribute_ids:list<string>
+     *   preparation_supported:bool,readiness_issue_code:?string,readiness_attribute_ids:list<string>
      * }
      */
     private function classified(
@@ -147,6 +147,9 @@ final class JmhzScenarioSelectorResolver
             }
         }
         sort($attributes, SORT_STRING);
+        $preparationSupported = $scenarioKey === 'scenario_3'
+            && $activityCode === 'S'
+            && $relationshipDetailCode === '1';
 
         return [
             'supported' => true,
@@ -166,11 +169,13 @@ final class JmhzScenarioSelectorResolver
                 'selection_kind' => $scenario->selectionKind->value,
                 'matrix_source_sheet' => $matrix->sourceSheet,
             ],
-            'preparation_supported' => false,
-            'readiness_issue_code' => $scenarioKey === 'scenario_8'
-                ? 'deferred_income_evidence_missing'
-                : "jmhz_{$scenarioKey}_preparation_unsupported",
-            'readiness_attribute_ids' => $attributes,
+            'preparation_supported' => $preparationSupported,
+            'readiness_issue_code' => $preparationSupported
+                ? null
+                : ($scenarioKey === 'scenario_8'
+                    ? 'deferred_income_evidence_missing'
+                    : "jmhz_{$scenarioKey}_preparation_unsupported"),
+            'readiness_attribute_ids' => $preparationSupported ? [] : $attributes,
         ];
     }
 

@@ -36,7 +36,7 @@ final class PayrollPeriodExportService
     public function createMonthly(
         int $supplierId,
         string $period,
-        int $userId,
+        ?int $userId,
     ): array {
         if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
             throw new \InvalidArgumentException(
@@ -61,7 +61,7 @@ final class PayrollPeriodExportService
     public function createAnnual(
         int $supplierId,
         int $year,
-        int $userId,
+        ?int $userId,
     ): array {
         if ($year < 2000 || $year > 2199) {
             throw new \InvalidArgumentException(
@@ -252,11 +252,11 @@ final class PayrollPeriodExportService
         PayrollPeriodExportScope $scope,
         string $periodStart,
         string $periodEnd,
-        int $userId,
+        ?int $userId,
     ): array {
-        if ($supplierId <= 0 || $userId <= 0) {
+        if ($supplierId <= 0 || ($userId !== null && $userId <= 0)) {
             throw new \InvalidArgumentException(
-                'Firma a uživatel exportu musí být kladná čísla.',
+                'Firma a případný uživatel exportu musí být kladná čísla.',
             );
         }
 

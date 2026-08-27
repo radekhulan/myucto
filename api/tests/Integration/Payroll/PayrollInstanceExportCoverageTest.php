@@ -55,6 +55,8 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         'payroll_data_migration_markers',
         'payroll_document_download_grants',
         'payroll_payment_export_download_grants',
+        'payroll_period_export_jobs',
+        'payroll_period_export_job_attempts',
         'payroll_ruleset_audit',
         'payroll_submission_signing_profiles',
         'payroll_submission_artifact_download_grants',

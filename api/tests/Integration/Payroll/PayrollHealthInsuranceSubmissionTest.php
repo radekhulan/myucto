@@ -679,6 +679,45 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         );
     }
 
+    public function testCorrectionRevisionBeforeFirstFilingCreatesAndReplaysRegularOverview(): void
+    {
+        $this->revisionId = $this->correctionRevision();
+        $employeeId = (int) $this->db->pdo()->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId,
+        )->fetchColumn();
+        $this->storeResult($employeeId);
+
+        $first = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        $submission = $this->repository->findSubmission(
+            $this->supplierId,
+            $first['submission_id'],
+        );
+        self::assertIsArray($submission);
+        self::assertSame('regular', $submission['submission_kind']);
+        self::assertNull($submission['corrects_submission_id']);
+        self::assertStringContainsString(
+            '<typPrehledu>radny</typPrehledu>',
+            $this->submissions->artifactBytes(
+                $this->supplierId,
+                (int) $first['artifact_id'],
+            ),
+        );
+
+        $replayed = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        self::assertSame($first['submission_id'], $replayed['submission_id']);
+        self::assertFalse($replayed['created']);
+    }
+
     public function testCorrectionRevisionCreatesCorrectiveOverviewLinkedToAcceptedPredecessor(): void
     {
         $regular = $this->service->preparePaymentOverview(

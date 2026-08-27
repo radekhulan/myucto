@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -158,6 +159,141 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         self::assertSame(
             'employer_obstacle_verified',
             $snapshot['health']['month_evidence']['top_up_responsibility'],
+        );
+    }
+
+    public function testHealthEvidenceDocumentRequiresSessionPermissionAndActiveTenantDocument(): void
+    {
+        if (!$this->db->hasColumn('payroll_person_health_coverage_history', 'health_evidence_document_id')) {
+            $this->markTestSkipped('Migrace 1602 neproběhla.');
+        }
+
+        $documentId = $this->document($this->supplierId, str_repeat('d', 64));
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_coverages'][0]['insurer_evidence_reference'] = 'health:insured-card';
+        $payload['sections']['health_coverages'][0]['health_evidence_document_id'] = $documentId;
+
+        $documentsOnly = new EffectiveRole(301, 'Bez zdravotních důkazů', 'staff', true, [
+            'payroll.person.write' => 2,
+        ]);
+        $restricted = $this->saveAs($payload, $documentsOnly);
+        self::assertSame(403, $restricted->getStatusCode());
+        self::assertSame('forbidden', $this->json($restricted)['error']['code']);
+
+        $healthWriter = new EffectiveRole(302, 'Zdravotní důkazy', 'staff', true, [
+            'payroll.person.write' => 2,
+            'payroll.health_evidence' => 2,
+        ]);
+        $stored = $this->saveAs($payload, $healthWriter);
+        self::assertSame(200, $stored->getStatusCode(), (string) $stored->getBody());
+        $coverage = $this->json($stored)['evidence']['sections']['health_coverages'][0];
+        self::assertSame($documentId, (int) $coverage['health_evidence_document_id']);
+        self::assertSame(str_repeat('d', 64), $coverage['health_evidence_document_sha256']);
+
+        $foreignDocumentId = $this->document($this->otherSupplierId, str_repeat('e', 64));
+        $foreignPayload = $this->completeEvidence();
+        $foreignPayload['sections']['health_coverages'][0]['insurer_evidence_reference'] = 'health:insured-card';
+        $foreignPayload['sections']['health_coverages'][0]['health_evidence_document_id'] = $foreignDocumentId;
+        $foreign = $this->saveAs($foreignPayload, $healthWriter);
+        self::assertSame(422, $foreign->getStatusCode());
+        self::assertStringContainsString('aktivní dokument této firmy', $this->json($foreign)['error']['message']);
+
+        $bearer = $this->saveAs($payload, $healthWriter, 'bearer');
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
+    }
+
+    public function testHealthEvidenceDocumentMetadataRequiresReadPermission(): void
+    {
+        if (!$this->db->hasColumn('payroll_person_health_coverage_history', 'health_evidence_document_id')) {
+            $this->markTestSkipped('Migrace 1602 neproběhla.');
+        }
+
+        $documentId = $this->document($this->supplierId, str_repeat('f', 64));
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_coverages'][0]['insurer_evidence_reference'] = 'health:insured-card';
+        $payload['sections']['health_coverages'][0]['health_evidence_document_id'] = $documentId;
+
+        $healthWriter = new EffectiveRole(303, 'Zdravotní důkazy', 'staff', true, [
+            'payroll.person.write' => 2,
+            'payroll.health_evidence' => 2,
+        ]);
+        self::assertSame(200, $this->saveAs($payload, $healthWriter)->getStatusCode());
+
+        $payrollOnly = new EffectiveRole(304, 'Pouze mzdy', 'staff', true, [
+            'payroll' => 1,
+        ]);
+        $redacted = $this->json($this->showAs($payrollOnly));
+        $redactedCoverage = $redacted['evidence']['sections']['health_coverages'][0];
+        self::assertArrayNotHasKey('health_evidence_document_id', $redactedCoverage);
+        self::assertArrayNotHasKey('health_evidence_document_sha256', $redactedCoverage);
+        self::assertSame('health:insured-card', $redactedCoverage['insurer_evidence_reference']);
+
+        $healthReader = new EffectiveRole(305, 'Čtení zdravotních důkazů', 'staff', true, [
+            'payroll' => 1,
+            'payroll.health_evidence' => 1,
+        ]);
+        $visible = $this->json($this->showAs($healthReader));
+        $visibleCoverage = $visible['evidence']['sections']['health_coverages'][0];
+        self::assertSame($documentId, (int) $visibleCoverage['health_evidence_document_id']);
+        self::assertSame(str_repeat('f', 64), $visibleCoverage['health_evidence_document_sha256']);
+    }
+
+    public function testRedactedHealthEvidenceLinkSurvivesUnrelatedPayrollWrite(): void
+    {
+        if (!$this->db->hasColumn('payroll_person_health_coverage_history', 'health_evidence_document_id')) {
+            $this->markTestSkipped('Migrace 1602 neproběhla.');
+        }
+
+        $documentId = $this->document($this->supplierId, str_repeat('a', 64));
+        $payload = $this->completeEvidence();
+        $payload['sections']['health_coverages'][0]['insurer_evidence_reference'] = 'health:insured-card';
+        $payload['sections']['health_coverages'][0]['health_evidence_document_id'] = $documentId;
+
+        $healthWriter = new EffectiveRole(306, 'Zápis zdravotních důkazů', 'staff', true, [
+            'payroll.person.write' => 2,
+            'payroll.health_evidence' => 2,
+        ]);
+        self::assertSame(200, $this->saveAs($payload, $healthWriter)->getStatusCode());
+
+        $payrollReader = new EffectiveRole(307, 'Běžné mzdy', 'staff', true, [
+            'payroll' => 1,
+        ]);
+        $redactedView = $this->json($this->showAs($payrollReader))['evidence'];
+        self::assertArrayNotHasKey(
+            'health_evidence_document_id',
+            $redactedView['sections']['health_coverages'][0],
+        );
+
+        $unrelatedUpdate = $this->payloadFrom($redactedView);
+        $unrelatedUpdate['sections']['tax_declarations'][0]['evidence_reference']
+            = 'document:tax-declaration-corrected';
+        $payrollWriter = new EffectiveRole(308, 'Zápis běžných mezd', 'staff', true, [
+            'payroll.person.write' => 2,
+        ]);
+        $saved = $this->saveAs($unrelatedUpdate, $payrollWriter);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $savedCoverage = $this->json($saved)['evidence']['sections']['health_coverages'][0];
+        self::assertArrayNotHasKey('health_evidence_document_id', $savedCoverage);
+        self::assertArrayNotHasKey('health_evidence_document_sha256', $savedCoverage);
+
+        $healthReader = new EffectiveRole(309, 'Čtení zdravotních důkazů', 'staff', true, [
+            'payroll' => 1,
+            'payroll.health_evidence' => 1,
+        ]);
+        $visible = $this->json($this->showAs($healthReader))['evidence'];
+        $visibleCoverage = $visible['sections']['health_coverages'][0];
+        self::assertSame($documentId, (int) $visibleCoverage['health_evidence_document_id']);
+        self::assertSame(str_repeat('a', 64), $visibleCoverage['health_evidence_document_sha256']);
+
+        $changedLink = $this->payloadFrom($visible);
+        $changedLink['sections']['health_coverages'][0]['health_evidence_document_id']
+            = $this->document($this->supplierId, str_repeat('b', 64));
+        $immutable = $this->saveAs($changedLink, $healthWriter);
+        self::assertSame(422, $immutable->getStatusCode());
+        self::assertStringContainsString(
+            'po připojení neměnný',
+            $this->json($immutable)['error']['message'],
         );
     }
 
@@ -496,7 +632,7 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
                     'jurisdiction_evidence_reference' => null,
                     'insurer_status' => 'verified',
                     'insurer_code' => '111',
-                    'insurer_evidence_reference' => 'document:health-insurer-card',
+                    'insurer_evidence_reference' => null,
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
                 ]],
@@ -548,6 +684,21 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         );
     }
 
+    private function showAs(EffectiveRole $role): Response
+    {
+        return $this->action->show(
+            $this->request(
+                'GET',
+                $this->supplierId,
+                "/api/payroll/people/{$this->employeeId}/statutory-evidence"
+                . '?effective_on=2026-08-31',
+            )->withQueryParams(['effective_on' => '2026-08-31'])
+                ->withAttribute('auth.effective_role', $role),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+    }
+
     /** @param array<string,mixed> $payload */
     private function save(array $payload, ?int $supplierId = null): Response
     {
@@ -558,6 +709,26 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
                 "/api/payroll/people/{$this->employeeId}/statutory-evidence",
                 $payload,
             ),
+            new Response(),
+            ['id' => (string) $this->employeeId],
+        );
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function saveAs(
+        array $payload,
+        EffectiveRole $role,
+        string $authMethod = 'session',
+    ): Response {
+        return $this->action->save(
+            $this->request(
+                'PUT',
+                $this->supplierId,
+                "/api/payroll/people/{$this->employeeId}/statutory-evidence",
+                $payload,
+                'accountant',
+                $authMethod,
+            )->withAttribute('auth.effective_role', $role),
             new Response(),
             ['id' => (string) $this->employeeId],
         );
@@ -613,6 +784,24 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         );
         $statement->execute([$supplierId]);
 
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function document(int $supplierId, string $sha256): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope)
+             VALUES (?, "Syntetický zdravotní důkaz", "health-evidence.pdf", ?, ?,
+                     "application/pdf", 1, "pdf", "manual", ?, "company")',
+        );
+        $statement->execute([
+            $supplierId,
+            $sha256 . '.pdf',
+            $sha256,
+            $this->userId,
+        ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

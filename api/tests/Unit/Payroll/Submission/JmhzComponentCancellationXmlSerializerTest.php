@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCancellationRequest;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellation;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentCancellationXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
@@ -155,6 +157,7 @@ final class JmhzComponentCancellationXmlSerializerTest extends TestCase
             '1234567890',
             2026,
             7,
+            deadlines: $this->deadlines(),
             today: '2026-08-25',
         );
     }
@@ -166,8 +169,14 @@ final class JmhzComponentCancellationXmlSerializerTest extends TestCase
             '1234567890',
             2026,
             7,
+            deadlines: $this->deadlines(),
             today: '2026-08-10',
         );
+    }
+
+    private function deadlines(): JmhzDeadlinePolicy
+    {
+        return new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider());
     }
 
     private function envelope(): JmhzSubmissionEnvelope

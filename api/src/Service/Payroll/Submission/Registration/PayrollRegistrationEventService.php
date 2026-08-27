@@ -9,6 +9,8 @@ use DOMElement;
 use DOMXPath;
 use MyInvoice\Repository\Payroll\PayrollRegistrationEventRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Codebook\HealthInsurers;
+use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -34,6 +36,7 @@ final readonly class PayrollRegistrationEventService
         private PayrollSensitiveData $sensitiveData,
         private SecretEncryption $encryption,
         private PayrollSubmissionService $submissions,
+        private PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
         private ClockInterface $clock,
     ) {}
 
@@ -124,6 +127,7 @@ final readonly class PayrollRegistrationEventService
             'notification_trigger_on' => $notificationTriggerOn,
             'person_external_identifier' => $personExternal,
             'employment_external_identifier' => $employmentExternal,
+            'jmhz_codebook' => $this->jmhzEvidence->packageProvenance(),
             'employer' => [
                 'variable_symbol' => $this->requiredDigits(
                     $context['social_security_variable_symbol'] ?? null,
@@ -391,11 +395,8 @@ final readonly class PayrollRegistrationEventService
             $input = $this->object($value, 'Předčasné ukončení A2-SPEC');
             $this->onlyKeys($input, ['early_termination_reason'], 'Podklady A2-SPEC');
             return [
-                'early_termination_reason' => $this->requiredDigits(
+                'early_termination_reason' => $this->earlyTerminationReason(
                     $input['early_termination_reason'] ?? null,
-                    'Důvod předčasného ukončení',
-                    1,
-                    1,
                 ),
             ];
         }
@@ -457,11 +458,8 @@ final readonly class PayrollRegistrationEventService
                 'employment_type', 'termination_reason', 'entitlement',
                 'paid_in_full', 'replacement', 'golden_handshake',
             ], 'Podklady A2 pracovního vztahu');
-            $reason = $this->requiredDigits(
+            $reason = $this->employmentTerminationReason(
                 $input['termination_reason'] ?? null,
-                'Důvod ukončení pracovního vztahu',
-                1,
-                3,
             );
             $result['termination_reason'] = $reason;
             $this->settlement(
@@ -476,11 +474,8 @@ final readonly class PayrollRegistrationEventService
                 'employment_type', 'service_termination_reason', 'entitlement',
                 'paid_in_full', 'severance_pay', 'disposal',
             ], 'Podklady A2 služebního poměru');
-            $reason = $this->requiredDigits(
+            $reason = $this->serviceTerminationReason(
                 $input['service_termination_reason'] ?? null,
-                'Důvod ukončení služebního poměru',
-                1,
-                3,
             );
             $result['service_termination_reason'] = $reason;
             $this->settlement(
@@ -582,7 +577,7 @@ final readonly class PayrollRegistrationEventService
             $result[$key] = match ($key) {
                 'title_prefix' => $this->requiredText($value, 'Titul', 30),
                 'relationship_detail_code' => $this->requiredDigits($value, 'Bližší určení vztahu', 1, 1),
-                'health_insurance_code' => $this->requiredDigits($value, 'Kód zdravotní pojišťovny', 3, 3),
+                'health_insurance_code' => $this->healthInsuranceCode($value),
                 'contract_start_on' => $this->date($value, 'Vznik zaměstnání'),
                 'highest_education_code' => $this->requiredCodeValue($value, 'Nejvyšší vzdělání', 1),
                 'tax_residency' => $this->taxResidency($value),
@@ -997,6 +992,40 @@ final readonly class PayrollRegistrationEventService
             throw new \InvalidArgumentException("{$label} musí mít {$min} až {$max} číslic.");
         }
         return $value;
+    }
+
+    private function earlyTerminationReason(mixed $value): string
+    {
+        $code = $this->requiredDigits($value, 'Důvod předčasného ukončení', 1, 1);
+        $this->jmhzEvidence->requireEarlyTerminationReason($code);
+
+        return $code;
+    }
+
+    private function employmentTerminationReason(mixed $value): string
+    {
+        $code = $this->requiredDigits($value, 'Důvod ukončení pracovního vztahu', 1, 3);
+        $this->jmhzEvidence->requireEmploymentTerminationReason($code);
+
+        return $code;
+    }
+
+    private function serviceTerminationReason(mixed $value): string
+    {
+        $code = $this->requiredDigits($value, 'Důvod ukončení služebního poměru', 1, 3);
+        $this->jmhzEvidence->requireServiceTerminationReason($code);
+
+        return $code;
+    }
+
+    private function healthInsuranceCode(mixed $value): string
+    {
+        $code = $this->requiredDigits($value, 'Kód zdravotní pojišťovny', 3, 3);
+        if (!HealthInsurers::isValid($code)) {
+            throw new \InvalidArgumentException(HealthInsurers::invalidCodeMessage($code));
+        }
+
+        return $code;
     }
 
     private function requiredAmount(mixed $value, string $label): string

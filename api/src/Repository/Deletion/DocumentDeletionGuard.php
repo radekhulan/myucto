@@ -64,6 +64,9 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ['table' => 'payroll_enforcement_case_documents', 'column' => 'dms_document_id'],
                     ['table' => 'payroll_enforcement_events', 'column' => 'decision_document_id'],
                     ['table' => 'payroll_insolvency_payment_instructions', 'column' => 'decision_document_id'],
+                    ['table' => 'payroll_enforcement_case_parties', 'column' => 'source_document_id'],
+                    ['table' => 'payroll_enforcement_claim_breakdowns', 'column' => 'source_document_id'],
+                    ['table' => 'payroll_enforcement_recipient_instructions', 'column' => 'source_document_id'],
                 ],
             ],
             'payroll_enforcement_xmlzam_source' => [
@@ -80,6 +83,23 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     [
                         'table' => 'payroll_production_qualification_documents',
                         'column' => 'document_id',
+                    ],
+                ],
+            ],
+            'payroll_foreign_permit' => [
+                'message' => 'Doklad je autoritativním podkladem pobytového nebo pracovního oprávnění '
+                    . 'zaměstnance (%d vazeb). Historie oprávnění je neměnná a doklad nelze odstranit.',
+                'references' => [
+                    ['table' => 'payroll_person_foreign_permits', 'column' => 'document_id'],
+                ],
+            ],
+            'payroll_health_evidence' => [
+                'message' => 'Doklad je neměnným důkazem zdravotního pojištění zaměstnance '
+                    . '(%d vazeb). Historie pojistného krytí se bez něj nesmí odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_person_health_coverage_history',
+                        'column' => 'health_evidence_document_id',
                     ],
                 ],
             ],

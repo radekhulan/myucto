@@ -75,14 +75,17 @@ final class PayrollRulesetProviderTest extends TestCase
         );
     }
 
-    public function testManualReviewDomainRemainsBlockedAtParameterLevel(): void
+    public function testDeadlineDomainExposesTheEffectiveJmhzRule(): void
     {
         $ruleset = CzechPayrollRulesets2026::provider()
             ->forDate(PayrollRulesetDomain::Deadlines, '2026-08-03');
 
-        $this->expectException(PayrollRulesetException::class);
-        $this->expectExceptionMessage('requires manual review');
-        $ruleset->parameter('submission_calendar');
+        self::assertSame(PayrollRulesetCapability::Supported, $ruleset->capability);
+        self::assertSame(
+            'following_month_day_window',
+            $ruleset->parameter('jmhz.deadline.rule')->value,
+        );
+        self::assertSame(20, $ruleset->parameter('jmhz.deadline.due_day')->value);
     }
 
     /**

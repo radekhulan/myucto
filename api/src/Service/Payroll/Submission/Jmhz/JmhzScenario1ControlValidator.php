@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+
 /**
  * Projde celý katalog kontrol ČSSZ proti vyrobenému XML měsíčního hlášení.
  *
@@ -25,7 +27,10 @@ final class JmhzScenario1ControlValidator
         private readonly JmhzScenario1ControlEvaluator $evaluator,
     ) {}
 
-    public static function create(?string $resourceRoot = null): self
+    public static function create(
+        PayrollRulesetProvider $rulesets,
+        ?string $resourceRoot = null,
+    ): self
     {
         $root = $resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
         $catalog = JmhzControlSourceCatalog::load($root);
@@ -35,6 +40,7 @@ final class JmhzScenario1ControlValidator
             $catalog,
             new JmhzScenario1ControlEvaluator(
                 $catalog->parameters(),
+                new JmhzDeadlinePolicy($rulesets),
                 new JmhzExternalCodebookCatalog($specPackages, $root),
                 new JmhzCodebookCatalog($specPackages->load(
                     JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,

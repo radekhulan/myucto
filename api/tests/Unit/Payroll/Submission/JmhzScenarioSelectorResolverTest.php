@@ -22,7 +22,7 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
         yield 'other-income-14' => ['14', '1', null, 'scenario_5', 'formJinyPrijem.xsd'];
         yield 'international-hire' => ['12', '1', null, 'scenario_6', 'formMezinarodniPronajemSily.xsd'];
         yield 'disability-training' => ['10', null, null, 'scenario_7', 'formOzpTpp.xsd'];
-        yield 'explicit-deferred-income' => ['A', '1', 'scenario_8', 'scenario_8', 'formOdlozenyPrijem.xsd'];
+        yield 'explicit-deferred-income' => ['A', null, 'scenario_8', 'scenario_8', 'formOdlozenyPrijem.xsd'];
     }
 
     #[DataProvider('pinnedSelectors')]
@@ -62,9 +62,26 @@ final class JmhzScenarioSelectorResolverTest extends TestCase
 
     public function testDoesNotInferManualDeferredIncomeScenario(): void
     {
-        $resolution = JmhzScenarioSelectorResolver::load()->resolve('A', '1');
+        $resolution = JmhzScenarioSelectorResolver::load()->resolve('A', null);
 
         self::assertSame('scenario_1', $resolution['evidence']['scenario_key'] ?? null);
+    }
+
+    public function testEnablesOnlyPinnedStatutoryBodySelectorForScenarioThreePreparation(): void
+    {
+        $supported = JmhzScenarioSelectorResolver::load()->resolve('S', '1');
+        $otherScenarioThree = JmhzScenarioSelectorResolver::load()->resolve('K', '1');
+
+        self::assertSame('scenario_3', $supported['evidence']['scenario_key'] ?? null);
+        self::assertSame('formCinnostKS.xsd', $supported['evidence']['xsd_entrypoint'] ?? null);
+        self::assertTrue($supported['preparation_supported']);
+        self::assertNull($supported['readiness_issue_code']);
+        self::assertSame([], $supported['readiness_attribute_ids']);
+        self::assertFalse($otherScenarioThree['preparation_supported']);
+        self::assertSame(
+            'jmhz_scenario_3_preparation_unsupported',
+            $otherScenarioThree['readiness_issue_code'],
+        );
     }
 
     public function testDeferredIncomeIsForbiddenForActivityKindTen(): void

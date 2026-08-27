@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Blocker;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentService;
@@ -241,7 +243,10 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
             $documents,
             $validator,
             new JmhzSubmissionGuidFactory(),
-            JmhzScenario1ControlValidator::create(),
+            JmhzScenario1ControlValidator::create(
+                CzechPayrollRulesets2026::provider(),
+            ),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
     }
 }
