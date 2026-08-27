@@ -45,9 +45,30 @@ export interface PayrollSupportMatrix {
   features: PayrollCapability[]
 }
 
+export interface PayrollCompanyCapabilityBlocker {
+  code: 'unsupported_relation_type'
+    | 'foreign_employment_regime'
+    | 'unsupported_jmhz_scenario'
+    | 'foreign_social_jurisdiction'
+    | 'foreign_health_jurisdiction'
+    | string
+  capability_key: string
+  source_type: string
+  source_id: number
+  message: string
+  parameters: Record<string, unknown>
+}
+
+export interface PayrollCompanyCapabilityAssessment {
+  production_ready: boolean
+  assessed_from: string | null
+  blockers: PayrollCompanyCapabilityBlocker[]
+}
+
 export interface PayrollCapabilitiesResponse {
   state: PayrollModuleState
   support_matrix: PayrollSupportMatrix
+  company_capability: PayrollCompanyCapabilityAssessment
 }
 
 export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
@@ -4014,7 +4035,11 @@ export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
   activation: () =>
-    api.get<{ state: PayrollModuleState; production_qualification: PayrollProductionQualification | null }>('/payroll/settings/activation')
+    api.get<{
+      state: PayrollModuleState
+      production_qualification: PayrollProductionQualification | null
+      company_capability: PayrollCompanyCapabilityAssessment
+    }>('/payroll/settings/activation')
       .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),

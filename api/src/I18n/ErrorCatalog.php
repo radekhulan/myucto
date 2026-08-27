@@ -77,6 +77,7 @@ final class ErrorCatalog
         'Pouze admin nebo účetní.' => 'Admin or accountant only.',
         'Pro pokračování je nutné aktivovat dvoufaktorové ověření.' => 'You must activate two-factor authentication to continue.',
         'Proforma musí být označená jako zaplacená.' => 'Proforma must be marked as paid.',
+        'Produkční provoz nelze aktivovat, dokud aktuální mzdová data vyžadují nepodporovaný scénář.' => 'Production operation cannot be enabled while current payroll data requires an unsupported scenario.',
         'Příliš mnoho pokusů. Zkus to později.' => 'Too many attempts. Try again later.',
         'Setup již proběhl.' => 'Setup has already been completed.',
         'Soubor chybí.' => 'File missing.',

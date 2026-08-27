@@ -89,4 +89,13 @@ describe('PayrollProductionQualificationPanel', () => {
     expect(JSON.stringify(payload)).not.toContain('sha256')
     expect(wrapper.emitted('qualified')).toHaveLength(1)
   })
+
+  it('nepovolí kvalifikaci, dokud serverový preflight hlásí blocker', async () => {
+    const wrapper = mount(PayrollProductionQualificationPanel, {
+      props: { state, matrixVersion: '2026-08', productionReady: false },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="qualification-submit"]').attributes('disabled')).toBeDefined()
+  })
 })

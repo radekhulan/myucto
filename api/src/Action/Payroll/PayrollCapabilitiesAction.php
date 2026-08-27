@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Payroll;
 use MyInvoice\Http\Json;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\SupportMatrix;
@@ -22,6 +23,7 @@ final class PayrollCapabilitiesAction
         private readonly PayrollModuleStateRepository $state,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollModuleActivationService $activation,
+        private readonly PayrollCompanyCapabilityService $companyCapability,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -42,9 +44,15 @@ final class PayrollCapabilitiesAction
             $this->userId($request),
         );
 
+        $state = $this->state->get($supplierId);
+
         return Json::ok($response, [
-            'state' => $this->state->get($supplierId),
+            'state' => $state,
             'support_matrix' => $this->matrix->all(),
+            'company_capability' => $this->companyCapability->assess(
+                $supplierId,
+                $state['start_period'],
+            ),
         ]);
     }
 }

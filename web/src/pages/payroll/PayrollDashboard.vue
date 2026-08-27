@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
   type PayrollCapabilitiesResponse,
+  type PayrollCompanyCapabilityBlocker,
   type PayrollRun,
   type PayrollSetupCheck,
 } from '@/api/payroll'
@@ -39,11 +40,25 @@ const availableFeatures = computed(() =>
 const plannedFeatures = computed(() =>
   capabilities.value?.support_matrix.features.filter(feature => !feature.available) ?? [],
 )
+const companyCapabilityBlockers = computed(() => capabilities.value?.company_capability.blockers ?? [])
 const setupBlockers = computed(() =>
   setupCheck.value !== null && !setupCheck.value.ready
     ? setupCheck.value.checks.filter(item => item.status === 'blocked')
     : [],
 )
+
+function companyCapabilityMessage(blocker: PayrollCompanyCapabilityBlocker): string {
+  const known = new Set([
+    'unsupported_relation_type',
+    'foreign_employment_regime',
+    'unsupported_jmhz_scenario',
+    'foreign_social_jurisdiction',
+    'foreign_health_jurisdiction',
+  ])
+  return known.has(blocker.code)
+    ? t(`payroll.activation.qualification.company_blockers.${blocker.code}`, blocker.parameters)
+    : blocker.message
+}
 
 /**
  * Hlavička sekce používá sdílený `ActionBar` (AGENTS.md §Frontend): jedna plná
@@ -265,10 +280,26 @@ onMounted(load)
           <p class="mt-2 max-w-4xl text-xs text-neutral-600">{{ t('payroll.activation.qualification_single_accountant') }}</p>
         </section>
 
+        <section
+          v-if="needsProductionQualification && companyCapabilityBlockers.length > 0"
+          class="rounded-xl border border-danger-500/40 bg-danger-50 p-4 sm:p-6"
+          data-test="company-capability-blockers"
+        >
+          <h2 class="text-lg font-semibold text-danger-800">{{ t('payroll.activation.qualification.company_blockers.title') }}</h2>
+          <p class="mt-1 max-w-4xl text-sm text-danger-700">{{ t('payroll.activation.qualification.company_blockers.description') }}</p>
+          <ul class="mt-3 space-y-2 text-sm text-danger-800">
+            <li v-for="blocker in companyCapabilityBlockers" :key="`${blocker.code}:${blocker.source_type}:${blocker.source_id}`" class="flex gap-2">
+              <span aria-hidden="true">•</span>
+              <span>{{ companyCapabilityMessage(blocker) }}</span>
+            </li>
+          </ul>
+        </section>
+
         <PayrollProductionQualificationPanel
           v-if="needsProductionQualification && canConfigure"
           :state="state"
           :matrix-version="capabilities.support_matrix.version"
+          :production-ready="capabilities.company_capability.production_ready"
           @qualified="productionQualified"
           @refresh="load"
         />

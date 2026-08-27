@@ -59,8 +59,8 @@ function mountDashboard() {
         PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
         PayrollGuide: { template: '<div data-test="guide-stub" />' },
         PayrollProductionQualificationPanel: {
-          props: ['state', 'matrixVersion'],
-          template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" />',
+          props: ['state', 'matrixVersion', 'productionReady'],
+          template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" :data-production-ready="String(productionReady)" />',
         },
       },
     },
@@ -90,6 +90,11 @@ describe('PayrollDashboard monthly workspace', () => {
           available: true,
           min_epic: 'MZ01',
         }],
+      },
+      company_capability: {
+        production_ready: true,
+        assessed_from: '2026-01-01',
+        blockers: [],
       },
     })
     m.runs.mockResolvedValue([])
@@ -198,6 +203,11 @@ describe('PayrollDashboard monthly workspace', () => {
         employment_types: [],
         features: [],
       },
+      company_capability: {
+        production_ready: true,
+        assessed_from: '2026-01-01',
+        blockers: [],
+      },
     })
 
     const wrapper = mountDashboard()
@@ -206,5 +216,46 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(wrapper.find('[data-test="production-qualification-notice"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="qualification-panel-stub"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
+  })
+
+  it('shows concrete company blockers and passes the fail-closed state to qualification', async () => {
+    m.capabilities.mockResolvedValue({
+      state: {
+        supplier_id: 1,
+        status: 'qualification_required',
+        start_period: '2026-01',
+        row_version: 2,
+        activated_at: null,
+        suspended_at: null,
+        created_at: null,
+        updated_at: null,
+      },
+      support_matrix: {
+        version: '2026-08',
+        supported_years: [2026],
+        employment_types: [],
+        features: [],
+      },
+      company_capability: {
+        production_ready: false,
+        assessed_from: '2026-01-01',
+        blockers: [{
+          code: 'foreign_employment_regime',
+          capability_key: 'foreign_regime',
+          source_type: 'employment_term',
+          source_id: 91,
+          message: 'server fallback',
+          parameters: { employment_code: 'HPP-FOREIGN' },
+        }],
+      },
+    })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const blockers = wrapper.get('[data-test="company-capability-blockers"]')
+    expect(blockers.text()).toContain('payroll.activation.qualification.company_blockers.foreign_employment_regime')
+    expect(wrapper.get('[data-test="qualification-panel-stub"]').attributes('data-production-ready'))
+      .toBe('false')
   })
 })

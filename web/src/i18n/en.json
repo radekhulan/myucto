@@ -4852,7 +4852,16 @@
                 "submit": "Enable production operation",
                 "completed": "Production payroll operation has been enabled.",
                 "failed": "Production qualification could not be completed.",
-                "load_failed": "Approved payroll runs could not be loaded."
+                "load_failed": "Approved payroll runs could not be loaded.",
+                "company_blockers": {
+                    "title": "Current company data blocks production operation",
+                    "description": "This is not a general application limitation. The following current employments require a scenario that is not yet covered by the support matrix. Test operation remains available.",
+                    "unsupported_relation_type": "Employment {employment_code} uses unsupported type {relation_type}.",
+                    "foreign_employment_regime": "Employment {employment_code} uses a foreign insurance or tax regime.",
+                    "unsupported_jmhz_scenario": "Employment {employment_code} requires a special JMHZ scenario that cannot yet be filed in production.",
+                    "foreign_social_jurisdiction": "Employee {employee_name} has a verified foreign social-security regime.",
+                    "foreign_health_jurisdiction": "Employee {employee_name} has a verified foreign health-insurance regime."
+                }
             }
         },
         "dashboard": {

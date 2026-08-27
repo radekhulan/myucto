@@ -4852,7 +4852,16 @@
                 "submit": "Povolit ostrý provoz",
                 "completed": "Ostrý provoz mezd byl povolen.",
                 "failed": "Kvalifikaci ostrého provozu se nepodařilo dokončit.",
-                "load_failed": "Schválené mzdové běhy se nepodařilo načíst."
+                "load_failed": "Schválené mzdové běhy se nepodařilo načíst.",
+                "company_blockers": {
+                    "title": "Ostrý provoz blokují skutečná data firmy",
+                    "description": "Nejde o obecné omezení aplikace. Následující aktuální pracovní vztahy vyžadují scénář, který support matrix zatím nepokrývá. Testovací provoz zůstává dostupný.",
+                    "unsupported_relation_type": "Pracovní vztah {employment_code} má nepodporovaný typ {relation_type}.",
+                    "foreign_employment_regime": "Pracovní vztah {employment_code} používá zahraniční pojistný nebo daňový režim.",
+                    "unsupported_jmhz_scenario": "Pracovní vztah {employment_code} vyžaduje zvláštní scénář JMHZ, který zatím nelze podat naostro.",
+                    "foreign_social_jurisdiction": "Zaměstnanec {employee_name} má doložený zahraniční režim sociálního zabezpečení.",
+                    "foreign_health_jurisdiction": "Zaměstnanec {employee_name} má doložený zahraniční režim zdravotního pojištění."
+                }
             }
         },
         "dashboard": {

@@ -11,10 +11,13 @@ import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatPeriod } from '@/composables/useFormat'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   state: PayrollModuleState
   matrixVersion: string
-}>()
+  productionReady?: boolean
+}>(), {
+  productionReady: true,
+})
 const emit = defineEmits<{
   qualified: [state: PayrollModuleState]
   refresh: []
@@ -48,7 +51,8 @@ const selectedRunsAreDistinct = computed(() => {
     && first.id !== second.id && first.period_start !== second.period_start
 })
 const canSubmit = computed(() =>
-  selectedRunsAreDistinct.value
+  props.productionReady
+  && selectedRunsAreDistinct.value
   && correctionRunId.value !== null
   && selectedDocument.value !== null
   && approverName.value.trim() !== ''
@@ -136,7 +140,8 @@ async function submit() {
     emit('qualified', result.state)
   } catch (error: any) {
     const code = error?.response?.data?.error?.code
-    if (code === 'row_version_conflict' || code === 'support_matrix_changed') {
+    if (code === 'row_version_conflict' || code === 'support_matrix_changed'
+      || code === 'company_capability_blocked') {
       emit('refresh')
     }
     toast.error(error?.response?.data?.error?.message || t('payroll.activation.qualification.failed'))

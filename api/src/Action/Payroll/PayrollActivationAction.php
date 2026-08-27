@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollStateLockedException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationException;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationService;
@@ -29,6 +30,7 @@ final class PayrollActivationAction
         private readonly SupportMatrix $supportMatrix,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionQualificationService $qualification,
+        private readonly PayrollCompanyCapabilityService $companyCapability,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -41,10 +43,15 @@ final class PayrollActivationAction
         }
 
         $supplierId = $this->currentSupplierId($request);
+        $state = $this->state->get($supplierId);
 
         return Json::ok($response, [
-            'state' => $this->state->get($supplierId),
+            'state' => $state,
             'production_qualification' => $this->qualification->qualification($supplierId),
+            'company_capability' => $this->companyCapability->assess(
+                $supplierId,
+                $state['start_period'],
+            ),
         ]);
     }
 
@@ -165,9 +172,16 @@ final class PayrollActivationAction
                 'qualification_requires_setup',
                 'support_matrix_changed',
                 'unsupported_start_period',
+                'company_capability_blocked',
             ], true) ? 409 : 422;
 
-            return Json::error($response, $e->errorCode, $e->getMessage(), $status);
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                $status,
+                $e->details === [] ? [] : ['details' => $e->details],
+            );
         }
 
         return Json::ok($response, $result);
