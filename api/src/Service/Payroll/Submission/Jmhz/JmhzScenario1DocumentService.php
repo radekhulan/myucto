@@ -10,7 +10,22 @@ final readonly class JmhzScenario1DocumentService
         private JmhzPreparationSnapshotService $preparations,
         private JmhzPvpojPreviewService $pvpoj,
         private JmhzScenario1DocumentResolver $resolver,
+        private JmhzScenario2DocumentResolver $scenario2Resolver,
     ) {}
+
+    public function resolveScenario2(
+        int $supplierId,
+        string $environment,
+        int $preparationId,
+    ): JmhzScenario2Resolution {
+        return $this->scenario2Resolver->resolve(
+            $this->preparations->loadVerified(
+                $supplierId,
+                $environment,
+                $preparationId,
+            ),
+        );
+    }
 
     /**
      * @param int|null $officeId registrace u OSSZ, za kterou se hlášení

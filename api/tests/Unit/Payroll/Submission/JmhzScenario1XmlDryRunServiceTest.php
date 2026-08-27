@@ -11,6 +11,8 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1NormalizedDocument;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlDryRunService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlValidator;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario2NormalizedDocument;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario2Resolution;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use PHPUnit\Framework\TestCase;
 
@@ -42,6 +44,40 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
         self::assertSame('jmhz_taxpayer_declaration_unresolved', $result['blockers'][0]['code']);
         self::assertArrayNotHasKey('xml', $result);
         self::assertArrayNotHasKey('controls', $result);
+    }
+
+    public function testSpecialScopeReturnsScenarioTwoCandidateAndExactBlocker(): void
+    {
+        $candidate = new JmhzScenario2NormalizedDocument([
+            'schema_reference' => JmhzScenario2NormalizedDocument::SCHEMA_REFERENCE,
+            'forms' => [['employee_id' => 11, 'employment_id' => 101]],
+        ]);
+        $result = $this->service(
+            new JmhzScenario1Resolution(null, [
+                new JmhzScenario1Blocker(
+                    'jmhz_scenario1_scope_unsupported',
+                    'preparation',
+                    77,
+                ),
+            ]),
+            $this->createStub(JmhzScenario1XmlValidator::class),
+            new JmhzScenario2Resolution($candidate, [
+                new JmhzScenario1Blocker(
+                    'jmhz_scenario2_evidence_gap',
+                    'employment',
+                    101,
+                    ['10051'],
+                ),
+            ]),
+        )->dryRun(1, 'test', 77);
+
+        self::assertSame('blocked', $result['scenario_2']['status']);
+        self::assertSame($candidate->payload, $result['scenario_2']['candidate']);
+        self::assertSame($candidate->sha256(), $result['scenario_2']['candidate_sha256']);
+        self::assertSame(
+            'jmhz_scenario2_evidence_gap',
+            $result['scenario_2']['blockers'][0]['code'],
+        );
     }
 
     /**
@@ -153,9 +189,13 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
     private function service(
         JmhzScenario1Resolution $resolution,
         JmhzScenario1XmlValidator $validator,
+        ?JmhzScenario2Resolution $scenario2Resolution = null,
     ): JmhzScenario1XmlDryRunService {
         $documents = $this->createStub(JmhzScenario1DocumentService::class);
         $documents->method('resolve')->willReturn($resolution);
+        if ($scenario2Resolution !== null) {
+            $documents->method('resolveScenario2')->willReturn($scenario2Resolution);
+        }
 
         return new JmhzScenario1XmlDryRunService(
             $documents,
