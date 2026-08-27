@@ -15,7 +15,13 @@ namespace MyInvoice\Service\Submission;
 interface SubmissionArtifactResolver
 {
     /**
-     * @return array{filename:string,mime:string,bytes:string}|null
+     * @return array{
+     *   filename:string,mime:string,bytes:string,
+     *   authority?:array{
+     *     kind:string,environment:string,agenda_code:string,status:string,
+     *     channel:string,artifact_kind:string,direction:string
+     *   }
+     * }|null
      *         null = artefakt už neexistuje
      */
     public function resolve(int $supplierId, string $artifactKind, int $artifactId): ?array;

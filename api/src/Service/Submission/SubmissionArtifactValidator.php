@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Submission;
 use DOMDocument;
 use DOMElement;
 use MyInvoice\Service\Payroll\Garnishment\Xmlzam\XmlzamSchemaCatalog;
+use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 
 /**
@@ -57,10 +58,19 @@ final readonly class SubmissionArtifactValidator
      */
     public function validateArtifact(string $agendaCode, array $artifact): array
     {
-        if (strtoupper($agendaCode) === 'XMLZAM') {
+        $agendaCode = strtoupper($agendaCode);
+        if ($agendaCode === 'ELDP') {
+            return [
+                'status' => 'failed',
+                'errors' => [
+                    'Samostatný ELDP obsahuje pouze kontrolní XML; odesílatelná datová věta není připnutá.',
+                ],
+            ];
+        }
+        if ($agendaCode === 'XMLZAM') {
             return $this->validateXmlzam($artifact);
         }
-        $formCode = self::AGENDA_SCHEMAS[strtoupper($agendaCode)] ?? null;
+        $formCode = self::AGENDA_SCHEMAS[$agendaCode] ?? null;
         if ($formCode === null || !$this->schemas->hasSchema($formCode)) {
             return ['status' => 'skipped', 'errors' => []];
         }
@@ -80,6 +90,83 @@ final readonly class SubmissionArtifactValidator
         }
         $formCode = self::AGENDA_SCHEMAS[strtoupper($agendaCode)] ?? null;
         return $formCode !== null && $this->schemas->hasSchema($formCode);
+    }
+
+    /** @param array<string,mixed> $artifact */
+    public function assertTransportAuthority(
+        string $artifactKind,
+        array $artifact,
+        string $environment,
+        string $agendaCode,
+    ): void {
+        if ($artifactKind !== 'payroll_submission') {
+            return;
+        }
+
+        $authority = $artifact['authority'] ?? null;
+        if (!is_array($authority)
+            || ($authority['kind'] ?? null) !== 'payroll_submission'
+        ) {
+            throw new SubmissionChannelException(
+                'payroll_artifact_context_missing',
+                'Mzdový podklad nemá autoritativní vazbu na evidované podání.',
+                409,
+            );
+        }
+
+        $authoritativeAgenda = self::canonicalPayrollAgenda(strtoupper(trim(
+            is_string($authority['agenda_code'] ?? null)
+                ? $authority['agenda_code']
+                : '',
+        )));
+        if ($authoritativeAgenda === 'ELDP') {
+            throw new SubmissionChannelException(
+                'payroll_artifact_untransportable',
+                'Samostatný ELDP obsahuje pouze kontrolní XML. Odesílatelná datová věta není připnutá, proto ho nelze zařadit ani odeslat.',
+                409,
+            );
+        }
+        if (($authority['status'] ?? null) !== 'ready') {
+            throw new SubmissionChannelException(
+                'payroll_submission_not_ready',
+                'Mzdové podání ještě není v autoritativním stavu připraveno k odeslání.',
+                409,
+            );
+        }
+        if (($authority['environment'] ?? null) !== $environment) {
+            throw new SubmissionChannelException(
+                'payroll_submission_environment_mismatch',
+                'Prostředí fronty neodpovídá prostředí mzdového podání.',
+                409,
+            );
+        }
+        if ($authoritativeAgenda !== self::canonicalPayrollAgenda(
+            strtoupper(trim($agendaCode)),
+        )) {
+            throw new SubmissionChannelException(
+                'payroll_submission_agenda_mismatch',
+                'Agenda fronty neodpovídá autoritativní agendě mzdového podání.',
+                409,
+            );
+        }
+        if (($authority['direction'] ?? null) !== 'outbound'
+            || !in_array(
+                $authority['artifact_kind'] ?? null,
+                ['outbound_xml', 'outbound_pdf', 'outbound_zip'],
+                true,
+            )
+        ) {
+            throw new SubmissionChannelException(
+                'payroll_artifact_not_outbound',
+                'Do fronty lze zařadit jen zmrazený odchozí artefakt mzdového podání.',
+                409,
+            );
+        }
+    }
+
+    private static function canonicalPayrollAgenda(string $agendaCode): string
+    {
+        return $agendaCode === 'JMHZ' ? 'JMHZ25' : $agendaCode;
     }
 
     /**

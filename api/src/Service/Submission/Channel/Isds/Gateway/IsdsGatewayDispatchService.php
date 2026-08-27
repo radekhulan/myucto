@@ -704,6 +704,12 @@ final readonly class IsdsGatewayDispatchService
                 404,
             );
         }
+        $this->validator->assertTransportAuthority(
+            (string) $row['artifact_kind'],
+            $artifact,
+            (string) $row['environment'],
+            (string) $row['agenda_code'],
+        );
         if (!hash_equals((string) $row['artifact_sha256'], hash('sha256', $artifact['bytes']))) {
             throw new SubmissionChannelException(
                 'artifact_changed',

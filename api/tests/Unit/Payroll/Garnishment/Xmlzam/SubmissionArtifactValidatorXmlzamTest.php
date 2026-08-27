@@ -63,6 +63,26 @@ final class SubmissionArtifactValidatorXmlzamTest extends TestCase
         self::assertStringContainsString('DTD', implode(' ', $result['errors']));
     }
 
+    public function testEldpControlXmlIsFailedInsteadOfSkipped(): void
+    {
+        $validator = new SubmissionArtifactValidator(
+            new XmlSchemaValidator(),
+            new XmlzamSchemaCatalog(),
+        );
+
+        $result = $validator->validateArtifact('ELDP', [
+            'filename' => 'eldp-kontrolni.xml',
+            'mime' => 'application/xml',
+            'bytes' => '<eldp/>',
+        ]);
+
+        self::assertSame('failed', $result['status']);
+        self::assertStringContainsString(
+            'kontrolní',
+            implode(' ', $result['errors']),
+        );
+    }
+
     private static function validResponse(): string
     {
         return <<<'XML'

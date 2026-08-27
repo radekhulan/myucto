@@ -94,6 +94,12 @@ final readonly class SubmissionOutboxService
                 404,
             );
         }
+        $this->validator->assertTransportAuthority(
+            $artifactKind,
+            $artifact,
+            $environment,
+            $agendaCode,
+        );
 
         $recipientBoxId = null;
         if ($recipientId !== null) {
@@ -187,6 +193,25 @@ final readonly class SubmissionOutboxService
                     $id,
                     'artifact_missing',
                     'Podklad k odeslání už v aplikaci není. Vygenerujte ho znovu a zařaďte podání do fronty znovu.',
+                    (int) $claimed['row_version'],
+                ),
+                'dispatched' => false,
+            ];
+        }
+        try {
+            $this->validator->assertTransportAuthority(
+                (string) $claimed['artifact_kind'],
+                $artifact,
+                (string) $claimed['environment'],
+                (string) $claimed['agenda_code'],
+            );
+        } catch (SubmissionChannelException $exception) {
+            return [
+                'row' => $this->outbox->markFailed(
+                    $supplierId,
+                    $id,
+                    $exception->errorCode,
+                    $exception->getMessage(),
                     (int) $claimed['row_version'],
                 ),
                 'dispatched' => false,

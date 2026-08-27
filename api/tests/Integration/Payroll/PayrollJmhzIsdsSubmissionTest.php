@@ -31,6 +31,7 @@ use MyInvoice\Tests\Support\SyntheticZfoBuilder;
 use MyInvoice\Tests\Unit\Payroll\Submission\JmhzTransportSample;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Symfony\Component\Clock\MockClock;
@@ -54,6 +55,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
     private Connection $db;
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
+    private SubmissionOutboxService $outboxService;
     private JmhzIsdsSubmissionService $isds;
     private IsdsGatewayAction $gatewayAction;
     private int $supplierId;
@@ -67,6 +69,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         self::assertInstanceOf(Connection::class, $connection);
         self::assertInstanceOf(SecretEncryption::class, $encryption);
         self::assertInstanceOf(SubmissionOutboxService::class, $outbox);
+        $this->outboxService = $outbox;
 
         $this->db = $connection;
         $pdo = $connection->pdo();
@@ -178,7 +181,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
 
     public function testDownloadedSignedProtocolUpdatesTheExactJmhzSubmission(): void
     {
-        $submissionId = $this->frozenSubmission('inbox-protocol');
+        $submissionId = $this->frozenSubmission('inbox-protocol', false);
         $draft = $this->submissions->get($this->supplierId, $submissionId);
         $validated = $this->submissions->transition(
             $this->supplierId,
@@ -238,8 +241,12 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             $outbox,
             new PayrollSubmissionRepository($this->db),
             $this->submissions,
-            $container->get(PayrollSubmissionDispatchProjection::class),
-            $container->get(SubmissionOutboxService::class),
+            new PayrollSubmissionDispatchProjection(
+                new PayrollSubmissionRepository($this->db),
+                $this->submissions,
+                new NullLogger(),
+            ),
+            $this->outboxService,
             $container->get(ZfoExtractor::class),
             $signatures,
         );
@@ -364,7 +371,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             . '</jmhz>';
     }
 
-    private function frozenSubmission(string $key): int
+    private function frozenSubmission(string $key, bool $ready = true): int
     {
         $obligation = $this->obligations->register(
             $this->supplierId,
@@ -395,7 +402,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             'isds-2026-07-' . $key,
             environment: 'test',
         );
-        $this->submissions->storeArtifact(
+        $artifact = $this->submissions->storeArtifact(
             $this->supplierId,
             $submission['id'],
             $submission['row_version'],
@@ -409,6 +416,20 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             self::CHANNEL,
             'artifact-isds-2026-07-' . $key,
         );
+        if ($ready) {
+            $validated = $this->submissions->transition(
+                $this->supplierId,
+                $submission['id'],
+                $artifact['submission_row_version'],
+                'validated',
+            );
+            $this->submissions->transition(
+                $this->supplierId,
+                $submission['id'],
+                $validated['row_version'],
+                'ready',
+            );
+        }
 
         return (int) $submission['id'];
     }

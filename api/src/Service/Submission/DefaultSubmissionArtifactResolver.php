@@ -71,15 +71,35 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         ];
     }
 
-    /** @return array{filename:string,mime:string,bytes:string}|null */
+    /**
+     * @return array{
+     *   filename:string,mime:string,bytes:string,
+     *   authority:array{
+     *     kind:string,environment:string,agenda_code:string,status:string,
+     *     channel:string,artifact_kind:string,direction:string
+     *   }
+     * }|null
+     */
     private function payrollArtifact(int $supplierId, int $id): ?array
     {
         if (!$this->db->hasTable('payroll_submission_artifacts')) {
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT artifact_kind, mime_type, submission_id
-               FROM payroll_submission_artifacts WHERE id = ? AND supplier_id = ?'
+            'SELECT artifact.artifact_kind, artifact.direction,
+                    artifact.mime_type, artifact.submission_id,
+                    submission.environment, submission.status,
+                    submission.channel, obligation.agenda_code
+               FROM payroll_submission_artifacts artifact
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = artifact.supplier_id
+                AND submission.environment = artifact.environment
+                AND submission.id = artifact.submission_id
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+              WHERE artifact.id = ? AND artifact.supplier_id = ?'
         );
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -111,6 +131,15 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
             'filename' => 'mzdove-podani-' . (int) $row['submission_id'] . '-' . $id . '.' . $extension,
             'mime' => $mime !== '' ? $mime : 'application/xml',
             'bytes' => $bytes,
+            'authority' => [
+                'kind' => 'payroll_submission',
+                'environment' => (string) $row['environment'],
+                'agenda_code' => (string) $row['agenda_code'],
+                'status' => (string) $row['status'],
+                'channel' => (string) $row['channel'],
+                'artifact_kind' => (string) $row['artifact_kind'],
+                'direction' => (string) $row['direction'],
+            ],
         ];
     }
 
