@@ -91,6 +91,53 @@ final class SetupAction
      *
      * @param array<string,mixed> $supplier
      */
+    /**
+     * Srovná účetní režim s právní formou zjištěnou z ARESu.
+     *
+     * Režim se rozhoduje při zakládání firmy podle `supplier.taxpayer_type`
+     * ve VSTUPU. Bezobslužné zřízení ho ale neposílá — provozovatel právní
+     * formu nezná, zná jen IČ — takže s.r.o. vzniklo v daňové evidenci
+     * a účetnictví, kvůli kterému si zákazník MyÚčto koupil, bylo vypnuté.
+     * Právní formu přitom o pár řádků výš dohledal ARES; jen přišla POZDĚ,
+     * až po vložení řádku.
+     *
+     * ⚠️ Jen když typ poplatníka NEPŘIŠEL ve vstupu. Kdo ho poslal výslovně,
+     * rozhodl — a rozhodnutí volajícího se nepřepisuje registrem.
+     *
+     * ⚠️ Bez směrné osnovy je podvojné účetnictví rozbitý stav, proto se
+     * seeduje spolu s přepnutím. V okamžiku setupu firma nemá doklady, takže
+     * odpadá doúčtování minulosti, které řeší přepínač v Nastavení.
+     *
+     * @param array<string,mixed> $supplier
+     */
+    private function alignAccountingModeWithLegalForm(int $supplierId, array $supplier): void
+    {
+        if (in_array($supplier['taxpayer_type'] ?? null, ['fo', 'po'], true)) {
+            return;
+        }
+
+        try {
+            $pdo = $this->db->pdo();
+            $stmt = $pdo->prepare('SELECT taxpayer_type, accounting_mode FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!is_array($row)
+                || (string) ($row['taxpayer_type'] ?? '') !== 'po'
+                || (string) ($row['accounting_mode'] ?? '') !== 'tax_evidence') {
+                return;
+            }
+
+            $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+                ->execute([$supplierId]);
+            $this->coaSeeder->seedForSupplier($supplierId);
+            $this->log->info('setup: právnická osoba převedena do podvojného účetnictví podle ARESu', ['supplier_id' => $supplierId]);
+        } catch (\Throwable $e) {
+            // Špatný režim je nepříjemný, ale opravitelný v Nastavení; zahozený
+            // setup ne. Proto se to jen zaloguje.
+            $this->log->warning('setup: účetní režim se nepodařilo srovnat s právní formou', ['error' => $e->getMessage()]);
+        }
+    }
+
     private function fillPublishedBankAccount(int $supplierId, array $supplier): void
     {
         // Účet, který přišel ve zřizovacím požadavku, má přednost — registr
@@ -364,6 +411,7 @@ final class SetupAction
         if ($createdSupplierId !== null) {
             $this->enricher->enrich($createdSupplierId, $supplier['ic'] ?? null, $supplier['dic'] ?? null);
             $this->fillPublishedBankAccount($createdSupplierId, $supplier ?? []);
+            $this->alignAccountingModeWithLegalForm($createdSupplierId, $supplier ?? []);
         }
 
         // Spravovaná instalace aktivuje licenci sama, hned při zřízení.
