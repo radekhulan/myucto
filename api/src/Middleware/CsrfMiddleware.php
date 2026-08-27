@@ -77,6 +77,19 @@ final class CsrfMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
+        // ⚠️ Doručení licence od provozovatele. Volá se SERVER-TO-SERVER, takže
+        // Origin ani Referer nemá odkud vzít — a nemá je ani mít: kontrola
+        // originu brání cizímu WEBU, aby požadavek vyvolal z prohlížeče
+        // uživatele, což u volání bez prohlížeče nedává smysl. Pravost tu stojí
+        // na Ed25519 podpisu obálky ověřeném zabudovaným veřejným klíčem
+        // (ManagedLicenseAction) a na adresátovi `instance_id` uvnitř ní.
+        //
+        // Bez téhle výjimky odpoví instalace 403 `origin_mismatch` a licenci
+        // nepřevezme — zaplacená instalace pak běží na zkušební období.
+        if ($path === '/api/managed/license') {
+            return $handler->handle($request);
+        }
+
         // Origin / Referer check (i pro exempt routes)
         $domain = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
         $appUrl = $domain instanceof TenantDomainContext

@@ -50,6 +50,14 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             || str_starts_with($path, '/api/auth/mfa/')
             || str_starts_with($path, '/api/auth/session/')
             || str_starts_with($path, '/api/auth/domain-login/')
+            // ⚠️ Doručení licence od provozovatele. Volá se server-to-server,
+            // BEZ přihlášeného uživatele — a tedy i bez členství ve firmě, ze
+            // kterého se scope počítá. Bez téhle výjimky odpoví instalace
+            // `forbidden_supplier` a licenci nepřevezme; zaplacená instalace
+            // pak běží na zkušební období. Pravost obálky si hlídá sama akce
+            // (podpis provozovatele + adresát `instance_id`), scope firmy tu
+            // nemá co chránit — licence není doklad žádné firmy.
+            || $path === '/api/managed/license'
         ) {
             return $handler->handle($request);
         }

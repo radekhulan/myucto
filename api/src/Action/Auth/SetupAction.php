@@ -394,9 +394,20 @@ final class SetupAction
             // se svým UUID, takže se přepisuje — a jen ve stejné transakci jako
             // admin, ať instance nikdy neběží s identitou, kterou licenční
             // server nezná.
+            //
+            // ⚠️ UPSERT, ne UPDATE. Řádek nemusí existovat: aplikace si ho
+            // zakládá LÍNĚ při prvním čtení licence, takže na instalaci, kde se
+            // do té doby nikdo licence nezeptal, `UPDATE … WHERE id = 1`
+            // neaktualizoval nic — a mlčky. Instance si pak při prvním čtení
+            // vyrobila vlastní UUID, aktivace s ním odešla a licenční server ji
+            // odmítl `instance_not_managed`: zaplacená instalace zůstala na
+            // zkušebním období. Stalo se to při každém zřízení nad vyčištěnou
+            // databází.
             if ($assignedInstanceId !== '') {
-                $pdo->prepare('UPDATE license SET instance_id = ? WHERE id = 1')
-                    ->execute([$assignedInstanceId]);
+                $pdo->prepare(
+                    'INSERT INTO license (id, instance_id, trial_started_at) VALUES (1, ?, NOW())
+                     ON DUPLICATE KEY UPDATE instance_id = VALUES(instance_id)'
+                )->execute([$assignedInstanceId]);
             }
 
             // Volitelně dodavatel
