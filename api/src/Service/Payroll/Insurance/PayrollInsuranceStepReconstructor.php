@@ -91,6 +91,79 @@ final class PayrollInsuranceStepReconstructor
     }
 
     /**
+     * @return array{step:array<string,mixed>,minimum_step:?array<string,mixed>,version:PayrollRulesetVersion,rounding_method:string}|null
+     */
+    public function healthMinimumTopUpStep(
+        string $rulesetId,
+        string $rulesetHash,
+        int $assessmentBaseMinorUnits,
+        int $minimumBaseMinorUnits,
+        int $storedStandardMinorUnits,
+        int $storedTopUpMinorUnits,
+    ): ?array {
+        if ($assessmentBaseMinorUnits < 0
+            || $minimumBaseMinorUnits <= $assessmentBaseMinorUnits
+            || $storedStandardMinorUnits < 0
+            || $storedTopUpMinorUnits <= 0
+        ) {
+            return null;
+        }
+        $version = $this->frozenVersion($rulesetId, $rulesetHash);
+        if ($version === null) {
+            return null;
+        }
+        try {
+            $parameter = $version->parameter(self::HEALTH_RATE_PARAMETER);
+            if ($parameter->type !== 'decimal_rate' || !is_string($parameter->value)) {
+                return null;
+            }
+            $rate = DecimalRate::fromString($parameter->value);
+            $standardStep = CalculationStep::calculate(
+                self::HEALTH_STANDARD_LABEL,
+                $assessmentBaseMinorUnits,
+                $rate,
+                RoundingMode::Ceil,
+            );
+            $topUpStep = CalculationStep::calculate(
+                self::HEALTH_TOP_UP_LABEL,
+                $minimumBaseMinorUnits - $assessmentBaseMinorUnits,
+                $rate,
+                RoundingMode::Ceil,
+            );
+            $minimumStep = CalculationStep::calculate(
+                'monthly-health-insurance-minimum-total',
+                $minimumBaseMinorUnits,
+                $rate,
+                RoundingMode::Ceil,
+            );
+            $standard = PayrollRounding::ceilToCzk($standardStep->outputMinorUnits);
+            $topUp = PayrollRounding::healthMinimumTopUp(
+                $standard,
+                PayrollRounding::ceilToCzk($minimumStep->outputMinorUnits),
+            );
+            $roundingMethod = 'rounded_total_difference';
+            if ($standard !== $storedStandardMinorUnits || $topUp !== $storedTopUpMinorUnits) {
+                $legacyTopUp = PayrollRounding::ceilToCzk($topUpStep->outputMinorUnits);
+                if ($standard !== $storedStandardMinorUnits || $legacyTopUp !== $storedTopUpMinorUnits) {
+                    return null;
+                }
+                $roundingMethod = 'legacy_separate_top_up';
+            }
+
+            return [
+                'step' => $topUpStep->jsonSerialize(),
+                'minimum_step' => $roundingMethod === 'rounded_total_difference'
+                    ? $minimumStep->jsonSerialize()
+                    : null,
+                'version' => $version,
+                'rounding_method' => $roundingMethod,
+            ];
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * Verze sady pravidel, jejíž otisk se shoduje s uloženým. Hledá se mezi
      * efektivní (default ⊕ override) a dodanou verzí téhož ID; jiná cesta, jak
      * se k historické verzi dostat, není a domýšlet ji nesmíme.

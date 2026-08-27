@@ -300,7 +300,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $preview->sha256());
     }
 
-    public function testOrdinaryHppReachesValidJmhzTestSubmissionWithoutTransport(): void
+    public function testLowIncomeHppWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(): void
     {
         $officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '9990001234');
         $person = $this->createEmployment(
@@ -311,10 +311,13 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             'employment',
             40,
             10_000,
+            false,
+            '2026-07-01',
+            false,
         );
         $this->completeJmhzEmployment($person);
-        $this->createApprovedTimeMonth($person['employment_id']);
-        $this->createApprovedAverage($person['employment_id']);
+        $this->createApprovedTimeMonth($person['employment_id'], '2026-07');
+        $this->createApprovedAverage($person['employment_id'], 3);
         $this->assignJmhzIdentity($person);
 
         $baseComponentId = $this->componentId('MZDA_MESICNI_FLOW');
@@ -323,12 +326,12 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             throw new \RuntimeException('Mapování mzdových složek JMHZ není dostupné.');
         }
         $mappings->put($this->supplierId, $baseComponentId, '10329', null, $this->actors[0]);
-        $this->createApprovedInput($person, $baseComponentId, 4_200_000, 'jmhz-base');
+        $this->createApprovedInput($person, $baseComponentId, 450_000, 'jmhz-base', '2026-07-01');
 
         $run = $this->runs->createRun(
             $this->supplierId,
-            '2026-06-01',
-            '2026-07-15',
+            '2026-07-01',
+            '2026-08-15',
             $officeId,
             $this->actors[0],
         );
@@ -347,6 +350,11 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             $this->actors[0],
         );
         self::assertSame([], $this->blockingValidations((int) $calculated->revision['id']));
+        $health = $this->healthResultSnapshot((int) $calculated->revision['id']);
+        self::assertSame(20_300, $health['employee_standard_contribution_minor_units']);
+        self::assertSame(241_600, $health['employee_minimum_top_up_minor_units']);
+        self::assertSame(261_900, $health['employee_contribution_minor_units']);
+        self::assertSame(40_500, $health['employer_contribution_minor_units']);
         $reviewed = $this->runs->review(
             $this->supplierId,
             (int) $run['id'],
@@ -396,6 +404,13 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame('dry_run_valid', $tested['status'], CanonicalJson::encode($tested));
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $tested['xml_sha256']);
         self::assertSame(hash('sha256', $tested['xml']), $tested['xml_sha256']);
+        self::assertStringContainsString('<form:zuctovanoCelkem>4500</form:zuctovanoCelkem>', $tested['xml']);
+        self::assertStringContainsString('<form:vypoctenaZaloha>675</form:vypoctenaZaloha>', $tested['xml']);
+        self::assertStringContainsString('<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>', $tested['xml']);
+        self::assertMatchesRegularExpression('/<form:zdravPojZamestnanec>\s*<form:zdravotniPojisteni>2619<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnanec>/', $tested['xml']);
+        self::assertMatchesRegularExpression('/<form:zdravPojZamestnavatel>\s*<form:zdravotniPojisteni>405<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnavatel>/', $tested['xml']);
+        self::assertStringContainsString('<form:socialniPojisteni>320</form:socialniPojisteni>', $tested['xml']);
+        self::assertStringContainsString('<form:socialniPojisteni>1116</form:socialniPojisteni>', $tested['xml']);
 
         $freezeResponse = $freeze(
             $this->request('POST', "/api/payroll/jmhz/preparations/{$preparationId}/submission")
@@ -409,6 +424,24 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame('ready', $submission['status']);
         self::assertTrue($submission['created']);
         self::assertSame(0, $this->transportAttemptCount((int) $submission['submission_id']));
+    }
+
+    /** @return array<string,mixed> */
+    private function healthResultSnapshot(int $revisionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT person.result_snapshot_json
+               FROM payroll_statutory_person_results person
+               JOIN payroll_statutory_results result
+                 ON result.supplier_id = person.supplier_id
+                AND result.id = person.statutory_result_id
+              WHERE result.supplier_id = ? AND result.revision_id = ?
+                AND result.calculation_kind = "health_insurance"'
+        );
+        $stmt->execute([$this->supplierId, $revisionId]);
+        $snapshot = json_decode((string) $stmt->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($snapshot);
+        return $snapshot;
     }
 
     private function createOffice(
@@ -485,6 +518,9 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         string $relationType,
         int $weeklyHours,
         int $workloadBasisPoints,
+        bool $taxDeclarationSigned = true,
+        string $periodStart = '2026-06-01',
+        bool $withHealthMonthEvidence = true,
     ): array {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -492,8 +528,8 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                 (supplier_id, full_name, taxpayer_type, employment_type,
                  tax_declaration_signed, tax_credit_taxpayer, child_count,
                  monthly_gross, auto_post, is_active)
-             VALUES (?, ?, "employee", ?, 1, 1, 0, 0, 0, 1)',
-        )->execute([$this->supplierId, $name, $employmentType]);
+             VALUES (?, ?, "employee", ?, ?, ?, 0, 0, 0, 1)',
+        )->execute([$this->supplierId, $name, $employmentType, $taxDeclarationSigned ? 1 : 0, $taxDeclarationSigned ? 1 : 0]);
         $employeeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employee_profiles
@@ -516,13 +552,14 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                  health_insurance_participation, tax_regime,
                  tax_declaration_signed, is_primary)
              VALUES (?, ?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
-                     ?, ?, "automatic", "automatic", "advance", 1, 1)',
+                     ?, ?, "automatic", "automatic", "advance", ?, 1)',
         )->execute([
             $this->supplierId,
             $employmentId,
             $officeId,
             $weeklyHours,
             $workloadBasisPoints,
+            $taxDeclarationSigned ? 1 : 0,
         ]);
         $evidence = $this->container->get(PayrollPersonStatutoryEvidenceRepository::class);
         if (!$evidence instanceof PayrollPersonStatutoryEvidenceRepository) {
@@ -531,8 +568,8 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $evidence->save(
             $this->supplierId,
             $employeeId,
-            $this->statutoryEvidence(),
-            '2026-06-30',
+            $this->statutoryEvidence($periodStart, $taxDeclarationSigned, $withHealthMonthEvidence),
+            date('Y-m-t', strtotime($periodStart)),
             $this->actors[0],
             null,
             'payroll-full-flow-test',
@@ -543,8 +580,8 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                 (supplier_id, employee_id, period_start,
                  claim_register_evidence_complete, dependants_evidence_complete,
                  spouse_evidence_complete, pension_evidence, updated_by)
-             VALUES (?, ?, "2026-06-01", 1, 1, 1, "none", ?)',
-        )->execute([$this->supplierId, $employeeId, $this->actors[0]]);
+             VALUES (?, ?, ?, 1, 1, 1, "none", ?)',
+        )->execute([$this->supplierId, $employeeId, $periodStart, $this->actors[0]]);
         return ['employee_id' => $employeeId, 'employment_id' => $employmentId, 'name' => $name];
     }
 
@@ -568,7 +605,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @param array{employee_id:int,employment_id:int,name:string} $person */
-    private function createApprovedInput(array $person, int $componentId, int $amountMinor, string $externalId): void
+    private function createApprovedInput(array $person, int $componentId, int $amountMinor, string $externalId, string $periodStart = '2026-06-01'): void
     {
         $component = $this->db->pdo()->prepare(
             'SELECT * FROM payroll_component_definitions WHERE supplier_id = ? AND id = ?',
@@ -606,13 +643,14 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                  period_start, amount_minor, source_kind, external_id, status,
                  component_snapshot_json, component_snapshot_hash,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, "2026-06-01", ?, "manual", ?, "approved",
+             VALUES (?, ?, ?, ?, ?, ?, "manual", ?, "approved",
                      ?, ?, ?, NOW())',
         )->execute([
             $this->supplierId,
             $person['employee_id'],
             $person['employment_id'],
             $componentId,
+            $periodStart,
             $amountMinor,
             $externalId,
             $json,
@@ -661,15 +699,15 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function createApprovedAverage(int $employmentId): array
+    private function createApprovedAverage(int $employmentId, int $quarter = 2): array
     {
         $averageResponse = $this->absences->createAverage(
             $this->request('POST', '/api/payroll/absences/average')->withParsedBody([
                 'employment_id' => $employmentId,
                 'applicable_year' => 2026,
-                'applicable_quarter' => 2,
-                'decisive_from' => '2026-01-01',
-                'decisive_to' => '2026-03-31',
+                'applicable_quarter' => $quarter,
+                'decisive_from' => $quarter === 3 ? '2026-04-01' : '2026-01-01',
+                'decisive_to' => $quarter === 3 ? '2026-06-30' : '2026-03-31',
                 'gross_earnings_minor' => 12_000_000,
                 'longer_period_allocated_minor' => 0,
                 'worked_minutes' => 9_600,
@@ -727,7 +765,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $this->insertPersonIdentifier($person['employee_id'], 'birth_number', '9102030014');
     }
 
-    private function createApprovedTimeMonth(int $employmentId): void
+    private function createApprovedTimeMonth(int $employmentId, string $period = '2026-06'): void
     {
         $calendar = $this->time->calendar(
             $this->request('PUT', "/api/payroll/time/calendars/{$employmentId}")
@@ -757,8 +795,8 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $entry = $this->time->entry(
             $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
                 'employment_id' => $employmentId,
-                'starts_at' => '2026-06-01T08:00:00+02:00',
-                'ends_at' => '2026-06-01T16:00:00+02:00',
+                'starts_at' => "{$period}-01T08:00:00+02:00",
+                'ends_at' => "{$period}-01T16:00:00+02:00",
                 'timezone' => 'Europe/Prague',
                 'category' => 'regular',
                 'break_minutes' => 30,
@@ -772,7 +810,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $monthVersion = (int) $this->json($entry)['month']['row_version'];
         $overview = $this->time->month(
             $this->request('GET', '/api/payroll/time/month')
-                ->withQueryParams(['period' => '2026-06']),
+                ->withQueryParams(['period' => $period]),
             new Response(),
         );
         self::assertSame(200, $overview->getStatusCode(), (string) $overview->getBody());
@@ -786,7 +824,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertIsArray($item);
         $preview = $item['jmhz_work_summary']['preview'];
         $approved = $this->time->approve(
-            $this->request('POST', '/api/payroll/time/months/2026-06/approve')
+            $this->request('POST', "/api/payroll/time/months/{$period}/approve")
                 ->withParsedBody([
                     'employment_id' => $employmentId,
                     'row_version' => $monthVersion,
@@ -802,7 +840,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     ],
                 ]),
             new Response(),
-            ['period' => '2026-06'],
+            ['period' => $period],
         );
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
     }
@@ -846,13 +884,13 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function statutoryEvidence(): array
+    private function statutoryEvidence(string $periodStart, bool $taxDeclarationSigned, bool $withHealthMonthEvidence): array
     {
         return [
-            'effective_on' => '2026-06-30',
+            'effective_on' => date('Y-m-t', strtotime($periodStart)),
             'sections' => [
                 'tax_declarations' => [[
-                    'status' => 'signed',
+                    'status' => $taxDeclarationSigned ? 'signed' : 'not-signed',
                     'evidence_reference' => 'document:synthetic-tax-declaration',
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
@@ -890,13 +928,13 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
                 ]],
-                'health_month_evidence' => [[
-                    'period_start' => '2026-06-01',
+                'health_month_evidence' => $withHealthMonthEvidence ? [[
+                    'period_start' => $periodStart,
                     'top_up_responsibility' => 'employer_obstacle_verified',
                     'top_up_responsibility_evidence_reference' => 'document:synthetic-obstacle',
                     'selected_top_up_employer_reference' => null,
                     'selected_top_up_employer_evidence_reference' => null,
-                ]],
+                ]] : [],
             ],
         ];
     }

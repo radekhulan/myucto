@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Insurance;
 
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
+use MyInvoice\Service\Payroll\Calculation\PayrollRounding;
 
 /**
  * MZ-10-W07 / MZ-11-W07 — „jak vzniklo sociální a zdravotní pojistné".
@@ -299,6 +300,10 @@ final class PayrollInsuranceBreakdownQueryService
             $result['standard_contribution_step'] ?? null,
             'health.standard_contribution_step',
         );
+        $minimumContributionStep = self::step(
+            $result['minimum_contribution_step'] ?? null,
+            'health.minimum_contribution_step',
+        );
         $topUpStep = self::step($result['minimum_top_up_step'] ?? null, 'health.minimum_top_up_step');
         $standard = self::optionalNonNegativeInt($result, 'standard_contribution_minor_units');
         $employeeStandard = self::optionalNonNegativeInt(
@@ -316,7 +321,9 @@ final class PayrollInsuranceBreakdownQueryService
         $total = self::optionalNonNegativeInt($result, 'total_contribution_minor_units');
         $status = (string) ($person['result_status'] ?? 'manual_review');
 
-        $stepsRecorded = $standardStep !== null || $topUpStep !== null;
+        $stepsRecorded = $standardStep !== null
+            || $minimumContributionStep !== null
+            || $topUpStep !== null;
         $reconstruction = null;
         if ($status === 'calculated' && !$stepsRecorded) {
             $reconstruction = $this->reconstructHealthSteps(
@@ -327,6 +334,7 @@ final class PayrollInsuranceBreakdownQueryService
                 ($employeeTopUp ?? 0) + ($employerTopUp ?? 0),
             );
             $standardStep = $reconstruction['standard_step'] ?? null;
+            $minimumContributionStep = $reconstruction['minimum_step'] ?? null;
             $topUpStep = $reconstruction['top_up_step'] ?? null;
             $reconstruction = $reconstruction['evidence'] ?? null;
         }
@@ -334,6 +342,7 @@ final class PayrollInsuranceBreakdownQueryService
         if ($status === 'calculated') {
             $this->assertHealthReconciles(
                 $standardStep,
+                $minimumContributionStep,
                 $standard,
                 $employeeStandard,
                 $employerStandard,
@@ -450,6 +459,7 @@ final class PayrollInsuranceBreakdownQueryService
                 ),
                 'rate_reconstruction' => $reconstruction,
                 'standard_step' => $standardStep,
+                'minimum_total_step' => $minimumContributionStep,
                 'standard_minor' => $standard,
                 'employee_standard_minor' => $employeeStandard,
                 'employer_standard_minor' => $employerStandard,
@@ -485,7 +495,7 @@ final class PayrollInsuranceBreakdownQueryService
      * jediné místo, kde se rekonstruovaný původ přizná.
      *
      * @param array<string,mixed> $set
-     * @return array{standard_step?:array<string,mixed>,top_up_step?:array<string,mixed>,evidence?:array<string,mixed>}
+     * @return array{standard_step?:array<string,mixed>,minimum_step?:array<string,mixed>,top_up_step?:array<string,mixed>,evidence?:array<string,mixed>}
      */
     private function reconstructHealthSteps(
         array $set,
@@ -503,11 +513,12 @@ final class PayrollInsuranceBreakdownQueryService
             $assessmentBase,
             $standard ?? 0,
         );
-        $topUpMatch = $this->reconstructor->healthStep(
-            PayrollInsuranceStepReconstructor::HEALTH_TOP_UP_LABEL,
+        $topUpMatch = $this->reconstructor->healthMinimumTopUpStep(
             $rulesetId,
             $rulesetHash,
-            $effectiveMinimum - $assessmentBase,
+            $assessmentBase,
+            $effectiveMinimum,
+            $standard ?? 0,
             $topUpTotal,
         );
         if ($standardMatch === null && $topUpMatch === null) {
@@ -523,6 +534,7 @@ final class PayrollInsuranceBreakdownQueryService
                 'proof' => 'ruleset_hash_and_amount_match',
                 'standard_reconstructed' => $standardMatch !== null,
                 'top_up_reconstructed' => $topUpMatch !== null,
+                'top_up_rounding_method' => $topUpMatch['rounding_method'] ?? null,
             ],
         ];
         if ($standardMatch !== null) {
@@ -536,6 +548,12 @@ final class PayrollInsuranceBreakdownQueryService
                 $topUpMatch['step'],
                 'health.minimum_top_up_step',
             );
+            if (($topUpMatch['minimum_step'] ?? null) !== null) {
+                $reconstructed['minimum_step'] = self::step(
+                    $topUpMatch['minimum_step'],
+                    'health.minimum_contribution_step',
+                );
+            }
         }
 
         return $reconstructed;
@@ -985,10 +1003,12 @@ final class PayrollInsuranceBreakdownQueryService
 
     /**
      * @param array<string,mixed>|null $standardStep
+     * @param array<string,mixed>|null $minimumContributionStep
      * @param array<string,mixed>|null $topUpStep
      */
     private function assertHealthReconciles(
         ?array $standardStep,
+        ?array $minimumContributionStep,
         ?int $standard,
         ?int $employeeStandard,
         ?int $employerStandard,
@@ -1039,8 +1059,20 @@ final class PayrollInsuranceBreakdownQueryService
              */
             return;
         }
-        if ($topUpStep !== null) {
-            self::assertRounding($topUpStep, $employeeTopUp + $employerTopUp, 'dopočtu do minima');
+        if ($minimumContributionStep !== null) {
+            self::assertRounding($minimumContributionStep, $total, 'minimálního celkového zdravotního');
+            if ($employeeTopUp + $employerTopUp !== $total - $standard) {
+                throw new \DomainException(
+                    'Dopočet do minima není rozdílem celkového a standardního pojistného.',
+                );
+            }
+        } elseif ($topUpStep !== null) {
+            self::assertHealthTopUpRounding(
+                $standardStep,
+                $topUpStep,
+                $standard,
+                $employeeTopUp + $employerTopUp,
+            );
         } elseif ($employeeTopUp + $employerTopUp !== 0 && $stepsRecorded) {
             /*
              * Tvrdá podmínka platí jen revizi, která mezikroky ukládala: tam je
@@ -1050,6 +1082,41 @@ final class PayrollInsuranceBreakdownQueryService
              */
             throw new \DomainException(
                 'Dopočet do minimálního vyměřovacího základu bez mezikroku nesmí být nenulový.',
+            );
+        }
+    }
+
+    /**
+     * @param array<string,mixed>|null $standardStep
+     * @param array<string,mixed> $topUpStep
+     */
+    private static function assertHealthTopUpRounding(
+        ?array $standardStep,
+        array $topUpStep,
+        int $standard,
+        int $topUp,
+    ): void {
+        $fractions = [];
+        if ($standardStep !== null) {
+            $fractions[] = [
+                'numerator' => self::nonNegativeInt($standardStep, 'unrounded_numerator'),
+                'denominator' => self::positiveInt($standardStep, 'unrounded_denominator'),
+            ];
+        }
+        $fractions[] = [
+            'numerator' => self::nonNegativeInt($topUpStep, 'unrounded_numerator'),
+            'denominator' => self::positiveInt($topUpStep, 'unrounded_denominator'),
+        ];
+        $expected = PayrollRounding::healthMinimumTopUp(
+            $standard,
+            PayrollRounding::ceilFractionSumToMultiple($fractions, 100),
+        );
+        $legacy = PayrollRounding::ceilToCzk(
+            self::nonNegativeInt($topUpStep, 'output_minor_units'),
+        );
+        if ($topUp !== $expected && $topUp !== $legacy) {
+            throw new \DomainException(
+                'Zaokrouhlení dopočtu do minima neodpovídá uložené částce.',
             );
         }
     }
