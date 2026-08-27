@@ -57,6 +57,15 @@ final class AuthMiddleware implements MiddlewareInterface
         '/api/auth/domain-login/exchange',
         '/api/auth/forgot',
         '/api/auth/reset',
+        // ⚠️ Doručení licence do spravované instalace volá licenční server,
+        // ne člověk — session nemá čím získat. Autentizace je Ed25519 podpis
+        // obálky ověřený zabudovaným veřejným klíčem (ManagedLicenseAction);
+        // bez podpisu endpoint neudělá nic.
+        //
+        // ⚠️ Seznamy jsou DVA: tenhle (bez session) a RoutePermissionMap
+        // (bez oprávnění). Zapsat routu jen do jednoho znamená 401 ještě
+        // před akcí — přesně tak endpoint po vydání 5.28.2 mlčel.
+        '/api/managed/license',
     ];
 
     /**
