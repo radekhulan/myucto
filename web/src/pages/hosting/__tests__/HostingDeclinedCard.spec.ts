@@ -171,3 +171,45 @@ describe('Hosting — neproběhlá platba doplatku', () => {
     expect(wrapper.get('[data-hosting-pay-again] a').attributes('href')).toBeTruthy()
   })
 })
+
+/**
+ * ⚠️ Odmítnutá kontrola licence se NESMÍ tvářit jako v pořádku.
+ *
+ * Po vrácení peněz server licenci odmítne, ale token doběhne dál — obrazovka
+ * do té doby hlásila „Stav licence: Aktivní" a datum poslední kontroly, jako
+ * by všechno sedělo. Zákazník se o konci placených funkcí dozvěděl až tím,
+ * že mu zmizely.
+ */
+describe('Hosting — neúspěšná kontrola licence', () => {
+  // `billing` chodí uvnitř bloku `instance`, ne vedle něj — obrazovka ho čte
+  // přes instanceStatus, ne ze stavu licence.
+  function withBilling(lastCheckOk: boolean) {
+    const base = buildPreviewStatus('manual_key', 1_800_000_000) as Record<string, unknown>
+    const instance = { ...(base.instance as Record<string, unknown>) }
+    const billing = { ...(instance.billing as Record<string, unknown> ?? {}) }
+
+    return {
+      ...base,
+      instance: {
+        ...instance,
+        billing: { ...billing, last_check_ok: lastCheckOk, last_check_at: '2026-08-27T20:53:48+02:00' },
+      },
+    }
+  }
+
+  it('neúspěšnou kontrolu pojmenuje', async () => {
+    mocks.status.mockResolvedValue(withBilling(false))
+
+    const wrapper = await mountHosting()
+
+    expect(wrapper.find('[data-hosting-check-failed]').exists()).toBe(true)
+  })
+
+  it('u úspěšné kontroly nic nestraší', async () => {
+    mocks.status.mockResolvedValue(withBilling(true))
+
+    const wrapper = await mountHosting()
+
+    expect(wrapper.find('[data-hosting-check-failed]').exists()).toBe(false)
+  })
+})

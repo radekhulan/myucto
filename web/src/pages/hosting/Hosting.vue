@@ -779,6 +779,24 @@ watch(previewScenario, (scenario) => {
         </p>
       </section>
 
+      <!-- ⚠️ Odmítnutou kontrolu licence NELZE mlčet — a musí být vidět BEZ
+           OHLEDU na to, jestli server poslal vyprávění o fázi neuhrazení.
+           Server licenci odmítne třeba po vrácení peněz nebo jejím zneplatnění,
+           jenže token doběhne dál: obrazovka do té doby hlásila „Stav licence:
+           Aktivní" a datum poslední kontroly, jako by všechno sedělo, a
+           zákazník se o konci placených funkcí dozvěděl až tím, že mu zmizely. -->
+      <section
+        v-if="billing && !billing.last_check_ok"
+        class="rounded-lg border border-danger-500/40 bg-danger-50/50 px-4 py-3"
+        data-hosting-check-failed
+      >
+        <p class="text-sm font-medium text-danger-600">{{ t('hosting.check_failed_title') }}</p>
+        <p class="mt-1 text-sm text-neutral-700">{{ t('hosting.unpaid_check_failed') }}</p>
+        <p v-if="billing.last_check_at" class="mt-1 text-xs text-neutral-600">
+          {{ t('hosting.check_failed_when', { checked: fmtDateTime(billing.last_check_at) }) }}
+        </p>
+      </section>
+
       <!-- ── CO MI DOCHÁZÍ ──────────────────────────────────────────────────
            Kreslí se jen tehdy, když je co řešit. -->
       <section
