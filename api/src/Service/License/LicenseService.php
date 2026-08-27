@@ -1373,6 +1373,62 @@ final class LicenseService
         );
     }
 
+    /**
+     * Převezme licenční klíč doručený provozovatelem spravované instalace.
+     *
+     * Spravovanou instalaci dostává zákazník hotovou a licenční klíč nemá kam
+     * opsat — dokud tahle cesta nebyla, běžela zaplacená instalace na zkušebním
+     * období, protože klíč se do ní nikdy nedostal. Prvotní zřízení klíč nese
+     * v setupu; tohle je cesta pro instalaci, která už běží.
+     *
+     * ⚠️ Autentizace je KRYPTOGRAFICKÁ, ne sdíleným heslem. Obálku podepisuje
+     * licenční server týmž Ed25519 klíčem jako licenční token, takže se ověří
+     * veřejným klíčem, který aplikace už má — nevzniká další tajemství, které
+     * by se muselo distribuovat a chránit.
+     *
+     * ⚠️ Obálka musí být adresovaná TÉHLE instalaci (`instance_id`) a čerstvá.
+     * Bez toho by se jednou odchycená obálka dala přehrát na cizí instalaci
+     * a vnutit jí cizí licenci.
+     *
+     * @return array{ok:bool,error:?string}
+     */
+    public function acceptManagedLicense(string $envelope): array
+    {
+        if (!$this->isManaged()) {
+            return ['ok' => false, 'error' => 'not_managed'];
+        }
+
+        $payload = $this->verifier->verify(trim($envelope), $this->publicKeys());
+        if ($payload === null) {
+            return ['ok' => false, 'error' => 'invalid_signature'];
+        }
+        if ((string) ($payload['purpose'] ?? '') !== 'managed_license') {
+            return ['ok' => false, 'error' => 'wrong_purpose'];
+        }
+
+        $own = $this->instanceIdOf($this->loadRow());
+        if ($own === '' || (string) ($payload['instance_id'] ?? '') !== $own) {
+            return ['ok' => false, 'error' => 'instance_mismatch'];
+        }
+
+        // Pět minut stačí na síť i na rozjeté hodiny, a přehrání staré obálky
+        // za týden to nepustí.
+        $issuedAt = (int) ($payload['iat'] ?? 0);
+        if ($issuedAt <= 0 || abs(time() - $issuedAt) > 300) {
+            return ['ok' => false, 'error' => 'stale_envelope'];
+        }
+
+        $key = trim((string) ($payload['license_key'] ?? ''));
+        if ($key === '') {
+            return ['ok' => false, 'error' => 'invalid_key'];
+        }
+
+        // `takeover` schválně NE. Kdyby licence visela na jiné instalaci, je to
+        // nález k prošetření, ne něco, co má provozovatel přebít mlčky.
+        $res = $this->activate($key);
+        return ['ok' => ($res['ok'] ?? false) === true, 'error' => $res['error'] ?? null];
+    }
+
     private function publicKey(): string
     {
         $key = trim((string) $this->config->get('license.public_key', ''));

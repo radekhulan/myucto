@@ -425,6 +425,10 @@ final class Routes
         // instalace přestane fungovat. Rozsah viz BillingSnapshot::dunning().
         $app->get ('/api/license/billing',       LicenseBillingAction::class);
         $app->post('/api/license/activate',      ActivateLicenseAction::class);
+        // ⚠️ Mimo admin bránu schválně: tohle volá licenční server, ne člověk.
+        // Autentizace je Ed25519 podpis obálky, ověřený zabudovaným veřejným
+        // klíčem — nepodepsaný požadavek neudělá nic.
+        $app->post('/api/managed/license',       \MyInvoice\Action\License\ManagedLicenseAction::class);
         $app->post('/api/license/deactivate',    DeactivateLicenseAction::class);
         // Vypnutí automatického prodlužování — licence doběhne do valid_until.
         $app->post('/api/license/cancel-renewal', CancelRenewalLicenseAction::class);

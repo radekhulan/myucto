@@ -19,6 +19,11 @@ final class RoutePermissionMap
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
         '/api/auth/forgot', '/api/auth/reset', '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
+        // ⚠️ „Public" jen ve smyslu BEZ SESSION. Doručení licence do spravované
+        // instalace volá licenční server, který se sem přihlásit nemá čím;
+        // autentizace je Ed25519 podpis obálky ověřený zabudovaným veřejným
+        // klíčem (ManagedLicenseAction), takže bez podpisu endpoint neudělá nic.
+        '/api/managed/license',
     ];
 
     /** @var list<string> */

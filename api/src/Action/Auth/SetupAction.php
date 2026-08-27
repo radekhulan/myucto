@@ -58,6 +58,12 @@ final class SetupAction
         // Právnická osoba se zakládá rovnou v podvojném účetnictví, a to bez
         // směrné osnovy nefunguje — viz insertSupplier().
         private readonly \MyInvoice\Service\Accounting\ChartOfAccountsSeeder $coaSeeder,
+        // Spravovaná instalace dostává licenční klíč rovnou ve zřizovacím
+        // požadavku — viz aktivaci na konci setupu.
+        private readonly \MyInvoice\Service\License\LicenseService $license,
+        // Zveřejněné bankovní účty z registru plátců DPH (doplnění podle DIČ).
+        private readonly \MyInvoice\Service\Ares\CrpDphClient $crpdph,
+        private readonly \Psr\Log\LoggerInterface $log,
     ) {}
 
     /**
@@ -69,6 +75,72 @@ final class SetupAction
      *
      * @param array<string,mixed> $supplier
      */
+    /**
+     * Doplní bankovní účet z registru plátců DPH (zveřejněné účty podle DIČ).
+     *
+     * Zřizovací požadavek účet neobsahuje — objednávka se na něj neptá a my ho
+     * neznáme. Spravovaná instalace tak vznikla s prázdnou CZK i EUR měnou
+     * a zákazník nemohl vystavit fakturu, dokud si účet nedoplnil ručně.
+     *
+     * ⚠️ Bere se JEN zveřejněný účet z registru. Je to účet, který u správce
+     * daně ohlásil sám plátce — nic se nehádá a nic neopisuje z jiného zdroje.
+     *
+     * ⚠️ Best-effort a jen do PRÁZDNÉ měny. Výpadek registru ani chybějící
+     * zveřejněný účet nesmí shodit dokončený setup; co se nedoplní, doplní si
+     * zákazník v Nastavení.
+     *
+     * @param array<string,mixed> $supplier
+     */
+    private function fillPublishedBankAccount(int $supplierId, array $supplier): void
+    {
+        // Účet, který přišel ve zřizovacím požadavku, má přednost — registr
+        // by ho přepsal jiným, který si zákazník nevybral.
+        if (isset($supplier['bank_account']) && is_array($supplier['bank_account'])
+            && trim((string) ($supplier['bank_account']['account_number'] ?? '')) !== '') {
+            return;
+        }
+        $dic = trim((string) ($supplier['dic'] ?? ''));
+        if ($dic === '') {
+            return;
+        }
+
+        try {
+            $res = $this->crpdph->lookup($dic);
+            $accounts = is_array($res['accounts'] ?? null) ? $res['accounts'] : [];
+            if (!$accounts) {
+                return;
+            }
+            // První zveřejněný účet je ten, který plátce uvádí jako hlavní.
+            $first = $accounts[0];
+            $number = trim((string) ($first['prefix'] ?? '')) !== ''
+                ? trim((string) $first['prefix']) . '-' . trim((string) ($first['number'] ?? ''))
+                : trim((string) ($first['number'] ?? ''));
+            $bankCode = trim((string) ($first['bank_code'] ?? ''));
+            $iban = trim((string) ($first['iban'] ?? '')) ?: null;
+            if ($number === '' && $iban === null) {
+                return;
+            }
+
+            // SEC-01: ani doplnění z registru si nesmí nárokovat účet, který už
+            // patří jinému dodavateli nebo na který chodí cizí výpisy.
+            if ($this->bankOwnership->accountClaimedByOtherSupplier($supplierId, $number ?: null, $iban)
+                || $this->bankOwnership->accountBlockedByForeignStatements($supplierId, $number ?: null, $iban)) {
+                $this->log->warning('setup: zveřejněný účet se nedoplnil — patří jinému dodavateli');
+                return;
+            }
+
+            $stmt = $this->db->pdo()->prepare(
+                "UPDATE currencies SET account_number = ?, bank_code = ?, iban = ?
+                   WHERE supplier_id = ? AND code = 'CZK'
+                     AND (account_number IS NULL OR account_number = '')
+                     AND (iban IS NULL OR iban = '')"
+            );
+            $stmt->execute([$number ?: null, $bankCode ?: null, $iban, $supplierId]);
+        } catch (\Throwable $e) {
+            $this->log->warning('setup: zveřejněné účty se nepodařilo načíst', ['error' => $e->getMessage()]);
+        }
+    }
+
     private function foreignBankAccountError(array $supplier): ?string
     {
         $bank = isset($supplier['bank_account']) && is_array($supplier['bank_account']) ? $supplier['bank_account'] : null;
@@ -127,6 +199,15 @@ final class SetupAction
             : '';
         if ($assignedInstanceId !== '' && !preg_match('/^[A-Za-z0-9._:-]{1,64}$/', $assignedInstanceId)) {
             return Json::error($response, 'validation_failed', 'instance_id má nepovolený tvar.', 400);
+        }
+        // ⚠️ Licenční klíč spravované instalace. Přichází ze zřizovacího
+        // požadavku provozovatele, protože zákazník ho nemá kam opsat —
+        // instalaci dostává hotovou. Bez něj (self-hosted) se nic nemění.
+        $licenseKey = isset($body['license_key']) && is_string($body['license_key'])
+            ? trim($body['license_key'])
+            : '';
+        if ($licenseKey !== '' && !preg_match('/^[A-Za-z0-9-]{8,64}$/', $licenseKey)) {
+            return Json::error($response, 'validation_failed', 'license_key má nepovolený tvar.', 400);
         }
         $requireTotp = !empty($body['require_totp']);
         // Přijetí licence a obchodních podmínek je podmínkou dokončení setupu;
@@ -282,6 +363,28 @@ final class SetupAction
         // registrů, co jde (čísla domu, NACE, spisová značka, typ poplatníka, kód FÚ).
         if ($createdSupplierId !== null) {
             $this->enricher->enrich($createdSupplierId, $supplier['ic'] ?? null, $supplier['dic'] ?? null);
+            $this->fillPublishedBankAccount($createdSupplierId, $supplier ?? []);
+        }
+
+        // Spravovaná instalace aktivuje licenci sama, hned při zřízení.
+        // Zákazník ji dostává hotovou a klíč nemá kam opsat; dokud se tohle
+        // nedělo, běžela zaplacená instalace na zkušebním období.
+        //
+        // ⚠️ Best-effort. Nedostupný licenční server je provozní výpadek, ne
+        // důvod zahodit dokončený setup — klíč se dá zadat i ručně a licence
+        // se ověřuje znovu při každém startu.
+        $licenseActivated = null;
+        if ($licenseKey !== '') {
+            try {
+                $res = $this->license->activate($licenseKey);
+                $licenseActivated = ($res['ok'] ?? false) === true;
+                if (!$licenseActivated) {
+                    $this->log->warning('setup: aktivace licence selhala', ['error' => (string) ($res['error'] ?? '?')]);
+                }
+            } catch (\Throwable $e) {
+                $licenseActivated = false;
+                $this->log->warning('setup: aktivace licence spadla', ['error' => $e->getMessage()]);
+            }
         }
 
         // Zapiš obecnou MFA politiku, legacy TOTP flag a případně detekované app.url.
