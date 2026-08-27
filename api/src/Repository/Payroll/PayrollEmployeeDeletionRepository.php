@@ -60,6 +60,7 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_generated_documents',
                 'payroll_annual_document_revisions',
                 'payroll_annual_document_sources',
+                'payroll_document_batch_items',
             ],
             'code' => 'payroll_employee_has_documents',
             'message' => 'Zaměstnanci už byla vydaná výplatní páska, mzdový list nebo roční '
@@ -122,10 +123,17 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_enforcement_month_results',
                 'payroll_enforcement_person_month_evidence',
                 'payroll_insolvency_payment_instructions',
+                'payroll_enforcement_xmlzam_requests',
             ],
             'code' => 'payroll_employee_has_enforcement',
             'message' => 'Na zaměstnance je vedená exekuce nebo insolvence. '
                 . 'Ty záznamy jsou neměnné, takže osobu smazat nelze.',
+        ],
+        'statutory_obligation' => [
+            'tables' => ['payroll_statutory_obligation_evidence'],
+            'code' => 'payroll_employee_has_statutory_obligation_evidence',
+            'message' => 'K zaměstnanci je uložený neměnný důkaz splněné zákonné povinnosti. '
+                . 'Smazat ho nelze.',
         ],
     ];
 
