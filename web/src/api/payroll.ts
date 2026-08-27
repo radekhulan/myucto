@@ -2306,6 +2306,76 @@ export interface PayrollRegistrationSubmission {
   deadline: PayrollRegistrationDeadline
 }
 
+export type PayrollRegistrationEventInteraction =
+  | 'termination'
+  | 'change'
+  | 'correction'
+  | 'variable_symbol_transfer'
+  | 'czech_legislation_start'
+  | 'czech_legislation_end'
+  | 'cancellation'
+
+export interface PayrollRegistrationEvent {
+  id: number
+  employment_id: number
+  environment: PayrollJmhzTransportEnvironment
+  interaction: PayrollRegistrationEventInteraction
+  action_code: 2 | 3 | 4 | 5 | 6 | 7 | 8
+  effective_on: string
+  source_kind: string
+  source_reference: string
+  snapshot_fingerprint: string
+  approved_at: string
+  consumed: boolean
+  created: boolean
+}
+
+export interface PayrollRegistrationPensionPeriodInput {
+  from: string
+  to: string
+}
+
+export interface PayrollRegistrationEventInput {
+  environment: PayrollJmhzTransportEnvironment
+  interaction: PayrollRegistrationEventInteraction
+  effective_on: string
+  source_reference?: string
+  ended_by_death?: boolean
+  unemployment?: {
+    mode?: 'provided' | 'not_provided_2' | 'not_provided_3'
+    early_termination_reason?: string
+    average_net_earnings?: string
+    pension_periods?: PayrollRegistrationPensionPeriodInput[]
+    employment_type?: '1' | '2'
+    termination_reason?: string
+    service_termination_reason?: string
+    entitlement?: boolean
+    paid_in_full?: boolean
+    replacement?: string
+    golden_handshake?: string
+    severance_pay?: string
+    disposal?: string
+  }
+  changes?: Record<string, unknown>
+  corrections?: Record<string, unknown>
+  discovered_on?: string
+  source_submission_id?: number
+  new_variable_symbol?: string
+  foreign_insurance?: {
+    current: 'P' | 'S'
+    name: string
+    country_code: string
+    identifier?: string
+    street?: string
+    house_number?: string
+    orientation_number?: string
+    postal_code?: string
+    city?: string
+    sector?: string
+  }
+  not_started?: true
+}
+
 /** Ručně spuštěný VREP přenos jedné zmrazené PREZEC/REGZEC registrace. */
 export interface PayrollRegistrationTransportResult {
   agenda_code: PayrollRegistrationAgenda
@@ -4239,16 +4309,32 @@ export const payrollApi = {
   previewEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'test',
+    eventId?: number | null,
   ) => api.get<PayrollRegistrationPreview>(
     `/payroll/submissions/registration/${employmentId}`,
-    { params: { environment } },
+    { params: { environment, ...(eventId == null ? {} : { event_id: eventId }) } },
   ).then(response => response.data),
   prepareEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'test',
+    eventId?: number | null,
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
-    { environment },
+    { environment, ...(eventId == null ? {} : { event_id: eventId }) },
+  ).then(response => response.data),
+  employmentRegistrationEvents: (
+    employmentId: number,
+    environment: PayrollJmhzTransportEnvironment = 'test',
+  ) => api.get<{ items: PayrollRegistrationEvent[] }>(
+    `/payroll/submissions/registration/${employmentId}/events`,
+    { params: { environment } },
+  ).then(response => response.data.items),
+  approveEmploymentRegistrationEvent: (
+    employmentId: number,
+    payload: PayrollRegistrationEventInput,
+  ) => api.post<PayrollRegistrationEvent>(
+    `/payroll/submissions/registration/${employmentId}/events`,
+    payload,
   ).then(response => response.data),
   sendEmploymentRegistrationTransport: (
     submissionId: number,

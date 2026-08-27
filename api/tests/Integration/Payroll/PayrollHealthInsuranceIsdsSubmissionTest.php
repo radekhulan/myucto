@@ -326,7 +326,7 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         self::assertSame('text_pdf', $result['attachment']['format']);
     }
 
-    public function testVozpUsesTheExtractablePdf(): void
+    public function testVozpEmployerPaymentOverviewUsesTheDocumentedOlomoucBox(): void
     {
         $result = $this->isds->enqueue(
             $this->supplierId,
