@@ -1012,6 +1012,14 @@ final class Routes
                 '/documents/{documentId:[0-9]+}/download',
                 [PayrollDocumentAction::class, 'download'],
             );
+            $g->get(
+                '/documents/{documentId:[0-9]+}/delivery-events',
+                [PayrollDocumentAction::class, 'deliveryEvents'],
+            );
+            $g->post(
+                '/documents/{documentId:[0-9]+}/delivery-events',
+                [PayrollDocumentAction::class, 'recordDeliveryEvent'],
+            );
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->post('/people', [PayrollPeopleAction::class, 'create']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);

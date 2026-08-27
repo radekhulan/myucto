@@ -11,6 +11,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\AnnualPayrollSheetService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentDeliveryLedgerService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -24,6 +25,7 @@ final class PayrollDocumentAction
     public function __construct(
         private readonly PayrollDocumentService $documents,
         private readonly PayrollDocumentRepository $documentRepository,
+        private readonly PayrollDocumentDeliveryLedgerService $deliveryLedger,
         private readonly AnnualPayrollSheetService $annualPayrollSheets,
         private readonly PayrollDocumentBatchQueueService $batch,
         private readonly PayrollModuleAccess $moduleAccess,
@@ -69,7 +71,7 @@ final class PayrollDocumentAction
         return Json::ok($response, [
             'period' => $period,
             'revisions' => $result['revisions'],
-            'items' => array_map(self::publicDocument(...), $result['items']),
+            'items' => $this->publicDocuments($this->currentSupplierId($request), $result['items']),
             'total' => $result['total'],
             'limit' => $limit,
             'offset' => $offset,
@@ -111,7 +113,7 @@ final class PayrollDocumentAction
 
         return Json::ok($response, [
             'year' => $year,
-            'items' => array_map(self::publicDocument(...), $page['items']),
+            'items' => $this->publicDocuments($this->currentSupplierId($request), $page['items']),
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
@@ -454,6 +456,11 @@ final class PayrollDocumentAction
                 $userId,
                 $token,
             );
+            $this->deliveryLedger->recordViewedIfPersonalDocument(
+                $supplierId,
+                $documentId,
+                $userId,
+            );
         } catch (\Throwable) {
             return Json::error($response, 'not_found', 'Mzdový dokument nebyl nalezen.', 404);
         }
@@ -492,6 +499,87 @@ final class PayrollDocumentAction
             ->withHeader('X-Content-Type-Options', 'nosniff')
             ->withHeader('Content-Security-Policy', "default-src 'none'; sandbox")
             ->withBody(new Stream($handle));
+    }
+
+    /** @param array<string,string> $args */
+    public function deliveryEvents(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::READ,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        try {
+            $events = $this->deliveryLedger->forDocument(
+                $this->currentSupplierId($request),
+                (int) ($args['documentId'] ?? 0),
+            );
+        } catch (\DomainException) {
+            return Json::error($response, 'not_found', 'Mzdový dokument nebyl nalezen.', 404);
+        }
+        return Json::ok($response, ['events' => $events])
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function recordDeliveryEvent(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission(
+            $request,
+            $response,
+            'payroll.documents',
+            AccessLevel::WRITE,
+            $error,
+        ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $actorUserId = $this->userId($request);
+        $body = (array) $request->getParsedBody();
+        $eventType = trim((string) ($body['event_type'] ?? ''));
+        if ($actorUserId === null || !in_array($eventType, ['handover', 'external_notification'], true)) {
+            return Json::error($response, 'validation_failed', 'Doručovací událost není platná.', 422);
+        }
+        try {
+            $event = $this->deliveryLedger->record(
+                $this->currentSupplierId($request),
+                (int) ($args['documentId'] ?? 0),
+                $actorUserId,
+                $eventType,
+            );
+        } catch (\DomainException) {
+            return Json::error($response, 'not_found', 'Mzdový dokument nebyl nalezen.', 404);
+        }
+        return Json::ok($response, ['event' => $event], 201)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * @param list<array<string,mixed>> $documents
+     * @return list<array<string,mixed>>
+     */
+    private function publicDocuments(int $supplierId, array $documents): array
+    {
+        $summaries = $this->deliveryLedger->summaries(
+            $supplierId,
+            array_map(static fn (array $document): int => (int) $document['id'], $documents),
+        );
+        return array_map(
+            static function (array $document) use ($summaries): array {
+                $public = self::publicDocument($document);
+                $summary = $summaries[(int) $document['id']] ?? null;
+                if ($summary !== null) {
+                    $public['delivery'] = $summary;
+                }
+                return $public;
+            },
+            $documents,
+        );
     }
 
     /**

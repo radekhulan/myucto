@@ -323,6 +323,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/documents/batches/[0-9]+/items/[0-9]+/retry$#', 'payroll.documents', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/documents/[0-9]+/download-grant$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/documents/[0-9]+/download$#', 'payroll.documents', AccessLevel::READ],
+        ['GET', '#^/api/payroll/documents/[0-9]+/delivery-events$#', 'payroll.documents', AccessLevel::READ],
+        ['POST', '#^/api/payroll/documents/[0-9]+/delivery-events$#', 'payroll.documents', AccessLevel::WRITE],
         // Legislativní rulesety jsou GLOBÁLNÍ číselník: čtení pod payroll.rulesets,
         // zápis navíc jen superadmin (tvrdý check v PayrollRulesetAction).
         ['GET', '#^/api/payroll/rulesets(?:/|$)#', 'payroll.rulesets', AccessLevel::READ],

@@ -229,6 +229,7 @@ final class PayrollRetentionCatalog
             'employee_tables' => [
                 'payroll_monthly_records',
                 'payroll_generated_documents',
+                'payroll_document_delivery_events',
                 'payroll_document_batch_items',
                 'payroll_annual_document_revisions',
                 'payroll_inputs',

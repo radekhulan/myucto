@@ -43,6 +43,15 @@ final class PayrollGeneratedDocumentsMigrationTest extends TestCase
         self::assertIsString($scope);
         self::assertStringContainsString('COALESCE(employee_id, 0)', $scope);
         self::assertStringContainsString('employee_scope_id', $scope);
+
+        $delivery = file_get_contents(
+            dirname(__DIR__, 3) . '/db/migrations/1590_payroll_document_delivery_ledger.sql',
+        );
+        self::assertIsString($delivery);
+        self::assertStringContainsString('payroll_document_delivery_events', $delivery);
+        self::assertStringContainsString('Payroll document delivery tenant or person mismatch', $delivery);
+        self::assertStringContainsString('Payroll document delivery events are append-only', $delivery);
+        self::assertStringNotContainsString('token_hash', $delivery);
     }
 
     public function testCleanupPurgesExpiredDownloadGrants(): void

@@ -44,6 +44,10 @@ final class PayrollDocumentsApiContractTest extends TestCase
             "'/documents/{documentId:[0-9]+}/download'",
             $routes,
         );
+        self::assertStringContainsString(
+            "'/documents/{documentId:[0-9]+}/delivery-events'",
+            $routes,
+        );
     }
 
     public function testSessionOnlyPayrollDocumentsStayOutsideBearerOpenApi(): void
@@ -76,6 +80,10 @@ final class PayrollDocumentsApiContractTest extends TestCase
         );
         self::assertStringNotContainsString(
             "getQueryParams()['token']",
+            $action,
+        );
+        self::assertStringContainsString(
+            "'Cache-Control', 'private, no-store'",
             $action,
         );
     }

@@ -58,6 +58,7 @@ final class PayrollEmployeeDeletionRepository
         'document' => [
             'tables' => [
                 'payroll_generated_documents',
+                'payroll_document_delivery_events',
                 'payroll_annual_document_revisions',
                 'payroll_annual_document_sources',
                 'payroll_document_batch_items',
