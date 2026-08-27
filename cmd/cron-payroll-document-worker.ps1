@@ -17,6 +17,6 @@ $logFile = Join-Path $logRoot (
     'payroll-document-worker-{0}.log' -f (Get-Date -Format 'yyyy-MM-dd')
 )
 
-& $phpBin (Join-Path $projectRoot 'api\bin\payroll-document-worker.php') `
+& $phpBin (Join-Path $projectRoot 'api\bin\cron-payroll-document-worker.php') `
     "--limit=$Limit" *>> $logFile
 exit $LASTEXITCODE
