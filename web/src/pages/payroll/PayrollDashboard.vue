@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
   type PayrollCapabilitiesResponse,
-  type PayrollCompanyCapabilityBlocker,
   type PayrollRun,
   type PayrollSetupCheck,
 } from '@/api/payroll'
@@ -16,7 +15,6 @@ import { formatPeriod } from '@/composables/useFormat'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
-import PayrollProductionQualificationPanel from '@/pages/payroll/PayrollProductionQualificationPanel.vue'
 import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.vue'
 import PayrollOperationalHealthPanel from '@/pages/payroll/PayrollOperationalHealthPanel.vue'
 import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'
@@ -36,29 +34,17 @@ const guide = ref<InstanceType<typeof PayrollGuide> | null>(null)
 const state = computed(() => capabilities.value?.state ?? null)
 const canConfigure = computed(() => auth.canWrite('payroll.settings'))
 const isEnabled = computed(() => state.value?.status !== 'disabled')
-const needsProductionQualification = computed(() => state.value?.status === 'qualification_required')
+const productionReleasePending = computed(() =>
+  capabilities.value !== null && capabilities.value.production_release?.released !== true,
+)
 const availableFeatures = computed(() =>
   capabilities.value?.support_matrix.features.filter(feature => feature.available) ?? [],
 )
-const companyCapabilityBlockers = computed(() => capabilities.value?.company_capability.blockers ?? [])
 const setupBlockers = computed(() =>
   setupCheck.value !== null && !setupCheck.value.ready
     ? setupCheck.value.checks.filter(item => item.status === 'blocked')
     : [],
 )
-
-function companyCapabilityMessage(blocker: PayrollCompanyCapabilityBlocker): string {
-  const known = new Set([
-    'unsupported_relation_type',
-    'foreign_employment_regime',
-    'unsupported_jmhz_scenario',
-    'foreign_social_jurisdiction',
-    'foreign_health_jurisdiction',
-  ])
-  return known.has(blocker.code)
-    ? t(`payroll.activation.qualification.company_blockers.${blocker.code}`, blocker.parameters)
-    : blocker.message
-}
 
 /**
  * Hlavička sekce používá sdílený `ActionBar` (AGENTS.md §Frontend): jedna plná
@@ -205,10 +191,6 @@ async function disableSetup() {
   }
 }
 
-function productionQualified(updatedState: PayrollCapabilitiesResponse['state']) {
-  if (capabilities.value) capabilities.value.state = updatedState
-}
-
 onMounted(load)
 </script>
 
@@ -271,38 +253,14 @@ onMounted(load)
 
       <div v-else class="space-y-6">
         <section
-          v-if="needsProductionQualification"
+          v-if="productionReleasePending"
           class="rounded-xl border border-warning-500/40 bg-warning-50 p-4 sm:p-6"
-          data-test="production-qualification-notice"
+          data-test="production-release-notice"
         >
-          <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.activation.qualification_title') }}</h2>
-          <p class="mt-1 max-w-4xl text-sm text-neutral-700">{{ t('payroll.activation.qualification_description') }}</p>
-          <p class="mt-2 max-w-4xl text-xs text-neutral-600">{{ t('payroll.activation.qualification_single_accountant') }}</p>
+          <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.activation.production_release_title') }}</h2>
+          <p class="mt-1 max-w-4xl text-sm text-neutral-700">{{ t('payroll.activation.production_release_description') }}</p>
+          <p class="mt-2 max-w-4xl text-xs text-neutral-600">{{ t('payroll.activation.production_release_customer_action') }}</p>
         </section>
-
-        <section
-          v-if="needsProductionQualification && companyCapabilityBlockers.length > 0"
-          class="rounded-xl border border-danger-500/40 bg-danger-50 p-4 sm:p-6"
-          data-test="company-capability-blockers"
-        >
-          <h2 class="text-lg font-semibold text-danger-800">{{ t('payroll.activation.qualification.company_blockers.title') }}</h2>
-          <p class="mt-1 max-w-4xl text-sm text-danger-700">{{ t('payroll.activation.qualification.company_blockers.description') }}</p>
-          <ul class="mt-3 space-y-2 text-sm text-danger-800">
-            <li v-for="blocker in companyCapabilityBlockers" :key="`${blocker.code}:${blocker.source_type}:${blocker.source_id}`" class="flex gap-2">
-              <span aria-hidden="true">•</span>
-              <span>{{ companyCapabilityMessage(blocker) }}</span>
-            </li>
-          </ul>
-        </section>
-
-        <PayrollProductionQualificationPanel
-          v-if="needsProductionQualification && canConfigure"
-          :state="state"
-          :matrix-version="capabilities.support_matrix.version"
-          :production-ready="capabilities.company_capability.production_ready"
-          @qualified="productionQualified"
-          @refresh="load"
-        />
 
         <section
           v-if="setupBlockers.length > 0"

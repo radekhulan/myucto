@@ -60,10 +60,6 @@ function mountDashboard() {
         ActionBar: actionBarStub,
         PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
         PayrollGuide: { template: '<div data-test="guide-stub" />' },
-        PayrollProductionQualificationPanel: {
-          props: ['state', 'matrixVersion', 'productionReady'],
-          template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" :data-production-ready="String(productionReady)" />',
-        },
         PayrollAnnualReportPanel: {
           props: ['initialYear'],
           template: '<div data-test="annual-report-panel-stub" :data-year="initialYear" />',
@@ -162,6 +158,9 @@ describe('PayrollDashboard monthly workspace', () => {
         assessed_from: '2026-01-01',
         blockers: [],
       },
+      production_release: {
+        released: false,
+      },
     })
 
     const wrapper = mountDashboard()
@@ -233,11 +232,11 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(wrapper.find('[data-test="setup-blockers"]').exists()).toBe(false)
   })
 
-  it('explains test operation without hiding the monthly workflow', async () => {
+  it('explains the internal test operation without asking the customer for qualification', async () => {
     m.capabilities.mockResolvedValue({
       state: {
         supplier_id: 1,
-        status: 'qualification_required',
+        status: 'active',
         start_period: '2026-01',
         row_version: 2,
         activated_at: null,
@@ -256,54 +255,16 @@ describe('PayrollDashboard monthly workspace', () => {
         assessed_from: '2026-01-01',
         blockers: [],
       },
+      production_release: {
+        released: false,
+      },
     })
 
     const wrapper = mountDashboard()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="production-qualification-notice"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="qualification-panel-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="production-release-notice"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('payroll.activation.qualification.title')
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
-  })
-
-  it('shows concrete company blockers and passes the fail-closed state to qualification', async () => {
-    m.capabilities.mockResolvedValue({
-      state: {
-        supplier_id: 1,
-        status: 'qualification_required',
-        start_period: '2026-01',
-        row_version: 2,
-        activated_at: null,
-        suspended_at: null,
-        created_at: null,
-        updated_at: null,
-      },
-      support_matrix: {
-        version: '2026-08',
-        supported_years: [2026],
-        employment_types: [],
-        features: [],
-      },
-      company_capability: {
-        production_ready: false,
-        assessed_from: '2026-01-01',
-        blockers: [{
-          code: 'foreign_employment_regime',
-          capability_key: 'foreign_regime',
-          source_type: 'employment_term',
-          source_id: 91,
-          message: 'server fallback',
-          parameters: { employment_code: 'HPP-FOREIGN' },
-        }],
-      },
-    })
-
-    const wrapper = mountDashboard()
-    await flushPromises()
-
-    const blockers = wrapper.get('[data-test="company-capability-blockers"]')
-    expect(blockers.text()).toContain('payroll.activation.qualification.company_blockers.foreign_employment_regime')
-    expect(wrapper.get('[data-test="qualification-panel-stub"]').attributes('data-production-ready'))
-      .toBe('false')
   })
 })

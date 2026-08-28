@@ -58,49 +58,6 @@ final class PermissionMiddlewareTest extends TestCase
         );
     }
 
-    public function testProductionQualificationRequiresPayrollSettingsWrite(): void
-    {
-        $access = new SupplierAccess(1, false, null);
-        $path = '/api/payroll/settings/activation/production-qualification';
-        $writer = new EffectiveRole(
-            2,
-            'Správce mzdového nastavení',
-            'staff',
-            true,
-            ['payroll.settings' => AccessLevel::WRITE->value],
-        );
-        self::assertSame(
-            204,
-            $this->middleware($writer, $access)
-                ->process($this->request('POST', $path), $this->handler())
-                ->getStatusCode(),
-        );
-
-        foreach ([
-            new EffectiveRole(
-                3,
-                'Čtenář mzdového nastavení',
-                'staff',
-                true,
-                ['payroll.settings' => AccessLevel::READ->value],
-            ),
-            new EffectiveRole(
-                4,
-                'Schvalovatel mezd',
-                'staff',
-                true,
-                ['payroll.approve' => AccessLevel::WRITE->value],
-            ),
-        ] as $role) {
-            self::assertSame(
-                403,
-                $this->middleware($role, $access)
-                    ->process($this->request('POST', $path), $this->handler())
-                    ->getStatusCode(),
-            );
-        }
-    }
-
     public function testMissingMembershipHasDedicatedError(): void
     {
         $role = new EffectiveRole(2, 'Writer', 'staff', true, ['invoices' => 2]);

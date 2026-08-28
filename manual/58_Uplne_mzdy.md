@@ -106,31 +106,22 @@ vstup. Jednorázové odměny a výjimky patří do konkrétního měsíce. Odkaz
 je dobrovolný; nenahrazuje skutečný zákonný údaj a jeho absence sama o sobě
 nesmí bránit práci.
 
-### 58.2.7 7. Projděte celý tok v testovacím prostředí a povolte ostrý provoz
+### 58.2.7 7. Dokončete nastavení firmy
 
-Před prvním ostrým měsícem vytvořte alespoň jeden úplný test: zaměstnanec,
-docházka nebo rychlý měsíční vstup, schválený běh, výplatní dokument, platba,
-zaúčtování a testovací hlášení. U elektronického podání ověřte nejen vznik
-souboru, ale také protokol a výsledek cílové instituce. Testovací a produkční
-prostředí mají oddělené podání, certifikáty i stav.
+Po vyplnění zaměstnavatele, účtáren, účtů, předkontací a zaměstnanců můžete
+začít zpracovávat první skutečný mzdový měsíc. Aplikace nevyžaduje dva měsíce
+paralelního provozu, uměle založený opravný běh, zkoušku obnovy ani kvalifikační
+protokol zákazníka.
 
-Dokud je firma ve stavu **Testovací provoz**, lze mzdy počítat, schvalovat a
-odesílat do testovacích prostředí. Ostrá podání a mzdové platební příkazy jsou
-zablokované. Na přehledu mezd proto dokončete **Kvalifikaci ostrého provozu**:
+Testovací podání můžete použít dobrovolně k ověření vlastního certifikátu a
+identifikátorů. Testovací a produkční prostředí mají oddělené podání,
+certifikáty i stav.
 
-1. vyberte dva schválené běhy za dva různé měsíce;
-2. vyberte schválený opravný běh;
-3. do firemních **Dokumentů** nahrajte souhrnný kvalifikační protokol, který
-   popisuje porovnání běhů, zkoušku obnovy, návratový postup a dohled po spuštění;
-4. protokol vyhledejte v kvalifikačním panelu a doplňte data jednotlivých kontrol;
-5. zkontrolujte souhrn a potvrďte **Povolit ostrý provoz**.
-
-Celý krok smí provést jedna oprávněná účetní. Aplikace nevyžaduje druhého
-schvalovatele. Otisk SHA-256 nevyplňujete: server jej načte přímo z firemního
-DMS a uloží neměnnou vazbu. Osobní dokument nelze použít a kvalifikační protokol
-po aktivaci nelze trvale smazat z koše. Pokud potřebujete doklad nahradit,
-nedokončujte kvalifikaci se špatným souborem; po potvrzení je stopa záměrně
-neměnná.
+Dokud je na přehledu upozornění **Mzdy jsou zatím v testovacím provozu**, jsou
+ostrá podání a mzdové platební příkazy globálně zablokované interní release
+branou MyÚčta. Na straně firmy není potřeba nic dokládat ani odblokovávat. Po
+interním ověření produktu bude brána uvolněna aktualizací aplikace; běžné
+kontroly úplnosti nastavení a jednotlivých podání zůstanou zachované.
 
 ## 58.3 Doporučený měsíční postup
 

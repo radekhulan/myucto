@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStateLockedException;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
@@ -34,6 +35,9 @@ use MyInvoice\Service\Payroll\Run\PayrollRunPaymentPreparationService;
 use MyInvoice\Service\Payroll\Run\PayrollRunPaymentSettlementService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
+use MyInvoice\Service\Payroll\Settings\PayrollSetupCheckService;
+use MyInvoice\Service\Payroll\Settings\PayrollSetupFeatures;
+use MyInvoice\Service\Payroll\Settings\PayrollSetupFeaturesResolver;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -558,16 +562,16 @@ final class PayrollRunPaymentCommandsTest extends TestCase
         );
     }
 
-    public function testFirstApprovedRunDoesNotActivateProduction(): void
+    public function testFirstApprovedRunCompletesOrdinaryModuleSetup(): void
     {
         self::assertSame('setup', $this->moduleState->get($this->supplierId)['status']);
         $service = $this->commandService();
         $this->approve($service);
 
         $state = $this->moduleState->get($this->supplierId);
-        self::assertSame('setup', $state['status']);
+        self::assertSame('active', $state['status']);
         self::assertSame(
-            0,
+            1,
             (int) $this->scalar(
                 'SELECT COUNT(*) FROM activity_log
                   WHERE supplier_id = ? AND action = "payroll.activation.activated"',
@@ -576,7 +580,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
         );
     }
 
-    public function testCompletedSetupCheckDoesNotActivateProduction(): void
+    public function testCompletedSetupCheckActivatesModuleOnceAndIrreversibly(): void
     {
         $activation = $this->activationService(false);
         self::assertNull(
@@ -595,10 +599,10 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $this->supplierId,
             $this->actors[0],
         );
-        self::assertNull($state);
-        self::assertSame('setup', $this->moduleState->get($this->supplierId)['status']);
+        self::assertSame('active', $state['status'] ?? null);
+        self::assertSame('active', $this->moduleState->get($this->supplierId)['status']);
         self::assertSame(
-            0,
+            1,
             (int) $this->scalar(
                 'SELECT COUNT(*) FROM activity_log
                   WHERE supplier_id = ? AND action = "payroll.activation.activated"',
@@ -607,14 +611,14 @@ final class PayrollRunPaymentCommandsTest extends TestCase
         );
     }
 
-    public function testApprovalAfterSetupCompleteStillDoesNotActivateProduction(): void
+    public function testApprovalAfterSetupCompleteDoesNotDuplicateActivation(): void
     {
         $this->activationService(true)->activateWhenSetupComplete(
             $this->supplierId,
             $this->actors[0],
         );
         $state = $this->moduleState->get($this->supplierId);
-        self::assertSame('setup', $state['status']);
+        self::assertSame('active', $state['status']);
 
         $this->approve($this->commandService());
 
@@ -623,7 +627,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             $this->moduleState->get($this->supplierId)['row_version'],
         );
         self::assertSame(
-            0,
+            1,
             (int) $this->scalar(
                 'SELECT COUNT(*) FROM activity_log
                   WHERE supplier_id = ? AND action = "payroll.activation.activated"',
@@ -771,9 +775,42 @@ final class PayrollRunPaymentCommandsTest extends TestCase
     }
 
     private function activationService(
-        bool $_setupReady,
+        bool $setupReady,
     ): PayrollModuleActivationService {
-        return new PayrollModuleActivationService();
+        $features = $this->createStub(PayrollSetupFeaturesResolver::class);
+        $features->method('resolve')->willReturn(
+            new PayrollSetupFeatures(
+                homeOffice: false,
+                travelExpenses: false,
+                fourEyes: false,
+                automaticCalculation: false,
+                automaticPosting: false,
+                automaticPayments: false,
+                secureDelivery: false,
+                jmhz: false,
+                activeApproverCount: 0,
+                jmhzRegistryReady: false,
+                jmhzCertificateReady: false,
+                sourceBlockers: [],
+            ),
+        );
+        $setupCheck = $this->createStub(PayrollSetupCheckService::class);
+        $setupCheck->method('check')->willReturn([
+            'ready' => $setupReady,
+            'effective_on' => '2026-06-01',
+            'policy_id' => $this->employerPolicyId,
+            'checks' => [],
+            'blockers' => $setupReady ? [] : ['employer_settings'],
+        ]);
+        $logger = $this->container->get(ActivityLogger::class);
+        self::assertInstanceOf(ActivityLogger::class, $logger);
+
+        return new PayrollModuleActivationService(
+            $this->moduleState,
+            $logger,
+            $features,
+            $setupCheck,
+        );
     }
 
     private function approve(

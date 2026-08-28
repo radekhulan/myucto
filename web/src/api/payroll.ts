@@ -69,6 +69,9 @@ export interface PayrollCapabilitiesResponse {
   state: PayrollModuleState
   support_matrix: PayrollSupportMatrix
   company_capability: PayrollCompanyCapabilityAssessment
+  production_release: {
+    released: boolean
+  }
 }
 
 export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
@@ -3817,31 +3820,6 @@ export interface PayrollRunsPage {
   offset: number
 }
 
-export interface PayrollProductionQualification {
-  id: number
-  supplier_id: number
-  module_state_row_version: number
-  support_matrix_version: string
-  support_matrix_sha256: string
-  evidence_sha256: string
-  qualified_by: number | null
-  qualified_at: string
-}
-
-export interface PayrollProductionQualificationEvidence {
-  parallel_runs: Array<{ payroll_run_id: number; document_id: number }>
-  correction_scenario: { payroll_run_id: number; document_id: number }
-  recovery_drill: { completed_on: string; document_id: number }
-  expert_approval: {
-    approver_name: string
-    approver_role: string
-    approved_on: string
-    document_id: number
-  }
-  rollback_plan: { verified_on: string; document_id: number }
-  post_go_live_monitoring: { prepared_on: string; document_id: number }
-}
-
 export interface PayrollRunCommandResponse {
   command: PayrollRunCommand
   from_status: PayrollRunStatus
@@ -4302,20 +4280,12 @@ export const payrollApi = {
   activation: () =>
     api.get<{
       state: PayrollModuleState
-      production_qualification: PayrollProductionQualification | null
       company_capability: PayrollCompanyCapabilityAssessment
+      production_release: { released: boolean }
     }>('/payroll/settings/activation')
       .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
-  qualifyProduction: (payload: {
-    row_version: number
-    support_matrix_version: string
-    evidence: PayrollProductionQualificationEvidence
-  }) => api.post<{
-    state: PayrollModuleState
-    qualification: PayrollProductionQualification
-  }>('/payroll/settings/activation/production-qualification', payload).then(response => response.data),
   /**
    * Stránka seznamu osob. Filtr i hledání jdou na server — kdyby zužoval
    * prohlížeč, hledal by jen v načtené stránce a člověka ze třetí stránky by

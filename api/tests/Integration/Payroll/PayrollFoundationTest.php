@@ -131,41 +131,6 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame(2, $disabled['row_version']);
     }
 
-    public function testFirstApprovedRunCannotActivateProductionAutomatically(): void
-    {
-        $this->states->setActivation(
-            $this->supplierId,
-            true,
-            '2026-06-01',
-            0,
-            $this->userId,
-        );
-
-        $this->moduleActivation->activateAfterApprovedRun(
-            $this->supplierId,
-            $this->userId,
-        );
-
-        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
-    }
-
-    public function testCompletedSetupCannotActivateProductionAutomatically(): void
-    {
-        $this->states->setActivation(
-            $this->supplierId,
-            true,
-            '2026-06-01',
-            0,
-            $this->userId,
-        );
-
-        self::assertNull($this->moduleActivation->activateWhenSetupComplete(
-            $this->supplierId,
-            $this->userId,
-        ));
-        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
-    }
-
     public function testStaleActivationVersionIsRejected(): void
     {
         $this->states->setActivation($this->supplierId, true, '2026-06-01', 0, null);

@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationException;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationService;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -31,6 +32,7 @@ final class PayrollActivationAction
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionQualificationService $qualification,
         private readonly PayrollCompanyCapabilityService $companyCapability,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -47,11 +49,11 @@ final class PayrollActivationAction
 
         return Json::ok($response, [
             'state' => $state,
-            'production_qualification' => $this->qualification->qualification($supplierId),
             'company_capability' => $this->companyCapability->assess(
                 $supplierId,
                 $state['start_period'],
             ),
+            'production_release' => $this->productionGate->status(),
         ]);
     }
 
@@ -119,6 +121,7 @@ final class PayrollActivationAction
         return Json::ok($response, ['state' => $state]);
     }
 
+    /** Interní kvalifikační cesta bez HTTP routy; používají ji pouze naše testy. */
     public function qualify(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'payroll.settings', AccessLevel::WRITE, $error)) {
@@ -150,7 +153,7 @@ final class PayrollActivationAction
             return Json::error(
                 $response,
                 'authenticated_actor_required',
-                'Produkční aktivace vyžaduje přihlášeného uživatele.',
+                'Interní produkční kvalifikace vyžaduje přihlášeného uživatele.',
                 403,
             );
         }

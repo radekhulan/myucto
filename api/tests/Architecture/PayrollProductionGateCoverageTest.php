@@ -49,7 +49,7 @@ final class PayrollProductionGateCoverageTest extends TestCase
     }
 
     #[DataProvider('productionEntrypoints')]
-    public function testEveryProductionEntrypointUsesQualificationGate(
+    public function testEveryProductionEntrypointUsesInternalReleaseGate(
         string $relativePath,
         string $assertion,
     ): void {
@@ -60,7 +60,19 @@ final class PayrollProductionGateCoverageTest extends TestCase
         self::assertStringContainsString(
             '$this->productionGate->' . $assertion . '(',
             $source,
-            "Produkční cesta {$relativePath} obchází kvalifikační bránu.",
+            "Produkční cesta {$relativePath} obchází interní release bránu.",
+        );
+    }
+
+    public function testInternalQualificationHasNoCustomerHttpRoute(): void
+    {
+        $routes = (string) file_get_contents(
+            dirname(__DIR__, 2) . '/src/Routes.php',
+        );
+
+        self::assertStringNotContainsString(
+            '/settings/activation/production-qualification',
+            $routes,
         );
     }
 }

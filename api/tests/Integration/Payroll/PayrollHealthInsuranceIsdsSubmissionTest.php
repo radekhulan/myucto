@@ -278,7 +278,7 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
 
         self::assertSame(409, $response->getStatusCode());
         self::assertSame(
-            'payroll_production_qualification_required',
+            'payroll_production_release_pending',
             $body['error']['code'] ?? null,
         );
 

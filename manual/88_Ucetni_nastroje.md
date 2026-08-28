@@ -255,57 +255,16 @@ V podvojném účetnictví export slouží také jako praktický podklad pro zá
 retenci účetních a daňových záznamů. Přehled lhůt a zadržení skartace najdete v
 sekci **Účetnictví → Retence**.
 
-### 88.6.3 Produkční kvalifikace mezd a recovery drill
+### 88.6.3 Interní ověření mzdového produktu
 
-Ostrá mzdová podání a mzdové platební příkazy zůstávají zablokované, dokud
-firma nedokončí **Kvalifikaci ostrého provozu** na přehledu mezd. Samotné
-vyplnění data nestačí. Oprávněná účetní musí:
+Produkční kvalifikaci, syntetické paralelní běhy a recovery drill provádí
+výhradně tým MyÚčta v izolovaném interním prostředí. Zákazník tyto důkazy
+nevytváří, nenahrává kvalifikační protokol a neodemyká ostrý provoz své firmy.
 
-1. vybrat dva schválené běhy za dva různé podporované měsíce a jeden schválený
-   opravný běh;
-2. v izolovaném prostředí provést níže popsanou zkoušku obnovy ze skutečného
-   úplného exportu a zaznamenat její výsledek;
-3. doložit odborné ověření, plán bezpečného návratu a připravený dohled po
-   prvním ostrém spuštění;
-4. nahrát protokol jako aktivní **firemní** dokument. Jeden souhrnný protokol
-   může doložit všechny části, musí však jednoznačně uvést použité běhy, datum
-   obnovy, rozsah kontrol, zjištěné rozdíly a jejich vypořádání;
-5. v kvalifikačním panelu vybrat dokument, uvést jméno a roli odborného
-   schvalovatele a data obnovy, schválení, ověření návratu a přípravy dohledu;
-6. zkontrolovat aktuální blokace support matrix a teprve poté potvrdit
-   **Povolit ostrý provoz**.
-
-Server ověří, že běhy patří aktuální firmě, jsou schválené a leží v podporovaném
-období. U dokumentu načte SHA-256 přímo z firemního DMS, uloží neměnnou vazbu a
-chrání použitý dokument před fyzickým smazáním. Osobní, cizí, smazaný nebo
-neexistující dokument odmítne. Kvalifikaci může dokončit jedna oprávněná účetní;
-nejde o automatický důkaz odborné správnosti obsahu protokolu.
-
-Recovery drill proveďte mimo ostrou databázi a datový adresář, bez produkčních
-přístupových údajů k bankám a úřadům a bez běžících workerů podání nebo plateb:
-
-1. vytvořte úplný export v **Administrace → Kompletní export dat** a uložte jeho
-   identifikaci, datum, verzi aplikace a SHA-256 do protokolu;
-2. připravte prázdnou databázi migrovanou stejnou nebo novější verzí a prázdný
-   datový adresář; nejprve spusťte `archive-restore.php` s `--dry-run`;
-3. ostrou obnovu spusťte s `--restore`, `--storage` a `--documents`. Pro ověření
-   šifrovaných mzdových dat nastavte v izolované instalaci původní
-   `app.secret_encryption_key`, případně jej po rotaci dočasně zařaďte mezi
-   `app.secret_encryption_previous_keys`; klíč nikdy nevkládejte do protokolu;
-4. porovnejte počty osob a vztahů, dva schválené měsíce a opravnou revizi,
-   mzdové součty, závazky, skutečné úhrady a stránku **Mzdy → Shoda účtování
-   mezd**. Otevřete vzorek pásek a dalších dokumentů, ověřte šifrovaný bankovní
-   export a u podání zkontrolujte neměnný artefakt i přijatý protokol;
-5. ověřte oprávnění: uživatel bez mzdových práv nesmí osobní údaje ani dokumenty
-   zobrazit. Zkušební instalaci nepřipojujte k produkčním službám a neodesílejte
-   z ní podání ani platby;
-6. do protokolu zapište očekávané a skutečné výsledky, rozdíly, jejich řešení,
-   dobu obnovy a výsledek návratového postupu. Neúspěšný nebo neúplný drill
-   kvalifikaci neuzavírá.
-
-Tento postup popisuje požadovaný důkaz. Neznamená, že recovery drill byl na
-konkrétní instalaci proveden; platí pouze protokol založený na skutečně
-provedené a zkontrolované obnově.
+Dokud interní ověření není dokončené, aplikace globálně blokuje ostrá mzdová
+podání a mzdové platební příkazy. Výpočty, dokumenty, zaúčtování a podání do
+testovacích prostředí zůstávají dostupné. Uvolnění produkčního provozu přijde
+v aktualizaci aplikace a nemůže ho obejít nastavení jednotlivé firmy.
 
 ## 88.7 Retence a právní zadržení na backendu
 
