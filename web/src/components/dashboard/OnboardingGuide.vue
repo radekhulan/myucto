@@ -110,6 +110,7 @@ const GROUPS: Group[] = [
       { id: 'series',    to: '/utilities?section=document-series', visible: () => isDoubleEntry.value && auth.canRead('utilities') },
       { id: 'bank_email', to: '/bank?tab=email',               visible: () => auth.canRead('bank') },
       { id: 'databox',   to: '/admin/databox',                 visible: () => isSuperadmin.value && payrollEnabled.value },
+      { id: 'ai_extraction', to: '/admin/integrations?tab=ai', visible: () => auth.canWrite('settings.company') },
       { id: 'users',     to: '/admin/users',                   visible: () => isSuperadmin.value },
     ],
   },

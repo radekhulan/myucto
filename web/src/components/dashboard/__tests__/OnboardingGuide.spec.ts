@@ -75,7 +75,7 @@ describe('OnboardingGuide', () => {
   it('vykreslí všechny kroky a ohlásí se jako viditelný', async () => {
     const wrapper = await mountGuide()
 
-    expect(wrapper.findAll('article')).toHaveLength(10)
+    expect(wrapper.findAll('article')).toHaveLength(11)
     expect(wrapper.emitted('update:visible')?.at(-1)).toEqual([true])
     expect(wrapper.text()).toContain('dashboard.onboarding.title')
   })
@@ -103,7 +103,7 @@ describe('OnboardingGuide', () => {
     const wrapper = await mountGuide()
 
     expect(wrapper.text()).toContain('dashboard.onboarding.steps.series.title')
-    expect(wrapper.findAll('article')).toHaveLength(11)
+    expect(wrapper.findAll('article')).toHaveLength(12)
   })
 
   /**
@@ -117,7 +117,7 @@ describe('OnboardingGuide', () => {
     m.payrollEnabled = false
     const wrapper = await mountGuide()
     expect(wrapper.text()).not.toContain('dashboard.onboarding.steps.databox.title')
-    expect(wrapper.findAll('article')).toHaveLength(9)
+    expect(wrapper.findAll('article')).toHaveLength(10)
   })
 
   it('vynechá kroky, na které uživatel nemá právo', async () => {
@@ -185,7 +185,7 @@ describe('OnboardingGuide', () => {
 
     await wrapper.find('button').trigger('click')
 
-    expect(wrapper.findAll('article')).toHaveLength(10)
+    expect(wrapper.findAll('article')).toHaveLength(11)
     expect(wrapper.emitted('update:visible')?.at(-1)).toEqual([true])
   })
 
