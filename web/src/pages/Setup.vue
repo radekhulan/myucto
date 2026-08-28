@@ -48,6 +48,9 @@ const supplier = ref({
   commercial_register: '',
   taxpayer_type: '' as '' | 'fo' | 'po',
   is_vat_payer: true,
+  // Nový plátce je podle §99 ZDPH měsíční ze zákona, čtvrtletní období si smí
+  // zvolit až po podmínkách §99a — měsíční je proto bezpečnější výchozí volba.
+  vat_period: 'monthly' as 'monthly' | 'quarterly',
   default_currency: 'CZK',
   default_payment_due_days: 7,
   default_hourly_rate: 1500,
@@ -294,6 +297,7 @@ async function submit() {
         phone: supplier.value.phone || undefined,
         web: supplier.value.web || undefined,
         is_vat_payer: supplier.value.is_vat_payer,
+        vat_period: supplier.value.is_vat_payer ? supplier.value.vat_period : undefined,
         commercial_register: supplier.value.commercial_register || undefined,
         taxpayer_type: supplier.value.taxpayer_type || undefined,
         default_currency: supplier.value.default_currency,
@@ -571,6 +575,17 @@ async function submit() {
                 <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.dic') }}</label>
                 <input v-model="supplier.dic" class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
               </div>
+              <!-- Zdaňovací období řídí, jestli se DPH a kontrolní hlášení podávají
+                   měsíčně, nebo čtvrtletně. Bez něj sestavy nemají o co se opřít, takže
+                   se ptáme rovnou tady — u plátce, kterého potvrdil CRPDPH. -->
+              <div v-if="supplier.is_vat_payer">
+                <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('settings.vat_period') }}</label>
+                <select v-model="supplier.vat_period" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none">
+                  <option value="monthly">{{ t('settings.vat_monthly') }}</option>
+                  <option value="quarterly">{{ t('settings.vat_quarterly') }}</option>
+                </select>
+                <p class="text-xs text-neutral-500 mt-1">{{ t('settings.vat_period_hint') }}</p>
+              </div>
               <div>
                 <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.email') }} <span class="text-danger-500">*</span></label>
                 <input v-model="supplier.email" type="email" required :class="['w-full h-10 px-3 border rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none', fieldErrors['supplier.email'] ? 'border-danger-500' : 'border-neutral-300']" />
@@ -728,3 +743,4 @@ async function submit() {
     </div>
   </AppShell>
 </template>
+

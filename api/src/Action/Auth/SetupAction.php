@@ -15,6 +15,7 @@ use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionCookieFactory;
 use MyInvoice\Service\Auth\WebAuthnConfig;
 use MyInvoice\Service\Ares\SupplierRegistryEnricher;
+use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
 use MyInvoice\Service\System\ManagedModeGuard;
@@ -66,6 +67,8 @@ final class SetupAction
         // Plátcovství se eviduje v čase; historie je jediná zapisovací cesta.
         private readonly \MyInvoice\Service\Vat\VatStatusService $vatStatus,
         private readonly \Psr\Log\LoggerInterface $log,
+        // Historie účetního režimu — bez ní firma nemá čím doložit režim k datu.
+        private readonly \MyInvoice\Repository\AccountingModeRepository $accountingModes,
     ) {}
 
     /**
@@ -626,13 +629,28 @@ final class SetupAction
             : null;
         $accountingMode = $taxpayerType === 'po' ? 'double_entry' : 'tax_evidence';
 
+        // ⚠️ Zdaňovací období plátce se musí trefit hned — sestavy DPH a kontrolní
+        // hlášení z něj berou, jestli podávat měsíčně, nebo čtvrtletně. Setup ho dosud
+        // vůbec nesbíral, takže plátce zůstal na NULL a přiznání se nemělo o co opřít.
+        //
+        // Když wizard hodnotu nepošle, bereme `monthly`: nový plátce je podle §99
+        // ZDPH měsíční ze zákona a čtvrtletní období si smí zvolit až po podmínkách
+        // §99a. Měsíční default je proto ta bezpečnější strana omylu — nanejvýš se
+        // podá častěji, než bylo nutné.
+        $vatPeriod = null;
+        if (!empty($supplier['is_vat_payer'])) {
+            $vatPeriod = in_array($supplier['vat_period'] ?? null, ['monthly', 'quarterly'], true)
+                ? (string) $supplier['vat_period']
+                : 'monthly';
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO supplier
             (company_name, display_name, street, city, zip, country_id, ic, dic, is_vat_payer,
-             email, phone, web, commercial_register, taxpayer_type, accounting_mode,
+             email, phone, web, commercial_register, taxpayer_type, accounting_mode, vat_period,
              default_currency_id, default_vat_rate_id,
              default_payment_due_days, default_payment_due_unit, default_hourly_rate)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)'
         );
         $stmt->execute([
             (string) ($supplier['company_name'] ?? ''),
@@ -650,6 +668,7 @@ final class SetupAction
             (string) ($supplier['commercial_register'] ?? '') ?: null,
             $taxpayerType,
             $accountingMode,
+            $vatPeriod,
             $vatRateId,
             (int) ($supplier['default_payment_due_days'] ?? 7),
             in_array($supplier['default_payment_due_unit'] ?? null, ['days', 'month'], true)
@@ -659,6 +678,21 @@ final class SetupAction
         ]);
         $supplierId = (int) $pdo->lastInsertId();
         \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, !empty($supplier['is_vat_payer']));
+
+        // ⚠️ Historie účetního režimu musí vzniknout spolu s firmou. Seed v migraci
+        // 1066 naplnil `supplier_accounting_modes` jen firmám, které tehdy existovaly
+        // — firma založená později neměla v historii nic a dotazy „jaký režim platil
+        // v roce X" padaly na fallback na `supplier.accounting_mode`, tedy na dnešní
+        // stav místo tehdejšího.
+        //
+        // ⚠️ NE `1900-01-01` jako u DPH statusu. Historie účetního režimu není jen
+        // evidence — `continuousDoubleEntrySince()` z ní počítá, jestli je splněných
+        // 5 účetních období podle § 4 odst. 7 ZoÚ, než smí firma účetnictví ukončit.
+        // Datum od roku 1900 by firmě založené dnes vyrobilo 126 „odsloužených"
+        // období a ze zákonné pojistky by udělalo formalitu. 1. leden letošního roku
+        // je nejstarší datum, které umíme doložit; kdo přechází z jiného systému, si
+        // starší historii doplní v Nastavení.
+        $this->accountingModes->record($supplierId, date('Y-01-01'), $accountingMode);
 
         // ⚠️ Podvojné účetnictví BEZ směrné osnovy je rozbitý stav — `PostingService`
         // nemá na co mapovat `account_code`. `SettingsAction` proto osnovu seeduje
@@ -712,6 +746,13 @@ final class SetupAction
         $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')
             ->execute([$defaultCurrencyId, $supplierId]);
         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+
+        // ⚠️ Účet zapsaný na měnu musí rovnou do registru vlastních účtů. Účtování
+        // banky, analytika 221 i rozpoznání vlastní protistrany čtou
+        // `supplier_bank_accounts`, ne `currencies` — a ten se dosud naplnil až prvním
+        // importem výpisu. Do té doby si firma svůj vlastní účet neuměla přiřadit.
+        // Registrace až tady, po obnovení FK: řádek se váže na `currencies.id`.
+        OwnBankAccountRegistrar::syncSupplier($pdo, $supplierId, $this->bankOwnership);
 
         return $supplierId;
     }
@@ -790,3 +831,4 @@ final class SetupAction
         return $statement->fetchColumn();
     }
 }
+

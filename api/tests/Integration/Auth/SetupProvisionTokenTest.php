@@ -275,6 +275,7 @@ final class SetupProvisionTokenTest extends TestCase
             $this->container->get(\MyInvoice\Service\Ares\CrpDphClient::class),
             $this->container->get(\MyInvoice\Service\Vat\VatStatusService::class),
             $this->container->get(\Psr\Log\LoggerInterface::class),
+            $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class),
         );
     }
 
@@ -316,3 +317,4 @@ final class SetupProvisionTokenTest extends TestCase
         return (int) $this->db->pdo()->query('SELECT COUNT(*) FROM users')->fetchColumn();
     }
 }
+

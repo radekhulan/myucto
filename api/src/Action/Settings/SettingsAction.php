@@ -13,6 +13,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseCompanyLimitExceeded;
@@ -389,6 +390,19 @@ final class SettingsAction
                         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
                         $fkSuspended = false;
                     }
+
+                    // Registr vlastních účtů — backfill migrace 1053 se na firmu
+                    // založenou později nevztahuje, takže by účet zapsaný výš na měnu
+                    // zůstal mimo registr až do prvního importu výpisu.
+                    //
+                    // ⚠️ Historie účetního režimu se tady ZÁMĚRNĚ neseeduje. Na rozdíl
+                    // od setupu tahle cesta `accounting_mode` vůbec nenastavuje (chybí
+                    // ve sloupcích INSERTu výš), takže s.r.o. skončí na DB defaultu
+                    // `tax_evidence`. Zapsat tuhle hodnotu do historie by chybu
+                    // zabetonovalo: dnes se dá opravit přepnutím režimu, protože
+                    // `forYear()` padá na `supplier.accounting_mode`, kdežto historický
+                    // řádek by rok založení navždy hlásil jako daňovou evidenci.
+                    OwnBankAccountRegistrar::syncSupplier($pdo, $newSupplierId, $this->bankOwnership);
                     if ($ownsTransaction) {
                         $pdo->commit();
                     } else {
@@ -406,6 +420,19 @@ final class SettingsAction
                         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
                         $fkSuspended = false;
                     }
+
+                    // Registr vlastních účtů — backfill migrace 1053 se na firmu
+                    // založenou později nevztahuje, takže by účet zapsaný výš na měnu
+                    // zůstal mimo registr až do prvního importu výpisu.
+                    //
+                    // ⚠️ Historie účetního režimu se tady ZÁMĚRNĚ neseeduje. Na rozdíl
+                    // od setupu tahle cesta `accounting_mode` vůbec nenastavuje (chybí
+                    // ve sloupcích INSERTu výš), takže s.r.o. skončí na DB defaultu
+                    // `tax_evidence`. Zapsat tuhle hodnotu do historie by chybu
+                    // zabetonovalo: dnes se dá opravit přepnutím režimu, protože
+                    // `forYear()` padá na `supplier.accounting_mode`, kdežto historický
+                    // řádek by rok založení navždy hlásil jako daňovou evidenci.
+                    OwnBankAccountRegistrar::syncSupplier($pdo, $newSupplierId, $this->bankOwnership);
                     throw $e;
                 }
             });
@@ -1305,6 +1332,21 @@ final class SettingsAction
         $invalidated = 0;
         if (!empty($changedBankFields)) {
             $invalidated = $this->pdf->invalidateByCurrency($id);
+            // Účet zadaný na měně musí vidět i registr vlastních účtů — jinak se do
+            // něj dostane až prvním importem výpisu a do té doby nemá účtování banky
+            // na co mapovat analytiku 221. Původní řádek registru se ZÁMĚRNĚ neruší:
+            // váže se na něj naimportovaná historie (viz OwnBankAccountRegistrar).
+            $registered = OwnBankAccountRegistrar::syncFromCurrency($pdo, $sid, $id, $this->bankOwnership);
+            if (!$registered) {
+                // Tichý neúspěch je horší než hlučný: firma věří, že účet má
+                // zaevidovaný, a účtování banky přitom nemá co mapovat. Typicky
+                // zahraniční IBAN (kanonizace umí jen CZ) nebo účet nárokovaný
+                // jinou firmou.
+                $this->log($request, 'currency.bank_account_not_registered', $id, [
+                    'code' => $code,
+                    'reason' => 'canonical_unavailable_or_claimed',
+                ]);
+            }
         }
 
         $this->log($request, 'currency.updated', $id, [
@@ -1570,6 +1612,9 @@ final class SettingsAction
             ($b['bic'] ?? '') !== '' ? (string) $b['bic'] : null,
         ]);
         $newId = (int) $pdo->lastInsertId();
+        // Nová měna může rovnou nést vlastní účet (typicky EUR účet vedle CZK) —
+        // ať se do registru dostane hned, ne až prvním importem výpisu.
+        OwnBankAccountRegistrar::syncFromCurrency($pdo, $sid, $newId, $this->bankOwnership);
         $this->log($request, 'currency.created', $newId, ['supplier_id' => $sid, 'code' => $code, 'label' => $label]);
         return Json::ok($response, ['id' => $newId, 'code' => $code], 201);
     }
@@ -1735,3 +1780,4 @@ final class SettingsAction
         $this->logger->log($action, (int) ($user['id'] ?? 0), 'supplier', $entityId, $payload, $ip, $request->getHeaderLine('User-Agent'));
     }
 }
+

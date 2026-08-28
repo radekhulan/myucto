@@ -233,6 +233,7 @@ export interface SetupPayload {
     ic?: string
     dic?: string
     is_vat_payer?: boolean
+    vat_period?: 'monthly' | 'quarterly'
     email: string
     phone?: string
     web?: string
@@ -441,3 +442,4 @@ export const authApi = {
       { code },
     ).then(r => r.data),
 }
+
