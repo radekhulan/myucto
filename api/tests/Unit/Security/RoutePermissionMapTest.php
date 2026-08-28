@@ -150,6 +150,7 @@ final class RoutePermissionMapTest extends TestCase
             ['PUT', '/api/payroll/time/calendars/42', 'payroll.time.write', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/shifts', 'payroll.time.write', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/entries', 'payroll.time.write', AccessLevel::WRITE],
+            ['POST', '/api/payroll/time/entries/batch', 'payroll.time.write', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/imports/preview', 'payroll.time.write', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/imports', 'payroll.time.write', AccessLevel::WRITE],
             ['POST', '/api/payroll/time/months/2026-05/approve', 'payroll.approve', AccessLevel::WRITE],

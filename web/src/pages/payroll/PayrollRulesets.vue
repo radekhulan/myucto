@@ -14,9 +14,11 @@ import {
   type PayrollRulesetDomainGroup,
   type PayrollRulesetDomainStatus,
   type PayrollRulesetImpactPreview,
+  type PayrollRulesetOutlookSeverity,
   type PayrollRulesetOverview,
   type PayrollRulesetSource,
   type PayrollRulesetSummary,
+  type PayrollRulesetYearOutlook,
 } from '@/api/payrollRulesets'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -87,6 +89,62 @@ const domainStatusClass: Record<string, string> = {
   awaiting_activation: 'bg-warning-50 text-warning-600',
   coverage_issue: 'bg-danger-50 text-danger-500',
   missing: 'bg-danger-50 text-danger-500',
+}
+
+/**
+ * Výhled pokrytí příštích let. Bez něj se účetní o chybějící sadě dozví až
+ * prvním lednovým výpočtem, tedy v den, kdy se s tím nedá nic dělat rychle.
+ * `critical` (od 1. října, kdy už jsou hodnoty vyhlášené) proto dostává červený
+ * rám a jde nad karty domén — všechny totiž vypadají v pořádku, jen žádná
+ * nepokrývá leden.
+ */
+const yearOutlook = computed<PayrollRulesetYearOutlook[]>(() => overview.value?.year_outlook ?? [])
+
+const OUTLOOK_RANK: Record<PayrollRulesetOutlookSeverity, number> = {
+  ok: 0,
+  info: 1,
+  warning: 2,
+  critical: 3,
+}
+
+/** Server posílá i souhrn; když chybí (starší API), dopočítá se z položek. */
+const outlookSeverity = computed<PayrollRulesetOutlookSeverity>(() => {
+  const reported = overview.value?.year_outlook_severity
+  if (reported && reported in OUTLOOK_RANK) return reported
+  return yearOutlook.value.reduce<PayrollRulesetOutlookSeverity>(
+    (worst, entry) => (OUTLOOK_RANK[entry.severity] > OUTLOOK_RANK[worst] ? entry.severity : worst),
+    'ok',
+  )
+})
+
+const showOutlook = computed(() => yearOutlook.value.length > 0)
+
+const outlookPanelClass = computed(() => {
+  if (outlookSeverity.value === 'critical') return 'border-danger-500/50 bg-danger-50'
+  if (outlookSeverity.value === 'warning') return 'border-warning-500/40 bg-warning-50'
+  return 'border-neutral-200 bg-surface'
+})
+
+const outlookSeverityClass: Record<PayrollRulesetOutlookSeverity, string> = {
+  ok: 'bg-success-50 text-success-600',
+  info: 'bg-neutral-100 text-neutral-600',
+  warning: 'bg-warning-50 text-warning-700',
+  critical: 'bg-danger-50 text-danger-700',
+}
+
+function outlookMessage(entry: PayrollRulesetYearOutlook): string {
+  if (entry.covered) return t('payroll.rulesets.outlook.covered', { year: entry.year })
+  const severity = entry.severity === 'ok' ? 'info' : entry.severity
+  return t(`payroll.rulesets.outlook.message.${severity}`, { year: entry.year })
+}
+
+function outlookDomains(entry: PayrollRulesetYearOutlook): string {
+  if (entry.missing_domains.length === 0) return ''
+  return t('payroll.rulesets.outlook.missing_domains', {
+    domains: entry.missing_domains
+      .map(domain => t(`payroll.rulesets.domain.${domain}`))
+      .join(', '),
+  })
 }
 
 function domainStatus(group: PayrollRulesetDomainGroup): PayrollRulesetDomainStatus {
@@ -441,6 +499,77 @@ onMounted(load)
         <p class="mt-1 break-words font-mono">{{ overview.degraded_reason }}</p>
       </details>
     </div>
+
+    <!--
+      Výhled na příští roky jde NAD karty domén: karty vypadají v pořádku
+      (všechny verze jsou účinné), jenom žádná nepokrývá leden. Chybějící sada
+      je tedy porucha, kterou z nich není vidět.
+    -->
+    <section
+      v-if="!loading && showOutlook"
+      class="rounded-xl border p-4 shadow-sm sm:p-6"
+      :class="outlookPanelClass"
+      data-test="ruleset-year-outlook"
+      :role="outlookSeverity === 'critical' ? 'alert' : 'status'"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="max-w-3xl">
+          <h2 class="text-lg font-semibold text-neutral-900">
+            {{ t('payroll.rulesets.outlook.title') }}
+          </h2>
+          <p class="mt-1 text-sm text-neutral-600">
+            {{ t('payroll.rulesets.outlook.description') }}
+          </p>
+        </div>
+        <span
+          class="shrink-0 rounded-full px-2.5 py-1 text-xs font-medium"
+          :class="outlookSeverityClass[outlookSeverity]"
+          data-test="ruleset-year-outlook-severity"
+        >
+          {{ t(`payroll.rulesets.outlook.severity.${outlookSeverity}`) }}
+        </span>
+      </div>
+
+      <ul class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+        <li
+          v-for="entry in yearOutlook"
+          :key="entry.year"
+          class="rounded-lg border border-neutral-200 bg-surface p-3"
+          :data-test="`ruleset-year-outlook-${entry.year}`"
+        >
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <h3 class="font-medium text-neutral-900">
+              {{ t('payroll.rulesets.outlook.year', { year: entry.year }) }}
+            </h3>
+            <span
+              class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="outlookSeverityClass[entry.severity]"
+              :data-test="`ruleset-year-outlook-severity-${entry.year}`"
+            >
+              {{ t(`payroll.rulesets.outlook.severity.${entry.severity}`) }}
+            </span>
+          </div>
+          <p
+            class="mt-1 text-sm"
+            :class="entry.severity === 'critical' ? 'font-medium text-danger-700' : 'text-neutral-600'"
+            :data-test="`ruleset-year-outlook-message-${entry.year}`"
+          >
+            {{ outlookMessage(entry) }}
+          </p>
+          <p
+            v-if="outlookDomains(entry)"
+            class="mt-1 text-xs text-neutral-500"
+            :data-test="`ruleset-year-outlook-domains-${entry.year}`"
+          >
+            {{ outlookDomains(entry) }}
+          </p>
+          <details v-if="entry.message" class="mt-2 text-xs text-neutral-500">
+            <summary class="cursor-pointer">{{ t('payroll.rulesets.outlook.technical') }}</summary>
+            <p class="mt-1">{{ entry.message }}</p>
+          </details>
+        </li>
+      </ul>
+    </section>
 
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-24 animate-pulse rounded-xl bg-neutral-100" />

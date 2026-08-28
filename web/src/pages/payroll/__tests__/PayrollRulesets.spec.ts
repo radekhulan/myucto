@@ -154,12 +154,14 @@ function detail(
 async function mountPage(
   groups: PayrollRulesetDomainGroup[],
   degradedReason: string | null = null,
+  outlook: Partial<PayrollRulesetOverview> = {},
 ) {
   const overview: PayrollRulesetOverview = {
     domains: groups,
     override_storage_available: true,
     degraded_reason: degradedReason,
     generated_at: '2026-08-15 10:00:00',
+    ...outlook,
   }
   m.overview.mockResolvedValue(overview)
   const wrapper = mount(PayrollRulesets, { global: { stubs: { Modal: { template: '<div><slot /></div>' } } } })
@@ -430,4 +432,80 @@ describe('PayrollRulesets', () => {
       row_version: 7,
     })
   })
+
+  it('hides the year outlook when the API does not send it', async () => {
+    const wrapper = await mountPage([group()])
+
+    expect(wrapper.find('[data-test="ruleset-year-outlook"]').exists()).toBe(false)
+  })
+
+  it('warns loudly that next year has no ruleset once the values are published', async () => {
+    const wrapper = await mountPage([group()], null, {
+      year_outlook_severity: 'critical',
+      year_outlook: [
+        {
+          year: 2027,
+          covered: false,
+          severity: 'critical',
+          missing_domains: ['income_tax', 'social_insurance'],
+          code: 'year_ruleset_missing',
+          message: 'Pro mzdovy rok 2027 chybi legislativni sada.',
+        },
+        {
+          year: 2028,
+          covered: false,
+          severity: 'info',
+          missing_domains: ['income_tax'],
+          code: 'year_ruleset_missing',
+          message: 'Pro mzdovy rok 2028 chybi legislativni sada.',
+        },
+      ],
+    })
+
+    const panel = wrapper.get('[data-test="ruleset-year-outlook"]')
+    // Kriticky stav musi byt videt na prvni pohled a ohlasit se ctecce.
+    expect(panel.attributes('role')).toBe('alert')
+    expect(panel.classes()).toEqual(expect.arrayContaining(['border-danger-500/50']))
+    expect(wrapper.get('[data-test="ruleset-year-outlook-severity"]').text())
+      .toBe('payroll.rulesets.outlook.severity.critical')
+    expect(wrapper.get('[data-test="ruleset-year-outlook-message-2027"]').text())
+      .toBe('payroll.rulesets.outlook.message.critical:{"year":2027}')
+    // Prespristi rok je jen informace, ne dalsi poplach.
+    expect(wrapper.get('[data-test="ruleset-year-outlook-severity-2028"]').text())
+      .toBe('payroll.rulesets.outlook.severity.info')
+    // Chybejici domeny se pojmenuji, ne vypisou kodem.
+    expect(wrapper.get('[data-test="ruleset-year-outlook-domains-2027"]').text())
+      .toContain('payroll.rulesets.domain.income_tax')
+  })
+
+  it('derives the worst severity itself when the API omits the summary', async () => {
+    const wrapper = await mountPage([group()], null, {
+      year_outlook: [
+        {
+          year: 2027,
+          covered: false,
+          severity: 'warning',
+          missing_domains: ['income_tax'],
+          code: 'year_ruleset_missing',
+          message: 'x',
+        },
+        {
+          year: 2028,
+          covered: true,
+          severity: 'ok',
+          missing_domains: [],
+          code: 'year_covered',
+          message: 'y',
+        },
+      ],
+    })
+
+    expect(wrapper.get('[data-test="ruleset-year-outlook-severity"]').text())
+      .toBe('payroll.rulesets.outlook.severity.warning')
+    expect(wrapper.get('[data-test="ruleset-year-outlook"]').attributes('role')).toBe('status')
+    expect(wrapper.get('[data-test="ruleset-year-outlook-message-2028"]').text())
+      .toBe('payroll.rulesets.outlook.covered:{"year":2028}')
+    expect(wrapper.find('[data-test="ruleset-year-outlook-domains-2028"]').exists()).toBe(false)
+  })
+
 })

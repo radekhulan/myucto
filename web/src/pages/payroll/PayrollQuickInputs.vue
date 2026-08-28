@@ -27,6 +27,7 @@ import {
   localPayrollPeriod,
   parsePayrollAmountToMinor,
   parsePayrollHoursToMilli,
+  payrollInputEditable,
   payrollMinorToInput,
 } from '@/pages/payroll/payrollComponentsUi'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
@@ -342,17 +343,29 @@ function formatMoney(value: number): string {
   return formatMoneyMinor(value)
 }
 
-/*
- * Kdo smí schvalovat, ukládá rovnou schválené vstupy — a musel by si tím
- * první uloženou částkou zabetonovat vlastní řádek, kdyby schválené pole
- * zůstalo zamčené. Dokud vstup nepohltil mzdový běh (`locked`), jde ho
- * opravit; server ho na tu dobu vrátí do konceptu a schválí znovu.
- *
- * Bez práva schvalovat platí původní pravidlo: upravit jde jen koncept.
- */
+/** Pravidlo žije v `payrollComponentsUi.ts` — sdílí ho i karty zaměstnanců. */
 function editable(input: PayrollQuickInputRef | null): boolean {
-  if (input === null || input.status === 'draft') return true
-  return input.status === 'approved' && canApprove.value
+  return payrollInputEditable(input?.status ?? null, canApprove.value)
+}
+
+/**
+ * Rozpad přesčasu na dosaženou mzdu a příplatek (§ 114 odst. 1 ZP).
+ *
+ * Ve formuláři je pole jedno, ale mzdový list musí doložit, KTERÝ zákonný
+ * nárok byl uspokojen (§ 142 odst. 5 ZP) — dosažená mzda za odpracovanou
+ * hodinu a příplatek nejméně 25 % průměrného výdělku jsou dva různé nároky.
+ * Při náhradním volnu je příplatek nula a dosažená mzda se platí; i to je
+ * informace, kterou musí být z pásky vidět, takže se rozpad ukáže i tehdy.
+ *
+ * Nulová dvojice se neukazuje: řádek bez přesčasu nemá co dokládat.
+ */
+function overtimeSplit(row: UiRow): { wage: number; premium: number } | null {
+  const wage = row.overtime_wage_minor
+  const premium = row.overtime_premium_minor
+  if (typeof wage !== 'number' || typeof premium !== 'number') return null
+  if (wage === 0 && premium === 0) return null
+
+  return { wage, premium }
 }
 
 function relationLabel(row: UiRow): string {
@@ -1128,6 +1141,16 @@ onMounted(() => {
                     {{ serverError(row, 'overtime') }}
                   </p>
                   <p
+                    v-if="overtimeSplit(row)"
+                    :data-testid="`quick-overtime-split-${row.employment_id}`"
+                    class="mt-1 max-w-56 text-xs text-neutral-500"
+                  >
+                    {{ t('payroll.quick_inputs.overtime_split', {
+                      wage: formatMoney(overtimeSplit(row)!.wage),
+                      premium: formatMoney(overtimeSplit(row)!.premium),
+                    }) }}
+                  </p>
+                  <p
                     v-if="fieldState(row, 'overtime')"
                     :data-testid="`quick-overtime-state-${row.employment_id}`"
                     :class="['mt-1 max-w-56 text-xs', fieldStateClass(fieldState(row, 'overtime'))]"
@@ -1397,6 +1420,16 @@ onMounted(() => {
                 </p>
                 <p v-if="row.overtime_hours_relation_supported && !row.overtime_hours_available" class="mt-1 text-xs text-warning-700">{{ t('payroll.quick_inputs.hours_unavailable') }}</p>
                 <p v-else-if="!row.overtime_hours_relation_supported" class="mt-1 text-xs text-neutral-500">{{ t('payroll.quick_inputs.amount_only_relation_hint') }}</p>
+                <p
+                  v-if="overtimeSplit(row)"
+                  :data-testid="`quick-overtime-split-mobile-${row.employment_id}`"
+                  class="mt-1 text-xs text-neutral-500"
+                >
+                  {{ t('payroll.quick_inputs.overtime_split', {
+                    wage: formatMoney(overtimeSplit(row)!.wage),
+                    premium: formatMoney(overtimeSplit(row)!.premium),
+                  }) }}
+                </p>
                 <p
                   v-if="fieldState(row, 'overtime')"
                   :class="['mt-1 text-xs', fieldStateClass(fieldState(row, 'overtime'))]"

@@ -46,6 +46,29 @@ use Psr\Clock\ClockInterface;
  */
 final readonly class PayrollDeadlineOverviewService
 {
+    /**
+     * Fáze termínu, jak je vidí klient. Pořadí je zároveň pořadím naléhavosti,
+     * ve kterém se přehled zobrazuje.
+     *
+     * @var list<string>
+     */
+    public const PHASES = [
+        'overdue',
+        'due_today',
+        'due_soon',
+        'action_required',
+        'awaiting_result',
+        'open',
+    ];
+
+    /**
+     * Odkud termín pochází. Účetní to řeší až jako druhé — primárně ji zajímá,
+     * co je pozdě — ale rozhoduje to, kam vede proklik.
+     *
+     * @var list<string>
+     */
+    public const SOURCES = ['submission', 'levy', 'checklist'];
+
     /** Kolik dnů dopředu se termín považuje za „brzy". */
     private const DUE_SOON_DAYS = 5;
 
@@ -115,15 +138,8 @@ final readonly class PayrollDeadlineOverviewService
                 <=> [$b['due_on'], $b['source'], $b['title']],
         );
 
-        $summary = [
-            'total' => count($items),
-            'overdue' => 0,
-            'due_today' => 0,
-            'due_soon' => 0,
-            'open' => 0,
-            'awaiting_result' => 0,
-            'action_required' => 0,
-        ];
+        $summary = ['total' => count($items)]
+            + array_fill_keys(self::PHASES, 0);
         foreach ($items as $item) {
             $phase = (string) $item['phase'];
             if (array_key_exists($phase, $summary) && $phase !== 'total') {

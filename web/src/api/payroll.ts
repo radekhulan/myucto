@@ -1072,6 +1072,43 @@ export interface PayrollTimeOverview {
   offset: number
 }
 
+/** Jedna buňka měsíční mřížky docházky = jeden den jednoho vztahu v jedné kategorii. */
+export interface PayrollTimeBatchCell {
+  employment_id: number
+  category: PayrollTimeCategory
+  starts_at: string
+  ends_at: string
+  timezone: string
+  break_minutes: number
+  supersedes_id: number | null
+  row_version: number
+  month_row_version: number
+}
+
+/**
+ * Proč se odmítla PRÁVĚ TAHLE buňka. `index` míří do pole `cells` požadavku,
+ * takže se chyba dá pověsit na konkrétní políčko, ne na celou tabulku.
+ */
+export interface PayrollTimeBatchFailure {
+  index: number
+  employment_id: number | null
+  date: string
+  category: string
+  code:
+    | 'validation_failed'
+    | 'row_version_conflict'
+    | 'payroll_time_locked'
+    | 'stale_after_conflict'
+  message: string
+}
+
+export interface PayrollTimeBatchResult {
+  saved: number
+  failures: PayrollTimeBatchFailure[]
+  /** Přenačtená TÁŽ stránka přehledu — uložení nesmí mřížku poslat na začátek. */
+  month: PayrollTimeOverview
+}
+
 export interface PayrollTimeImportError {
   row_number: number
   error_code: string
@@ -1624,6 +1661,14 @@ export interface PayrollQuickInputRow {
   overtime_mode: 'hours' | 'amount'
   overtime_hours_milli: number | null
   overtime_amount_minor: number
+  /**
+   * Rozpad § 114 odst. 1 na dosaženou mzdu a příplatek. Ve formuláři je pole
+   * jedno, ale mzdový list musí doložit, který zákonný nárok byl uspokojen
+   * (§ 142 odst. 5 ZP), takže se obě poloviny zobrazují zvlášť. U náhradního
+   * volna je příplatek 0 a dosažená mzda se platí.
+   */
+  overtime_wage_minor?: number | null
+  overtime_premium_minor?: number | null
   overtime_hourly_rate_minor: number | null
   overtime_average_snapshot_id: number | null
   overtime_average_snapshot_version: number | null
@@ -2056,6 +2101,41 @@ export interface PayrollSubmissionOverviewResponse {
   total: number
   limit: number
   offset: number
+}
+
+/** Fáze zákonného termínu — prahy drží backend, UI je jen barví. */
+export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
+  | 'awaiting_result' | 'action_required'
+
+export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
+
+export interface PayrollDeadlineItem {
+  source: PayrollDeadlineSource
+  /** `payroll_obligation:12` — stabilní klíč řádku napříč prameny. */
+  reference: string
+  /** Kód agendy, druh závazku nebo klíč položky checklistu. */
+  title: string
+  subject: string
+  period: string | null
+  due_on: string
+  phase: PayrollDeadlinePhase
+  days_to_due: number
+  is_overdue: boolean
+  /** Kam se to řeší — routa aplikace, ne externí odkaz. */
+  path: string
+  status?: string
+  submission_status?: string | null
+  remaining_minor?: number
+  employee_id?: number
+  checklist_phase?: string
+}
+
+export interface PayrollDeadlineOverview {
+  as_of: string
+  horizon_days: number
+  window: { from: string; to: string }
+  summary: Record<string, number>
+  items: PayrollDeadlineItem[]
 }
 
 export interface PayrollOperationalHealth {
@@ -4751,6 +4831,19 @@ export const payrollApi = {
   operationalHealth: () =>
     api.get<PayrollOperationalHealth>('/payroll/operational-health')
       .then(response => response.data),
+  /**
+   * Blížící se a zmeškané zákonné termíny za firmu. Bez období: jde o to, co
+   * hoří teď, ne o vybraný měsíc.
+   */
+  deadlines: (
+    environment: PayrollRegzelEnvironment = 'production',
+    horizonDays?: number,
+  ) => api.get<PayrollDeadlineOverview>('/payroll/deadlines', {
+    params: {
+      environment,
+      ...(horizonDays === undefined ? {} : { horizon_days: horizonDays }),
+    },
+  }).then(response => response.data),
   statutoryObligationOverview: (
     environment: PayrollRegzelEnvironment,
     period: string,
@@ -5598,6 +5691,25 @@ export const payrollApi = {
   saveTimeEntry: (payload: Record<string, unknown>) =>
     api.post<{ entry: PayrollTimeEntry; month: PayrollTimeMonthState }>('/payroll/time/entries', payload)
       .then(response => response.data),
+  /**
+   * Dávkové uložení buněk měsíční mřížky. `page` a `employmentId` se posílají
+   * v query, aby odpověď nesla TU stránku přehledu, kterou má uživatel před
+   * sebou — jedno uložení = jeden požadavek, ne uložení plus přenačtení.
+   */
+  saveTimeEntryBatch: (
+    payload: { period: string; timezone: string; cells: PayrollTimeBatchCell[] },
+    page?: PayrollPageParams,
+    employmentId?: number | null,
+    incomplete = false,
+  ) =>
+    api.post<PayrollTimeBatchResult>('/payroll/time/entries/batch', payload, {
+      params: {
+        period: payload.period,
+        incomplete: incomplete ? 1 : 0,
+        ...pageParams(page),
+        ...(employmentId ? { employment_id: employmentId } : {}),
+      },
+    }).then(response => response.data),
   saveOvertimeConsent: (payload: {
     employment_id: number
     id?: number | null

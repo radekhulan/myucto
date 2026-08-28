@@ -1048,6 +1048,167 @@ final class PayrollTimeApiTest extends TestCase
         self::assertCount(0, $this->json($june)['items'][0]['entries']);
     }
 
+    /**
+     * Měsíční mřížka ukládá dvanáct dnů JEDNÍM požadavkem.
+     *
+     * Klient posílá `month_row_version` jen u první buňky vztahu; kdyby si ho
+     * dávka nedržela z odpovědi předchozího zápisu, spadl by druhý den vždycky
+     * na optimistický zámek, který zvedl náš vlastní předchozí zápis.
+     */
+    public function testEntryBatchWritesWholeMonthInOneRequestAndTracksMonthVersion(): void
+    {
+        $cells = [];
+        foreach (range(4, 15) as $day) {
+            $date = sprintf('2026-05-%02d', $day);
+            $cells[] = [
+                'employment_id' => $this->employmentId,
+                'category' => 'regular',
+                'starts_at' => "{$date}T08:00:00+02:00",
+                'ends_at' => "{$date}T16:30:00+02:00",
+                'timezone' => 'Europe/Prague',
+                'break_minutes' => 30,
+                'supersedes_id' => null,
+                'row_version' => 0,
+                'month_row_version' => 0,
+            ];
+        }
+        $response = $this->action->entryBatch(
+            $this->request('POST', '/api/payroll/time/entries/batch')
+                ->withQueryParams(['period' => '2026-05'])
+                ->withParsedBody(['period' => '2026-05', 'cells' => $cells]),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->json($response);
+        self::assertSame(12, $body['saved']);
+        self::assertSame([], $body['failures']);
+        // Odpověď nese rovnou přenačtenou stránku, takže uložení stojí jeden
+        // požadavek, ne uložení plus GET.
+        self::assertSame('2026-05', $body['month']['period']);
+        self::assertSame(12 * 480, $body['month']['items'][0]['summary']['actual_minutes']);
+        self::assertCount(12, $body['month']['items'][0]['entries']);
+    }
+
+    /**
+     * Dávka musí umět částečný výsledek: co prošlo, co ne a proč, u KONKRÉTNÍ
+     * buňky. Jedna vadná buňka nesmí shodit zbytek měsíce.
+     */
+    public function testEntryBatchReportsFailingCellWithoutLosingTheRest(): void
+    {
+        $response = $this->action->entryBatch(
+            $this->request('POST', '/api/payroll/time/entries/batch')
+                ->withQueryParams(['period' => '2026-05'])
+                ->withParsedBody([
+                    'period' => '2026-05',
+                    'cells' => [
+                        [
+                            'employment_id' => $this->employmentId,
+                            'category' => 'regular',
+                            'starts_at' => '2026-05-04T08:00:00+02:00',
+                            'ends_at' => '2026-05-04T16:30:00+02:00',
+                            'timezone' => 'Europe/Prague',
+                            // Přestávka delší než interval — buňka se odmítne
+                            // ještě před dotykem měsíce.
+                            'break_minutes' => 999,
+                            'row_version' => 0,
+                            'month_row_version' => 0,
+                        ],
+                        [
+                            'employment_id' => $this->employmentId,
+                            'category' => 'regular',
+                            'starts_at' => '2026-05-05T08:00:00+02:00',
+                            'ends_at' => '2026-05-05T16:30:00+02:00',
+                            'timezone' => 'Europe/Prague',
+                            'break_minutes' => 30,
+                            'row_version' => 0,
+                            'month_row_version' => 0,
+                        ],
+                    ],
+                ]),
+            new Response(),
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->json($response);
+        self::assertSame(1, $body['saved']);
+        self::assertCount(1, $body['failures']);
+        self::assertSame(0, $body['failures'][0]['index']);
+        self::assertSame('2026-05-04', $body['failures'][0]['date']);
+        self::assertSame('validation_failed', $body['failures'][0]['code']);
+        // Vadná buňka nezhasla platný den, který stál za ní.
+        self::assertSame(480, $body['month']['items'][0]['summary']['actual_minutes']);
+    }
+
+    /**
+     * Po konfliktu se u téhož vztahu nepokračuje. Hádat verzi měsíce dál by
+     * znamenalo buď tiše přepsat cizí změnu, nebo sypat matoucí konflikty.
+     */
+    public function testEntryBatchStopsEmploymentAfterVersionConflict(): void
+    {
+        $response = $this->action->entryBatch(
+            $this->request('POST', '/api/payroll/time/entries/batch')
+                ->withQueryParams(['period' => '2026-05'])
+                ->withParsedBody([
+                    'period' => '2026-05',
+                    'cells' => [
+                        [
+                            'employment_id' => $this->employmentId,
+                            'category' => 'regular',
+                            'starts_at' => '2026-05-04T08:00:00+02:00',
+                            'ends_at' => '2026-05-04T16:30:00+02:00',
+                            'timezone' => 'Europe/Prague',
+                            'break_minutes' => 30,
+                            'row_version' => 0,
+                            // Měsíc ještě neexistuje, takže verze 9 je konflikt.
+                            'month_row_version' => 9,
+                        ],
+                        [
+                            'employment_id' => $this->employmentId,
+                            'category' => 'regular',
+                            'starts_at' => '2026-05-05T08:00:00+02:00',
+                            'ends_at' => '2026-05-05T16:30:00+02:00',
+                            'timezone' => 'Europe/Prague',
+                            'break_minutes' => 30,
+                            'row_version' => 0,
+                            'month_row_version' => 9,
+                        ],
+                    ],
+                ]),
+            new Response(),
+        );
+
+        $body = $this->json($response);
+        self::assertSame(0, $body['saved']);
+        self::assertCount(2, $body['failures']);
+        self::assertSame('row_version_conflict', $body['failures'][0]['code']);
+        self::assertSame('stale_after_conflict', $body['failures'][1]['code']);
+        self::assertSame(0, $this->countRows('payroll_time_entries'));
+    }
+
+    /** Strop dávky je tvrdý — bez něj by jeden požadavek mohl běžet minuty. */
+    public function testEntryBatchRejectsOversizedAndEmptyBatch(): void
+    {
+        $empty = $this->action->entryBatch(
+            $this->request('POST', '/api/payroll/time/entries/batch')
+                ->withParsedBody(['period' => '2026-05', 'cells' => []]),
+            new Response(),
+        );
+        self::assertSame(422, $empty->getStatusCode());
+
+        $oversized = $this->action->entryBatch(
+            $this->request('POST', '/api/payroll/time/entries/batch')
+                ->withParsedBody([
+                    'period' => '2026-05',
+                    'cells' => array_fill(0, 501, ['employment_id' => $this->employmentId]),
+                ]),
+            new Response(),
+        );
+        self::assertSame(422, $oversized->getStatusCode());
+        self::assertSame('validation_failed', $this->json($oversized)['error']['code']);
+        self::assertSame(0, $this->countRows('payroll_time_entries'));
+    }
+
     public function testTenantIsolationAndBearerAreFailClosed(): void
     {
         $foreign = $this->action->month(

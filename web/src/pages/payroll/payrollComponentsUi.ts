@@ -1,6 +1,7 @@
 import type {
   PayrollInputImportIssue,
   PayrollInputImportPreview,
+  PayrollInputStatus,
 } from '@/api/payroll'
 import type { PayrollAbsenceEmployment } from '@/api/payrollAbsences'
 
@@ -18,6 +19,29 @@ export interface PayrollEmploymentOption {
   code: string
   relation_type: string
   status: string
+}
+
+/**
+ * Smí se mzdový vstup ještě opravit?
+ *
+ * Kdo smí schvalovat, ukládá rovnou schválené vstupy — a musel by si tím první
+ * uloženou částkou zabetonovat vlastní řádek, kdyby schválené pole zůstalo
+ * zamčené. Dokud vstup nepohltil mzdový běh (`locked`), jde ho opravit; server
+ * ho na tu dobu vrátí do konceptu a schválí znovu. Bez práva schvalovat platí
+ * původní pravidlo: upravit jde jen koncept.
+ *
+ * Pravidlo žije tady, protože ho potřebují DVĚ obrazovky — rychlé vstupy (kde
+ * se edituje) a karty zaměstnanců na přehledu (kde se jen říká, jestli je
+ * částka ještě otevřená). Když si každá držela vlastní kopii, tvrdily o téže
+ * částce dvě různé věci.
+ */
+export function payrollInputEditable(
+  status: PayrollInputStatus | null | undefined,
+  canApprove: boolean,
+): boolean {
+  if (status === null || status === undefined || status === 'draft') return true
+
+  return status === 'approved' && canApprove
 }
 
 export function localPayrollPeriod(date = new Date()): string {

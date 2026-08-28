@@ -135,15 +135,6 @@ final class GarnishmentCalculator
             $policy,
         );
         $allocation = $this->allocateClaims($claims, $third, $excess, $fourRule, $policy);
-        if ($allocation === null) {
-            return $this->manualReview(
-                $input,
-                ['employer_fee_iteration_did_not_converge'],
-                $policy->rulesetId(),
-                $policy->rulesetHash(),
-                $scope,
-            );
-        }
 
         $allocations = [];
         foreach ($claims as $claim) {
@@ -160,7 +151,7 @@ final class GarnishmentCalculator
                 $a->claimId <=> $b->claimId,
         );
 
-        $withheld = self::addExactly($allocation['claim_total'], $allocation['fee']);
+        $withheld = $allocation['withheld'];
 
         return new GarnishmentResult(
             $input->period,
@@ -251,12 +242,32 @@ final class GarnishmentCalculator
     }
 
     /**
+     * Paušální náhradu nákladů plátce mzdy PLATÍ OPRÁVNĚNÝ, ne povinný.
+     *
+     * § 270 odst. 3 o. s. ř. (shodně § 87 odst. 3 exekučního řádu): plátce mzdy
+     * si náhradu „odečte ze sražených částek, které mají být vyplaceny nebo
+     * zaslány oprávněnému"; právo na náhradu, která nebyla odečtena ze sražené
+     * částky před jejím vyplacením, zaniká. Srážka ze mzdy se o paušál tedy
+     * NEZVYŠUJE — zaměstnanci se srazí přesně tolik, kolik by se srazilo
+     * i bez něj, a z té částky si 50 Kč nechá zaměstnavatel.
+     *
+     * Dřív se paušál k pohledávkám PŘIČÍTAL (`withheld = claim_total + fee`).
+     * Tam, kde srážku omezovala kapacita, vycházel součet náhodou správně,
+     * jenže na doběhu exekuce ne: při zbývajícím dluhu 100 Kč se zaměstnanci
+     * srazilo 150 Kč. Chyba se týkala každé exekuce s paušálem, tedy prakticky
+     * všech od 1. 1. 2022 (nález E-02).
+     *
+     * Výpočet proto běží v jednom průchodu: nejdřív se rozdělí celá kapacita
+     * mezi pohledávky (to je částka sražená ze mzdy), pak se z ní ukrojí
+     * paušál. Iterativní hledání pevného bodu odpadlo — paušál už kapacitu
+     * neovlivňuje, takže se nemá na čem stáčet.
+     *
      * @return array{
      *   first:array<string,int>,
      *   second:array<string,int>,
      *   fee:int,
-     *   claim_total:int
-     * }|null
+     *   withheld:int
+     * }
      * @param list<DeductionClaim> $claims
      */
     private function allocateClaims(
@@ -265,49 +276,169 @@ final class GarnishmentCalculator
         int $excess,
         bool $fourRule,
         EnforcementDeductionPolicy2026 $policy,
-    ): ?array {
-        $requestedFee = 0;
-        $flatFeeMaximum = $policy->money('employer_flat_fee.maximum.monthly');
-
-        for ($iteration = 0; $iteration < 64; $iteration++) {
-            $balances = [];
-            foreach ($claims as $claim) {
-                $balances[$claim->id] = $claim->outstandingMinorUnits;
-            }
-
-            $priorityCapacity = self::addExactly($third, $excess);
-            $second = $this->allocatePriorityClaims($claims, $priorityCapacity, $balances);
-            $priorityUsed = self::sumExactly($second);
-            $generalBeforeFee = self::generalPool($third, $excess, $priorityUsed, $fourRule);
-            $actualFee = min($requestedFee, $generalBeforeFee);
-            $first = $this->allocateRankedClaims(
-                $claims,
-                $generalBeforeFee - $actualFee,
-                $balances,
-            );
-            $claimTotal = self::addExactly(self::sumExactly($first), $priorityUsed);
-            $grossWithholding = self::addExactly($claimTotal, $actualFee);
-
-            $candidateFee = $this->hasEligibleFeeClaim($claims, $policy) && $grossWithholding > 0
-                ? min(
-                    $flatFeeMaximum,
-                    $generalBeforeFee,
-                    self::ceilOneThirdToWholeCrown($grossWithholding),
-                )
-                : 0;
-
-            if ($candidateFee === $actualFee) {
-                return [
-                    'first' => $first,
-                    'second' => $second,
-                    'fee' => $actualFee,
-                    'claim_total' => $claimTotal,
-                ];
-            }
-            $requestedFee = $candidateFee;
+    ): array {
+        $balances = [];
+        foreach ($claims as $claim) {
+            $balances[$claim->id] = $claim->outstandingMinorUnits;
         }
 
-        return null;
+        $priorityCapacity = self::addExactly($third, $excess);
+        $second = $this->allocatePriorityClaims($claims, $priorityCapacity, $balances);
+        $priorityUsed = self::sumExactly($second);
+        $first = $this->allocateRankedClaims(
+            $claims,
+            self::generalPool($third, $excess, $priorityUsed, $fourRule),
+            $balances,
+        );
+
+        // Sražená částka. Paušál ji nezvyšuje ani nesnižuje — jen se z ní bere.
+        $withheld = self::addExactly(self::sumExactly($first), $priorityUsed);
+
+        $fee = $this->hasEligibleFeeClaim($claims, $policy) && $withheld > 0
+            ? min(
+                // 50 Kč za kalendářní měsíc, a jen jednou na jednoho povinného
+                // i při souběhu více pohledávek (§ 3 nař. vlády č. 595/2006 Sb.).
+                $policy->money('employer_flat_fee.maximum.monthly'),
+                // „nesmí přesáhnout třetinu částky sražené ze mzdy povinného
+                // zaokrouhlenou na celé koruny nahoru"
+                self::ceilOneThirdToWholeCrown($withheld),
+                // Pojistka pro haléřové doběhy: zaokrouhlení nahoru nesmí
+                // ukrojit víc, než kolik se vůbec srazilo.
+                $withheld,
+            )
+            : 0;
+
+        $firstNet = $this->carveEmployerFee($this->reverseFirstPoolOrder($claims), $first, $fee);
+        $carvedFromFirst = self::sumExactly($first) - self::sumExactly($firstNet);
+        $secondNet = $this->carveEmployerFee(
+            $this->reverseSecondPoolOrder($claims),
+            $second,
+            $fee - $carvedFromFirst,
+        );
+
+        return [
+            'first' => $firstNet,
+            'second' => $secondNet,
+            'fee' => $fee,
+            'withheld' => $withheld,
+        ];
+    }
+
+    /**
+     * Odkud se paušál ukrojí, sráží-li se na víc pohledávek.
+     *
+     * Náhrada „se uspokojuje před všemi ostatními pohledávkami z první
+     * třetiny" (§ 3 odst. 4 nař. vlády č. 595/2006 Sb.), takže o ni nepřijde
+     * ten, kdo je v pořadí první, ale ten, na koho by zbylo jako na
+     * posledního: krájí se v OBRÁCENÉM pořadí uspokojování. Uvnitř jedné
+     * skupiny stejného pořadí se dělí poměrně podle přiznaných částek, aby
+     * se pořadí nerozbilo abecedou.
+     *
+     * Až když první třetina nestačí — typicky měsíc, kdy celou srážku spolkne
+     * výživné z druhé třetiny a na první třetinu nedojde — sáhne se do druhé
+     * třetiny, opět od konce (§ 280 řeší jen rozvrh MEZI výživnými, ne poměr
+     * k náhradě). Bez toho by zaměstnavateli náhrada v takovém měsíci
+     * propadla, přestože srážky prováděl; § 270 odst. 3 o. s. ř. přitom
+     * dovoluje odečíst ji z kterékoli částky mířící oprávněnému.
+     *
+     * @param list<list<DeductionClaim>> $groups
+     * @param array<string,int> $allocated
+     * @return array<string,int>
+     */
+    private function carveEmployerFee(array $groups, array $allocated, int $remaining): array
+    {
+        if ($remaining <= 0) {
+            return $allocated;
+        }
+
+        foreach ($groups as $group) {
+            $ids = [];
+            $groupTotal = 0;
+            foreach ($group as $claim) {
+                $amount = $allocated[$claim->id] ?? 0;
+                if ($amount > 0) {
+                    $ids[$claim->id] = $amount;
+                    $groupTotal = self::addExactly($groupTotal, $amount);
+                }
+            }
+            if ($groupTotal === 0) {
+                continue;
+            }
+
+            $carve = min($remaining, $groupTotal);
+            $remaining -= $carve;
+            $unassigned = $carve;
+            $remainders = [];
+            foreach ($ids as $claimId => $amount) {
+                $product = self::multiplyExactly($carve, $amount);
+                $share = intdiv($product, $groupTotal);
+                $allocated[$claimId] -= $share;
+                $unassigned -= $share;
+                $remainders[$claimId] = $product % $groupTotal;
+            }
+            if ($unassigned > 0) {
+                $order = array_keys($ids);
+                usort($order, static function (int|string $a, int|string $b) use ($remainders): int {
+                    $remainderOrder = $remainders[$b] <=> $remainders[$a];
+
+                    return $remainderOrder !== 0 ? $remainderOrder : (string) $a <=> (string) $b;
+                });
+                foreach ($order as $claimId) {
+                    if ($unassigned === 0) {
+                        break;
+                    }
+                    if ($allocated[$claimId] === 0) {
+                        continue;
+                    }
+                    $allocated[$claimId]--;
+                    $unassigned--;
+                }
+            }
+            if ($remaining === 0) {
+                break;
+            }
+        }
+
+        return $allocated;
+    }
+
+    /**
+     * Obrácené pořadí uspokojování z první třetiny.
+     *
+     * @param list<DeductionClaim> $claims
+     * @return list<list<DeductionClaim>>
+     */
+    private function reverseFirstPoolOrder(array $claims): array
+    {
+        return array_reverse($this->priorities->resolve($claims));
+    }
+
+    /**
+     * Obrácené pořadí uspokojování z druhé třetiny: nejdřív ostatní přednostní
+     * od konce, teprve pak výživné od poslední kategorie.
+     *
+     * @param list<DeductionClaim> $claims
+     * @return list<list<DeductionClaim>>
+     */
+    private function reverseSecondPoolOrder(array $claims): array
+    {
+        $groups = array_reverse($this->priorities->resolve(array_values(array_filter(
+            $claims,
+            static fn (DeductionClaim $claim): bool =>
+                $claim->category === ClaimCategory::OtherPriority,
+        ))));
+
+        foreach (array_reverse(ClaimCategory::maintenanceCategories()) as $category) {
+            $group = array_values(array_filter(
+                $claims,
+                static fn (DeductionClaim $claim): bool => $claim->category === $category,
+            ));
+            if ($group !== []) {
+                $groups[] = $group;
+            }
+        }
+
+        return $groups;
     }
 
     /**

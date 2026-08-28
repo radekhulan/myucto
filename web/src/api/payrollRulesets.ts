@@ -184,8 +184,27 @@ export interface PayrollRulesetDomainGroup {
   versions: PayrollRulesetSummary[]
 }
 
+export type PayrollRulesetOutlookSeverity = 'ok' | 'info' | 'warning' | 'critical'
+
+/**
+ * Výhled pokrytí příštích mzdových let. `critical` znamená, že zákonné hodnoty
+ * pro příští rok už jsou vyhlášené (od 1. 10.) a sada pořád chybí — od 1. ledna
+ * modul bez ní nespočítá ani jednu výplatu.
+ */
+export interface PayrollRulesetYearOutlook {
+  year: number
+  covered: boolean
+  severity: PayrollRulesetOutlookSeverity
+  missing_domains: string[]
+  code: string
+  /** Vysvětlení ze serveru (česky). UI si skládá vlastní přeložený text. */
+  message: string
+}
+
 export interface PayrollRulesetOverview {
   domains: PayrollRulesetDomainGroup[]
+  year_outlook?: PayrollRulesetYearOutlook[]
+  year_outlook_severity?: PayrollRulesetOutlookSeverity
   override_storage_available: boolean
   degraded_reason: string | null
   generated_at: string

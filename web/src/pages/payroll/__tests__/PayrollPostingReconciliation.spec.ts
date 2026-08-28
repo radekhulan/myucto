@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/payrollPosting', () => ({
   payrollPostingApi: { reconciliation: m.reconciliation },
+  PAYROLL_POSTING_INFORMATIONAL_CATEGORIES: ['non_monetary_neutral'],
 }))
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
@@ -22,7 +23,14 @@ vi.mock('@/pages/payroll/payrollComponentsUi', () => ({
   localPayrollPeriod: () => '2026-08',
 }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+  useI18n: () => ({
+    t: (key: string) => key,
+    // Vysvětlivky má jen část kategorií, `te` proto rozhoduje o jejich zobrazení.
+    te: (key: string) => [
+      'payroll.posting_reconciliation.category_note.risky_savings',
+      'payroll.posting_reconciliation.category_note.non_monetary_neutral',
+    ].includes(key),
+  }),
 }))
 
 import PayrollPostingReconciliationPage from '@/pages/payroll/PayrollPostingReconciliation.vue'
@@ -271,5 +279,96 @@ describe('PayrollPostingReconciliation', () => {
     expect(mobileToggle.attributes('aria-expanded')).toBe('false')
     expect(wrapper.find(`#${desktopDetailId}`).exists()).toBe(false)
     expect(wrapper.find(`#${mobileDetailId}`).exists()).toBe(false)
+  })
+
+  it('shows the risky-savings category the backend already calculates', async () => {
+    m.reconciliation.mockResolvedValue(reconciliation({
+      categories: [
+        category({ key: 'gross_wages' }),
+        category({
+          key: 'risky_savings',
+          payroll_minor: 4200,
+          journal_minor: 4200,
+          payments_liability_minor: 4200,
+          payments_paid_minor: 0,
+          status: 'match',
+        }),
+      ],
+    }))
+
+    const wrapper = mount(PayrollPostingReconciliationPage)
+    await flushPromises()
+
+    const desktop = wrapper.get('[data-test="reconciliation-desktop"]')
+    expect(desktop.get('[data-test="reconciliation-desktop-toggle-risky_savings"]').text())
+      .toBe('payroll.posting_reconciliation.categories.risky_savings')
+    expect(wrapper.find('[data-test="reconciliation-mobile-toggle-risky_savings"]').exists()).toBe(true)
+    // Bezna kategorie, ne informativni: stav se ukazuje normalne.
+    expect(desktop.get('[data-test="reconciliation-desktop-row-risky_savings"]').text())
+      .toContain('payroll.posting_reconciliation.category_status.match')
+  })
+
+  it('marks the neutral non-monetary category as informational, never as a difference', async () => {
+    m.reconciliation.mockResolvedValue(reconciliation({
+      overall_status: 'reconciled',
+      categories: [
+        category({ key: 'gross_wages' }),
+        category({
+          key: 'non_monetary_neutral',
+          payroll_minor: 5000,
+          journal_minor: null,
+          payments_liability_minor: null,
+          payments_paid_minor: null,
+          diff_payroll_journal_minor: null,
+          diff_payroll_payments_minor: null,
+          status: 'not_applicable',
+        }),
+      ],
+    }))
+
+    const wrapper = mount(PayrollPostingReconciliationPage)
+    await flushPromises()
+
+    const row = wrapper.get('[data-test="reconciliation-desktop-row-non_monetary_neutral"]')
+    // Vlastni vizualni ton, zadna cervena a zadne "Nepouzije se".
+    expect(row.text()).toContain('payroll.posting_reconciliation.informational_badge')
+    expect(row.text()).not.toContain('payroll.posting_reconciliation.category_status.not_applicable')
+    expect(row.html()).not.toContain('text-danger-700')
+    expect(row.classes()).toEqual(expect.arrayContaining(['bg-primary-50/40']))
+
+    const mobileRow = wrapper.get('[data-test="reconciliation-mobile-row-non_monetary_neutral"]')
+    expect(mobileRow.text()).toContain('payroll.posting_reconciliation.informational_badge')
+    expect(mobileRow.html()).not.toContain('text-danger-700')
+
+    // Informativni radek jde v poradi az za porovnavane kategorie.
+    expect(wrapper.findAll('[data-test^="reconciliation-desktop-toggle-"]').map(node => node.text()))
+      .toEqual([
+        'payroll.posting_reconciliation.categories.gross_wages',
+        'payroll.posting_reconciliation.categories.non_monetary_neutral',
+      ])
+  })
+
+  it('explains in the detail why the neutral category can never produce a difference', async () => {
+    m.reconciliation.mockResolvedValue(reconciliation({
+      categories: [category({
+        key: 'non_monetary_neutral',
+        payroll_minor: 5000,
+        journal_minor: null,
+        payments_liability_minor: null,
+        payments_paid_minor: null,
+        diff_payroll_journal_minor: null,
+        diff_payroll_payments_minor: null,
+        status: 'not_applicable',
+      })],
+    }))
+
+    const wrapper = mount(PayrollPostingReconciliationPage)
+    await flushPromises()
+
+    await wrapper.get('[data-test="reconciliation-desktop-toggle-non_monetary_neutral"]').trigger('click')
+    expect(wrapper.get('[data-test="reconciliation-desktop-note-non_monetary_neutral"]').text())
+      .toBe('payroll.posting_reconciliation.category_note.non_monetary_neutral')
+    expect(wrapper.get('[data-test="reconciliation-mobile-note-non_monetary_neutral"]').text())
+      .toBe('payroll.posting_reconciliation.category_note.non_monetary_neutral')
   })
 })

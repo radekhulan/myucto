@@ -17,6 +17,7 @@ import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
 import PayrollSetupGuide from '@/pages/payroll/PayrollSetupGuide.vue'
 import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.vue'
+import PayrollDeadlinesPanel from '@/pages/payroll/PayrollDeadlinesPanel.vue'
 import PayrollOperationalHealthPanel from '@/pages/payroll/PayrollOperationalHealthPanel.vue'
 import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'
 
@@ -305,6 +306,13 @@ onMounted(load)
         <PayrollSetupGuide v-if="showSetupGuide" />
 
         <PayrollGuide ref="guide" />
+
+        <!--
+          Zákonné termíny jdou nad provozní přehled i nad dlaždice měsíce:
+          zmeškaná lhůta je jediná věc na téhle stránce, která se s odstupem
+          času už nedá napravit.
+        -->
+        <PayrollDeadlinesPanel />
 
         <PayrollOperationalHealthPanel />
 

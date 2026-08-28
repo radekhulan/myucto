@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 import type {
   PayrollEmployeeCardMonth,
+  PayrollInputStatus,
+  PayrollQuickInputRef,
   PayrollQuickInputRow,
   PayrollQuickSurchargeKind,
   PayrollQuickSurchargeState,
@@ -10,10 +12,15 @@ import type {
 
 const m = vi.hoisted(() => ({
   employeeCards: vi.fn(),
+  canWrite: vi.fn(() => false),
 }))
 
 vi.mock('@/api/payroll', () => ({
   payrollApi: { employeeCards: m.employeeCards },
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canWrite: m.canWrite }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -118,6 +125,19 @@ function row(overrides: Partial<PayrollQuickInputRow> = {}): PayrollQuickInputRo
   }
 }
 
+/** Odkaz na uložený mzdový vstup — karta z něj čte jen stav. */
+function inputRef(status: PayrollInputStatus): PayrollQuickInputRef {
+  return {
+    id: 1,
+    amount_minor: 4_500_000,
+    quantity_milliunits: null,
+    source_kind: 'manual',
+    status,
+    row_version: 1,
+    source_snapshot: null,
+  }
+}
+
 function cardMonth(
   items: PayrollQuickInputRow[],
   overrides: Partial<PayrollEmployeeCardMonth> = {},
@@ -154,6 +174,7 @@ function mountCards(period = '2026-08') {
 describe('PayrollEmployeeCards', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.canWrite.mockReturnValue(false)
     m.employeeCards.mockResolvedValue(cardMonth([row()]))
   })
 
@@ -331,4 +352,61 @@ describe('PayrollEmployeeCards', () => {
     expect(wrapper.get('[data-test="employee-cards-failed"]').text())
       .toBe('payroll.employee_cards.load_failed')
   })
+
+  it('o konceptu i o prázdném měsíci mlčí — štítek stavu by byl jen šum', async () => {
+    m.employeeCards.mockResolvedValue(cardMonth([
+      row({ employment_id: 1, inputs: { base: null, overtime: null, bonus: null } }),
+      row({
+        employment_id: 2,
+        inputs: { base: inputRef('draft'), overtime: null, bonus: null },
+      }),
+    ]))
+
+    const wrapper = mountCards()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="employee-base-state-1"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="employee-base-state-2"]').exists()).toBe(false)
+  })
+
+  it('schválená částka není zamčená pro toho, kdo ji schvalovat smí', async () => {
+    m.canWrite.mockImplementation(((permission: string) => permission === 'payroll.approve') as never)
+    m.employeeCards.mockResolvedValue(cardMonth([
+      row({ employment_id: 12, inputs: { base: inputRef('approved'), overtime: null, bonus: null } }),
+    ]))
+
+    const wrapper = mountCards()
+    await flushPromises()
+
+    const badge = wrapper.get('[data-test="employee-base-state-12"]')
+    expect(badge.text()).toBe('payroll.employee_cards.base_state.approved_open')
+    expect(badge.classes()).toEqual(expect.arrayContaining(['bg-success-50']))
+  })
+
+  it('bez práva schvalovat je táž částka označená jako uzavřená', async () => {
+    m.employeeCards.mockResolvedValue(cardMonth([
+      row({ employment_id: 12, inputs: { base: inputRef('approved'), overtime: null, bonus: null } }),
+    ]))
+
+    const wrapper = mountCards()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="employee-base-state-12"]').text())
+      .toBe('payroll.employee_cards.base_state.approved_closed')
+  })
+
+  it('vstup pohlcený mzdovým během je zamčený i pro schvalovatele', async () => {
+    m.canWrite.mockReturnValue(true)
+    m.employeeCards.mockResolvedValue(cardMonth([
+      row({ employment_id: 12, inputs: { base: inputRef('locked'), overtime: null, bonus: null } }),
+    ]))
+
+    const wrapper = mountCards()
+    await flushPromises()
+
+    const badge = wrapper.get('[data-test="employee-base-state-12"]')
+    expect(badge.text()).toBe('payroll.employee_cards.base_state.locked')
+    expect(badge.classes()).toEqual(expect.arrayContaining(['bg-neutral-100']))
+  })
+
 })

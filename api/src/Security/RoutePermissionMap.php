@@ -203,7 +203,7 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
-        ['*', '#^/api/payroll/time/(shifts|entries|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],
+        ['*', '#^/api/payroll/time/(shifts|entries(?:/batch)?|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/year-close/[0-9]{4}$#', 'payroll', AccessLevel::READ],

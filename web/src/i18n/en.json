@@ -817,6 +817,25 @@
             "storage_unavailable": "The override storage is unavailable — the database migration is missing. The verified built-in set applies.",
             "degraded": "The stored rules override is inconsistent. The calculation therefore uses the verified rules supplied with the application.",
             "degraded_technical": "Technical details for support",
+            "outlook": {
+                "title": "Outlook for the coming years",
+                "description": "A ruleset must be ready before the year it is meant to calculate — otherwise the module cannot compute a single payslip from 1 January.",
+                "year": "Year {year}",
+                "covered": "Year {year} is covered by a legislative ruleset.",
+                "missing_domains": "Missing domains: {domains}",
+                "severity": {
+                    "ok": "Covered",
+                    "info": "Information",
+                    "warning": "Complete this year",
+                    "critical": "Complete now"
+                },
+                "message": {
+                    "info": "There is no legislative ruleset for {year} yet. The statutory values for that year have not been published — this is information, not a task.",
+                    "warning": "There is no legislative ruleset for {year} yet. The values are published in autumn (average wage by 30 September, minimum wage and non-attachable amounts usually in November and December); the ruleset must be ready by 31 December at the latest.",
+                    "critical": "The legislative ruleset for {year} is missing even though the statutory values have already been published. Complete it THIS YEAR — from 1 January {year} the payroll module cannot compute a single payslip without it."
+                },
+                "technical": "Technical wording from the server"
+            },
             "version_count": "Versions: {count}",
             "status": {
                 "ready": "Calculation enabled",
@@ -1221,8 +1240,15 @@
                 "income_tax": "Payroll income tax (342)",
                 "other_deductions": "Other deductions (379)",
                 "enforcement": "Garnishment and insolvency deductions (379)",
-                "net_wage": "Net wage payable (331/366)"
+                "net_wage": "Net wage payable (331/366)",
+                "risky_savings": "Mandatory savings for risky work (527/379)",
+                "non_monetary_neutral": "Non-monetary benefit with no accounting impact"
             },
+            "category_note": {
+                "risky_savings": "The expense side (527) is tracked. If you post other payroll items to 527 as well, separate the contribution with an analytical account (e.g. 527.100).",
+                "non_monetary_neutral": "An informational row, not a difference. Non-monetary benefits (typically 1 % of the vehicle purchase price) are not posted separately — the expense is already in the books from the source document, so they are excluded from the gross wages being compared."
+            },
+            "informational_badge": "Informational",
             "category_status": {
                 "match": "Match",
                 "diff": "Difference",
@@ -1698,6 +1724,7 @@
             "total_amount": "Total amount",
             "identifier_missing": "Birth number is not available",
             "rate_hint": "Approved average {rate}/h; overtime includes the 25% premium.",
+            "overtime_split": "Of which wage earned {wage} and overtime premium {premium} (Section 114(1) of the Labour Code).",
             "hours_unavailable": "Hours require an approved average hourly earning. Enter the total amount instead.",
             "amount_only_relation_hint": "This employment accepts a reward amount only, not hourly overtime.",
             "suspended_in_month": "Suspended during the month",
@@ -2480,7 +2507,68 @@
                 "remote": "Remote work",
                 "publish": "Publish to employee",
                 "blocked_no_employment": "Pick the employee the record will be written to.",
-                "blocked_no_range": "Fill in both the start and the end of the shift — hours worked cannot be calculated without them."
+                "blocked_no_range": "Fill in both the start and the end of the shift — hours worked cannot be calculated without them.",
+                "save_and_next": "Save and next day"
+            },
+            "grid": {
+                "title": "Monthly attendance grid",
+                "subtitle": "One row per employee, one column per day. Type the hours worked into a cell — “8”, “8:30” or “7.5” all work. Exceptions (shifts across midnight, breaks, surcharge categories) stay in the row editor above.",
+                "category": "Category being entered",
+                "start_time": "Day starts at",
+                "break": "Break (min)",
+                "hours_hint": "The record starts at the given time and lasts the entered hours plus the break. Cells hold net worked time.",
+                "flag_notice": "Night work, weekend, public holiday and difficult environment are flags over THE SAME hours, not extra hours. They are never added to time worked — that is always regular work plus overtime.",
+                "worked": "Worked",
+                "weekdays": {
+                    "1": "Mo",
+                    "2": "Tu",
+                    "3": "We",
+                    "4": "Th",
+                    "5": "Fr",
+                    "6": "Sa",
+                    "7": "Su"
+                },
+                "cell_label": "{name}, {date}",
+                "cell_flags": "The day carries flags: {flags}.",
+                "month_approved": "The month is approved, nothing can be written to it.",
+                "fill_workdays": "Fill working days",
+                "copy_previous": "Copy previous month",
+                "import": "Import from CSV or XLSX",
+                "save": "Save grid ({count})",
+                "saved": "Days saved: {count}.",
+                "saved_partially": "Days saved: {saved}. Not saved: {failed} — they stay in the grid with the reason on the cell.",
+                "save_failed": "The grid could not be saved.",
+                "filled": "Days filled: {count}. Only empty cells were touched.",
+                "filled_without_calendar": "Days filled: {count}. {people} employments have no work calendar, so Monday to Friday at eight hours was assumed — such an estimate does not know about public holidays.",
+                "copied": "Days copied: {count} for {people} employees from {period}. Employees not found: {missing}. Days that do not fit this month: {skipped}.",
+                "copy_failed": "The previous month could not be loaded.",
+                "more_errors": "And {count} more failing cells.",
+                "keyboard_hint": "Tab and arrows move around the grid, Enter jumps one row down, Ctrl+Enter saves.",
+                "mobile_note": "The monthly grid needs a tablet or wider — on a phone a cell would be narrower than a finger. Use the row entry below, or the import.",
+                "blocked_no_permission": "You are not allowed to write attendance.",
+                "blocked_nothing_changed": "Nothing has changed yet. Type hours into a cell, or use a bulk action above the grid.",
+                "blocked_flag_category": "Bulk filling only makes sense for regular work and overtime. Flags (night, weekend, holiday, difficult environment) are entered on specific days.",
+                "problems": {
+                    "unparsable": "The hours cannot be read. Write them as “8”, “8:30” or “7.5”.",
+                    "delete_unsupported": "The grid does not delete records — deletion is a revision with a reason. Use the row editor.",
+                    "locked": "The day holds several records of the same category, so one number cannot replace them. Edit it in the row editor.",
+                    "crosses_midnight": "The day would run past midnight. Enter a shift across midnight in the row editor.",
+                    "invalid_wall_time": "That time does not exist on this day (daylight saving change). Enter the day in the row editor."
+                }
+            },
+            "approve_errors": {
+                "holiday_arrangement_missing": "The month contains work on a public holiday, but {name} has no agreed arrangement (time off in lieu, or a surcharge). Pay cannot be calculated without it, so approval stops here.",
+                "difficulty_factors_missing": "The month contains work in a difficult environment, but {name} has no count of aggravating factors under § 117.",
+                "average_earning_missing": "The surcharge for {name} is calculated from average earnings, and none is established for this period.",
+                "inputs_locked": "Period inputs are locked by a payroll run, so approving attendance cannot write surcharges into them.",
+                "overtime_conflict": "Overtime for {name} is entered twice — in attendance and in quick inputs. Keep only one record.",
+                "link": {
+                    "holiday_arrangement_missing": "Open the employee card and set the surcharge arrangement",
+                    "difficulty_factors_missing": "Open the employee card and set the aggravating factors",
+                    "average_earning_missing": "Open average earnings",
+                    "inputs_locked": "Open payroll runs",
+                    "overtime_conflict": "Open quick inputs"
+                }
             },
             "calendar": {
                 "default_name": "Regular working week",
@@ -5115,6 +5203,35 @@
                 "description": "Complete these employer details before a payroll run can be calculated.",
                 "action": "Open settings"
             },
+            "deadlines": {
+                "title": "Statutory deadlines",
+                "description": "Filings, levies and per-person deadlines in one place — what is overdue and what is coming up.",
+                "as_of": "As of {date}, looking {days} days ahead.",
+                "load_failed": "The statutory deadline overview could not be loaded.",
+                "retry": "Try again",
+                "empty": "Nothing is overdue and no statutory deadline is pressing right now.",
+                "overdue_hint": "A statutory deadline has been missed — deal with this first.",
+                "resolve": "Resolve",
+                "remaining": "{amount} outstanding",
+                "overdue_by": "{n} day overdue | {n} day overdue | {n} days overdue",
+                "due_today_label": "due today",
+                "due_in": "{n} day left | {n} day left | {n} days left",
+                "expand": "Show {count} more",
+                "collapse": "Hide",
+                "phase": {
+                    "overdue": "Overdue",
+                    "due_today": "Due today",
+                    "due_soon": "Within five days",
+                    "action_required": "Action required",
+                    "awaiting_result": "Awaiting result",
+                    "open": "Open"
+                },
+                "source": {
+                    "submission": "Filing",
+                    "levy": "Levy",
+                    "checklist": "Per-person deadline"
+                }
+            },
             "operational_health": {
                   "title": "Payroll operational overview",
                   "description": "A summary of states that need attention. It contains no personal or detailed data.",
@@ -5322,6 +5439,11 @@
             "base": "Gross pay for the period",
             "base_missing": "Not entered",
             "gross_preview": "Including overtime and bonuses: {amount}",
+            "base_state": {
+                "approved_open": "Approved — still editable",
+                "approved_closed": "Approved — only an approver may change it",
+                "locked": "Locked by a payroll run"
+            },
             "summary": {
                 "people": "Employees",
                 "gross": "Total gross pay",

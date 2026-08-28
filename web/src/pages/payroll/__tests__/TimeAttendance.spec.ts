@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   timeMonth: vi.fn(),
+  saveTimeEntryBatch: vi.fn(),
   previewTimeImport: vi.fn(),
   importTime: vi.fn(),
   approveTimeMonth: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     timeMonth: m.timeMonth,
+    saveTimeEntryBatch: m.saveTimeEntryBatch,
     previewTimeImport: m.previewTimeImport,
     importTime: m.importTime,
     approveTimeMonth: m.approveTimeMonth,
@@ -220,7 +222,7 @@ describe('TimeAttendance', () => {
     const wrapper = mount(TimeAttendance)
     await flushPromises()
 
-    expect(wrapper.find('table').text()).toContain('payroll.time.columns.fund')
+    expect(wrapper.find('[data-test="payroll-time-summary"]').text()).toContain('payroll.time.columns.fund')
 
     const picker = wrapper.findAll('button')
       .find(button => button.text() === 'common.columns')
@@ -232,7 +234,7 @@ describe('TimeAttendance', () => {
     await fundToggle!.find('input').trigger('change')
     await flushPromises()
 
-    expect(wrapper.find('table').text()).not.toContain('payroll.time.columns.fund')
+    expect(wrapper.find('[data-test="payroll-time-summary"]').text()).not.toContain('payroll.time.columns.fund')
     // Mobilní karta má vlastní rozvržení a výběr sloupců se jí netýká.
     const mobile = wrapper.findAll('div')
       .find(node => node.classes().includes('md:hidden') && node.text() !== '')
@@ -623,5 +625,229 @@ describe('TimeAttendance', () => {
     expect(notice.exists()).toBe(true)
     expect(notice.text()).toContain('payroll.agendas.focus.missing')
     m.routeQuery = {}
+  })
+})
+
+/*
+ * ─── Měsíční mřížka (nález X-02) ────────────────────────────────────────────
+ *
+ * Docházka šla zadat jen po jednom intervalu v editoru, který se po uložení
+ * zavíral a datum si přepsal na první den měsíce. Testy tady hlídají to, čím se
+ * to nahradilo: hromadné vyplnění, JEDNO uložení místo požadavku na buňku,
+ * částečný výsledek u konkrétní buňky a ovládání klávesnicí (nález X-07).
+ */
+describe('TimeAttendance — měsíční mřížka', () => {
+  const GRID_MOUNT = {
+    attachTo: document.body,
+    global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.canWrite.mockReturnValue(true)
+    m.timeMonth.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
+    m.approveTimeMonth.mockResolvedValue({})
+  })
+
+  function gridPage(names: string[]) {
+    return {
+      items: names.map((name, index) => ({ ...row(12 + index, name), entries: [] })),
+      total: names.length,
+      limit: 25,
+      offset: 0,
+    }
+  }
+
+  function periodOf(wrapper: ReturnType<typeof mount>): string {
+    return (wrapper.find('input[type="month"]').element as HTMLInputElement).value
+  }
+
+  it('kreslí mřížku zaměstnanci × dny, ne jeden souhrnný řádek', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Syntetická osoba A', 'Syntetická osoba B']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const grid = wrapper.find('[data-test="payroll-time-grid"]')
+    expect(grid.exists()).toBe(true)
+    const period = periodOf(wrapper)
+    const [year, month] = period.split('-').map(Number)
+    const days = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    expect(grid.findAll('[data-grid-pos]')).toHaveLength(days * 2)
+    // Řádkový editor zůstává k dispozici pro výjimky, mřížka ho nenahrazuje.
+    expect(wrapper.findAll('button').some(button => button.text() === 'payroll.time.add'))
+      .toBe(true)
+    wrapper.unmount()
+  })
+
+  /** X-07: bez klávesnice je hromadné zadávání čísel k ničemu. */
+  it('Enter posune kurzor o řádek níž, šipka doprava o den dál', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A', 'Osoba B']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const first = wrapper.find('[data-grid-pos="0-0"]')
+    ;(first.element as HTMLInputElement).focus()
+    await first.trigger('keydown', { key: 'Enter' })
+    expect((document.activeElement as HTMLElement).getAttribute('data-grid-pos')).toBe('1-0')
+
+    await wrapper.find('[data-grid-pos="1-0"]').trigger('keydown', { key: 'ArrowRight' })
+    expect((document.activeElement as HTMLElement).getAttribute('data-grid-pos')).toBe('1-1')
+    wrapper.unmount()
+  })
+
+  it('vyplní pracovní dny a uloží celou stránku JEDNÍM požadavkem', async () => {
+    const page = gridPage(['Osoba A'])
+    m.timeMonth.mockResolvedValue(page)
+    m.saveTimeEntryBatch.mockImplementation((payload: any) => Promise.resolve({
+      saved: payload.cells.length,
+      failures: [],
+      month: page,
+    }))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const fill = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.grid.fill_workdays')
+    expect(fill).toBeDefined()
+    await fill!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="grid-note"]').text()).toContain('payroll.time.grid.filled')
+
+    await wrapper.find('[data-test="grid-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveTimeEntryBatch).toHaveBeenCalledTimes(1)
+    const payload = m.saveTimeEntryBatch.mock.calls[0][0]
+    // Bez kalendáře se odhaduje pondělí až pátek — v žádném měsíci jich není
+    // míň než dvacet a víc než třiadvacet.
+    expect(payload.cells.length).toBeGreaterThanOrEqual(20)
+    expect(payload.cells.length).toBeLessThanOrEqual(23)
+    expect(payload.cells[0]).toMatchObject({ category: 'regular', month_row_version: 1 })
+    wrapper.unmount()
+  })
+
+  it('částečné uložení nechá vadnou buňku rozepsanou i s důvodem', async () => {
+    const page = gridPage(['Osoba A'])
+    m.timeMonth.mockResolvedValue(page)
+    m.saveTimeEntryBatch.mockResolvedValue({
+      saved: 0,
+      failures: [{
+        index: 0,
+        employment_id: 12,
+        date: '',
+        category: 'regular',
+        code: 'row_version_conflict',
+        message: 'Záznam mezitím změnil jiný uživatel.',
+      }],
+      month: page,
+    })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const cell = wrapper.find('[data-grid-pos="0-0"]')
+    await cell.setValue('8')
+    await wrapper.find('[data-test="grid-save"]').trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.find('[data-test="grid-save-error"]')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toContain('payroll.time.grid.saved_partially')
+    expect(panel.text()).toContain('Záznam mezitím změnil jiný uživatel.')
+    // Neuložená hodnota nesmí z políčka zmizet, jinak ji uživatel píše znovu.
+    expect((wrapper.find('[data-grid-pos="0-0"]').element as HTMLInputElement).value).toBe('8')
+    wrapper.unmount()
+  })
+
+  it('nečitelná hodina se pojmenuje u buňky a neodešle se na server', async () => {
+    const page = gridPage(['Osoba A'])
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('[data-grid-pos="0-0"]').setValue('osm hodin')
+    await wrapper.find('[data-test="grid-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveTimeEntryBatch).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="grid-save-error"]').text())
+      .toContain('payroll.time.grid.problems.unparsable')
+    wrapper.unmount()
+  })
+
+  /**
+   * Schválení nově materializuje příplatky, takže padá i na chybějícím
+   * podkladu. Toast to zamlčí; uživatel musí vidět, co chybí a kam jít.
+   */
+  it('selhané schválení pojmenuje chybějící podklad a nabídne cíl', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    m.approveTimeMonth.mockRejectedValue({
+      response: { data: { error: { code: 'holiday_arrangement_missing', message: '409' } } },
+    })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    const checkbox = wrapper.find('thead input[type="checkbox"]')
+    await checkbox.trigger('change')
+    const bulk = wrapper.findAll('button')
+      .find(button => button.text().includes('payroll.time.bulk.approve'))
+    expect(bulk).toBeDefined()
+    await bulk!.trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.find('[data-test="approve-error"]')
+    expect(panel.exists()).toBe(true)
+    expect(panel.text()).toContain('payroll.time.approve_errors.holiday_arrangement_missing')
+    expect(wrapper.find('[data-test="approve-error-link"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /**
+   * Klíč buňky je „vztah|den" bez kategorie, takže rozepsané hodnoty se při
+   * přepnutí vrstvy musí zahodit. Jinak by se osm hodin běžné práce zapsalo
+   * jako osm hodin přesčasu.
+   */
+  it('přepnutí kategorie zahodí rozepsané buňky, nepřelije je', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('[data-grid-pos="0-0"]').setValue('8')
+    expect(wrapper.find('[data-test="grid-save"]').text()).toContain('payroll.time.grid.save')
+    await wrapper.find('[data-test="grid-category"]').setValue('overtime')
+    await flushPromises()
+
+    expect((wrapper.find('[data-grid-pos="0-0"]').element as HTMLInputElement).value).toBe('')
+    expect(wrapper.find('[data-test="grid-save-blocked"]').text())
+      .toContain('payroll.time.grid.blocked_nothing_changed')
+    wrapper.unmount()
+  })
+
+  /** Příznaky se nesčítají do odpracované doby — a mřížka to musí říct. */
+  it('u příznakové kategorie odmítne hromadné vyplnění a vysvětlí proč', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('[data-test="grid-category"]').setValue('night')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="grid-flag-notice"]').text())
+      .toContain('payroll.time.grid.flag_notice')
+    const fill = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.grid.fill_workdays')
+    expect(fill!.attributes('disabled')).toBeDefined()
+    expect(fill!.attributes('title')).toContain('payroll.time.grid.blocked_flag_category')
+    wrapper.unmount()
+  })
+
+  /** Mřížka na telefon nepatří — místo ní musí být věta, ne prázdno. */
+  it('na mobilu nabídne řádkové zadání větou místo jednatřiceti sloupců', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-time-grid"]').classes()).toContain('md:block')
+    expect(wrapper.find('[data-test="grid-mobile-note"]').classes()).toContain('md:hidden')
+    wrapper.unmount()
   })
 })

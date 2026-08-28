@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 import {
   payrollApi,
   type PayrollOvertimeAveragingBasis,
   type PayrollOvertimeAveragingPeriod,
   type PayrollOvertimeProtectionKind,
   type PayrollTimeCategory,
+  type PayrollTimeEntry,
   type PayrollTimeImportPreview,
   type PayrollTimeOverview,
   type PayrollTimeOverviewItem,
 } from '@/api/payroll'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import {
+  buildPayrollGridBatch,
+  formatPayrollGridHours,
+  isWorkedCategory,
+  payrollDayPlans,
+  payrollGridCellKey,
+  payrollGridCellState,
+  payrollGridFlags,
+  payrollGridNextPosition,
+  payrollGridWorkedMinutes,
+  payrollMonthDays,
+  type PayrollGridCellProblem,
+  type PayrollGridMoveKey,
+} from '@/pages/payroll/payrollTimeGrid'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
@@ -247,10 +263,23 @@ function reload() {
   void load()
 }
 
+/*
+ * Editor si drží POSLEDNÍ zadaný den, ne první den měsíce.
+ *
+ * Why: dokud se datum po každém otevření přepsalo na `${period}-01`, znamenal
+ * zápis dvanácti dnů čtyřiadvacet ručních přepsání data. Běžný případ teď řeší
+ * mřížka; tenhle editor zůstává na výjimky (směna přes půlnoc, přestávky,
+ * příplatkové kategorie), ale ani u výjimek nemá smysl datum zahazovat.
+ */
+const lastEditorTimes = ref<{ date: string; start: string; end: string } | null>(null)
+
 function setDefaultTimes() {
-  const day = `${period.value}-01`
-  startsAt.value = `${day}T08:00`
-  endsAt.value = `${day}T16:30`
+  const remembered = lastEditorTimes.value
+  const day = remembered && remembered.date.startsWith(`${period.value}-`)
+    ? remembered.date
+    : `${period.value}-01`
+  startsAt.value = `${day}T${remembered?.start ?? '08:00'}`
+  endsAt.value = `${day}T${remembered?.end ?? '16:30'}`
 }
 
 function openEditor(item?: PayrollTimeOverviewItem) {
@@ -259,7 +288,30 @@ function openEditor(item?: PayrollTimeOverviewItem) {
   editorOpen.value = true
 }
 
-async function saveRecord() {
+/** Posun na následující den v témže měsíci; poslední den zůstane, kde je. */
+function nextEditorDay(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return date
+  const next = new Date(parsed.getTime() + 86_400_000)
+  const iso = next.toISOString().slice(0, 10)
+  return iso.startsWith(`${period.value}-`) ? iso : date
+}
+
+/**
+ * „Uložit a další den" — zápis se uloží, editor zůstane otevřený a posune se
+ * o den. Bez toho stálo pět výjimek v měsíci pět otevření editoru.
+ */
+async function saveRecordAndContinue() {
+  const before = startsAt.value.slice(0, 10)
+  await saveRecord(true)
+  if (editorOpen.value) {
+    const day = nextEditorDay(before)
+    startsAt.value = `${day}T${startsAt.value.slice(11)}`
+    endsAt.value = `${day}T${endsAt.value.slice(11)}`
+  }
+}
+
+async function saveRecord(keepOpen = false) {
   if (!selected.value) return
   const common = {
     employment_id: selected.value.employment.id,
@@ -285,7 +337,12 @@ async function saveRecord() {
       await payrollApi.saveTimeEntry({ ...common, category: category.value })
     }
     toast.success(t('payroll.time.saved'))
-    editorOpen.value = false
+    lastEditorTimes.value = {
+      date: startsAt.value.slice(0, 10),
+      start: startsAt.value.slice(11, 16),
+      end: endsAt.value.slice(11, 16),
+    }
+    if (!keepOpen) editorOpen.value = false
     await load()
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('payroll.time.save_failed'))
@@ -752,12 +809,32 @@ async function approve() {
       },
     })
     toast.success(t('payroll.time.approved'))
+    approveError.value = null
     closeApproval()
     await load()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.time.approve_failed'))
+    approveError.value = describeApproveFailure(error, item)
+    toast.error(approveError.value.message)
   } finally {
     saving.value = false
+  }
+}
+
+/**
+ * Schválení materializuje příplatky, takže selhává i na chybějícím PODKLADU,
+ * ne jen na verzi. Kód z odpovědi se překlopí na větu „co chybí" a na cíl, kde
+ * se to doplní — jinak uživatel vidí jen 409 a neví, kam jít.
+ */
+function describeApproveFailure(error: any, item: PayrollTimeOverviewItem) {
+  const raw = error?.response?.data?.error?.code
+  const code = APPROVE_ERROR_CODES.find(known => known === raw) ?? null
+  return {
+    code,
+    message: code === null
+      ? (error?.response?.data?.error?.message || t('payroll.time.approve_failed'))
+      : t(`payroll.time.approve_errors.${code}`, { name: item.employment.full_name }),
+    name: item.employment.full_name,
+    employmentId: item.employment.id,
   }
 }
 
@@ -788,8 +865,12 @@ async function approveSelected() {
         row_version: item.month.row_version,
       })
       approved += 1
-    } catch {
+    } catch (error: any) {
       failed += 1
+      // Z hromadného schválení si necháme PRVNÍ konkrétní důvod i s odkazem,
+      // kam pro chybějící podklad jít. „Nepodařilo se schválit 3 vztahy" bez
+      // toho znamená otevřít tři řádky a hádat, který na čem spadl.
+      approveError.value ??= describeApproveFailure(error, item)
     }
   }
   if (approved > 0) toast.success(t('payroll.time.bulk.approved', { count: approved }))
@@ -917,7 +998,515 @@ async function applyImport() {
   }
 }
 
-onMounted(load)
+/*
+ * ─── Měsíční mřížka: zaměstnanci × dny ──────────────────────────────────────
+ *
+ * Why: docházku šlo dosud zadat jen po JEDNOM intervalu v editoru, který se po
+ * uložení zavíral. Dvacet lidí za měsíc = několik tisíc úkonů, pět set lidí je
+ * mimo lidské možnosti — a jediná průchodná cesta (import CSV/XLSX) nebyla na
+ * stránce nikde vidět.
+ *
+ * Mřížka edituje VŽDY JEDNU kategorii. Není to zjednodušení: `night`,
+ * `weekend`, `holiday` a `difficult_environment` jsou příznaky nad týmiž
+ * hodinami, ne hodiny navíc (odpracovaná doba = `regular + overtime`). Kdyby
+ * mřížka nabídla „součet všech kategorií", měsíc s nočními by tvrdil dvakrát
+ * tolik. Sloupec „odpracováno" proto sčítá jen dvě hodinové kategorie a
+ * příznaky se v buňce ukazují jen jako značka.
+ */
+const gridCategory = ref<PayrollTimeCategory>('regular')
+const gridStartTime = ref('08:00')
+const gridBreakMinutes = ref(0)
+/** Jen políčka, kterých se uživatel dotkl. Klíč je `employmentId|YYYY-MM-DD`. */
+const gridDrafts = ref<Record<string, string>>({})
+/** Věta, PROČ se konkrétní buňka neuložila. Nezmizí sama, na rozdíl od toastu. */
+const gridCellErrors = ref<Record<string, string>>({})
+const gridSaving = ref(false)
+const gridSaveError = ref<string | null>(null)
+const gridNote = ref<string | null>(null)
+const gridBody = ref<HTMLElement | null>(null)
+const GRID_FALLBACK_MINUTES = 480
+/** Musí sedět na `PayrollTimeService::BATCH_MAX_CELLS` — server víc nevezme. */
+const GRID_BATCH_MAX = 500
+
+const gridDays = computed(() => payrollMonthDays(period.value))
+const gridEditableCategory = computed(() => isWorkedCategory(gridCategory.value))
+/*
+ * Stav buněk se počítá JEDNOU na načtení, ne při každém překreslení.
+ *
+ * Why: stránka mřížky má 775 buněk a každý stisk klávesy překreslí celou
+ * komponentu. Kdyby si buňka svůj stav filtrovala ze seznamu zápisů sama, stálo
+ * by jedno písmeno 775 × (počet zápisů měsíce) průchodů polem — u plného měsíce
+ * dvacet tisíc. Takhle je to O(1) lookup v mapě.
+ */
+const gridRows = computed(() => visibleItems.value.map(item => {
+  const entries = item.entries ?? []
+  const cells = new Map<string, {
+    minutes: number
+    locked: boolean
+    worked: number
+    flags: string
+    holidayName: string | null
+    workday: boolean
+  }>()
+  const plans = payrollDayPlans(item, gridDays.value, GRID_FALLBACK_MINUTES)
+  for (const day of gridDays.value) {
+    const state = payrollGridCellState(entries, day.date, gridCategory.value)
+    const plan = plans.get(day.date)
+    cells.set(day.date, {
+      minutes: state.minutes,
+      locked: state.locked,
+      worked: payrollGridWorkedMinutes(entries, day.date),
+      flags: payrollGridFlags(entries, day.date)
+        .map(flag => t(`payroll.time.category.${flag}`))
+        .join(', '),
+      holidayName: plan?.holidayName ?? null,
+      workday: plan?.kind === 'workday',
+    })
+  }
+  return {
+    item,
+    entries,
+    plans,
+    cells,
+    plannedMinutes: (date: string) => plans.get(date)?.plannedMinutes ?? 0,
+    workedTotal: gridDays.value.reduce(
+      (sum, day) => sum + (cells.get(day.date)?.worked ?? 0),
+      0,
+    ),
+  }
+}))
+type PayrollGridRow = (typeof gridRows)['value'][number]
+const gridDirtyKeys = computed(() => Object.keys(gridDrafts.value))
+const gridDirtyCount = computed(() => gridDirtyKeys.value.length)
+const gridBlockedReason = computed<string | null>(() => {
+  if (!canWrite.value) return t('payroll.time.grid.blocked_no_permission')
+  if (gridDirtyCount.value === 0) return t('payroll.time.grid.blocked_nothing_changed')
+  return null
+})
+const gridFillBlockedReason = computed<string | null>(() => {
+  if (!canWrite.value) return t('payroll.time.grid.blocked_no_permission')
+  if (!gridEditableCategory.value) return t('payroll.time.grid.blocked_flag_category')
+  return null
+})
+
+function gridKey(employmentId: number, date: string): string {
+  return payrollGridCellKey(employmentId, date)
+}
+
+/**
+ * Rozepsané buňky patří k JEDNÉ kategorii a k JEDNOMU období.
+ *
+ * Klíč je `vztah|den`, takže bez tohohle úklidu by se osm hodin napsaných do
+ * běžné práce po přepnutí na přesčas ukázalo jako osm hodin přesčasu — a při
+ * uložení by se tak i zapsalo.
+ */
+function resetGridDrafts() {
+  gridDrafts.value = {}
+  gridCellErrors.value = {}
+  gridSaveError.value = null
+  gridNote.value = null
+}
+
+watch([gridCategory, period], resetGridDrafts)
+
+/** Co je v políčku vidět: rozepsaná hodnota, jinak to, co je uložené. */
+function gridValue(row: PayrollGridRow, date: string): string {
+  const draft = gridDrafts.value[gridKey(row.item.employment.id, date)]
+  if (draft !== undefined) return draft
+  return formatPayrollGridHours(row.cells.get(date)?.minutes ?? 0)
+}
+
+function gridCellLocked(row: PayrollGridRow, date: string): boolean {
+  return row.cells.get(date)?.locked ?? false
+}
+
+function gridCellFlags(row: PayrollGridRow, date: string): string {
+  return row.cells.get(date)?.flags ?? ''
+}
+
+function setGridValue(employmentId: number, date: string, value: string) {
+  const key = gridKey(employmentId, date)
+  gridDrafts.value = { ...gridDrafts.value, [key]: value }
+  if (gridCellErrors.value[key]) {
+    const next = { ...gridCellErrors.value }
+    delete next[key]
+    gridCellErrors.value = next
+  }
+}
+
+/**
+ * Tooltip buňky. Skládá se ze všeho, co o dni víme a co by jinak zůstalo
+ * neviditelné: chyba uložení, důvod zamčení, svátek a příznaky nad hodinami.
+ */
+function gridCellTitle(row: PayrollGridRow, date: string): string {
+  const cell = row.cells.get(date)
+  const parts: string[] = []
+  const error = gridCellErrors.value[gridKey(row.item.employment.id, date)]
+  if (error) parts.push(error)
+  if (row.item.month.status !== 'open') parts.push(t('payroll.time.grid.month_approved'))
+  if (cell?.locked) parts.push(t('payroll.time.grid.problems.locked'))
+  if (cell?.holidayName) parts.push(cell.holidayName)
+  if (cell?.flags) parts.push(t('payroll.time.grid.cell_flags', { flags: cell.flags }))
+  return parts.join(' ')
+}
+
+/** Prvních deset vadných buněk s větou — víc by z panelu udělalo výpis. */
+const gridCellErrorList = computed(() => Object.entries(gridCellErrors.value)
+  .slice(0, 10)
+  .map(([key, message]) => {
+    const [employmentId, date] = key.split('|')
+    const row = gridRows.value.find(candidate =>
+      candidate.item.employment.id === Number(employmentId))
+    return { key, date, name: row?.item.employment.full_name ?? employmentId, message }
+  }))
+const gridCellErrorCount = computed(() => Object.keys(gridCellErrors.value).length)
+
+function gridCellClass(row: PayrollGridRow, date: string): string {
+  const key = gridKey(row.item.employment.id, date)
+  if (gridCellErrors.value[key]) return 'border-danger-500 bg-danger-50'
+  if (gridDrafts.value[key] !== undefined) return 'border-payroll-500 bg-payroll-50'
+  return 'border-neutral-200'
+}
+
+/*
+ * Pohyb po mřížce klávesnicí.
+ *
+ * Enter skáče o řádek níž (ne „uložit"): u sedmi set políček by odeslání
+ * formuláře prostředním Enterem uložilo rozdělanou práci. Uložení má
+ * Ctrl+Enter a tlačítko. Šipky vlevo/vpravo se chovají jako v tabulkovém
+ * procesoru — přeskočí na sousední buňku jen tehdy, když je kurzor na kraji
+ * textu; jinak by se v políčku nedalo opravit prostřední znak.
+ */
+function onGridKeydown(event: KeyboardEvent, rowIndex: number, columnIndex: number) {
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault()
+    void saveGrid()
+    return
+  }
+  const input = event.target as HTMLInputElement
+  if (event.key === 'ArrowLeft' && (input.selectionStart ?? 0) > 0) return
+  if (event.key === 'ArrowRight' && (input.selectionEnd ?? 0) < input.value.length) return
+  const keys = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter', 'Home', 'End']
+  if (!keys.includes(event.key)) return
+  const next = payrollGridNextPosition(
+    { row: rowIndex, column: columnIndex },
+    event.key as PayrollGridMoveKey,
+    gridRows.value.length,
+    gridDays.value.length,
+  )
+  event.preventDefault()
+  if (next) focusGridCell(next.row, next.column)
+}
+
+function focusGridCell(row: number, column: number) {
+  const target = gridBody.value?.querySelector<HTMLInputElement>(
+    `[data-grid-pos="${row}-${column}"]`,
+  )
+  if (!target) return
+  target.focus({ preventScroll: false })
+  target.select()
+}
+
+/**
+ * Vyplnit pracovní dny podle kalendáře vztahu.
+ *
+ * Přepisují se JEN prázdné buňky. Kdo si den ručně zkrátil, o to kliknutím na
+ * hromadnou akci nepřijde — a svátky ani víkendy se neplní vůbec, protože je
+ * kalendář (a v něm `CzechHolidayCalendar`) označuje jako nepracovní.
+ */
+function fillWorkdays() {
+  if (gridFillBlockedReason.value) return
+  let filled = 0
+  let withoutCalendar = 0
+  const drafts = { ...gridDrafts.value }
+  for (const row of gridRows.value) {
+    if (row.item.month.status !== 'open') continue
+    if (!row.item.calendar) withoutCalendar += 1
+    for (const day of gridDays.value) {
+      const cell = row.cells.get(day.date)
+      if (!cell?.workday) continue
+      const key = gridKey(row.item.employment.id, day.date)
+      const current = drafts[key] ?? formatPayrollGridHours(cell.minutes)
+      if (current !== '') continue
+      drafts[key] = formatPayrollGridHours(row.plannedMinutes(day.date) || GRID_FALLBACK_MINUTES)
+      filled += 1
+    }
+  }
+  gridDrafts.value = drafts
+  gridNote.value = withoutCalendar > 0
+    ? t('payroll.time.grid.filled_without_calendar', { count: filled, people: withoutCalendar })
+    : t('payroll.time.grid.filled', { count: filled })
+}
+
+function previousPeriod(value: string): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(value)
+  if (!match) return value
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const previous = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 }
+  return `${previous.year}-${String(previous.month).padStart(2, '0')}`
+}
+
+/**
+ * Zkopírovat minulý měsíc.
+ *
+ * Minulý měsíc se stránkuje jinak než tenhle (někdo nastoupil, někdo odešel),
+ * takže se `offset` použít nedá — dohledává se podle `employment_id`, po
+ * stránkách po dvou stech a nejvýše pěti požadavcích. Kdo se ve stropě nevešel,
+ * se neututlá: řekne se to větou i s počtem.
+ */
+async function copyPreviousMonth() {
+  if (!canWrite.value) return
+  const needed = new Set(gridRows.value
+    .filter(row => row.item.month.status === 'open')
+    .map(row => row.item.employment.id))
+  if (needed.size === 0) return
+  gridSaving.value = true
+  gridNote.value = null
+  gridSaveError.value = null
+  const source = previousPeriod(period.value)
+  try {
+    const found = new Map<number, PayrollTimeEntry[]>()
+    let cursor = 0
+    let known = Number.POSITIVE_INFINITY
+    for (let page = 0; page < 5 && cursor < known && found.size < needed.size; page += 1) {
+      const previous = await payrollApi.timeMonth(source, false, { limit: 200, offset: cursor })
+      known = previous.total
+      for (const item of previous.items) {
+        if (needed.has(item.employment.id)) found.set(item.employment.id, item.entries ?? [])
+      }
+      cursor += previous.items.length
+      if (previous.items.length === 0) break
+    }
+    const sourceDays = payrollMonthDays(source)
+    const drafts = { ...gridDrafts.value }
+    let copied = 0
+    let skippedDays = 0
+    for (const row of gridRows.value) {
+      const entries = found.get(row.item.employment.id)
+      if (!entries) continue
+      for (const day of sourceDays) {
+        const minutes = payrollGridCellState(entries, day.date, gridCategory.value).minutes
+        if (minutes === 0) continue
+        const target = gridDays.value.find(candidate => candidate.day === day.day)
+        if (!target) {
+          skippedDays += 1
+          continue
+        }
+        const key = gridKey(row.item.employment.id, target.date)
+        const current = drafts[key]
+          ?? formatPayrollGridHours(row.cells.get(target.date)?.minutes ?? 0)
+        if (current !== '') continue
+        drafts[key] = formatPayrollGridHours(minutes)
+        copied += 1
+      }
+    }
+    gridDrafts.value = drafts
+    gridNote.value = t('payroll.time.grid.copied', {
+      count: copied,
+      people: found.size,
+      period: source,
+      missing: needed.size - found.size,
+      skipped: skippedDays,
+    })
+  } catch (error: any) {
+    gridSaveError.value = error?.response?.data?.error?.message
+      || t('payroll.time.grid.copy_failed')
+  } finally {
+    gridSaving.value = false
+  }
+}
+
+function gridProblemMessage(problem: PayrollGridCellProblem): string {
+  return t(`payroll.time.grid.problems.${problem}`)
+}
+
+/**
+ * Uložení mřížky.
+ *
+ * Jeden požadavek na dávku, ne jeden na buňku — a dávka se skládá ZNOVU po
+ * každém kole, protože každý uložený den zvedne verzi měsíce a druhá dávka by
+ * s původními verzemi celá spadla na optimistický zámek. Odpověď nese už
+ * přenačtenou TÚTÉŽ stránku přehledu, takže uložení stojí přesně tolik
+ * požadavků, kolik je dávek.
+ */
+async function saveGrid() {
+  if (gridBlockedReason.value) return
+  gridSaving.value = true
+  gridSaveError.value = null
+  gridNote.value = null
+  const errors: Record<string, string> = {}
+  const remaining = new Set(gridDirtyKeys.value)
+  let saved = 0
+  let failed = 0
+  try {
+    for (let round = 0; round < 5 && remaining.size > 0; round += 1) {
+      const context = new Map(gridRows.value.map(row => [row.item.employment.id, {
+        entries: row.entries,
+        monthRowVersion: row.item.month.row_version,
+        open: row.item.month.status === 'open',
+      }]))
+      const drafts = [...remaining].flatMap(key => {
+        const [employmentId, date] = key.split('|')
+        return context.has(Number(employmentId))
+          ? [{ employmentId: Number(employmentId), date, raw: gridDrafts.value[key] ?? '' }]
+          : []
+      })
+      const build = buildPayrollGridBatch({
+        drafts,
+        category: gridCategory.value,
+        startTime: gridStartTime.value,
+        breakMinutes: gridBreakMinutes.value,
+        timezone: timezone.value,
+        context,
+      })
+      // Buňka, která se neposílá, je vyřízená v tomhle kole: buď je vadná
+      // (a zůstane rozepsaná i s větou proč), nebo se od uloženého stavu neliší.
+      const sent = new Set(build.keys)
+      const nextDrafts = { ...gridDrafts.value }
+      for (const key of [...remaining]) {
+        if (sent.has(key)) continue
+        remaining.delete(key)
+        const problem = build.problems.get(key)
+        if (problem) {
+          errors[key] = gridProblemMessage(problem)
+          failed += 1
+        } else {
+          delete nextDrafts[key]
+        }
+      }
+      gridDrafts.value = nextDrafts
+      if (build.cells.length === 0) break
+
+      const chunk = build.cells.slice(0, GRID_BATCH_MAX)
+      const chunkKeys = build.keys.slice(0, GRID_BATCH_MAX)
+      const result = await payrollApi.saveTimeEntryBatch(
+        { period: period.value, timezone: timezone.value, cells: chunk },
+        { limit: pageSize, offset: offset.value },
+        focusEmploymentId.value,
+        incompleteOnly.value,
+      )
+      overview.value = result.month
+      total.value = result.month.total
+      const failures = new Map(result.failures.map(failure => [failure.index, failure]))
+      const afterRound = { ...gridDrafts.value }
+      chunkKeys.forEach((key, index) => {
+        remaining.delete(key)
+        const failure = failures.get(index)
+        if (failure) {
+          errors[key] = failure.message
+          failed += 1
+          return
+        }
+        delete afterRound[key]
+        saved += 1
+      })
+      gridDrafts.value = afterRound
+    }
+    gridCellErrors.value = errors
+    if (failed === 0) {
+      toast.success(t('payroll.time.grid.saved', { count: saved }))
+      return
+    }
+    // Částečný výsledek se nesmí tvářit ani jako úspěch, ani jako selhání —
+    // uživatel musí vědět, kolik dnů prošlo a kolik na něj ještě čeká.
+    gridSaveError.value = t('payroll.time.grid.saved_partially', { saved, failed })
+    toast.error(gridSaveError.value)
+  } catch (error: any) {
+    gridCellErrors.value = errors
+    const message: string = error?.response?.data?.error?.message
+      || t('payroll.time.grid.save_failed')
+    gridSaveError.value = message
+    toast.error(message)
+  } finally {
+    gridSaving.value = false
+  }
+}
+
+const gridActions = computed<ActionItem[]>(() => [
+  {
+    key: 'fill',
+    label: t('payroll.time.grid.fill_workdays'),
+    icon: 'calendar',
+    tier: 'primary',
+    variant: 'primary',
+    show: canWrite.value,
+    disabled: gridFillBlockedReason.value !== null || gridSaving.value,
+    disabledReason: gridFillBlockedReason.value ?? undefined,
+    run: fillWorkdays,
+  },
+  {
+    key: 'copy',
+    label: t('payroll.time.grid.copy_previous'),
+    icon: 'cycle',
+    tier: 'secondary',
+    show: canWrite.value,
+    disabled: gridSaving.value,
+    run: () => void copyPreviousMonth(),
+  },
+  {
+    key: 'import',
+    label: t('payroll.time.grid.import'),
+    icon: 'upload',
+    tier: 'secondary',
+    show: canWrite.value,
+    run: () => { importOpen.value = true },
+  },
+])
+
+/*
+ * Schválení měsíce dnes materializuje zákonné příplatky ve stejné transakci,
+ * takže může spadnout na chybějícím podkladu. Toast, který za pět vteřin
+ * zmizí, je u téhle chyby k ničemu: uživatel musí vidět, CO chybí a KAM pro to
+ * jít. Odtud panel s odkazem místo pouhé hlášky.
+ */
+type PayrollApproveErrorCode =
+  | 'holiday_arrangement_missing'
+  | 'difficulty_factors_missing'
+  | 'average_earning_missing'
+  | 'inputs_locked'
+  | 'overtime_conflict'
+
+const APPROVE_ERROR_CODES: PayrollApproveErrorCode[] = [
+  'holiday_arrangement_missing',
+  'difficulty_factors_missing',
+  'average_earning_missing',
+  'inputs_locked',
+  'overtime_conflict',
+]
+
+const approveError = ref<{
+  code: PayrollApproveErrorCode | null
+  message: string
+  name: string
+  employmentId: number
+} | null>(null)
+
+const approveErrorTarget = computed<RouteLocationRaw | null>(() => {
+  const failure = approveError.value
+  if (!failure || failure.code === null) return null
+  const employment = String(failure.employmentId)
+  switch (failure.code) {
+    case 'holiday_arrangement_missing':
+    case 'difficulty_factors_missing':
+      // Zásada příplatků visí na pracovním vztahu, tedy na kartě zaměstnance.
+      return { name: 'payroll-people', query: { employment } }
+    case 'average_earning_missing':
+      return { name: 'payroll-absences', query: { employment, tab: 'averages' } }
+    case 'overtime_conflict':
+      return { name: 'payroll-quick-inputs', query: { employment } }
+    case 'inputs_locked':
+      return { name: 'payroll-runs' }
+  }
+})
+
+function clearApproveError() {
+  approveError.value = null
+}
+
+onMounted(() => {
+  void load()
+})
 </script>
 
 <template>
@@ -969,6 +1558,33 @@ onMounted(load)
       </div>
     </section>
 
+    <!--
+      Schválení materializuje zákonné příplatky, takže spadne i na chybějícím
+      podkladu. Panel místo toastu: uživatel musí vidět, CO chybí a KAM jít.
+    -->
+    <section
+      v-if="approveError"
+      class="rounded-xl border border-danger-500/40 bg-danger-50 p-4 text-sm text-danger-700"
+      data-test="approve-error"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p class="font-semibold">{{ t('payroll.time.approve_failed') }}</p>
+          <p class="mt-1 max-w-prose leading-snug">{{ approveError.message }}</p>
+          <RouterLink
+            v-if="approveErrorTarget"
+            :to="approveErrorTarget"
+            class="mt-2 inline-flex text-sm font-medium underline"
+            data-test="approve-error-link"
+          >{{ t(`payroll.time.approve_errors.link.${approveError.code}`) }}</RouterLink>
+        </div>
+        <button :class="btnOutline('neutral')" @click="clearApproveError">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+          {{ t('common.close') }}
+        </button>
+      </div>
+    </section>
+
     <section v-if="editorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 shadow-sm sm:p-6">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.time.editor.title') }}</h2>
@@ -977,6 +1593,11 @@ onMounted(load)
           {{ t('common.cancel') }}
         </button>
       </div>
+      <!--
+        Editor je `<form>` schválně: dokud jím nebyl, Enter v poli nedělal nic
+        a záznam se dal uložit jen myší. Enter teď formulář odešle.
+      -->
+      <form data-test="time-record-form" @submit.prevent="saveRecord()">
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.employment') }}</span>
@@ -1029,21 +1650,35 @@ onMounted(load)
       </div>
       <div class="mt-5 flex flex-wrap justify-end gap-2">
         <div class="flex flex-col items-end gap-1.5">
-          <button
-            :class="btnFilled('primary')"
-            :disabled="saving || !selected || !startsAt || !endsAt"
-            :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
-            data-test="time-record-save"
-            @click="saveRecord"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
-            {{ t('common.save') }}
-          </button>
+          <div class="flex flex-wrap justify-end gap-2">
+            <button
+              type="button"
+              :class="btnOutline('neutral')"
+              :disabled="saving || !selected || !startsAt || !endsAt"
+              :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
+              data-test="time-record-save-next"
+              @click="saveRecordAndContinue"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>
+              {{ t('payroll.time.editor.save_and_next') }}
+            </button>
+            <button
+              type="submit"
+              :class="btnFilled('primary')"
+              :disabled="saving || !selected || !startsAt || !endsAt"
+              :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
+              data-test="time-record-save"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+              {{ t('common.save') }}
+            </button>
+          </div>
           <p v-if="recordBlockedReason" :class="BTN_DISABLED_NOTE" data-test="time-record-save-blocked">
             {{ recordBlockedReason }}
           </p>
         </div>
       </div>
+      </form>
     </section>
 
     <section v-if="importOpen" class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6">
@@ -1114,6 +1749,167 @@ onMounted(load)
       @clear="clearFocus"
     />
 
+    <!--
+      ─── Měsíční mřížka ────────────────────────────────────────────────────
+      Od tabletu výš. Jedenatřicet sloupců se na telefon nevejde ani ve scrollu:
+      buňka by byla užší než prst a zadání dne by skončilo překlepem, který se
+      pozná až na výplatní pásce. Na mobilu proto zůstává řádkové zadání
+      (editor + karty níž) a mřížka se nabídne větou.
+    -->
+    <section
+      v-if="!loading && !loadFailed && gridRows.length > 0"
+      class="hidden rounded-xl border border-neutral-200 bg-surface shadow-sm md:block"
+      data-test="payroll-time-grid"
+    >
+      <div class="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 p-4">
+        <div>
+          <h2 class="font-semibold text-neutral-900">{{ t('payroll.time.grid.title') }}</h2>
+          <p class="mt-1 max-w-prose text-sm text-neutral-500">{{ t('payroll.time.grid.subtitle') }}</p>
+        </div>
+        <ActionBar :actions="gridActions" />
+      </div>
+
+      <div class="flex flex-wrap items-end gap-4 border-b border-neutral-200 px-4 py-3">
+        <label class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.grid.category') }}</span>
+          <select
+            v-model="gridCategory"
+            class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+            data-test="grid-category"
+          >
+            <option v-for="item in categories" :key="item" :value="item">{{ t(`payroll.time.category.${item}`) }}</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.grid.start_time') }}</span>
+          <input v-model="gridStartTime" type="time" class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="grid-start-time">
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.grid.break') }}</span>
+          <input v-model.number="gridBreakMinutes" type="number" min="0" class="h-9 w-24 rounded-md border border-neutral-300 bg-surface px-3 text-sm" data-test="grid-break">
+        </label>
+        <p class="max-w-prose text-xs text-neutral-500">{{ t('payroll.time.grid.hours_hint') }}</p>
+      </div>
+
+      <!--
+        Příznaky nad hodinami se nesčítají do odpracované doby. Věta tu není
+        pro parádu: bez ní by uživatel čekal, že „noční 8h" přidá osm hodin.
+      -->
+      <p
+        v-if="!gridEditableCategory"
+        class="border-b border-warning-200 bg-warning-50 px-4 py-2 text-xs text-warning-800"
+        data-test="grid-flag-notice"
+      >{{ t('payroll.time.grid.flag_notice') }}</p>
+
+      <p v-if="gridNote" class="border-b border-neutral-200 bg-neutral-50 px-4 py-2 text-sm text-neutral-700" data-test="grid-note">
+        {{ gridNote }}
+      </p>
+      <div
+        v-if="gridSaveError"
+        class="border-b border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-700"
+        data-test="grid-save-error"
+      >
+        <p class="font-medium">{{ gridSaveError }}</p>
+        <ul v-if="gridCellErrorList.length" class="mt-2 space-y-1 text-xs">
+          <li v-for="failure in gridCellErrorList" :key="failure.key">
+            {{ failure.name }} · {{ failure.date }} — {{ failure.message }}
+          </li>
+        </ul>
+        <p v-if="gridCellErrorCount > gridCellErrorList.length" class="mt-1 text-xs">
+          {{ t('payroll.time.grid.more_errors', { count: gridCellErrorCount - gridCellErrorList.length }) }}
+        </p>
+      </div>
+
+      <div ref="gridBody" class="overflow-x-auto">
+        <table class="min-w-full border-separate border-spacing-0 text-xs">
+          <thead>
+            <tr class="text-neutral-500">
+              <th scope="col" class="sticky left-0 z-10 bg-surface px-3 py-2 text-left font-medium">
+                {{ t('payroll.time.columns.employee') }}
+              </th>
+              <th
+                v-for="day in gridDays"
+                :key="day.date"
+                scope="col"
+                class="px-1 py-2 text-center font-medium"
+                :class="day.weekend ? 'bg-neutral-50 text-neutral-400' : ''"
+              >
+                <span class="block">{{ day.day }}</span>
+                <span class="block text-[10px] uppercase">{{ t(`payroll.time.grid.weekdays.${day.weekday}`) }}</span>
+              </th>
+              <th scope="col" class="px-3 py-2 text-right font-medium">{{ t('payroll.time.grid.worked') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(row, rowIndex) in gridRows" :key="row.item.employment.id" class="border-t border-neutral-100">
+              <th scope="row" class="sticky left-0 z-10 max-w-[16rem] bg-surface px-3 py-1 text-left font-normal">
+                <span class="block truncate font-medium text-neutral-900">{{ row.item.employment.full_name }}</span>
+                <span class="block font-mono text-[10px] text-neutral-400">{{ row.item.employment.code }}</span>
+              </th>
+              <td
+                v-for="(day, dayIndex) in gridDays"
+                :key="day.date"
+                class="px-0.5 py-1 text-center"
+                :class="!row.cells.get(day.date)?.workday ? 'bg-neutral-50' : ''"
+              >
+                <input
+                  :data-grid-pos="`${rowIndex}-${dayIndex}`"
+                  :data-test="`grid-cell-${row.item.employment.id}-${day.date}`"
+                  :value="gridValue(row, day.date)"
+                  :disabled="!canWrite || row.item.month.status !== 'open' || gridCellLocked(row, day.date) || gridSaving"
+                  :title="gridCellTitle(row, day.date)"
+                  :aria-label="t('payroll.time.grid.cell_label', { name: row.item.employment.full_name, date: day.date })"
+                  :aria-invalid="Boolean(gridCellErrors[gridKey(row.item.employment.id, day.date)])"
+                  class="h-8 w-12 rounded border bg-surface px-1 text-center disabled:bg-neutral-100 disabled:text-neutral-400"
+                  :class="gridCellClass(row, day.date)"
+                  inputmode="decimal"
+                  autocomplete="off"
+                  @input="setGridValue(row.item.employment.id, day.date, ($event.target as HTMLInputElement).value)"
+                  @keydown="onGridKeydown($event, rowIndex, dayIndex)"
+                >
+                <span
+                  v-if="gridCellFlags(row, day.date)"
+                  class="mt-0.5 block text-[9px] leading-none text-payroll-600"
+                  aria-hidden="true"
+                >•</span>
+              </td>
+              <td class="px-3 py-1 text-right font-medium text-neutral-700">
+                {{ formatPayrollMinutes(row.workedTotal) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!--
+        Jedno společné Uložit dole, ne tlačítko u každého řádku — mřížka je
+        jeden formulář o sedmi stech políčkách, ne dvacet pět formulářů.
+      -->
+      <div class="sticky bottom-0 flex flex-wrap items-center justify-end gap-3 border-t border-neutral-200 bg-surface/95 px-4 py-3">
+        <p class="mr-auto text-xs text-neutral-500">{{ t('payroll.time.grid.keyboard_hint') }}</p>
+        <div class="flex flex-col items-end gap-1.5">
+          <button
+            :class="btnFilled('primary')"
+            :disabled="gridBlockedReason !== null || gridSaving"
+            :title="disabledTitle(gridBlockedReason !== null, gridBlockedReason)"
+            data-test="grid-save"
+            @click="saveGrid"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+            {{ t('payroll.time.grid.save', { count: gridDirtyCount }) }}
+          </button>
+          <p v-if="gridBlockedReason" :class="BTN_DISABLED_NOTE" data-test="grid-save-blocked">
+            {{ gridBlockedReason }}
+          </p>
+        </div>
+      </div>
+    </section>
+    <p
+      v-if="!loading && !loadFailed && gridRows.length > 0"
+      class="rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm text-neutral-600 md:hidden"
+      data-test="grid-mobile-note"
+    >{{ t('payroll.time.grid.mobile_note') }}</p>
+
     <div v-if="loading" class="space-y-3">
       <div v-for="index in 4" :key="index" class="h-28 animate-pulse rounded-xl bg-neutral-100" />
     </div>
@@ -1135,7 +1931,7 @@ onMounted(load)
         <DensityToggle :ctrl="tbl" />
       </div>
       <div class="hidden overflow-x-auto md:block">
-        <table class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
+        <table data-test="payroll-time-summary" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
           <thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
             <th class="w-10 px-4 py-3">
               <input

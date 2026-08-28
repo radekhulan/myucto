@@ -400,9 +400,186 @@ final class GarnishmentCalculatorTest extends TestCase
             ),
         ]);
         self::assertSame(0, $oldOrder->employerFlatFeeMinorUnits);
+        self::assertSame(863_200, $oldOrder->totalWithheldMinorUnits);
+        self::assertSame(863_200, $oldOrder->allocationFor('claim-old')?->firstPoolMinorUnits);
     }
 
-    public function testEmployerFeeConvergesWhenOnlyOneCrownCanBeWithheld(): void
+    /**
+     * § 270 odst. 3 o. s. ř.: paušál si plátce mzdy odečte ZE SRAŽENÝCH ČÁSTEK
+     * mířících oprávněnému. Na doběhu exekuce se proto zaměstnanci srazí přesně
+     * zbývající dluh — dřív se mu k němu paušál přičetl (nález E-02).
+     */
+    public function testEmployerFeeIsPaidByCreditorNotByDebtorOnTheFinalInstalment(): void
+    {
+        $result = $this->calculate(4_000_000, [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 30_000),
+        ]);
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        // Kapacita první třetiny je 863 200; sráží se jen zbývající dluh 300 Kč.
+        self::assertSame(30_000, $result->totalWithheldMinorUnits);
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
+        self::assertSame(25_000, $result->allocationFor('claim-1')?->totalMinorUnits);
+        self::assertSame(3_970_000, $result->employeePaymentMinorUnits);
+    }
+
+    /**
+     * Zaokrouhlená třetina sražené částky je strop náhrady (§ 3 odst. 3 nař.
+     * vlády č. 595/2006 Sb.). Při dluhu 100 Kč tedy plátci mzdy nenáleží
+     * 50 Kč, ale jen 34 Kč — a sráží se pořád jen těch 100 Kč.
+     */
+    public function testEmployerFeeIsCappedByOneThirdOfTheAmountActuallyWithheld(): void
+    {
+        $result = $this->calculate(4_000_000, [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000),
+        ]);
+
+        self::assertSame(10_000, $result->totalWithheldMinorUnits);
+        self::assertSame(3_400, $result->employerFlatFeeMinorUnits);
+        self::assertSame(6_600, $result->allocationFor('claim-1')?->totalMinorUnits);
+    }
+
+    /**
+     * „Provádí-li plátce mzdy zároveň srážky k vydobytí několika pohledávek
+     * vůči témuž povinnému, náleží mu náhrada nákladů pouze jednou."
+     * Strop je 50 Kč na povinného, ne na exekuci.
+     */
+    public function testEmployerFeeIsDueOncePerDebtorRegardlessOfClaimCount(): void
+    {
+        $result = $this->calculate(4_000_000, [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 400_000, '2026-01-01'),
+            $this->statutoryClaim('claim-2', ClaimCategory::NonPriority, 400_000, '2026-02-01'),
+            $this->statutoryClaim('claim-3', ClaimCategory::NonPriority, 400_000, '2026-03-01'),
+        ]);
+
+        // Tři exekuční příkazy, náhrada pořád jen jedna — strop je 50 Kč na
+        // zaměstnance, ne na exekuci.
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
+        self::assertSame(863_200, $result->totalWithheldMinorUnits);
+
+        // Paušál se uspokojuje před ostatními pohledávkami z první třetiny,
+        // takže o něj přijde ten poslední v pořadí, ne ten první.
+        self::assertSame(400_000, $result->allocationFor('claim-1')?->totalMinorUnits);
+        self::assertSame(400_000, $result->allocationFor('claim-2')?->totalMinorUnits);
+        self::assertSame(58_200, $result->allocationFor('claim-3')?->totalMinorUnits);
+
+        $allocated = 0;
+        foreach ($result->allocations as $allocation) {
+            $allocated += $allocation->totalMinorUnits;
+        }
+        self::assertSame(
+            $result->totalWithheldMinorUnits,
+            $allocated + $result->employerFlatFeeMinorUnits,
+        );
+    }
+
+    /**
+     * Měsíc, kdy celou srážku spolkne výživné z druhé třetiny a na první
+     * třetinu vůbec nedojde. Paušál se ukrojí z výživného — jinak by nárok
+     * podle § 270 odst. 3 o. s. ř. zanikl, přestože plátce srážky prováděl.
+     */
+    public function testEmployerFeeIsCarvedFromMaintenanceWhenFirstThirdStaysUnused(): void
+    {
+        $result = $this->calculate(4_000_000, [
+            $this->statutoryClaim(
+                'maintenance',
+                ClaimCategory::CurrentMaintenance,
+                200_000,
+                maintenanceWeightMinorUnits: 200_000,
+            ),
+        ]);
+
+        self::assertSame(200_000, $result->totalWithheldMinorUnits);
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
+        self::assertSame(195_000, $result->allocationFor('maintenance')?->secondPoolMinorUnits);
+        self::assertSame(0, $result->allocationFor('maintenance')?->firstPoolMinorUnits);
+        self::assertSame(3_800_000, $result->employeePaymentMinorUnits);
+    }
+
+    /**
+     * Jádro nálezu E-02 jako vlastnost, ne jako jeden příklad: srážka
+     * s paušálem musí být na korunu stejná jako srážka bez něj. Paušál smí
+     * měnit jen to, komu z ní co dojde.
+     */
+    public function testEmployerFeeNeverChangesWhatTheEmployeeLoses(): void
+    {
+        foreach ([1, 100, 3_400, 10_000, 30_000, 200_000, 863_100, 863_200, 5_000_000] as $debt) {
+            foreach ([ClaimCategory::NonPriority, ClaimCategory::OtherPriority] as $category) {
+                $withFee = $this->calculate(4_000_000, [
+                    $this->statutoryClaim('claim-1', $category, $debt),
+                ]);
+                $withoutFee = $this->calculate(4_000_000, [
+                    $this->statutoryClaim(
+                        'claim-1',
+                        $category,
+                        $debt,
+                        orderIssuedOn: '2021-12-31',
+                    ),
+                ]);
+
+                self::assertSame(
+                    $withoutFee->totalWithheldMinorUnits,
+                    $withFee->totalWithheldMinorUnits,
+                    "dluh {$debt}, kategorie {$category->value}",
+                );
+                self::assertSame(
+                    $withoutFee->employeePaymentMinorUnits,
+                    $withFee->employeePaymentMinorUnits,
+                );
+                self::assertLessThanOrEqual(
+                    $withFee->totalWithheldMinorUnits,
+                    $withFee->employerFlatFeeMinorUnits,
+                );
+                self::assertSame(
+                    $withFee->totalWithheldMinorUnits - $withFee->employerFlatFeeMinorUnits,
+                    $withFee->allocationFor('claim-1')?->totalMinorUnits ?? 0,
+                );
+            }
+        }
+    }
+
+    public function testNoEmployerFeeInMonthWithoutAnyWithholding(): void
+    {
+        $result = $this->calculate(1_410_200, [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),
+        ]);
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+        self::assertSame(0, $result->employerFlatFeeMinorUnits);
+        self::assertSame(1_410_200, $result->employeePaymentMinorUnits);
+    }
+
+    /**
+     * Paušál je jen pro exekuční a soudem nařízené srážky, ne pro oddlužení —
+     * insolvenční správce dostane celou zabavitelnou částku.
+     */
+    public function testApprovedInsolvencyDoesNotChargeTheEmployerFee(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [],
+            insolvency: new InsolvencyInstruction(
+                InsolvencyMode::ApprovedStandard,
+                decisionVerified: true,
+                recipientVerified: true,
+                paymentInstructionId: 101,
+                paymentInstructionHash: str_repeat('a', 64),
+                employmentId: 202,
+            ),
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertTrue($result->insolvencyApplied);
+        self::assertSame(0, $result->employerFlatFeeMinorUnits);
+        self::assertSame(1_726_400, $result->totalWithheldMinorUnits);
+        self::assertSame(
+            1_726_400,
+            $result->allocationFor('insolvency-administrator')?->totalMinorUnits,
+        );
+    }
+
+    public function testEmployerFeeCannotExceedTheSingleCrownThatWasWithheld(): void
     {
         $result = $this->calculate(1_410_500, [
             $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),

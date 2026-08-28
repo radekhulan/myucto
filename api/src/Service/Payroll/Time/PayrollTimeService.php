@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Time;
 
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeConflictException;
+use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation;
@@ -16,6 +18,15 @@ final class PayrollTimeService
 {
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
+
+    /**
+     * Kolik buněk měsíční mřížky se vejde do jednoho požadavku.
+     *
+     * Stránka mřížky je 25 vztahů × 31 dnů = 775 buněk, takže se plná stránka
+     * uloží dvěma požadavky místo 775. Vyšší strop nedává smysl: dávka běží
+     * buňku po buňce a delší požadavek by narazil na `max_execution_time`.
+     */
+    public const BATCH_MAX_CELLS = 500;
 
     private const CATEGORIES = [
         'regular',
@@ -532,6 +543,158 @@ final class PayrollTimeService
             // pracoviště nic neliší".
             $this->difficultyFactorCount($input, $category),
         );
+    }
+
+    /**
+     * Dávkový zápis dnů z měsíční mřížky docházky.
+     *
+     * Proč to NENÍ jedna transakce nad celou dávkou: měsíc se zamyká
+     * `FOR UPDATE` a každý uložený den mu zvedne `row_version`. Držet ten zámek
+     * nad pěti sty dny by z běžného „vyplnit pracovní dny" udělalo minutu, po
+     * kterou se k témuž měsíci nedostane nikdo jiný. Každá buňka je proto
+     * vlastní transakce — dávka je částečně uložitelná ze své podstaty a
+     * volající se dozví, co prošlo a co ne, u KONKRÉTNÍ buňky.
+     *
+     * `month_row_version` posílá klient jen pro PRVNÍ buňku daného vztahu; dál
+     * si ho dávka drží z odpovědi předchozího zápisu. Kdyby to nedělala,
+     * druhý den téhož člověka by vždycky spadl na optimistický zámek, který
+     * zvedl náš vlastní předchozí zápis.
+     *
+     * @param array<string,mixed> $input
+     * @return array{
+     *     saved:int,
+     *     failures:list<array<string,mixed>>,
+     *     month_row_versions:array<int,int>
+     * }
+     */
+    public function saveEntryBatch(int $supplierId, array $input, ?int $userId): array
+    {
+        $cells = $input['cells'] ?? null;
+        if (!is_array($cells) || !array_is_list($cells)) {
+            throw new \InvalidArgumentException('cells musí být seznam buněk.');
+        }
+        if ($cells === []) {
+            throw new \InvalidArgumentException('Dávka neobsahuje žádnou buňku k uložení.');
+        }
+        if (count($cells) > self::BATCH_MAX_CELLS) {
+            throw new \InvalidArgumentException(sprintf(
+                'Najednou lze uložit nejvýše %d buněk docházky.',
+                self::BATCH_MAX_CELLS,
+            ));
+        }
+        $defaultTimezone = isset($input['timezone']) ? $input['timezone'] : null;
+
+        $saved = 0;
+        $failures = [];
+        /** @var array<int,int> $monthVersions */
+        $monthVersions = [];
+        /** @var array<int,string> $stale */
+        $stale = [];
+
+        foreach ($cells as $index => $cell) {
+            if (!is_array($cell)) {
+                $failures[] = self::batchFailure($index, null, '', '', 'validation_failed', 'Buňka musí být objekt.');
+                continue;
+            }
+            $employmentId = null;
+            try {
+                $employmentId = $this->positiveInt($cell, 'employment_id');
+            } catch (\InvalidArgumentException $e) {
+                $failures[] = self::batchFailure($index, null, '', '', 'validation_failed', $e->getMessage());
+                continue;
+            }
+            $date = is_string($cell['starts_at'] ?? null) ? substr($cell['starts_at'], 0, 10) : '';
+            $category = is_string($cell['category'] ?? null) ? $cell['category'] : '';
+
+            // Jakmile u vztahu jednou selhal optimistický zámek, nevíme, na jaké
+            // verzi měsíc je. Hádat ji dál by znamenalo buď tiše přepsat cizí
+            // změnu, nebo sypat matoucí konflikty — tak se to řekne rovnou.
+            if (isset($stale[$employmentId])) {
+                $failures[] = self::batchFailure(
+                    $index,
+                    $employmentId,
+                    $date,
+                    $category,
+                    'stale_after_conflict',
+                    'Dřívější den téhož zaměstnance se neuložil, takže se zbytek jeho dnů'
+                    . ' nezapisoval. Načtěte měsíc znovu a zkuste to na něm.',
+                );
+                continue;
+            }
+
+            $entryInput = $cell;
+            if (!isset($entryInput['timezone']) && $defaultTimezone !== null) {
+                $entryInput['timezone'] = $defaultTimezone;
+            }
+            if (isset($monthVersions[$employmentId])) {
+                $entryInput['month_row_version'] = $monthVersions[$employmentId];
+            }
+
+            try {
+                $result = $this->saveEntry($supplierId, $entryInput, $userId);
+                $monthVersions[$employmentId] = PayrollTimeValue::int(
+                    $result['month']['row_version'] ?? null,
+                    'row_version',
+                );
+                $saved += 1;
+            } catch (PayrollTimeConflictException $e) {
+                $stale[$employmentId] = 'conflict';
+                $failures[] = self::batchFailure(
+                    $index,
+                    $employmentId,
+                    $date,
+                    $category,
+                    'row_version_conflict',
+                    $e->getMessage(),
+                );
+            } catch (PayrollTimeLockedException $e) {
+                $stale[$employmentId] = 'locked';
+                $failures[] = self::batchFailure(
+                    $index,
+                    $employmentId,
+                    $date,
+                    $category,
+                    'payroll_time_locked',
+                    $e->getMessage(),
+                );
+            } catch (\InvalidArgumentException $e) {
+                // Neplatná buňka se odmítla ještě před dotykem měsíce, takže
+                // ostatní dny téhož člověka můžou pokračovat na téže verzi.
+                $failures[] = self::batchFailure(
+                    $index,
+                    $employmentId,
+                    $date,
+                    $category,
+                    'validation_failed',
+                    $e->getMessage(),
+                );
+            }
+        }
+
+        return [
+            'saved' => $saved,
+            'failures' => $failures,
+            'month_row_versions' => $monthVersions,
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private static function batchFailure(
+        int $index,
+        ?int $employmentId,
+        string $date,
+        string $category,
+        string $code,
+        string $message,
+    ): array {
+        return [
+            'index' => $index,
+            'employment_id' => $employmentId,
+            'date' => $date,
+            'category' => $category,
+            'code' => $code,
+            'message' => $message,
+        ];
     }
 
     /**

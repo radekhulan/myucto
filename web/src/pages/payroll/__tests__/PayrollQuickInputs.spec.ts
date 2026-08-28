@@ -837,4 +837,61 @@ describe('PayrollQuickInputs', () => {
       .toContain('Zasada svatku neni sjednana.')
   })
 
+
+  it('dokládá rozpad přesčasu na dosaženou mzdu a příplatek (§ 142 odst. 5 ZP)', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [fixture({
+        overtime_amount_minor: 31_250,
+        overtime_wage_minor: 25_000,
+        overtime_premium_minor: 6_250,
+      })],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // Obě poloviny nároku musí být doložitelné na desktopu i na mobilu.
+    expect(wrapper.get('[data-testid="quick-overtime-split-12"]').text())
+      .toBe('payroll.quick_inputs.overtime_split')
+    expect(wrapper.find('[data-testid="quick-overtime-split-mobile-12"]').exists()).toBe(true)
+  })
+
+  it('ukáže rozpad i u náhradního volna, kde je příplatek nulový', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [fixture({
+        overtime_amount_minor: 25_000,
+        overtime_wage_minor: 25_000,
+        overtime_premium_minor: 0,
+      })],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-overtime-split-12"]').exists()).toBe(true)
+  })
+
+  it('u řádku bez přesčasu a u starší odpovědi bez rozpadu mlčí', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      items: [
+        fixture({
+          employment_id: 12,
+          overtime_amount_minor: 0,
+          overtime_wage_minor: 0,
+          overtime_premium_minor: 0,
+        }),
+        fixture({ employment_id: 13, employment_row_version: 4, employment_code: 'SYN-B' }),
+      ],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-overtime-split-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-overtime-split-13"]').exists()).toBe(false)
+  })
+
 })

@@ -52,6 +52,14 @@ final class PayrollRulesetYearOutlook
     public const URGENT_FROM_DAY = 1;
 
     /**
+     * Stupně závažnosti výhledu, od nejmírnějšího. Pořadí je zároveň pořadím
+     * naléhavosti, které používá {@see self::worstSeverity()}.
+     *
+     * @var list<string>
+     */
+    public const SEVERITIES = ['ok', 'info', 'warning', 'critical'];
+
+    /**
      * @return list<array{
      *   year:int,
      *   covered:bool,
@@ -96,7 +104,7 @@ final class PayrollRulesetYearOutlook
         PayrollRulesetProvider $rulesets,
         ?DateTimeImmutable $today = null,
     ): string {
-        $rank = ['ok' => 0, 'info' => 1, 'warning' => 2, 'critical' => 3];
+        $rank = array_flip(self::SEVERITIES);
         $worst = 'ok';
         foreach (self::forProvider($rulesets, $today) as $entry) {
             if ($rank[$entry['severity']] > $rank[$worst]) {

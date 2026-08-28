@@ -1505,6 +1505,7 @@ final class Routes
             $g->put('/time/calendars/{employmentId:[0-9]+}', [PayrollTimeAction::class, 'calendar']);
             $g->post('/time/shifts', [PayrollTimeAction::class, 'shift']);
             $g->post('/time/entries', [PayrollTimeAction::class, 'entry']);
+            $g->post('/time/entries/batch', [PayrollTimeAction::class, 'entryBatch']);
             $g->post('/time/overtime-consents', [PayrollTimeAction::class, 'overtimeConsent']);
             $g->post('/time/overtime-protections', [PayrollTimeAction::class, 'overtimeProtection']);
             $g->post(

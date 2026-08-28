@@ -11,8 +11,18 @@ export type PayrollPostingReconciliationCategoryKey =
   | 'other_deductions'
   | 'enforcement'
   | 'net_wage'
+  | 'risky_savings'
+  // Informativní kategorie: deník i platby má vždy `null`, status
+  // `not_applicable`, rozdíl z ní nikdy nevznikne. Nepeněžní plnění bez
+  // účetního dopadu se navíc nezapočítává do porovnávané hrubé mzdy.
+  | 'non_monetary_neutral'
 
 export type PayrollPostingReconciliationCategoryStatus = 'match' | 'diff' | 'not_applicable'
+
+/** Kategorie, které se nikdy neporovnávají — jen se vykazují. */
+export const PAYROLL_POSTING_INFORMATIONAL_CATEGORIES: readonly PayrollPostingReconciliationCategoryKey[] = [
+  'non_monetary_neutral',
+]
 
 export interface PayrollPostingReconciliationCategory {
   key: PayrollPostingReconciliationCategoryKey

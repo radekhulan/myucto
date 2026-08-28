@@ -230,6 +230,70 @@ final class PayrollTimeAction
     }
 
     /**
+     * Dávkový zápis dnů z měsíční mřížky docházky.
+     *
+     * Odpověď nese i PŘENAČTENOU stránku přehledu, a to ve stejném zúžení
+     * (`limit`, `offset`, `employment_id`), v jakém ji má uživatel před sebou.
+     * Bez toho by po každém uložení následoval druhý požadavek a mřížka by
+     * skočila na první stranu.
+     *
+     * Audit se zapisuje JEDNOU za dávku. Jednotlivé dny jsou versionované
+     * řádky s `created_by`, takže per-den událost by jen nafoukla protokol
+     * o 775 řádků za jedno kliknutí.
+     */
+    public function entryBatch(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.time.write',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            $supplierId = $this->currentSupplierId($request);
+            $input = $this->input($request);
+            $result = $this->time->saveEntryBatch($supplierId, $input, $this->userId($request));
+            $this->audit(
+                $request,
+                'payroll.time.entries_batch_saved',
+                'payroll_time_month',
+                0,
+                [
+                    'period' => is_string($input['period'] ?? null) ? $input['period'] : null,
+                    'saved' => $result['saved'],
+                    'failed' => count($result['failures']),
+                    'employment_ids' => array_keys($result['month_row_versions']),
+                ],
+            );
+            $query = $request->getQueryParams();
+            $overview = $this->time->overview(
+                $supplierId,
+                is_string($query['period'] ?? null) ? $query['period'] : gmdate('Y-m'),
+                filter_var($query['incomplete'] ?? false, FILTER_VALIDATE_BOOL),
+                max(1, min(
+                    PayrollTimeService::LIST_MAX_LIMIT,
+                    (int) ($query['limit'] ?? PayrollTimeService::LIST_DEFAULT_LIMIT),
+                )),
+                max(0, (int) ($query['offset'] ?? 0)),
+                self::narrowingId($query, 'employment_id'),
+            );
+            return Json::ok($response, [
+                'saved' => $result['saved'],
+                'failures' => $result['failures'],
+                'month' => $overview,
+            ]);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
+    /**
      * Zápis souhlasu zaměstnance s prací přesčas nad nařízený rozsah
      * (§ 93 odst. 3 zákoníku práce).
      */

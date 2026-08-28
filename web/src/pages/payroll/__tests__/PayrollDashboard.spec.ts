@@ -19,6 +19,7 @@ vi.mock('@/api/payroll', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: () => true,
+    canRead: () => true,
     get isSuperadmin() { return m.isSuperadmin.value },
   }),
 }))
@@ -67,6 +68,9 @@ function mountDashboard() {
         },
         PayrollOperationalHealthPanel: {
           template: '<div data-test="operational-health-panel-stub" />',
+        },
+        PayrollDeadlinesPanel: {
+          template: '<div data-test="deadlines-panel-stub" />',
         },
       },
     },
@@ -293,4 +297,19 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(wrapper.text()).not.toContain('payroll.activation.qualification.title')
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
+
+  it('staví hlídač zákonných termínů nad provozní přehled i nad dlaždice měsíce', async () => {
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const html = wrapper.html()
+    const deadlines = html.indexOf('deadlines-panel-stub')
+    const health = html.indexOf('operational-health-panel-stub')
+    const workspace = html.indexOf('monthly-workspace')
+    expect(deadlines).toBeGreaterThan(-1)
+    // Zmeskana lhuta je jedina vec na strance, kterou uz nejde napravit pozdeji.
+    expect(deadlines).toBeLessThan(health)
+    expect(deadlines).toBeLessThan(workspace)
+  })
+
 })

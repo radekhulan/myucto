@@ -82,6 +82,12 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
         'payroll.ts::PayrollPeriodExportJobStatus'
             => 'const:MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository::STATUSES',
+        'payroll.ts::PayrollDeadlinePhase'
+            => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::PHASES',
+        'payroll.ts::PayrollDeadlineSource'
+            => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::SOURCES',
+        'payrollRulesets.ts::PayrollRulesetOutlookSeverity'
+            => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook::SEVERITIES',
         'payroll.ts::PayrollForeignPermitKind'
             => 'db:payroll_person_foreign_permits.permit_kind',
         'payroll.ts::PayrollForeignPermitStatus'

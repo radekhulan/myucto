@@ -11,7 +11,9 @@ import {
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatMoneyMinor } from '@/composables/useFormat'
+import { useAuthStore } from '@/stores/auth'
 import { employmentCodeLabel } from './employmentLifecycleUi'
+import { payrollInputEditable } from './payrollComponentsUi'
 
 /**
  * Karty zaměstnanců na přehledu mezd.
@@ -35,6 +37,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const auth = useAuthStore()
 const pageSize = 25
 const loading = ref(true)
 const failed = ref(false)
@@ -62,6 +65,34 @@ function absencesOf(row: PayrollEmployeeCardRow): PayrollEmployeeCardAbsence[] {
 
 function money(minor: number): string {
   return formatMoneyMinor(minor)
+}
+
+const canApprove = computed(() => auth.canWrite('payroll.approve'))
+
+/**
+ * Je částka měsíce ještě otevřená?
+ *
+ * Karta dřív o stavu vstupu mlčela, takže schválená částka vypadala stejně jako
+ * zamčená — a uživatel s právem `payroll.approve`, který ji opravit smí, se to
+ * odsud nedozvěděl. Pravidlo si karta nedrží vlastní: bere ho ze sdíleného
+ * `payrollInputEditable`, aby o téže částce netvrdila něco jiného než rychlé
+ * vstupy.
+ *
+ * Vrací `null` pro koncept a pro měsíc bez zadané částky — tam není co hlásit
+ * a štítek u každé karty by byl jen šum.
+ */
+function baseLockState(row: PayrollEmployeeCardRow): 'locked' | 'approved_open' | 'approved_closed' | null {
+  const status = row.inputs.base?.status ?? null
+  if (status === null || status === 'draft' || status === 'cancelled') return null
+  if (status === 'locked') return 'locked'
+
+  return payrollInputEditable(status, canApprove.value) ? 'approved_open' : 'approved_closed'
+}
+
+function baseLockClass(row: PayrollEmployeeCardRow): string {
+  return baseLockState(row) === 'approved_open'
+    ? 'bg-success-50 text-success-700'
+    : 'bg-neutral-100 text-neutral-600'
 }
 
 function relationLabel(row: PayrollEmployeeCardRow): string {
@@ -322,6 +353,14 @@ onBeforeUnmount(() => {
             >
               {{ t('payroll.employee_cards.gross_preview', { amount: money(row.gross_preview_minor) }) }}
             </p>
+            <span
+              v-if="baseLockState(row)"
+              class="mt-1.5 inline-flex rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="baseLockClass(row)"
+              :data-test="`employee-base-state-${row.employment_id}`"
+            >
+              {{ t(`payroll.employee_cards.base_state.${baseLockState(row)}`) }}
+            </span>
           </div>
 
           <div v-if="absencesOf(row).length > 0" class="mt-3 flex flex-wrap gap-1.5">

@@ -817,6 +817,25 @@
             "storage_unavailable": "Úložiště úprav není dostupné — chybí migrace databáze. Platí ověřená sada z aplikace.",
             "degraded": "Uložená úprava pravidel je nekonzistentní. Výpočet proto používá ověřená pravidla dodaná aplikací.",
             "degraded_technical": "Technické údaje pro podporu",
+            "outlook": {
+                "title": "Výhled na příští roky",
+                "description": "Sada musí být hotová dřív, než začne rok, který má počítat — jinak modul od 1. ledna nespočítá ani jednu výplatu.",
+                "year": "Rok {year}",
+                "covered": "Rok {year} je pokrytý legislativní sadou.",
+                "missing_domains": "Chybí domény: {domains}",
+                "severity": {
+                    "ok": "Pokryto",
+                    "info": "Informace",
+                    "warning": "Doplnit letos",
+                    "critical": "Doplnit ihned"
+                },
+                "message": {
+                    "info": "Pro rok {year} zatím legislativní sada není. Zákonné hodnoty pro tenhle rok ještě nejsou vyhlášené — je to informace, ne úkol.",
+                    "warning": "Pro rok {year} zatím legislativní sada není. Hodnoty se vyhlašují na podzim (průměrná mzda do 30. 9., minimální mzda a nezabavitelné částky obvykle v listopadu a prosinci); sada musí být hotová nejpozději k 31. 12.",
+                    "critical": "Pro rok {year} chybí legislativní sada, přestože zákonné hodnoty už jsou vyhlášené. Doplňte ji JEŠTĚ LETOS — od 1. 1. {year} mzdový modul bez ní nespočítá ani jednu výplatu."
+                },
+                "technical": "Technické znění ze serveru"
+            },
             "version_count": "Verzí: {count}",
             "status": {
                 "ready": "Výpočet povolen",
@@ -1221,8 +1240,15 @@
                 "income_tax": "Daň ze závislé činnosti (342)",
                 "other_deductions": "Ostatní srážky (379)",
                 "enforcement": "Exekuční a insolvenční srážky (379)",
-                "net_wage": "Čistá mzda k výplatě (331/366)"
+                "net_wage": "Čistá mzda k výplatě (331/366)",
+                "risky_savings": "Povinné spoření u rizikové práce (527/379)",
+                "non_monetary_neutral": "Nepeněžní plnění bez účetního dopadu"
             },
+            "category_note": {
+                "risky_savings": "Sleduje se nákladová strana (527). Pokud si na 527 účtujete i jinou mzdovou složku, oddělte příspěvek analytikou (např. 527.100).",
+                "non_monetary_neutral": "Informativní řádek, ne rozdíl. Nepeněžní plnění (typicky 1 % vstupní ceny vozidla) se neúčtuje zvlášť — náklad je v knihách už ze zdrojového dokladu, a proto se do porovnávané hrubé mzdy nezapočítává."
+            },
+            "informational_badge": "Informativní",
             "category_status": {
                 "match": "Souhlasí",
                 "diff": "Rozdíl",
@@ -1698,6 +1724,7 @@
             "total_amount": "Celková částka",
             "identifier_missing": "Rodné číslo není doplněno",
             "rate_hint": "Schválený průměr {rate}/h; přesčas počítán včetně 25% příplatku.",
+            "overtime_split": "Z toho dosažená mzda {wage} a příplatek za přesčas {premium} (§ 114 odst. 1 ZP).",
             "hours_unavailable": "Hodiny lze použít až po schválení průměrného hodinového výdělku. Zadejte celkovou částku.",
             "amount_only_relation_hint": "U tohoto pracovního vztahu se zadává pouze částka odměny, nikoli hodinový přesčas.",
             "suspended_in_month": "Pozastavení v průběhu měsíce",
@@ -2480,7 +2507,68 @@
                 "remote": "Práce na dálku",
                 "publish": "Publikovat zaměstnanci",
                 "blocked_no_employment": "Vyberte zaměstnance, kterému se záznam zapíše.",
-                "blocked_no_range": "Doplňte začátek i konec směny — bez nich se odpracovaná doba nedá spočítat."
+                "blocked_no_range": "Doplňte začátek i konec směny — bez nich se odpracovaná doba nedá spočítat.",
+                "save_and_next": "Uložit a další den"
+            },
+            "grid": {
+                "title": "Měsíční mřížka docházky",
+                "subtitle": "Řádek je zaměstnanec, sloupec den. Do buňky se píší odpracované hodiny — „8“, „8:30“ i „7,5“. Výjimky (směna přes půlnoc, přestávky, příplatkové kategorie) zůstávají v řádkovém editoru nahoře.",
+                "category": "Zapisovaná kategorie",
+                "start_time": "Začátek dne",
+                "break": "Přestávka (min)",
+                "hours_hint": "Zápis se založí od začátku dne v délce zadaných hodin plus přestávka. Do buňky se píše čistý odpracovaný čas.",
+                "flag_notice": "Noční práce, víkend, svátek a ztížené prostředí jsou příznaky nad TÝMIŽ hodinami, ne hodiny navíc. Do odpracované doby se nesčítají — ta je vždy jen běžná práce plus přesčas.",
+                "worked": "Odpracováno",
+                "weekdays": {
+                    "1": "po",
+                    "2": "út",
+                    "3": "st",
+                    "4": "čt",
+                    "5": "pá",
+                    "6": "so",
+                    "7": "ne"
+                },
+                "cell_label": "{name}, {date}",
+                "cell_flags": "Den nese příznaky: {flags}.",
+                "month_approved": "Měsíc je schválený, zápis do něj nejde.",
+                "fill_workdays": "Vyplnit pracovní dny",
+                "copy_previous": "Zkopírovat minulý měsíc",
+                "import": "Import z CSV nebo XLSX",
+                "save": "Uložit mřížku ({count})",
+                "saved": "Uložené dny: {count}.",
+                "saved_partially": "Uložené dny: {saved}. Neuložené: {failed} — zůstávají rozepsané i s důvodem u konkrétní buňky.",
+                "save_failed": "Mřížku se nepodařilo uložit.",
+                "filled": "Vyplněné dny: {count}. Přepsaly se jen prázdné buňky.",
+                "filled_without_calendar": "Vyplněné dny: {count}. U {people} vztahů chybí pracovní kalendář, takže se odhadlo pondělí až pátek po osmi hodinách — svátky v takovém odhadu nejsou.",
+                "copied": "Zkopírované dny: {count} od {people} zaměstnanců z období {period}. Nedohledaní zaměstnanci: {missing}. Dny, které se do měsíce nevešly: {skipped}.",
+                "copy_failed": "Minulý měsíc se nepodařilo načíst.",
+                "more_errors": "A dalších chybných buněk: {count}.",
+                "keyboard_hint": "Tab a šipky se pohybují po mřížce, Enter skočí o řádek níž, Ctrl+Enter uloží.",
+                "mobile_note": "Měsíční mřížka je od tabletu výš — na telefonu by byla buňka užší než prst. Použijte řádkové zadání níž, nebo import.",
+                "blocked_no_permission": "Na zápis docházky nemáte oprávnění.",
+                "blocked_nothing_changed": "Zatím jste nic nezměnili. Napište hodiny do buňky, nebo použijte hromadnou akci nad mřížkou.",
+                "blocked_flag_category": "Hromadné vyplnění dává smysl jen u běžné práce a přesčasu. Příznaky (noční, víkend, svátek, ztížené prostředí) se zadávají ke konkrétním dnům.",
+                "problems": {
+                    "unparsable": "Hodiny nejdou přečíst. Napište je jako „8“, „8:30“ nebo „7,5“.",
+                    "delete_unsupported": "Zápis se z mřížky nemaže — smazání je revize s důvodem. Použijte řádkový editor.",
+                    "locked": "Den má víc zápisů téže kategorie, takže ho jedno číslo nenahradí. Upravte ho v řádkovém editoru.",
+                    "crosses_midnight": "Den by přesáhl půlnoc. Směnu přes půlnoc zadejte v řádkovém editoru.",
+                    "invalid_wall_time": "Tenhle čas toho dne neexistuje (přechod na letní čas). Zadejte den v řádkovém editoru."
+                }
+            },
+            "approve_errors": {
+                "holiday_arrangement_missing": "Měsíc obsahuje práci ve svátek, ale u vztahu {name} není sjednaná zásada (náhradní volno, nebo příplatek). Bez ní se z evidence nedá spočítat mzda, takže ji schválení nepustí dál.",
+                "difficulty_factors_missing": "Měsíc obsahuje práci ve ztíženém prostředí, ale u vztahu {name} chybí počet ztěžujících vlivů podle § 117.",
+                "average_earning_missing": "Příplatek se u vztahu {name} počítá z průměrného výdělku a ten pro toto období není zjištěný.",
+                "inputs_locked": "Vstupy období jsou uzamčené mzdovým během, takže do nich schválení docházky nemůže zapsat příplatky.",
+                "overtime_conflict": "Přesčas je u vztahu {name} zadaný dvakrát — v docházce i v rychlých vstupech. Nechte jen jednu evidenci.",
+                "link": {
+                    "holiday_arrangement_missing": "Otevřít kartu zaměstnance a doplnit zásadu příplatků",
+                    "difficulty_factors_missing": "Otevřít kartu zaměstnance a doplnit ztěžující vlivy",
+                    "average_earning_missing": "Otevřít průměrné výdělky",
+                    "inputs_locked": "Otevřít mzdové běhy",
+                    "overtime_conflict": "Otevřít rychlé vstupy"
+                }
             },
             "calendar": {
                 "default_name": "Pravidelný pracovní týden",
@@ -5115,6 +5203,35 @@
                 "description": "Než půjde spočítat mzdový běh, doplňte tyhle údaje zaměstnavatele.",
                 "action": "Otevřít nastavení"
             },
+            "deadlines": {
+                "title": "Zákonné termíny",
+                "description": "Podání, odvody i lhůty u lidí na jednom místě — co je po termínu a co vás čeká.",
+                "as_of": "Stav k {date}, výhled na {days} dnů dopředu.",
+                "load_failed": "Přehled zákonných termínů se nepodařilo načíst.",
+                "retry": "Zkusit znovu",
+                "empty": "Žádný zákonný termín teď nehoří ani není po termínu.",
+                "overdue_hint": "Zmeškaná zákonná lhůta — řešte přednostně.",
+                "resolve": "Vyřešit",
+                "remaining": "Zbývá {amount}",
+                "overdue_by": "po termínu o {n} den | po termínu o {n} den | po termínu o {n} dny | po termínu o {n} dnů",
+                "due_today_label": "termín je dnes",
+                "due_in": "zbývá {n} den | zbývá {n} den | zbývají {n} dny | zbývá {n} dnů",
+                "expand": "Zobrazit dalších {count}",
+                "collapse": "Skrýt",
+                "phase": {
+                    "overdue": "Po termínu",
+                    "due_today": "Dnes",
+                    "due_soon": "Do pěti dnů",
+                    "action_required": "Vyžaduje zásah",
+                    "awaiting_result": "Čeká na výsledek",
+                    "open": "Otevřené"
+                },
+                "source": {
+                    "submission": "Podání",
+                    "levy": "Odvod",
+                    "checklist": "Lhůta u člověka"
+                }
+            },
             "operational_health": {
                   "title": "Provozní přehled mezd",
                   "description": "Souhrn stavů, které vyžadují pozornost. Neobsahuje osobní ani detailní údaje.",
@@ -5322,6 +5439,11 @@
             "base": "Hrubá mzda za období",
             "base_missing": "Nezadáno",
             "gross_preview": "Včetně přesčasů a odměn: {amount}",
+            "base_state": {
+                "approved_open": "Schváleno — ještě lze opravit",
+                "approved_closed": "Schváleno — opravit smí jen schvalovatel",
+                "locked": "Uzamčeno mzdovým během"
+            },
             "summary": {
                 "people": "Zaměstnanců",
                 "gross": "Hrubé mzdy celkem",

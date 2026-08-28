@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   payrollPostingApi,
+  PAYROLL_POSTING_INFORMATIONAL_CATEGORIES,
   type PayrollPostingReconciliation,
   type PayrollPostingReconciliationCategory,
   type PayrollPostingReconciliationCategoryKey,
@@ -14,7 +15,7 @@ import { formatMoneyMinor as formatMoney } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { localPayrollPeriod } from './payrollComponentsUi'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const period = ref(localPayrollPeriod())
 const loading = ref(true)
 const loadError = ref('')
@@ -30,7 +31,21 @@ const CATEGORY_KEYS: PayrollPostingReconciliationCategoryKey[] = [
   'other_deductions',
   'enforcement',
   'net_wage',
+  'risky_savings',
+  // Informativní řádek jde záměrně poslední: není to porovnání, jen doložení
+  // částky, která se z porovnávané hrubé mzdy vyjmula.
+  'non_monetary_neutral',
 ]
+
+function isInformational(key: PayrollPostingReconciliationCategoryKey): boolean {
+  return PAYROLL_POSTING_INFORMATIONAL_CATEGORIES.includes(key)
+}
+
+/** Vysvětlivka má jen část kategorií; u ostatních se řádek detailu nemění. */
+function categoryNote(key: PayrollPostingReconciliationCategoryKey): string {
+  const path = `payroll.posting_reconciliation.category_note.${key}`
+  return te(path) ? t(path) : ''
+}
 
 async function load(): Promise<void> {
   const sequence = ++loadSequence
@@ -66,13 +81,22 @@ function categoryLabel(key: PayrollPostingReconciliationCategoryKey): string {
   return t(`payroll.posting_reconciliation.categories.${key}`)
 }
 
-function statusLabel(status: PayrollPostingReconciliationCategory['status']): string {
-  return t(`payroll.posting_reconciliation.category_status.${status}`)
+/**
+ * Informativní kategorie nesmí nést štítek „Nepoužije se" — v řadě, kde ostatní
+ * řádky říkají souhlasí/rozdíl, to čte jako selhání kontroly. Dostává vlastní,
+ * modrý tón: je to doložení částky, ne výsledek porovnání.
+ */
+function statusLabel(category: PayrollPostingReconciliationCategory): string {
+  if (isInformational(category.key)) {
+    return t('payroll.posting_reconciliation.informational_badge')
+  }
+  return t(`payroll.posting_reconciliation.category_status.${category.status}`)
 }
 
-function statusBadgeClass(status: PayrollPostingReconciliationCategory['status']): string {
-  if (status === 'diff') return 'bg-danger-50 text-danger-700'
-  if (status === 'match') return 'bg-success-50 text-success-700'
+function statusBadgeClass(category: PayrollPostingReconciliationCategory): string {
+  if (isInformational(category.key)) return 'bg-primary-50 text-primary-700'
+  if (category.status === 'diff') return 'bg-danger-50 text-danger-700'
+  if (category.status === 'match') return 'bg-success-50 text-success-700'
   return 'bg-neutral-100 text-neutral-600'
 }
 
@@ -238,6 +262,8 @@ onMounted(load)
               <template v-for="category in orderedCategories" :key="category.key">
                 <tr
                   class="cursor-pointer hover:bg-neutral-50"
+                  :class="isInformational(category.key) ? 'bg-primary-50/40 italic' : ''"
+                  :data-test="`reconciliation-desktop-row-${category.key}`"
                   @click="toggle(category.key)"
                 >
                   <td class="px-3 py-3 font-medium text-neutral-900">
@@ -269,8 +295,8 @@ onMounted(load)
                     {{ formatDiff(category.diff_payroll_payments_minor) }}
                   </td>
                   <td class="px-3 py-3">
-                    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category.status)">
-                      {{ statusLabel(category.status) }}
+                    <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category)">
+                      {{ statusLabel(category) }}
                     </span>
                   </td>
                 </tr>
@@ -279,7 +305,12 @@ onMounted(load)
                   :id="`payroll-reconciliation-desktop-detail-${category.key}`"
                 >
                   <td colspan="8" class="bg-neutral-50 px-3 py-3 text-xs text-neutral-600">
-                    {{ t('payroll.posting_reconciliation.detail_hint') }}
+                    <p v-if="categoryNote(category.key)" :data-test="`reconciliation-desktop-note-${category.key}`">
+                      {{ categoryNote(category.key) }}
+                    </p>
+                    <p :class="categoryNote(category.key) ? 'mt-1' : ''">
+                      {{ t('payroll.posting_reconciliation.detail_hint') }}
+                    </p>
                   </td>
                 </tr>
               </template>
@@ -295,7 +326,11 @@ onMounted(load)
           <article
             v-for="category in orderedCategories"
             :key="`mobile-${category.key}`"
-            class="rounded-lg border border-neutral-200 p-4"
+            class="rounded-lg border p-4"
+            :class="isInformational(category.key)
+              ? 'border-primary-500/30 bg-primary-50/40'
+              : 'border-neutral-200'"
+            :data-test="`reconciliation-mobile-row-${category.key}`"
             @click="toggle(category.key)"
           >
             <div class="flex items-start justify-between gap-3">
@@ -309,8 +344,8 @@ onMounted(load)
               >
                 {{ categoryLabel(category.key) }}
               </button>
-              <span class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category.status)">
-                {{ statusLabel(category.status) }}
+              <span class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category)">
+                {{ statusLabel(category) }}
               </span>
             </div>
             <dl class="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
@@ -338,13 +373,18 @@ onMounted(load)
               {{ t('payroll.posting_reconciliation.table.diff_journal') }}: {{ formatDiff(category.diff_payroll_journal_minor) }}
               · {{ t('payroll.posting_reconciliation.table.diff_payments') }}: {{ formatDiff(category.diff_payroll_payments_minor) }}
             </p>
-            <p
+            <div
               v-if="expandedKey === category.key"
               :id="`payroll-reconciliation-mobile-detail-${category.key}`"
               class="mt-3 border-t border-neutral-200 pt-3 text-xs text-neutral-600"
             >
-              {{ t('payroll.posting_reconciliation.detail_hint') }}
-            </p>
+              <p v-if="categoryNote(category.key)" :data-test="`reconciliation-mobile-note-${category.key}`">
+                {{ categoryNote(category.key) }}
+              </p>
+              <p :class="categoryNote(category.key) ? 'mt-1' : ''">
+                {{ t('payroll.posting_reconciliation.detail_hint') }}
+              </p>
+            </div>
           </article>
         </section>
       </template>

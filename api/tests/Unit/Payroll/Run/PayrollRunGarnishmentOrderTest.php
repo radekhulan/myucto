@@ -90,7 +90,10 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
             [self::EMPLOYEE_ID => self::NET_BEFORE_DEDUCTIONS],
         );
 
-        self::assertSame([self::EMPLOYEE_ID => 424_900], $capacities);
+        // Exekuce spotřebuje z první třetiny jen 1 000 Kč — tolik zbývalo
+        // dlužníkovi doplatit. Paušál plátce mzdy se z té tisícovky ukrojí,
+        // srážku nezvyšuje, takže dohodě zůstane 529 900 − 100 000.
+        self::assertSame([self::EMPLOYEE_ID => 429_900], $capacities);
     }
 
     public function testInsolvencyLeavesNoCapacityForVoluntaryAgreements(): void
@@ -139,9 +142,9 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
         ));
 
         self::assertSame(self::NET_BEFORE_DEDUCTIONS, $net->netBeforeDeductionsMinorUnits);
-        self::assertSame(424_900, $net->deductedMinorUnits);
-        self::assertSame(75_100, $net->deductions[0]->unappliedMinorUnits);
-        self::assertSame(2_575_100, $net->netPayableMinorUnits);
+        self::assertSame(429_900, $net->deductedMinorUnits);
+        self::assertSame(70_100, $net->deductions[0]->unappliedMinorUnits);
+        self::assertSame(2_570_100, $net->netPayableMinorUnits);
 
         $base['statutory'] = ['status' => 'calculated'];
         $base['people'][0]['statutory'] = [
@@ -156,17 +159,23 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
             self::NET_BEFORE_DEDUCTIONS,
             $person['enforcement']['input']['income']['garnishable_minor_units'],
         );
+        // Oprávněnému dojde 950 Kč, plátci mzdy 50 Kč — a zaměstnanci se
+        // srazí přesně těch 1 000 Kč, které ještě dlužil.
         self::assertSame(
-            100_000,
+            95_000,
             $person['enforcement']['result']['allocations'][0]['total_minor_units'],
         );
         self::assertSame(
-            105_000,
+            5_000,
+            $person['enforcement']['result']['employer_flat_fee_minor_units'],
+        );
+        self::assertSame(
+            100_000,
             $person['enforcement']['result']['total_withheld_minor_units'],
         );
         self::assertSame(2_470_100, $person['payable_after_enforcement_minor']);
         self::assertSame(
-            $net->netPayableMinorUnits - 105_000,
+            $net->netPayableMinorUnits - 100_000,
             $person['payable_after_enforcement_minor'],
         );
     }
