@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Settings;
 
 use MyInvoice\Repository\Payroll\PayrollDimensionRepository;
+use MyInvoice\Service\Payroll\Posting\PayrollPostingAccountPolicy;
 
 final class PayrollDimensionService
 {
@@ -69,6 +70,16 @@ final class PayrollDimensionService
                 'Kód dimenze musí mít 1–50 znaků: velká písmena, číslice, tečku, podtržítko nebo pomlčku.',
             );
         }
+        // Prefixy MZ-SR- a MZ-EX- nese ve sloupci `cost_center` PSEUDONYM
+        // oprávněného ze srážky, respektive z exekuce — saldokonto per
+        // oprávněný datový model zatím nemá. Reálné středisko se stejným
+        // prefixem by se v reconciliaci vydávalo za srážku a naopak.
+        if (PayrollPostingAccountPolicy::isReservedDimensionCode($code)) {
+            throw new \InvalidArgumentException(
+                'Kódy začínající MZ-SR- a MZ-EX- jsou vyhrazené analytice srážek '
+                . 'a exekucí ve mzdovém deníku. Zvolte prosím jiný kód dimenze.',
+            );
+        }
 
         $name = $input['name'] ?? null;
         if (!is_string($name)) {
@@ -102,6 +113,24 @@ final class PayrollDimensionService
             throw new \InvalidArgumentException(
                 'Výchozí účet dimenze musí mít formát účtové osnovy (např. 518 nebo 518.001).',
             );
+        }
+        // Rezervované prefixy se dosud ověřovaly AŽ při zaúčtování
+        // (PayrollDimensionCostAccountResolver), takže chybný účet dimenze
+        // shodil APPROVE celého mzdového běhu — tedy dávno potom, co ho někdo
+        // uložil. Táž kontrola patří k zadání, kde se dá bez následků opravit.
+        if ($account !== null) {
+            try {
+                PayrollPostingAccountPolicy::assertGrossCostAccountIsUnambiguous(
+                    $account,
+                );
+            } catch (\DomainException $exception) {
+                throw new \InvalidArgumentException(
+                    "Výchozí účet dimenze {$account} je vyhrazený jiné mzdové "
+                    . 'kategorii (pojistné, daň, srážky, závazek mzdy nebo '
+                    . 'zápočet). Zvolte nákladový účet hrubé mzdy, například 521.100.',
+                    previous: $exception,
+                );
+            }
         }
 
         return [

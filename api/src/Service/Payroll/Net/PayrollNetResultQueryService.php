@@ -55,7 +55,7 @@ final class PayrollNetResultQueryService
             );
         }
         $net = self::object($statutory['net_pay'] ?? null, 'person.statutory.net_pay');
-        if ((string) ($net['person_reference'] ?? '') !== (string) $employeeId) {
+        if (!self::referencesEmployee($net['person_reference'] ?? null, $employeeId)) {
             throw new \DomainException('Výsledek čisté mzdy nepatří zadané osobě.');
         }
 
@@ -123,6 +123,29 @@ final class PayrollNetResultQueryService
             'allocations' => $payout['allocations'],
             'allocations_total_minor' => $payout['total_minor'],
         ];
+    }
+
+    /**
+     * Patří zmrazený výsledek čisté mzdy téhle osobě?
+     *
+     * Kanonický tvar reference je `employee:{id}` — tak ji do výsledku zapisuje
+     * {@see \MyInvoice\Service\Payroll\Run\PayrollRunStatutoryCalculationService}
+     * a v tom tvaru je i v `result_snapshot_json` každé schválené revize.
+     * Dřívější porovnání očekávalo holé `{id}`, takže tahle kontrola odmítla
+     * KAŽDOU revizi z ostrého běhu a rozklad čisté mzdy skončil výjimkou —
+     * jak na `PayrollNetResultAction`, tak v součinnosti exekutorům (XMLZAM).
+     * Testy to nechytily, protože si osobu do snapshotu psaly holým id.
+     *
+     * Kontrola je proto STEJNĚ PŘÍSNÁ jako u sousedních čtenářů téhož snapshotu
+     * ({@see \MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsCalculator}
+     * a `PayslipDocumentSnapshotMapper`), které `employee:{id}` vyžadují taky.
+     * Holé `{id}` se nepřipouští: kdyby takový snapshot existoval, spadly by
+     * na něm už kontrolní součty, takže by tolerance jen zakryla nesoulad.
+     * Reference cizí osoby musí padat dál — jinak by rozklad vydal cizí údaje.
+     */
+    private static function referencesEmployee(mixed $reference, int $employeeId): bool
+    {
+        return is_string($reference) && $reference === "employee:{$employeeId}";
     }
 
     /**

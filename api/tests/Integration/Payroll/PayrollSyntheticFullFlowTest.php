@@ -20,6 +20,7 @@ use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
+use MyInvoice\Service\Payroll\Net\PayrollNetResultQueryService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -271,6 +272,43 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame($approved->revision['reviewed_by'], $approved->revision['approved_by']);
 
         $revisionId = (int) $approved->revision['id'];
+
+        /*
+         * Rozklad čisté mzdy po osobách MUSÍ jít přečíst hned po schválení běhu,
+         * bez jakéhokoliv dalšího zápisu. Je to jediná cesta, kterou čte
+         * `PayrollNetResultAction` i součinnost exekutorům (XMLZAM), a stojí
+         * VÝHRADNĚ na zmrazené revizi — ne na `payroll_net_results`, do kterých
+         * se nikdy nezapisovalo (viz {@see \MyInvoice\Repository\Payroll\PayrollNetRepository}).
+         * Kdyby ta cesta ležela na nějaké další perzistenci, tenhle test spadne
+         * dřív, než se to projeví prázdnou obrazovkou v ostrém provozu.
+         */
+        $netResults = $this->container->get(PayrollNetResultQueryService::class);
+        if (!$netResults instanceof PayrollNetResultQueryService) {
+            throw new \RuntimeException('Výsledkové API čisté mzdy není dostupné.');
+        }
+        $netTotal = 0;
+        foreach ($this->people as $person) {
+            $breakdown = $netResults->breakdown(
+                $this->supplierId,
+                $revisionId,
+                $person['employee_id'],
+            );
+            self::assertSame($person['employee_id'], $breakdown['person']['employee_id']);
+            self::assertGreaterThan(0, $breakdown['income']['gross_minor']);
+            self::assertGreaterThan(0, $breakdown['net_payable_minor']);
+            self::assertSame(
+                $breakdown['net_payable_minor'] - $breakdown['enforcement_withheld_minor'],
+                $breakdown['payable_after_enforcement_minor'],
+            );
+            $netTotal += $breakdown['net_payable_minor'];
+        }
+        self::assertGreaterThan(0, $netTotal);
+        self::assertSame(
+            [0, 0],
+            $this->deadNetTableCounts($revisionId),
+            'Mrtvé tabulky čisté mzdy musí zůstat prázdné — zdroj pravdy je zmrazená revize.',
+        );
+
         $response = $this->healthOverview->index(
             $this->request('GET', "/api/payroll/submissions/health-overviews/{$revisionId}"),
             new Response(),
@@ -1271,6 +1309,30 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $statement = $this->db->pdo()->prepare("SELECT COUNT(*) FROM {$table} WHERE supplier_id = ?");
         $statement->execute([$this->supplierId]);
         return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * Počty řádků v `payroll_net_results` a `payroll_payout_allocations`.
+     *
+     * Obě tabulky jsou mrtvé: nikdy neměly produkčního zapisovatele a rozpis
+     * výplaty dnes drží `payroll_payment_liabilities`. Kdyby je někdo znovu
+     * zapojil, vznikl by druhý — a s tím prvním rozporný — rozpis týchž peněz,
+     * navíc neměnný (migrace 1631). Nenulový počet je tedy regrese, ne pokrok.
+     *
+     * @return array{0:int,1:int}
+     */
+    private function deadNetTableCounts(int $revisionId): array
+    {
+        $counts = [];
+        foreach (['payroll_net_results', 'payroll_payout_allocations'] as $table) {
+            $statement = $this->db->pdo()->prepare(
+                "SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND revision_id = ?"
+            );
+            $statement->execute([$this->supplierId, $revisionId]);
+            $counts[] = (int) $statement->fetchColumn();
+        }
+
+        return [$counts[0], $counts[1]];
     }
 
     /** @return list<array{code:string,message:string}> */

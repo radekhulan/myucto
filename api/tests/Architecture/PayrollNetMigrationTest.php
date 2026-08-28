@@ -63,4 +63,44 @@ final class PayrollNetMigrationTest extends TestCase
             );
         }
     }
+
+    /**
+     * `payroll_net_results` a `payroll_payout_allocations` jsou mrtvé tabulky.
+     *
+     * Zapisovatel do nich nikdy neměl produkčního volajícího a model ho mezitím
+     * přerostl: alokace by se počítaly z čisté mzdy PŘED exekučními srážkami,
+     * kdežto skutečné platby se rozdělují z `payable_after_enforcement_minor`
+     * (`PayrollNetWageLiabilityMaterializer`). Kdyby někdo zápis obnovil, vznikl
+     * by druhý — a s tím prvním rozporný — rozpis těch samých peněz, a to
+     * NEMĚNNĚ (migrace 1631). Zdroj pravdy je zmrazená revize plus
+     * `payroll_payment_liabilities` s `liability_kind = 'net_wage'`.
+     *
+     * Test je proto brána, ne popis: hlídá, že do těch tabulek `src/` nezapisuje.
+     */
+    public function testDeadNetResultTablesHaveNoProductionWriter(): void
+    {
+        $source = dirname(__DIR__, 2) . '/src';
+        self::assertDirectoryExists($source);
+
+        $offenders = [];
+        $files = new \RegexIterator(
+            new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($source, \FilesystemIterator::SKIP_DOTS),
+            ),
+            '/\.php$/D',
+        );
+        foreach ($files as $file) {
+            $code = (string) file_get_contents((string) $file);
+            foreach (['payroll_net_results', 'payroll_payout_allocations'] as $table) {
+                if (preg_match(
+                    '/(INSERT\s+(?:IGNORE\s+)?INTO|REPLACE\s+INTO|UPDATE)\s+' . $table . '\b/i',
+                    $code,
+                ) === 1) {
+                    $offenders[] = basename((string) $file) . " => {$table}";
+                }
+            }
+        }
+
+        self::assertSame([], $offenders);
+    }
 }

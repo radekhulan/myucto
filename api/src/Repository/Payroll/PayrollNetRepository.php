@@ -5,194 +5,48 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Payroll\Net\PayoutAllocationResult;
-use MyInvoice\Service\Payroll\Net\PayrollNetResult;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
 
+/**
+ * Append-only evidence SRÁŽEK ze mzdy (`payroll_deduction_ledger`).
+ *
+ * Repozitář kdysi držel i zápis čisté mzdy do `payroll_net_results` a rozpisu
+ * výplaty do `payroll_payout_allocations`. Ten zápis se do pipeline nikdy
+ * nezapojil (v `src/` nebyl jediný volající od vzniku v 2c4278051) a MEZITÍM
+ * ho model přerostl ve třech bodech, takže by dnes zapisoval NESPRÁVNÁ data:
+ *
+ *  1. Základ rozpisu. `saveCalculation()` vyžadovalo, aby se alokace rovnaly
+ *     `net_payable_minor`, tedy čisté mzdě PŘED exekučními srážkami. Skutečné
+ *     platby ale {@see \MyInvoice\Service\Payroll\Payment\PayrollNetWageLiabilityMaterializer}
+ *     rozděluje z `payable_after_enforcement_minor`. Jakmile je na osobě
+ *     exekuce, oba rozpisy si odporují — a tabulky jsou od migrace 1631
+ *     DB-neměnné, takže by ten rozpor byl trvalý.
+ *  2. Zápočet na účet společníka (`PayrollPartnerSettlement`) není výplata a do
+ *     platebních závazků se záměrně nedostane; do alokací by se dostal.
+ *  3. `payroll_net_results.net_payable_minor` je `BIGINT UNSIGNED`, jenže čistá
+ *     mzda smí být záporná (doplatek ZP do minimálního vyměřovacího základu,
+ *     § 3 odst. 10 z. č. 592/1992 Sb.). Zápis by na takovém měsíci spadl.
+ *
+ * Kde ta data doopravdy jsou (a odkud je čtou VŠECHNY produkční cesty —
+ * {@see \MyInvoice\Service\Payroll\Net\PayrollNetResultQueryService}, a přes ni
+ * `PayrollNetResultAction` i součinnost XMLZAM):
+ *  * rozklad čisté mzdy — zmrazený `payroll_run_revisions.result_snapshot_json`
+ *    a `payroll_run_persons.result_json` (klíč `statutory.net_pay`),
+ *  * rozpis výplaty na víc cílů — `payroll_payment_liabilities`
+ *    (`liability_kind = 'net_wage'`), jeden závazek na cíl.
+ *
+ * Obě tabulky jsou proto mrtvé a prokazatelně prázdné ve všech databázích
+ * včetně ostré. Fyzický `DROP` je samostatná migrace (viz W27 report): vyžaduje
+ * přepsat trigger `trg_payroll_run_result_period_propagate` z migrace 1593,
+ * který do `payroll_net_results` propaguje období rodičovského běhu.
+ */
 final class PayrollNetRepository
 {
     private const SAVEPOINT = 'payroll_net_repository';
 
     public function __construct(private readonly Connection $db) {}
-
-    public function saveCalculation(
-        int $supplierId,
-        int $revisionId,
-        int $employeeId,
-        PayrollNetResult $result,
-        PayoutAllocationResult $payout,
-    ): int {
-        if ($result->personReference !== (string) $employeeId) {
-            throw new \DomainException('Výsledek čisté mzdy nepatří zadanému zaměstnanci.');
-        }
-        if ($payout->netPayableMinorUnits !== $result->netPayableMinorUnits) {
-            throw new \DomainException('Alokace nepatří k výsledné čisté mzdě.');
-        }
-        $allocated = array_sum(array_map(
-            static fn ($allocation): int => $allocation->amountMinorUnits,
-            $payout->allocations,
-        ));
-        if ($allocated !== $result->netPayableMinorUnits) {
-            throw new \DomainException('Součet alokací neodpovídá čisté výplatě.');
-        }
-        $payload = [
-            'net' => $result->jsonSerialize(),
-            'payout' => $payout->jsonSerialize(),
-        ];
-        $json = CanonicalJson::encode($payload);
-        $hash = hash('sha256', $json);
-
-        return $this->transactional(function () use (
-            $supplierId,
-            $revisionId,
-            $employeeId,
-            $result,
-            $payout,
-            $json,
-            $hash,
-        ): int {
-            try {
-                $stmt = $this->db->pdo()->prepare(
-                    'INSERT INTO payroll_net_results
-                        (supplier_id, revision_id, period_start, employee_id,
-                         cash_income_minor, non_cash_income_minor,
-                         employee_social_minor, employee_health_minor,
-                         advance_tax_minor, withholding_tax_minor,
-                         tax_bonus_minor, correction_minor,
-                         annual_settlement_minor, deducted_minor,
-                         net_payable_minor, result_json, result_hash)
-                     SELECT ?, ?, run.period_start, ?,
-                            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                       FROM payroll_run_revisions revision
-                       JOIN payroll_runs run
-                         ON run.supplier_id = revision.supplier_id
-                        AND run.id = revision.run_id
-                      WHERE revision.supplier_id = ? AND revision.id = ?'
-                );
-                $stmt->execute([
-                    $supplierId,
-                    $revisionId,
-                    $employeeId,
-                    $result->cashIncomeMinorUnits,
-                    $result->nonCashIncomeMinorUnits,
-                    $result->employeeSocialMinorUnits,
-                    $result->employeeHealthMinorUnits,
-                    $result->advanceTaxMinorUnits,
-                    $result->withholdingTaxMinorUnits,
-                    $result->taxBonusMinorUnits,
-                    $result->correctionMinorUnits,
-                    $result->annualSettlementMinorUnits,
-                    $result->deductedMinorUnits,
-                    $result->netPayableMinorUnits,
-                    $json,
-                    $hash,
-                    $supplierId,
-                    $revisionId,
-                ]);
-                if ($stmt->rowCount() !== 1) {
-                    throw new \DomainException('Revize mzdového běhu nemá platné období.');
-                }
-                $resultId = (int) $this->db->pdo()->lastInsertId();
-            } catch (PDOException $e) {
-                if (!$this->isDuplicateKey($e)) {
-                    throw $e;
-                }
-                $existing = $this->findResult($supplierId, $revisionId, $employeeId);
-                if ($existing === null || $existing['result_hash'] !== $hash) {
-                    throw new \DomainException(
-                        'Revize už obsahuje jiný výsledek čisté mzdy.',
-                        previous: $e,
-                    );
-                }
-                return PayrollTimeValue::int($existing['id'] ?? null, 'result.id');
-            }
-
-            $insert = $this->db->pdo()->prepare(
-                'INSERT INTO payroll_payout_allocations
-                    (supplier_id, revision_id, employee_id, net_result_id,
-                     payout_rule_id, allocation_reference, destination_kind,
-                     destination_reference, allocation_kind, amount_minor,
-                     allocation_order)
-                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)'
-            );
-            foreach ($payout->allocations as $index => $allocation) {
-                $insert->execute([
-                    $supplierId,
-                    $revisionId,
-                    $employeeId,
-                    $resultId,
-                    $allocation->allocationReference,
-                    $allocation->destinationKind,
-                    $allocation->destinationReference,
-                    $allocation->allocationKind,
-                    $allocation->amountMinorUnits,
-                    $index + 1,
-                ]);
-            }
-            return $resultId;
-        });
-    }
-
-    /** @return array<string,mixed>|null */
-    public function findResult(int $supplierId, int $revisionId, int $employeeId): ?array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_net_results
-              WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?'
-        );
-        $stmt->execute([$supplierId, $revisionId, $employeeId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($row)) {
-            return null;
-        }
-        $row = PayrollTimeValue::row($row, 'net_result');
-        foreach ([
-            'id', 'supplier_id', 'revision_id', 'employee_id',
-            'cash_income_minor', 'non_cash_income_minor',
-            'employee_social_minor', 'employee_health_minor',
-            'advance_tax_minor', 'withholding_tax_minor', 'tax_bonus_minor',
-            'correction_minor', 'annual_settlement_minor',
-            'deducted_minor', 'net_payable_minor',
-        ] as $field) {
-            $row[$field] = PayrollTimeValue::int($row[$field] ?? null, $field);
-        }
-        $row['result'] = json_decode(
-            PayrollTimeValue::string($row['result_json'] ?? null, 'result_json'),
-            true,
-            flags: JSON_THROW_ON_ERROR,
-        );
-        return $row;
-    }
-
-    /** @return list<array<string,mixed>> */
-    public function allocations(int $supplierId, int $revisionId, int $employeeId): array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_payout_allocations
-              WHERE supplier_id = ? AND revision_id = ? AND employee_id = ?
-              ORDER BY allocation_order, id'
-        );
-        $stmt->execute([$supplierId, $revisionId, $employeeId]);
-        $result = [];
-        foreach (PayrollTimeValue::rows(
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-            'payout_allocations',
-        ) as $row) {
-            foreach ([
-                'id', 'supplier_id', 'revision_id', 'employee_id',
-                'net_result_id', 'amount_minor', 'allocation_order',
-            ] as $field) {
-                $row[$field] = PayrollTimeValue::int($row[$field] ?? null, $field);
-            }
-            $row['payout_rule_id'] = $row['payout_rule_id'] === null
-                ? null
-                : PayrollTimeValue::int($row['payout_rule_id'], 'payout_rule_id');
-            $result[] = $row;
-        }
-        return $result;
-    }
 
     /**
      * @param array<string,mixed> $metadata

@@ -154,6 +154,120 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
     }
 
     /**
+     * Ú-09: firma, která čistou mzdu společníka započítává proti jeho účtu.
+     *
+     * Zápočet je čistě účetní překlasifikace závazku (331 MD / 365 D) — deník
+     * i platební strana jsou o něj nižší než kontrolní součet čisté mzdy, který
+     * o způsobu vypořádání nic neví. Dokud se zápočet neodečítal, měla taková
+     * firma na obrazovce TRVALE svítící rozdíl.
+     */
+    public function testPartnerSettlementIsReportedInsteadOfBecomingAPermanentDiff(): void
+    {
+        $fixture = $this->buildBalancedRevision(
+            month: 9,
+            deducted: 445,
+            tag: 'PS',
+            partnerSettlement: true,
+        );
+        // Zápočtem se nic nevyplácí, závazek čisté mzdy proto NEVZNIKÁ.
+        $this->materializeLiabilities($fixture['revisionId'], $fixture['employeeId'], [
+            'social_insurance' => 1_400,
+            'health_insurance' => 1_000,
+            'advance_tax' => 900,
+            'deduction' => 445,
+        ]);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-09',
+        );
+
+        self::assertSame('reconciled', $result['overall_status']);
+        $byKey = array_column($result['categories'], null, 'key');
+        // Čistá mzda je celá vypořádaná zápočtem — nezbývá nic k výplatě.
+        self::assertSame(0, $byKey['net_wage']['payroll_minor']);
+        self::assertSame(0, $byKey['net_wage']['journal_minor']);
+        self::assertSame(0, $byKey['net_wage']['diff_payroll_journal_minor']);
+        // A číslo nezmizelo: má vlastní, POROVNÁVANOU kategorii.
+        self::assertSame(10_100, $byKey['partner_settlement']['payroll_minor']);
+        self::assertSame(10_100, $byKey['partner_settlement']['journal_minor']);
+        self::assertSame(0, $byKey['partner_settlement']['diff_payroll_journal_minor']);
+        self::assertSame('match', $byKey['partner_settlement']['status']);
+        // Platební strana zápočet mít nesmí — nic se neplatí.
+        self::assertNull($byKey['partner_settlement']['payments_liability_minor']);
+    }
+
+    /**
+     * Ú-17: zákonné pojištění odpovědnosti (§ 205d ZP) a benefity se z mezd
+     * PLATÍ, ale v můstku se NEÚČTUJÍ — účtují se vlastním dokladem. Dokud
+     * chyběly v mapě druhů, zaplacený závazek z obrazovky beze stopy zmizel;
+     * porovnávaná kategorie by z nich naopak udělala trvalý falešný rozdíl.
+     */
+    public function testUnpostedLiabilitiesAreNamedInsteadOfDisappearing(): void
+    {
+        $fixture = $this->buildBalancedRevision(month: 10, deducted: 445, tag: 'UL');
+        $this->materializeLiabilities($fixture['revisionId'], $fixture['employeeId'], [
+            'net_wage' => 10_100,
+            'social_insurance' => 1_400,
+            'health_insurance' => 1_000,
+            'advance_tax' => 900,
+            'deduction' => 445,
+            'statutory_insurance' => 620,
+            'benefit' => 380,
+        ]);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-10',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame(
+            1_000,
+            $byKey['unposted_liabilities']['payments_liability_minor'],
+        );
+        self::assertNull($byKey['unposted_liabilities']['payroll_minor']);
+        self::assertNull($byKey['unposted_liabilities']['journal_minor']);
+        self::assertNull(
+            $byKey['unposted_liabilities']['diff_payroll_payments_minor'],
+        );
+        self::assertSame('not_applicable', $byKey['unposted_liabilities']['status']);
+        // A hlavně: nesmí z nich vzniknout rozdíl.
+        self::assertSame('reconciled', $result['overall_status']);
+    }
+
+    /** Ú-16: třetí osa porovnání — deník proti skutečně vzniklým závazkům. */
+    public function testJournalIsAlsoComparedAgainstPaymentLiabilities(): void
+    {
+        $fixture = $this->buildBalancedRevision(month: 11, deducted: 445, tag: 'JP');
+        $this->materializeLiabilities($fixture['revisionId'], $fixture['employeeId'], [
+            'net_wage' => 10_100,
+            'social_insurance' => 1_400,
+            'health_insurance' => 1_000,
+            'advance_tax' => 900,
+            'deduction' => 445,
+        ]);
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-11',
+        );
+
+        self::assertSame(
+            'payroll-posting-reconciliation.v2',
+            $result['schema_version'],
+        );
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame(
+            0,
+            $byKey['social_health_insurance']['diff_journal_payments_minor'],
+        );
+        self::assertSame(0, $byKey['income_tax']['diff_journal_payments_minor']);
+        // Kategorie bez platební strany třetí osu nemá.
+        self::assertNull($byKey['gross_wages']['diff_journal_payments_minor']);
+    }
+
+    /**
      * Nepeněžní plnění BEZ vlastní předkontace (1 % vstupní ceny vozidla,
      * přechodné ubytování) se záměrně neúčtuje — náklad je v knihách už ze
      * zdrojového dokladu. Kontrolní součty MZ-13 ho ale do hrubého příjmu
@@ -846,13 +960,18 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         ?array $nonMonetaryAccounting = null,
         bool $splitInsurance = false,
         int $riskySavingsMinor = 0,
+        bool $partnerSettlement = false,
     ): array
     {
         $employeeId = 8_000 + crc32($tag) % 900;
         $employmentId = 8_500 + crc32($tag . 'e') % 900;
         $this->createEmployee($employeeId);
         $runId = $this->createRun($month);
-        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $input = $this->buildInputSnapshot(
+            $employeeId,
+            $employmentId,
+            $partnerSettlement,
+        );
         $inputJson = CanonicalJson::encode($input);
         $resultData = $this->buildResultSnapshot(
             $employeeId,
@@ -861,6 +980,7 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
             $nonMonetaryMinor,
             $nonMonetaryAccounting,
             $riskySavingsMinor,
+            $partnerSettlement,
         );
         $revisionId = $this->insertRevision($runId, 1, $inputJson, $resultData['json'], true);
         $this->createRunPerson($revisionId, $employeeId);
@@ -900,6 +1020,21 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
                 'amount' => number_format($netWage / 100, 2, '.', ''),
             ],
         ];
+        if ($partnerSettlement) {
+            // Zápočet celé čisté výplaty: 331 MD proti 365.100 D. Závazek
+            // čisté mzdy tím na 331 padne na nulu a NEVZNIKÁ platba.
+            $this->createAnalyticAccount('365.100');
+            $lines[] = [
+                'account_code' => '331',
+                'side' => 'debit',
+                'amount' => number_format($netWage / 100, 2, '.', ''),
+            ];
+            $lines[] = [
+                'account_code' => '365.100',
+                'side' => 'credit',
+                'amount' => number_format($netWage / 100, 2, '.', ''),
+            ];
+        }
         if ($riskySavingsMinor > 0) {
             // 527 MD / 379 D BEZ analytické dimenze srážky — nesmí spadnout
             // do `other_deductions` ani do `enforcement`.
@@ -1014,17 +1149,32 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function buildInputSnapshot(int $employeeId, int $employmentId): array
-    {
+    private function buildInputSnapshot(
+        int $employeeId,
+        int $employmentId,
+        bool $partnerSettlement = false,
+    ): array {
+        $employment = ['id' => $employmentId, 'office_id' => 1];
+        $person = ['employee' => ['id' => $employeeId]];
+        if ($partnerSettlement) {
+            // Zápočet je přípustný jen u společníka a člena orgánu.
+            $employment['relation_type'] = 'statutory_body';
+            $person['payout_rules'] = [[
+                'allocation_reference' => 'rule:1',
+                'allocation_kind' => 'remainder',
+                'destination_kind' => 'partner_settlement',
+                'destination_reference' => '365.100',
+                'priority_no' => 0,
+            ]];
+        }
+        $person['employments'] = [[
+            'employment' => $employment,
+            'inputs' => [],
+        ]];
+
         return [
             'schema_version' => 'payroll-run-input.v2',
-            'people' => [[
-                'employee' => ['id' => $employeeId],
-                'employments' => [[
-                    'employment' => ['id' => $employmentId, 'office_id' => 1],
-                    'inputs' => [],
-                ]],
-            ]],
+            'people' => [$person],
         ];
     }
 
@@ -1041,8 +1191,13 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         int $nonMonetaryMinor = 0,
         ?array $nonMonetaryAccounting = null,
         int $riskySavingsMinor = 0,
+        bool $partnerSettlement = false,
     ): array {
-        $input = $this->buildInputSnapshot($employeeId, $employmentId);
+        $input = $this->buildInputSnapshot(
+            $employeeId,
+            $employmentId,
+            $partnerSettlement,
+        );
         $inputJson = CanonicalJson::encode($input);
         $metrics = [
             'source_amount_minor' => 12_345 + $nonMonetaryMinor,
@@ -1099,6 +1254,9 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
             'source_snapshot_hash' => hash('sha256', $inputJson),
             'people' => [[
                 'employee_id' => $employeeId,
+                // Zápočet se počítá z čisté výplaty PO exekuci — bez ní by
+                // mzdová strana o zápočtu nevěděla.
+                'payable_after_enforcement_minor' => $netPayable,
                 'employments' => [[
                     'employment_id' => $employmentId,
                     'inputs' => $inputs,

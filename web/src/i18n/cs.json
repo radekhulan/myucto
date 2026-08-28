@@ -1231,6 +1231,7 @@
                 "payments_liability": "Platby — závazek",
                 "payments_paid": "Platby — uhrazeno",
                 "diff_payments": "Rozdíl (mzda ↔ platby)",
+                "diff_journal_payments": "Rozdíl (deník ↔ platby)",
                 "status": "Stav"
             },
             "categories": {
@@ -1242,11 +1243,17 @@
                 "enforcement": "Exekuční a insolvenční srážky (379)",
                 "net_wage": "Čistá mzda k výplatě (331/366)",
                 "risky_savings": "Povinné spoření u rizikové práce (527/379)",
-                "non_monetary_neutral": "Nepeněžní plnění bez účetního dopadu"
+                "partner_settlement": "Zápočet čisté mzdy na účet společníka (365)",
+                "non_monetary_neutral": "Nepeněžní plnění bez účetního dopadu",
+                "tax_bonus_receivable": "Pohledávka za FÚ z daňových bonusů (§ 35d odst. 5)",
+                "unposted_liabilities": "Placeno mimo mzdový můstek (zákonné pojištění, benefity)"
             },
             "category_note": {
                 "risky_savings": "Sleduje se nákladová strana (527). Pokud si na 527 účtujete i jinou mzdovou složku, oddělte příspěvek analytikou (např. 527.100).",
-                "non_monetary_neutral": "Informativní řádek, ne rozdíl. Nepeněžní plnění (typicky 1 % vstupní ceny vozidla) se neúčtuje zvlášť — náklad je v knihách už ze zdrojového dokladu, a proto se do porovnávané hrubé mzdy nezapočítává."
+                "non_monetary_neutral": "Informativní řádek, ne rozdíl. Nepeněžní plnění (typicky 1 % vstupní ceny vozidla) se neúčtuje zvlášť — náklad je v knihách už ze zdrojového dokladu, a proto se do porovnávané hrubé mzdy nezapočítává.",
+                "partner_settlement": "Zápočtem se nic nevyplácí — je to účetní překlasifikace závazku (331/366 MD / 365 D). Kategorie Čistá mzda je proto o tuhle částku nižší a platební sloupec zůstává prázdný.",
+                "tax_bonus_receivable": "Informativní řádek, ne rozdíl. Vyplacené bonusy převýšily odvod záloh, o rozdíl snížíte odvod v dalších měsících nebo o něj požádáte správce daně (§ 35d odst. 5). Kategorie Daň ji už má započtenou.",
+                "unposted_liabilities": "Informativní řádek, ne rozdíl. Zákonné pojištění odpovědnosti a benefity se platí z mezd, ale účtují se vlastním dokladem — mzdový můstek je nezapisuje, proto tu není s čím porovnávat."
             },
             "informational_badge": "Informativní",
             "category_status": {

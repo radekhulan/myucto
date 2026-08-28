@@ -5,9 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Posting;
 
 use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
-use MyInvoice\Service\Payroll\Net\PayoutAllocationRequest;
-use MyInvoice\Service\Payroll\Net\PayoutAllocationService;
-use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -31,8 +28,8 @@ final class PayrollPostingLineBuilder
     public function __construct(
         private readonly PayrollEmploymentAccountingClassifier $classifier =
             new PayrollEmploymentAccountingClassifier(),
-        private readonly PayoutAllocationService $payoutAllocations =
-            new PayoutAllocationService(),
+        private readonly PayrollPartnerSettlementResolver $partnerSettlements =
+            new PayrollPartnerSettlementResolver(),
         private readonly PayrollDimensionCostAccountResolver $dimensionAccounts =
             new PayrollDimensionCostAccountResolver(),
     ) {}
@@ -581,7 +578,14 @@ final class PayrollPostingLineBuilder
                 );
             }
 
-            foreach ($this->partnerSettlements(
+            // Zápočet čisté mzdy na účet společníka (331/366 MD / 365 D) počítá
+            // sdílený resolver — tutéž částku potřebuje i reconciliace účetního
+            // můstku, takže smí existovat jen jednou. Rozdělení na jednotlivé
+            // závazkové účty pak vezme stejný poměrový mechanismus jako srážky
+            // (addEmployeeCharge → allocate), takže při více pracovních vztazích
+            // se zápočet rozpustí podle jejich peněžního podílu a zápis zůstává
+            // vyrovnaný — kontroluje assertBalancedAllocations.
+            foreach ($this->partnerSettlements->forEmployee(
                 $employeeId,
                 $snapshotPeople[$employeeId]['payout_rules'],
                 $relationTypesByEmployee[$employeeId],
@@ -624,133 +628,6 @@ final class PayrollPostingLineBuilder
             $debit,
             $credit,
         );
-    }
-
-    /**
-     * Zápočet čisté mzdy na účet společníka: relační závazkový účet mzdy
-     * (*_gross_credit, tedy 331 u zaměstnance nebo 366 u společníka) MD proti
-     * účtu zápočtu (365.x) D.
-     *
-     * Proč je tenhle způsob výplaty jiný než hotovost a banka: nevyplácí se.
-     * Nevzniká platba, platební příkaz ani pokladní doklad — je to čistě účetní
-     * překlasifikace závazku. Účetní zápis proto vzniká TADY, kdežto závazek
-     * čisté mzdy a řádek platební dávky vzniknout NESMÍ (viz
-     * PayrollNetWageLiabilityMaterializer). Kdyby vznikly, firma by vyplatila
-     * peníze, které jsou už vypořádané.
-     *
-     * Rozdělení na jednotlivé závazkové účty vezme stejný poměrový mechanismus
-     * jako srážky (addEmployeeCharge → allocate), takže při více pracovních
-     * vztazích se zápočet rozpustí podle jejich peněžního podílu a zápis zůstává
-     * vyrovnaný — kontroluje assertBalancedAllocations.
-     *
-     * @param list<string> $relationTypes
-     * @return list<array{
-     *   allocation_reference:string,
-     *   account_code:string,
-     *   amount_minor:int
-     * }>
-     */
-    private function partnerSettlements(
-        int $employeeId,
-        mixed $payoutRules,
-        array $relationTypes,
-        int $payableAfterEnforcement,
-    ): array {
-        if (!is_array($payoutRules) || !array_is_list($payoutRules)) {
-            return [];
-        }
-        $hasSettlement = false;
-        foreach ($payoutRules as $rule) {
-            if (is_array($rule)
-                && ($rule['destination_kind'] ?? null) === PayrollPartnerSettlement::KIND
-            ) {
-                $hasSettlement = true;
-                break;
-            }
-        }
-        if (!$hasSettlement) {
-            // Bez zápočtu se výplatní pravidla vůbec nerozpočítávají. Účetní
-            // zápis tak zůstává pro všechny dosavadní i budoucí revize bez
-            // zápočtu byte-identický — zmrazené snapshoty bez klíče payout_rules
-            // nevyjímaje.
-            return [];
-        }
-        PayrollPartnerSettlement::assertEligible($relationTypes, $employeeId);
-        if ($payableAfterEnforcement <= 0) {
-            // Není co započíst — přeplatek se řeší pohledávkou za
-            // zaměstnancem, ne zápočtem na účet společníka.
-            return [];
-        }
-
-        $result = [];
-        foreach ($this->payoutAllocations->allocate(
-            $payableAfterEnforcement,
-            $this->payoutAllocationRequests($payoutRules),
-        )->allocations as $allocation) {
-            if ($allocation->destinationKind !== PayrollPartnerSettlement::KIND
-                || $allocation->amountMinorUnits === 0
-            ) {
-                continue;
-            }
-            $result[] = [
-                'allocation_reference' => $allocation->allocationReference,
-                'account_code' => $this->account(
-                    $allocation->destinationReference,
-                    'cíl zápočtu na účet společníka',
-                ),
-                'amount_minor' => $allocation->amountMinorUnits,
-            ];
-        }
-
-        return $result;
-    }
-
-    /**
-     * @param list<mixed> $payoutRules
-     * @return list<PayoutAllocationRequest>
-     */
-    private function payoutAllocationRequests(array $payoutRules): array
-    {
-        $requests = [];
-        foreach ($payoutRules as $rule) {
-            $rule = $this->object($rule, 'snapshot.payout_rule');
-            $reference = $this->requiredString($rule, 'allocation_reference');
-            $destinationKind = $this->requiredString($rule, 'destination_kind');
-            $destinationReference = $rule['destination_reference'] ?? null;
-            if ($destinationReference !== null && !is_string($destinationReference)) {
-                throw new \DomainException(
-                    'Reference platebního cíle není text.',
-                );
-            }
-            $priority = $this->nonNegativeInt($rule, 'priority_no');
-            $requests[] = match ($this->requiredString($rule, 'allocation_kind')) {
-                'fixed' => PayoutAllocationRequest::fixed(
-                    $reference,
-                    $destinationKind,
-                    $destinationReference,
-                    $this->nonNegativeInt($rule, 'amount_minor'),
-                    $priority,
-                ),
-                'percentage' => PayoutAllocationRequest::percentage(
-                    $reference,
-                    $destinationKind,
-                    $destinationReference,
-                    $this->nonNegativeInt($rule, 'basis_points'),
-                    $priority,
-                ),
-                'remainder' => PayoutAllocationRequest::remainder(
-                    $reference,
-                    $destinationKind,
-                    $destinationReference,
-                    $priority,
-                ),
-                default => throw new \DomainException(
-                    'Zmrazené výplatní pravidlo má nepodporovaný typ alokace.',
-                ),
-            };
-        }
-
-        return $requests;
     }
 
     /**
@@ -1256,7 +1133,15 @@ final class PayrollPostingLineBuilder
                 );
             }
             $seenKeys[$key] = true;
-            $vectorKey = $key . "\0" . $account;
+            // Do vektoru patří i STŘEDISKO. Opravná revize, která zaměstnance
+            // jen přeřadí na jiné středisko, mění `cost_center`, ne částku ani
+            // účet — bez střediska v klíči by delta vyšla nulově a v deníku by
+            // navždy zůstalo staré středisko. S ním se stará dvojice odúčtuje
+            // a nová zaúčtuje, takže analytika sedí i po opravě.
+            //
+            // `target_hash` se tím NEMĚNÍ: počítá se ze samotných alokací, ne
+            // z tohohle vektoru, takže zaúčtované revize dál hlásí týž otisk.
+            $vectorKey = $key . "\0" . $account . "\0" . ($costCenter ?? '');
             $result[$vectorKey] = [
                 'account_code' => $this->account($account, $key),
                 'signed_minor' => $signed,

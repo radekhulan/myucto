@@ -883,6 +883,148 @@ final class PayrollPostingLineBuilderTest extends TestCase
         return $sets;
     }
 
+    /**
+     * Ú-11: opravná revize, která zaměstnance JEN PŘEŘADÍ na jiné středisko.
+     *
+     * Částka i účet zůstávají stejné, mění se výhradně `cost_center`. Dokud
+     * středisko nebylo součástí klíče rozdílového vektoru, vyšla delta nulově
+     * a v deníku zůstalo navždy staré středisko.
+     */
+    public function testCostCentreChangeAloneProducesReclassificationDelta(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $first = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        $moved = $this->snapshotWithCostCentres();
+        $moved['people'][0]['employments'][0]['dimensions'] = [
+            $this->dimension('cost_center', 'MONTAZ', null),
+        ];
+        $movedResult = $this->calculatedResult();
+        $movedResult['source_snapshot_hash'] = $this->snapshotHash($moved);
+
+        $correction = $this->builder->build(
+            $moved,
+            $movedResult,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+            $first->targetAllocations,
+        );
+
+        self::assertNotSame([], $correction->lines);
+        self::assertSame(
+            ['MONTAZ' => 100_000],
+            $this->costCentreMap($correction->lines, '521', 'debit'),
+        );
+        self::assertSame(
+            ['VYROBA' => 100_000],
+            $this->costCentreMap($correction->lines, '521', 'credit'),
+        );
+        self::assertSame(
+            $correction->debitTotalMinor,
+            $correction->creditTotalMinor,
+        );
+        self::assertNotSame($first->targetHash, $correction->targetHash);
+    }
+
+    /**
+     * Ú-19: daňový bonus OBRACÍ stranu zápisu daně — 342 MD proti závazku mzdy.
+     * Všechny dosavadní fixtures měly bonus nulový, takže tahle větev nebyla
+     * pokrytá vůbec.
+     */
+    public function testTaxBonusPostsTaxAccountOnTheDebitSide(): void
+    {
+        $preview = $this->builder->build(
+            $this->snapshot(),
+            $this->bonusResult(),
+            $this->bonusStatutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        // Záloha je nula, takže na 342 zůstane JEN bonus — a to na straně MD.
+        self::assertSame(30_000, $lineMap['342|debit']);
+        self::assertArrayNotHasKey('342|credit', $lineMap);
+        // Protistrana bonusu jde do závazku mzdy poměrem peněžního příjmu
+        // (100 000 : 500 000), takže zaměstnanci se čistá mzda ZVYŠUJE.
+        self::assertSame(105_000, $lineMap['331|credit']);
+        self::assertSame(525_000, $lineMap['366|credit']);
+        self::assertSame(
+            $preview->debitTotalMinor,
+            $preview->creditTotalMinor,
+        );
+    }
+
+    /**
+     * Ú-19: ZÁPORNÁ delta opravné revize. Snížení pojistného musí obrátit obě
+     * strany zápisu — 524 na D a 336.100 na MD — jinak by oprava směrem dolů
+     * náklad ještě zvýšila.
+     */
+    public function testCorrectionThatLowersAmountReversesBothSides(): void
+    {
+        $first = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $sets = $this->statutorySets();
+        $sets['social_insurance']['result_snapshot'][
+            'employer_contribution_minor_units'
+        ] = 138_800;
+
+        $correction = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $sets,
+            PayrollAccountingDefaults::codes(),
+            $first->targetAllocations,
+        );
+
+        self::assertSame([
+            '336.100|debit' => 10_000,
+            '524|credit' => 10_000,
+        ], $this->lineMap($correction->lines));
+        self::assertSame(10_000, $correction->debitTotalMinor);
+        self::assertSame(10_000, $correction->creditTotalMinor);
+    }
+
+    /**
+     * Výsledek, kde záloha na daň vyšla nula a uplatnil se měsíční daňový bonus
+     * 300 Kč. Čistá mzda je proto o bonus VYŠŠÍ než peněžní příjem po srážkách.
+     *
+     * @return array<string,mixed>
+     */
+    private function bonusResult(): array
+    {
+        $result = $this->calculatedResult();
+        // 600 000 − 42 000 − 27 000 − 10 000 + 30 000 = 551 000
+        $result['people'][0]['payable_after_enforcement_minor'] = 546_000;
+
+        return $result;
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function bonusStatutorySets(): array
+    {
+        $sets = $this->statutorySets();
+        $sets['income_tax']['people'][0]['result_snapshot']['advance_tax'] = [
+            'tax_after_credits_minor_units' => 0,
+            'tax_bonus_minor_units' => 30_000,
+        ];
+        $sets['net_pay']['people'][0]['result_snapshot'][
+            'net_payable_minor_units'
+        ] = 551_000;
+
+        return $sets;
+    }
+
     public function testCorrectionProducesOnlyBalancedDeltaAgainstPreviousTarget(): void
     {
         $first = $this->builder->build(

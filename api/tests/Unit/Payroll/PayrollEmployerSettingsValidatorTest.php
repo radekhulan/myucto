@@ -78,6 +78,50 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
         $this->validator()->validate(1, $this->input('205', $code));
     }
 
+    /**
+     * Ú-12: typ účtu („expense") propustí do nákladu hrubé mzdy i 524. Zápis by
+     * prošel, ale reconciliace by pak trvale končila chybou 422 — kontrola
+     * rezervovaných prefixů proto patří už k uložení nastavení.
+     */
+    #[DataProvider('collidingGrossCostAccounts')]
+    public function testRejectsGrossCostAccountReservedForAnotherCategory(
+        string $key,
+        string $code,
+    ): void {
+        $input = $this->input('205');
+        $input['accounts'][$key] = $code;
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('je kolizní s jinou mzdovou kategorií');
+        $this->validator()->validate(1, $input);
+    }
+
+    /** @return array<string,array{string,string}> */
+    public static function collidingGrossCostAccounts(): array
+    {
+        // Závazkové kolize (331, 342, 365) chytí už kontrola TYPU účtu. Sem
+        // patří ty, které jí projdou: nákladový účet proti nákladovému.
+        return [
+            'hrubá mzda na účtu pojistného zaměstnavatele'
+                => ['employment_gross_debit', '524'],
+            'odměna společníka na účtu pojistného zaměstnavatele'
+                => ['partner_gross_debit', '524'],
+            'pojistné zaměstnavatele na účtu hrubé mzdy'
+                => ['employer_insurance_debit', '521'],
+            'pojistné zaměstnavatele na účtu odměny společníka'
+                => ['employer_insurance_debit', '522'],
+        ];
+    }
+
+    /** Výchozí sada zůstává platná — kontrola nesmí zabránit běžnému uložení. */
+    public function testAcceptsDefaultAccountSet(): void
+    {
+        $accounts = $this->validator()->validate(1, $this->input('205'))['accounts'];
+
+        self::assertSame('521', $accounts['employment_gross_debit']);
+        self::assertSame('524', $accounts['employer_insurance_debit']);
+    }
+
     /** @return array<string,array{string}> */
     public static function malformedSocialSecurityOfficeCodes(): array
     {

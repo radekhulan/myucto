@@ -31,10 +31,13 @@ const CATEGORY_KEYS: PayrollPostingReconciliationCategoryKey[] = [
   'other_deductions',
   'enforcement',
   'net_wage',
+  'partner_settlement',
   'risky_savings',
-  // Informativní řádek jde záměrně poslední: není to porovnání, jen doložení
-  // částky, která se z porovnávané hrubé mzdy vyjmula.
+  // Informativní řádky jdou záměrně poslední: nejsou to porovnání, jen doložení
+  // částek, které se z porovnání vyjmuly nebo se v můstku vůbec neúčtují.
   'non_monetary_neutral',
+  'tax_bonus_receivable',
+  'unposted_liabilities',
 ]
 
 function isInformational(key: PayrollPostingReconciliationCategoryKey): boolean {
@@ -255,6 +258,7 @@ onMounted(load)
                 <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.payments_liability') }}</th>
                 <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.payments_paid') }}</th>
                 <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.diff_payments') }}</th>
+                <th class="px-3 py-2 text-right">{{ t('payroll.posting_reconciliation.table.diff_journal_payments') }}</th>
                 <th class="px-3 py-2">{{ t('payroll.posting_reconciliation.table.status') }}</th>
               </tr>
             </thead>
@@ -294,6 +298,13 @@ onMounted(load)
                   >
                     {{ formatDiff(category.diff_payroll_payments_minor) }}
                   </td>
+                  <td
+                    class="px-3 py-3 text-right font-mono"
+                    :class="category.diff_journal_payments_minor ? 'text-danger-700 font-semibold' : 'text-neutral-500'"
+                    :data-test="`reconciliation-desktop-diff-journal-payments-${category.key}`"
+                  >
+                    {{ formatDiff(category.diff_journal_payments_minor) }}
+                  </td>
                   <td class="px-3 py-3">
                     <span class="inline-flex rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category)">
                       {{ statusLabel(category) }}
@@ -304,7 +315,7 @@ onMounted(load)
                   v-if="expandedKey === category.key"
                   :id="`payroll-reconciliation-desktop-detail-${category.key}`"
                 >
-                  <td colspan="8" class="bg-neutral-50 px-3 py-3 text-xs text-neutral-600">
+                  <td colspan="9" class="bg-neutral-50 px-3 py-3 text-xs text-neutral-600">
                     <p v-if="categoryNote(category.key)" :data-test="`reconciliation-desktop-note-${category.key}`">
                       {{ categoryNote(category.key) }}
                     </p>
@@ -367,11 +378,13 @@ onMounted(load)
               </div>
             </dl>
             <p
-              v-if="category.diff_payroll_journal_minor || category.diff_payroll_payments_minor"
+              v-if="category.diff_payroll_journal_minor || category.diff_payroll_payments_minor
+                || category.diff_journal_payments_minor"
               class="mt-2 text-xs font-semibold text-danger-700"
             >
               {{ t('payroll.posting_reconciliation.table.diff_journal') }}: {{ formatDiff(category.diff_payroll_journal_minor) }}
               · {{ t('payroll.posting_reconciliation.table.diff_payments') }}: {{ formatDiff(category.diff_payroll_payments_minor) }}
+              · {{ t('payroll.posting_reconciliation.table.diff_journal_payments') }}: {{ formatDiff(category.diff_journal_payments_minor) }}
             </p>
             <div
               v-if="expandedKey === category.key"

@@ -539,8 +539,11 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         bool $splitPayout = false,
         ?array $evidenceSource = null,
     ): array {
+        // Kanonický tvar reference z pipeline. Fixtura tu dřív psala holé id,
+        // takže rozklad čisté mzdy vycházel zeleně na tvaru, jaký ostrý běh
+        // nikdy nevyrobí — a v produkci padal na kontrole identity osoby.
         $net = (new PayrollNetCalculator())->calculate(new PayrollNetInput(
-            personReference: (string) $employeeId,
+            personReference: "employee:{$employeeId}",
             relationships: [
                 new NetRelationshipIncome("employment-{$employeeId}", 1_000_000, 0),
             ],

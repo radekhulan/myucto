@@ -11,7 +11,11 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/payrollPosting', () => ({
   payrollPostingApi: { reconciliation: m.reconciliation },
-  PAYROLL_POSTING_INFORMATIONAL_CATEGORIES: ['non_monetary_neutral'],
+  PAYROLL_POSTING_INFORMATIONAL_CATEGORIES: [
+    'non_monetary_neutral',
+    'tax_bonus_receivable',
+    'unposted_liabilities',
+  ],
 }))
 vi.mock('@/api/errors', () => ({
   apiErrorMessage: (_error: unknown, fallback: string) => fallback,
@@ -46,6 +50,7 @@ function category(
     payments_paid_minor: 1000,
     diff_payroll_journal_minor: 0,
     diff_payroll_payments_minor: 0,
+    diff_journal_payments_minor: 0,
     status: 'match',
     ...overrides,
   }
@@ -55,7 +60,7 @@ function reconciliation(
   overrides: Partial<PayrollPostingReconciliation> = {},
 ): PayrollPostingReconciliation {
   return {
-    schema_version: 'payroll-posting-reconciliation.v1',
+    schema_version: 'payroll-posting-reconciliation.v2',
     supplier_id: 1,
     period: '2026-08',
     accounting_mode: 'double_entry',

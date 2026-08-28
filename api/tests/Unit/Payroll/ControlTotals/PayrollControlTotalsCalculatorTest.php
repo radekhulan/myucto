@@ -64,6 +64,11 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
                 'amount_minor' => 450,
             ],
             [
+                'liability_kind' => 'tax_bonus_receivable',
+                'direction' => 'incoming',
+                'amount_minor' => 0,
+            ],
+            [
                 'liability_kind' => 'withholding_tax',
                 'direction' => 'outgoing',
                 'amount_minor' => 0,
@@ -147,6 +152,81 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
         self::assertSame('incoming', $this->liabilityDirection($totals, 'employee_receivable'));
         self::assertSame('outgoing', $this->liabilityDirection($totals, 'net_wage'));
         self::assertCount(3, $totals->people);
+    }
+
+    /**
+     * Ú-10: vyplacené daňové bonusy převýšily odvod záloh.
+     *
+     * § 35d odst. 5 říká, že plátce o vyplacený bonus SNÍŽÍ odvod záloh. Odvod
+     * ale nemůže klesnout pod nulu — převis je POHLEDÁVKA za správcem daně,
+     * kterou plátce uplatní v dalších měsících nebo o ni požádá. Clamp na nule
+     * je proto správně, jenže sám o sobě částku umlčel: deník na 342 clamp
+     * nemá, takže firmě trvale svítil rozdíl. Rozpad na dvě položky drží obě
+     * strany na jednom čísle.
+     */
+    public function testTaxBonusOverhangBecomesReceivableInsteadOfSilentClamp(): void
+    {
+        $totals = $this->calculate($this->bonusHeavyResult());
+
+        $liabilities = $this->liabilityMap($totals);
+        // Odvod na zaplacení je nula — zápornou zálohu poslat nelze.
+        self::assertSame(0, $liabilities['advance_tax']);
+        // Převis se ale nezahazuje: 1 000 + 2 500 vyplacených bonusů proti
+        // nulovému odvodu.
+        self::assertSame(3_500, $liabilities['tax_bonus_receivable']);
+        self::assertSame(
+            'incoming',
+            $this->liabilityDirection($totals, 'tax_bonus_receivable'),
+        );
+    }
+
+    /** Bez bonusů zůstává pohledávka nulová a odvod nedotčený. */
+    public function testAdvanceTaxWithoutBonusKeepsReceivableAtZero(): void
+    {
+        $liabilities = $this->liabilityMap($this->calculate($this->resultSnapshot()));
+
+        self::assertSame(3_000, $liabilities['advance_tax']);
+        self::assertSame(0, $liabilities['tax_bonus_receivable']);
+    }
+
+    /**
+     * Výsledek, kde oběma osobám vyšla nulová záloha a uplatnil se měsíční
+     * daňový bonus. Čistá mzda je proto o bonus vyšší.
+     *
+     * @return array<string,mixed>
+     */
+    private function bonusHeavyResult(): array
+    {
+        $result = $this->resultSnapshot();
+        $result['people'][0] = $this->withTaxBonus($result['people'][0], 1_000);
+        $result['people'][1] = $this->withTaxBonus($result['people'][1], 2_500);
+
+        return $result;
+    }
+
+    /**
+     * @param array<string,mixed> $person
+     * @return array<string,mixed>
+     */
+    private function withTaxBonus(array $person, int $bonusMinor): array
+    {
+        $advance = $person['statutory']['income_tax']['advance_tax']
+            ['tax_after_credits_minor_units'];
+        $shift = $advance + $bonusMinor;
+
+        $person['statutory']['income_tax']['advance_tax'] = [
+            'tax_after_credits_minor_units' => 0,
+            'tax_bonus_minor_units' => $bonusMinor,
+        ];
+        $net = $person['statutory']['net_pay'];
+        $net['advance_tax_minor_units'] = 0;
+        $net['tax_bonus_minor_units'] = $bonusMinor;
+        $net['net_before_deductions_minor_units'] += $shift;
+        $net['net_payable_minor_units'] += $shift;
+        $person['statutory']['net_pay'] = $net;
+        $person['statutory']['net_payable_minor_units'] += $shift;
+
+        return $person;
     }
 
     public function testWholeRunInNegativeStillProducesExactTotals(): void

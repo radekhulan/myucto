@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Codebook\HealthInsurers;
+use MyInvoice\Service\Payroll\Posting\PayrollPostingAccountPolicy;
 
 final class PayrollEmployerSettingsValidator
 {
@@ -24,6 +25,25 @@ final class PayrollEmployerSettingsValidator
         'payroll_contact_name' => 190,
         'payroll_contact_email' => 190,
         'payroll_contact_phone' => 40,
+    ];
+
+    /**
+     * Předkontace, u kterých nestačí TYP účtu.
+     *
+     * Typ „expense“ propustí i 524 do nákladu hrubé mzdy nebo 521 do pojistného
+     * zaměstnavatele. Zápis by prošel, jenže reconciliace účetního můstku pak
+     * nedokáže kategorie rozlišit a firmě trvale končí chybou
+     * „Nákladový účet hrubé mzdy … je kolizní s jinou mzdovou kategorií“ (HTTP
+     * 422) — tedy až ve chvíli, kdy je mzda dávno zaúčtovaná. Rezervované
+     * prefixy proto hlídá už ukládání nastavení.
+     *
+     * @var array<string,'gross_cost'|'employer_insurance_cost'>
+     */
+    private const RESERVED_PREFIX_GUARD = [
+        'employment_gross_debit' => 'gross_cost',
+        'partner_gross_debit' => 'gross_cost',
+        'statutory_gross_debit' => 'gross_cost',
+        'employer_insurance_debit' => 'employer_insurance_cost',
     ];
 
     public function __construct(private readonly ChartOfAccountsRepository $accounts) {}
@@ -193,6 +213,21 @@ final class PayrollEmployerSettingsValidator
             if ($account['account_type'] !== $definition['type']) {
                 throw new \InvalidArgumentException(
                     "Účet {$code} nemá očekávaný typ {$definition['type']}."
+                );
+            }
+            try {
+                match (self::RESERVED_PREFIX_GUARD[$key] ?? null) {
+                    'gross_cost' => PayrollPostingAccountPolicy
+                        ::assertGrossCostAccountIsUnambiguous($code),
+                    'employer_insurance_cost' => PayrollPostingAccountPolicy
+                        ::assertEmployerInsuranceCostAccountIsUnambiguous($code),
+                    default => null,
+                };
+            } catch (\DomainException $exception) {
+                // Vadné nastavení je chyba VSTUPU (422), ne pád serveru.
+                throw new \InvalidArgumentException(
+                    $exception->getMessage(),
+                    previous: $exception,
                 );
             }
             $result[$key] = $code;

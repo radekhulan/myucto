@@ -672,7 +672,9 @@ final class XmlzamCooperationFlowTest extends TestCase
             ]],
         ];
         $net = [
-            'person_reference' => (string) $employeeId,
+            // Kanonický tvar z pipeline. Holé id tu dřív zakrývalo, že rozklad
+            // čisté mzdy — a s ním celá součinnost — na ostré revizi padal.
+            'person_reference' => "employee:{$employeeId}",
             'cash_income_minor_units' => 3_500_000,
             'non_cash_income_minor_units' => 0,
             'employee_social_minor_units' => 0,

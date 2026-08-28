@@ -40,9 +40,15 @@ final class PayrollPostingReconciliationRepository
     }
 
     /**
+     * Vstupní snapshot se čte spolu s výsledným, protože zápočet čisté mzdy na
+     * účet společníka je zmrazený ve VÝPLATNÍCH PRAVIDLECH vstupu — výsledek
+     * o něm nic neví. Bez něj by firma se zápočtem měla trvalý falešný rozdíl.
+     *
      * @return array{
      *   id:int,
      *   status:string,
+     *   input_snapshot_json:?string,
+     *   input_snapshot_hash:?string,
      *   result_snapshot_json:?string,
      *   result_snapshot_hash:?string
      * }|null
@@ -53,7 +59,9 @@ final class PayrollPostingReconciliationRepository
         int $revisionNo,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, status, result_snapshot_json, result_snapshot_hash
+            'SELECT id, status,
+                    input_snapshot_json, input_snapshot_hash,
+                    result_snapshot_json, result_snapshot_hash
                FROM payroll_run_revisions
               WHERE supplier_id = ? AND run_id = ? AND revision_no = ?
               LIMIT 1'
@@ -67,6 +75,12 @@ final class PayrollPostingReconciliationRepository
         return [
             'id' => (int) $row['id'],
             'status' => (string) $row['status'],
+            'input_snapshot_json' => $row['input_snapshot_json'] === null
+                ? null
+                : (string) $row['input_snapshot_json'],
+            'input_snapshot_hash' => $row['input_snapshot_hash'] === null
+                ? null
+                : (string) $row['input_snapshot_hash'],
             'result_snapshot_json' => $row['result_snapshot_json'] === null
                 ? null
                 : (string) $row['result_snapshot_json'],

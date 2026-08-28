@@ -90,6 +90,9 @@ final class PayrollControlTotalsCalculator
             'net_wage',
             'social_insurance',
             'standard_deduction',
+            // Převis vyplacených bonusů nad odvodem záloh — POHLEDÁVKA za
+            // správcem daně, ne nula. Viz níž u clampu `advance_tax`.
+            'tax_bonus_receivable',
             'withholding_tax',
         ], 0);
         $employeeSocial = 0;
@@ -255,10 +258,20 @@ final class PayrollControlTotalsCalculator
         // zbytek se podle týchž ustanovení řeší buď snížením odvodů
         // v následujících měsících, nebo žádostí správci daně; obojí je úkon
         // plátce, ne výpočet, a modul za něj nerozhoduje.
-        $liabilityMap['advance_tax'] = max(
-            0,
-            $this->subtract($liabilityMap['advance_tax'], $advanceTaxOffset),
+        //
+        // Clamp na nule je správně pro ODVOD — zaplatit zápornou částku nejde.
+        // Převis se ale nesmí ztratit: je to POHLEDÁVKA za správcem daně, o
+        // kterou plátce sníží odvod v dalších měsících nebo o ni požádá. Deník
+        // na 342 clamp z definice nemá (účtuje se D 342 zálohou a MD 342
+        // bonusem), takže bez samostatného vykázání by firmě, které bonusy
+        // převýší zálohy, trvale svítil rozdíl mzda ↔ deník. Neumlčuje se
+        // proto — dostává vlastní, POJMENOVANOU položku, kterou účetní vidí.
+        $advanceTaxNet = $this->subtract(
+            $liabilityMap['advance_tax'],
+            $advanceTaxOffset,
         );
+        $liabilityMap['advance_tax'] = max(0, $advanceTaxNet);
+        $liabilityMap['tax_bonus_receivable'] = max(0, -$advanceTaxNet);
 
         ksort($officeMaps, SORT_NUMERIC);
         $offices = [];
@@ -282,9 +295,10 @@ final class PayrollControlTotalsCalculator
         $liabilities = [];
         foreach ($liabilityMap as $kind => $amount) {
             // Každá položka je nezáporná ČÁSTKA a směr říká, kterým směrem
-            // peníze tečou. Pohledávka za zaměstnancem z přeplatku čisté mzdy
-            // je jediná příchozí — firma ji od zaměstnance inkasuje (zápočtem
-            // v dalším měsíci nebo úhradou), neposílá ji.
+            // peníze tečou. Příchozí jsou dvě: pohledávka za zaměstnancem
+            // z přeplatku čisté mzdy (firma ji inkasuje zápočtem v dalším
+            // měsíci nebo úhradou) a pohledávka za správcem daně z převisu
+            // daňových bonusů nad odvodem záloh (§ 35d odst. 5).
             if ($amount < 0) {
                 throw new \DomainException(
                     "Kontrolní součet závazku {$kind} vyšel záporně.",
@@ -292,7 +306,11 @@ final class PayrollControlTotalsCalculator
             }
             $liabilities[] = [
                 'liability_kind' => $kind,
-                'direction' => $kind === 'employee_receivable'
+                'direction' => in_array(
+                    $kind,
+                    ['employee_receivable', 'tax_bonus_receivable'],
+                    true,
+                )
                     ? 'incoming'
                     : 'outgoing',
                 'amount_minor' => $amount,

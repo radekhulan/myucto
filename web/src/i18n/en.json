@@ -1231,6 +1231,7 @@
                 "payments_liability": "Payments — liability",
                 "payments_paid": "Payments — paid",
                 "diff_payments": "Diff (payroll vs. payments)",
+                "diff_journal_payments": "Diff (journal vs. payments)",
                 "status": "Status"
             },
             "categories": {
@@ -1242,11 +1243,17 @@
                 "enforcement": "Garnishment and insolvency deductions (379)",
                 "net_wage": "Net wage payable (331/366)",
                 "risky_savings": "Mandatory savings for risky work (527/379)",
-                "non_monetary_neutral": "Non-monetary benefit with no accounting impact"
+                "partner_settlement": "Net pay offset against the partner account (365)",
+                "non_monetary_neutral": "Non-monetary benefit with no accounting impact",
+                "tax_bonus_receivable": "Receivable from the tax office for tax bonuses (Sec. 35d(5))",
+                "unposted_liabilities": "Paid outside the payroll bridge (statutory insurance, benefits)"
             },
             "category_note": {
                 "risky_savings": "The expense side (527) is tracked. If you post other payroll items to 527 as well, separate the contribution with an analytical account (e.g. 527.100).",
-                "non_monetary_neutral": "An informational row, not a difference. Non-monetary benefits (typically 1 % of the vehicle purchase price) are not posted separately — the expense is already in the books from the source document, so they are excluded from the gross wages being compared."
+                "non_monetary_neutral": "An informational row, not a difference. Non-monetary benefits (typically 1 % of the vehicle purchase price) are not posted separately — the expense is already in the books from the source document, so they are excluded from the gross wages being compared.",
+                "partner_settlement": "An offset pays out nothing — it only reclassifies the liability (331/366 debit / 365 credit). The Net pay category is lower by this amount and the payments column stays empty.",
+                "tax_bonus_receivable": "An informational row, not a difference. Tax bonuses paid out exceeded the advance tax due; the excess reduces future remittances or is refunded on request (Sec. 35d(5)). The Income tax category already accounts for it.",
+                "unposted_liabilities": "An informational row, not a difference. Employer liability insurance and benefits are paid from payroll but posted from their own document — the payroll bridge does not post them, so there is nothing to compare."
             },
             "informational_badge": "Informational",
             "category_status": {

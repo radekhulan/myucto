@@ -26,6 +26,34 @@ final class PayrollPostingAccountPolicy
     public const NET_WAGE_PREFIXES = ['331', '366'];
 
     /**
+     * Protiúčet zápočtu čisté mzdy na účet společníka (365).
+     *
+     * Zápočet je čistě VNITŘNÍ překlasifikace závazku: 331/366 MD proti 365 D.
+     * Mzdová strana o něm nic neví — kontrolní součty MZ-13 znají jen čistou
+     * mzdu, ne způsob jejího vypořádání. Kdyby se 365 nechalo mimo kategorii
+     * čisté mzdy, deník by byl o zápočet nižší než mzda a firma se zápočtem by
+     * měla na kontrolní obrazovce TRVALÝ falešný rozdíl. Proto se 365 porovnává
+     * SPOLU s 331/366 — uvnitř skupiny se zápočet vyruší — a samotná částka se
+     * nezahazuje: vykazuje ji informativní kategorie `partner_settlement`.
+     *
+     * @var list<string>
+     */
+    public const PARTNER_SETTLEMENT_PREFIXES = ['365'];
+
+    /**
+     * Rezervované prefixy analytické dimenze srážek a exekucí.
+     *
+     * Sloupec `cost_center` deníku nese u srážek pseudonym oprávněného
+     * (`MZ-SR-…`, `MZ-EX-…`), protože samostatné saldokonto per oprávněný
+     * datový model zatím nemá. Reálný kód mzdové dimenze proto tyhle prefixy
+     * mít NESMÍ — jinak by se středisko firmy v reconciliaci vydávalo za
+     * srážku. Hlídá {@see \MyInvoice\Service\Payroll\Settings\PayrollDimensionService}.
+     *
+     * @var list<string>
+     */
+    public const RESERVED_DIMENSION_PREFIXES = ['MZ-SR-', 'MZ-EX-'];
+
+    /**
      * Povinný příspěvek na spoření u rizikové práce.
      *
      * ZÁMĚRNĚ není mezi rezervovanými prefixy hrubé mzdy: 527 je běžný účet
@@ -39,17 +67,67 @@ final class PayrollPostingAccountPolicy
 
     public static function assertGrossCostAccountIsUnambiguous(string $account): void
     {
+        self::assertUnambiguous(
+            $account,
+            [
+                self::EMPLOYER_CONTRIBUTION_PREFIXES,
+                self::SOCIAL_HEALTH_INSURANCE_PREFIXES,
+                self::INCOME_TAX_PREFIXES,
+                self::OTHER_DEDUCTION_PREFIXES,
+                self::NET_WAGE_PREFIXES,
+                self::PARTNER_SETTLEMENT_PREFIXES,
+            ],
+            'Nákladový účet hrubé mzdy',
+        );
+    }
+
+    /**
+     * Nákladový účet pojistného zaměstnavatele (výchozí 524) nesmí spadnout do
+     * ŽÁDNÉ jiné mzdové kategorie — ani do hrubé mzdy. Nastavením 521 nebo 331
+     * by zápis sice prošel, ale reconciliace by kategorii nedokázala rozlišit
+     * a firma by měla trvalý rozdíl, který nejde odstranit jinak než změnou
+     * nastavení. Chyba proto patří k zadání, ne až k zaúčtování.
+     */
+    public static function assertEmployerInsuranceCostAccountIsUnambiguous(
+        string $account,
+    ): void {
+        self::assertUnambiguous(
+            $account,
+            [
+                self::GROSS_WAGE_PREFIXES,
+                self::SOCIAL_HEALTH_INSURANCE_PREFIXES,
+                self::INCOME_TAX_PREFIXES,
+                self::OTHER_DEDUCTION_PREFIXES,
+                self::NET_WAGE_PREFIXES,
+                self::PARTNER_SETTLEMENT_PREFIXES,
+            ],
+            'Nákladový účet pojistného zaměstnavatele',
+        );
+    }
+
+    /** Nese kód mzdové dimenze rezervovaný pseudonym srážky nebo exekuce? */
+    public static function isReservedDimensionCode(string $code): bool
+    {
+        foreach (self::RESERVED_DIMENSION_PREFIXES as $prefix) {
+            if (str_starts_with(strtoupper($code), $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param list<list<string>> $reservedGroups */
+    private static function assertUnambiguous(
+        string $account,
+        array $reservedGroups,
+        string $label,
+    ): void {
         $prefix = substr($account, 0, 3);
-        foreach ([
-            self::EMPLOYER_CONTRIBUTION_PREFIXES,
-            self::SOCIAL_HEALTH_INSURANCE_PREFIXES,
-            self::INCOME_TAX_PREFIXES,
-            self::OTHER_DEDUCTION_PREFIXES,
-            self::NET_WAGE_PREFIXES,
-        ] as $reservedPrefixes) {
+        foreach ($reservedGroups as $reservedPrefixes) {
             if (in_array($prefix, $reservedPrefixes, true)) {
                 throw new \DomainException(
-                    "Nákladový účet hrubé mzdy {$account} je kolizní s jinou mzdovou kategorií.",
+                    "{$label} {$account} je kolizní s jinou mzdovou kategorií.",
                 );
             }
         }

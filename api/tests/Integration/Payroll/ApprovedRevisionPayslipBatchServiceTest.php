@@ -143,12 +143,17 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
     {
         $documents = new TransactionObservingPayrollDocumentService(
             $this->db,
+            // Zdroj se mění na VÝSLEDKU OSOBY, ne na období běhu. Období běhu se
+            // schválenou revizí posunout nejde od migrace 1632 (guard C-16) —
+            // a nemá jít: propagace z migrace 1593 by tím přerazítkovala i mzdy,
+            // které jsou schválené a vyplacené. Zdrojový otisk pásky stejně stojí
+            // na `result_json`, takže tohle je věrnější simulace téhož rizika.
             function (): void {
                 $this->db->pdo()->prepare(
-                    'UPDATE payroll_runs
-                        SET period_start = "2026-08-01"
-                      WHERE supplier_id = ? AND id = ?'
-                )->execute([$this->supplierId, $this->runId]);
+                    "UPDATE payroll_run_persons
+                        SET result_json = JSON_SET(result_json, '$.source_changed', 1)
+                      WHERE supplier_id = ? AND revision_id = ?"
+                )->execute([$this->supplierId, $this->revisionId]);
             },
         );
         $service = new ApprovedRevisionPayslipBatchService(

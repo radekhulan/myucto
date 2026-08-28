@@ -7,18 +7,21 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollNetRepository;
-use MyInvoice\Service\Payroll\Net\NetRelationshipIncome;
-use MyInvoice\Service\Payroll\Net\PayoutAllocationRequest;
-use MyInvoice\Service\Payroll\Net\PayoutAllocationService;
-use MyInvoice\Service\Payroll\Net\PayrollNetCalculator;
-use MyInvoice\Service\Payroll\Net\PayrollNetInput;
-use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Append-only evidence srážek ze mzdy.
+ *
+ * Zápis do `payroll_net_results` a `payroll_payout_allocations` tenhle repozitář
+ * už nemá — nikdy neměl produkčního volajícího a model ho přerostl (viz docblock
+ * {@see PayrollNetRepository}). Čistá mzda se čte ze zmrazené revize a rozpis
+ * výplaty z `payroll_payment_liabilities`; obojí pokrývá
+ * `PayrollDeductionAgreementLifecycleTest`.
+ */
 #[Group('integration')]
 final class PayrollNetPersistenceTest extends TestCase
 {
@@ -27,7 +30,6 @@ final class PayrollNetPersistenceTest extends TestCase
     private Connection $db;
     private PayrollNetRepository $repository;
     private int $supplierId;
-    private int $otherSupplierId;
     private int $employeeId;
     private int $revisionId;
 
@@ -41,14 +43,8 @@ final class PayrollNetPersistenceTest extends TestCase
             throw new \RuntimeException('Služby čisté mzdy nejsou dostupné.');
         }
         $this->db = $db;
-        foreach ([
-            'payroll_net_results',
-            'payroll_payout_allocations',
-            'payroll_deduction_ledger',
-        ] as $table) {
-            if (!$db->hasTable($table)) {
-                $this->markTestSkipped('Migrace 1250 neproběhla.');
-            }
+        if (!$db->hasTable('payroll_deduction_ledger')) {
+            $this->markTestSkipped('Migrace 1250 neproběhla.');
         }
         $this->repository = $repository;
         $pdo = $db->pdo();
@@ -58,7 +54,6 @@ final class PayrollNetPersistenceTest extends TestCase
         }
         $pdo->beginTransaction();
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
-        $this->otherSupplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $this->employeeId = $this->createEmployee($pdo, $this->supplierId);
         $this->revisionId = $this->createRevision($pdo, $this->supplierId);
     }
@@ -71,80 +66,6 @@ final class PayrollNetPersistenceTest extends TestCase
         if (isset($this->db)) {
             $this->db->close();
         }
-    }
-
-    public function testPersistsImmutableResultAndExactAllocationsIdempotently(): void
-    {
-        $result = (new PayrollNetCalculator())->calculate(new PayrollNetInput(
-            personReference: (string) $this->employeeId,
-            relationships: [
-                new NetRelationshipIncome('employment-synthetic', 1_000_000, 50_000),
-            ],
-            employeeSocialMinorUnits: 71_000,
-            employeeHealthMinorUnits: 45_000,
-            advanceTaxMinorUnits: 80_000,
-            withholdingTaxMinorUnits: 0,
-            taxBonusMinorUnits: 0,
-            correctionMinorUnits: 0,
-            voluntaryDeductionCapacityMinorUnits: 804_000,
-            deductions: [],
-        ));
-        $payout = (new PayoutAllocationService())->allocate(
-            $result->netPayableMinorUnits,
-            [PayoutAllocationRequest::remainder(
-                'primary',
-                'bank',
-                'synthetic-primary-account',
-                1,
-            )],
-        );
-
-        $id = $this->repository->saveCalculation(
-            $this->supplierId,
-            $this->revisionId,
-            $this->employeeId,
-            $result,
-            $payout,
-        );
-        $replayedId = $this->repository->saveCalculation(
-            $this->supplierId,
-            $this->revisionId,
-            $this->employeeId,
-            $result,
-            $payout,
-        );
-
-        self::assertSame($id, $replayedId);
-        $stored = $this->repository->findResult(
-            $this->supplierId,
-            $this->revisionId,
-            $this->employeeId,
-        );
-        self::assertNotNull($stored);
-        self::assertSame('2026-06-01', (string) $stored['period_start']);
-        self::assertSame(
-            hash('sha256', CanonicalJson::encode([
-                'net' => $result->jsonSerialize(),
-                'payout' => $payout->jsonSerialize(),
-            ])),
-            $stored['result_hash'],
-        );
-        self::assertSame(804_000, $stored['net_payable_minor']);
-        $allocations = $this->repository->allocations(
-            $this->supplierId,
-            $this->revisionId,
-            $this->employeeId,
-        );
-        self::assertCount(1, $allocations);
-        self::assertSame(
-            'synthetic-primary-account',
-            $allocations[0]['destination_reference'],
-        );
-        self::assertNull($this->repository->findResult(
-            $this->otherSupplierId,
-            $this->revisionId,
-            $this->employeeId,
-        ));
     }
 
     public function testAppendOnlyLedgerSupportsIdempotencyAndExplicitReversal(): void
@@ -205,42 +126,6 @@ final class PayrollNetPersistenceTest extends TestCase
         self::assertSame([25_000, -25_000], array_column($ledger, 'amount_minor'));
     }
 
-    public function testForeignKeyViolationIsNotMisclassifiedAsIdempotentReplay(): void
-    {
-        $result = (new PayrollNetCalculator())->calculate(new PayrollNetInput(
-            personReference: (string) PHP_INT_MAX,
-            relationships: [
-                new NetRelationshipIncome('employment-synthetic', 100_000, 0),
-            ],
-            employeeSocialMinorUnits: 0,
-            employeeHealthMinorUnits: 0,
-            advanceTaxMinorUnits: 0,
-            withholdingTaxMinorUnits: 0,
-            taxBonusMinorUnits: 0,
-            correctionMinorUnits: 0,
-            voluntaryDeductionCapacityMinorUnits: 100_000,
-            deductions: [],
-        ));
-        $payout = (new PayoutAllocationService())->allocate(
-            $result->netPayableMinorUnits,
-            [PayoutAllocationRequest::remainder(
-                'primary',
-                'cash',
-                null,
-                1,
-            )],
-        );
-
-        $this->expectException(PDOException::class);
-        $this->repository->saveCalculation(
-            $this->supplierId,
-            $this->revisionId,
-            PHP_INT_MAX,
-            $result,
-            $payout,
-        );
-    }
-
     public function testLedgerCannotUseAgreementOwnedByAnotherEmployee(): void
     {
         $otherEmployeeId = $this->createEmployee($this->db->pdo(), $this->supplierId);
@@ -262,37 +147,6 @@ final class PayrollNetPersistenceTest extends TestCase
             null,
             [],
             null,
-        );
-    }
-
-    public function testCannotPersistResultForDifferentEmployeeIdentity(): void
-    {
-        $result = (new PayrollNetCalculator())->calculate(new PayrollNetInput(
-            personReference: 'different-synthetic-person',
-            relationships: [
-                new NetRelationshipIncome('employment-synthetic', 100_000, 0),
-            ],
-            employeeSocialMinorUnits: 0,
-            employeeHealthMinorUnits: 0,
-            advanceTaxMinorUnits: 0,
-            withholdingTaxMinorUnits: 0,
-            taxBonusMinorUnits: 0,
-            correctionMinorUnits: 0,
-            voluntaryDeductionCapacityMinorUnits: 100_000,
-            deductions: [],
-        ));
-        $payout = (new PayoutAllocationService())->allocate(
-            $result->netPayableMinorUnits,
-            [PayoutAllocationRequest::remainder('cash', 'cash', null, 1)],
-        );
-
-        $this->expectException(\DomainException::class);
-        $this->repository->saveCalculation(
-            $this->supplierId,
-            $this->revisionId,
-            $this->employeeId,
-            $result,
-            $payout,
         );
     }
 

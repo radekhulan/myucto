@@ -23,8 +23,15 @@ use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
  * hrubé mzdy (521/522/523), zákonné náklady zaměstnavatele (524), sociální +
  * zdravotní pojištění (336), daň (342), ostatní srážky a exekuce (obě 379,
  * rozlišené analytickou dimenzí MZ-SR-/MZ-EX-) a čistá mzda (331/366).
- * K nim přibylo povinné spoření u rizikové práce (527) a INFORMATIVNÍ řádek
- * nepeněžních plnění bez účetního dopadu, který se záměrně s ničím neporovnává.
+ * K nim přibylo povinné spoření u rizikové práce (527), zápočet čisté mzdy na
+ * účet společníka (365) a tři INFORMATIVNÍ řádky, které se záměrně s ničím
+ * neporovnávají: nepeněžní plnění bez účetního dopadu, pohledávka za správcem
+ * daně z převisu bonusů (§ 35d odst. 5) a závazky placené mimo mzdový můstek.
+ *
+ * POROVNÁVAJÍ SE TŘI OSY, ne dvě: mzda ↔ deník, mzda ↔ závazky a nově
+ * i deník ↔ závazky. První dvě samy o sobě propustily stav, kdy se zůstatek
+ * účtu rozešel se skutečně vzniklým závazkem, aniž by to kterákoli z nich
+ * ukázala.
  *
  * Období, kde se ještě neúčtovalo (daňová evidence nebo neuzavřený/neschválený
  * měsíc), NENÍ rozdíl — vrací se stav bez kategorií a s vysvětlujícím stavem.
@@ -32,11 +39,20 @@ use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
 final class PayrollPostingReconciliationService
 {
     /**
+     * Sloupce, které kategorie vůbec MÁ. Chybějící sloupec je `null`, ne nula —
+     * „tuhle stranu neznáme" je něco jiného než „na téhle straně je nula".
+     *
+     * @var list<string>
+     */
+    private const ALL_COLUMNS = ['payroll', 'journal', 'payments'];
+
+    /**
      * @var array<string,array{
      *   prefixes:list<string>,
      *   dimension:?string,
      *   nature:'expense'|'liability',
-     *   informational?:bool
+     *   informational?:bool,
+     *   columns?:list<string>
      * }>
      */
     private const CATEGORIES = [
@@ -106,10 +122,72 @@ final class PayrollPostingReconciliationService
             'dimension' => null,
             'nature' => 'expense',
             'informational' => true,
+            'columns' => ['payroll'],
+        ],
+        /*
+         * Zápočet čisté mzdy na účet společníka (331/366 MD / 365 D).
+         *
+         * Mzdová strana ho počítá {@see PayrollPartnerSettlementResolver} ze
+         * zmrazených výplatních pravidel, deník ho drží na 365. Je to plnohodnotné
+         * POROVNÁNÍ, ne informativní řádek: zápočet se účtuje, takže se dá ověřit.
+         * Platební strana ho ale mít nesmí — zápočtem se nic nevyplácí (viz
+         * PayrollNetWageLiabilityMaterializer), proto sloupec plateb chybí.
+         *
+         * Kategorie `net_wage` má tutéž částku ODEČTENOU: deník i platby jsou
+         * o zápočet nižší než kontrolní součet čisté mzdy MZ-13, který o způsobu
+         * vypořádání nic neví. Bez toho měla firma se zápočtem trvalý rozdíl.
+         */
+        'partner_settlement' => [
+            'prefixes' => PayrollPostingAccountPolicy::PARTNER_SETTLEMENT_PREFIXES,
+            'dimension' => null,
+            'nature' => 'liability',
+            'columns' => ['payroll', 'journal'],
+        ],
+        /*
+         * Pohledávka za správcem daně z převisu daňových bonusů nad odvodem
+         * záloh (§ 35d odst. 5). NENÍ to chyba a nesmí se umlčet: kontrolní
+         * součty odvod clampují nulou (zápornou zálohu nelze zaplatit), deník
+         * na 342 clamp nemá. Rozdíl se proto neschovává — vykazuje se jako
+         * vlastní, pojmenovaná POLOŽKA a kategorie `income_tax` už porovnává
+         * čistý (clampem nedotčený) odvod, takže všechny tři sloupce mluví
+         * o jednom čísle.
+         */
+        'tax_bonus_receivable' => [
+            'prefixes' => [],
+            'dimension' => null,
+            'nature' => 'liability',
+            'informational' => true,
+            'columns' => ['payroll'],
+        ],
+        /*
+         * Závazky, které se PLATÍ, ale ÚČTUJÍ se mimo mzdový můstek: zákonné
+         * pojištění odpovědnosti zaměstnavatele (§ 205d zákoníku práce, vyhl.
+         * 125/1993 Sb.) a benefity placené třetí straně. Účtují se vlastním
+         * dokladem (přijatá faktura, interní doklad), takže mzdová ani deníková
+         * strana tu být NEMŮŽE — kdyby se doplnila kategorie s porovnáním,
+         * vyrobila by trvalý falešný rozdíl. Vykazují se proto jmenovitě jako
+         * NEÚČTOVANÉ; účetní tak vidí, že o nich modul ví, a nehledá je jinde.
+         */
+        'unposted_liabilities' => [
+            'prefixes' => [],
+            'dimension' => null,
+            'nature' => 'liability',
+            'informational' => true,
+            'columns' => ['payments'],
         ],
     ];
 
-    /** @var array<string,list<string>> */
+    /**
+     * Mapa kategorie → druhy platebních závazků.
+     *
+     * Musí pokrýt VŠECHNY druhy, které umí vzniknout (viz
+     * PayrollRunPaymentSettlementService::KIND_LABELS), jinak zaplacený závazek
+     * z obrazovky beze stopy zmizí. `statutory_insurance`, `benefit` a `other`
+     * se ale v můstku NEÚČTUJÍ, takže patří do informativní kategorie
+     * `unposted_liabilities`, ne mezi porovnávané.
+     *
+     * @var array<string,list<string>>
+     */
     private const PAYMENT_LIABILITY_KINDS = [
         'social_health_insurance' => ['social_insurance', 'health_insurance'],
         'income_tax' => ['advance_tax', 'withholding_tax'],
@@ -117,6 +195,7 @@ final class PayrollPostingReconciliationService
         'enforcement' => ['enforcement', 'insolvency'],
         'net_wage' => ['net_wage'],
         'risky_savings' => ['risky_savings'],
+        'unposted_liabilities' => ['statutory_insurance', 'benefit', 'other'],
     ];
 
     public function __construct(
@@ -124,6 +203,8 @@ final class PayrollPostingReconciliationService
         private readonly PayrollControlTotalsService $controlTotals,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
         private readonly AccountingModeRepository $accountingModes,
+        private readonly PayrollPartnerSettlementResolver $partnerSettlements =
+            new PayrollPartnerSettlementResolver(),
     ) {}
 
     /** @return array<string,mixed> */
@@ -147,7 +228,11 @@ final class PayrollPostingReconciliationService
         $accountingMode = $this->accountingModes->forYear($supplierId, $year);
 
         $envelope = [
-            'schema_version' => 'payroll-posting-reconciliation.v1',
+            // v2: přibyla třetí osa `diff_journal_payments_minor`, kategorie
+            // `partner_settlement`, `tax_bonus_receivable` a
+            // `unposted_liabilities`, a `payroll_minor` smí být `null`
+            // (kategorie, která mzdovou stranu z podstaty nemá).
+            'schema_version' => 'payroll-posting-reconciliation.v2',
             'supplier_id' => $supplierId,
             'period' => $period,
             'accounting_mode' => $accountingMode,
@@ -191,18 +276,24 @@ final class PayrollPostingReconciliationService
             $revision['id'],
         );
         $resultSnapshot = $this->verifiedResultSnapshot($revision);
+        $inputSnapshot = $this->verifiedInputSnapshot($revision);
         $enforcementTotal = $this->enforcementWithheldTotal($resultSnapshot);
         $employerContributions = $this->employerContributions(
             $supplierId,
             $revision['id'],
         );
         $nonMonetaryNeutral = $this->neutralNonMonetaryTotal($resultSnapshot);
+        $partnerSettlement = $this->partnerSettlements->totalForRevision(
+            $inputSnapshot,
+            $resultSnapshot,
+        );
 
         $liabilitiesByKind = [];
         foreach ($controlTotals->liabilities as $liability) {
             $liabilitiesByKind[(string) $liability['liability_kind']] =
                 (int) $liability['amount_minor'];
         }
+        $taxBonusReceivable = $liabilitiesByKind['tax_bonus_receivable'] ?? 0;
         $payrollByCategory = [
             // Kontrolní součet MZ-13 je HRUBÝ příjem VČETNĚ nepeněžních
             // složek bez předkontace, deník je ale z definice nemá — jinak by
@@ -215,14 +306,28 @@ final class PayrollPostingReconciliationService
             'social_health_insurance' =>
                 ($liabilitiesByKind['social_insurance'] ?? 0)
                 + ($liabilitiesByKind['health_insurance'] ?? 0),
+            // ČISTÝ odvod daně, tedy včetně případného záporu. Kontrolní
+            // součty drží odvod clampnutý nulou (zaplatit zápornou částku
+            // nelze) a převis vykazují zvlášť jako pohledávku za FÚ; deník na
+            // 342 clamp nemá. Porovnává se proto rozdíl obojího — jinak by
+            // firmě, které bonusy převýší zálohy, trvale svítil rozdíl.
             'income_tax' =>
                 ($liabilitiesByKind['advance_tax'] ?? 0)
-                + ($liabilitiesByKind['withholding_tax'] ?? 0),
+                + ($liabilitiesByKind['withholding_tax'] ?? 0)
+                - $taxBonusReceivable,
             'other_deductions' => $liabilitiesByKind['standard_deduction'] ?? 0,
             'enforcement' => $enforcementTotal,
-            'net_wage' => ($liabilitiesByKind['net_wage'] ?? 0) - $enforcementTotal,
+            // Zápočet na účet společníka se nevyplácí ani nezůstává na 331/366 —
+            // deník i platební strana jsou o něj nižší. Vlastní kategorie
+            // `partner_settlement` ho vykazuje a porovnává samostatně.
+            'net_wage' => ($liabilitiesByKind['net_wage'] ?? 0)
+                - $enforcementTotal
+                - $partnerSettlement,
             'risky_savings' => $this->riskySavingsTotal($resultSnapshot),
             'non_monetary_neutral' => $nonMonetaryNeutral,
+            'partner_settlement' => $partnerSettlement,
+            'tax_bonus_receivable' => $taxBonusReceivable,
+            'unposted_liabilities' => 0,
         ];
 
         $revisionIds = $this->repository->revisionIdsForRun(
@@ -249,17 +354,29 @@ final class PayrollPostingReconciliationService
         );
         $paymentsMaterialized = $liabilityRows !== [];
         $paymentsByCategory = $this->paymentsByCategory($liabilityRows);
+        // Platební strana daně je stejně jako kontrolní součet clampnutá na
+        // nule — závazek na zaplacení zápornou částku být nemůže. Aby se
+        // porovnávalo totéž číslo jako v deníku a na mzdové straně, odečte se
+        // i tady převis bonusů. Sloupec „zaplaceno" zůstává tím, čím je:
+        // skutečně odeslanou částkou.
+        if (isset($paymentsByCategory['income_tax'])) {
+            $paymentsByCategory['income_tax']['liability'] -= $taxBonusReceivable;
+        }
 
         $categories = [];
         $hasDiff = false;
         $hasMatch = false;
         foreach (self::CATEGORIES as $key => $definition) {
             $informational = ($definition['informational'] ?? false) === true;
-            $payrollMinor = $payrollByCategory[$key];
-            $journalMinor = !$informational && $journalState === 'posted'
-                ? ($journalByCategory[$key] ?? 0)
+            $columns = $definition['columns'] ?? self::ALL_COLUMNS;
+            $payrollMinor = in_array('payroll', $columns, true)
+                ? $payrollByCategory[$key]
                 : null;
-            $liabilityApplicable = !$informational
+            $journalMinor = in_array('journal', $columns, true)
+                && $journalState === 'posted'
+                    ? ($journalByCategory[$key] ?? 0)
+                    : null;
+            $liabilityApplicable = in_array('payments', $columns, true)
                 && isset(self::PAYMENT_LIABILITY_KINDS[$key])
                 && $paymentsMaterialized;
             $paymentsLiabilityMinor = $liabilityApplicable
@@ -269,20 +386,38 @@ final class PayrollPostingReconciliationService
                 ? ($paymentsByCategory[$key]['paid'] ?? 0)
                 : null;
 
-            $diffJournal = $journalMinor === null
-                ? null
-                : $payrollMinor - $journalMinor;
-            $diffPayments = $paymentsLiabilityMinor === null
-                ? null
-                : $payrollMinor - $paymentsLiabilityMinor;
+            $diffJournal = $informational
+                || $payrollMinor === null
+                || $journalMinor === null
+                    ? null
+                    : $payrollMinor - $journalMinor;
+            $diffPayments = $informational
+                || $payrollMinor === null
+                || $paymentsLiabilityMinor === null
+                    ? null
+                    : $payrollMinor - $paymentsLiabilityMinor;
+            // TŘETÍ OSA (Ú-16): deník ↔ platební závazek. Mzda ↔ deník
+            // a mzda ↔ závazky se dosud porovnávaly každá zvlášť, takže se
+            // zůstatky 331/336/342/379 mohly rozejít se skutečně vzniklými
+            // závazky, aniž by to kterákoli z prvních dvou os ukázala.
+            $diffJournalPayments = $informational
+                || $journalMinor === null
+                || $paymentsLiabilityMinor === null
+                    ? null
+                    : $journalMinor - $paymentsLiabilityMinor;
 
-            if (($diffJournal !== null && $diffJournal !== 0)
-                || ($diffPayments !== null && $diffPayments !== 0)
-            ) {
+            $diffs = [$diffJournal, $diffPayments, $diffJournalPayments];
+            $comparable = array_filter(
+                $diffs,
+                static fn (?int $diff): bool => $diff !== null,
+            );
+            // Informativní kategorie mají všechny rozdíly `null`, takže
+            // spadnou do `not_applicable` — nikdy z nich nevznikne rozdíl.
+            if ($comparable === []) {
+                $status = 'not_applicable';
+            } elseif (array_filter($comparable) !== []) {
                 $status = 'diff';
                 $hasDiff = true;
-            } elseif ($diffJournal === null && $diffPayments === null) {
-                $status = 'not_applicable';
             } else {
                 $status = 'match';
                 $hasMatch = true;
@@ -296,6 +431,7 @@ final class PayrollPostingReconciliationService
                 'payments_paid_minor' => $paymentsPaidMinor,
                 'diff_payroll_journal_minor' => $diffJournal,
                 'diff_payroll_payments_minor' => $diffPayments,
+                'diff_journal_payments_minor' => $diffJournalPayments,
                 'status' => $status,
             ];
         }
@@ -406,20 +542,44 @@ final class PayrollPostingReconciliationService
      */
     private function verifiedResultSnapshot(array $revision): array
     {
-        $json = $revision['result_snapshot_json'];
-        $hash = $revision['result_snapshot_hash'];
+        return $this->verifiedSnapshot(
+            $revision['result_snapshot_json'],
+            $revision['result_snapshot_hash'],
+            'Výsledný',
+        );
+    }
+
+    /**
+     * @param array{input_snapshot_json:?string,input_snapshot_hash:?string} $revision
+     * @return array<string,mixed>
+     */
+    private function verifiedInputSnapshot(array $revision): array
+    {
+        return $this->verifiedSnapshot(
+            $revision['input_snapshot_json'] ?? null,
+            $revision['input_snapshot_hash'] ?? null,
+            'Vstupní',
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function verifiedSnapshot(
+        ?string $json,
+        ?string $hash,
+        string $label,
+    ): array {
         if ($json === null || $hash === null
             || preg_match('/^[0-9a-f]{64}$/D', $hash) !== 1
             || !hash_equals($hash, hash('sha256', $json))
         ) {
             throw new \DomainException(
-                'Výsledný snapshot schválené revize nemá platný otisk.',
+                "{$label} snapshot schválené revize nemá platný otisk.",
             );
         }
         $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
         if (!is_array($decoded) || array_is_list($decoded)) {
             throw new \UnexpectedValueException(
-                'Výsledný snapshot revize není objekt.',
+                "{$label} snapshot revize není objekt.",
             );
         }
 

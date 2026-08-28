@@ -198,7 +198,7 @@ final class PayrollPostingBatchRepository
         }
 
         $statement = $this->db->pdo()->prepare(
-            'SELECT starts_on, ends_on
+            'SELECT starts_on, ends_on, fiscal_year
                FROM accounting_periods
               WHERE supplier_id = ?
                 AND status = "open"
@@ -229,8 +229,64 @@ final class PayrollPostingBatchRepository
                 'Pro mzdový předpis není dostupné otevřené účetní datum.',
             );
         }
+        $this->assertSameFiscalYear(
+            $supplierId,
+            $payrollPeriodEnd,
+            self::databaseInt($row['fiscal_year'] ?? null, 'fiscal_year'),
+            $entryDate,
+        );
 
         return $entryDate;
+    }
+
+    /**
+     * Posun na první otevřené období NESMÍ přejít hranici účetního roku.
+     *
+     * Zamčené nebo uzavřené prosincové období dosud znamenalo, že se lednový
+     * (a jakýkoli jiný) mzdový náklad tiše přesunul do PRVNÍHO otevřeného
+     * období — klidně do dalšího roku. Náklad by se tím vykázal v období, se
+     * kterým věcně ani časově nesouvisí (§ 3 odst. 1 ZoÚ), zkreslil by výsledek
+     * hospodaření obou let a základ daně z příjmů.
+     *
+     * Uvnitř JEDNOHO účetního roku je posun v pořádku — tam jde jen o volbu
+     * dne, ne o změnu období, se kterým náklad souvisí. Přes hranici roku se
+     * proto zaúčtování ODMÍTNE a účetní musí vědomě rozhodnout: otevřít
+     * období, nebo mzdu zaúčtovat jako dohadnou položku minulého roku.
+     *
+     * Kontroluje se jen tehdy, když účetní rok mzdového období vůbec známe.
+     * Firma, která na mzdové období nemá založené účetní období, dosavadní
+     * chování nemění — není proti čemu měřit.
+     */
+    private function assertSameFiscalYear(
+        int $supplierId,
+        string $payrollPeriodEnd,
+        int $entryFiscalYear,
+        string $entryDate,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT fiscal_year
+               FROM accounting_periods
+              WHERE supplier_id = ?
+                AND ? BETWEEN starts_on AND ends_on
+              ORDER BY id
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $payrollPeriodEnd]);
+        $payrollFiscalYear = $statement->fetchColumn();
+        if ($payrollFiscalYear === false || $payrollFiscalYear === null) {
+            return;
+        }
+        if ((int) $payrollFiscalYear === $entryFiscalYear) {
+            return;
+        }
+
+        throw new \DomainException(
+            "Mzdový předpis za období do {$payrollPeriodEnd} by se zaúčtoval "
+            . "k {$entryDate}, tedy do jiného účetního roku ({$entryFiscalYear} "
+            . "místo {$payrollFiscalYear}). Časová souvislost nákladu podle § 3 "
+            . 'odst. 1 zákona o účetnictví to nedovoluje — otevřete účetní '
+            . 'období mzdy, nebo mzdu zaúčtujte ručně jako dohadnou položku.',
+        );
     }
 
     /**
