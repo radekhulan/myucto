@@ -8,6 +8,10 @@ const m = vi.hoisted(() => ({
   status: vi.fn(),
   poll: vi.fn(),
   close: vi.fn(),
+  events: vi.fn(),
+  approveEvent: vi.fn(),
+  a1Profile: vi.fn(),
+  saveA1Profile: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -18,6 +22,10 @@ vi.mock('@/api/payroll', () => ({
     employmentRegistrationTransportStatus: m.status,
     pollEmploymentRegistrationTransportAttempt: m.poll,
     closeEmploymentRegistrationTransportAttempt: m.close,
+    employmentRegistrationEvents: m.events,
+    approveEmploymentRegistrationEvent: m.approveEvent,
+    employmentRegistrationA1Profile: m.a1Profile,
+    saveEmploymentRegistrationA1Profile: m.saveA1Profile,
   },
 }))
 
@@ -76,6 +84,69 @@ describe('EmploymentRegistrationPanel', () => {
       submission_class: 'CSSZ_PREZEC',
       attempt: null,
     })
+    m.events.mockResolvedValue([])
+    m.a1Profile.mockResolvedValue(null)
+  })
+
+  it('saves the authoritative A1 profile before preview and prepare', async () => {
+    m.saveA1Profile.mockResolvedValue({
+      effective_on: '2026-08-14',
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+      permanent_address: {},
+    })
+    m.preview.mockResolvedValue({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'hire',
+      action_code: 1,
+    })
+    m.prepare.mockResolvedValue({
+      submission_id: 14,
+      obligation_id: 15,
+      part_id: 16,
+      artifact_id: 17,
+      status: 'ready',
+      row_version: 1,
+      environment: 'test',
+      agenda_code: 'REGZEC25',
+      interaction: 'hire',
+      artifact_sha256: 'c'.repeat(64),
+      created: true,
+      deadline,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    const input = wrapper.get('[data-test="registration-a1-json"]')
+    await input.setValue(JSON.stringify({
+      effective_on: '2026-08-14',
+      row_version: 0,
+      permanent_address: {},
+    }))
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      effective_on: '2026-08-14',
+      row_version: 0,
+    }))
+    expect(wrapper.get('[data-test="registration-a1-saved"]').text()).toContain('version')
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.preview).toHaveBeenCalledWith(5, 'test')
+    expect(m.prepare).toHaveBeenCalledWith(5, 'test')
+    expect(m.saveA1Profile.mock.invocationCallOrder[0])
+      .toBeLessThan(m.preview.mock.invocationCallOrder[0])
+    expect(m.preview.mock.invocationCallOrder[0])
+      .toBeLessThan(m.prepare.mock.invocationCallOrder[0])
+    expect(wrapper.find('[data-test="registration-prepared"]').exists()).toBe(true)
   })
 
   it('shows the deadline window and which form will be filed', async () => {
@@ -263,5 +334,159 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.send).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="registration-transport-actions"]').text())
       .toContain('registration.poll')
+  })
+
+  it('loads an immutable REGZEC event and uses it for preview and prepare', async () => {
+    m.events.mockResolvedValue([{
+      id: 91,
+      employment_id: 5,
+      environment: 'test',
+      interaction: 'change',
+      action_code: 3,
+      effective_on: '2026-08-26',
+      source_kind: 'verified_change',
+      source_reference: 'personnel-change-18',
+      snapshot_fingerprint: 'c'.repeat(64),
+      approved_at: '2026-08-26 09:00:00',
+      consumed: false,
+      created: true,
+    }])
+    m.preview.mockResolvedValue({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'change',
+      action_code: 3,
+    })
+    m.prepare.mockResolvedValue({
+      submission_id: 21,
+      obligation_id: 22,
+      part_id: 23,
+      artifact_id: 24,
+      status: 'ready',
+      row_version: 1,
+      environment: 'test',
+      agenda_code: 'REGZEC25',
+      interaction: 'change',
+      artifact_sha256: 'd'.repeat(64),
+      created: true,
+      deadline,
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-select"]').setValue('91')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenCalledWith(5, 'test', 91)
+
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+    expect(m.prepare).toHaveBeenCalledWith(5, 'test', 91)
+  })
+
+  it('creates an A5 source, selects it and previews the exact event', async () => {
+    const event = {
+      id: 92,
+      employment_id: 5,
+      environment: 'test',
+      interaction: 'variable_symbol_transfer',
+      action_code: 5,
+      effective_on: '2026-08-26',
+      source_kind: 'employer_transfer',
+      source_reference: 'transfer-decision-4',
+      snapshot_fingerprint: 'e'.repeat(64),
+      approved_at: '2026-08-26 10:00:00',
+      consumed: false,
+      created: true,
+    }
+    m.approveEvent.mockResolvedValue(event)
+    m.preview.mockResolvedValue({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'variable_symbol_transfer',
+      action_code: 5,
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-interaction"]').setValue('variable_symbol_transfer')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-08-26')
+    await wrapper.get('[data-test="registration-event-source-reference"]').setValue('transfer-decision-4')
+    await wrapper.get('[data-test="registration-event-new-variable-symbol"]').setValue('9990005678')
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      environment: 'test',
+      interaction: 'variable_symbol_transfer',
+      effective_on: '2026-08-26',
+      source_reference: 'transfer-decision-4',
+      new_variable_symbol: '9990005678',
+    }))
+    expect(m.preview).toHaveBeenCalledWith(5, 'test', 92)
+  })
+
+  it('requires an explicit no-show confirmation for A8 and binds the source submission', async () => {
+    m.approveEvent.mockResolvedValue({
+      id: 93,
+      employment_id: 5,
+      environment: 'test',
+      interaction: 'cancellation',
+      action_code: 8,
+      effective_on: '2026-08-20',
+      source_kind: 'verified_cancellation',
+      source_reference: 'no-show-record-1',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-08-26 11:00:00',
+      consumed: false,
+      created: true,
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-interaction"]').setValue('cancellation')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-08-20')
+    await wrapper.get('[data-test="registration-event-source-reference"]').setValue('no-show-record-1')
+    await wrapper.get('[data-test="registration-event-source-submission-id"]').setValue('44')
+
+    expect(wrapper.get('[data-test="registration-event-save"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="registration-event-not-started"]').setValue(true)
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
+      interaction: 'cancellation',
+      source_submission_id: 44,
+      not_started: true,
+    }))
+  })
+
+  it('exposes guided fields for every REGZEC interaction A2 through A8', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    const interaction = wrapper.get('[data-test="registration-event-interaction"]')
+
+    expect(wrapper.find('[data-test="registration-event-a2"]').exists()).toBe(true)
+
+    await interaction.setValue('change')
+    expect(wrapper.find('[data-test="registration-event-delta"]').exists()).toBe(true)
+
+    await interaction.setValue('correction')
+    expect(wrapper.find('[data-test="registration-event-source-submission-id"]').exists()).toBe(true)
+
+    await interaction.setValue('variable_symbol_transfer')
+    expect(wrapper.find('[data-test="registration-event-new-variable-symbol"]').exists()).toBe(true)
+
+    await interaction.setValue('czech_legislation_start')
+    expect(wrapper.find('[data-test="registration-event-foreign-insurance"]').exists()).toBe(true)
+
+    await interaction.setValue('czech_legislation_end')
+    expect(wrapper.find('[data-test="registration-event-foreign-insurance"]').exists()).toBe(true)
+
+    await interaction.setValue('cancellation')
+    expect(wrapper.find('[data-test="registration-event-a8"]').exists()).toBe(true)
   })
 })

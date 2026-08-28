@@ -11,9 +11,11 @@ use MyInvoice\Repository\Payroll\PayrollStateLockedException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationException;
 use MyInvoice\Service\Payroll\PayrollProductionQualificationService;
+use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -29,6 +31,8 @@ final class PayrollActivationAction
         private readonly SupportMatrix $supportMatrix,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollProductionQualificationService $qualification,
+        private readonly PayrollCompanyCapabilityService $companyCapability,
+        private readonly PayrollProductionGate $productionGate,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -41,10 +45,15 @@ final class PayrollActivationAction
         }
 
         $supplierId = $this->currentSupplierId($request);
+        $state = $this->state->get($supplierId);
 
         return Json::ok($response, [
-            'state' => $this->state->get($supplierId),
-            'production_qualification' => $this->qualification->qualification($supplierId),
+            'state' => $state,
+            'company_capability' => $this->companyCapability->assess(
+                $supplierId,
+                $state['start_period'],
+            ),
+            'production_release' => $this->productionGate->status(),
         ]);
     }
 
@@ -112,6 +121,7 @@ final class PayrollActivationAction
         return Json::ok($response, ['state' => $state]);
     }
 
+    /** Interní kvalifikační cesta bez HTTP routy; používají ji pouze naše testy. */
     public function qualify(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'payroll.settings', AccessLevel::WRITE, $error)) {
@@ -143,7 +153,7 @@ final class PayrollActivationAction
             return Json::error(
                 $response,
                 'authenticated_actor_required',
-                'Produkční aktivace vyžaduje přihlášeného uživatele.',
+                'Interní produkční kvalifikace vyžaduje přihlášeného uživatele.',
                 403,
             );
         }
@@ -165,9 +175,16 @@ final class PayrollActivationAction
                 'qualification_requires_setup',
                 'support_matrix_changed',
                 'unsupported_start_period',
+                'company_capability_blocked',
             ], true) ? 409 : 422;
 
-            return Json::error($response, $e->errorCode, $e->getMessage(), $status);
+            return Json::error(
+                $response,
+                $e->errorCode,
+                $e->getMessage(),
+                $status,
+                $e->details === [] ? [] : ['details' => $e->details],
+            );
         }
 
         return Json::ok($response, $result);

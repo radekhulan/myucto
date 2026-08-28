@@ -4,60 +4,45 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
-use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 use MyInvoice\Service\Report\CzechWorkingDays;
 
 final class JmhzDeadlinePolicy
 {
-    private const TRANSITION_RULESET =
-        'cz-jmhz-deadlines-2026.transition.v1';
-    private const REGULAR_RULESET = 'cz-jmhz-deadlines-2026.regular.v1';
-    private const SOURCES = [
-        'law' => '323/2025 Sb.',
-        'regulation' => '417/2025 Sb.',
-        'mpsv' => 'https://mpsv.gov.cz/socialni-pojisteni',
-        'cssz_document' =>
-            'Jednotné měsíční hlášení zaměstnavatele – základní informace',
-    ];
+    private const FIXED_WINDOW = 'transition_fixed_window';
+    private const FOLLOWING_MONTH_WINDOW = 'following_month_day_window';
+    private const NEXT_CZECH_WORKING_DAY = 'next_czech_working_day';
+
+    public function __construct(
+        private readonly PayrollRulesetProvider $rulesets,
+    ) {}
 
     public function forPeriod(string $periodStart): JmhzDeadlineWindow
     {
-        $period = \DateTimeImmutable::createFromFormat(
-            '!Y-m-d',
-            $periodStart,
-        );
-        if (!$period instanceof \DateTimeImmutable
-            || $period->format('Y-m-d') !== $periodStart
-            || $period->format('d') !== '01'
-            || $periodStart < '2026-01-01'
-        ) {
-            throw new \InvalidArgumentException(
-                'Období JMHZ musí být podporovaný kalendářní měsíc od ledna 2026.',
-            );
-        }
+        $period = $this->month($periodStart);
+        $ruleset = $this->rulesetFor($periodStart);
+        [$earliestSubmissionOn, $statutoryDueOn] = $this->window($ruleset, $period);
 
-        if ($periodStart <= '2026-03-01') {
-            return $this->window(
-                '2026-04-01',
-                '2026-06-30',
-                self::TRANSITION_RULESET,
-                'transition_2026_q1',
-            );
-        }
-
-        $followingMonth = $period->modify('first day of next month');
-
-        return $this->window(
-            $followingMonth->format('Y-m-01'),
-            $followingMonth->format('Y-m-20'),
-            self::REGULAR_RULESET,
-            'regular_following_month_1_20',
+        return new JmhzDeadlineWindow(
+            $earliestSubmissionOn,
+            $this->shiftedDueOn($ruleset, $statutoryDueOn),
+            $this->text($ruleset, 'jmhz.deadline.calendar_basis'),
+            $ruleset->id,
+            $ruleset->canonicalHash,
         );
     }
 
     public function cancellationAllowed(string $periodStart): bool
     {
-        return $this->forPeriod($periodStart)->rulesetId !== self::TRANSITION_RULESET;
+        $this->month($periodStart);
+
+        return $this->boolean(
+            $this->rulesetFor($periodStart),
+            'jmhz.deadline.cancellation_allowed',
+        );
     }
 
     public function lastCorrectionOn(string $periodStart): string
@@ -67,33 +52,131 @@ final class JmhzDeadlinePolicy
         return sprintf('%04d-12-31', $dueYear + 10);
     }
 
-    private function window(
-        string $earliestSubmissionOn,
-        string $dueOn,
-        string $rulesetId,
-        string $rule,
-    ): JmhzDeadlineWindow {
-        $dueDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $dueOn);
-        if (!$dueDate instanceof \DateTimeImmutable) {
-            throw new \LogicException('Termín JMHZ není platné datum.');
+    private function rulesetFor(string $periodStart): PayrollRulesetVersion
+    {
+        try {
+            return $this->rulesets->forCalculation(
+                PayrollRulesetDomain::Deadlines,
+                $periodStart,
+            );
+        } catch (PayrollRulesetException $e) {
+            throw new \InvalidArgumentException(
+                'Pro období JMHZ není dostupná účinná a výpočtově použitelná verze lhůty.',
+                0,
+                $e,
+            );
         }
-        $shiftedDueOn = CzechWorkingDays::shiftToWorkingDay($dueDate)
-            ->format('Y-m-d');
-        $rulesetHash = hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'jmhz-deadline-policy.v1',
-            'ruleset_id' => $rulesetId,
-            'rule' => $rule,
-            'due_shift' => 'next_czech_working_day',
-            'calendar_basis' => 'business_days',
-            'sources' => self::SOURCES,
-        ]));
+    }
 
-        return new JmhzDeadlineWindow(
-            $earliestSubmissionOn,
-            $shiftedDueOn,
-            'business_days',
-            $rulesetId,
-            $rulesetHash,
-        );
+    /** @return array{string,string} earliest submission and statutory due date */
+    private function window(PayrollRulesetVersion $ruleset, \DateTimeImmutable $period): array
+    {
+        return match ($this->text($ruleset, 'jmhz.deadline.rule')) {
+            self::FIXED_WINDOW => [
+                $this->date($ruleset, 'jmhz.deadline.earliest_submission_on'),
+                $this->date($ruleset, 'jmhz.deadline.due_on'),
+            ],
+            self::FOLLOWING_MONTH_WINDOW => $this->followingMonthWindow($ruleset, $period),
+            default => throw new \LogicException(
+                "Ruleset {$ruleset->id} má nepodporovaný tvar lhůty JMHZ.",
+            ),
+        };
+    }
+
+    /** @return array{string,string} earliest submission and statutory due date */
+    private function followingMonthWindow(
+        PayrollRulesetVersion $ruleset,
+        \DateTimeImmutable $period,
+    ): array {
+        $offset = $this->integer($ruleset, 'jmhz.deadline.month_offset');
+        if ($offset < 1) {
+            throw new \LogicException("Ruleset {$ruleset->id} má neplatný měsíční posun lhůty JMHZ.");
+        }
+        $target = $period->modify(sprintf('first day of +%d month', $offset));
+
+        return [
+            $this->dayOfMonth($target, $this->integer($ruleset, 'jmhz.deadline.earliest_day')),
+            $this->dayOfMonth($target, $this->integer($ruleset, 'jmhz.deadline.due_day')),
+        ];
+    }
+
+    private function shiftedDueOn(PayrollRulesetVersion $ruleset, string $statutoryDueOn): string
+    {
+        if ($this->text($ruleset, 'jmhz.deadline.due_shift') !== self::NEXT_CZECH_WORKING_DAY) {
+            throw new \LogicException("Ruleset {$ruleset->id} má nepodporovaný posun lhůty JMHZ.");
+        }
+
+        return CzechWorkingDays::shiftToWorkingDay(
+            new \DateTimeImmutable($statutoryDueOn),
+        )->format('Y-m-d');
+    }
+
+    private function dayOfMonth(\DateTimeImmutable $month, int $day): string
+    {
+        if ($day < 1 || $day > 31) {
+            throw new \LogicException('Ruleset JMHZ má neplatný den v měsíci.');
+        }
+        $date = $month->setDate((int) $month->format('Y'), (int) $month->format('n'), $day);
+        if ((int) $date->format('j') !== $day) {
+            throw new \LogicException('Ruleset JMHZ posunul den mimo cílový měsíc.');
+        }
+
+        return $date->format('Y-m-d');
+    }
+
+    private function date(PayrollRulesetVersion $ruleset, string $key): string
+    {
+        $value = $this->text($ruleset, $key);
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        if (!$date instanceof \DateTimeImmutable || $date->format('Y-m-d') !== $value) {
+            throw new \LogicException("Ruleset {$ruleset->id} má neplatné datum {$key}.");
+        }
+
+        return $value;
+    }
+
+    private function text(PayrollRulesetVersion $ruleset, string $key): string
+    {
+        $parameter = $ruleset->parameter($key);
+        if ($parameter->type !== 'text' || !is_string($parameter->value)) {
+            throw new \LogicException("Ruleset {$ruleset->id} má neplatný textový parametr {$key}.");
+        }
+
+        return $parameter->value;
+    }
+
+    private function integer(PayrollRulesetVersion $ruleset, string $key): int
+    {
+        $parameter = $ruleset->parameter($key);
+        if ($parameter->type !== 'integer' || !is_int($parameter->value)) {
+            throw new \LogicException("Ruleset {$ruleset->id} má neplatný celočíselný parametr {$key}.");
+        }
+
+        return $parameter->value;
+    }
+
+    private function boolean(PayrollRulesetVersion $ruleset, string $key): bool
+    {
+        $parameter = $ruleset->parameter($key);
+        if ($parameter->type !== 'boolean' || !is_bool($parameter->value)) {
+            throw new \LogicException("Ruleset {$ruleset->id} má neplatný logický parametr {$key}.");
+        }
+
+        return $parameter->value;
+    }
+
+    private function month(string $periodStart): \DateTimeImmutable
+    {
+        $period = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if (!$period instanceof \DateTimeImmutable
+            || $period->format('Y-m-d') !== $periodStart
+            || $period->format('d') !== '01'
+        ) {
+            throw new \InvalidArgumentException(
+                'Období JMHZ musí být kalendářní měsíc začínající prvním dnem.',
+            );
+        }
+
+        return $period;
     }
 }

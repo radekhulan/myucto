@@ -568,6 +568,25 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         $firstSupplierId = $this->supplierId;
         $byEmployment = [];
         $snapshot = $this->build();
+        self::assertSame([
+            'effective_from' => '2026-01-01',
+            'minimum_shift_eighths' => 24,
+            'payment_due_months_after_period' => 1,
+            'payment_due_rule' => 'last_day_of_month',
+            'rate' => '0.04',
+            'schema' => 'payroll-risky-savings-rules.v1',
+        ], array_diff_key(
+            $snapshot->data['risky_savings_ruleset'],
+            array_flip(['ruleset_id', 'ruleset_sha256']),
+        ));
+        self::assertSame(
+            'cz-payroll-2026.social-insurance.v1',
+            $snapshot->data['risky_savings_ruleset']['ruleset_id'],
+        );
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            $snapshot->data['risky_savings_ruleset']['ruleset_sha256'],
+        );
         foreach ($snapshot->data['people'] as $person) {
             foreach ($person['employments'] as $employment) {
                 $byEmployment[(int) $employment['employment']['id']] =

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
+use MyInvoice\Service\Payroll\Calculation\CalculationStep;
+use MyInvoice\Service\Payroll\Calculation\DecimalRate;
+use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -45,10 +48,10 @@ final class PayrollBenefitBasketService
         string $periodStart,
         int $shiftEntitlements = 0,
     ): int {
-        $value = $this->rulesets
-            ->forCalculation(PayrollRulesetDomain::IncomeTax, $this->effectiveOn($basket, $periodStart))
-            ->parameter($basket->rulesetKey())
-            ->value;
+        $effectiveOn = $this->effectiveOn($basket, $periodStart);
+        $incomeTax = $this->rulesets
+            ->forCalculation(PayrollRulesetDomain::IncomeTax, $effectiveOn);
+        $value = $incomeTax->parameter($basket->rulesetKey())->value;
         if (!is_int($value) || $value <= 0) {
             throw new PayrollRulesetException(
                 "Limit koše {$basket->rulesetKey()} není částka v haléřích.",
@@ -56,6 +59,33 @@ final class PayrollBenefitBasketService
         }
         if (!$basket->scalesWithShifts()) {
             return $value;
+        }
+        $rateValue = $incomeTax
+            ->parameter('benefit_exemption.meal.shift_rate')
+            ->value;
+        $travelMaximum = $this->rulesets
+            ->forCalculation(PayrollRulesetDomain::TravelAllowances, $effectiveOn)
+            ->parameter('meal_allowance.band_1.tax_exempt_maximum')
+            ->value;
+        if (!is_string($rateValue) || !is_int($travelMaximum) || $travelMaximum <= 0) {
+            throw new PayrollRulesetException(
+                'Parametry benefit_exemption.meal.shift_rate a '
+                . 'meal_allowance.band_1.tax_exempt_maximum nemají očekávaný typ.',
+            );
+        }
+        $derived = CalculationStep::calculate(
+            'benefit_exemption.meal.per_shift',
+            $travelMaximum,
+            DecimalRate::fromString($rateValue),
+            RoundingMode::HalfUp,
+        )->outputMinorUnits;
+        if ($value !== $derived) {
+            throw new PayrollRulesetException(
+                'Parametr benefit_exemption.meal.per_shift (' . $value . ') musí odpovídat '
+                . 'benefit_exemption.meal.shift_rate (' . $rateValue . ') × '
+                . 'meal_allowance.band_1.tax_exempt_maximum (' . $travelMaximum . ') = '
+                . $derived . '.',
+            );
         }
         if ($shiftEntitlements < 0) {
             throw new PayrollRulesetException(
@@ -95,9 +125,21 @@ final class PayrollBenefitBasketService
         int $usedBeforeMinor,
         int $amountMinor,
         int $shiftEntitlements = 0,
+        ?int $usedShiftEntitlements = null,
     ): PayrollBenefitBasketSplit {
         $limit = $this->limitMinor($basket, $periodStart, $shiftEntitlements);
         $amount = max(0, $amountMinor);
+        if ($basket->scalesWithShifts()) {
+            return $this->splitMeal(
+                $basket,
+                $limit,
+                max(0, $usedBeforeMinor),
+                $amount,
+                $shiftEntitlements,
+                $usedShiftEntitlements,
+                $periodStart,
+            );
+        }
         $headroom = max(0, $limit - max(0, $usedBeforeMinor));
         $exempt = min($amount, $headroom);
 
@@ -109,6 +151,76 @@ final class PayrollBenefitBasketService
             exemptMinor: $exempt,
             taxableMinor: $amount - $exempt,
             shiftEntitlements: $basket->scalesWithShifts() ? $shiftEntitlements : null,
+        );
+    }
+
+    private function splitMeal(
+        PayrollBenefitExemptionBasket $basket,
+        int $limitMinor,
+        int $usedBeforeMinor,
+        int $amountMinor,
+        int $shiftEntitlements,
+        ?int $usedShiftEntitlements,
+        string $periodStart,
+    ): PayrollBenefitBasketSplit {
+        if ($usedBeforeMinor > 0 && $usedShiftEntitlements !== $shiftEntitlements) {
+            throw new PayrollRulesetException(
+                'Počet nároků se proti dříve schválenému příspěvku změnil; '
+                . 'před dalším schválením je nutné předchozí vstup stornovat a přepočítat.',
+            );
+        }
+        if ($shiftEntitlements === 0) {
+            return new PayrollBenefitBasketSplit(
+                basket: $basket,
+                limitMinor: 0,
+                usedBeforeMinor: $usedBeforeMinor,
+                amountMinor: $amountMinor,
+                exemptMinor: 0,
+                taxableMinor: $amountMinor,
+                shiftEntitlements: 0,
+                allocation: [
+                    'mode' => 'no_entitlement',
+                    'entitlement_count' => 0,
+                    'amount_per_entitlement_minor' => 0,
+                    'limit_per_entitlement_minor' => 0,
+                    'exempt_per_entitlement_minor' => 0,
+                    'taxable_per_entitlement_minor' => 0,
+                ],
+            );
+        }
+        if ($amountMinor % $shiftEntitlements !== 0
+            || $usedBeforeMinor % $shiftEntitlements !== 0
+        ) {
+            throw new PayrollRulesetException(
+                'Částka příspěvku na stravování musí být mezi doložené nároky rozdělena '
+                . 'rovnoměrně; zadaný měsíční úhrn takto rozdělit nelze.',
+            );
+        }
+        $perShiftLimit = $this->limitMinor($basket, $periodStart, 1);
+        $amountPerEntitlement = intdiv($amountMinor, $shiftEntitlements);
+        $usedPerEntitlement = intdiv($usedBeforeMinor, $shiftEntitlements);
+        $exemptPerEntitlement = min(
+            $amountPerEntitlement,
+            max(0, $perShiftLimit - $usedPerEntitlement),
+        );
+        $exempt = $exemptPerEntitlement * $shiftEntitlements;
+
+        return new PayrollBenefitBasketSplit(
+            basket: $basket,
+            limitMinor: $limitMinor,
+            usedBeforeMinor: $usedBeforeMinor,
+            amountMinor: $amountMinor,
+            exemptMinor: $exempt,
+            taxableMinor: $amountMinor - $exempt,
+            shiftEntitlements: $shiftEntitlements,
+            allocation: [
+                'mode' => 'uniform_per_entitlement',
+                'entitlement_count' => $shiftEntitlements,
+                'amount_per_entitlement_minor' => $amountPerEntitlement,
+                'limit_per_entitlement_minor' => $perShiftLimit,
+                'exempt_per_entitlement_minor' => $exemptPerEntitlement,
+                'taxable_per_entitlement_minor' => $amountPerEntitlement - $exemptPerEntitlement,
+            ],
         );
     }
 }

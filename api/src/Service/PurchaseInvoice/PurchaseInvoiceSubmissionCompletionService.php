@@ -55,7 +55,7 @@ final class PurchaseInvoiceSubmissionCompletionService
         }
 
         $documentId = (int) $submission['document_id'];
-        $this->links->attach($documentId, 'purchase_invoice', $purchaseInvoiceId);
+        $this->links->attach($supplierId, $documentId, 'purchase_invoice', $purchaseInvoiceId);
         $this->requests->markProcessedBySubmission($submissionId, $supplierId, $purchaseInvoiceId);
         $this->archiveOrigin($submission, $supplierId, $purchaseInvoiceId);
     }

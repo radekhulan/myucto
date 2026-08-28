@@ -33,6 +33,7 @@ import PayrollPersonQuickEdit from './PayrollPersonQuickEdit.vue'
 import PayrollPersonProfilePanel from './PayrollPersonProfilePanel.vue'
 import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
+import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
 import { todayIso } from './employmentLifecycleUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
@@ -499,6 +500,7 @@ function employmentDraft(
   return {
     code,
     relation_type: relationType,
+    meal_entitlement_basis: 'shift',
     monthly_gross_minor: monthlyGrossMinor,
     terms: {
       office_id: null,
@@ -1075,6 +1077,11 @@ onMounted(async () => {
           <PayrollPersonDependantsPanel
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write')"
+          />
+          <PayrollPersonForeignPermitPanel
+            :person-id="expandedId"
+            :can-write="auth.canWrite('payroll.person.write') && auth.canRead('documents')"
+            :can-read-documents="auth.canRead('documents')"
           />
         </div>
       </details>

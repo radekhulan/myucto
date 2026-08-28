@@ -61,6 +61,7 @@ export interface EnforcementClaim {
   outstanding_minor_units: number
   maintenance_weight_minor_units: number | null
   priority_date: string | null
+  first_payer_delivered_on: string | null
   order_issued_on: string | null
   legal_title_verified: boolean
   order_or_notice_delivered: boolean
@@ -87,9 +88,10 @@ export interface EnforcementLedgerEntry {
   id: number
   claim_id: number | null
   month_result_id: number
-  entry_kind: 'withheld' | 'held' | 'remitted' | 'released_to_employee' | 'employer_fee' | 'adjustment'
+  entry_kind: 'withheld' | 'held' | 'released_for_remittance' | 'remitted' | 'released_to_employee' | 'employer_fee' | 'adjustment'
   amount_minor_units: number
   actor_user_id: number | null
+  decision_event_id: number | null
   created_at: string
 }
 
@@ -122,11 +124,13 @@ export interface EnforcementSettlementClaim {
   category: EnforcementClaimCategory
   priority_date: string | null
   is_active: boolean
+  original_minor: number
   outstanding_minor: number
   withheld_minor: number
   held_minor: number
   liability_minor: number
   settled_minor: number
+  remaining_to_withhold_minor: number
   remaining_minor: number
 }
 
@@ -136,7 +140,9 @@ export interface EnforcementSettlement {
   held_minor: number
   liability_minor: number
   settled_minor: number
+  original_minor: number
   outstanding_minor: number
+  remaining_to_withhold_minor: number
   remaining_minor: number
 }
 
@@ -153,7 +159,8 @@ export interface EnforcementClaimPayload {
   category: EnforcementClaimCategory
   outstanding_minor_units: number
   maintenance_weight_minor_units: number | null
-  priority_date: string | null
+  priority_date?: string | null
+  first_payer_delivered_on?: string | null
   order_issued_on: string | null
   legal_title_verified: boolean
   order_or_notice_delivered: boolean
@@ -161,6 +168,43 @@ export interface EnforcementClaimPayload {
   agreement_verified: boolean
   due_monetary_claim_verified: boolean
   same_order_as_claim_id?: number | null
+}
+
+export interface EnforcementCaseParty {
+  id: number
+  party_role: 'court' | 'executor' | 'beneficiary'
+  revision_no: number
+  effective_from: string
+  party_name: string
+  party_reference: string | null
+  source_document_id: number
+  created_at: string
+}
+
+export interface EnforcementClaimBreakdown {
+  id: number
+  revision_no: number
+  principal_minor_units: number
+  interest_minor_units: number
+  costs_minor_units: number
+  maintenance_minor_units: number
+  total_minor_units: number
+  source_document_id: number
+  change_reason: string | null
+  created_at: string
+}
+
+export interface EnforcementRecipientInstruction {
+  id: number
+  revision_no: number
+  effective_from: string
+  recipient_party_id: number
+  party_role: 'executor' | 'beneficiary'
+  party_name: string
+  payment_account_id: number
+  source_document_id: number
+  change_reason: string | null
+  created_at: string
 }
 
 export interface EnforcementMonthEvidence {
@@ -177,8 +221,46 @@ export interface EnforcementMonthEvidence {
   insolvency_mode: 'none' | 'alert_only' | 'approved_standard' | 'court_determined_amount'
   insolvency_decision_verified: boolean
   insolvency_recipient_verified: boolean
+  insolvency_payment_instruction_id: number | null
+  insolvency_employment_id: number | null
+  insolvency_institution_account_id: number | null
+  insolvency_decision_document_id: number | null
+  insolvency_payment_instruction_hash: string | null
   court_determined_amount_minor_units: number | null
   row_version: number | null
+}
+
+export interface InsolvencyEmploymentOption {
+  id: number
+  code: string
+  relation_type: string
+  status: 'active' | 'ended'
+  start_date: string | null
+  actual_start_date: string | null
+  end_date: string | null
+}
+
+export interface InsolvencyRecipientAccountOption {
+  id: number
+  institution_id: number
+  institution_code: string
+  institution_name: string
+  bank_account_masked: string
+  currency_code: 'CZK'
+  variable_symbol: string | null
+  specific_symbol: string | null
+  constant_symbol: string | null
+  valid_from: string
+  valid_to: string | null
+  source_kind: string
+  source_reference: string
+  verified_on: string
+  row_version: number
+}
+
+export interface InsolvencyOptions {
+  employments: InsolvencyEmploymentOption[]
+  recipient_accounts: InsolvencyRecipientAccountOption[]
 }
 
 export interface EnforcementDependant {
@@ -190,6 +272,74 @@ export interface EnforcementDependant {
   eligibility_verified: boolean
   excluded_for_maintenance: boolean
   row_version: number
+}
+
+export interface XmlzamCandidate {
+  inbox_message_id: number
+  document_id: number
+  document_file_id: number
+  external_message_id: string
+  sender_box_id: string | null
+  sender_name: string | null
+  subject: string | null
+  delivered_at: string | null
+  fetched_at: string
+  original_name: string
+  mime_type: string
+  size_bytes: number
+  sha256: string
+}
+
+export interface XmlzamRequestDetail {
+  id: number
+  environment: string
+  request_identifier: string
+  case_reference: string
+  issued_on: string
+  requested_scopes: string[]
+  executor_box_id: string
+  employee: { id: number; full_name: string; is_active: boolean }
+  source: {
+    inbox_message_id: number
+    document_id: number
+    document_file_id: number
+    sha256: string
+  }
+  recipient_match_status: 'matched' | 'missing' | 'ambiguous'
+  recipient: {
+    id: number
+    code: string
+    name: string
+    kind: string
+    isds_box_id: string
+  } | null
+  imported_at: string
+}
+
+export interface XmlzamResponsePreview {
+  request_id: number
+  case_id: number
+  response_identifier: string
+  includes_wages: boolean
+  source_manifest: Array<{
+    period: string
+    revision_id: number
+    revision_no: number
+    input_hash: string
+    result_hash: string
+    enforcement_input_hash: string
+  }>
+  xml: string
+  xml_sha256: string
+  priority?: number
+  shared_priority?: boolean
+  employment?: { active: boolean; start: string | null; end: string | null }
+  wages?: Array<{
+    period: string
+    gross_minor: number
+    withheld_minor: number
+    dependants: number
+  }>
 }
 
 export const payrollEnforcementApi = {
@@ -242,6 +392,52 @@ export const payrollEnforcementApi = {
     }>(`/payroll/enforcement/cases/${caseId}/claims/${claimId}`, {
       data: { row_version: rowVersion },
     }).then(response => response.data),
+  parties: (caseId: number) =>
+    api.get<{ items: EnforcementCaseParty[] }>(
+      `/payroll/enforcement/cases/${caseId}/parties`,
+    ).then(response => response.data.items),
+  appendParty: (caseId: number, payload: {
+    party_role: EnforcementCaseParty['party_role']
+    effective_from: string
+    party_name: string
+    party_reference?: string | null
+    source_document_id: number
+  }) =>
+    api.post<{ party: EnforcementCaseParty }>(
+      `/payroll/enforcement/cases/${caseId}/parties`,
+      payload,
+    ).then(response => response.data.party),
+  claimBreakdowns: (caseId: number, claimId: number) =>
+    api.get<{ items: EnforcementClaimBreakdown[] }>(
+      `/payroll/enforcement/cases/${caseId}/claims/${claimId}/breakdowns`,
+    ).then(response => response.data.items),
+  appendClaimBreakdown: (caseId: number, claimId: number, payload: {
+    principal_minor_units: number
+    interest_minor_units: number
+    costs_minor_units: number
+    maintenance_minor_units: number
+    source_document_id: number
+    change_reason?: string | null
+  }) =>
+    api.post<{ breakdown: EnforcementClaimBreakdown }>(
+      `/payroll/enforcement/cases/${caseId}/claims/${claimId}/breakdowns`,
+      payload,
+    ).then(response => response.data.breakdown),
+  recipientInstructions: (caseId: number) =>
+    api.get<{ items: EnforcementRecipientInstruction[] }>(
+      `/payroll/enforcement/cases/${caseId}/recipient-instructions`,
+    ).then(response => response.data.items),
+  appendRecipientInstruction: (caseId: number, payload: {
+    effective_from: string
+    recipient_party_id: number
+    payment_account_id: number
+    source_document_id: number
+    change_reason?: string | null
+  }) =>
+    api.post<{ instruction: EnforcementRecipientInstruction }>(
+      `/payroll/enforcement/cases/${caseId}/recipient-instructions`,
+      payload,
+    ).then(response => response.data.instruction),
   updateEvidence: (
     caseId: number,
     payload: {
@@ -281,6 +477,28 @@ export const payrollEnforcementApi = {
       `/payroll/enforcement/people/${employeeId}/month/${period}/evidence`,
       payload,
     ).then(response => response.data.evidence),
+  insolvencyOptions: (employeeId: number, period: string) =>
+    api.get<InsolvencyOptions>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/options`,
+    ).then(response => response.data),
+  insolvencyEvidence: (employeeId: number, period: string) =>
+    api.get<{ evidence: EnforcementMonthEvidence }>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/evidence`,
+    ).then(response => response.data.evidence),
+  saveInsolvencyEvidence: (
+    employeeId: number,
+    period: string,
+    payload: Omit<EnforcementMonthEvidence, 'id' | 'employee_id' | 'period_start'>,
+  ) =>
+    api.put<{ evidence: EnforcementMonthEvidence }>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/evidence`,
+      payload,
+    ).then(response => response.data.evidence),
+  cancelInsolvency: (employeeId: number, period: string, rowVersion: number) =>
+    api.post<{ evidence: EnforcementMonthEvidence }>(
+      `/payroll/insolvency/people/${employeeId}/month/${period}/commands/cancel`,
+      { row_version: rowVersion },
+    ).then(response => response.data.evidence),
   dependants: (employeeId: number) =>
     api.get<{ dependants: EnforcementDependant[] }>(
       `/payroll/enforcement/people/${employeeId}/dependants`,
@@ -299,4 +517,49 @@ export const payrollEnforcementApi = {
       `/payroll/enforcement/people/${employeeId}/dependants`,
       payload,
     ).then(response => response.data.dependant),
+  cooperationCandidates: (environment: string) =>
+    api.get<{ candidates: XmlzamCandidate[] }>(
+      '/payroll/enforcement/cooperation/candidates',
+      { params: { environment } },
+    ).then(response => response.data.candidates),
+  importCooperationRequest: (
+    environment: string,
+    inboxMessageId: number,
+    documentFileId: number,
+  ) => api.post<{
+    request: { id: number; employee_id: number; created: boolean; request_identifier: string }
+  }>('/payroll/enforcement/cooperation/requests/import', {
+    environment,
+    inbox_message_id: inboxMessageId,
+    document_file_id: documentFileId,
+  }).then(response => response.data.request),
+  cooperationRequestDetail: (requestId: number, environment: string) =>
+    api.get<{ request: XmlzamRequestDetail }>(
+      `/payroll/enforcement/cooperation/requests/${requestId}`,
+      { params: { environment } },
+    ).then(response => response.data.request),
+  previewCooperationResponse: (
+    requestId: number,
+    environment: string,
+    caseId: number,
+    periods: string[],
+  ) => api.post<{ preview: XmlzamResponsePreview }>(
+    `/payroll/enforcement/cooperation/requests/${requestId}/preview`,
+    { environment, case_id: caseId, periods },
+  ).then(response => response.data.preview),
+  freezeCooperationResponse: (
+    requestId: number,
+    environment: string,
+    caseId: number,
+    periods: string[],
+    idempotencyKey: string,
+  ) => api.post<{ response: { id: number; created: boolean; xml_sha256: string } }>(
+    `/payroll/enforcement/cooperation/requests/${requestId}/responses`,
+    { environment, case_id: caseId, periods, idempotency_key: idempotencyKey },
+  ).then(response => response.data.response),
+  enqueueCooperationResponse: (responseId: number, environment: string, recipientId: number) =>
+    api.post<{ dispatch: { outbox_id: number; created: boolean; dispatch_id: number } }>(
+      `/payroll/enforcement/cooperation/responses/${responseId}/enqueue`,
+      { environment, recipient_id: recipientId },
+    ).then(response => response.data.dispatch),
 }

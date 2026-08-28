@@ -43,12 +43,14 @@ final class VendorRulesetManifest
      * @var list<string>
      */
     public const CONTENT_HASHES = [
+        // cz-jmhz-deadlines-2026.regular.v1
+        '52b5f1f0d2580e659e300874f0b0591129640cf38bc67714afb2b4728339d582',
+        // cz-jmhz-deadlines-2026.transition.v1
+        '9e30371cd82fcf6005bee2954c79b8e13b84f0b487b24df12272d4ba9951e999',
         // cz-payroll-2026.codebooks.v1
         'e40864b10491901b346096ebb39b70027a0fc111ea1f0b2208138e7594e2f87c',
         // cz-payroll-2026.compensation-averages.v1
         'd7cb73262099457f36ccf8431d7f7fac48a137f845619341cf69d3405db8b71b',
-        // cz-payroll-2026.deadlines.v1
-        'b15c89442dc9e66e0c9ae2ea1749deb5883763541ad03220cce51fe3b43ff273',
         // cz-payroll-2026.employment-thresholds.v1
         '22905fba61e6204c0d615971e80b19fdf5e38327e97a2903b61e7255fb454add',
         // cz-payroll-2026.enforcement-deductions.v1
@@ -58,7 +60,7 @@ final class VendorRulesetManifest
         // cz-payroll-2026.income-tax.v1
         'dfb8c8fc8e52d37225eba195c53eda6f867be573029136c10b3301b148e7ea74',
         // cz-payroll-2026.social-insurance.v1
-        '23d0281cff6cae85f425b85e8ae9aa4e45401945ce5f92b1eca4d05b7e3fa9b0',
+        '9a0ec0de0f24085f7b12d5ee1971fd2526d6724b07ff3c29ff5b93db4b7ab4b4',
         // cz-payroll-2026.submissions.v1
         '5d4150f71b70da998f465b1ef5f5d396b3a457ff373cce434230a476854cf377',
         // cz-payroll-2026.travel-allowances.v1

@@ -23,6 +23,7 @@ final readonly class MonthlyHealthInsuranceResult implements JsonSerializable
         public ?CalculationStep $minimumTopUpStep,
         public string $rulesetId,
         public string $rulesetHash,
+        public ?CalculationStep $minimumContributionStep = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -41,6 +42,7 @@ final readonly class MonthlyHealthInsuranceResult implements JsonSerializable
             'total_contribution_minor_units' => $this->totalContributionMinorUnits,
             'standard_contribution_step' => $this->standardContributionStep?->jsonSerialize(),
             'minimum_top_up_step' => $this->minimumTopUpStep?->jsonSerialize(),
+            'minimum_contribution_step' => $this->minimumContributionStep?->jsonSerialize(),
             'ruleset_id' => $this->rulesetId,
             'ruleset_hash' => $this->rulesetHash,
         ];

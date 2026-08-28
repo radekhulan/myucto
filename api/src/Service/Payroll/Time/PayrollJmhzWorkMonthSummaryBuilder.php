@@ -58,11 +58,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $period,
             $periodEnd,
         );
-        [$agreedMinutes, $calendarIssues] = self::agreedFundMinutes(
-            $calendars,
-            $evidenceFrom,
-            $evidenceTo,
-        );
+        [$agreedMinutes, $calendarIssues] = self::requiresShiftCalendar(
+            $employment['relation_type'],
+        )
+            ? self::agreedFundMinutes($calendars, $evidenceFrom, $evidenceTo)
+            : [0, []];
         $employmentIssues = ($employment['term_values_consistent'] ?? false) === true
             ? []
             : [[
@@ -647,6 +647,15 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         return $fraction === 0
             ? (string) $whole
             : rtrim(sprintf('%d.%03d', $whole, $fraction), '0');
+    }
+
+    private static function requiresShiftCalendar(string $relationType): bool
+    {
+        return !in_array(
+            $relationType,
+            ['partner_dependent', 'statutory_body'],
+            true,
+        );
     }
 
     private static function scaledDecimal(

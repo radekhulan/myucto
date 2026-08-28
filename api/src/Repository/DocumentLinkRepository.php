@@ -18,9 +18,10 @@ final class DocumentLinkRepository
     public function linksForDocument(int $documentId, int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT entity_type, entity_id FROM document_links WHERE document_id = ? ORDER BY entity_type, entity_id'
+            'SELECT entity_type, entity_id FROM document_links
+              WHERE supplier_id = ? AND document_id = ? ORDER BY entity_type, entity_id'
         );
-        $stmt->execute([$documentId]);
+        $stmt->execute([$supplierId, $documentId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         // Popisky dávkově — jeden dotaz na typ entity místo N+1 (labelFor per řádek).
@@ -63,21 +64,22 @@ final class DocumentLinkRepository
         return $stmt->fetchColumn() !== false;
     }
 
-    public function attach(int $documentId, string $entityType, int $entityId): void
+    public function attach(int $supplierId, int $documentId, string $entityType, int $entityId): void
     {
         if (!in_array($entityType, self::ENTITY_TYPES, true)) return;
         $stmt = $this->db->pdo()->prepare(
-            'INSERT IGNORE INTO document_links (document_id, entity_type, entity_id) VALUES (?, ?, ?)'
+            'INSERT IGNORE INTO document_links (document_id, supplier_id, entity_type, entity_id) VALUES (?, ?, ?, ?)'
         );
-        $stmt->execute([$documentId, $entityType, $entityId]);
+        $stmt->execute([$documentId, $supplierId, $entityType, $entityId]);
     }
 
-    public function detach(int $documentId, string $entityType, int $entityId): void
+    public function detach(int $supplierId, int $documentId, string $entityType, int $entityId): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'DELETE FROM document_links WHERE document_id = ? AND entity_type = ? AND entity_id = ?'
+            'DELETE FROM document_links
+              WHERE supplier_id = ? AND document_id = ? AND entity_type = ? AND entity_id = ?'
         );
-        $stmt->execute([$documentId, $entityType, $entityId]);
+        $stmt->execute([$supplierId, $documentId, $entityType, $entityId]);
     }
 
     /**

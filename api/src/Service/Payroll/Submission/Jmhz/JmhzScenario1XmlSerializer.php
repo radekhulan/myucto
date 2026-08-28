@@ -8,8 +8,9 @@ use DOMDocument;
 use DOMElement;
 
 /**
- * Serializér prvního profilu měsíčního hlášení: jeden scénář `scenario_1`
- * (`form:bezPriznaku`), řádné i obsahově opravné podání, jeden dílčí balík.
+ * Serializér podporovaných běžných profilů měsíčního hlášení: `scenario_1`
+ * (`form:bezPriznaku`) a statutární profil scénáře 3 (`form:cinnostKS`),
+ * řádné i obsahově opravné podání, jeden dílčí balík.
  *
  * Pracuje VÝHRADNĚ s vyřešeným normalizovaným dokumentem. Nesahá do databáze,
  * nedopočítává a nezaokrouhluje — každá hodnota, která v dokumentu není
@@ -156,12 +157,12 @@ final class JmhzScenario1XmlSerializer
             );
         }
         $scope = $this->object($payload['scope'] ?? null);
-        if (($scope['scenario_key'] ?? null) !== 'scenario_1'
+        if (!in_array($scope['scenario_key'] ?? null, ['scenario_1', 'scenario_3'], true)
             || ($scope['submission_kind'] ?? null) !== 'regular'
         ) {
             $this->invalid(
                 'jmhz_xml_scenario_unsupported',
-                'Zdrojem serializace musí být řádná příprava standardního scénáře.',
+                'Zdrojem serializace musí být řádná příprava podporovaného scénáře.',
             );
         }
         $header = $this->object($payload['header'] ?? null);
@@ -331,9 +332,73 @@ final class JmhzScenario1XmlSerializer
             (string) $this->int($totals['tax_bonus'] ?? null, '10035'),
         );
         $node->appendChild($monthly);
-        // `danUdajeRok` a `zamestnavatelUdajeRok` jsou v připnutém XSD celé
-        // volitelné bloky. Bez zmrazeného ročního zdroje se proto vynechají;
-        // nulové ani záporné právní skutečnosti se z absence zdroje neodhadují.
+        $annual = $this->object(
+            $this->object($payload['employer'] ?? null)['annual'] ?? null,
+        );
+        if ($annual !== []) {
+            $annualNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:zamestnavatelUdajeRok',
+            );
+            $this->text(
+                $dom,
+                $annualNode,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:formaVlastnictvi',
+                $this->string($annual['ownership_form'] ?? null, '10220'),
+            );
+            $ozp = $this->object($annual['ozp'] ?? null);
+            if ($ozp !== []) {
+                $ozpNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_SOUHRN,
+                    'so:zamestnavaniOzp',
+                );
+                foreach ([
+                    'so:zecPocetPrepRok' => ['average_headcount_hundredths', '10038'],
+                    'so:zecPocetPrepOzpRok' => ['average_disabled_headcount_hundredths', '10039'],
+                    'so:podilZamZtp' => ['disabled_share_hundredths', '10452'],
+                ] as $element => [$key, $attributeId]) {
+                    $this->text(
+                        $dom,
+                        $ozpNode,
+                        JmhzSchemaCatalog::NS_SOUHRN,
+                        $element,
+                        $this->decimal($ozp[$key] ?? null, 2, $attributeId),
+                    );
+                }
+                $annualNode->appendChild($ozpNode);
+            }
+            $agreements = $annual['collective_agreement_types'] ?? null;
+            if (!is_array($agreements) || !array_is_list($agreements) || $agreements === []) {
+                $this->unresolved('10214');
+            }
+            $agreementsNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_SOUHRN,
+                'so:kolektivniSmlouvy',
+            );
+            foreach ($agreements as $agreement) {
+                $agreementNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_SOUHRN,
+                    'so:kolektivniSmlouva',
+                );
+                $this->text(
+                    $dom,
+                    $agreementNode,
+                    JmhzSchemaCatalog::NS_SOUHRN,
+                    'so:typKolektSmlouvy',
+                    $this->string($agreement, '10214'),
+                );
+                $agreementsNode->appendChild($agreementNode);
+            }
+            $annualNode->appendChild($agreementsNode);
+            $node->appendChild($annualNode);
+        }
+        // `danUdajeRok` je v připnutém XSD volitelný blok. Bez zmrazeného
+        // ročního zdroje se vynechá; právní skutečnosti se z absence neodhadují.
         // `specifickaSkutecnost` se neuvádí, protože IN13 je doložené `false`.
 
         return $node;
@@ -454,7 +519,7 @@ final class JmhzScenario1XmlSerializer
                 $this->bool($employment['primary'] ?? null, '10495') ? 'true' : 'false',
             );
             $form->appendChild($header);
-            $form->appendChild($this->bezPriznaku($dom, $summary, $employment));
+            $form->appendChild($this->formBody($dom, $summary, $employment));
             $node->appendChild($form);
         }
 
@@ -512,7 +577,7 @@ final class JmhzScenario1XmlSerializer
                 $this->bool($employment['primary'] ?? null, '10495') ? 'true' : 'false',
             );
             $form->appendChild($header);
-            $form->appendChild($this->bezPriznaku($dom, $summary, $employment));
+            $form->appendChild($this->formBody($dom, $summary, $employment));
             $node->appendChild($form);
         }
 
@@ -585,6 +650,54 @@ final class JmhzScenario1XmlSerializer
         return $node;
     }
 
+    /**
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function formBody(
+        DOMDocument $dom,
+        array $summary,
+        array $employment,
+    ): DOMElement {
+        $selector = $this->object($employment['selector'] ?? null);
+        return match ($selector['scenario_key'] ?? null) {
+            'scenario_1' => $this->bezPriznaku($dom, $summary, $employment),
+            'scenario_3' => $this->cinnostKs($dom, $summary, $employment),
+            default => $this->invalid(
+                'jmhz_xml_scenario_unsupported',
+                'Součást nepatří do podporovaného scénáře JMHZ.',
+            ),
+        };
+    }
+
+    /**
+     * @param array<string,mixed> $summary
+     * @param array<string,mixed> $employment
+     */
+    private function cinnostKs(
+        DOMDocument $dom,
+        array $summary,
+        array $employment,
+    ): DOMElement {
+        $selector = $this->object($employment['selector'] ?? null);
+        if (($selector['activity_code'] ?? null) !== 'S'
+            || ($selector['relationship_detail_code'] ?? null) !== '1'
+        ) {
+            $this->invalid(
+                'jmhz_xml_scenario_3_profile_unsupported',
+                'Větev činnost K–S podporuje pouze statutární profil S/detail 1.',
+            );
+        }
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:cinnostKS');
+        $node->appendChild($this->identification($dom, $employment));
+        $node->appendChild($this->employeeSummary($dom, $summary, true));
+        $node->appendChild($this->insurance($dom, $summary, $employment, true));
+        $node->appendChild($this->position($dom, $employment));
+        $node->appendChild($this->income($dom, $summary));
+
+        return $node;
+    }
+
     /** @param array<string,mixed> $employment */
     private function identification(
         DOMDocument $dom,
@@ -617,6 +730,7 @@ final class JmhzScenario1XmlSerializer
     private function employeeSummary(
         DOMDocument $dom,
         array $summary,
+        bool $cinnostKs = false,
     ): DOMElement {
         $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:souhrnDataZec');
         $income = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:prijmy');
@@ -788,34 +902,42 @@ final class JmhzScenario1XmlSerializer
                         ? 'true'
                         : 'false',
                 );
+                if (($result['child_credit_claimed'] ?? null) === true) {
+                    $this->annualChildCredit($dom, $resultNode, $result);
+                }
                 $annualNode->appendChild($resultNode);
             }
             $node->appendChild($annualNode);
         }
 
-        $net = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaCista');
-        $this->text(
-            $dom,
-            $net,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:mzdaCista',
-            (string) $this->int($summary['net_income_czk'] ?? null, '10344'),
-        );
-        $this->text(
-            $dom,
-            $net,
-            JmhzSchemaCatalog::NS_FORM,
-            'form:srazkyZeMzdyEvidovany',
-            $this->bool($summary['deductions_recorded'] ?? null, '10116')
-                ? 'true'
-                : 'false',
-        );
-        $node->appendChild($net);
+        if (!$cinnostKs) {
+            $net = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:mzdaCista');
+            $this->text(
+                $dom,
+                $net,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:mzdaCista',
+                (string) $this->int($summary['net_income_czk'] ?? null, '10344'),
+            );
+            $this->text(
+                $dom,
+                $net,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:srazkyZeMzdyEvidovany',
+                $this->bool($summary['deductions_recorded'] ?? null, '10116')
+                    ? 'true'
+                    : 'false',
+            );
+            $node->appendChild($net);
+        }
 
-        foreach ([
-            'form:zdravPojZamestnavatel' => ['employer_health_czk', '10482'],
-            'form:zdravPojZamestnanec' => ['employee_health_czk', '10371'],
-        ] as $element => [$key, $attributeId]) {
+        $healthAmounts = $cinnostKs
+            ? ['form:zdravPojZamestnanec' => ['employee_health_czk', '10371']]
+            : [
+                'form:zdravPojZamestnavatel' => ['employer_health_czk', '10482'],
+                'form:zdravPojZamestnanec' => ['employee_health_czk', '10371'],
+            ];
+        foreach ($healthAmounts as $element => [$key, $attributeId]) {
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
             $this->text(
                 $dom,
@@ -830,6 +952,151 @@ final class JmhzScenario1XmlSerializer
         return $node;
     }
 
+    /** @param array<string,mixed> $result */
+    private function annualChildCredit(
+        DOMDocument $dom,
+        DOMElement $resultNode,
+        array $result,
+    ): void {
+        $details = $this->object($result['child_credit_details'] ?? null);
+        $children = $this->rows($details['children'] ?? null);
+        if ($children === []) {
+            $this->unresolved('10446');
+        }
+        $block = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:zvyhodneniNaDeti',
+        );
+        $other = $this->bool(
+            $details['other_household_caregiver'] ?? null,
+            '10455',
+        );
+        $this->text(
+            $dom,
+            $block,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyzivujeJinaOsoba',
+            $other ? 'true' : 'false',
+        );
+        $caregivers = $this->rows($details['other_household_caregivers'] ?? null);
+        if ($other) {
+            if ($caregivers === []) {
+                $this->unresolved('10441');
+            }
+            $caregiverList = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:jineOsoby',
+            );
+            foreach ($caregivers as $caregiver) {
+                $caregiverNode = $this->node(
+                    $dom,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:jinaOsoba',
+                );
+                $caregiverNode->appendChild($this->annualPerson(
+                    $dom,
+                    $this->object($caregiver['identity'] ?? null),
+                    'form:osoba',
+                    ['10441', '10442', '10443', '10444'],
+                ));
+                $this->text(
+                    $dom,
+                    $caregiverNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:mesiceVyzivovani',
+                    $this->string($caregiver['months_mask'] ?? null, '10445'),
+                );
+                $caregiverList->appendChild($caregiverNode);
+            }
+            $block->appendChild($caregiverList);
+        }
+        $childList = $this->node(
+            $dom,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:vyzivovaneDeti',
+        );
+        foreach ($children as $child) {
+            $childNode = $this->node(
+                $dom,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:vyzivovaneDite',
+            );
+            $childNode->appendChild($this->annualPerson(
+                $dom,
+                $this->object($child['identity'] ?? null),
+                'form:dite',
+                ['10446', '10447', '10448', '10449'],
+            ));
+            $ztp = $this->string($child['ztp_p_months_mask'] ?? null, '10450');
+            if ($ztp !== 'NNNNNNNNNNNN') {
+                $this->text(
+                    $dom,
+                    $childNode,
+                    JmhzSchemaCatalog::NS_FORM,
+                    'form:prukazZtpp',
+                    $ztp,
+                );
+            }
+            $this->text(
+                $dom,
+                $childNode,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:poradi',
+                $this->string($child['order_months_mask'] ?? null, '10451'),
+            );
+            $childList->appendChild($childNode);
+        }
+        $block->appendChild($childList);
+        $resultNode->appendChild($block);
+    }
+
+    /**
+     * @param array<string,mixed> $identity
+     * @param array{string,string,string,string} $attributeIds
+     */
+    private function annualPerson(
+        DOMDocument $dom,
+        array $identity,
+        string $element,
+        array $attributeIds,
+    ): DOMElement {
+        $node = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
+        foreach ([
+            'form:jmeno' => ['given_name', $attributeIds[0]],
+            'form:prijmeni' => ['family_name', $attributeIds[1]],
+        ] as $name => [$key, $attributeId]) {
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                $name,
+                $this->string($identity[$key] ?? null, $attributeId),
+            );
+        }
+        if (($identity['birth_date'] ?? null) !== null) {
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:datumNarozeni',
+                $this->date($identity['birth_date'], $attributeIds[2]),
+            );
+        }
+        if (($identity['birth_number'] ?? null) !== null) {
+            $this->text(
+                $dom,
+                $node,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:rodneCislo',
+                $this->string($identity['birth_number'], $attributeIds[3]),
+            );
+        }
+
+        return $node;
+    }
+
     /**
      * @param array<string,mixed> $summary
      * @param array<string,mixed> $employment
@@ -838,6 +1105,7 @@ final class JmhzScenario1XmlSerializer
         DOMDocument $dom,
         array $summary,
         array $employment,
+        bool $cinnostKs = false,
     ): DOMElement {
         $eldp = $this->object($employment['eldp'] ?? null);
         $interval = $this->object($eldp['insurance_interval'] ?? null);
@@ -894,7 +1162,7 @@ final class JmhzScenario1XmlSerializer
         // odmítnutím podání, ve kterém chyběly. U nulového základu se rozpad
         // neuvádí: kontrola 284 se spouští až od nenulové částky a nula
         // rozdělená na složky nenese žádnou informaci.
-        if ($amount !== null && $amount > 0) {
+        if (!$cinnostKs && $amount !== null && $amount > 0) {
             $letter = $social['paragraph5_letter'] ?? null;
             if (!is_string($letter) || !isset(self::PARAGRAPH5_ELEMENTS[$letter])) {
                 $this->invalid(
@@ -995,7 +1263,7 @@ final class JmhzScenario1XmlSerializer
         // takže ji hlášení vykazuje jednou za zaměstnavatele (10032), ne po
         // součástech.
         $discount = $this->object($employment['part_time_discount'] ?? null);
-        if ($discount !== []) {
+        if (!$cinnostKs && $discount !== []) {
             $wrapper = $this->node(
                 $dom,
                 JmhzSchemaCatalog::NS_FORM,

@@ -11,6 +11,8 @@ use InvalidArgumentException;
  * @phpstan-type DependantInput array{
  *   relation:string,
  *   full_name:string,
+ *   given_name:?string,
+ *   family_name:?string,
  *   birth_date:string,
  *   birth_number_present:bool,
  *   birth_number:?string,
@@ -104,6 +106,8 @@ final class PayrollDependantValidator
         return [
             'relation' => $relation,
             'full_name' => $this->text($input, 'full_name', 191),
+            'given_name' => $this->nullableText($input, 'given_name', 100),
+            'family_name' => $this->nullableText($input, 'family_name', 100),
             'birth_date' => $birthDate,
             'birth_number_present' => $present,
             'birth_number' => $birthNumber,

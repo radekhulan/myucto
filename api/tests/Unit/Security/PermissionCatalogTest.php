@@ -115,4 +115,19 @@ final class PermissionCatalogTest extends TestCase
         self::assertTrue($checker->allows($dpo, 'payroll.erasure', AccessLevel::WRITE));
         self::assertFalse($checker->allows($dpo, 'payroll.retention'));
     }
+
+    public function testHealthEvidenceIsStaffOnlyAndNotGrantedToTheDefaultAccountant(): void
+    {
+        $catalog = new PermissionCatalog();
+        self::assertSame(['staff'], $catalog->all()['payroll.health_evidence']['role_types']);
+
+        $checker = new PermissionChecker($catalog);
+        $accountant = new EffectiveRole(2, 'Účetní', 'staff', true, $catalog->legacyPreset('accountant'));
+        self::assertFalse($checker->allows($accountant, 'payroll.health_evidence'));
+
+        $healthOfficer = new EffectiveRole(3, 'Zdravotní důkazy', 'staff', true, [
+            'payroll.health_evidence' => AccessLevel::WRITE->value,
+        ]);
+        self::assertTrue($checker->allows($healthOfficer, 'payroll.health_evidence', AccessLevel::READ));
+    }
 }

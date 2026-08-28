@@ -616,6 +616,245 @@ final class AnnualSettlementIntegrationTest extends TestCase
         }
     }
 
+    public function testAnnualSettlementCatchesUpTwoMonthsBelowMonthlyBonusThreshold(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $service = $container->get(AnnualTaxSettlementService::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+                monthlyIncomeMinor: [
+                    1_000_000,
+                    1_000_000,
+                    ...array_fill(0, 10, 1_200_000),
+                ],
+                monthlyTaxBonusMinor: [
+                    0,
+                    0,
+                    ...array_fill(0, 10, 126_700),
+                ],
+            );
+            $pdo->prepare(
+                'INSERT INTO payroll_dependants
+                    (supplier_id, employee_id, relation, full_name, given_name,
+                     family_name, birth_date, ztp_p, student, existence_from)
+                 VALUES (?, ?, "child_own", "Eva Syntetická", "Eva",
+                         "Syntetická", "2018-04-12", 0, 0, "2018-04-12")',
+            )->execute([$supplierId, $employeeId]);
+            $dependantId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_person_tax_child_claims
+                    (supplier_id, employee_id, dependant_id, child_reference,
+                     child_order, ztp_p, evidence_status, evidence_reference,
+                     shared_household_confirmed, other_claimant_excluded,
+                     effective_from, effective_to)
+                 VALUES (?, ?, ?, ?, 1, 0, "verified", "synthetic-catch-up",
+                         1, 1, ?, ?)',
+            )->execute([
+                $supplierId,
+                $employeeId,
+                $dependantId,
+                'dependant-' . $dependantId,
+                self::YEAR . '-01-01',
+                self::YEAR . '-12-31',
+            ]);
+            $pdo->prepare(
+                'UPDATE payroll_annual_settlement_requests
+                    SET other_household_caregiver_status = "none"
+                  WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?',
+            )->execute([$supplierId, $employeeId, self::YEAR]);
+
+            $preview = $service->preview(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                new DateTimeImmutable((self::YEAR + 1) . '-03-10'),
+            );
+            $result = $preview['result'];
+            $json = $result->jsonSerialize();
+
+            self::assertSame([], $result->blockerCodes());
+            self::assertTrue($result->annualBonusThresholdMet);
+            self::assertSame(1_520_400, $result->annualTaxBonusMinorUnits);
+            self::assertSame(253_400, $result->bonusDifferenceMinorUnits);
+            self::assertSame(253_400, $result->payableMinorUnits);
+            self::assertSame(13_440_000, $json['bonus_minimum_income_minor_units']);
+            self::assertSame(14_000_000, $json['bonus_qualifying_income_minor_units']);
+            self::assertSame(1_267_000, $json['monthly_tax_bonus_minor_units']);
+            self::assertSame('eligible', $json['annual_bonus_eligibility_reason']);
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
+    }
+
+    public function testChildIdentityMonthsAndOtherCaregiverAreFrozenForJmhz(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $connection = $container->get(Connection::class);
+        $service = $container->get(AnnualTaxSettlementService::class);
+        $snapshots = $container->get(AnnualSettlementSnapshotBuilder::class);
+        $settlements = $container->get(PayrollAnnualSettlementRepository::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $jmhzAnnual = $container->get(JmhzAnnualEvidenceService::class);
+        self::assertInstanceOf(Connection::class, $connection);
+        self::assertInstanceOf(AnnualTaxSettlementService::class, $service);
+        self::assertInstanceOf(AnnualSettlementSnapshotBuilder::class, $snapshots);
+        self::assertInstanceOf(PayrollAnnualSettlementRepository::class, $settlements);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        self::assertInstanceOf(JmhzAnnualEvidenceService::class, $jmhzAnnual);
+
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query(
+            'SELECT id FROM supplier ORDER BY id LIMIT 1',
+        )->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture(
+                $pdo,
+                $sourceSupplierId,
+                $sensitive,
+            );
+            $pdo->prepare(
+                'INSERT INTO payroll_dependants
+                    (supplier_id, employee_id, relation, full_name, given_name,
+                     family_name, birth_date, ztp_p, student, existence_from)
+                 VALUES (?, ?, "child_own", "Anna Syntetická", "Anna",
+                         "Syntetická", "2018-04-12", 0, 0, "2018-04-12")',
+            )->execute([$supplierId, $employeeId]);
+            $dependantId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_person_tax_child_claims
+                    (supplier_id, employee_id, dependant_id, child_reference,
+                     child_order, ztp_p, evidence_status, evidence_reference,
+                     shared_household_confirmed, other_claimant_excluded,
+                     effective_from, effective_to)
+                 VALUES (?, ?, ?, ?, 1, 0, "verified", "synthetic-child",
+                         1, 1, ?, ?)',
+            )->execute([
+                $supplierId,
+                $employeeId,
+                $dependantId,
+                'dependant-' . $dependantId,
+                self::YEAR . '-03-01',
+                self::YEAR . '-08-31',
+            ]);
+            $request = $settlements->findRequest(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+            );
+            self::assertIsArray($request);
+            $savedRequest = $settlements->saveRequest(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [
+                    'request_status' => $request['request_status'],
+                    'requested_on' => $request['requested_on'],
+                    'request_evidence_reference' => $request['request_evidence_reference'],
+                    'prior_employers' => $request['prior_employers'],
+                    'prior_documents_received_on' => $request['prior_documents_received_on'],
+                    'filing_obligation' => $request['filing_obligation'],
+                    'filing_obligation_reason' => $request['filing_obligation_reason'],
+                    'annual_claims' => $request['annual_claims'],
+                    'annual_claims_note' => $request['annual_claims_note'],
+                    'other_household_caregiver_status' => 'present',
+                    'other_household_caregivers' => [[
+                        'given_name' => 'Petr',
+                        'family_name' => 'Syntetický',
+                        'birth_date' => '1987-02-03',
+                        'months_mask' => 'AANNNNNNNNNN',
+                    ]],
+                    'note' => $request['note'],
+                ],
+                (int) $request['row_version'],
+                null,
+            );
+            self::assertSame('present', $savedRequest['other_household_caregiver_status']);
+            self::assertCount(1, $savedRequest['other_household_caregivers']);
+
+            $preview = $service->preview(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                new DateTimeImmutable((self::YEAR + 1) . '-03-10'),
+            );
+            self::assertSame([], $preview['result']->blockerCodes());
+            self::assertSame([3, 4, 5, 6, 7, 8], $preview['child_rows'][0]['claimed_months']);
+
+            $built = $snapshots->build(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                $preview['result'],
+                (self::YEAR + 1) . '-03-10',
+                $preview['credit_rows'],
+                $preview['child_rows'],
+                null,
+            );
+            $revisionId = (int) $built['revision']['id'];
+            $settlements->insertOutcome(
+                $supplierId,
+                $employeeId,
+                self::YEAR,
+                [
+                    'annual_revision_id' => $revisionId,
+                    'outcome' => $preview['result']->outcome->value,
+                    'tax_difference_minor' => $preview['result']->taxDifferenceMinorUnits,
+                    'bonus_difference_minor' => $preview['result']->bonusDifferenceMinorUnits,
+                    'settlement_difference_minor' =>
+                        $preview['result']->settlementDifferenceMinorUnits,
+                    'payable_minor' => $preview['result']->payableMinorUnits,
+                    'payout_threshold_minor' =>
+                        AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
+                    'settled_on' => (self::YEAR + 1) . '-03-10',
+                ],
+                null,
+            );
+
+            $frozen = $jmhzAnnual->snapshotsForPreparation(
+                $supplierId,
+                [$employeeId],
+                self::YEAR + 1,
+            )[$employeeId]['settlement']['child_rows'][0];
+            self::assertSame('Anna', $frozen['given_name']);
+            self::assertSame('Syntetická', $frozen['family_name']);
+            self::assertSame('2018-04-12', $frozen['birth_date']);
+            self::assertNull($frozen['birth_number']);
+            self::assertSame('NN111111NNNN', $frozen['order_months_mask']);
+            self::assertTrue($frozen['other_household_caregiver']);
+            self::assertSame(
+                'AANNNNNNNNNN',
+                $frozen['other_household_caregivers'][0]['months_mask'],
+            );
+            self::assertSame(
+                'Petr',
+                $frozen['other_household_caregivers'][0]['identity']['given_name'],
+            );
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $connection->close();
+        }
+    }
+
     /**
      * Otisk všech měsíčních dat zaměstnance. Změní-li se cokoli v mzdových
      * revizích, výsledcích osob nebo kumulacích, otisk se rozejde.
@@ -658,6 +897,8 @@ final class AnnualSettlementIntegrationTest extends TestCase
         string $filingObligation = 'none',
         ?string $filingReason = null,
         bool $withRequest = true,
+        ?array $monthlyIncomeMinor = null,
+        ?array $monthlyTaxBonusMinor = null,
     ): array {
         $supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $pdo->prepare(
@@ -786,6 +1027,8 @@ final class AnnualSettlementIntegrationTest extends TestCase
         $taxpayerCreditMonthly = 257_000;
         $advanceTaxTotal = 0;
         for ($month = 1; $month <= 12; $month++) {
+            $monthlyIncome = $monthlyIncomeMinor[$month - 1] ?? self::MONTHLY_GROSS_MINOR;
+            $monthlyTaxBonus = $monthlyTaxBonusMinor[$month - 1] ?? 0;
             $periodStart = sprintf('%04d-%02d-01', self::YEAR, $month);
             $pdo->prepare(
                 'INSERT INTO payroll_runs
@@ -846,20 +1089,20 @@ final class AnnualSettlementIntegrationTest extends TestCase
 
             // § 38h odst. 1: základ nad 100 Kč se zaokrouhluje na celé stokoruny
             // nahoru; § 38h odst. 2 a 3: 15 % a zaokrouhlení daně na koruny nahoru.
-            $roundedBase = (int) (ceil(self::MONTHLY_GROSS_MINOR / 10_000) * 10_000);
+            $roundedBase = (int) (ceil($monthlyIncome / 10_000) * 10_000);
             $taxBeforeCredits = (int) (ceil($roundedBase * 15 / 100 / 100) * 100);
             $advanceTax = max(0, $taxBeforeCredits - $taxpayerCreditMonthly);
             $advanceTaxTotal += $advanceTax;
 
             $entryValues = json_encode([
-                'advance_base_minor_units' => self::MONTHLY_GROSS_MINOR,
+                'advance_base_minor_units' => $monthlyIncome,
                 'advance_tax_minor_units' => $advanceTax,
                 'applied_child_credit_minor_units' => 0,
                 'applied_non_refundable_credits_minor_units' =>
                     min($taxBeforeCredits, $taxpayerCreditMonthly),
-                'bonus_qualifying_income_minor_units' => self::MONTHLY_GROSS_MINOR,
+                'bonus_qualifying_income_minor_units' => $monthlyIncome,
                 'completed_months' => 1,
-                'tax_bonus_minor_units' => 0,
+                'tax_bonus_minor_units' => $monthlyTaxBonus,
                 'withholding_base_minor_units' => 0,
                 'withholding_tax_minor_units' => 0,
             ], JSON_THROW_ON_ERROR);

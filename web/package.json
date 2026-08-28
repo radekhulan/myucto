@@ -12,9 +12,9 @@
     "check:i18n-map": "node tests/i18n-map.test.mjs",
     "check:routes": "node scripts/check-route-permissions.mjs",
     "check:manual": "node scripts/check-manual-links.mjs",
-    "test": "vitest run",
-    "test:unit": "vitest run",
-    "test:watch": "vitest",
+    "test": "node scripts/run-vitest.mjs run",
+    "test:unit": "node scripts/run-vitest.mjs run",
+    "test:watch": "node scripts/run-vitest.mjs",
     "test:pwa": "node --test \"tests/*.test.mjs\"",
     "gen:i18n": "node scripts/gen-i18n-map.mjs"
   },

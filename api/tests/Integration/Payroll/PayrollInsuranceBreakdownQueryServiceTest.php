@@ -406,8 +406,8 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
     {
         $this->useFrozenHealthRuleset();
         $this->persistResults(
-            healthBaseMinorUnits: 1_000_000,
-            healthMinimumMinorUnits: 2_130_000,
+            healthBaseMinorUnits: 450_000,
+            healthMinimumMinorUnits: 2_240_000,
             recordHealthSteps: false,
         );
 
@@ -418,8 +418,58 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
         )['health'];
 
         self::assertSame('reconstructed', $health['contribution']['rate_source']);
-        self::assertSame(1_130_000, $health['minimum']['top_up_base_minor']);
+        self::assertSame(1_790_000, $health['minimum']['top_up_base_minor']);
+        self::assertSame(241_600, $health['contribution']['employee_top_up_minor']);
         self::assertTrue($health['contribution']['rate_reconstruction']['top_up_reconstructed']);
+        self::assertSame(
+            'rounded_total_difference',
+            $health['contribution']['rate_reconstruction']['top_up_rounding_method'],
+        );
+    }
+
+    public function testMissingTopUpStepCanBeReconstructedForZeroAssessmentBase(): void
+    {
+        $this->useFrozenHealthRuleset();
+        $this->persistResults(
+            healthBaseMinorUnits: 0,
+            healthMinimumMinorUnits: 2_240_000,
+            recordHealthSteps: false,
+        );
+
+        $health = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['health'];
+
+        self::assertSame(302_400, $health['contribution']['employee_top_up_minor']);
+        self::assertTrue($health['contribution']['rate_reconstruction']['top_up_reconstructed']);
+        self::assertSame(
+            'rounded_total_difference',
+            $health['contribution']['rate_reconstruction']['top_up_rounding_method'],
+        );
+    }
+
+    public function testPersistedTopUpRoundsTheMinimumTotalOnlyOnce(): void
+    {
+        $this->persistResults(
+            healthBaseMinorUnits: 10_100,
+            healthMinimumMinorUnits: 2_240_000,
+            recordHealthSteps: true,
+        );
+
+        $health = $this->service->breakdown(
+            $this->supplierId,
+            $this->revisionId,
+            $this->employeeIds[0],
+        )['health'];
+
+        self::assertSame(301_000, $health['contribution']['employee_top_up_minor']);
+        self::assertSame(302_400, $health['contribution']['total_minor']);
+        self::assertSame(
+            'monthly-health-insurance-minimum-total',
+            $health['contribution']['minimum_total_step']['label'],
+        );
     }
 
     /**
@@ -857,6 +907,7 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                 RoundingMode::Ceil->roundFraction($standard, 3),
             );
             $employerStandard = $standard - $employeeStandard;
+            $minimumStep = null;
             $topUpStep = null;
             $topUp = 0;
             if ($minimumBase > $assessmentBase) {
@@ -866,7 +917,16 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                     $rate,
                     RoundingMode::Ceil,
                 );
-                $topUp = PayrollRounding::ceilToCzk($topUpStep->outputMinorUnits);
+                $minimumStep = CalculationStep::calculate(
+                    'monthly-health-insurance-minimum-total',
+                    $minimumBase,
+                    $rate,
+                    RoundingMode::Ceil,
+                );
+                $topUp = PayrollRounding::healthMinimumTopUp(
+                    $standard,
+                    PayrollRounding::ceilToCzk($minimumStep->outputMinorUnits),
+                );
             }
             $employee = $employeeStandard + $topUp;
             $employeeTotal += $employee;
@@ -921,6 +981,7 @@ final class PayrollInsuranceBreakdownQueryServiceTest extends TestCase
                 issues: [],
                 standardContributionStep: $recordSteps ? $standardStep : null,
                 minimumTopUpStep: $recordSteps ? $topUpStep : null,
+                minimumContributionStep: $recordSteps ? $minimumStep : null,
             );
             $liabilities[] = new HealthInsurerLiabilityResult(
                 $insurerCodes[$index],

@@ -79,6 +79,33 @@ final class PayrollInputPreviewService
             : 0;
         $after = $used + max(0, $input['amount_minor']);
 
+        $basket = null;
+        $mealEntitlement = null;
+        try {
+            $mealEntitlement = $definition->exemptionBasket?->scalesWithShifts() === true
+                ? $this->mealEvidence->forPeriod(
+                    $supplierId,
+                    $input['employee_id'],
+                    $input['period_start'],
+                )
+                : null;
+            if ($mealEntitlement !== null && !$mealEntitlement->complete) {
+                $support = 'manual_review';
+                $blocker = 'Chybí úplný podklad pro nárok na příspěvek na stravování: '
+                    . implode(', ', $mealEntitlement->missing) . '.';
+            } else {
+                $basket = $this->basketSplit(
+                    $supplierId,
+                    $definition,
+                    $input,
+                    $mealEntitlement,
+                );
+            }
+        } catch (PayrollRulesetException $e) {
+            $support = 'manual_review';
+            $blocker = $e->getMessage();
+        }
+
         return [
             'support_status' => $support,
             'blocker' => $blocker,
@@ -88,7 +115,8 @@ final class PayrollInputPreviewService
             'annual_used_minor' => $used,
             'annual_after_minor' => $after,
             'annual_limit_exceeded' => $limit !== null && $after > $limit,
-            'exemption_basket' => $this->basketSplit($supplierId, $definition, $input),
+            'exemption_basket' => $basket,
+            'meal_entitlement' => $mealEntitlement?->jsonSerialize(),
         ];
     }
 
@@ -110,21 +138,14 @@ final class PayrollInputPreviewService
         int $supplierId,
         PayrollComponentDefinition $definition,
         array $input,
+        ?PayrollMealShiftEntitlement $entitlement,
     ): ?array {
         if ($definition->exemptionBasket === null) {
             return null;
         }
         $taxYear = (int) substr($input['period_start'], 0, 4);
-        try {
-            $entitlement = $definition->exemptionBasket->scalesWithShifts()
-                ? $this->mealEvidence->forPeriod(
-                    $supplierId,
-                    $input['employee_id'],
-                    $input['period_start'],
-                )
-                : null;
 
-            return [
+        return [
                 ...$this->baskets->split(
                     $definition->exemptionBasket,
                     $input['period_start'],
@@ -137,11 +158,16 @@ final class PayrollInputPreviewService
                     ),
                     $input['amount_minor'],
                     $entitlement?->count() ?? 0,
+                    $definition->exemptionBasket->scalesWithShifts()
+                        ? $this->inputs->mealBasketEntitlements(
+                            $supplierId,
+                            $input['employee_id'],
+                            $definition->exemptionBasket,
+                            $input['period_start'],
+                        )
+                        : null,
                 )->jsonSerialize(),
                 'entitlement' => $entitlement?->jsonSerialize(),
             ];
-        } catch (PayrollRulesetException) {
-            return null;
-        }
     }
 }

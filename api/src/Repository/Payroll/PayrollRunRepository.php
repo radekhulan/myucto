@@ -1075,15 +1075,81 @@ final class PayrollRunRepository
     public function revisions(int $supplierId, int $runId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM payroll_run_revisions
+            'SELECT id, supplier_id, run_id, revision_no, previous_revision_id,
+                    revision_kind, status, schema_version, ruleset_manifest_hash,
+                    input_snapshot_hash, result_snapshot_hash, calculated_by,
+                    reviewed_by, approved_by, calculated_at, reviewed_at, approved_at,
+                    created_at,
+                    (input_snapshot_json IS NOT NULL) AS has_input_snapshot,
+                    (result_snapshot_json IS NOT NULL) AS has_result_snapshot
+               FROM payroll_run_revisions
               WHERE supplier_id = ? AND run_id = ?
               ORDER BY revision_no'
         );
         $stmt->execute([$supplierId, $runId]);
         return array_values(array_map(
-            self::castRevision(...),
+            self::castRevisionSummary(...),
             $stmt->fetchAll(PDO::FETCH_ASSOC),
         ));
+    }
+
+    /**
+     * @return array{
+     *   run_id:int,
+     *   revisions:list<array<string,mixed>>,
+     *   events:list<array<string,mixed>>
+     * }|null
+     */
+    public function history(int $supplierId, int $runId): ?array
+    {
+        $runStmt = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_runs WHERE supplier_id = ? AND id = ?',
+        );
+        $runStmt->execute([$supplierId, $runId]);
+        if ($runStmt->fetchColumn() === false) {
+            return null;
+        }
+
+        $revisionStmt = $this->db->pdo()->prepare(
+            'SELECT revision.id, revision.revision_no, revision.previous_revision_id,
+                    revision.revision_kind, revision.status,
+                    revision.ruleset_manifest_hash, revision.input_snapshot_hash,
+                    revision.result_snapshot_hash, revision.calculated_at,
+                    revision.reviewed_at, revision.approved_at, revision.created_at,
+                    previous.id AS diff_parent_revision_id,
+                    previous.input_snapshot_hash AS diff_parent_input_snapshot_hash,
+                    previous.ruleset_manifest_hash AS diff_parent_ruleset_manifest_hash,
+                    previous.result_snapshot_hash AS diff_parent_result_snapshot_hash,
+                    JSON_VALUE(revision.result_snapshot_json,
+                        "$.totals.cash_payable_minor") AS diff_cash_payable_after,
+                    JSON_VALUE(previous.result_snapshot_json,
+                        "$.totals.cash_payable_minor") AS diff_cash_payable_before,
+                    JSON_VALUE(revision.result_snapshot_json,
+                        "$.totals.enforcement_withheld_minor") AS diff_enforcement_withheld_after,
+                    JSON_VALUE(previous.result_snapshot_json,
+                        "$.totals.enforcement_withheld_minor") AS diff_enforcement_withheld_before,
+                    JSON_VALUE(revision.result_snapshot_json,
+                        "$.totals.payable_after_enforcement_minor") AS diff_payable_after_enforcement_after,
+                    JSON_VALUE(previous.result_snapshot_json,
+                        "$.totals.payable_after_enforcement_minor") AS diff_payable_after_enforcement_before
+               FROM payroll_run_revisions revision
+          LEFT JOIN payroll_run_revisions previous
+                 ON previous.supplier_id = revision.supplier_id
+                AND previous.run_id = revision.run_id
+                AND previous.id = revision.previous_revision_id
+              WHERE revision.supplier_id = ? AND revision.run_id = ?
+              ORDER BY revision.revision_no',
+        );
+        $revisionStmt->execute([$supplierId, $runId]);
+
+        return [
+            'run_id' => $runId,
+            'revisions' => array_values(array_map(
+                self::castHistoryRevision(...),
+                $revisionStmt->fetchAll(PDO::FETCH_ASSOC),
+            )),
+            'events' => $this->historyEvents($supplierId, $runId),
+        ];
     }
 
     /** @return list<array<string,mixed>> */
@@ -1418,23 +1484,24 @@ final class PayrollRunRepository
         int $revisionId,
         PayrollRunInputSnapshot $snapshot,
     ): void {
+        $periodStart = $this->periodStartForRevision($supplierId, $revisionId);
         $personInsert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_persons
-                (supplier_id, revision_id, employee_id)
-             VALUES (?, ?, ?)'
+                (supplier_id, revision_id, period_start, employee_id)
+             VALUES (?, ?, ?, ?)'
         );
         $employmentInsert = $this->db->pdo()->prepare(
             'INSERT INTO payroll_run_employments
-                (supplier_id, revision_id, employee_id, employment_id,
+                (supplier_id, revision_id, period_start, employee_id, employment_id,
                  input_json, input_hash)
-             VALUES (?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($snapshot->data['people'] as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
                 throw new \UnexpectedValueException('Snapshot osoby není platný.');
             }
             $employeeId = (int) $person['employee']['id'];
-            $personInsert->execute([$supplierId, $revisionId, $employeeId]);
+            $personInsert->execute([$supplierId, $revisionId, $periodStart, $employeeId]);
             foreach ($person['employments'] ?? [] as $employment) {
                 if (!is_array($employment)
                     || !is_array($employment['employment'] ?? null)
@@ -1445,6 +1512,7 @@ final class PayrollRunRepository
                 $employmentInsert->execute([
                     $supplierId,
                     $revisionId,
+                    $periodStart,
                     $employeeId,
                     (int) $employment['employment']['id'],
                     $json,
@@ -1471,6 +1539,25 @@ final class PayrollRunRepository
                 $validation->requiresOverride ? 1 : 0,
             ]);
         }
+    }
+
+    private function periodStartForRevision(int $supplierId, int $revisionId): string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE revision.supplier_id = ? AND revision.id = ?'
+        );
+        $statement->execute([$supplierId, $revisionId]);
+        $periodStart = $statement->fetchColumn();
+        if (!is_string($periodStart) || $periodStart === '') {
+            throw new \DomainException('Revize mzdového běhu nemá platné období.');
+        }
+
+        return $periodStart;
     }
 
     public function lockApprovedInputs(
@@ -1776,6 +1863,151 @@ final class PayrollRunRepository
         }
         unset($row['idempotency_key_hash']);
         return $row;
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private static function castRevisionSummary(array $row): array
+    {
+        foreach (['id', 'supplier_id', 'run_id', 'revision_no'] as $field) {
+            $row[$field] = (int) $row[$field];
+        }
+        foreach ([
+            'previous_revision_id',
+            'calculated_by',
+            'reviewed_by',
+            'approved_by',
+        ] as $field) {
+            $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        foreach (['has_input_snapshot', 'has_result_snapshot'] as $field) {
+            $row[$field] = (bool) (int) $row[$field];
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{
+     *   id:int,
+     *   revision_no:int,
+     *   previous_revision_id:?int,
+     *   revision_kind:string,
+     *   status:string,
+     *   created_at:string,
+     *   calculated_at:?string,
+     *   reviewed_at:?string,
+     *   approved_at:?string,
+     *   ruleset_manifest_hash:string,
+     *   input_snapshot_hash:string,
+     *   result_snapshot_hash:?string,
+     *   totals:array<string,?int>,
+     *   diff_from_previous:?array<string,mixed>
+     * }
+     */
+    private static function castHistoryRevision(array $row): array
+    {
+        $diff = self::historyDiff($row);
+
+        return [
+            'id' => (int) $row['id'],
+            'revision_no' => (int) $row['revision_no'],
+            'previous_revision_id' => $row['previous_revision_id'] === null
+                ? null
+                : (int) $row['previous_revision_id'],
+            'revision_kind' => (string) $row['revision_kind'],
+            'status' => (string) $row['status'],
+            'created_at' => (string) $row['created_at'],
+            'calculated_at' => $row['calculated_at'],
+            'reviewed_at' => $row['reviewed_at'],
+            'approved_at' => $row['approved_at'],
+            'ruleset_manifest_hash' => (string) $row['ruleset_manifest_hash'],
+            'input_snapshot_hash' => (string) $row['input_snapshot_hash'],
+            'result_snapshot_hash' => $row['result_snapshot_hash'],
+            'totals' => [
+                'cash_payable_minor' => self::nullableMinor(
+                    $row['diff_cash_payable_after'],
+                ),
+                'enforcement_withheld_minor' => self::nullableMinor(
+                    $row['diff_enforcement_withheld_after'],
+                ),
+                'payable_after_enforcement_minor' => self::nullableMinor(
+                    $row['diff_payable_after_enforcement_after'],
+                ),
+            ],
+            'diff_from_previous' => $diff,
+        ];
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed>|null */
+    private static function historyDiff(array $row): ?array
+    {
+        if ($row['diff_parent_revision_id'] === null) {
+            return null;
+        }
+
+        return [
+            'input_changed' =>
+                $row['input_snapshot_hash'] !== $row['diff_parent_input_snapshot_hash'],
+            'ruleset_changed' =>
+                $row['ruleset_manifest_hash'] !== $row['diff_parent_ruleset_manifest_hash'],
+            'result_changed' =>
+                $row['result_snapshot_hash'] !== $row['diff_parent_result_snapshot_hash'],
+            'totals' => [
+                'cash_payable_minor' => self::historyTotal(
+                    $row['diff_cash_payable_before'],
+                    $row['diff_cash_payable_after'],
+                ),
+                'enforcement_withheld_minor' => self::historyTotal(
+                    $row['diff_enforcement_withheld_before'],
+                    $row['diff_enforcement_withheld_after'],
+                ),
+                'payable_after_enforcement_minor' => self::historyTotal(
+                    $row['diff_payable_after_enforcement_before'],
+                    $row['diff_payable_after_enforcement_after'],
+                ),
+            ],
+        ];
+    }
+
+    /** @return array{before:?int,after:?int,delta:?int} */
+    private static function historyTotal(mixed $before, mixed $after): array
+    {
+        $before = self::nullableMinor($before);
+        $after = self::nullableMinor($after);
+
+        return [
+            'before' => $before,
+            'after' => $after,
+            'delta' => $before === null || $after === null ? null : $after - $before,
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function historyEvents(int $supplierId, int $runId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT event.id, event.revision_id, event.event_type, event.from_status,
+                    event.to_status, event.reason, actor.name AS actor_name,
+                    event.created_at
+               FROM payroll_run_events event
+          LEFT JOIN users actor ON actor.id = event.actor_user_id
+              WHERE event.supplier_id = ? AND event.run_id = ?
+              ORDER BY event.id',
+        );
+        $stmt->execute([$supplierId, $runId]);
+
+        return array_values(array_map(
+            static function (array $row): array {
+                $row['id'] = (int) $row['id'];
+                $row['revision_id'] = $row['revision_id'] === null
+                    ? null
+                    : (int) $row['revision_id'];
+
+                return $row;
+            },
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
     }
 
     private static function supportsPaymentMaterialization(mixed $snapshot): bool

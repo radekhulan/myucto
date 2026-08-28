@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Export\Instance\CompleteInstanceRestoreService;
 use MyInvoice\Service\Export\Instance\InstanceExportService;
+use MyInvoice\Service\Payroll\Export\PayrollPeriodExportStorage;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -22,11 +23,24 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
     /** @var list<string> */
     private const TENANT_TABLES = [
         'currencies',
+        'documents',
         'payroll_employees',
         'payroll_runs',
         'payroll_run_revisions',
         'payroll_run_persons',
         'payroll_generated_documents',
+        'payroll_production_qualifications',
+        'payroll_production_qualification_documents',
+        'payroll_enforcement_cases',
+        'payroll_enforcement_claims',
+        'payroll_enforcement_case_documents',
+        'payroll_person_foreign_permits',
+        'payroll_retention_policies',
+        'retention_holds',
+        'payroll_document_batches',
+        'payroll_document_batch_items',
+        'payroll_document_batch_attempts',
+        'payroll_period_exports',
         'payroll_obligations',
         'payroll_submissions',
         'payroll_submission_artifacts',
@@ -152,6 +166,12 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             $this->removeDirectory(RuntimePaths::storage(
                 'payroll-documents/sup-' . $this->supplierId,
             ));
+            $this->removeDirectory(RuntimePaths::storage(
+                'payroll-period-exports/sup-' . $this->supplierId,
+            ));
+            $this->removeDirectory(RuntimePaths::storage(
+                'documents/sup-' . $this->supplierId,
+            ));
         }
         if (isset($this->sourceConnection)
             && $this->sourceTransaction
@@ -170,6 +190,19 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         $sourceRows = $this->snapshotRows($source, $fixture['bank_statement_id']);
         $sourceCounts = array_map('count', $sourceRows);
         $sourceFingerprint = $this->fingerprint($sourceRows);
+
+        self::assertSame(1, $sourceCounts['documents'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_production_qualifications'] ?? 0);
+        self::assertSame(7, $sourceCounts['payroll_production_qualification_documents'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_enforcement_cases'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_enforcement_claims'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_enforcement_case_documents'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_person_foreign_permits'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_retention_policies'] ?? 0);
+        self::assertSame(1, $sourceCounts['retention_holds'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_document_batches'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_document_batch_items'] ?? 0);
+        self::assertSame(1, $sourceCounts['payroll_document_batch_attempts'] ?? 0);
 
         $result = $this->export->runForSupplier(
             $this->supplierId,
@@ -190,6 +223,30 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             'Vedlejší SHA-256 soubor musí popisovat přesně exportovaný ZIP.',
         );
         self::assertTrue((bool) ($result['manifest']['restore']['available'] ?? false));
+        $assets = [];
+        foreach ((array) ($result['manifest']['restore']['files'] ?? []) as $asset) {
+            $assets[(string) ($asset['storage_path'] ?? '')] = $asset;
+        }
+        self::assertArrayHasKey(
+            $fixture['dms_storage_path'],
+            $assets,
+            'DMS důkazní soubor musí být součástí obnovitelného archivu.',
+        );
+        self::assertSame($fixture['dms_sha256'], $assets[$fixture['dms_storage_path']]['sha256'] ?? null);
+        self::assertArrayHasKey(
+            $fixture['period_export_storage_path'],
+            $assets,
+            'Měsíční nebo roční mzdový archiv musí být součástí obnovitelného exportu.',
+        );
+        self::assertSame(
+            $fixture['period_export_ciphertext_sha256'],
+            $assets[$fixture['period_export_storage_path']]['sha256'] ?? null,
+        );
+        self::assertSame(
+            'denylist',
+            $result['manifest']['sections']['data']['skipped_tables']['payroll_period_export_jobs'] ?? null,
+            'Provozní exportní job se nesmí přenášet do obnovené instance.',
+        );
 
         $this->createAndMigrateTargetDatabase();
         self::assertNotNull($this->target);
@@ -209,7 +266,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         }
 
         $report = $restore->restore($archivePath);
-        self::assertGreaterThanOrEqual(1, $report['files'], 'Obnova musí vrátit výplatní PDF.');
+        self::assertGreaterThanOrEqual(2, $report['files'], 'Obnova musí vrátit výplatní i DMS PDF.');
         self::assertGreaterThanOrEqual(1, $report['blobs'], 'Obnova musí vrátit bankovní důkaz platby.');
         self::assertSame([], $this->foreignKeyViolations($this->target));
 
@@ -227,6 +284,32 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         self::assertFileExists($restoredPdf);
         self::assertSame($fixture['pdf_bytes'], file_get_contents($restoredPdf));
         self::assertSame($fixture['pdf_sha256'], hash_file('sha256', $restoredPdf));
+
+        $restoredDms = $this->targetStorage . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $fixture['dms_storage_path']);
+        self::assertFileExists($restoredDms);
+        self::assertSame($fixture['dms_bytes'], file_get_contents($restoredDms));
+        self::assertSame($fixture['dms_sha256'], hash_file('sha256', $restoredDms));
+
+        $restoredPeriodExport = $this->targetStorage . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $fixture['period_export_storage_path']);
+        self::assertFileExists($restoredPeriodExport);
+        self::assertSame(
+            $fixture['period_export_ciphertext'],
+            file_get_contents($restoredPeriodExport),
+        );
+        self::assertSame(
+            $fixture['period_export_ciphertext_sha256'],
+            hash_file('sha256', $restoredPeriodExport),
+        );
+
+        self::assertSame(
+            0,
+            (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_jobs')?->fetchColumn(),
+            'Obnova nesmí oživit provozní exportní job.',
+        );
+        self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_job_parts')?->fetchColumn());
+        self::assertSame(0, (int) $this->target->query('SELECT COUNT(*) FROM payroll_period_export_job_part_attempts')?->fetchColumn());
 
         $artifacts = $this->target->prepare(
             'SELECT artifact_kind, content_ciphertext, artifact_sha256
@@ -263,6 +346,9 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
      * @return array{
      *   bank_statement_id:int,
      *   pdf_storage_path:string,pdf_bytes:string,pdf_sha256:string,
+     *   dms_storage_path:string,dms_bytes:string,dms_sha256:string,
+     *   period_export_storage_path:string,period_export_ciphertext:string,
+     *   period_export_ciphertext_sha256:string,
      *   xml_bytes:string,xml_ciphertext:string,
      *   protocol_bytes:string,protocol_ciphertext:string,
      *   bank_bytes:string
@@ -271,6 +357,8 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
     private function seedCompletePayrollFlow(): array
     {
         $pdo = $this->sourceConnection->pdo();
+        $actorId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')?->fetchColumn() ?: 0);
+        self::assertGreaterThan(0, $actorId, 'Testovací DB musí obsahovat uživatele pro auditní FK.');
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, is_active)
@@ -307,6 +395,130 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             hash('sha256', "mz31-revision-{$this->supplierId}", true),
         ]);
         $revisionId = (int) $pdo->lastInsertId();
+
+        $dmsBytes = "%PDF-1.7\n% synthetic MZ-31 evidence bundle\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n";
+        $dmsHash = hash('sha256', $dmsBytes);
+        $dmsFilename = $dmsHash . '-mz31-evidence.pdf';
+        $dmsStoragePath = 'documents/sup-' . $this->supplierId . '/'
+            . substr($dmsHash, 0, 2) . '/' . $dmsFilename;
+        $dmsPath = RuntimePaths::storage($dmsStoragePath);
+        self::assertTrue(@mkdir(dirname($dmsPath), 0750, true) || is_dir(dirname($dmsPath)));
+        self::assertSame(strlen($dmsBytes), file_put_contents($dmsPath, $dmsBytes));
+        $pdo->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope)
+             VALUES (?, "Syntetický důkazní balíček MZ-31", "mz31-evidence.pdf", ?, ?,
+                     "application/pdf", ?, "pdf", "manual", ?, "company")',
+        )->execute([
+            $this->supplierId,
+            $dmsFilename,
+            $dmsHash,
+            strlen($dmsBytes),
+            $actorId,
+        ]);
+        $dmsDocumentId = (int) $pdo->lastInsertId();
+
+        $qualificationEvidence = '{"schema":"synthetic-mz31-qualification.v1","recovery":true}';
+        $pdo->prepare(
+            'INSERT INTO payroll_production_qualifications
+                (supplier_id, module_state_row_version, support_matrix_version,
+                 support_matrix_sha256, evidence_json, evidence_sha256, qualified_by, qualified_at)
+             VALUES (?, 1, "synthetic-mz31.v1", ?, ?, ?, ?, "2099-02-02 10:00:00")',
+        )->execute([
+            $this->supplierId,
+            hash('sha256', 'synthetic-mz31-support-matrix'),
+            $qualificationEvidence,
+            hash('sha256', $qualificationEvidence),
+            $actorId,
+        ]);
+        $qualificationId = (int) $pdo->lastInsertId();
+        $qualificationDocument = $pdo->prepare(
+            'INSERT INTO payroll_production_qualification_documents
+                (supplier_id, qualification_id, evidence_key, sequence_no, document_id, document_sha256)
+             VALUES (?, ?, ?, ?, ?, ?)',
+        );
+        foreach ([
+            ['parallel_run', 1],
+            ['parallel_run', 2],
+            ['correction_scenario', 1],
+            ['recovery_drill', 1],
+            ['expert_approval', 1],
+            ['rollback_plan', 1],
+            ['post_go_live_monitoring', 1],
+        ] as [$evidenceKey, $sequenceNo]) {
+            $qualificationDocument->execute([
+                $this->supplierId,
+                $qualificationId,
+                $evidenceKey,
+                $sequenceNo,
+                $dmsDocumentId,
+                $dmsHash,
+            ]);
+        }
+
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status, effective_from,
+                 evidence_complete, recipient_verified, created_by, updated_by)
+             VALUES (?, ?, ?, "enforcement", "received", "2099-01-01", 1, 0, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            "synthetic-mz31-enforcement-{$this->supplierId}",
+            $actorId,
+            $actorId,
+        ]);
+        $enforcementCaseId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, legal_basis, category, outstanding_minor_units,
+                 first_payer_delivered_on)
+             VALUES (?, ?, ?, "statutory", "non_priority", 10000, "2099-01-15")',
+        )->execute([
+            $this->supplierId,
+            $enforcementCaseId,
+            "synthetic-mz31-claim-{$this->supplierId}",
+        ]);
+        $pdo->prepare(
+            'INSERT INTO payroll_enforcement_case_documents
+                (supplier_id, case_id, dms_document_id, evidence_kind, document_sha256, verified_by)
+             VALUES (?, ?, ?, "initial_order", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $enforcementCaseId,
+            $dmsDocumentId,
+            $dmsHash,
+            $actorId,
+        ]);
+
+        $pdo->prepare(
+            'INSERT INTO payroll_person_foreign_permits
+                (supplier_id, employee_id, permit_kind, permit_label, issuing_country_code,
+                 effective_from, valid_until, document_supplier_id, document_id, document_sha256,
+                 recorded_by)
+             VALUES (?, ?, "work", "Syntetické pracovní oprávnění", "UA", "2099-01-01",
+                     "2099-12-31", ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            $this->supplierId,
+            $dmsDocumentId,
+            $dmsHash,
+            $actorId,
+        ]);
+        $pdo->prepare(
+            'INSERT INTO payroll_retention_policies
+                (supplier_id, category, extra_years, reason)
+             VALUES (?, "payroll_sheet", 1, "Syntetické prodloužení retence MZ-31")',
+        )->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO retention_holds
+                (supplier_id, subject_kind, subject_id, reason, description, placed_on, created_by)
+             VALUES (?, "payroll_employee", ?, "enforcement", "Syntetická exekuce MZ-31",
+                     "2099-02-02", ?)',
+        )->execute([$this->supplierId, $employeeId, $actorId]);
+
         $pdo->prepare(
             'INSERT INTO payroll_run_persons
                 (supplier_id, revision_id, employee_id, result_json,
@@ -348,6 +560,82 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             strlen($pdfBytes),
             $pdfHash,
             hash('sha256', "mz31-pdf-{$this->supplierId}", true),
+        ]);
+        $generatedDocumentId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare(
+            'INSERT INTO payroll_document_batches
+                (supplier_id, run_id, revision_id, status, source_snapshot_hash,
+                 idempotency_key_hash, item_count, succeeded_count, failed_count,
+                 requested_by, completed_at)
+             VALUES (?, ?, ?, "completed", ?, ?, 1, 1, 0, ?, "2099-02-02 12:00:00")',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionId,
+            $resultHash,
+            hash('sha256', "mz31-document-batch-{$revisionId}", true),
+            $actorId,
+        ]);
+        $documentBatchId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_document_batch_items
+                (supplier_id, batch_id, employee_id, source_snapshot_hash, status,
+                 attempt_count, available_at, document_id, completed_at)
+             VALUES (?, ?, ?, ?, "succeeded", 1, "2099-02-02 11:00:00", ?, "2099-02-02 12:00:00")',
+        )->execute([
+            $this->supplierId,
+            $documentBatchId,
+            $employeeId,
+            $resultHash,
+            $generatedDocumentId,
+        ]);
+        $documentBatchItemId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_document_batch_attempts
+                (supplier_id, batch_id, item_id, attempt_no, lease_token, status, started_at, finished_at)
+             VALUES (?, ?, ?, 1, ?, "succeeded", "2099-02-02 11:00:00", "2099-02-02 12:00:00")',
+        )->execute([
+            $this->supplierId,
+            $documentBatchId,
+            $documentBatchItemId,
+            random_bytes(16),
+        ]);
+        $pdo->prepare(
+            'INSERT INTO payroll_period_export_jobs
+                (supplier_id, export_scope, period_start, period_end, status, available_at, requested_by)
+             VALUES (?, "monthly", "2099-01-01", "2099-01-31", "queued", "2099-02-02 10:00:00", ?)',
+        )->execute([$this->supplierId, $actorId]);
+
+        $periodExportBytes = "synthetic MZ-31 monthly archive\n";
+        $periodStorage = Bootstrap::buildContainer()->get(PayrollPeriodExportStorage::class);
+        self::assertInstanceOf(PayrollPeriodExportStorage::class, $periodStorage);
+        $storedPeriodExport = $periodStorage->store(
+            $this->supplierId,
+            $periodExportBytes,
+        );
+        $periodExportHash = (string) $storedPeriodExport['storage_key'];
+        $periodExportStoragePath = 'payroll-period-exports/sup-'
+            . $this->supplierId . '/' . substr($periodExportHash, 0, 2)
+            . '/' . $periodExportHash;
+        $periodExportCiphertext = file_get_contents(
+            RuntimePaths::storage($periodExportStoragePath),
+        );
+        self::assertIsString($periodExportCiphertext);
+        $pdo->prepare(
+            'INSERT INTO payroll_period_exports
+                (supplier_id, export_scope, period_start, period_end,
+                 source_manifest_hash, manifest_json, file_sha256, size_bytes,
+                 mime_type, storage_key, suggested_filename, created_by)
+             VALUES (?, "monthly", "2099-01-01", "2099-01-31", ?, "{}", ?, ?,
+                     "application/zip", ?, "mzdy-2099-01.zip", ?)'
+        )->execute([
+            $this->supplierId,
+            hash('sha256', "mz31-period-source-{$this->supplierId}"),
+            $periodExportHash,
+            strlen($periodExportBytes),
+            $periodExportHash,
+            $actorId,
         ]);
 
         $pdo->prepare(
@@ -531,6 +819,12 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
             'pdf_storage_path' => $pdfStoragePath,
             'pdf_bytes' => $pdfBytes,
             'pdf_sha256' => $pdfHash,
+            'dms_storage_path' => $dmsStoragePath,
+            'dms_bytes' => $dmsBytes,
+            'dms_sha256' => $dmsHash,
+            'period_export_storage_path' => $periodExportStoragePath,
+            'period_export_ciphertext' => $periodExportCiphertext,
+            'period_export_ciphertext_sha256' => hash('sha256', $periodExportCiphertext),
             'xml_bytes' => $xmlBytes,
             'xml_ciphertext' => $xmlCiphertext,
             'protocol_bytes' => $protocolBytes,

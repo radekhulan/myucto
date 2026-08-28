@@ -245,6 +245,24 @@ Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné
 pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
 evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
 
+### 69.8.3 Pobytová a pracovní oprávnění cizinců
+
+Ve sbalené části **Úplná osobní evidence a historie** je samostatná sekce
+**Pobytová a pracovní oprávnění**. Každé oprávnění eviduje druh, označení,
+stát vydání, počátek účinnosti, konec platnosti a autoritativní podklad ve
+firemních Dokumentech. Osobní dokument, dokument jiné firmy nebo dokument
+v koši aplikace nepřijme.
+
+Historie se nepřepisuje. Prodloužení založte akcí **Navázat obnovení** u
+předchozího oprávnění; aplikace zachová původní podklad a vytvoří nový
+neměnný záznam. Jedno oprávnění může mít jen jedno přímé pokračování a
+překrývající se záznam bez uvedeného předchůdce se odmítne.
+
+Sekce upozorňuje na oprávnění, jejichž platnost skončila nebo skončí do
+30 dnů. Čtenář mezd bez oprávnění k Dokumentům uvidí věcnou historii a
+upozornění, nikoli odkaz na podklad. Zápis vyžaduje současně právo
+**Spravovat zaměstnance** a právo číst firemní Dokumenty.
+
 ## 69.9 Pracovní vztah a předkontace
 
 Jedna osoba může mít více samostatných právních vztahů. Rozlišení je důležité

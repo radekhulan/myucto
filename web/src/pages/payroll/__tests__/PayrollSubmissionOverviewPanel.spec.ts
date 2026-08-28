@@ -9,6 +9,18 @@ const m = vi.hoisted(() => ({
   healthPaymentOverviews: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
+  prepareHealthOverview: vi.fn(),
+  enqueueHealthIsds: vi.fn(),
+  gatewayStartPayroll: vi.fn(),
+}))
+vi.mock('@/api/payrollHealthNotifications', () => ({
+  payrollHealthNotificationApi: {
+    preparePaymentOverview: m.prepareHealthOverview,
+    enqueuePaymentOverviewIsds: m.enqueueHealthIsds,
+  },
+}))
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: { gatewayStartPayroll: m.gatewayStartPayroll },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -114,6 +126,71 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     const period = wrapper.get('[data-test="submission-overview-period"]')
       .element as HTMLInputElement
     expect(period.value).toBe('2027-01')
+  })
+
+  it('pro VZP připraví a stáhne PDF artefakt místo interního JSON', async () => {
+    m.runs.mockResolvedValue([{
+      revision_status: 'approved',
+      revision_id: 12,
+    }])
+    m.healthPaymentOverviews.mockResolvedValue({
+      items: [{
+        schema_reference: 'payroll-health-payment-overview.v1',
+        document_kind: 'internal_health_payment_overview',
+        official_submission: { supported: false, reason_code: 'internal' },
+        supplier_id: 1,
+        run_id: 1,
+        revision_id: 12,
+        revision_no: 3,
+        period: '2026-08',
+        currency_code: 'CZK',
+        insurer: { code: '111' },
+        source: { statutory_result_id: 1, statutory_result_hash: 'a', ruleset_id: 'r', ruleset_hash: 'h' },
+        totals: {
+          person_count: 2,
+          assessment_base_minor_units: 5700000,
+          employee_contribution_minor_units: 256500,
+          employer_contribution_minor_units: 756000,
+          total_contribution_minor_units: 1012500,
+        },
+        people: [],
+        sha256: 'old-json',
+        filename: 'internal.json',
+      }],
+    })
+    m.prepareHealthOverview.mockResolvedValue({
+      submission_id: 57,
+      obligation_id: 70,
+      artifact_id: 80,
+      pdf_artifact_id: 81,
+      status: 'ready',
+      row_version: 4,
+      insurer_code: '111',
+      period: '2026-08',
+      agenda_code: 'PPZ',
+      artifact_sha256: 'xml',
+      pdf_artifact_sha256: 'pdf',
+      created: true,
+      deadline: {},
+      schema_validated: true,
+      dispatch: {
+        supported: false,
+        reason_code: 'zp_transport_envelope_undocumented',
+        reason: 'Ruční potvrzení.',
+        channel: { insurer_code: '111', isds_attachment_format: 'text_pdf' },
+      },
+    })
+    const pdfArtifact = { id: 81, mime_type: 'application/pdf' }
+    m.submissionDetail.mockResolvedValue({ submission: { id: 57 }, artifacts: [pdfArtifact] })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'health' } })
+    await flushPromises()
+    await wrapper.get('[data-test="health-overview-download"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareHealthOverview).toHaveBeenCalledWith(12, '111', 'production')
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(57, pdfArtifact)
+    expect(m.downloadSubmissionArtifact).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mime_type: 'application/json' }))
   })
 
   it('ukáže v detailu lidské stavy a technický kód problému oddělí od hlavní zprávy', async () => {

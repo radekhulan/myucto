@@ -32,19 +32,27 @@ final readonly class PayrollRegistrationIdentitySnapshot
         public ?array $employmentExternalIdentifier,
         public array $registrationEligibility,
         public array $sourceVersions,
+        public ?PayrollRegistrationA1Snapshot $regzecA1 = null,
     ) {}
 
     /** @return array<string,mixed> */
     public function toArray(): array
     {
-        return [
+        $a1Ready = $this->scope['agenda_code'] === 'REGZEC25'
+            && $this->regzecA1 !== null;
+
+        $result = [
             'schema_reference' => self::SCHEMA_REFERENCE,
             'document_kind' => 'registration_identity_snapshot',
-            'workflow_status' => 'identity_frozen_only',
-            'official_submission' => [
-                'supported' => false,
-                'reason_code' => 'xml_and_legal_validation_not_implemented',
-            ],
+            'workflow_status' => $a1Ready
+                ? 'regzec_a1_frozen'
+                : 'identity_frozen_only',
+            'official_submission' => $a1Ready
+                ? ['supported' => true, 'reason_code' => null]
+                : [
+                    'supported' => false,
+                    'reason_code' => 'xml_and_legal_validation_not_implemented',
+                ],
             'scope' => $this->scope,
             'identity' => $this->identity,
             'identifiers' => $this->identifiers,
@@ -53,6 +61,11 @@ final readonly class PayrollRegistrationIdentitySnapshot
             'registration_eligibility' => $this->registrationEligibility,
             'source_versions' => $this->sourceVersions,
         ];
+        if ($this->regzecA1 !== null) {
+            $result['regzec_a1'] = $this->regzecA1->toArray();
+        }
+
+        return $result;
     }
 
     public function canonicalJson(): string
@@ -60,4 +73,3 @@ final readonly class PayrollRegistrationIdentitySnapshot
         return CanonicalJson::encode($this->toArray());
     }
 }
-

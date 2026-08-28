@@ -168,7 +168,7 @@ final class PayrollRegistrationIdentityRepository
 
     /**
      * @return array{
-     *   employee_id:int,start_date:?string,end_date:?string
+     *   employee_id:int,start_date:?string,actual_start_date:?string,end_date:?string
      * }|null
      */
     public function employment(
@@ -176,7 +176,7 @@ final class PayrollRegistrationIdentityRepository
         int $employmentId,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT employee_id, start_date, end_date
+            'SELECT employee_id, start_date, actual_start_date, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?'
         );
@@ -190,13 +190,14 @@ final class PayrollRegistrationIdentityRepository
         return [
             'employee_id' => $this->positiveInt($row, 'employee_id'),
             'start_date' => $this->nullableString($row, 'start_date'),
+            'actual_start_date' => $this->nullableString($row, 'actual_start_date'),
             'end_date' => $this->nullableString($row, 'end_date'),
         ];
     }
 
     /**
      * @return array{
-     *   employee_id:int,start_date:?string,end_date:?string
+     *   employee_id:int,start_date:?string,actual_start_date:?string,end_date:?string
      * }|null
      */
     public function lockEmployment(
@@ -204,7 +205,7 @@ final class PayrollRegistrationIdentityRepository
         int $employmentId,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT employee_id, start_date, end_date
+            'SELECT employee_id, start_date, actual_start_date, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?
               FOR UPDATE'
@@ -219,6 +220,7 @@ final class PayrollRegistrationIdentityRepository
         return [
             'employee_id' => $this->positiveInt($row, 'employee_id'),
             'start_date' => $this->nullableString($row, 'start_date'),
+            'actual_start_date' => $this->nullableString($row, 'actual_start_date'),
             'end_date' => $this->nullableString($row, 'end_date'),
         ];
     }
@@ -236,6 +238,79 @@ final class PayrollRegistrationIdentityRepository
         return $statement->fetchColumn() !== false;
     }
 
+    /** @return array<string,mixed>|null */
+    public function latestA1Profile(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        bool $forUpdate = false,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, employee_id, employment_id, effective_on,
+                    profile_ciphertext, profile_hash, reference_hash,
+                    row_version, created_at
+               FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND employment_id = ?
+              ORDER BY row_version DESC, id DESC
+              LIMIT 1'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([$supplierId, $employeeId, $employmentId]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'id' => $this->positiveInt($row, 'id'),
+            'supplier_id' => $this->positiveInt($row, 'supplier_id'),
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
+            'employment_id' => $this->positiveInt($row, 'employment_id'),
+            'effective_on' => $this->string($row, 'effective_on'),
+            'profile_ciphertext' => $this->string($row, 'profile_ciphertext'),
+            'profile_hash' => $this->string($row, 'profile_hash'),
+            'reference_hash' => $this->string($row, 'reference_hash'),
+            'row_version' => $this->positiveInt($row, 'row_version'),
+            'created_at' => $this->string($row, 'created_at'),
+        ];
+    }
+
+    public function insertA1Profile(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $effectiveOn,
+        string $ciphertext,
+        string $profileHash,
+        string $referenceHash,
+        int $rowVersion,
+        ?int $createdBy,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_registration_a1_profiles
+                (supplier_id, employee_id, employment_id, effective_on,
+                 profile_ciphertext, profile_hash, reference_hash,
+                 row_version, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $effectiveOn,
+            $ciphertext,
+            $profileHash,
+            $referenceHash,
+            $rowVersion,
+            $createdBy,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
     public function hasTrustedReceipt(
         int $supplierId,
         string $environment,
@@ -251,6 +326,100 @@ final class PayrollRegistrationIdentityRepository
               FOR UPDATE'
         );
         $statement->execute([$supplierId, $environment, $receiptId]);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    public function hasAcceptedRegistrationIdentifierReceipt(
+        int $supplierId,
+        string $environment,
+        int $receiptId,
+        int $employeeId,
+        int $employmentId,
+        string $identifierType,
+        string $value,
+        string $registrationRulesetId,
+    ): bool {
+        $outcomeColumn = match ($identifierType) {
+            'ik_mpsv' => 'external_person_reference',
+            'id_ppv' => 'external_employment_reference',
+            default => throw new \InvalidArgumentException(
+                'Druh registračního identifikátoru není podporovaný.',
+            ),
+        };
+        $employmentScope = $identifierType === 'id_ppv'
+            ? ' AND employment.id = ?'
+            : '';
+        $statement = $this->db->pdo()->prepare(
+            'SELECT receipt.id
+               FROM payroll_submission_receipts receipt
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = receipt.supplier_id
+                AND submission.environment = receipt.environment
+                AND submission.id = receipt.submission_id
+               JOIN payroll_obligations obligation
+                 ON obligation.supplier_id = submission.supplier_id
+                AND obligation.environment = submission.environment
+                AND obligation.id = submission.obligation_id
+               JOIN payroll_submission_deadlines deadline
+                 ON deadline.supplier_id = obligation.supplier_id
+                AND deadline.environment = obligation.environment
+                AND deadline.obligation_id = obligation.id
+                AND deadline.deadline_kind = "regular"
+               JOIN payroll_jmhz_protocol_form_outcomes outcome
+                 ON outcome.supplier_id = receipt.supplier_id
+                AND outcome.environment = receipt.environment
+                AND outcome.submission_id = receipt.submission_id
+                AND outcome.receipt_id = receipt.id
+               JOIN payroll_submission_parts part
+                 ON part.supplier_id = submission.supplier_id
+                AND part.environment = submission.environment
+                AND part.submission_id = submission.id
+                AND (
+                    outcome.part_id = part.id
+                    OR (
+                        outcome.part_id IS NULL
+                        AND 1 = (
+                            SELECT COUNT(*)
+                              FROM payroll_submission_parts receipt_part
+                             WHERE receipt_part.supplier_id = submission.supplier_id
+                               AND receipt_part.environment = submission.environment
+                               AND receipt_part.submission_id = submission.id
+                        )
+                    )
+                )
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = part.supplier_id
+                AND part.source_entity_type = "payroll_employment"
+                AND part.source_entity_reference =
+                    CONCAT("payroll_employment_registration:", employment.id)
+              WHERE receipt.supplier_id = ?
+                AND receipt.environment = ?
+                AND receipt.id = ?
+                AND receipt.verification_status = "trusted"
+                AND receipt.remote_status IN ("accepted", "partially_accepted")
+                AND submission.status IN ("accepted", "partially_accepted")
+                AND submission.submission_kind = "regular"
+                AND deadline.ruleset_id = ?
+                AND part.agenda_code IN ("REGZEC25", "PREZEC26")
+                AND outcome.remote_status = "accepted"
+                AND outcome.' . $outcomeColumn . ' = ?
+                AND employment.employee_id = ?'
+            . $employmentScope
+            . ' LIMIT 1 FOR UPDATE'
+        );
+        $parameters = [
+            $supplierId,
+            $environment,
+            $receiptId,
+            $registrationRulesetId,
+            $value,
+            $employeeId,
+        ];
+        if ($identifierType === 'id_ppv') {
+            $parameters[] = $employmentId;
+        }
+        $statement->execute($parameters);
 
         return $statement->fetchColumn() !== false;
     }
@@ -292,6 +461,63 @@ final class PayrollRegistrationIdentityRepository
         $raw = $statement->fetch(PDO::FETCH_ASSOC);
 
         return $raw === false ? null : $this->externalId($this->row($raw));
+    }
+
+    /** @return array<string,mixed>|null */
+    public function externalIdFromReceipt(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        int $receiptId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, employee_id, employment_id, environment,
+                    identifier_type, value_ciphertext, value_hash,
+                    value_masked, valid_from, valid_to, source_kind,
+                    source_receipt_id, source_reference_hash, row_version
+               FROM payroll_employment_external_ids
+              WHERE supplier_id = ? AND employment_id = ?
+                AND environment = ? AND identifier_type = "id_ppv"
+                AND source_receipt_id = ?
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $statement->execute([
+            $supplierId,
+            $employmentId,
+            $environment,
+            $receiptId,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return $raw === false ? null : $this->externalId($this->row($raw));
+    }
+
+    public function closeExternalId(
+        int $supplierId,
+        int $externalId,
+        int $expectedRowVersion,
+        string $validTo,
+        ?int $updatedBy,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_external_ids
+                SET valid_to = ?, updated_by = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND row_version = ?
+                AND valid_to IS NULL'
+        );
+        $statement->execute([
+            $validTo,
+            $updatedBy,
+            $supplierId,
+            $externalId,
+            $expectedRowVersion,
+        ]);
+        if ($statement->rowCount() !== 1) {
+            throw new \DomainException(
+                'Aktivní ID PPV se mezitím změnilo a nelze je bezpečně nahradit.',
+            );
+        }
     }
 
     /**

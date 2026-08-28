@@ -22,6 +22,8 @@ final readonly class AnnualSettlementChildMonths
         public int $order,
         public int $months,
         public int $ztpPMonths,
+        public array $claimedMonths = [],
+        public array $ztpPClaimedMonths = [],
     ) {
         if (trim($childReference) === '' || mb_strlen($childReference) > 128) {
             throw new \InvalidArgumentException('Odkaz na dítě není platný.');
@@ -39,6 +41,19 @@ final readonly class AnnualSettlementChildMonths
                 'Měsíce s průkazem ZTP/P nesmí přesáhnout měsíce vyživování.',
             );
         }
+        $this->validateMonthVector($claimedMonths, $months, 'Měsíce vyživování');
+        $this->validateMonthVector(
+            $ztpPClaimedMonths,
+            $ztpPMonths,
+            'Měsíce s průkazem ZTP/P',
+        );
+        if ($claimedMonths !== []
+            && array_diff($ztpPClaimedMonths, $claimedMonths) !== []
+        ) {
+            throw new \InvalidArgumentException(
+                'Měsíce s průkazem ZTP/P musí být podmnožinou měsíců vyživování.',
+            );
+        }
     }
 
     /** @return array<string,mixed> */
@@ -49,6 +64,30 @@ final readonly class AnnualSettlementChildMonths
             'order' => $this->order,
             'months' => $this->months,
             'ztp_p_months' => $this->ztpPMonths,
+            'claimed_months' => $this->claimedMonths,
+            'ztp_p_claimed_months' => $this->ztpPClaimedMonths,
         ];
+    }
+
+    /** @param list<int> $months */
+    private function validateMonthVector(
+        array $months,
+        int $expectedCount,
+        string $label,
+    ): void {
+        if ($months === []) {
+            return;
+        }
+        if (!array_is_list($months)
+            || count($months) !== $expectedCount
+            || $months !== array_values(array_unique($months))
+        ) {
+            throw new \InvalidArgumentException("{$label} nejsou platný měsíční vektor.");
+        }
+        foreach ($months as $month) {
+            if (!is_int($month) || $month < 1 || $month > AnnualTaxRates::MONTHS_IN_YEAR) {
+                throw new \InvalidArgumentException("{$label} nejsou platný měsíční vektor.");
+            }
+        }
     }
 }

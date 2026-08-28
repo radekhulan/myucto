@@ -902,10 +902,10 @@ final class PayrollRunPaymentSettlementGateTest extends TestCase
         $snapshot = '{"schema":"settlement-gate-incoming.v1"}';
         $this->pdo->prepare(
             'INSERT INTO payroll_run_persons
-                (supplier_id, revision_id, employee_id,
+                (supplier_id, revision_id, period_start, employee_id,
                  result_json, result_hash, status)
-             SELECT supplier_id, ?, employee_id,
-                    result_json, result_hash, "calculated"
+             SELECT supplier_id, ?, period_start, employee_id,
+                     result_json, result_hash, "calculated"
                FROM payroll_run_persons
               WHERE supplier_id = ? AND revision_id = ?',
         )->execute([

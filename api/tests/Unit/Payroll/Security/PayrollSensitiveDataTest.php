@@ -119,6 +119,39 @@ final class PayrollSensitiveDataTest extends TestCase
         );
     }
 
+    public function testA1ProfileKeepsCanonicalJsonCaseAndSupportsFullPayload(): void
+    {
+        $canonical = json_encode([
+            'position_name' => 'Účetní',
+            'attachment' => str_repeat('A', 500),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        $sealed = $this->service->seal(
+            $canonical,
+            PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+            10,
+            20,
+        );
+
+        self::assertSame('••••••••', $sealed->masked);
+        self::assertSame(
+            $canonical,
+            $this->service->reveal(
+                $sealed->ciphertext,
+                PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+                10,
+                20,
+            ),
+        );
+        self::assertSame(
+            $sealed->lookupHash,
+            $this->service->lookupHash(
+                $canonical,
+                PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+                10,
+            ),
+        );
+    }
+
     public function testContactsAreNormalizedEncryptedAndContextBound(): void
     {
         $email = $this->service->seal(

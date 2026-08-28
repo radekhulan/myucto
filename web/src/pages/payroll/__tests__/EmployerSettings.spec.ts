@@ -9,6 +9,8 @@ import type {
 const m = vi.hoisted(() => ({
   employerSettings: vi.fn(),
   saveEmployerSettings: vi.fn(),
+  officeRegistrations: vi.fn(),
+  createOfficeRegistration: vi.fn(),
   accountOptions: vi.fn(),
   institutionAccounts: vi.fn(),
   createInstitutionAccount: vi.fn(),
@@ -19,6 +21,8 @@ const m = vi.hoisted(() => ({
   updateEmployerPolicy: vi.fn(),
   regzelProfile: vi.fn(),
   saveRegzelProfile: vi.fn(),
+  jmhzEmployerAnnualEvidence: vi.fn(),
+  saveJmhzEmployerAnnualEvidence: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
@@ -32,6 +36,8 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     employerSettings: m.employerSettings,
     saveEmployerSettings: m.saveEmployerSettings,
+    officeRegistrations: m.officeRegistrations,
+    createOfficeRegistration: m.createOfficeRegistration,
     accountOptions: m.accountOptions,
     institutionAccounts: m.institutionAccounts,
     createInstitutionAccount: m.createInstitutionAccount,
@@ -42,6 +48,8 @@ vi.mock('@/api/payroll', () => ({
     updateEmployerPolicy: m.updateEmployerPolicy,
     regzelProfile: m.regzelProfile,
     saveRegzelProfile: m.saveRegzelProfile,
+    jmhzEmployerAnnualEvidence: m.jmhzEmployerAnnualEvidence,
+    saveJmhzEmployerAnnualEvidence: m.saveJmhzEmployerAnnualEvidence,
   },
 }))
 
@@ -60,6 +68,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       params ? `${key}:${JSON.stringify(params)}` : key,
+    locale: { value: 'cs-CZ' },
   }),
 }))
 
@@ -157,7 +166,23 @@ async function mountPage(value = settings()) {
     profile: null,
     suggested_tax_office_workplace_code: null,
   })
+  m.jmhzEmployerAnnualEvidence.mockResolvedValue({
+    evidence: null,
+    offices: [],
+    collective_agreement_types: [],
+    ownership_forms: [],
+  })
   m.saveEmployerSettings.mockResolvedValue(value)
+  m.officeRegistrations.mockResolvedValue([])
+  m.createOfficeRegistration.mockResolvedValue({
+    id: 22,
+    office_id: 1,
+    effective_from: '2026-09-01',
+    social_security_variable_symbol: '0012345678',
+    source_reference: 'synthetic-approved-source',
+    created_by: 1,
+    created_at: '2026-08-27 12:00:00',
+  })
   const wrapper = mount(EmployerSettings, { attachTo: document.body })
   await flushPromises()
   return wrapper
@@ -172,6 +197,29 @@ describe('EmployerSettings — účtová osnova', () => {
     vi.clearAllMocks()
     m.routeQuery = {}
     document.body.innerHTML = ''
+  })
+
+  it('uloží VS pouze přes dialog účinné registrace, ne přes bulk nastavení', async () => {
+    const wrapper = await mountPage()
+    const open = wrapper.findAll('button').find(button => button.text().includes('manage_registration'))
+    await open!.trigger('click')
+    await flushPromises()
+    const variableSymbol = document.querySelector<HTMLInputElement>('[data-registration-vs]')!
+    variableSymbol.value = '0012345678'
+    variableSymbol.dispatchEvent(new Event('input', { bubbles: true }))
+    const source = document.querySelector<HTMLInputElement>('[data-registration-source]')!
+    source.value = 'synthetic-approved-source'
+    source.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushPromises()
+    const save = Array.from(document.querySelectorAll('[role="dialog"] button'))
+      .find(button => button.textContent === 'common.save') as HTMLButtonElement
+    await save.click()
+    await flushPromises()
+    expect(m.createOfficeRegistration).toHaveBeenCalledWith(1, expect.objectContaining({
+      social_security_variable_symbol: '0012345678',
+      source_reference: 'synthetic-approved-source',
+    }))
+    wrapper.unmount()
   })
 
   it('otevře záložku podání podle query vedlejšího routeru', async () => {
@@ -257,13 +305,9 @@ describe('EmployerSettings — účtová osnova', () => {
     wrapper.unmount()
   })
 
-  it('zachová validní ČSSZ VS u mzdové účtárny v payloadu', async () => {
+  it('hromadné nastavení neposílá živý VS mimo účinnou historii', async () => {
     const wrapper = await mountPage()
-    const inputs = wrapper.findAll('[data-office-social-vs]')
-    expect(inputs).toHaveLength(2)
-    expect((inputs[0].element as HTMLInputElement).value).toBe('0012345678')
-
-    await inputs[0].setValue('0000000042')
+    expect(wrapper.findAll('[data-office-social-vs]')).toHaveLength(0)
     const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
     await save!.trigger('click')
     await flushPromises()
@@ -271,24 +315,23 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
     expect(m.saveEmployerSettings.mock.calls[0][0].offices[0]).toMatchObject({
       code: 'MAIN',
-      social_security_variable_symbol: '0000000042',
+      social_security_variable_symbol: null,
     })
     expect(m.saveEmployerSettings.mock.calls[0][0]).not.toHaveProperty('health_insurance_payer_number')
 
     wrapper.unmount()
   })
 
-  it('neodešle nečíselný ČSSZ VS účtárny', async () => {
-    const wrapper = await mountPage()
-    const input = wrapper.findAll('[data-office-social-vs]')[0]
-    await input.setValue('VS-42')
-
+  it('legacy neplatný VS neblokuje opravu jiného nastavení a neposílá se zpět', async () => {
+    const legacy = settings()
+    legacy.offices[0]!.social_security_variable_symbol = 'VS-42'
+    const wrapper = await mountPage(legacy)
     const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
     await save!.trigger('click')
+    await flushPromises()
 
-    expect(m.saveEmployerSettings).not.toHaveBeenCalled()
-    expect(input.attributes('aria-invalid')).toBe('true')
-    expect(wrapper.text()).toContain('payroll.employer.validation.social_security_variable_symbol')
+    expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
+    expect(m.saveEmployerSettings.mock.calls[0][0].offices[0].social_security_variable_symbol).toBeNull()
 
     wrapper.unmount()
   })

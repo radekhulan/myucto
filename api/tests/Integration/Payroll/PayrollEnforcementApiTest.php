@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use MyInvoice\Action\Document\DocumentsAction;
+use MyInvoice\Action\Document\DocumentFileAction;
+use MyInvoice\Action\Document\FoldersAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\ActivityLogger;
@@ -44,15 +50,22 @@ final class PayrollEnforcementApiTest extends TestCase
     private Connection $db;
     private PayrollEnforcementAction $action;
     private PayrollEnforcementRepository $repository;
+    private PayrollInstitutionAccountRepository $institutionAccounts;
     private EnforcementCaseLifecycle $lifecycle;
     private PayrollModuleAccess $access;
     private IpMatcher $ipMatcher;
     private DocumentRepository $documents;
+    private DocumentFolderRepository $documentFolders;
+    private DocumentsAction $documentsAction;
+    private DocumentFileAction $documentFileAction;
+    private FoldersAction $foldersAction;
     private int $supplierId;
     private int $otherSupplierId;
     private int $employeeId;
     private int $otherEmployeeId;
     private int $userId;
+    private int $legalRecipientDocumentId;
+    private int $legalRecipientAccountId;
 
     protected function setUp(): void
     {
@@ -63,18 +76,28 @@ final class PayrollEnforcementApiTest extends TestCase
         $db = $container->get(Connection::class);
         $action = $container->get(PayrollEnforcementAction::class);
         $repository = $container->get(PayrollEnforcementRepository::class);
+        $institutionAccounts = $container->get(PayrollInstitutionAccountRepository::class);
         $lifecycle = $container->get(EnforcementCaseLifecycle::class);
         $access = $container->get(PayrollModuleAccess::class);
         $ipMatcher = $container->get(IpMatcher::class);
         $documents = $container->get(DocumentRepository::class);
+        $documentFolders = $container->get(DocumentFolderRepository::class);
+        $documentsAction = $container->get(DocumentsAction::class);
+        $documentFileAction = $container->get(DocumentFileAction::class);
+        $foldersAction = $container->get(FoldersAction::class);
         if (
             !$db instanceof Connection
             || !$action instanceof PayrollEnforcementAction
             || !$repository instanceof PayrollEnforcementRepository
+            || !$institutionAccounts instanceof PayrollInstitutionAccountRepository
             || !$lifecycle instanceof EnforcementCaseLifecycle
             || !$access instanceof PayrollModuleAccess
             || !$ipMatcher instanceof IpMatcher
             || !$documents instanceof DocumentRepository
+            || !$documentFolders instanceof DocumentFolderRepository
+            || !$documentsAction instanceof DocumentsAction
+            || !$documentFileAction instanceof DocumentFileAction
+            || !$foldersAction instanceof FoldersAction
         ) {
             throw new \RuntimeException('Služby srážek nejsou dostupné.');
         }
@@ -84,10 +107,15 @@ final class PayrollEnforcementApiTest extends TestCase
         }
         $this->action = $action;
         $this->repository = $repository;
+        $this->institutionAccounts = $institutionAccounts;
         $this->lifecycle = $lifecycle;
         $this->access = $access;
         $this->ipMatcher = $ipMatcher;
         $this->documents = $documents;
+        $this->documentFolders = $documentFolders;
+        $this->documentsAction = $documentsAction;
+        $this->documentFileAction = $documentFileAction;
+        $this->foldersAction = $foldersAction;
         $pdo = $db->pdo();
         $sourceSupplierId = $this->firstId($pdo, 'supplier');
         $this->userId = $this->firstId($pdo, 'users');
@@ -114,6 +142,28 @@ final class PayrollEnforcementApiTest extends TestCase
         if (isset($this->db)) {
             $this->db->close();
         }
+    }
+
+    public function testClosedYearMutationReturnsConflict(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_year_closures
+                (supplier_id, calendar_year, status, row_version, closed_at, closed_by)
+             VALUES (?, 2026, 'closed', 1, NOW(), ?)",
+        )->execute([$this->supplierId, $this->userId]);
+
+        $response = $this->action->create(
+            $this->request('POST', '/api/payroll/enforcement/cases')
+                ->withParsedBody([
+                    'employee_id' => $this->employeeId,
+                    'case_kind' => 'enforcement',
+                    'effective_from' => '2026-08-01',
+                ]),
+            new Response(),
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('payroll_year_closed', $this->errorCode($response));
     }
 
     public function testTenantIsolationSessionGuardAndLifecycleEvidenceGates(): void
@@ -169,7 +219,7 @@ final class PayrollEnforcementApiTest extends TestCase
                     'category' => 'non_priority',
                     'outstanding_minor_units' => 250_000,
                     'maintenance_weight_minor_units' => null,
-                    'priority_date' => '2026-05-20',
+                    'first_payer_delivered_on' => '2026-05-20',
                     'order_issued_on' => '2026-05-15',
                     'legal_title_verified' => true,
                     'order_or_notice_delivered' => true,
@@ -181,6 +231,8 @@ final class PayrollEnforcementApiTest extends TestCase
             ['id' => (string) $ownId],
         );
         self::assertSame(201, $claimResponse->getStatusCode(), (string) $claimResponse->getBody());
+
+        $this->recordDocumentedRecipient($ownId);
 
         $evidence = $this->action->updateEvidence(
             $this->request('PUT', "/api/payroll/enforcement/cases/{$ownId}/evidence")
@@ -381,6 +433,654 @@ final class PayrollEnforcementApiTest extends TestCase
         );
         self::assertSame(409, $paid->getStatusCode());
         self::assertSame('invalid_case_transition', $this->errorCode($paid));
+    }
+
+    public function testClassifiedDecisionDocumentRequiresSessionPayrollPermissionInGenericDms(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $folderId = $this->documentFolders->create(
+            $this->supplierId,
+            null,
+            'Syntetická omezená složka',
+            $this->userId,
+        );
+        $documentId = $this->document($this->supplierId, str_repeat('e', 64));
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ? WHERE supplier_id = ? AND id = ?'
+        )->execute([$folderId, $this->supplierId, $documentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_case_documents
+                (supplier_id, case_id, dms_document_id, evidence_kind,
+                 document_sha256, verified_by)
+             VALUES (?, ?, ?, "initial_order", ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $caseId,
+            $documentId,
+            str_repeat('e', 64),
+            $this->userId,
+        ]);
+
+        $documentsOnly = new EffectiveRole(
+            91,
+            'Dokumenty bez mezd',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $payrollReader = new EffectiveRole(
+            92,
+            'Mzdová účetní',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.enforcement' => 1],
+        );
+
+        $restricted = $this->request('GET', "/api/documents/{$documentId}")
+            ->withAttribute('auth.effective_role', $documentsOnly);
+        $detail = $this->documentsAction->get(
+            $restricted,
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(404, $detail->getStatusCode());
+
+        $text = $this->documentsAction->text(
+            $restricted->withUri($restricted->getUri()->withPath("/api/documents/{$documentId}/text")),
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(404, $text->getStatusCode());
+
+        $restrictedViewer = DocumentViewerContext::forUser($this->userId);
+        self::assertNull(
+            $this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                $restrictedViewer,
+            ),
+        );
+        self::assertNotContains(
+            $documentId,
+            array_column(
+                $this->documents->listInFolder(
+                    $this->supplierId,
+                    null,
+                    $restrictedViewer,
+                ),
+                'id',
+            ),
+        );
+        $restrictedFolder = array_values(array_filter(
+            $this->documentFolders->listChildren(
+                $this->supplierId,
+                null,
+                $restrictedViewer,
+            ),
+            static fn (array $folder): bool => (int) $folder['id'] === $folderId,
+        ))[0] ?? self::fail('Syntetická složka chybí.');
+        self::assertSame(0, $restrictedFolder['file_count']);
+        self::assertSame(0, $restrictedFolder['total_bytes']);
+        self::assertFalse($this->documentFolders->canMutateSubtree(
+            $this->supplierId,
+            [$folderId],
+            $restrictedViewer,
+        ));
+        self::assertTrue($this->documentFolders->containsRetainedEvidence(
+            $this->supplierId,
+            [$folderId],
+        ));
+        self::assertSame([], $this->documentFolders->softDeleteSubtree(
+            $folderId,
+            $this->supplierId,
+            $this->userId,
+            $restrictedViewer,
+        ));
+        self::assertNotNull($this->documentFolders->find($folderId, $this->supplierId));
+        $restrictedDelete = $this->foldersAction->delete(
+            $restricted
+                ->withMethod('DELETE')
+                ->withUri($restricted->getUri()->withPath("/api/document-folders/{$folderId}")),
+            new Response(),
+            ['id' => (string) $folderId],
+        );
+        self::assertSame(403, $restrictedDelete->getStatusCode());
+        self::assertSame('folder_access_denied', $this->errorCode($restrictedDelete));
+
+        $search = $this->documentsAction->search(
+            $restricted
+                ->withUri($restricted->getUri()->withPath('/api/documents/search'))
+                ->withQueryParams(['q' => 'Syntetické']),
+            new Response(),
+        );
+        $searchRows = PayrollTimeValue::rows(
+            $this->json($search)['documents'] ?? null,
+            'documents',
+        );
+        self::assertNotContains(
+            $documentId,
+            array_column($searchRows, 'id'),
+        );
+
+        $allowed = $restricted->withAttribute('auth.effective_role', $payrollReader);
+        $detail = $this->documentsAction->get(
+            $allowed,
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(200, $detail->getStatusCode());
+        self::assertNotNull(
+            $this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                DocumentViewerContext::forUser($this->userId, true),
+            ),
+        );
+        $allowedFolder = array_values(array_filter(
+            $this->documentFolders->listChildren(
+                $this->supplierId,
+                null,
+                DocumentViewerContext::forUser($this->userId, true),
+            ),
+            static fn (array $folder): bool => (int) $folder['id'] === $folderId,
+        ))[0] ?? self::fail('Syntetická složka chybí mzdové účetní.');
+        self::assertSame(1, $allowedFolder['file_count']);
+        self::assertSame(1, $allowedFolder['total_bytes']);
+        $retainedDelete = $this->foldersAction->delete(
+            $allowed
+                ->withMethod('DELETE')
+                ->withUri($allowed->getUri()->withPath("/api/document-folders/{$folderId}")),
+            new Response(),
+            ['id' => (string) $folderId],
+        );
+        self::assertSame(409, $retainedDelete->getStatusCode());
+        self::assertSame('folder_retained_evidence', $this->errorCode($retainedDelete));
+
+        $bearer = $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer');
+        $detail = $this->documentsAction->get(
+            $bearer,
+            new Response(),
+            ['id' => (string) $documentId],
+        );
+        self::assertSame(404, $detail->getStatusCode());
+    }
+
+    public function testClassifiedInsolvencyDecisionRequiresBothSessionPayrollPermissionsInGenericDms(): void
+    {
+        $employmentId = $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'DMS-INSOLVENCY',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $account = $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'DMS-INS',
+            'institution_name' => 'Syntetický insolvenční správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:dms-insolvency',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+        $folderId = $this->documentFolders->create(
+            $this->supplierId,
+            null,
+            'Syntetická složka oddlužení',
+            $this->userId,
+        );
+        $documentId = $this->document($this->supplierId, str_repeat('f', 64));
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ? WHERE supplier_id = ? AND id = ?',
+        )->execute([$folderId, $this->supplierId, $documentId]);
+        $this->repository->saveMonthEvidence(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06',
+            [
+                'claim_register_evidence_complete' => false,
+                'dependants_evidence_complete' => false,
+                'spouse_evidence_complete' => false,
+                'pension_evidence' => 'unknown',
+                'has_multiple_payers' => false,
+                'protected_amount_override_minor_units' => null,
+                'protected_amount_override_verified' => false,
+                'insolvency_mode' => 'approved_standard',
+                'insolvency_decision_verified' => true,
+                'insolvency_recipient_verified' => true,
+                'insolvency_employment_id' => $employmentId,
+                'insolvency_institution_account_id' => (int) $account['id'],
+                'insolvency_decision_document_id' => $documentId,
+                'court_determined_amount_minor_units' => null,
+            ],
+            $this->userId,
+            null,
+        );
+        $instructionCount = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_insolvency_payment_instructions
+              WHERE supplier_id = ? AND decision_document_id = ?',
+        );
+        $instructionCount->execute([$this->supplierId, $documentId]);
+        self::assertSame(1, (int) $instructionCount->fetchColumn());
+
+        $documentsOnly = new EffectiveRole(
+            93,
+            'Dokumenty bez oddlužení',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $restricted = $this->request('GET', "/api/documents/{$documentId}")
+            ->withAttribute('auth.effective_role', $documentsOnly);
+        self::assertSame(404, $this->documentsAction->get(
+            $restricted,
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertNull($this->documents->findRaw(
+            $documentId,
+            $this->supplierId,
+            DocumentViewerContext::forUser($this->userId),
+        ));
+        self::assertSame([], $this->documents->rawByFolderIds(
+            $this->supplierId,
+            [$folderId],
+            DocumentViewerContext::forUser($this->userId),
+        ));
+        self::assertNull($this->documents->findRaw(
+            $documentId,
+            $this->otherSupplierId,
+            DocumentViewerContext::forUser($this->userId, false, true),
+        ));
+
+        $reader = new EffectiveRole(
+            94,
+            'Mzdová účetní pro oddlužení',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.enforcement' => 1, 'payroll.insolvency' => 1],
+        );
+        $allowed = $restricted->withAttribute('auth.effective_role', $reader);
+        self::assertSame(200, $this->documentsAction->get(
+            $allowed,
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertNotEmpty($this->documents->rawByFolderIds(
+            $this->supplierId,
+            [$folderId],
+            DocumentViewerContext::forUser($this->userId, false, true),
+        ));
+        self::assertSame(404, $this->documentsAction->get(
+            $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'),
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+    }
+
+    public function testProductionQualificationEvidenceRequiresPayrollSubmissionPermissionInGenericDms(): void
+    {
+        if (
+            !$this->db->hasTable('payroll_production_qualifications')
+            || !$this->db->hasTable('payroll_production_qualification_documents')
+        ) {
+            $this->markTestSkipped('Migrace produkční kvalifikace neproběhla.');
+        }
+
+        $documentId = $this->document($this->supplierId, str_repeat('a', 64));
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_production_qualifications
+                (supplier_id, module_state_row_version, support_matrix_version,
+                 support_matrix_sha256, evidence_json, evidence_sha256, qualified_by)
+             VALUES (?, 1, "synthetic", ?, "{}", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            str_repeat('b', 64),
+            str_repeat('c', 64),
+            $this->userId,
+        ]);
+        $qualificationId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_production_qualification_documents
+                (supplier_id, qualification_id, evidence_key, sequence_no,
+                 document_id, document_sha256)
+             VALUES (?, ?, "synthetic_evidence", 1, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $qualificationId,
+            $documentId,
+            str_repeat('a', 64),
+        ]);
+
+        $documentsOnly = new EffectiveRole(
+            95,
+            'Dokumenty bez mzdových podání',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $restricted = $this->request('GET', "/api/documents/{$documentId}")
+            ->withAttribute('auth.effective_role', $documentsOnly);
+        self::assertSame(404, $this->documentsAction->get(
+            $restricted,
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+        self::assertNull($this->documents->findRaw(
+            $documentId,
+            $this->supplierId,
+            DocumentViewerContext::forUser($this->userId),
+        ));
+
+        $submissionReader = new EffectiveRole(
+            96,
+            'Mzdová účetní pro podání',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.submissions' => 1],
+        );
+        self::assertSame(200, $this->documentsAction->get(
+            $restricted->withAttribute('auth.effective_role', $submissionReader),
+            new Response(),
+            ['id' => (string) $documentId],
+        )->getStatusCode());
+    }
+
+    public function testPayrollSubmissionReceiptsAndMatchedResponsesRequireSubmissionPermissionInGenericDms(): void
+    {
+        if (
+            !$this->db->hasTable('submission_outbox')
+            || !$this->db->hasTable('submission_inbox_messages')
+        ) {
+            $this->markTestSkipped('Migrace fronty podání neproběhla.');
+        }
+
+        $receiptDocumentId = $this->document($this->supplierId, str_repeat('f', 64));
+        $responseDocumentId = $this->document($this->supplierId, str_repeat('0', 64));
+        $outbox = $this->db->pdo()->prepare(
+            'INSERT INTO submission_outbox
+                (supplier_id, environment, channel, agenda_code, recipient_box_id,
+                 subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
+                 idempotency_key_hash, correlation_reference, receipt_document_id, created_by)
+             VALUES (?, "test", "isds", "JMHZ", "a1b2c3d", "Syntetické mzdové podání",
+                     "payroll_submission", 1, "synthetic.xml", ?, ?, ?, ?, ?)',
+        );
+        $outbox->execute([
+            $this->supplierId,
+            str_repeat('1', 64),
+            hash('sha256', 'synthetic-receipt-outbox', true),
+            'synthetic-receipt-1',
+            $receiptDocumentId,
+            $this->userId,
+        ]);
+        $outbox->execute([
+            $this->supplierId,
+            str_repeat('2', 64),
+            hash('sha256', 'synthetic-response-outbox', true),
+            'synthetic-response-1',
+            null,
+            $this->userId,
+        ]);
+        $responseOutboxId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO submission_inbox_messages
+                (supplier_id, environment, channel, external_message_id, classification,
+                 matched_outbox_id, document_id, raw_sha256)
+             VALUES (?, "test", "isds", "synthetic-health-response-1",
+                     "health_insurer_response", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $responseOutboxId,
+            $responseDocumentId,
+            str_repeat('0', 64),
+        ]);
+
+        $documentsOnly = new EffectiveRole(
+            99,
+            'Dokumenty bez mzdových podání',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $submissionReader = new EffectiveRole(
+            100,
+            'Mzdová účetní pro podání',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.submissions' => 1],
+        );
+        foreach ([$receiptDocumentId, $responseDocumentId] as $documentId) {
+            $restricted = $this->request('GET', "/api/documents/{$documentId}")
+                ->withAttribute('auth.effective_role', $documentsOnly);
+            self::assertSame(404, $this->documentsAction->get(
+                $restricted,
+                new Response(),
+                ['id' => (string) $documentId],
+            )->getStatusCode());
+            self::assertNull($this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                DocumentViewerContext::forUser($this->userId),
+            ));
+            self::assertSame(200, $this->documentsAction->get(
+                $restricted->withAttribute('auth.effective_role', $submissionReader),
+                new Response(),
+                ['id' => (string) $documentId],
+            )->getStatusCode());
+        }
+    }
+
+    public function testHealthEvidenceRequiresPermissionAcrossGenericDmsParentAndChildPaths(): void
+    {
+        if (!$this->db->hasColumn(
+            'payroll_person_health_coverage_history',
+            'health_evidence_document_id',
+        )) {
+            $this->markTestSkipped('Migrace 1602 neproběhla.');
+        }
+
+        $folderId = $this->documentFolders->create(
+            $this->supplierId,
+            null,
+            'Syntetická zdravotní složka',
+            $this->userId,
+        );
+        $parentDocumentId = $this->document($this->supplierId, str_repeat('7', 64));
+        $childDocumentId = $this->document($this->supplierId, str_repeat('8', 64));
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ?, parent_document_id = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$folderId, $parentDocumentId, $this->supplierId, $childDocumentId]);
+        $this->db->pdo()->prepare(
+            'UPDATE documents SET folder_id = ? WHERE supplier_id = ? AND id = ?',
+        )->execute([$folderId, $this->supplierId, $parentDocumentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, insurer_status, insurer_code,
+                 health_evidence_document_id, health_evidence_document_sha256,
+                 effective_from, created_by, updated_by)
+             VALUES (?, ?, "czech_regime_verified", "verified", "111", ?, ?,
+                     "2026-01-01", ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $parentDocumentId,
+            str_repeat('7', 64),
+            $this->userId,
+            $this->userId,
+        ]);
+
+        $documentsOnly = new EffectiveRole(
+            101,
+            'Dokumenty bez zdravotních důkazů',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $restricted = $this->request('GET', "/api/documents/{$parentDocumentId}")
+            ->withAttribute('auth.effective_role', $documentsOnly);
+        foreach ([$parentDocumentId, $childDocumentId] as $documentId) {
+            self::assertSame(404, $this->documentsAction->get(
+                $restricted->withUri($restricted->getUri()->withPath("/api/documents/{$documentId}")),
+                new Response(),
+                ['id' => (string) $documentId],
+            )->getStatusCode());
+            self::assertSame(404, $this->documentsAction->text(
+                $restricted->withUri($restricted->getUri()->withPath("/api/documents/{$documentId}/text")),
+                new Response(),
+                ['id' => (string) $documentId],
+            )->getStatusCode());
+            self::assertNull($this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                DocumentViewerContext::forUser($this->userId),
+            ));
+        }
+        $list = $this->documentsAction->list(
+            $restricted
+                ->withUri($restricted->getUri()->withPath('/api/documents'))
+                ->withQueryParams(['folder_id' => (string) $folderId]),
+            new Response(),
+        );
+        self::assertSame(0, $this->json($list)['meta']['total']);
+        $search = $this->documentsAction->search(
+            $restricted
+                ->withUri($restricted->getUri()->withPath('/api/documents/search'))
+                ->withQueryParams(['q' => 'Syntetické']),
+            new Response(),
+        );
+        self::assertNotContains(
+            $parentDocumentId,
+            array_column($this->json($search)['documents'], 'id'),
+        );
+        $folder = array_values(array_filter(
+            $this->documentFolders->listChildren(
+                $this->supplierId,
+                null,
+                DocumentViewerContext::forUser($this->userId),
+            ),
+            static fn (array $row): bool => (int) $row['id'] === $folderId,
+        ))[0] ?? self::fail('Syntetická zdravotní složka chybí.');
+        self::assertSame(0, $folder['file_count']);
+        self::assertTrue($this->documentFolders->containsRetainedEvidence(
+            $this->supplierId,
+            [$folderId],
+        ));
+        self::assertSame(404, $this->documentFileAction->bulkDownload(
+            $restricted
+                ->withUri($restricted->getUri()->withPath('/api/documents/bulk-download'))
+                ->withQueryParams(['ids' => (string) $childDocumentId]),
+            new Response(),
+        )->getStatusCode());
+
+        $healthReader = new EffectiveRole(
+            102,
+            'Mzdová účetní pro zdravotní důkazy',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.health_evidence' => 1],
+        );
+        $allowed = $restricted->withAttribute('auth.effective_role', $healthReader);
+        self::assertSame(200, $this->documentsAction->get(
+            $allowed,
+            new Response(),
+            ['id' => (string) $parentDocumentId],
+        )->getStatusCode());
+        self::assertNotNull($this->documents->findRaw(
+            $childDocumentId,
+            $this->supplierId,
+            DocumentViewerContext::forUser($this->userId, false, false, false, false, true),
+        ));
+        self::assertSame(404, $this->documentsAction->get(
+            $allowed->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'),
+            new Response(),
+            ['id' => (string) $parentDocumentId],
+        )->getStatusCode());
+    }
+
+    public function testNewEnforcementSourceDocumentsRequirePayrollEnforcementPermissionInGenericDms(): void
+    {
+        if (
+            !$this->db->hasTable('payroll_enforcement_case_parties')
+            || !$this->db->hasTable('payroll_enforcement_claim_breakdowns')
+        ) {
+            $this->markTestSkipped('Migrace 1600 neproběhla.');
+        }
+
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $claim = $this->createClaim($caseId);
+        $claimId = PayrollTimeValue::int($claim['id'] ?? null, 'id');
+        $partyDocumentId = $this->document($this->supplierId, str_repeat('d', 64));
+        $breakdownDocumentId = $this->document($this->supplierId, str_repeat('e', 64));
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_case_parties
+                (supplier_id, case_id, party_role, revision_no, effective_from,
+                 party_name, source_document_id, source_document_sha256, created_by)
+             VALUES (?, ?, "court", 1, "2026-05-20", "Syntetický soud", ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $caseId,
+            $partyDocumentId,
+            str_repeat('d', 64),
+            $this->userId,
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_claim_breakdowns
+                (supplier_id, case_id, claim_id, revision_no, principal_minor_units,
+                 source_document_id, source_document_sha256, created_by)
+             VALUES (?, ?, ?, 1, 100000, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $caseId,
+            $claimId,
+            $breakdownDocumentId,
+            str_repeat('e', 64),
+            $this->userId,
+        ]);
+
+        $documentsOnly = new EffectiveRole(
+            97,
+            'Dokumenty bez exekucí',
+            'staff',
+            true,
+            ['documents' => 1],
+        );
+        $payrollReader = new EffectiveRole(
+            98,
+            'Mzdová účetní pro exekuce',
+            'staff',
+            true,
+            ['documents' => 1, 'payroll.enforcement' => 1],
+        );
+        foreach ([$partyDocumentId, $breakdownDocumentId] as $documentId) {
+            $restricted = $this->request('GET', "/api/documents/{$documentId}")
+                ->withAttribute('auth.effective_role', $documentsOnly);
+            self::assertSame(404, $this->documentsAction->get(
+                $restricted,
+                new Response(),
+                ['id' => (string) $documentId],
+            )->getStatusCode());
+            self::assertNull($this->documents->findRaw(
+                $documentId,
+                $this->supplierId,
+                DocumentViewerContext::forUser($this->userId),
+            ));
+            self::assertSame(200, $this->documentsAction->get(
+                $restricted->withAttribute('auth.effective_role', $payrollReader),
+                new Response(),
+                ['id' => (string) $documentId],
+            )->getStatusCode());
+        }
     }
 
     public function testZeroProtectedAmountOverrideIsAcceptedForMultiplePayers(): void
@@ -860,6 +1560,28 @@ final class PayrollEnforcementApiTest extends TestCase
         self::assertSame('forbidden', $this->errorCode($response));
     }
 
+    public function testInsolvencyEndpointsAlsoRequireEnforcementPermission(): void
+    {
+        $insolvencyOnly = new EffectiveRole(
+            94,
+            'Syntetická role pouze pro oddlužení',
+            'staff',
+            true,
+            ['payroll.insolvency' => 2],
+        );
+        $response = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/options",
+            )->withAttribute('auth.effective_role', $insolvencyOnly),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertSame('forbidden', $this->errorCode($response));
+    }
+
     public function testApprovedInsolvencyEvidenceRequiresDocumentPermission(): void
     {
         $withoutDocuments = new EffectiveRole(
@@ -881,6 +1603,195 @@ final class PayrollEnforcementApiTest extends TestCase
 
         self::assertSame(403, $response->getStatusCode());
         self::assertSame('forbidden', $this->errorCode($response));
+    }
+
+    public function testInsolvencyOptionsAreTenantEffectiveVerifiedAndPermissionScoped(): void
+    {
+        $ownEmploymentId = $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'OWN-ACTIVE',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'OWN-EXPIRED',
+            'ended',
+            '2025-01-01',
+            '2025-12-31',
+        );
+        $this->employment(
+            $this->otherSupplierId,
+            $this->otherEmployeeId,
+            'FOREIGN-ACTIVE',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $ownAccount = $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-OWN',
+            'institution_name' => 'Syntetický insolvenční správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-options-own',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+        $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-EXPIRED',
+            'institution_name' => 'Syntetický bývalý správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => null,
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2025-01-01',
+            'valid_to' => '2025-12-31',
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-options-expired',
+            'verified_on' => '2025-01-02',
+        ], $this->userId);
+        $this->institutionAccounts->create($this->otherSupplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-FOREIGN',
+            'institution_name' => 'Syntetický cizí správce',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => null,
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-options-foreign',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+
+        $response = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/options",
+            ),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame([$ownEmploymentId], array_column($body['employments'], 'id'));
+        self::assertSame([(int) $ownAccount['id']], array_column($body['recipient_accounts'], 'id'));
+
+        $withoutInsolvency = new EffectiveRole(
+            94,
+            'Syntetická role bez insolvence',
+            'staff',
+            true,
+            ['payroll.enforcement' => 2],
+        );
+        $forbidden = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/options",
+            )->withAttribute('auth.effective_role', $withoutInsolvency),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+
+        $foreignPerson = $this->action->insolvencyOptions(
+            $this->request(
+                'GET',
+                "/api/payroll/insolvency/people/{$this->otherEmployeeId}/month/2026-06/options",
+            ),
+            new Response(),
+            ['employeeId' => (string) $this->otherEmployeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(422, $foreignPerson->getStatusCode());
+    }
+
+    public function testInsolvencyCancellationIsExplicitAndReloadsByRowVersion(): void
+    {
+        $employmentId = $this->employment(
+            $this->supplierId,
+            $this->employeeId,
+            'CANCEL-ACTIVE',
+            'active',
+            '2026-01-01',
+            null,
+        );
+        $account = $this->institutionAccounts->create($this->supplierId, [
+            'institution_type' => 'other_recipient',
+            'institution_code' => 'INS-CANCEL',
+            'institution_name' => 'Syntetický správce pro zrušení',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '1234567890',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:insolvency-cancel',
+            'verified_on' => '2026-01-02',
+        ], $this->userId);
+        $documentId = $this->document($this->supplierId, str_repeat('c', 64));
+        $saved = $this->action->saveMonthEvidence(
+            $this->request(
+                'PUT',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/evidence",
+            )->withParsedBody([
+                'claim_register_evidence_complete' => false,
+                'dependants_evidence_complete' => false,
+                'spouse_evidence_complete' => false,
+                'pension_evidence' => 'unknown',
+                'has_multiple_payers' => false,
+                'protected_amount_override_minor_units' => null,
+                'protected_amount_override_verified' => false,
+                'insolvency_mode' => 'approved_standard',
+                'insolvency_decision_verified' => true,
+                'insolvency_recipient_verified' => true,
+                'insolvency_employment_id' => $employmentId,
+                'insolvency_institution_account_id' => (int) $account['id'],
+                'insolvency_decision_document_id' => $documentId,
+                'court_determined_amount_minor_units' => null,
+                'row_version' => null,
+            ]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $rowVersion = (int) ($this->json($saved)['evidence']['row_version'] ?? 0);
+
+        $cancelled = $this->action->cancelInsolvency(
+            $this->request(
+                'POST',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/commands/cancel",
+            )->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(200, $cancelled->getStatusCode(), (string) $cancelled->getBody());
+        self::assertSame('none', $this->json($cancelled)['evidence']['insolvency_mode']);
+
+        $stale = $this->action->cancelInsolvency(
+            $this->request(
+                'POST',
+                "/api/payroll/insolvency/people/{$this->employeeId}/month/2026-06/commands/cancel",
+            )->withParsedBody(['row_version' => $rowVersion]),
+            new Response(),
+            ['employeeId' => (string) $this->employeeId, 'period' => '2026-06'],
+        );
+        self::assertSame(409, $stale->getStatusCode());
+        self::assertSame('row_version_conflict', $this->errorCode($stale));
     }
 
     public function testAddingDependantRequiresInsolvencyPermission(): void
@@ -939,7 +1850,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1036,12 +1947,13 @@ final class PayrollEnforcementApiTest extends TestCase
             $this->userId,
         );
         $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $this->recordDocumentedRecipient($caseId, '2026-07-10');
         $this->repository->addClaim($this->supplierId, $caseId, [
             'legal_basis' => 'statutory',
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-07-10',
+            'first_payer_delivered_on' => '2026-07-10',
             'order_issued_on' => '2026-07-09',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1119,12 +2031,13 @@ final class PayrollEnforcementApiTest extends TestCase
     {
         $case = $this->createCase($this->employeeId);
         $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $this->recordDocumentedRecipient($caseId);
         $this->repository->addClaim($this->supplierId, $caseId, [
             'legal_basis' => 'statutory',
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1280,12 +2193,13 @@ final class PayrollEnforcementApiTest extends TestCase
     {
         $case = $this->createCase($this->employeeId);
         $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $this->recordDocumentedRecipient($caseId);
         $payload = [
             'legal_basis' => 'statutory',
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1420,7 +2334,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => true,
             'order_or_notice_delivered' => true,
@@ -1496,7 +2410,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => false,
             'order_or_notice_delivered' => false,
@@ -1555,7 +2469,6 @@ final class PayrollEnforcementApiTest extends TestCase
             )->withParsedBody([
                 ...$this->claimBody(),
                 'outstanding_minor_units' => 125_000,
-                'priority_date' => '2026-05-21',
                 'row_version' => 1,
             ]),
             new Response(),
@@ -1567,7 +2480,7 @@ final class PayrollEnforcementApiTest extends TestCase
             'claim',
         );
         self::assertSame(125_000, $updatedClaim['outstanding_minor_units']);
-        self::assertSame('2026-05-21', $updatedClaim['priority_date']);
+        self::assertSame('2026-05-20', $updatedClaim['priority_date']);
         self::assertSame(2, $updatedClaim['row_version']);
 
         $deleted = $this->action->deleteClaim(
@@ -1602,6 +2515,142 @@ final class PayrollEnforcementApiTest extends TestCase
             'payroll.enforcement.claim.updated',
             'payroll.enforcement.claim.deleted',
         ], $audit->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    public function testStatutoryClaimPriorityIsDerivedFromFirstPayerDelivery(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+
+        $created = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-20',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $first = PayrollTimeValue::row($this->json($created)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-20', $first['first_payer_delivered_on']);
+        self::assertSame('2026-05-20', $first['priority_date']);
+
+        $spoofed = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-21',
+                    'priority_date' => '2000-01-01',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(422, $spoofed->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($spoofed));
+
+        $sameOrderBody = [
+            ...$this->statutoryClaimBody(),
+            'category' => 'other_priority',
+            'same_order_as_claim_id' => $first['id'],
+        ];
+        unset($sameOrderBody['first_payer_delivered_on']);
+        $sameOrder = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody($sameOrderBody),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $sameOrder->getStatusCode(), (string) $sameOrder->getBody());
+        $shared = PayrollTimeValue::row($this->json($sameOrder)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-20', $shared['first_payer_delivered_on']);
+        self::assertSame('2026-05-20', $shared['priority_date']);
+
+        $changedDelivery = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$first['id']}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-21',
+                    'row_version' => $first['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $first['id']],
+        );
+        self::assertSame(422, $changedDelivery->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($changedDelivery));
+
+        $earlier = $this->action->addClaim(
+            $this->request('POST', "/api/payroll/enforcement/cases/{$caseId}/claims")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'category' => 'maintenance_arrears',
+                    'maintenance_weight_minor_units' => 1,
+                    'first_payer_delivered_on' => '2026-05-19',
+                ]),
+            new Response(),
+            ['id' => (string) $caseId],
+        );
+        self::assertSame(201, $earlier->getStatusCode(), (string) $earlier->getBody());
+
+        $detail = $this->repository->findCase($this->supplierId, $caseId);
+        self::assertNotNull($detail);
+        self::assertSame(['2026-05-19', '2026-05-20', '2026-05-20'], array_column(
+            $detail['claims'],
+            'priority_date',
+        ));
+    }
+
+    public function testLegacyStatutoryClaimCanCaptureFirstPayerDeliveryOnce(): void
+    {
+        $case = $this->createCase($this->employeeId);
+        $caseId = PayrollTimeValue::int($case['id'] ?? null, 'id');
+        $insert = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, legal_basis, category,
+                 outstanding_minor_units, priority_date)
+             VALUES (?, ?, ?, "voluntary_agreement", "non_priority", ?, ?)',
+        );
+        $insert->execute([
+            $this->supplierId,
+            $caseId,
+            'legacy_claim_' . bin2hex(random_bytes(8)),
+            100_000,
+            '2026-05-19',
+        ]);
+        $claimId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_enforcement_claims
+                SET legal_basis = "statutory"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $claimId]);
+
+        $captured = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-20',
+                    'row_version' => 1,
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(200, $captured->getStatusCode(), (string) $captured->getBody());
+        $claim = PayrollTimeValue::row($this->json($captured)['claim'] ?? null, 'claim');
+        self::assertSame('2026-05-20', $claim['first_payer_delivered_on']);
+        self::assertSame('2026-05-20', $claim['priority_date']);
+
+        $changed = $this->action->updateClaim(
+            $this->request('PUT', "/api/payroll/enforcement/cases/{$caseId}/claims/{$claimId}")
+                ->withParsedBody([
+                    ...$this->statutoryClaimBody(),
+                    'first_payer_delivered_on' => '2026-05-21',
+                    'row_version' => $claim['row_version'],
+                ]),
+            new Response(),
+            ['id' => (string) $caseId, 'claimId' => (string) $claimId],
+        );
+        self::assertSame(422, $changed->getStatusCode());
+        self::assertSame('validation_failed', $this->errorCode($changed));
     }
 
     public function testClaimMutationFailsClosedAfterActivationOrPayrollSnapshot(): void
@@ -1716,6 +2765,71 @@ final class PayrollEnforcementApiTest extends TestCase
         return PayrollTimeValue::row($this->json($response)['case'] ?? null, 'case');
     }
 
+    private function recordDocumentedRecipient(
+        int $caseId,
+        string $effectiveFrom = '2026-05-20',
+    ): void
+    {
+        if (!isset($this->legalRecipientDocumentId)) {
+            $this->legalRecipientDocumentId = $this->document(
+                $this->supplierId,
+                hash('sha256', 'synthetic-enforcement-recipient-proof'),
+            );
+            $account = $this->institutionAccounts->create($this->supplierId, [
+                'institution_type' => 'other_recipient',
+                'institution_code' => 'SYNTH-ENF-RECIPIENT',
+                'institution_name' => 'Syntetický příjemce srážky',
+                'bank_account' => '1000000005/0100',
+                'currency_code' => 'CZK',
+                'variable_symbol' => '20260520',
+                'specific_symbol' => null,
+                'constant_symbol' => '0558',
+                'valid_from' => '2026-05-20',
+                'valid_to' => null,
+                'source_kind' => 'official_document',
+                'source_reference' => 'synthetic:enforcement-recipient',
+                'verified_on' => '2026-05-20',
+            ], $this->userId);
+            $this->legalRecipientAccountId = PayrollTimeValue::int(
+                $account['id'] ?? null,
+                'legal_recipient_account_id',
+            );
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT sha256 FROM documents WHERE supplier_id = ? AND id = ?',
+        );
+        $stmt->execute([$this->supplierId, $this->legalRecipientDocumentId]);
+        $hash = PayrollTimeValue::string($stmt->fetchColumn(), 'legal_recipient_document_hash');
+        $party = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_case_parties
+                (supplier_id, case_id, party_role, revision_no, effective_from,
+                 party_name, party_reference, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?)',
+        );
+        $party->execute([
+            $this->supplierId, $caseId, 'court', $effectiveFrom, 'Syntetický soud',
+            'SYNTH-COURT', $this->legalRecipientDocumentId, $hash, $this->userId,
+        ]);
+        $party->execute([
+            $this->supplierId, $caseId, 'beneficiary', $effectiveFrom,
+            'Syntetický oprávněný', 'SYNTH-BENEFICIARY',
+            $this->legalRecipientDocumentId, $hash, $this->userId,
+        ]);
+        $beneficiaryId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_recipient_instructions
+                (supplier_id, case_id, revision_no, effective_from,
+                 recipient_party_id, payment_account_id, source_document_id,
+                 source_document_sha256, created_by)
+             VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId, $caseId, $effectiveFrom, $beneficiaryId,
+            $this->legalRecipientAccountId, $this->legalRecipientDocumentId,
+            $hash, $this->userId,
+        ]);
+    }
+
     private function deleteCase(int $caseId, int $rowVersion): ResponseInterface
     {
         return $this->action->delete(
@@ -1742,12 +2856,18 @@ final class PayrollEnforcementApiTest extends TestCase
     /** @return array<string,mixed> */
     private function claimBody(): array
     {
+        return $this->statutoryClaimBody();
+    }
+
+    /** @return array<string,mixed> */
+    private function statutoryClaimBody(): array
+    {
         return [
             'legal_basis' => 'statutory',
             'category' => 'non_priority',
             'outstanding_minor_units' => 100_000,
             'maintenance_weight_minor_units' => null,
-            'priority_date' => '2026-05-20',
+            'first_payer_delivered_on' => '2026-05-20',
             'order_issued_on' => '2026-05-19',
             'legal_title_verified' => false,
             'order_or_notice_delivered' => false,
@@ -1824,6 +2944,32 @@ final class PayrollEnforcementApiTest extends TestCase
              VALUES (?, ?, "employee", "hpp", 1, 1, 0, 42000, 0, 1)'
         );
         $stmt->execute([$supplierId, $name]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function employment(
+        int $supplierId,
+        int $employeeId,
+        string $code,
+        string $status,
+        ?string $startDate,
+        ?string $endDate,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, end_date, is_primary)
+             VALUES (?, ?, ?, "employment", ?, ?, ?, ?, 0)',
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $code,
+            $status,
+            $startDate,
+            $startDate,
+            $endDate,
+        ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

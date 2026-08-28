@@ -63,7 +63,8 @@ final class PayrollDependantRepository
         $claimsByDependant = $this->claimRows($supplierId, $employeeId);
 
         $statement = $this->db->pdo()->prepare(
-            'SELECT id, relation, full_name, birth_date, birth_number_masked,
+            'SELECT id, relation, full_name, given_name, family_name,
+                    birth_date, birth_number_masked,
                     birth_number_hash, ztp_p, student, existence_from,
                     existence_to, note, row_version, created_at, updated_at
                FROM payroll_dependants
@@ -99,6 +100,12 @@ final class PayrollDependantRepository
                 'id' => $id,
                 'relation' => $relation,
                 'full_name' => (string) $row['full_name'],
+                'given_name' => $row['given_name'] === null
+                    ? null
+                    : (string) $row['given_name'],
+                'family_name' => $row['family_name'] === null
+                    ? null
+                    : (string) $row['family_name'],
                 'birth_date' => (string) $row['birth_date'],
                 'birth_number_masked' => $row['birth_number_masked'] === null
                     ? null
@@ -147,16 +154,19 @@ final class PayrollDependantRepository
             function () use ($supplierId, $employeeId, $data, $userId, $ip, $userAgent): void {
                 $insert = $this->db->pdo()->prepare(
                     'INSERT INTO payroll_dependants
-                        (supplier_id, employee_id, relation, full_name, birth_date,
+                        (supplier_id, employee_id, relation, full_name,
+                         given_name, family_name, birth_date,
                          ztp_p, student, existence_from, existence_to, note,
                          created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 );
                 $insert->execute([
                     $supplierId,
                     $employeeId,
                     $data['relation'],
                     $data['full_name'],
+                    $data['given_name'],
+                    $data['family_name'],
                     $data['birth_date'],
                     (int) $data['ztp_p'],
                     (int) $data['student'],
@@ -264,7 +274,8 @@ final class PayrollDependantRepository
 
                 $update = $this->db->pdo()->prepare(
                     'UPDATE payroll_dependants
-                        SET relation = ?, full_name = ?, birth_date = ?,
+                        SET relation = ?, full_name = ?, given_name = ?,
+                            family_name = ?, birth_date = ?,
                             ztp_p = ?, student = ?, existence_from = ?,
                             existence_to = ?, note = ?, updated_by = ?,
                             row_version = row_version + 1
@@ -274,6 +285,8 @@ final class PayrollDependantRepository
                 $update->execute([
                     $data['relation'],
                     $data['full_name'],
+                    $data['given_name'],
+                    $data['family_name'],
                     $data['birth_date'],
                     (int) $data['ztp_p'],
                     (int) $data['student'],

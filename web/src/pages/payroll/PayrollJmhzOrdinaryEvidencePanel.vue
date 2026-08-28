@@ -56,7 +56,10 @@ function scopeLabel(scope: PayrollJmhzOrdinaryEvidenceScope): string {
 }
 
 function attentionPath(scope: PayrollJmhzOrdinaryEvidenceScope): string {
-  if (scope.attention_code === 'jmhz_ordinary_evidence_profile_missing') {
+  if (scope.attention_code === 'jmhz_ordinary_evidence_profile_missing'
+    || scope.attention_code === 'jmhz_ordinary_evidence_selector_mismatch'
+    || scope.attention_code === 'jmhz_ordinary_evidence_scope_mismatch'
+  ) {
     return '/payroll/runs'
   }
   if (scope.attention_code === 'jmhz_ordinary_evidence_deduction_conflict') {
@@ -66,6 +69,11 @@ function attentionPath(scope: PayrollJmhzOrdinaryEvidenceScope): string {
 }
 
 function attentionActionKey(scope: PayrollJmhzOrdinaryEvidenceScope): string {
+  if (scope.attention_code === 'jmhz_ordinary_evidence_selector_mismatch'
+    || scope.attention_code === 'jmhz_ordinary_evidence_scope_mismatch'
+  ) {
+    return 'payroll.submissions.overview.jmhz_evidence_attention_revision_action'
+  }
   if (scope.attention_code === 'jmhz_ordinary_evidence_profile_missing') {
     return 'payroll.submissions.overview.jmhz_evidence_attention_run_action'
   }

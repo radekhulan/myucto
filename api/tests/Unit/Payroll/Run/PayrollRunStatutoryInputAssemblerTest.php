@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxRegime;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatutoryInputAssembler;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialDiscountEvidence;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory;
@@ -59,6 +60,63 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         self::assertSame('supplier:7', $tax->payerReference);
         self::assertSame('employment:84', $tax->relationships[0]->relationshipReference);
         self::assertSame(5, $tax->annualAccumulator?->completedMonths);
+    }
+
+    public function testDuplicatePersonInSnapshotBlocksAllStatutoryDomains(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['people'][] = $snapshot['people'][0];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->socialInsurance);
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame([], $bundle->incomeTax);
+        self::assertSame(
+            ['snapshot|duplicate_employee_reference|employee:42'],
+            array_map(
+                static fn ($issue): string => implode('|', [
+                    $issue->domain,
+                    $issue->code,
+                    (string) $issue->personReference,
+                ]),
+                $bundle->issues,
+            ),
+        );
+    }
+
+    public function testEmploymentCannotBelongToTwoPeopleInOneSnapshot(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $duplicate = $snapshot['people'][0];
+        $duplicate['employee']['id'] = 43;
+        $duplicate['statutory_accumulators']['social_insurance']['state'][
+            'employee_id'
+        ] = 43;
+        $duplicate['statutory_accumulators']['income_tax']['state'][
+            'employee_id'
+        ] = 43;
+        $duplicate['statutory_evidence']['employee_id'] = 43;
+        $duplicate['employments'][0]['employment']['employee_id'] = 43;
+        $snapshot['people'][] = $duplicate;
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->socialInsurance);
+        self::assertNull($bundle->healthInsurance);
+        self::assertSame([], $bundle->incomeTax);
+        self::assertSame(
+            ['snapshot|duplicate_employment_reference|employee:43|employment:84'],
+            array_map(
+                static fn ($issue): string => implode('|', [
+                    $issue->domain,
+                    $issue->code,
+                    (string) $issue->personReference,
+                    (string) $issue->relationshipReference,
+                ]),
+                $bundle->issues,
+            ),
+        );
     }
 
     /**
@@ -255,6 +313,78 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         self::assertSame(
             'synthetic-risk-category',
             $socialRelationship?->employerRateCategoryEvidenceReference,
+        );
+    }
+
+    public function testRiskySavingsWithoutLockedRulesetFailsClosed(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        unset($snapshot['risky_savings_ruleset']);
+        $snapshot['people'][0]['employments'][0]['risky_savings_evidence'] = [
+            'id' => 93,
+            'status' => 'approved',
+            'risk_factor' => 'cold',
+            'work_category' => 3,
+            'qualifying_shift_eighths' => 24,
+            'right_claimed_on' => '2026-05-31',
+            'employee_informed_on' => '2026-05-01',
+            'pension_company' => 'Testovací penzijní společnost',
+            'product_reference' => 'SYNTHETIC-PRODUCT',
+            'institution_account_id' => 44,
+            'institution_account_row_version' => 2,
+            'institution_account_hash' => str_repeat('c', 64),
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->socialInsurance);
+        self::assertContains(
+            'social_insurance|risky_savings_ruleset_invalid|employee:42|employment:84',
+            array_map(
+                static fn ($issue): string => implode('|', [
+                    $issue->domain,
+                    $issue->code,
+                    (string) $issue->personReference,
+                    (string) $issue->relationshipReference,
+                ]),
+                $bundle->issues,
+            ),
+        );
+    }
+
+    public function testMalformedLockedRiskySavingsRulesetFailsClosed(): void
+    {
+        $snapshot = $this->completeSnapshot();
+        $snapshot['risky_savings_ruleset']['rate'] = '0.0000000000000000001';
+        $snapshot['people'][0]['employments'][0]['risky_savings_evidence'] = [
+            'id' => 93,
+            'status' => 'approved',
+            'risk_factor' => 'cold',
+            'work_category' => 3,
+            'qualifying_shift_eighths' => 24,
+            'right_claimed_on' => '2026-05-31',
+            'employee_informed_on' => '2026-05-01',
+            'pension_company' => 'Testovací penzijní společnost',
+            'product_reference' => 'SYNTHETIC-PRODUCT',
+            'institution_account_id' => 44,
+            'institution_account_row_version' => 2,
+            'institution_account_hash' => str_repeat('c', 64),
+        ];
+
+        $bundle = (new PayrollRunStatutoryInputAssembler())->assemble($snapshot);
+
+        self::assertNull($bundle->socialInsurance);
+        self::assertContains(
+            'social_insurance|risky_savings_ruleset_invalid|employee:42|employment:84',
+            array_map(
+                static fn ($issue): string => implode('|', [
+                    $issue->domain,
+                    $issue->code,
+                    (string) $issue->personReference,
+                    (string) $issue->relationshipReference,
+                ]),
+                $bundle->issues,
+            ),
         );
     }
 
@@ -845,6 +975,10 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
                 'social_calculation_date' => '2026-06-30',
                 'health_calculation_date' => '2026-06-30',
             ],
+            'risky_savings_ruleset' => PayrollRiskySavingsRules::fromProvider(
+                CzechPayrollRulesets2026::provider(),
+                '2026-06-01',
+            )->toSnapshot(),
             'people' => [[
                 'employee' => [
                     'id' => 42,

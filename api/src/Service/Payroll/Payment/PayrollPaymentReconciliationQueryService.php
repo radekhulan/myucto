@@ -145,6 +145,86 @@ final class PayrollPaymentReconciliationQueryService
     }
 
     /**
+     * Úplný, nestránkovaný součet reconciliation po směru. Příchozí vratka
+     * zůstává samostatnou osou a nikdy nesnižuje otevřenou odchozí úhradu.
+     *
+     * @return array{
+     *   outgoing:array{liability_count:int,required_minor:int,settled_minor:int,remaining_minor:int},
+     *   incoming:array{liability_count:int,required_minor:int,settled_minor:int,remaining_minor:int}
+     * }
+     */
+    public function periodTotals(int $supplierId, string $period): array
+    {
+        if ($supplierId <= 0) {
+            throw new \InvalidArgumentException(
+                'Firma párování plateb musí být kladné číslo.',
+            );
+        }
+        [$from, $to] = $this->periodRange($period);
+        $statement = $this->db->pdo()->prepare(
+            'SELECT liability.direction, COUNT(*) AS liability_count,
+                    SUM(liability.amount_minor) AS required_minor,
+                    SUM(COALESCE(settlement.settled_minor, 0)) AS settled_minor
+               FROM payroll_payment_liabilities liability
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+          LEFT JOIN (
+                    SELECT supplier_id, liability_id,
+                           SUM(amount_minor) AS settled_minor
+                      FROM payroll_payment_matches
+                     WHERE supplier_id = ? AND liability_id IS NOT NULL
+                     GROUP BY supplier_id, liability_id
+               ) settlement
+                 ON settlement.supplier_id = liability.supplier_id
+                AND settlement.liability_id = liability.id
+              WHERE liability.supplier_id = ?
+                AND run.period_start >= ? AND run.period_start < ?
+              GROUP BY liability.direction',
+        );
+        $statement->execute([$supplierId, $supplierId, $from, $to]);
+        $result = [
+            'outgoing' => [
+                'liability_count' => 0,
+                'required_minor' => 0,
+                'settled_minor' => 0,
+                'remaining_minor' => 0,
+            ],
+            'incoming' => [
+                'liability_count' => 0,
+                'required_minor' => 0,
+                'settled_minor' => 0,
+                'remaining_minor' => 0,
+            ],
+        ];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $direction = self::enum(
+                self::row($row, 'součet párování plateb'),
+                'direction',
+                ['outgoing', 'incoming'],
+            );
+            $required = (int) ($row['required_minor'] ?? 0);
+            $settled = (int) ($row['settled_minor'] ?? 0);
+            if ($required <= 0 || $settled < 0 || $settled > $required) {
+                throw new \UnexpectedValueException(
+                    'Součet platebního ledgeru je mimo povolené meze.',
+                );
+            }
+            $result[$direction] = [
+                'liability_count' => (int) ($row['liability_count'] ?? 0),
+                'required_minor' => $required,
+                'settled_minor' => $settled,
+                'remaining_minor' => $required - $settled,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Serverové hledání v nabídce pickeru.
      *
      * Vrací nejvýš `$limit` nejlepších shod a příznak `truncated`, když jich

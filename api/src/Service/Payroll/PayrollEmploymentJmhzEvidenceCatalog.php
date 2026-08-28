@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
 
 final class PayrollEmploymentJmhzEvidenceCatalog
 {
@@ -73,20 +74,70 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         }
     }
 
-    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
+    /** Důvod předčasného ukončení REGZEC A2-SPEC. */
+    public function requireEarlyTerminationReason(string $code): void
+    {
+        $this->requireEmbeddedCodebookValue(
+            'duvod_predcasneho_ukonceni',
+            $code,
+            'Důvod předčasného ukončení',
+        );
+    }
+
+    /** Důvod ukončení pracovního poměru v podkladech A2. */
+    public function requireEmploymentTerminationReason(string $code): void
+    {
+        $this->requireEmbeddedCodebookValue(
+            'duvod_ukonceni_ppv',
+            $code,
+            'Důvod ukončení pracovního vztahu',
+        );
+    }
+
+    /** Důvod ukončení služebního poměru v podkladech A2. */
+    public function requireServiceTerminationReason(string $code): void
+    {
+        $this->requireEmbeddedCodebookValue(
+            'duvod_ukonceni_sluz_pomeru',
+            $code,
+            'Důvod ukončení služebního poměru',
+        );
+    }
+
+    /** @return array{package_key:string,manifest_sha256:string} */
+    public function packageProvenance(): array
+    {
+        return [
+            'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+            'manifest_sha256' => $this->manifest['manifest_sha256'],
+        ];
+    }
+
+    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>} */
     public function options(): array
     {
         $apzOptions = [];
         foreach (['1', '2', '3', '4'] as $code) {
             $entry = $this->codebooks->requireValue('nastroj_opatreni', $code);
-            $apzOptions[] = ['code' => $code, 'label' => (string) $entry['label']];
+            $label = $entry['label'] ?? null;
+            if (!is_string($label)) {
+                throw new \UnexpectedValueException('Připnutý číselník JMHZ má neplatnou položku.');
+            }
+            $apzOptions[] = ['code' => $code, 'label' => $label];
         }
 
         return [
             'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
             'manifest_sha256' => $this->manifest['manifest_sha256'],
             'external_codebooks' => $this->externalCodebooks->provenance(),
-            'activity_codes' => $this->codebookOptions('druh_cinnosti'),
+            'activity_codes' => array_map(
+                static fn (array $option): array => [
+                    ...$option,
+                    'relationship_detail_mode' =>
+                        PayrollRegistrationRelationshipDetailPolicy::modeForActivity($option['code']),
+                ],
+                $this->codebookOptions('druh_cinnosti'),
+            ),
             'relationship_detail_codes' => $this->codebookOptions(
                 'blizsi_urceni_pracovnepravn',
             ),
@@ -128,5 +179,21 @@ final class PayrollEmploymentJmhzEvidenceCatalog
             $options[] = ['code' => $code, 'label' => $label];
         }
         return $options;
+    }
+
+    private function requireEmbeddedCodebookValue(
+        string $codebookKey,
+        string $code,
+        string $label,
+    ): void {
+        try {
+            $this->codebooks->requireValue($codebookKey, $code);
+        } catch (JmhzCodebookValueException|JmhzCodebookUnavailableException $e) {
+            throw new \InvalidArgumentException(
+                "{$label} {$code} není v připnutém číselníku JMHZ.",
+                0,
+                $e,
+            );
+        }
     }
 }

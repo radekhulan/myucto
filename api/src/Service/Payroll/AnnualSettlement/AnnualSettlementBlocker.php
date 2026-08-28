@@ -141,6 +141,14 @@ enum AnnualSettlementBlocker: string
      */
     case ChildClaimConflict = 'child_claim_conflict';
 
+    /**
+     * Uplatněné dítě nemá úplnou identitu pro JMHZ nebo není zodpovězeno,
+     * zda daňové zvýhodnění v některém měsíci uplatňovala jiná osoba ve
+     * společné domácnosti. Po provedení se roční podklad zmrazí, proto tento
+     * údaj nelze bezpečně doplňovat až při pozdějším podání JMHZ.
+     */
+    case ChildJmhzEvidenceIncomplete = 'child_jmhz_evidence_incomplete';
+
     /** Roční zúčtování už za tento rok proběhlo (§ 38ch odst. 4 — jednou ročně). */
     case AlreadySettled = 'already_settled';
 

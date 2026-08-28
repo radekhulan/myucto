@@ -229,6 +229,8 @@ final class PayrollRetentionCatalog
             'employee_tables' => [
                 'payroll_monthly_records',
                 'payroll_generated_documents',
+                'payroll_document_delivery_events',
+                'payroll_document_batch_items',
                 'payroll_annual_document_revisions',
                 'payroll_inputs',
                 'payroll_run_employments',
@@ -307,10 +309,15 @@ final class PayrollRetentionCatalog
                 'payroll_jmhz_ordinary_evidence_snapshots',
                 'payroll_jmhz_ordinary_evidence_idempotency_claims',
                 'payroll_person_social_jurisdictions',
+                'payroll_person_foreign_permits',
                 'payroll_person_external_ids',
                 'payroll_employment_external_ids',
+                'payroll_registration_a1_profiles',
             ],
-            'employment_tables' => [],
+            'employment_tables' => [
+                'payroll_registration_event_snapshots',
+                'payroll_registration_a2_evidence_ledger',
+            ],
             'note' => 'Jde o TUTÉŽ větu jako u mzdových listů („mzdové listy nebo účetní '
                 . 'záznamy o údajích potřebných pro účely důchodového pojištění"), takže '
                 . 'sdílejí i číslo: 45 kalendářních roků. Identifikátor pracovněprávního '
@@ -319,7 +326,9 @@ final class PayrollRetentionCatalog
                 . 'podle § 37 odst. 1 zákona č. 582/1991 Sb. nedá k ničemu přiřadit. '
                 . 'Idempotenční zámek nad evidencí JMHZ vlastní lhůtu nemá, ale vazba na '
                 . 'vzniklý snapshot je nullovatelná — viz tatáž úvaha u stejnopisů '
-                . 'evidenčních listů.',
+                . 'evidenčních listů. Autoritativní profil REGZEC A1 nese také údaje '
+                . 'potřebné pro důchodové pojištění a neměnnou vazbu na zaměstnance a '
+                . 'pracovní vztah, proto bezpečně sdílí delší 45letou lhůtu této kategorie.',
         ],
         self::SOCIAL_CONTRIBUTIONS => [
             'label' => 'Záznamy pro stanovení a odvod pojistného na sociální zabezpečení',
@@ -384,7 +393,7 @@ final class PayrollRetentionCatalog
             'verified_on' => self::VERIFIED_ON,
             'accounting_relevant' => false,
             'closing_agenda' => false,
-            'employee_tables' => [],
+            'employee_tables' => ['payroll_statutory_obligation_evidence'],
             'employment_tables' => ['payroll_absences'],
             'note' => 'Věta první § 96 ukládá uschovat záznamy o skutečnostech podle § 95 '
                 . 'po dobu 10 kalendářních roků následujících po roce, kterého se týkají, '
@@ -583,6 +592,7 @@ final class PayrollRetentionCatalog
                 'payroll_enforcement_month_results',
                 'payroll_enforcement_person_month_evidence',
                 'payroll_insolvency_payment_instructions',
+                'payroll_enforcement_xmlzam_requests',
                 'payroll_deduction_agreements',
             ],
             'employment_tables' => [],

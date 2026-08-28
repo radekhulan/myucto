@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Deadline;
 
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use PHPUnit\Framework\TestCase;
@@ -174,7 +175,7 @@ final class PayrollLevyDeadlinePolicyTest extends TestCase
 
     public function testAgreesWithJmhzPolicyOnRegularMonthlyReports(): void
     {
-        $jmhz = new JmhzDeadlinePolicy();
+        $jmhz = new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider());
         foreach (['2026-04-01', '2026-05-01', '2026-12-01'] as $period) {
             $window = $this->policy->forPeriod(
                 PayrollLevyDeadlinePolicy::JMHZ_MONTHLY_REPORT,

@@ -75,7 +75,10 @@ zátěž velkými svalovými skupinami. Nestačí obecné označení vztahu jako
 rizikového. U každého dotčeného vztahu proto vyberte konkrétní zákonný faktor
 a za měsíc zadejte počet rozhodných osmin směny. Celá osmihodinová směna má
 osm osmin; u směny jiné délky se každá započatá hodina počítá jako jedna
-osmina. Povinnost vzniká od 24 osmin za měsíc.
+osmina. Rozhodný minimální rozsah směn, sazba příspěvku, datum účinnosti i
+splatnost určuje pro dané období účinný legislativní ruleset. Tyto hodnoty
+uživatel ručně nepřepisuje; zadává pouze skutečný rozsah směn a podklady
+konkrétního pracovního vztahu.
 
 Nejdříve v **Mzdy → Nastavení mezd → Účty institucí** založte penzijní
 společnost jako jiného příjemce a ověřte její účet. Číslo účtu je v katalogu
@@ -93,9 +96,13 @@ datum výpočet 4 % nezmění, ale mzdový běh zobrazí srozumitelné varován�
 
 Podklady nejprve uložte jako koncept a po kontrole je schvalte. Schválený
 záznam se už nepřepisuje; oprava založí novou revizi a původní zůstane v
-auditní historii. Výpočet použije 4 % z nezastropovaného vyměřovacího základu,
-výsledek zaokrouhlí nahoru na celé koruny a stanoví splatnost na poslední den
-následujícího měsíce. Uhrazení potvrďte až podle skutečného bankovního pohybu.
+auditní historii. Mzdový běh zmrazí použitý ruleset spolu s výsledkem, takže
+pozdější legislativní změna nepřepíše sazbu, minimum směn, účinnost ani
+splatnost již vypočteného období. Výpočet použije sazbu z nezastropovaného
+vyměřovacího základu a výsledek zaokrouhlí nahoru na celé koruny. Chybí-li
+u historického běhu tento podklad nebo je poškozený, aplikace přepočet zablokuje
+pro ruční posouzení; nikdy místo něj nedosadí dnešní parametry. Uhrazení potvrďte
+až podle skutečného bankovního pohybu.
 Po schválení mzdové revize aplikace vytvoří samostatný závazek **Povinné
 spoření u rizikové práce** v Mzdových příkazech. Odtud jej zařaďte do ABO
 nebo SEPA dávky stejně jako ostatní mzdové odvody. Za uhrazený se považuje až

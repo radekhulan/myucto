@@ -189,6 +189,54 @@ final class PayrollDeletionApiTest extends TestCase
         self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employment['id']));
     }
 
+    public function testAuthoritativeA1ProfileBlocksEmploymentAndEmployeeDeletion(): void
+    {
+        $employment = $this->create('HPP-A1', 'employment', true);
+        $employmentId = (int) $employment['id'];
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_registration_a1_profiles
+                (supplier_id, employee_id, employment_id, effective_on,
+                 profile_ciphertext, profile_hash, reference_hash, row_version)
+             VALUES (?, ?, ?, ?, ?, UNHEX(SHA2(?, 256)), ?, 1)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $employmentId,
+            '2026-01-01',
+            'enc:v2:synthetic-fixture',
+            'synthetic-a1-profile',
+            str_repeat('a', 64),
+        ]);
+
+        $employmentDecision = $this->employmentDeletion->canDelete(
+            $this->supplierId,
+            $employmentId,
+        );
+        self::assertNotNull($employmentDecision);
+        self::assertFalse($employmentDecision->canDelete);
+        self::assertSame('payroll_employment_registered', $employmentDecision->blockerCode);
+
+        $employeeDecision = $this->employeeDeletion->canDelete(
+            $this->supplierId,
+            $this->employeeId,
+        );
+        self::assertNotNull($employeeDecision);
+        self::assertFalse($employeeDecision->canDelete);
+        self::assertSame($employmentId, $employeeDecision->blockedEmploymentId);
+
+        foreach ([
+            $this->deleteEmployment($employment),
+            $this->deleteEmployee($this->employeeId),
+        ] as $response) {
+            self::assertSame(409, $response->getStatusCode());
+            $error = $this->json($response)['error'];
+            self::assertStringNotContainsStringIgnoringCase('constraint', $error['message']);
+            self::assertStringNotContainsStringIgnoringCase('SQLSTATE', $error['message']);
+        }
+        self::assertSame(1, $this->rowCount('payroll_employments', 'id', $employmentId));
+        self::assertSame(1, $this->rowCount('payroll_employees', 'id', $this->employeeId));
+    }
+
     public function testForeignTenantSeesNeitherCanDeleteNorDeletes(): void
     {
         $employment = $this->create('HPP-5', 'employment', true);

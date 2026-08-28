@@ -289,17 +289,17 @@ final class JmhzPreparationSnapshotRepository
         $statement = $this->db->pdo()->prepare(
             'INSERT INTO payroll_jmhz_preparation_snapshots
                 (supplier_id, environment, run_id, source_revision_id,
-                 period_start, scenario_key, builder_version,
+                 period_start, scenario_key, scenario_set_json, builder_version,
                  readiness_status, issue_count, source_manifest_json,
                  source_manifest_sha256, readiness_json, readiness_sha256,
                  snapshot_ciphertext, snapshot_fingerprint,
                  request_fingerprint, idempotency_key_hash, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $statement->execute([
             $record['supplier_id'], $record['environment'], $record['run_id'],
             $record['source_revision_id'], $record['period_start'],
-            $record['scenario_key'], $record['builder_version'],
+            $record['scenario_key'], $record['scenario_set_json'] ?? null, $record['builder_version'],
             $record['readiness_status'], $record['issue_count'],
             $record['source_manifest_json'], $record['source_manifest_sha256'],
             $record['readiness_json'], $record['readiness_sha256'],

@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Export\PayrollPeriodExportQueueService;
 use MyInvoice\Service\Payroll\Export\PayrollPeriodExportService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -20,6 +21,7 @@ final class PayrollPeriodExportAction
 
     public function __construct(
         private readonly PayrollPeriodExportService $exports,
+        private readonly PayrollPeriodExportQueueService $queue,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
@@ -35,7 +37,7 @@ final class PayrollPeriodExportAction
             int $supplierId,
             int $userId,
         ) use ($args): array {
-            return $this->exports->createMonthly(
+            return $this->queue->enqueueMonthly(
                 $supplierId,
                 (string) ($args['period'] ?? ''),
                 $userId,
@@ -53,7 +55,7 @@ final class PayrollPeriodExportAction
             int $supplierId,
             int $userId,
         ) use ($args): array {
-            return $this->exports->createAnnual(
+            return $this->queue->enqueueAnnual(
                 $supplierId,
                 (int) ($args['year'] ?? 0),
                 $userId,
@@ -140,6 +142,60 @@ final class PayrollPeriodExportAction
         return Json::ok($response, $grant, 201)
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function status(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize($request, $response, AccessLevel::READ, $error)) {
+            return $this->errorResponse($error);
+        }
+        $jobId = $this->positiveInteger($args['jobId'] ?? null);
+        if ($jobId === null) {
+            return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
+        }
+        $job = $this->queue->detail($this->currentSupplierId($request), $jobId);
+        if ($job === null) {
+            return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
+        }
+
+        return Json::ok($response, $this->jobPayload($job))
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,string> $args */
+    public function grantJob(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->authorize($request, $response, AccessLevel::READ, $error)) {
+            return $this->errorResponse($error);
+        }
+        $jobId = $this->positiveInteger($args['jobId'] ?? null);
+        if ($jobId === null) {
+            return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        $job = $this->queue->detail($supplierId, $jobId);
+        if ($job === null) {
+            return Json::error($response, 'not_found', 'Job exportu mezd nebyl nalezen.', 404);
+        }
+        if ((string) $job['status'] !== 'completed' || !is_int($job['export_id'])) {
+            return Json::error(
+                $response,
+                'payroll_export_not_ready',
+                'Export mezd ještě není dokončen.',
+                409,
+                ['job' => $this->jobPayload($job)],
+            );
+        }
+
+        return $this->grant($request, $response, ['exportId' => (string) $job['export_id']]);
     }
 
     /** @param array<string,string> $args */
@@ -243,7 +299,7 @@ final class PayrollPeriodExportAction
     }
 
     /**
-     * @param callable(int,int):array{id:int,export_scope:string,period_start:string,period_end:string,file_sha256:string,size_bytes:int,storage_key:string,suggested_filename:string,source_manifest_hash:string,manifest_json:string,mime_type:string,created_at:string} $factory
+     * @param callable(int,int):array<string,mixed> $factory
      */
     private function create(
         Request $request,
@@ -269,7 +325,7 @@ final class PayrollPeriodExportAction
             );
         }
         try {
-            $export = $factory($supplierId, $userId);
+            $job = $factory($supplierId, $userId);
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
                 $response,
@@ -293,16 +349,14 @@ final class PayrollPeriodExportAction
             );
         }
         $this->activity->log(
-            'payroll.period_export_created',
+            'payroll.period_export_queued',
             $userId,
-            'payroll_period_export',
-            (int) $export['id'],
+            'payroll_period_export_job',
+            (int) $job['id'],
             [
-                'scope' => $export['export_scope'],
-                'period_start' => $export['period_start'],
-                'period_end' => $export['period_end'],
-                'file_sha256' => $export['file_sha256'],
-                'size_bytes' => $export['size_bytes'],
+                'scope' => $job['export_scope'],
+                'period_start' => $job['period_start'],
+                'period_end' => $job['period_end'],
             ],
             $this->ipMatcher->clientIpFromRequest(
                 $this->serverParams($request),
@@ -311,16 +365,31 @@ final class PayrollPeriodExportAction
             $supplierId,
         );
 
-        return Json::ok($response, [
-            'id' => (int) $export['id'],
-            'scope' => $export['export_scope'],
-            'period_start' => $export['period_start'],
-            'period_end' => $export['period_end'],
-            'file_sha256' => $export['file_sha256'],
-            'size_bytes' => (int) $export['size_bytes'],
-            'suggested_filename' => $export['suggested_filename'],
-        ], 201)->withHeader('Cache-Control', 'private, no-store')
+        return Json::ok($response, $this->jobPayload($job), 202)
+            ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache');
+    }
+
+    /** @param array<string,mixed> $job
+     *  @return array<string,mixed>
+     */
+    private function jobPayload(array $job): array
+    {
+        return [
+            'id' => (int) $job['id'],
+            'scope' => (string) $job['export_scope'],
+            'period_start' => (string) $job['period_start'],
+            'period_end' => (string) $job['period_end'],
+            'status' => (string) $job['status'],
+            'attempt_count' => (int) $job['attempt_count'],
+            'available_at' => (string) $job['available_at'],
+            'export_id' => $job['export_id'],
+            'last_error_code' => $job['last_error_code'],
+            'last_error_message' => $job['last_error_message'],
+            'created_at' => (string) $job['created_at'],
+            'started_at' => $job['started_at'],
+            'completed_at' => $job['completed_at'],
+        ];
     }
 
     private function authorize(

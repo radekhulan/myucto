@@ -5,11 +5,16 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpManualCompletionException;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpManualCompletionService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -19,8 +24,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Evidenční list důchodového pojištění.
  *
  * `prepare` dovede evidenční list do stavu **připraveno** a tam skončí.
- * Žádná routa tady nic neodesílá; odeslání spouští člověk přes společnou
- * platformu podání.
+ * Žádná routa tady nic neodesílá; člověk dokončí úkon v oficiálním rozhraní
+ * a samostatná routa pak pouze uloží ověřitelný DMS důkaz výsledku.
  */
 final class PayrollEldpAction
 {
@@ -28,6 +33,7 @@ final class PayrollEldpAction
 
     public function __construct(
         private readonly EldpStatementService $service,
+        private readonly EldpManualCompletionService $completions,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -54,13 +60,26 @@ final class PayrollEldpAction
             );
         }
 
-        return Json::ok($response, [
-            'statement' => $this->service->statement(
+        $statement = $this->service->statement(
                 $this->currentSupplierId($request),
                 $environment,
                 $employmentId,
                 $year,
-            ),
+            );
+        $manualCompletion = null;
+        if ($statement !== null
+            && RequestAuthorization::allows($request, 'documents', AccessLevel::READ)
+        ) {
+            $manualCompletion = $this->completions->overview(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $statement['id'],
+            );
+        }
+
+        return Json::ok($response, [
+            'statement' => $statement,
+            'manual_completion' => $manualCompletion,
             'supported' => [
                 'agenda_code' => EldpStatementService::AGENDA_CODE,
                 'evidence_schema' => 'jmhz-1.4.3.4 eldpType',
@@ -134,6 +153,64 @@ final class PayrollEldpAction
         );
 
         return Json::ok($response, ['statement' => $result]);
+    }
+
+    /** @param array<string,string> $args */
+    public function complete(Request $request, Response $response, array $args): Response
+    {
+        if ($request->getAttribute(AuthMiddleware::ATTR_METHOD) !== 'session') {
+            return Json::error($response, 'session_required', 'Ruční dokončení ELDP vyžaduje přihlášenou relaci.', 403);
+        }
+        if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
+            return $this->guardFailure($error);
+        }
+        if (!$this->requirePermission($request, $response, 'documents', AccessLevel::READ, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        try {
+            $body = $this->body($request);
+            $result = $this->completions->record(
+                $this->currentSupplierId($request),
+                $this->environment($body),
+                $this->positiveInt($args, 'statementId'),
+                $this->positiveInt($body, 'expected_obligation_row_version'),
+                $this->string($body, 'authority_status'),
+                $this->positiveInt($body, 'confirmation_document_id'),
+                $this->string($body, 'authority_reference'),
+                $this->string($body, 'confirmed_on'),
+                $this->string($body, 'idempotency_key'),
+                $this->requiredUserId($request),
+            );
+        } catch (EldpManualCompletionException $exception) {
+            $extra = $exception->currentRowVersion === null
+                ? []
+                : ['current_row_version' => $exception->currentRowVersion];
+            return Json::error($response, $exception->errorCode, $exception->getMessage(), $exception->httpStatus, $extra);
+        } catch (PayrollSubmissionConflictException $exception) {
+            return Json::error($response, 'row_version_conflict', $exception->getMessage(), 409);
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        $this->audit(
+            $request,
+            'payroll.eldp.manual_completion_recorded',
+            'payroll_eldp_manual_completions',
+            $result['id'],
+            [
+                'statement_id' => $result['statement_id'],
+                'obligation_id' => $result['obligation_id'],
+                'authority_status' => $result['authority_status'],
+                'obligation_status' => $result['obligation_status'],
+                'local_submission_status' => $result['local_submission_status'],
+                'confirmation_document_id' => $result['confirmation_document_id'],
+                'confirmation_sha256' => $result['confirmation_sha256'],
+                'created' => $result['created'],
+            ],
+        );
+
+        return Json::ok($response, ['manual_completion' => $result]);
     }
 
     private function failure(

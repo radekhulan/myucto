@@ -144,9 +144,9 @@ final class PayrollModuleStateRepository
     }
 
     /**
-     * Jednosměrné interní překlopení `setup` → `active` po úspěšné produkční
-     * kvalifikaci. Automatické spouště setup/approve ho od MZ-27-W10 nevolají.
-     * Zámek `FOR UPDATE`, očekávaná verze a `status = "setup"` drží souběh.
+     * Jednosměrné překlopení `setup` → `active` po dokončení běžného nastavení
+     * nebo po prvním schváleném běhu. Globální interní release gate produktu
+     * je oddělená a tento zákaznický stav ji nemůže obejít.
      *
      * @return array{
      *   supplier_id:int,status:string,start_period:?string,row_version:int,

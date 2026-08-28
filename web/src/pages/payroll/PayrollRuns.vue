@@ -6,6 +6,11 @@ import {
   payrollApi,
   type PayrollRun,
   type PayrollRunCommand,
+  type PayrollRunHistory,
+  type PayrollRunHistoryEvent,
+  type PayrollRunHistoryTotalDiff,
+  type PayrollRunHistoryTotalKey,
+  type PayrollRunRevisionHistory,
   type PayrollRunResultPerson,
   type PayrollRunValidation,
 } from '@/api/payroll'
@@ -45,6 +50,10 @@ const personNames = ref<Record<number, string>>({})
  */
 const breakdowns = ref<Record<number, PayrollRunResultPerson[]>>({})
 const breakdownLoading = ref<Record<number, boolean>>({})
+const histories = ref<Record<number, PayrollRunHistory>>({})
+const historyOpen = ref<Record<number, boolean>>({})
+const historyLoading = ref<Record<number, boolean>>({})
+const historyFailed = ref<Record<number, boolean>>({})
 const total = ref(0)
 const pageSize = 12
 const offset = ref(0)
@@ -330,6 +339,9 @@ async function load() {
     total.value = page.total
     // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
     breakdowns.value = {}
+    histories.value = {}
+    historyOpen.value = {}
+    historyFailed.value = {}
     if (people !== null) {
       personNames.value = Object.fromEntries(
         people.map(person => [person.id, person.full_name]),
@@ -373,6 +385,57 @@ async function toggleBreakdown(run: PayrollRun) {
   } finally {
     const { [run.id]: _pending, ...rest } = breakdownLoading.value
     breakdownLoading.value = rest
+  }
+}
+
+const HISTORY_TOTAL_KEYS: PayrollRunHistoryTotalKey[] = [
+  'cash_payable_minor',
+  'enforcement_withheld_minor',
+  'payable_after_enforcement_minor',
+]
+
+function historyTotalDiffs(revision: PayrollRunRevisionHistory): Array<{
+  key: PayrollRunHistoryTotalKey
+  diff: PayrollRunHistoryTotalDiff
+}> {
+  if (revision.diff_from_previous === null) return []
+  return HISTORY_TOTAL_KEYS.flatMap((key) => {
+    const diff = revision.diff_from_previous?.totals[key]
+    return diff === undefined ? [] : [{ key, diff }]
+  })
+}
+
+function historyEventLabel(event: PayrollRunHistoryEvent): string {
+  const known = new Set([
+    'created',
+    ...KNOWN_COMMANDS,
+    'validation_override',
+    'validation_override_revoked',
+  ])
+  return known.has(event.event_type)
+    ? t(`payroll.runs.history.event.${event.event_type}`)
+    : t('payroll.runs.history.event.unknown')
+}
+
+async function loadHistory(runId: number) {
+  historyLoading.value = { ...historyLoading.value, [runId]: true }
+  historyFailed.value = { ...historyFailed.value, [runId]: false }
+  try {
+    const history = await payrollApi.runHistory(runId)
+    histories.value = { ...histories.value, [runId]: history }
+  } catch {
+    historyFailed.value = { ...historyFailed.value, [runId]: true }
+  } finally {
+    const { [runId]: _pending, ...rest } = historyLoading.value
+    historyLoading.value = rest
+  }
+}
+
+async function toggleHistory(run: PayrollRun) {
+  const opening = !historyOpen.value[run.id]
+  historyOpen.value = { ...historyOpen.value, [run.id]: opening }
+  if (opening && histories.value[run.id] === undefined) {
+    await loadHistory(run.id)
   }
 }
 
@@ -755,25 +818,171 @@ onMounted(load)
           </div>
         </dl>
 
-        <button
-          v-if="run.result_snapshot"
-          type="button"
-          :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
-          :class="[btnOutline('neutral'), 'mt-4']"
-          :disabled="breakdownLoading[run.id]"
-          @click="toggleBreakdown(run)"
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button
+            v-if="run.result_snapshot"
+            type="button"
+            :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
+            :class="btnOutline('neutral')"
+            :disabled="breakdownLoading[run.id]"
+            @click="toggleBreakdown(run)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.chart" />
+            </svg>
+            {{
+              breakdownLoading[run.id]
+                ? t('common.loading')
+                : breakdowns[run.id]
+                  ? t('payroll.runs.breakdown_hide')
+                  : t('payroll.runs.breakdown_show')
+            }}
+          </button>
+          <button
+            type="button"
+            :data-testid="`payroll-run-${run.id}-history-toggle`"
+            :class="btnOutline('neutral')"
+            :disabled="historyLoading[run.id]"
+            @click="toggleHistory(run)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.cycle" />
+            </svg>
+            {{
+              historyLoading[run.id]
+                ? t('common.loading')
+                : historyOpen[run.id]
+                  ? t('payroll.runs.history.hide')
+                  : t('payroll.runs.history.show')
+            }}
+          </button>
+        </div>
+
+        <section
+          v-if="historyOpen[run.id]"
+          :data-testid="`payroll-run-${run.id}-history`"
+          class="mt-4 rounded-xl border border-neutral-200 bg-neutral-50 p-4"
         >
-          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-            <path :d="ICONS.chart" />
-          </svg>
-          {{
-            breakdownLoading[run.id]
-              ? t('common.loading')
-              : breakdowns[run.id]
-                ? t('payroll.runs.breakdown_hide')
-                : t('payroll.runs.breakdown_show')
-          }}
-        </button>
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <h3 class="font-semibold text-neutral-900">{{ t('payroll.runs.history.title') }}</h3>
+              <p class="mt-1 text-xs leading-relaxed text-neutral-500">
+                {{ t('payroll.runs.history.hint') }}
+              </p>
+            </div>
+          </div>
+
+          <div
+            v-if="historyFailed[run.id]"
+            :data-testid="`payroll-run-${run.id}-history-failed`"
+            class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+            role="alert"
+          >
+            <p>{{ t('payroll.runs.history.load_failed') }}</p>
+            <button
+              type="button"
+              :data-testid="`payroll-run-${run.id}-history-retry`"
+              :class="[btnOutlineSm('danger'), 'mt-2']"
+              :disabled="historyLoading[run.id]"
+              @click="loadHistory(run.id)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.cycle" />
+              </svg>
+              {{ t('payroll.runs.history.retry') }}
+            </button>
+          </div>
+
+          <p
+            v-else-if="histories[run.id] && histories[run.id].revisions.length === 0 && histories[run.id].events.length === 0"
+            class="mt-3 text-sm text-neutral-500"
+          >
+            {{ t('payroll.runs.history.empty') }}
+          </p>
+
+          <div v-else-if="histories[run.id]" class="mt-4 grid gap-5 xl:grid-cols-2">
+            <div>
+              <h4 class="text-sm font-semibold text-neutral-800">{{ t('payroll.runs.history.revisions') }}</h4>
+              <ol class="mt-3 space-y-3">
+                <li
+                  v-for="revision in [...histories[run.id].revisions].reverse()"
+                  :key="revision.id"
+                  class="rounded-lg border border-neutral-200 bg-surface p-3"
+                >
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span class="font-medium text-neutral-900">
+                        {{ t('payroll.runs.history.revision_label', { revision: revision.revision_no }) }}
+                      </span>
+                      <span class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600">
+                        {{ t(`payroll.runs.history.kind.${revision.revision_kind}`) }}
+                      </span>
+                    </div>
+                    <time class="text-xs text-neutral-500">{{ formatDateTime(revision.created_at) }}</time>
+                  </div>
+
+                  <div v-if="revision.diff_from_previous" class="mt-3 space-y-2">
+                    <div class="flex flex-wrap gap-1.5 text-xs">
+                      <span class="rounded-full bg-neutral-100 px-2 py-1 text-neutral-700">
+                        {{ t(`payroll.runs.history.${revision.diff_from_previous.input_changed ? 'input_changed' : 'input_unchanged'}`) }}
+                      </span>
+                      <span class="rounded-full bg-neutral-100 px-2 py-1 text-neutral-700">
+                        {{ t(`payroll.runs.history.${revision.diff_from_previous.ruleset_changed ? 'ruleset_changed' : 'ruleset_unchanged'}`) }}
+                      </span>
+                      <span class="rounded-full bg-neutral-100 px-2 py-1 text-neutral-700">
+                        {{ t(`payroll.runs.history.${revision.diff_from_previous.result_changed ? 'result_changed' : 'result_unchanged'}`) }}
+                      </span>
+                    </div>
+                    <dl v-if="historyTotalDiffs(revision).length" class="space-y-1.5">
+                      <div
+                        v-for="item in historyTotalDiffs(revision)"
+                        :key="item.key"
+                        class="flex flex-wrap items-baseline justify-between gap-2 text-xs"
+                      >
+                        <dt class="text-neutral-600">{{ t(`payroll.runs.history.total.${item.key}`) }}</dt>
+                        <dd class="font-medium text-neutral-800">
+                          {{ money(item.diff.before) }} → {{ money(item.diff.after) }}
+                          <span class="ml-1 text-primary-700">
+                            {{ t('payroll.runs.history.delta', { value: money(item.diff.delta) }) }}
+                          </span>
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                  <p v-else class="mt-2 text-xs text-neutral-500">
+                    {{ t('payroll.runs.history.first_revision') }}
+                  </p>
+                </li>
+              </ol>
+            </div>
+
+            <div>
+              <h4 class="text-sm font-semibold text-neutral-800">{{ t('payroll.runs.history.events') }}</h4>
+              <ol class="mt-3 border-l border-neutral-300 pl-4">
+                <li
+                  v-for="event in [...histories[run.id].events].reverse()"
+                  :key="event.id"
+                  class="relative pb-4 last:pb-0"
+                >
+                  <span class="absolute -left-[1.18rem] top-1.5 h-2 w-2 rounded-full bg-primary-500" aria-hidden="true" />
+                  <div class="flex flex-wrap items-baseline justify-between gap-2">
+                    <p class="text-sm font-medium text-neutral-800">{{ historyEventLabel(event) }}</p>
+                    <time class="text-xs text-neutral-500">{{ formatDateTime(event.created_at) }}</time>
+                  </div>
+                  <p v-if="event.from_status && event.to_status" class="mt-0.5 text-xs text-neutral-500">
+                    {{ t(`payroll.runs.status.${event.from_status}`) }} → {{ t(`payroll.runs.status.${event.to_status}`) }}
+                  </p>
+                  <p v-if="event.actor_name" class="mt-0.5 text-xs text-neutral-500">
+                    {{ t('payroll.runs.history.actor', { name: event.actor_name }) }}
+                  </p>
+                  <p v-if="event.reason" class="mt-1 text-sm leading-relaxed text-neutral-700">
+                    {{ event.reason }}
+                  </p>
+                </li>
+              </ol>
+            </div>
+          </div>
+        </section>
 
         <PayrollIncomeTaxBreakdown
           v-if="breakdowns[run.id]?.length"

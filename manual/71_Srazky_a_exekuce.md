@@ -11,7 +11,7 @@ Je nutné oprávnění `payroll.enforcement` a podle případu `payroll.insolven
 ## 71.3 Krokový postup
 
 1. Otevřete **Mzdy → Srážky a exekuce** a založte případ u správné osoby.
-2. Vyplňte rozhodné datum, pořadí, druh pohledávky, spis, příjemce a částky.
+2. Vyplňte datum doručení prvnímu plátci, druh pohledávky, spis, příjemce a částky.
 3. Zkontrolujte vyživované osoby a další údaje ovlivňující nezabavitelnou částku.
 4. Před uzavřením běhu projděte rozdělení srážek a zůstatky všech souběžných případů.
 5. Po úhradě aktualizujte stav; změnu pořadí nebo skončení proveďte podle doložené události.
@@ -22,6 +22,21 @@ vede od pohledávky přes ověření podkladů a zahájení srážení až k ov�
 příjemce a povolení odesílání. Méně časté změny stavu jsou pod volbou **Další
 stavové kroky**; jejich skrytí nemění právní kontroly ani dostupné možnosti.
 Použijte je pouze tehdy, když odpovídají doloženému rozhodnutí.
+
+U zákonné pohledávky aplikace určí den pořadí sama z data doručení prvnímu
+plátci. Při přípravě každého nového mzdového běhu se pořadí znovu posoudí podle
+tohoto data; příkaz doručený až po dni výplaty se do daného běhu nezařadí. Již
+schválený mzdový běh ani připravená úhrada se touto pozdější skutečností
+nepřepisují. Pokud více pohledávek patří ke stejnému exekučnímu příkazu, zvolte
+referenční pohledávku a společné datum i pořadí se převezmou automaticky. Datum
+doručení lze u staršího neúplného záznamu jednou doplnit; po uložení je neměnné.
+Chybně zadanou dosud nepoužitou pohledávku smažte a založte znovu podle listiny.
+
+V bloku **Strany případu a skladba pohledávky** uložte ze zdrojového dokumentu
+aktuální soud nebo exekutora, oprávněného a rozpad každé pohledávky na jistinu,
+úroky, náklady a výživné. Rozpad musí přesně odpovídat evidované částce
+pohledávky. Každá změna vytváří novou neměnnou revizi s odkazem na dokument,
+proto původní právní podklad ani dřívější výpočet nepřepisujte.
 
 V měsíčních podkladech je běžná kontrola oddělená od výjimek. Rejstřík
 pohledávek a právě uplatněné nároky zkontrolujete přímo. Souběh plátců,
@@ -60,7 +75,8 @@ Stejné pravidlo platí pro jednotlivou pohledávku. Dokud je případ ve stavu
 **Přijato — čeká na ověření** a pohledávka ještě nevstoupila do mzdového
 výsledku, ledgeru ani platebního závazku, můžete ji v tabulce **Opravit** nebo
 **Smazat**. Oprava zachová interní identitu pohledávky, zvýší její verzi a
-znovu označí podklady případu jako neověřené. Po zahájení srážení se původní
+znovu označí podklady případu jako neověřené; již uložené datum doručení prvnímu
+plátci se přitom nemění. Po zahájení srážení se původní
 záznam nemění ani nemaže; použijte navazující právní nebo opravný postup.
 
 ## 71.6 Kontroly a bezpečnost
@@ -121,15 +137,22 @@ celý zůstatek pohledávek — samotné sražení ze mzdy k tomu nestačí.
 
 ### 71.9.1 Odeslání sražených částek příjemci
 
-Aby aplikace sražené peníze skutečně odeslala, vyber v případu **příjemce srážky**
-z katalogu **Mzdy → Nastavení mezd → Účty institucí** (typ *ostatní příjemce*). Účet
-musí být ověřený a účinný k datu výplaty; číslo účtu ani symboly se do případu
-neopisují. Po schválení mzdové revize vytvoří akce **Připravit závazky**
-v **Mzdy → Mzdové příkazy a úhrady** závazek vůči tomuto příjemci — ale jen z částek, které jsou
-ve stavu **odesílání**. Cokoli je deponované (nový případ, odklad, zastavení)
-se do odchozí platební dávky nedostane. Opakovaná příprava nevytvoří druhý
-závazek; oprava mzdy promítne jen rozdíl a pokles vznikne jako samostatný
-příchozí opravný závazek.
+Aby aplikace sražené peníze skutečně odeslala, založte v bloku **Platební
+instrukce příjemce** novou instrukci ze zdrojové listiny. Vyberte aktuálního
+exekutora nebo oprávněného, datum účinnosti, ověřený účet typu *ostatní
+příjemce* z **Mzdy → Nastavení mezd → Účty institucí**, zdrojový dokument a
+důvod nové revize. Účet musí být k tomuto datu účinný a ověřený; aplikace do
+zmrazeného platebního podkladu uloží konkrétní účet i variabilní, specifický a
+konstantní symbol. Číslo účtu ani symboly se do případu neopisují.
+
+Bez aktuální doložené právní strany a platební instrukce k ověřenému účtu nelze
+zahájit srážení ani povolit odesílání. Změna příjemce, účtu nebo symbolů vytváří
+novou instrukci pro budoucí úhrady; historickou připravenou či spárovanou úhradu
+nemění. Po schválení mzdové revize vytvoří akce **Připravit závazky** v
+**Mzdy → Mzdové příkazy a úhrady** závazek jen z částek ve stavu **odesílání**.
+Cokoli je deponované (nový případ, odklad, zastavení) se do odchozí platební
+dávky nedostane. Opakovaná příprava nevytvoří druhý závazek; oprava mzdy promítne
+jen rozdíl a pokles vznikne jako samostatný příchozí opravný závazek.
 
 Blok **Sraženo, depozitum a odeslané platby** v detailu případu ukazuje, kolik
 bylo sraženo, kolik drží depozitum, kolik je připraveno k úhradě, kolik už

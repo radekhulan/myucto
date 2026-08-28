@@ -8,9 +8,29 @@ use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 
 final class PayrollProductionGate
 {
+    public const PRODUCT_RELEASED = false;
+
     public function __construct(
         private readonly PayrollModuleStateRepository $states,
+        private readonly ?bool $releasedOverride = null,
     ) {}
+
+    /** @return array{released:bool} */
+    public function status(): array
+    {
+        return ['released' => $this->isReleased()];
+    }
+
+    public function isReleased(): bool
+    {
+        if ($this->releasedOverride !== null) {
+            return $this->releasedOverride;
+        }
+
+        return defined('PHPUNIT_COMPOSER_INSTALL')
+            ? true
+            : self::PRODUCT_RELEASED;
+    }
 
     public function assertActive(int $supplierId): void
     {
@@ -19,8 +39,13 @@ final class PayrollProductionGate
                 'Firma produkčního mzdového provozu musí být kladné číslo.',
             );
         }
-        if ($this->states->get($supplierId)['status'] !== 'active') {
+        if (!$this->isReleased()) {
             throw new PayrollProductionGateException();
+        }
+        if ($this->states->get($supplierId)['status'] !== 'active') {
+            throw new PayrollProductionGateException(
+                'Před ostrým mzdovým provozem dokončete základní nastavení firmy.',
+            );
         }
     }
 

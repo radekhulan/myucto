@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
 use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
+use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\InstitutionAccountType;
+use MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use Psr\Clock\ClockInterface;
@@ -36,6 +39,9 @@ use Psr\Clock\ClockInterface;
  */
 final readonly class HealthInsuranceSubmissionService
 {
+    /** Namespaced immutable metadata of the one PPZ artifact selected for ISDS. */
+    public const ISDS_ATTACHMENT_CATALOG_VERSION_PREFIX =
+        'health-isds-attachment.v1:';
     public const AGENDA_BULK_NOTIFICATION = HealthInsuranceSchemaCatalog::HOZ;
     public const AGENDA_PAYMENT_OVERVIEW = HealthInsuranceSchemaCatalog::PPZ;
 
@@ -45,7 +51,6 @@ final readonly class HealthInsuranceSubmissionService
     private const CHANNEL = 'health_portal';
     private const SUBJECT_EMPLOYMENT = 'employment';
     private const SUBJECT_RUN = 'payroll_run';
-    private const PDF_TEMPLATE_VERSION = 'payroll-health-payment-overview.v1';
 
     /** Strop stránky je tvrdý — z URL ho zvednout nejde. */
     public const PERIOD_MAX_LIMIT = 200;
@@ -53,6 +58,7 @@ final readonly class HealthInsuranceSubmissionService
 
     public function __construct(
         private PayrollHealthNotificationRepository $facts,
+        private PayrollInstitutionAccountRepository $institutionAccounts,
         private HealthNotificationDutyResolver $resolver,
         private HealthNotificationDutyCatalog $duties,
         private HealthNotificationCodeCatalog $codes,
@@ -413,6 +419,66 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
+     * Sestaví přímo uživatelsky předatelný artefakt podle doloženého formátu
+     * konkrétní pojišťovny. Interní JSON přehled se touto cestou nikdy nevydává.
+     *
+     * @return array{bytes:string,mime_type:string,filename:string,sha256:string,format:string}
+     */
+    public function paymentOverviewDownload(
+        int $supplierId,
+        int $revisionId,
+        string $insurerCode,
+    ): array {
+        $source = $this->paymentOverviewSource(
+            $supplierId,
+            $revisionId,
+            $insurerCode,
+        );
+        $format = $this->channels->forInsurer($insurerCode)
+            ->isdsAttachmentFormatOn($this->today());
+        if ($format === HealthInsurerIsdsAttachmentFormat::Xml) {
+            $bytes = $this->serializer->serializePaymentOverview(
+                $source['payload'],
+            );
+            $this->validator->validatePaymentOverview(
+                $source['payload'],
+                $bytes,
+            );
+            $mimeType = 'application/xml';
+            $extension = 'xml';
+        } elseif ($format === HealthInsurerIsdsAttachmentFormat::TextPdf) {
+            $bytes = $this->pdfRenderer->renderPayload(
+                $source['payload'],
+                is_string($source['channel']['insurer_name'] ?? null)
+                    ? $source['channel']['insurer_name']
+                    : null,
+                $this->today(),
+            );
+            $mimeType = 'application/pdf';
+            $extension = 'pdf';
+        } else {
+            throw new HealthNotificationException(
+                'zp_isds_attachment_undocumented',
+                'Pro tuto zdravotní pojišťovnu není k dnešnímu dni doložený formát předatelného přehledu.',
+            );
+        }
+
+        return [
+            'bytes' => $bytes,
+            'mime_type' => $mimeType,
+            'filename' => sprintf(
+                'zp-prehled-%s-%s-revize-%d.%s',
+                $source['overview']->period,
+                $insurerCode,
+                $revisionId,
+                $extension,
+            ),
+            'sha256' => hash('sha256', $bytes),
+            'format' => $format->value,
+        ];
+    }
+
+    /**
      * Zmrazí přehled o platbě pojistného do odesílatelné podoby. Neodesílá.
      *
      * @return array<string,mixed>
@@ -424,59 +490,60 @@ final readonly class HealthInsuranceSubmissionService
         string $insurerCode,
         ?int $createdBy = null,
     ): array {
-        $this->schemas->assertInsurerCode($insurerCode);
-        $overview = $this->overviews->overview(
+        $documents = $this->paymentOverviewDocuments(
             $supplierId,
             $revisionId,
             $insurerCode,
         );
-        $payload = $this->payload($supplierId, $overview);
-        $xml = $this->serializer->serializePaymentOverview($payload);
-        $channel = $this->channelDescription($supplierId, $insurerCode);
-        $pdf = $this->pdfRenderer->renderPayload(
-            $payload,
-            is_string($channel['insurer_name'] ?? null)
-                ? $channel['insurer_name']
-                : null,
-            $this->today(),
+        $overview = $documents['overview'];
+        $payload = $documents['payload'];
+        $xml = $documents['xml'];
+        $pdf = $documents['pdf'];
+        $channel = $documents['channel'];
+        $isdsAttachmentFormat = HealthInsurerIsdsAttachmentFormat::tryFrom(
+            (string) ($channel['isds_attachment_format'] ?? ''),
         );
+        if ($isdsAttachmentFormat === null
+            || $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::None
+        ) {
+            throw new HealthNotificationException(
+                'zp_isds_attachment_undocumented',
+                'Pro tuto zdravotní pojišťovnu není k dnešnímu dni doložený formát přílohy datové zprávy.',
+            );
+        }
+        $isdsAttachmentCatalogVersion = self::isdsAttachmentCatalogVersion(
+            $isdsAttachmentFormat,
+        );
+        $regularDocuments = null;
+        if ($overview->revisionKind === 'correction') {
+            $regularPayload = $this->payload(
+                $supplierId,
+                $overview,
+                'regular',
+            );
+            $regularDocuments = [
+                'payload' => $regularPayload,
+                'xml' => $this->serializer->serializePaymentOverview(
+                    $regularPayload,
+                ),
+                'pdf' => $this->pdfRenderer->renderPayload(
+                    $regularPayload,
+                    is_string($channel['insurer_name'] ?? null)
+                        ? $channel['insurer_name']
+                        : null,
+                    $this->today(),
+                ),
+            ];
+        }
         $window = $this->deadlines->forPaymentOverview($overview->period);
-        $sourceHash = hash('sha256', CanonicalJson::encode([
-            'schema_reference' => 'payroll-health-payment-overview-submission.v4',
-            'revision_id' => $overview->revisionId,
-            'insurer_code' => $insurerCode,
-            'statutory_result_hash' => $overview->statutoryResultHash,
-            'xml_sha256' => hash('sha256', $xml),
-            'pdf_template_version' => self::PDF_TEMPLATE_VERSION,
-            'isds_attachment_rules' => $channel['isds_attachment_rules'],
-        ]));
-        $obligation = $this->obligations->register(
-            $supplierId,
-            self::AGENDA_PAYMENT_OVERVIEW,
-            self::SUBJECT_RUN,
-            'payroll_run:' . $overview->runId . ':' . $insurerCode,
-            // Období povinnosti je mzdový měsíc, za který se pojistné platí,
-            // ne okno lhůty. Lhůta má vlastní pole a plést je znamená, že se
-            // přehled zařadí do jiného měsíce, než za který je.
-            $overview->period . '-01',
-            $window->earliestSubmissionOn,
-            'regular',
-            self::CHANNEL,
-            self::SOURCE_EVENT_OVERVIEW,
+        $submissionKind = $overview->revisionKind;
+        $subjectReference =
+            'payroll_run:' . $overview->runId . ':' . $insurerCode;
+        $sourceEventReference =
             'payroll_health_payment_overview:' . $overview->revisionId
-                . ':' . $insurerCode,
-            $sourceHash,
-            $window->earliestSubmissionOn,
-            $window->dueOn,
-            $window->calendarBasis,
-            $window->rulesetId,
-            $window->rulesetHash,
-            'health-overview-obligation:' . $environment . ':' . $sourceHash,
-            null,
-            $createdBy,
-            null,
-            $environment,
-        );
+                . ':' . $insurerCode;
+        $periodStart = $overview->period . '-01';
+        $periodEnd = $window->earliestSubmissionOn;
 
         return $this->submissionRepository->transaction(function () use (
             $supplierId,
@@ -486,9 +553,16 @@ final readonly class HealthInsuranceSubmissionService
             $payload,
             $xml,
             $pdf,
-            $sourceHash,
-            $obligation,
             $window,
+            $submissionKind,
+            $subjectReference,
+            $sourceEventReference,
+            $periodStart,
+            $periodEnd,
+            $channel,
+            $isdsAttachmentFormat,
+            $isdsAttachmentCatalogVersion,
+            $regularDocuments,
             $createdBy,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
@@ -497,11 +571,107 @@ final readonly class HealthInsuranceSubmissionService
                     'Firma přehledu o platbě nebyla nalezena.',
                 );
             }
+            $correctsSubmissionId = null;
+            if ($submissionKind === 'correction') {
+                $existingSource = $this->submissionRepository
+                    ->submissionForSourceEventForUpdate(
+                        $supplierId,
+                        $environment,
+                        self::AGENDA_PAYMENT_OVERVIEW,
+                        self::SOURCE_EVENT_OVERVIEW,
+                        $sourceEventReference,
+                    );
+                if ($existingSource !== null) {
+                    if ($existingSource['submission_kind'] === 'regular'
+                        && $existingSource['corrects_submission_id'] === null
+                    ) {
+                        $submissionKind = 'regular';
+                    } elseif ($existingSource['submission_kind'] === 'correction'
+                        && $existingSource['corrects_submission_id'] !== null
+                    ) {
+                        $correctsSubmissionId =
+                            $existingSource['corrects_submission_id'];
+                    } else {
+                        throw new HealthNotificationException(
+                            'zp_correction_source_conflict',
+                            'Zdroj opravného přehledu už patří jinému druhu podání.',
+                        );
+                    }
+                } else {
+                    $predecessor = $this->submissionRepository
+                        ->latestSubmissionForScopeForUpdate(
+                            $supplierId,
+                            $environment,
+                            self::AGENDA_PAYMENT_OVERVIEW,
+                            self::SUBJECT_RUN,
+                            $subjectReference,
+                            $periodStart,
+                            $periodEnd,
+                            PayrollAgendaCorrectionPolicy::correctableStatuses(
+                                self::AGENDA_PAYMENT_OVERVIEW,
+                            ),
+                    );
+                    if ($predecessor === null) {
+                        $submissionKind = 'regular';
+                    } else {
+                        $correctsSubmissionId = $predecessor['id'];
+                    }
+                }
+            }
+            if ($submissionKind === 'regular'
+                && $overview->revisionKind === 'correction'
+            ) {
+                if ($regularDocuments === null) {
+                    throw new \LogicException(
+                        'Chybí řádná varianta přehledu z opravné mzdové revize.',
+                    );
+                }
+                $payload = $regularDocuments['payload'];
+                $xml = $regularDocuments['xml'];
+                $pdf = $regularDocuments['pdf'];
+            }
+            $sourceHash = hash('sha256', CanonicalJson::encode([
+                'schema_reference' =>
+                    'payroll-health-payment-overview-submission.v5',
+                'revision_id' => $overview->revisionId,
+                'revision_kind' => $submissionKind,
+                'corrects_submission_id' => $correctsSubmissionId,
+                'insurer_code' => $insurerCode,
+                'statutory_result_hash' => $overview->statutoryResultHash,
+                'xml_sha256' => hash('sha256', $xml),
+                'pdf_template_reference' =>
+                    $this->pdfRenderer->templateReference($insurerCode),
+                'isds_attachment_rules' => $channel['isds_attachment_rules'],
+                'isds_attachment_format' => $isdsAttachmentFormat->value,
+            ]));
+            $obligation = $this->obligations->register(
+                $supplierId,
+                self::AGENDA_PAYMENT_OVERVIEW,
+                self::SUBJECT_RUN,
+                $subjectReference,
+                $periodStart,
+                $periodEnd,
+                $submissionKind,
+                self::CHANNEL,
+                self::SOURCE_EVENT_OVERVIEW,
+                $sourceEventReference,
+                $sourceHash,
+                $window->earliestSubmissionOn,
+                $window->dueOn,
+                $window->calendarBasis,
+                $window->rulesetId,
+                $window->rulesetHash,
+                'health-overview-obligation:' . $environment . ':' . $sourceHash,
+                null,
+                $createdBy,
+                null,
+                $environment,
+            );
             $keys = $this->idempotencyKeys($environment, $sourceHash);
             $submission = $this->submissions->prepare(
                 $supplierId,
                 $obligation['id'],
-                'regular',
+                $submissionKind,
                 self::CHANNEL,
                 $sourceHash,
                 $keys['submission'],
@@ -510,7 +680,7 @@ final readonly class HealthInsuranceSubmissionService
                 // přehledu ale váže XML a zdravotní výsledek, ne celý běh —
                 // provázat je by znamenalo tvrdit shodu, která neplatí.
                 null,
-                null,
+                $correctsSubmissionId,
                 $createdBy,
                 $environment,
             );
@@ -592,7 +762,9 @@ final readonly class HealthInsuranceSubmissionService
                 'application/xml',
                 $xml,
                 HealthInsuranceSchemaCatalog::XSD_VERSION,
-                null,
+                $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::Xml
+                    ? $isdsAttachmentCatalogVersion
+                    : null,
                 self::CHANNEL,
                 $keys['xml_artifact'],
                 $createdBy,
@@ -617,7 +789,9 @@ final readonly class HealthInsuranceSubmissionService
                 'application/pdf',
                 $pdf,
                 null,
-                null,
+                $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::TextPdf
+                    ? $isdsAttachmentCatalogVersion
+                    : null,
                 self::CHANNEL,
                 $keys['pdf_artifact'],
                 $createdBy,
@@ -1212,8 +1386,13 @@ final readonly class HealthInsuranceSubmissionService
     private function payload(
         int $supplierId,
         HealthPaymentOverview $overview,
+        ?string $submissionKind = null,
     ): HealthPaymentOverviewPayload {
-        $employer = $this->requireEmployer($supplierId);
+        $employer = $this->requireEmployer(
+            $supplierId,
+            $overview->insurerCode,
+            $overview->period . '-01',
+        );
         $contribution = $overview->totals['total_contribution_minor_units'];
         if ($contribution % 100 !== 0) {
             throw new HealthNotificationException(
@@ -1226,7 +1405,9 @@ final readonly class HealthInsuranceSubmissionService
 
         return new HealthPaymentOverviewPayload(
             insurerCode: $overview->insurerCode,
-            overviewKind: HealthPaymentOverviewPayload::KIND_REGULAR,
+            overviewKind: ($submissionKind ?? $overview->revisionKind) === 'correction'
+                ? HealthPaymentOverviewPayload::KIND_CORRECTIVE
+                : HealthPaymentOverviewPayload::KIND_REGULAR,
             employer: $employer,
             month: (int) substr($overview->period, 5, 2),
             year: (int) substr($overview->period, 0, 4),
@@ -1237,8 +1418,70 @@ final readonly class HealthInsuranceSubmissionService
         );
     }
 
+    /**
+     * @return array{
+     *   overview:HealthPaymentOverview,payload:HealthPaymentOverviewPayload,
+     *   xml:string,pdf:string,channel:array<string,mixed>
+     * }
+     */
+    private function paymentOverviewDocuments(
+        int $supplierId,
+        int $revisionId,
+        string $insurerCode,
+    ): array {
+        $source = $this->paymentOverviewSource(
+            $supplierId,
+            $revisionId,
+            $insurerCode,
+        );
+        $payload = $source['payload'];
+        $channel = $source['channel'];
+        $xml = $this->serializer->serializePaymentOverview($payload);
+        $pdf = $this->pdfRenderer->renderPayload(
+            $payload,
+            is_string($channel['insurer_name'] ?? null)
+                ? $channel['insurer_name']
+                : null,
+            $this->today(),
+        );
+
+        return $source + [
+            'xml' => $xml,
+            'pdf' => $pdf,
+        ];
+    }
+
+    /**
+     * @return array{
+     *   overview:HealthPaymentOverview,payload:HealthPaymentOverviewPayload,
+     *   channel:array<string,mixed>
+     * }
+     */
+    private function paymentOverviewSource(
+        int $supplierId,
+        int $revisionId,
+        string $insurerCode,
+    ): array {
+        $this->schemas->assertInsurerCode($insurerCode);
+        $overview = $this->overviews->overview(
+            $supplierId,
+            $revisionId,
+            $insurerCode,
+        );
+        $payload = $this->payload($supplierId, $overview);
+        $channel = $this->channelDescription($supplierId, $insurerCode);
+
+        return [
+            'overview' => $overview,
+            'payload' => $payload,
+            'channel' => $channel,
+        ];
+    }
+
     private function requireEmployer(
         int $supplierId,
+        string $insurerCode,
+        string $effectiveOn,
     ): HealthEmployerIdentification {
         $row = $this->facts->findEmployerIdentification($supplierId);
         if ($row === null) {
@@ -1255,11 +1498,27 @@ final readonly class HealthInsuranceSubmissionService
             );
         }
 
-        return HealthEmployerIdentification::fromBusinessId(
-            businessId: $row['business_id'],
-            // Číslo účtárny plátce aplikace neeviduje; výchozí `00` je
-            // doložený tvar pro zaměstnavatele s jedinou účtárnou.
-            accountingUnit: '00',
+        $identifiers = $this->institutionAccounts->findEffectivePaymentIdentifiers(
+            $supplierId,
+            InstitutionAccountType::HEALTH_INSURER->value,
+            $insurerCode,
+            'CZK',
+            $effectiveOn,
+        );
+        $payerNumber = preg_replace(
+            '/\D+/',
+            '',
+            (string) ($identifiers['variable_symbol'] ?? ''),
+        );
+        if (preg_match('/^[0-9]{10}$/', $payerNumber) !== 1) {
+            throw new HealthNotificationException(
+                'zp_payer_number_missing',
+                'U účinného platebního účtu pojišťovny chybí desetimístné identifikační číslo plátce (VS zaměstnavatele).',
+            );
+        }
+
+        return new HealthEmployerIdentification(
+            payerNumber: $payerNumber,
             name: $row['name'],
             street: (string) ($row['street'] ?? ''),
             houseNumber: (string) ($row['house_number'] ?? ''),
@@ -1309,6 +1568,20 @@ final readonly class HealthInsuranceSubmissionService
             'xml_artifact' => 'health-overview-xml-artifact:' . $fingerprint,
             'pdf_artifact' => 'health-overview-pdf-artifact:' . $fingerprint,
         ];
+    }
+
+    public static function isdsAttachmentCatalogVersion(
+        HealthInsurerIsdsAttachmentFormat $format,
+    ): string
+    {
+        return match ($format) {
+            HealthInsurerIsdsAttachmentFormat::Xml,
+            HealthInsurerIsdsAttachmentFormat::TextPdf =>
+                self::ISDS_ATTACHMENT_CATALOG_VERSION_PREFIX . $format->value,
+            HealthInsurerIsdsAttachmentFormat::None => throw new \InvalidArgumentException(
+                'Nedoložený formát přílohy ISDS nelze zmrazit.',
+            ),
+        };
     }
 
     private function today(): string

@@ -110,6 +110,11 @@ final class PayrollRuleParameterCatalog
                 'Rozhodná částka pro účast na nemocenském pojištění u dohody o provedení práce',
             'participation.small_scale.minimum' =>
                 'Rozhodná částka pro účast na nemocenském pojištění u zaměstnání malého rozsahu',
+            'risky_savings.effective_from' => 'Datum účinnosti povinného příspěvku na spoření zaměstnanců v rizikové práci',
+            'risky_savings.minimum_shift_eighths' => 'Nejnižší rozsah rozhodných směn pro povinný příspěvek (osminy směn)',
+            'risky_savings.payment_due.months_after_period' => 'Počet měsíců po mzdovém období do splatnosti povinného příspěvku',
+            'risky_savings.payment_due.rule' => 'Pravidlo určení dne splatnosti povinného příspěvku',
+            'risky_savings.rate' => 'Sazba povinného příspěvku na spoření zaměstnanců v rizikové práci',
         ],
         'health_insurance' => [
             'employee.rate' => 'Podíl zaměstnance na pojistném',
@@ -206,6 +211,15 @@ final class PayrollRuleParameterCatalog
             'rounding.thirds_base' => 'Zaokrouhlení základu pro výpočet třetin',
         ],
         'deadlines' => [
+            'jmhz.deadline.calendar_basis' => 'Kalendář použitý pro lhůtu JMHZ',
+            'jmhz.deadline.cancellation_allowed' => 'Přípustnost storna JMHZ v daném období',
+            'jmhz.deadline.due_day' => 'Den pravidelného termínu JMHZ',
+            'jmhz.deadline.due_on' => 'Pevný přechodný termín JMHZ',
+            'jmhz.deadline.due_shift' => 'Posun termínu JMHZ na pracovní den',
+            'jmhz.deadline.earliest_day' => 'První den pravidelného okna JMHZ',
+            'jmhz.deadline.earliest_submission_on' => 'Pevný začátek přechodného okna JMHZ',
+            'jmhz.deadline.month_offset' => 'Posun pravidelného okna JMHZ v měsících',
+            'jmhz.deadline.rule' => 'Pravidlo výpočtu lhůty JMHZ',
             'submission_calendar' => 'Kalendář lhůt pro podání',
         ],
         'codebooks' => [
@@ -238,6 +252,7 @@ final class PayrollRuleParameterCatalog
         'floor_to_whole_czk_divisible_by_three' => 'zaokrouhlit dolů na celé koruny dělitelné třemi',
         'merge-two-calendar-days-when-more-favourable' =>
             'sloučit dva kalendářní dny cesty, je-li to pro zaměstnance výhodnější',
+        'last_day_of_month' => 'poslední den příslušného měsíce',
     ];
 
     /**

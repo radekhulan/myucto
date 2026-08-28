@@ -6,6 +6,7 @@ import type { PayrollRun, PayrollRunValidation } from '@/api/payroll'
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
   runDetail: vi.fn(),
+  runHistory: vi.fn(),
   peopleOptions: vi.fn(),
   deleteRun: vi.fn(),
   commandRun: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('@/api/payroll', () => ({
         offset: page?.offset ?? 0,
       })),
     run: m.runDetail,
+    runHistory: m.runHistory,
     peopleOptions: m.peopleOptions,
     deleteRun: m.deleteRun,
     commandRun: m.commandRun,
@@ -105,6 +107,7 @@ describe('PayrollRuns', () => {
     m.runs.mockResolvedValue([run()])
     m.total.mockReturnValue(undefined)
     m.runDetail.mockResolvedValue(run())
+    m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
     m.peopleOptions.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
     m.commandRun.mockResolvedValue({ outcome: null })
@@ -354,6 +357,115 @@ describe('PayrollRuns', () => {
     await flushPromises()
 
     expect(m.runDetail).toHaveBeenCalledWith(15)
+  })
+
+  it('loads revision history lazily and shows the audit trail with a safe total diff', async () => {
+    m.runs.mockResolvedValue([run({
+      revision_id: 10,
+      revision_no: 2,
+      revision_kind: 'correction',
+      revision_status: 'approved',
+      result_snapshot: { totals: { cash_payable_minor: 120_000 } },
+    })])
+    m.runHistory.mockResolvedValue({
+      run_id: 15,
+      revisions: [
+        {
+          id: 9,
+          revision_no: 1,
+          previous_revision_id: null,
+          revision_kind: 'regular',
+          status: 'approved',
+          created_at: '2026-08-20 09:00:00',
+          calculated_at: '2026-08-20 09:10:00',
+          reviewed_at: '2026-08-20 09:20:00',
+          approved_at: '2026-08-20 09:30:00',
+          ruleset_manifest_hash: 'rules-a',
+          input_snapshot_hash: 'input-a',
+          result_snapshot_hash: 'result-a',
+          totals: {
+            cash_payable_minor: 100_000,
+            enforcement_withheld_minor: 0,
+            payable_after_enforcement_minor: 100_000,
+          },
+          diff_from_previous: null,
+        },
+        {
+          id: 10,
+          revision_no: 2,
+          previous_revision_id: 9,
+          revision_kind: 'correction',
+          status: 'approved',
+          created_at: '2026-08-21 09:00:00',
+          calculated_at: '2026-08-21 09:10:00',
+          reviewed_at: '2026-08-21 09:20:00',
+          approved_at: '2026-08-21 09:30:00',
+          ruleset_manifest_hash: 'rules-a',
+          input_snapshot_hash: 'input-b',
+          result_snapshot_hash: 'result-b',
+          totals: {
+            cash_payable_minor: 120_000,
+            enforcement_withheld_minor: 0,
+            payable_after_enforcement_minor: 120_000,
+          },
+          diff_from_previous: {
+            input_changed: true,
+            ruleset_changed: false,
+            result_changed: true,
+            totals: {
+              cash_payable_minor: { before: 100_000, after: 120_000, delta: 20_000 },
+            },
+          },
+        },
+      ],
+      events: [{
+        id: 101,
+        revision_id: 10,
+        event_type: 'approve',
+        from_status: 'reviewed',
+        to_status: 'approved',
+        reason: 'Oprava syntetického vstupu.',
+        actor_name: 'Syntetická účetní',
+        created_at: '2026-08-21 09:30:00',
+      }],
+    })
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(m.runHistory).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="payroll-run-15-history-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(m.runHistory).toHaveBeenCalledWith(15)
+    const history = wrapper.get('[data-testid="payroll-run-15-history"]')
+    expect(history.text()).toContain('payroll.runs.history.revision_label')
+    expect(history.text()).toContain('payroll.runs.history.input_changed')
+    expect(history.text()).toContain('payroll.runs.history.ruleset_unchanged')
+    expect(history.text()).toContain('payroll.runs.history.actor')
+    expect(history.text()).toContain('Oprava syntetického vstupu.')
+    expect(history.html()).not.toContain('input_snapshot')
+    expect(history.html()).not.toContain('result_snapshot')
+  })
+
+  it('keeps a failed history load distinct from an empty audit trail and can retry', async () => {
+    m.runHistory.mockRejectedValueOnce(new Error('network'))
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-history-toggle"]').trigger('click')
+    await flushPromises()
+
+    const failed = wrapper.get('[data-testid="payroll-run-15-history-failed"]')
+    expect(failed.text()).toContain('payroll.runs.history.load_failed')
+    expect(failed.text()).not.toContain('payroll.runs.history.empty')
+
+    m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
+    await wrapper.get('[data-testid="payroll-run-15-history-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(m.runHistory).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('payroll.runs.history.empty')
   })
 
   /*

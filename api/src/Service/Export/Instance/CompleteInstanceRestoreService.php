@@ -19,6 +19,7 @@ final class CompleteInstanceRestoreService
     /** @var array<string,list<string>> potomek => rodiče ověřované triggerem bez FK */
     private const TRIGGER_DEPENDENCIES = [
         'payroll_payment_liabilities' => ['payroll_run_persons'],
+        'payroll_document_batch_items' => ['payroll_run_persons'],
     ];
 
     public function __construct(

@@ -8,7 +8,8 @@ use JsonSerializable;
 use MyInvoice\Service\Payroll\Calculation\CalculationStep;
 
 /**
- * Mezikroky (`standardContributionStep`, `minimumTopUpStep`) tu nejsou pro ozdobu:
+ * Mezikroky (`standardContributionStep`, `minimumTopUpStep`,
+ * `minimumContributionStep`) tu nejsou pro ozdobu:
  * bez nich zůstane po výpočtu jen výsledná částka a sazba ani způsob zaokrouhlení
  * se z uloženého výsledku už nedají doložit. Účetní pak nemá čím obhájit, proč
  * systém spočítal zrovna tolik. Kroky vznikají v `MonthlyHealthInsuranceCalculator`
@@ -64,6 +65,7 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
         public ?CalculationStep $minimumTopUpStep = null,
         public HealthMinimumTopUpResponsibilitySource $topUpResponsibilitySource =
             HealthMinimumTopUpResponsibilitySource::Declared,
+        public ?CalculationStep $minimumContributionStep = null,
     ) {}
 
     /** @return array<string,mixed> */
@@ -113,6 +115,7 @@ final readonly class HealthPersonMonthResult implements JsonSerializable
             'total_contribution_minor_units' => $this->totalContributionMinorUnits,
             'standard_contribution_step' => $this->standardContributionStep?->jsonSerialize(),
             'minimum_top_up_step' => $this->minimumTopUpStep?->jsonSerialize(),
+            'minimum_contribution_step' => $this->minimumContributionStep?->jsonSerialize(),
             'relationships' => array_map(
                 static fn (HealthRelationshipResult $relationship): array =>
                     $relationship->jsonSerialize(),

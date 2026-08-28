@@ -68,6 +68,8 @@ use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
 use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
+use MyInvoice\Action\Payroll\PayrollAnnualReportAction;
+use MyInvoice\Action\Payroll\PayrollYearCloseAction;
 use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
@@ -83,8 +85,14 @@ use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
+use MyInvoice\Action\Payroll\PayrollEnforcementFactsAction;
+use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
+use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
+use MyInvoice\Action\Payroll\PayrollOperationalReconciliationAction;
+use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
@@ -113,6 +121,7 @@ use MyInvoice\Action\Payroll\PayrollPeriodExportAction;
 use MyInvoice\Action\Payroll\PayrollRiskySavingsAction;
 use MyInvoice\Action\Payroll\PayrollPayoutRulesAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
+use MyInvoice\Action\Payroll\PayrollForeignPermitAction;
 use MyInvoice\Action\Payroll\PayrollPersonProfileAction;
 use MyInvoice\Action\Payroll\PayrollPersonQuickEditAction;
 use MyInvoice\Action\Payroll\PayrollOpeningBalanceAction;
@@ -132,6 +141,7 @@ use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionInboxAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionOverviewAction;
+use MyInvoice\Action\Payroll\PayrollStatutoryObligationAction;
 use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Action\Payroll\PayrollTravelAction;
 use MyInvoice\Action\Settings\SignatureDocumentSelectionAction;
@@ -763,10 +773,22 @@ final class Routes
                 [PayrollDeductionAgreementAction::class, 'transition'],
             );
             $g->get('/enforcement/cases', [PayrollEnforcementAction::class, 'list']);
+            $g->get('/enforcement/cooperation/candidates', [PayrollXmlzamCooperationAction::class, 'candidates']);
+            $g->get('/enforcement/cooperation/requests/{id:[0-9]+}', [PayrollXmlzamCooperationAction::class, 'detail']);
+            $g->post('/enforcement/cooperation/requests/import', [PayrollXmlzamCooperationAction::class, 'import']);
+            $g->post('/enforcement/cooperation/requests/{id:[0-9]+}/preview', [PayrollXmlzamCooperationAction::class, 'preview']);
+            $g->post('/enforcement/cooperation/requests/{id:[0-9]+}/responses', [PayrollXmlzamCooperationAction::class, 'freeze']);
+            $g->post('/enforcement/cooperation/responses/{id:[0-9]+}/enqueue', [PayrollXmlzamCooperationAction::class, 'enqueue']);
             $g->post('/enforcement/cases', [PayrollEnforcementAction::class, 'create']);
             $g->get('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'detail']);
+            $g->get('/enforcement/cases/{id:[0-9]+}/parties', [PayrollEnforcementFactsAction::class, 'parties']);
+            $g->post('/enforcement/cases/{id:[0-9]+}/parties', [PayrollEnforcementFactsAction::class, 'appendParty']);
+            $g->get('/enforcement/cases/{id:[0-9]+}/recipient-instructions', [PayrollEnforcementFactsAction::class, 'recipientInstructions']);
+            $g->post('/enforcement/cases/{id:[0-9]+}/recipient-instructions', [PayrollEnforcementFactsAction::class, 'appendRecipientInstruction']);
             $g->delete('/enforcement/cases/{id:[0-9]+}', [PayrollEnforcementAction::class, 'delete']);
             $g->post('/enforcement/cases/{id:[0-9]+}/claims', [PayrollEnforcementAction::class, 'addClaim']);
+            $g->get('/enforcement/cases/{id:[0-9]+}/claims/{claimId:[0-9]+}/breakdowns', [PayrollEnforcementFactsAction::class, 'breakdowns']);
+            $g->post('/enforcement/cases/{id:[0-9]+}/claims/{claimId:[0-9]+}/breakdowns', [PayrollEnforcementFactsAction::class, 'appendBreakdown']);
             $g->put(
                 '/enforcement/cases/{id:[0-9]+}/claims/{claimId:[0-9]+}',
                 [PayrollEnforcementAction::class, 'updateClaim'],
@@ -787,6 +809,22 @@ final class Routes
             $g->get(
                 '/enforcement/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
                 [PayrollEnforcementAction::class, 'monthEvidence'],
+            );
+            $g->get(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/options',
+                [PayrollEnforcementAction::class, 'insolvencyOptions'],
+            );
+            $g->get(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'monthEvidence'],
+            );
+            $g->put(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/evidence',
+                [PayrollEnforcementAction::class, 'saveMonthEvidence'],
+            );
+            $g->post(
+                '/insolvency/people/{employeeId:[0-9]+}/month/{period:[0-9]{4}-[0-9]{2}}/commands/cancel',
+                [PayrollEnforcementAction::class, 'cancelInsolvency'],
             );
             $g->post(
                 '/enforcement/people/{employeeId:[0-9]+}/dependants',
@@ -838,6 +876,7 @@ final class Routes
             // Legislativní rulesety — globální číselník (default v kódu + DB override),
             // konkrétnější cesty musí být před `/rulesets/{rulesetId}`.
             $g->get('/rulesets', [PayrollRulesetAction::class, 'list']);
+            $g->get('/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}/impact-preview', [PayrollRulesetAction::class, 'impactPreview']);
             $g->get('/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}/diff', [PayrollRulesetAction::class, 'diff']);
             $g->post(
                 '/rulesets/{rulesetId:[A-Za-z0-9][A-Za-z0-9._-]{0,159}}/commands/{command:review|approve|activate|supersede}',
@@ -892,6 +931,13 @@ final class Routes
                 [PayrollPostingReconciliationAction::class, 'get'],
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
+            $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
+            // Roční uzávěrka mzdových běhů je úmyslně samostatná od ročního
+            // zúčtování daně zaměstnanců; všechna mutace jsou session-only.
+            $g->get('/year-close/{year:[0-9]{4}}', [PayrollYearCloseAction::class, 'get']);
+            $g->post('/year-close/{year:[0-9]{4}}/close', [PayrollYearCloseAction::class, 'close']);
+            $g->post('/year-close/{year:[0-9]{4}}/reopen', [PayrollYearCloseAction::class, 'reopen']);
+            $g->get('/runs/{id:[0-9]+}/history', [PayrollRunsAction::class, 'history']);
             // Detail existuje kvůli tomu, aby seznam nemusel posílat celý
             // výsledkový snapshot každého běhu — ten se dotahuje na vyžádání.
             $g->get('/runs/{id:[0-9]+}', [PayrollRunsAction::class, 'detail']);
@@ -920,6 +966,14 @@ final class Routes
             $g->post(
                 '/exports/annual/{year:[0-9]{4}}',
                 [PayrollPeriodExportAction::class, 'createAnnual'],
+            );
+            $g->get(
+                '/exports/jobs/{jobId:[0-9]+}',
+                [PayrollPeriodExportAction::class, 'status'],
+            );
+            $g->post(
+                '/exports/jobs/{jobId:[0-9]+}/download-grants',
+                [PayrollPeriodExportAction::class, 'grantJob'],
             );
             $g->post(
                 '/exports/{exportId:[0-9]+}/download-grants',
@@ -974,6 +1028,18 @@ final class Routes
                 [PayrollDocumentAction::class, 'generateBatch'],
             );
             $g->get(
+                '/documents/batches/{batchId:[0-9]+}',
+                [PayrollDocumentAction::class, 'batchDetail'],
+            );
+            $g->get(
+                '/documents/batches/{batchId:[0-9]+}/items',
+                [PayrollDocumentAction::class, 'batchItems'],
+            );
+            $g->post(
+                '/documents/batches/{batchId:[0-9]+}/items/{itemId:[0-9]+}/retry',
+                [PayrollDocumentAction::class, 'retryBatchItem'],
+            );
+            $g->get(
                 '/employments/{id:[0-9]+}/documents/exit',
                 [PayrollEmploymentExitDocumentAction::class, 'list'],
             );
@@ -988,6 +1054,14 @@ final class Routes
             $g->get(
                 '/documents/{documentId:[0-9]+}/download',
                 [PayrollDocumentAction::class, 'download'],
+            );
+            $g->get(
+                '/documents/{documentId:[0-9]+}/delivery-events',
+                [PayrollDocumentAction::class, 'deliveryEvents'],
+            );
+            $g->post(
+                '/documents/{documentId:[0-9]+}/delivery-events',
+                [PayrollDocumentAction::class, 'recordDeliveryEvent'],
             );
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->post('/people', [PayrollPeopleAction::class, 'create']);
@@ -1016,6 +1090,7 @@ final class Routes
             $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
             $g->patch('/employments/{id:[0-9]+}/code', [PayrollEmploymentAction::class, 'rename']);
+            $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',
                 [PayrollEmploymentAction::class, 'transition'],
@@ -1061,6 +1136,14 @@ final class Routes
             $g->put(
                 '/people/{id:[0-9]+}/statutory-evidence',
                 [PayrollPersonStatutoryEvidenceAction::class, 'save'],
+            );
+            $g->get(
+                '/people/{id:[0-9]+}/foreign-permits',
+                [PayrollForeignPermitAction::class, 'show'],
+            );
+            $g->post(
+                '/people/{id:[0-9]+}/foreign-permits',
+                [PayrollForeignPermitAction::class, 'create'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/statutory-openings',
@@ -1118,6 +1201,27 @@ final class Routes
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
             );
+            $g->get('/operational-health', PayrollOperationalHealthAction::class);
+            $g->get(
+                '/operational-reconciliation',
+                [PayrollOperationalReconciliationAction::class, 'get'],
+            );
+            $g->post(
+                '/operational-reconciliation/sweep',
+                [PayrollOperationalReconciliationAction::class, 'sweep'],
+            );
+            $g->get(
+                '/operational-reconciliation/issues/{issueId:[0-9]+}',
+                [PayrollOperationalReconciliationAction::class, 'detail'],
+            );
+            $g->get(
+                '/submissions/statutory-obligations',
+                [PayrollStatutoryObligationAction::class, 'overview'],
+            );
+            $g->post(
+                '/submissions/statutory-obligations/evidence',
+                [PayrollStatutoryObligationAction::class, 'record'],
+            );
             $g->get(
                 '/submissions/inbox',
                 [PayrollSubmissionInboxAction::class, 'list'],
@@ -1150,6 +1254,14 @@ final class Routes
                 '/submissions/jmhz-ordinary-evidence/{revisionId:[0-9]+}/{employmentId:[0-9]+}',
                 [PayrollJmhzOrdinaryEvidenceAction::class, 'confirm'],
             );
+            $g->get(
+                '/submissions/jmhz-employer-annual-evidence/{reportYear:[0-9]{4}}',
+                [PayrollJmhzEmployerAnnualEvidenceAction::class, 'get'],
+            );
+            $g->post(
+                '/submissions/jmhz-employer-annual-evidence/{reportYear:[0-9]{4}}',
+                [PayrollJmhzEmployerAnnualEvidenceAction::class, 'save'],
+            );
             $g->post(
                 '/submissions/jmhz-preparation/{revisionId:[0-9]+}',
                 PayrollJmhzPreparationAction::class,
@@ -1173,6 +1285,10 @@ final class Routes
                 '/submissions/eldp',
                 [PayrollEldpAction::class, 'prepare'],
             );
+            $g->post(
+                '/submissions/eldp/{statementId:[0-9]+}/manual-completion',
+                [PayrollEldpAction::class, 'complete'],
+            );
             // Přihlášení pracovního vztahu u ČSSZ. Cesta nenese kód formuláře:
             // PREZEC vs. REGZEC rozhoduje resolver z faktů, ne volající.
             $g->get(
@@ -1182,6 +1298,26 @@ final class Routes
             $g->post(
                 '/submissions/registration/{employmentId:[0-9]+}',
                 [PayrollRegistrationAction::class, 'prepare'],
+            );
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/a1-profile',
+                [PayrollRegistrationAction::class, 'a1Profile'],
+            );
+            $g->put(
+                '/submissions/registration/{employmentId:[0-9]+}/a1-profile',
+                [PayrollRegistrationAction::class, 'saveA1Profile'],
+            );
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/events',
+                [PayrollRegistrationAction::class, 'events'],
+            );
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/a2-evidence-candidates',
+                [PayrollRegistrationAction::class, 'a2EvidenceCandidates'],
+            );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/events',
+                [PayrollRegistrationAction::class, 'approveEvent'],
             );
             $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
@@ -1383,13 +1519,11 @@ final class Routes
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/reopen', [PayrollTimeAction::class, 'reopen']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
-            $g->post(
-                '/settings/activation/production-qualification',
-                [PayrollActivationAction::class, 'qualify'],
-            );
             $g->get('/settings/account-options', PayrollAccountOptionsAction::class);
             $g->get('/settings/employer', [PayrollEmployerSettingsAction::class, 'get']);
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
+            $g->get('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'list']);
+            $g->post('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'create']);
             $g->get('/settings/policies', [PayrollEmployerPolicyAction::class, 'list']);
             $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
             $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);
@@ -2112,6 +2246,8 @@ final class Routes
         $app->get    ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'mobileKeyProfile']);
         $app->post   ('/api/settings/databox/mobile-key',  [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'saveMobileKeyProfile']);
         $app->delete ('/api/settings/databox/mobile-key/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'deleteMobileKeyProfile']);
+        $app->get    ('/api/settings/databox/inbox-storage', [\MyInvoice\Action\Submission\SubmissionInboxStorageSettingsAction::class, 'list']);
+        $app->put    ('/api/settings/databox/inbox-storage/{environment:production|test}', [\MyInvoice\Action\Submission\SubmissionInboxStorageSettingsAction::class, 'save']);
         $app->delete ('/api/settings/databox/{environment:production|test}', [\MyInvoice\Action\Submission\DataBoxSettingsAction::class, 'delete']);
         // Registrace odesílací brány je věc PROVOZOVATELE, ne zákazníka:
         // certifikát je jeden pro celou službu a zákazník k odeslání přes bránu
@@ -2159,6 +2295,9 @@ final class Routes
         $app->post   ('/api/submissions/inbox/sms/start', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsStart']);
         $app->post   ('/api/submissions/inbox/sms/complete', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'smsComplete']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/classify', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'reclassify']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/hide', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'hide']);
+        $app->post   ('/api/submissions/inbox/{id:[0-9]+}/restore', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'restore']);
+        $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);
         // Doručení a jeho následky. `delivery/refresh` nesahá na síť — jen znovu
         // posoudí už stažené zprávy, protože běžící lhůta fikce (§ 17 odst. 4
         // zák. 300/2008 Sb.) se mění pouhým během času.

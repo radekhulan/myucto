@@ -102,19 +102,26 @@ final class HealthInsurerChannelCatalog
                 insurerCode: '111',
                 kind: HealthInsurerChannelKind::OwnPortal,
                 portalUrl: 'https://point.vzp.cz',
-                isdsAttachmentRules: [self::pdfSince('2026-01-01')],
+                isdsAttachmentRules: [self::pdfBetween(
+                    '2026-01-01',
+                    '2026-12-31',
+                )],
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_TRANSPORT_UNDOCUMENTED,
                 note: 'VZP zveřejňuje aktuální formulář i XDP šablonu pro '
                     . 'hromadné vyplnění. Pro datovou schránku MyÚčto '
-                    . 'připraví strojově čitelné PDF se stejnými údaji.',
+                    . 'vyplní přímo připnutý oficiální PDF formulář a před '
+                    . 'odesláním ověří jeho integritu i hodnoty polí.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '201',
                 kind: HealthInsurerChannelKind::SharedPortal,
                 portalUrl: 'https://portal.vozp.cz',
-                isdsAttachmentRules: [self::pdfSince('2026-01-01')],
+                isdsAttachmentRules: [self::pdfBetween(
+                    '2026-01-01',
+                    '2026-12-31',
+                )],
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_PORTAL_GATEWAY_ON_REQUEST,
@@ -148,7 +155,10 @@ final class HealthInsurerChannelCatalog
                 insurerCode: '209',
                 kind: HealthInsurerChannelKind::SharedPortal,
                 portalUrl: 'https://portal.zpskoda.cz',
-                isdsAttachmentRules: [self::pdfSince('2026-01-01')],
+                isdsAttachmentRules: [self::pdfBetween(
+                    '2026-01-01',
+                    '2026-12-31',
+                )],
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_SHARED_MESSAGE_UNCONFIRMED,
@@ -163,9 +173,9 @@ final class HealthInsurerChannelCatalog
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode: self::REASON_B2B_NOT_PUBLISHED,
                 note: 'ZP MV přijímá přes datovou schránku strojově čitelné '
-                    . 'PDF i po spuštění nového XML/B2B rozhraní plánovaného '
-                    . 'od 1. 10. 2026. MyÚčto proto ISDS automaticky na XML '
-                    . 'nepřepíná; B2B zůstává samostatný kanál.',
+                    . 'PDF i po spuštění nového XML/B2B rozhraní. MyÚčto '
+                    . 'proto ISDS automaticky na XML nepřepíná; B2B zůstává '
+                    . 'samostatný kanál.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '213',
@@ -176,7 +186,7 @@ final class HealthInsurerChannelCatalog
                 undocumentedReasonCode:
                     self::REASON_SHARED_MESSAGE_UNCONFIRMED,
                 note: 'Přehled lze podat Portálem ZP, aplikací my213 nebo '
-                    . 'datovou schránkou ve formátu XML nebo vytěžitelného PDF.',
+                    . 'datovou schránkou ve formátu XML.',
             ),
         ];
 
@@ -204,6 +214,16 @@ final class HealthInsurerChannelCatalog
         return [
             'from' => $from,
             'to' => null,
+            'format' => HealthInsurerIsdsAttachmentFormat::TextPdf,
+        ];
+    }
+
+    /** @return array{from:string,to:string,format:HealthInsurerIsdsAttachmentFormat} */
+    private static function pdfBetween(string $from, string $to): array
+    {
+        return [
+            'from' => $from,
+            'to' => $to,
             'format' => HealthInsurerIsdsAttachmentFormat::TextPdf,
         ];
     }

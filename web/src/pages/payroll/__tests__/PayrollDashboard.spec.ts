@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   capabilities: vi.fn(),
   runs: vi.fn(),
   payrollSetupCheck: vi.fn(),
+  isSuperadmin: { value: false },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/api/payroll', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: () => true,
+    get isSuperadmin() { return m.isSuperadmin.value },
   }),
 }))
 
@@ -58,9 +60,12 @@ function mountDashboard() {
         ActionBar: actionBarStub,
         PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
         PayrollGuide: { template: '<div data-test="guide-stub" />' },
-        PayrollProductionQualificationPanel: {
-          props: ['state', 'matrixVersion'],
-          template: '<div data-test="qualification-panel-stub" :data-version="matrixVersion" />',
+        PayrollAnnualReportPanel: {
+          props: ['initialYear'],
+          template: '<div data-test="annual-report-panel-stub" :data-year="initialYear" />',
+        },
+        PayrollOperationalHealthPanel: {
+          template: '<div data-test="operational-health-panel-stub" />',
         },
       },
     },
@@ -69,6 +74,7 @@ function mountDashboard() {
 
 describe('PayrollDashboard monthly workspace', () => {
   beforeEach(() => {
+    m.isSuperadmin.value = false
     m.capabilities.mockResolvedValue({
       state: {
         supplier_id: 1,
@@ -90,6 +96,11 @@ describe('PayrollDashboard monthly workspace', () => {
           available: true,
           min_epic: 'MZ01',
         }],
+      },
+      company_capability: {
+        production_ready: true,
+        assessed_from: '2026-01-01',
+        blockers: [],
       },
     })
     m.runs.mockResolvedValue([])
@@ -118,6 +129,47 @@ describe('PayrollDashboard monthly workspace', () => {
     // support matrix. Zaměstnavateli neříká nic a budí dojem nehotového
     // produktu — proto ji vidí jen superadmin.
     expect(wrapper.find('[data-test="support-diagnostics"]').exists()).toBe(false)
+  })
+
+  it('zobrazuje v diagnostické matici jen skutečně dostupné funkce', async () => {
+    m.isSuperadmin.value = true
+    m.capabilities.mockResolvedValue({
+      state: {
+        supplier_id: 1,
+        status: 'active',
+        start_period: '2026-01',
+        row_version: 1,
+        activated_at: null,
+        suspended_at: null,
+        created_at: null,
+        updated_at: null,
+      },
+      support_matrix: {
+        version: '2026-08',
+        supported_years: [2026],
+        employment_types: [],
+        features: [
+          { key: 'ready_feature', status: 'supported', available: true, min_epic: 'MZ-01' },
+          { key: 'planned_feature', status: 'not_supported', available: false, min_epic: 'MZ-99' },
+        ],
+      },
+      company_capability: {
+        production_ready: true,
+        assessed_from: '2026-01-01',
+        blockers: [],
+      },
+      production_release: {
+        released: false,
+      },
+    })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const diagnostics = wrapper.get('[data-test="support-diagnostics"]')
+    expect(diagnostics.text()).toContain('payroll.features.ready_feature')
+    expect(diagnostics.text()).not.toContain('payroll.features.planned_feature')
+    expect(diagnostics.text()).not.toContain('payroll.capabilities.planned')
   })
 
   it('shows the guide and employee cards for the current period', async () => {
@@ -180,11 +232,11 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(wrapper.find('[data-test="setup-blockers"]').exists()).toBe(false)
   })
 
-  it('explains test operation without hiding the monthly workflow', async () => {
+  it('explains the internal test operation without asking the customer for qualification', async () => {
     m.capabilities.mockResolvedValue({
       state: {
         supplier_id: 1,
-        status: 'qualification_required',
+        status: 'active',
         start_period: '2026-01',
         row_version: 2,
         activated_at: null,
@@ -198,13 +250,21 @@ describe('PayrollDashboard monthly workspace', () => {
         employment_types: [],
         features: [],
       },
+      company_capability: {
+        production_ready: true,
+        assessed_from: '2026-01-01',
+        blockers: [],
+      },
+      production_release: {
+        released: false,
+      },
     })
 
     const wrapper = mountDashboard()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="production-qualification-notice"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="qualification-panel-stub"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="production-release-notice"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('payroll.activation.qualification.title')
     expect(wrapper.find('[data-test="monthly-workspace"]').exists()).toBe(true)
   })
 })

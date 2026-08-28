@@ -17,9 +17,19 @@ final class JmhzPreparationSnapshotBuilder
     public const PREVIOUS_V6_BUILDER_VERSION = 'jmhz-preparation-source.v6';
     public const PREVIOUS_V7_BUILDER_VERSION = 'jmhz-preparation-source.v7';
     public const PREVIOUS_V8_BUILDER_VERSION = 'jmhz-preparation-source.v8';
-    public const BUILDER_VERSION = 'jmhz-preparation-source.v9';
+    public const PREVIOUS_V9_BUILDER_VERSION = 'jmhz-preparation-source.v9';
+    public const PREVIOUS_V10_BUILDER_VERSION = 'jmhz-preparation-source.v10';
+    public const BUILDER_VERSION = 'jmhz-preparation-source.v11';
 
-    private ?JmhzScenario1SelectorResolver $scenarioSelector = null;
+    private readonly JmhzOrdinaryEvidenceApplicability $ordinaryEvidenceApplicability;
+    private ?JmhzScenarioSelectorResolver $scenarioSelector = null;
+    private ?JmhzScenarioRequirementSourceCatalog $scenarioRequirements = null;
+
+    public function __construct(?JmhzOrdinaryEvidenceApplicability $ordinaryEvidenceApplicability = null)
+    {
+        $this->ordinaryEvidenceApplicability = $ordinaryEvidenceApplicability
+            ?? new JmhzOrdinaryEvidenceApplicability();
+    }
 
     /**
      * @param array<string,mixed> $source
@@ -35,6 +45,8 @@ final class JmhzPreparationSnapshotBuilder
      *        by víceúčtárenské podání znemožnila.
      * @param array<int,array<string,mixed>>|null $annualEvidenceSources roční
      *        skutečnosti podle `employee_id`, načtené ve stejné transakci
+     * @param array<string,mixed>|null $employerAnnualEvidence prosincová
+     *        neměnná roční evidence zaměstnavatele
      */
     public function build(
         int $supplierId,
@@ -46,6 +58,7 @@ final class JmhzPreparationSnapshotBuilder
         array $eldpSources = [],
         array $ordinaryEvidenceSources = [],
         ?array $annualEvidenceSources = null,
+        ?array $employerAnnualEvidence = null,
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -107,6 +120,7 @@ final class JmhzPreparationSnapshotBuilder
         $normalizedPeople = [];
         $sourceVersions = [];
         $seenEmployments = [];
+        $scenarioSet = [];
         $usedOrdinaryEvidence = [];
         $usedAnnualEvidence = [];
         $annualEvidenceProvided = $annualEvidenceSources !== null;
@@ -168,6 +182,7 @@ final class JmhzPreparationSnapshotBuilder
                 }
                 $term = $entry['term'] ?? null;
                 $scenarioResolution = null;
+                $scenarioKey = null;
                 if (!is_array($term) || array_is_list($term)) {
                     $issues[] = $this->issue('effective_term_missing', 'employment', $employmentId);
                 } else {
@@ -193,15 +208,35 @@ final class JmhzPreparationSnapshotBuilder
                         );
                     } else {
                         $scenarioResolution = $selection['evidence'];
+                        $scenarioKey = $scenarioResolution['scenario_key'] ?? null;
+                        if (!is_string($scenarioKey)) {
+                            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil klíč scénáře.');
+                        }
+                        $scenarioSet[$scenarioKey] = true;
+                        if (!$selection['preparation_supported']) {
+                            $issueCode = $selection['readiness_issue_code'];
+                            if (!is_string($issueCode)) {
+                                throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil readiness blocker.');
+                            }
+                            $issues[] = $this->issue(
+                                $issueCode,
+                                'employment',
+                                $employmentId,
+                                $selection['readiness_attribute_ids'],
+                            );
+                        }
                     }
                 }
                 $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
-                $averageEarning = $this->inspectAverageEarning(
-                    $entry['average_earning'] ?? null,
-                    $employmentId,
-                    $periodStart,
-                    $issues,
-                );
+                $averageEarning = ($scenarioKey === null
+                    || $this->scenarioRequiresAttribute($scenarioKey, '10345'))
+                        ? $this->inspectAverageEarning(
+                            $entry['average_earning'] ?? null,
+                            $employmentId,
+                            $periodStart,
+                            $issues,
+                        )
+                        : null;
                 $workSummary = is_array($entry['time_month'] ?? null)
                     ? ($entry['time_month']['jmhz_work_summary'] ?? null)
                     : null;
@@ -234,30 +269,31 @@ final class JmhzPreparationSnapshotBuilder
                 // nález na revizi — účetní tak ví, komu ji má doplnit.
                 $ordinary = $ordinaryEvidenceSources[$employmentId] ?? null;
                 if (!is_array($ordinary)) {
-                    $issues[] = $this->issue(
-                        'jmhz_ordinary_evidence_missing',
-                        'employment',
-                        $employmentId,
-                        [
-                            '10116', '10546', '10408', '10409', '10410',
-                            '10347', '10348', '10349', '10270', '10271', '10272',
-                        ],
-                    );
+                    if (!$this->hasSpecificOrdinaryEvidenceIssue($sourceIssues, $employmentId)) {
+                        $issues[] = $this->issue(
+                            'jmhz_ordinary_evidence_missing',
+                            'employment',
+                            $employmentId,
+                            [
+                                '10116', '10546', '10408', '10409', '10410',
+                                '10347', '10348', '10349', '10270', '10271', '10272',
+                            ],
+                        );
+                    }
                     $ordinary = null;
                 } else {
-                    $this->assertOrdinaryEvidence(
-                        $ordinary,
-                        $supplierId,
-                        $runId,
-                        $revisionId,
-                        $revisionNo,
-                        $periodStart,
-                        $periodEnd,
-                        $revision,
-                        $employeeId,
-                        $employmentId,
-                        $term,
-                    );
+                    try {
+                        $this->ordinaryEvidenceApplicability->assertApplicable(
+                            $ordinary,
+                            $supplierId,
+                            $revision,
+                            $employeeId,
+                            $employmentId,
+                            $term,
+                        );
+                    } catch (JmhzOrdinaryEvidenceApplicabilityException $exception) {
+                        $this->invalid($exception->validationCode, $exception->getMessage());
+                    }
                     $usedOrdinaryEvidence[$employmentId] = $ordinary;
                 }
                 $componentMappings = [];
@@ -520,6 +556,57 @@ final class JmhzPreparationSnapshotBuilder
                     $evidence['withholding_certificate']['snapshot_hash'] ?? null,
             ];
         }
+        $employerAnnualVersion = null;
+        $isDecember = substr($periodStart, 5, 2) === '12';
+        if ($isDecember && $employerAnnualEvidence === null) {
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_collective_agreement_missing',
+                'supplier',
+                $supplierId,
+                ['10214'],
+            );
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_ownership_missing',
+                'supplier',
+                $supplierId,
+                ['10220'],
+            );
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_ozp_summary_missing',
+                'supplier',
+                $supplierId,
+                ['10038', '10039', '10452'],
+            );
+        } elseif ($employerAnnualEvidence !== null) {
+            if (($employerAnnualEvidence['schema_reference'] ?? null)
+                    !== JmhzEmployerAnnualEvidenceService::SCHEMA_REFERENCE
+                || ($employerAnnualEvidence['report_year'] ?? null)
+                    !== (int) substr($periodStart, 0, 4)
+                || ($employerAnnualEvidence['spec_manifest_sha256'] ?? null)
+                    !== JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256
+            ) {
+                $this->invalid(
+                    'jmhz_employer_annual_evidence_scope_mismatch',
+                    'Roční evidence zaměstnavatele neodpovídá připravovanému období.',
+                );
+            }
+            $employerAnnualVersion = [
+                'id' => $this->positiveInt(
+                    $employerAnnualEvidence['id'] ?? null,
+                    'employer_annual_evidence.id',
+                ),
+                'report_year' => $employerAnnualEvidence['report_year'],
+                'revision_no' => $this->positiveInt(
+                    $employerAnnualEvidence['revision_no'] ?? null,
+                    'employer_annual_evidence.revision_no',
+                ),
+                'payload_sha256' => $this->hash(
+                    $employerAnnualEvidence['payload_sha256'] ?? null,
+                    'employer_annual_evidence.payload_sha256',
+                ),
+                'spec_manifest_sha256' => $employerAnnualEvidence['spec_manifest_sha256'],
+            ];
+        }
         $registrations = $this->officeRegistrations(
             $source['offices'] ?? null,
             $normalizedPeople,
@@ -532,6 +619,8 @@ final class JmhzPreparationSnapshotBuilder
                 : null;
 
         $issues = $this->normalizeIssues($issues);
+        $scenarioSet = array_keys($scenarioSet);
+        sort($scenarioSet, SORT_STRING);
         $payload = [
             'schema_reference' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,
             'builder_version' => self::BUILDER_VERSION,
@@ -543,7 +632,7 @@ final class JmhzPreparationSnapshotBuilder
                 'revision_no' => $revisionNo,
                 'period_start' => $periodStart,
                 'period_end' => $periodEnd,
-                'scenario_key' => 'scenario_1',
+                'scenario_set' => $scenarioSet,
             ],
             'specification' => [
                 'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
@@ -570,12 +659,14 @@ final class JmhzPreparationSnapshotBuilder
             ],
             'people' => $normalizedPeople,
             'ordinary_evidence' => $ordinaryPayloads,
+            'employer_annual_evidence' => $employerAnnualEvidence,
             'source_versions' => [
                 'office_id' => is_array($office) ? $office['id'] : null,
                 'office_ids' => array_column($registrations, 'id'),
                 'employments' => $sourceVersions,
                 'ordinary_evidence' => $ordinaryVersions,
                 'annual_evidence' => $annualVersions,
+                'employer_annual_evidence' => $employerAnnualVersion,
             ],
             'readiness_issue_codes' => array_column($issues, 'code'),
             'readiness_issues' => $issues,
@@ -616,14 +707,11 @@ final class JmhzPreparationSnapshotBuilder
         int $runId,
         array &$issues,
     ): array {
-        $known = [];
-        foreach ($this->rows($catalog ?? [], 'offices') as $office) {
-            $id = $office['id'] ?? null;
-            if (is_int($id) && $id > 0) {
-                $known[$id] = $office;
-            }
-        }
-        $officeIds = [];
+        // The live office catalogue is deliberately not a source of a VS here.
+        // A locked payroll revision carries the resolved immutable registration.
+        unset($catalog);
+        $registrations = [];
+        $registrationIdentities = [];
         foreach ($people as $person) {
             foreach ($this->rows(
                 $person['employments'] ?? null,
@@ -643,218 +731,81 @@ final class JmhzPreparationSnapshotBuilder
                     );
                     continue;
                 }
-                $officeIds[$officeId] = true;
+                $registration = is_array($source) ? ($source['office_registration'] ?? null) : null;
+                if (!is_array($registration)) {
+                    $issues[] = $this->issue(
+                        'office_registration_history_missing',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $versionId = $registration['id'] ?? null;
+                $hash = $registration['sha256'] ?? null;
+                $symbol = $registration['social_security_variable_symbol'] ?? null;
+                $identityValid = is_int($versionId) && $versionId > 0
+                    && is_string($hash) && preg_match('/^[a-f0-9]{64}$/D', $hash) === 1;
+                if (!$identityValid) {
+                    $issues[] = $this->issue(
+                        'office_registration_history_missing',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $identity = ['version_id' => $versionId, 'sha256' => $hash];
+                if (isset($registrationIdentities[$officeId])
+                    && $registrationIdentities[$officeId] !== $identity) {
+                    $issues[] = $this->issue(
+                        'office_registration_snapshot_mismatch',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $registrationIdentities[$officeId] = $identity;
+                $valid = is_string($symbol) && preg_match('/^[0-9]{10}$/D', $symbol) === 1;
+                if (!$valid) {
+                    $issues[] = $this->issue(
+                        'social_security_variable_symbol_missing',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                }
+                $frozen = [
+                    'id' => $officeId,
+                    'code' => is_string($registration['office_code'] ?? null) ? $registration['office_code'] : '',
+                    'name' => is_string($registration['office_name'] ?? null) ? $registration['office_name'] : '',
+                    'social_security_variable_symbol' => $valid ? $symbol : null,
+                ];
+                if (isset($registrations[$officeId])
+                    && $registrations[$officeId]['social_security_variable_symbol'] !== $symbol) {
+                    $issues[] = $this->issue(
+                        'office_registration_snapshot_mismatch',
+                        'office',
+                        $officeId,
+                        ['10221'],
+                    );
+                    continue;
+                }
+                $registrations[$officeId] = $frozen;
             }
         }
-        $ids = array_keys($officeIds);
-        sort($ids, SORT_NUMERIC);
-        if ($ids === []) {
+        if ($registrations === []) {
             $issues[] = $this->issue(
                 'social_security_variable_symbol_missing',
                 'run',
                 $runId,
                 ['10221'],
             );
+        }
+        ksort($registrations, SORT_NUMERIC);
 
-            return [];
-        }
-        $registrations = [];
-        foreach ($ids as $officeId) {
-            $office = $known[$officeId] ?? null;
-            if ($office === null) {
-                $issues[] = $this->issue(
-                    'jmhz_social_office_unknown',
-                    'office',
-                    $officeId,
-                    ['10221'],
-                );
-                continue;
-            }
-            $symbol = $office['social_security_variable_symbol'] ?? null;
-            // Deset číslic je totéž, co vynucuje serializér u atributu 10221;
-            // kratší hodnota by prošla přípravou a spadla až na XSD.
-            $valid = is_string($symbol)
-                && preg_match('/^[0-9]{10}$/D', $symbol) === 1;
-            if (!$valid) {
-                $issues[] = $this->issue(
-                    'social_security_variable_symbol_missing',
-                    'office',
-                    $officeId,
-                    ['10221'],
-                );
-            }
-            $registrations[] = [
-                'id' => $officeId,
-                'code' => is_string($office['code'] ?? null) ? $office['code'] : '',
-                'name' => is_string($office['name'] ?? null) ? $office['name'] : '',
-                'social_security_variable_symbol' => $valid ? (string) $symbol : null,
-            ];
-        }
-
-        return $registrations;
-    }
-
-    /**
-     * @param array<string,mixed> $evidence
-     * @param array<string,mixed> $revision
-     * @param array<string,mixed> $term
-     */
-    private function assertOrdinaryEvidence(
-        array $evidence,
-        int $supplierId,
-        int $runId,
-        int $revisionId,
-        int $revisionNo,
-        string $periodStart,
-        string $periodEnd,
-        array $revision,
-        int $employeeId,
-        int $employmentId,
-        array $term,
-    ): void {
-        $this->positiveInt($evidence['id'] ?? null, 'ordinary_evidence.id');
-        $this->hash(
-            $evidence['source_manifest_sha256'] ?? null,
-            'ordinary_evidence.source_manifest_sha256',
-        );
-        $this->hash(
-            $evidence['snapshot_fingerprint'] ?? null,
-            'ordinary_evidence.snapshot_fingerprint',
-        );
-        $payload = $this->object(
-            $evidence['payload'] ?? null,
-            'ordinary_evidence.payload',
-        );
-        $scope = $this->object($payload['scope'] ?? null, 'ordinary_evidence.scope');
-        if (($payload['schema_reference'] ?? null)
-                !== JmhzOrdinaryEvidenceSnapshot::SCHEMA_REFERENCE
-            || ($payload['builder_version'] ?? null)
-                !== JmhzOrdinaryEvidenceBuilder::BUILDER_VERSION
-            || ($scope['supplier_id'] ?? null) !== $supplierId
-            || ($scope['run_id'] ?? null) !== $runId
-            || ($scope['source_revision_id'] ?? null) !== $revisionId
-            || ($scope['revision_no'] ?? null) !== $revisionNo
-            || ($scope['period_start'] ?? null) !== $periodStart
-            || ($scope['period_end'] ?? null) !== $periodEnd
-            || ($scope['scenario_key'] ?? null) !== 'scenario_1'
-        ) {
-            $this->invalid(
-                'jmhz_ordinary_evidence_scope_mismatch',
-                'Ordinary evidence neodpovida pripravovane mzdove revizi.',
-            );
-        }
-        if (($scope['employee_id'] ?? null) !== $employeeId
-            || ($scope['employment_id'] ?? null) !== $employmentId
-        ) {
-            $this->invalid(
-                'jmhz_ordinary_evidence_scope_mismatch',
-                'Ordinary evidence neodpovida zmrazene osobe a pracovnimu vztahu.',
-            );
-        }
-        $specification = $this->object(
-            $payload['specification'] ?? null,
-            'ordinary_evidence.specification',
-        );
-        if (($specification['package_key'] ?? null)
-                !== JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY
-            || ($specification['spec_manifest_sha256'] ?? null)
-                !== JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256
-            || ($specification['scenario_catalog_key'] ?? null)
-                !== JmhzScenarioRequirementSourceCatalog::CATALOG_KEY
-            || ($specification['scenario_manifest_sha256'] ?? null)
-                !== JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256
-            || ($specification['control_catalog_key'] ?? null)
-                !== JmhzControlSourceCatalog::CATALOG_KEY
-            || ($specification['control_manifest_sha256'] ?? null)
-                !== JmhzControlSourceCatalog::MANIFEST_SHA256
-        ) {
-            $this->invalid(
-                'jmhz_ordinary_evidence_specification_mismatch',
-                'Ordinary evidence neodpovida pripnute specifikaci JMHZ.',
-            );
-        }
-        $sourceRevision = $this->object(
-            $payload['source_revision'] ?? null,
-            'ordinary_evidence.source_revision',
-        );
-        foreach ([
-            'input_snapshot_hash',
-            'result_snapshot_hash',
-            'ruleset_manifest_hash',
-        ] as $field) {
-            if (($sourceRevision[$field] ?? null) !== ($revision[$field] ?? null)) {
-                $this->invalid(
-                    'jmhz_ordinary_evidence_source_mismatch',
-                    'Ordinary evidence nevychazi ze stejne mzdove revize.',
-                );
-            }
-        }
-        if (($payload['attribute_values'] ?? null) !== [
-            '10116' => false,
-            '10546' => false,
-        ]) {
-            $this->invalid(
-                'jmhz_ordinary_evidence_values_mismatch',
-                'Ordinary evidence obsahuje nepodporovanou pravni skutecnost.',
-            );
-        }
-        $catalog = JmhzScenarioRequirementSourceCatalog::load();
-        $expectedInteractions = [];
-        foreach (['IN13', 'IN28', 'IN30'] as $interactionId) {
-            $expectedInteractions[] = [
-                'interaction_id' => $interactionId,
-                'triggered' => false,
-                'row_sha256' => $catalog->interaction($interactionId)->rowHash,
-            ];
-        }
-        $expectedDerivedInteractions = [[
-            'interaction_id' => 'IN36',
-            'triggered' => false,
-            'source_attribute_id' => '10546',
-            'row_sha256' => $catalog->interaction('IN36')->rowHash,
-        ]];
-        $actualInteractions = $this->rows(
-            $payload['interaction_decisions'] ?? null,
-            'ordinary_evidence.interaction_decisions',
-        );
-        $actualDerivedInteractions = $this->rows(
-            $payload['derived_interactions'] ?? null,
-            'ordinary_evidence.derived_interactions',
-        );
-        if (CanonicalJson::encode(['rows' => $actualInteractions])
-                !== CanonicalJson::encode(['rows' => $expectedInteractions])
-            || CanonicalJson::encode(['rows' => $actualDerivedInteractions])
-                !== CanonicalJson::encode(['rows' => $expectedDerivedInteractions])
-        ) {
-            $this->invalid(
-                'jmhz_ordinary_evidence_interaction_mismatch',
-                'Ordinary evidence neodpovida pripnutym interakcim JMHZ.',
-            );
-        }
-        $confirmation = $this->object(
-            $payload['confirmation'] ?? null,
-            'ordinary_evidence.confirmation',
-        );
-        $sourceKind = $confirmation['source_kind'] ?? null;
-        $sourceIsValid = $sourceKind === 'explicit_confirmation';
-        if ($sourceKind === 'derived_from_frozen_payroll_sources') {
-            $sourceIsValid = ($confirmation['source_term_id'] ?? null) === ($term['id'] ?? null)
-                && ($confirmation['source_term_row_version'] ?? null) === ($term['row_version'] ?? null);
-        }
-        if (!$sourceIsValid
-            || !is_int($confirmation['confirmed_by_user_id'] ?? null)
-            || $confirmation['confirmed_by_user_id'] <= 0
-            || !is_string($confirmation['confirmed_at'] ?? null)
-            || preg_match(
-                '/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{6})?Z$/D',
-                $confirmation['confirmed_at'],
-            ) !== 1
-        ) {
-            $this->invalid(
-                'jmhz_ordinary_evidence_confirmation_invalid',
-                'Ordinary evidence nema platne potvrzeni.',
-            );
-        }
+        return array_values($registrations);
     }
 
     /**
@@ -923,9 +874,21 @@ final class JmhzPreparationSnapshotBuilder
         return $average;
     }
 
-    private function scenarioSelector(): JmhzScenario1SelectorResolver
+    private function scenarioRequiresAttribute(string $scenarioKey, string $attributeId): bool
     {
-        return $this->scenarioSelector ??= JmhzScenario1SelectorResolver::load();
+        $this->scenarioRequirements ??= JmhzScenarioRequirementSourceCatalog::load();
+        foreach ($this->scenarioRequirements->requirementsForMatrix($scenarioKey) as $requirement) {
+            if ($requirement->attributeId === $attributeId) {
+                return $requirement->requirement === JmhzFieldRequirementKind::Required;
+            }
+        }
+
+        return false;
+    }
+
+    private function scenarioSelector(): JmhzScenarioSelectorResolver
+    {
+        return $this->scenarioSelector ??= JmhzScenarioSelectorResolver::load();
     }
 
     /**
@@ -1178,6 +1141,14 @@ final class JmhzPreparationSnapshotBuilder
         $scope = $this->object($payload['scope'] ?? null, 'eldp.scope');
         $sourceRevision = $this->object($payload['source_revision'] ?? null, 'eldp.source_revision');
         $sourceEvidence = $this->object($payload['source_evidence'] ?? null, 'eldp.source_evidence');
+        $scenarioKey = $scope['scenario_key'];
+        $scenarioResolution = $sourceEvidence['scenario_resolution'] ?? null;
+        if ($scenarioKey === 'scenario_3') {
+            $scenarioResolution = $this->object(
+                $scenarioResolution,
+                'eldp.source_evidence.scenario_resolution',
+            );
+        }
         $sections = $this->rows($payload['eldp_sections'] ?? null, 'eldp.sections');
         $revisionId = $this->positiveInt($revision['id'] ?? null, 'revision.id');
         if (($payload['schema_reference'] ?? null) !== JmhzEldpEvidenceSnapshot::SCHEMA_REFERENCE
@@ -1186,7 +1157,9 @@ final class JmhzPreparationSnapshotBuilder
             || ($scope['employee_id'] ?? null) !== $employeeId
             || ($scope['employment_id'] ?? null) !== $employmentId
             || ($scope['period_start'] ?? null) !== $periodStart
-            || ($scope['scenario_key'] ?? null) !== 'scenario_1'
+            || !in_array($scenarioKey, ['scenario_1', 'scenario_3'], true)
+            || ($scenarioKey === 'scenario_3'
+                && ($scenarioResolution['scenario_key'] ?? null) !== $scenarioKey)
             || ($sourceRevision['input_snapshot_hash'] ?? null) !== ($revision['input_snapshot_hash'] ?? null)
             || ($sourceRevision['result_snapshot_hash'] ?? null) !== ($revision['result_snapshot_hash'] ?? null)
             || ($sourceRevision['ruleset_manifest_hash'] ?? null) !== ($revision['ruleset_manifest_hash'] ?? null)
@@ -1381,6 +1354,24 @@ final class JmhzPreparationSnapshotBuilder
                 && $issue['entity_id'] === $employmentId
                 && str_starts_with($issue['code'], 'jmhz_eldp_')
                 && $issue['code'] !== 'jmhz_eldp_evidence_missing'
+            ) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<array{code:string,entity_type:string,entity_id:?int,attribute_ids:list<string>}> $sourceIssues
+     */
+    private function hasSpecificOrdinaryEvidenceIssue(array $sourceIssues, int $employmentId): bool
+    {
+        foreach ($sourceIssues as $issue) {
+            if ($issue['entity_type'] === 'employment'
+                && $issue['entity_id'] === $employmentId
+                && str_starts_with($issue['code'], 'jmhz_ordinary_evidence_')
+                && $issue['code'] !== 'jmhz_ordinary_evidence_missing'
             ) {
                 return true;
             }

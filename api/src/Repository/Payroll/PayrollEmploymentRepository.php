@@ -104,7 +104,8 @@ final class PayrollEmploymentRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT employment.id, employment.employee_id, employment.office_id,
                     office.code AS office_code, office.name AS office_name,
-                    employment.code, employment.relation_type, employment.status,
+                    employment.code, employment.relation_type,
+                    employment.meal_entitlement_basis, employment.status,
                     employment.is_primary, employment.start_date,
                     employment.actual_start_date, employment.end_date,
                     employment.archived_at, employment.is_legacy_projection,
@@ -142,6 +143,7 @@ final class PayrollEmploymentRepository
                 'office_name' => $row['office_name'] === null ? null : (string) $row['office_name'],
                 'code' => (string) $row['code'],
                 'relation_type' => $relationType,
+                'meal_entitlement_basis' => (string) $row['meal_entitlement_basis'],
                 'status' => (string) $row['status'],
                 'is_primary' => (bool) $row['is_primary'],
                 'start_date' => $row['start_date'] === null ? null : (string) $row['start_date'],
@@ -207,9 +209,10 @@ final class PayrollEmploymentRepository
             $stmt = $this->db->pdo()->prepare(
                 "INSERT INTO payroll_employments
                     (supplier_id, employee_id, office_id, code, relation_type,
+                     meal_entitlement_basis,
                      status, is_primary, start_date, actual_start_date, end_date,
                      monthly_gross_minor, is_legacy_projection, row_version)
-                 VALUES (?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 0, 1)"
+                 VALUES (?, ?, ?, ?, ?, ?, 'planned', ?, ?, ?, ?, ?, 0, 1)"
             );
             $stmt->execute([
                 $supplierId,
@@ -217,6 +220,7 @@ final class PayrollEmploymentRepository
                 $data['terms']['office_id'],
                 $data['code'],
                 $data['relation_type'],
+                $data['meal_entitlement_basis'],
                 (int) $data['terms']['is_primary'],
                 $data['terms']['planned_start_on'],
                 $data['terms']['actual_start_on'],
@@ -519,6 +523,86 @@ final class PayrollEmploymentRepository
                 (int) $employment['employee_id'],
                 $employmentId,
             );
+        });
+    }
+
+    /** @return array<string,mixed> */
+    public function setMealEntitlementBasis(
+        int $supplierId,
+        int $employmentId,
+        string $basis,
+        int $expectedVersion,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $basis,
+            $expectedVersion,
+            $userId,
+            $ip,
+            $userAgent,
+        ): array {
+            $owner = $this->db->pdo()->prepare(
+                'SELECT employee_id
+                   FROM payroll_employments
+                  WHERE supplier_id = ? AND id = ?'
+            );
+            $owner->execute([$supplierId, $employmentId]);
+            $employeeId = $owner->fetchColumn();
+            if ($employeeId === false) {
+                throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+            }
+            $this->lockEmployee($supplierId, (int) $employeeId);
+            $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $previous = (string) $employment['meal_entitlement_basis'];
+            if ($previous === $basis) {
+                return $this->find(
+                    $supplierId,
+                    (int) $employment['employee_id'],
+                    $employmentId,
+                );
+            }
+            $activeMealInput = $this->db->pdo()->prepare(
+                'SELECT 1
+                   FROM payroll_inputs input
+                   JOIN payroll_benefit_accumulators accumulator
+                     ON accumulator.supplier_id = input.supplier_id
+                    AND accumulator.input_id = input.id
+                  WHERE input.supplier_id = ?
+                    AND input.employee_id = ?
+                    AND input.status IN ("approved", "locked")
+                    AND input.benefit_basket = "meal_per_shift"
+                    AND accumulator.status = "active"
+                  LIMIT 1'
+            );
+            $activeMealInput->execute([$supplierId, (int) $employeeId]);
+            if ($activeMealInput->fetchColumn() !== false) {
+                throw new PayrollMealEntitlementBasisLockedException();
+            }
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET meal_entitlement_basis = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([$basis, $supplierId, $employmentId, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.meal_entitlement_basis_changed',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['from' => $previous, 'to' => $basis],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return $this->find($supplierId, (int) $employment['employee_id'], $employmentId);
         });
     }
 
@@ -1118,7 +1202,8 @@ final class PayrollEmploymentRepository
         ?int $expectedVersion,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, employee_id, office_id, code, relation_type, status, is_primary,
+            'SELECT id, employee_id, office_id, code, relation_type,
+                    meal_entitlement_basis, status, is_primary,
                     start_date,
                     actual_start_date, end_date, monthly_gross_minor, row_version
                FROM payroll_employments

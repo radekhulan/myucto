@@ -30,6 +30,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
+import EnforcementLegalFacts from '@/pages/payroll/EnforcementLegalFacts.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatMoneyMinor as money } from '@/composables/useFormat'
 import { useToast } from '@/composables/useToast'
@@ -110,6 +111,18 @@ const recipientOptions = computed(() => {
   }
   return [...seen.values()]
 })
+function recipientAccountLabel(account: PayrollInstitutionAccount): string {
+  const paymentSymbols = [
+    account.variable_symbol ? `VS ${account.variable_symbol}` : null,
+    account.specific_symbol ? `SS ${account.specific_symbol}` : null,
+    account.constant_symbol ? `KS ${account.constant_symbol}` : null,
+  ].filter((value): value is string => value !== null)
+  return [
+    account.institution_name,
+    account.bank_account || account.bank_account_masked,
+    ...paymentSymbols,
+  ].join(' · ')
+}
 const today = appIsoDate()
 const evidencePeriod = ref(today.slice(0, 7))
 const monthEvidence = ref<EnforcementMonthEvidence | null>(null)
@@ -125,7 +138,6 @@ const dependants = ref<EnforcementDependant[]>([])
 const personCases = ref<EnforcementCaseSummary[]>([])
 const personCasesComplete = ref(false)
 const protectedOverrideCzk = ref('')
-const courtAmountCzk = ref('')
 const newDependant = ref<{
   dependant_kind: 'dependant' | 'spouse_partner'
   valid_from: string
@@ -153,6 +165,7 @@ function emptyClaim(): EnforcementClaimPayload {
     outstanding_minor_units: 0,
     maintenance_weight_minor_units: null,
     priority_date: null,
+    first_payer_delivered_on: null,
     order_issued_on: null,
     legal_title_verified: false,
     order_or_notice_delivered: false,
@@ -549,9 +562,6 @@ async function loadMonthlyEvidence(employeeId: number, sequence = detailRequestS
     protectedOverrideCzk.value = evidence.protected_amount_override_minor_units === null
       ? ''
       : String(evidence.protected_amount_override_minor_units / 100)
-    courtAmountCzk.value = evidence.court_determined_amount_minor_units === null
-      ? ''
-      : String(evidence.court_determined_amount_minor_units / 100)
     dependants.value = loadedDependants
   } catch {
     if (sequence === detailRequestSequence) {
@@ -726,10 +736,6 @@ async function saveMonthEvidence() {
       protectedOverrideCzk.value,
       false,
     )
-    payload.court_determined_amount_minor_units = minorUnits(
-      courtAmountCzk.value,
-      false,
-    )
     monthEvidence.value = await payrollEnforcementApi.saveMonthEvidence(
       current.employee_id,
       evidencePeriod.value,
@@ -829,6 +835,14 @@ async function addClaim() {
       outstanding_minor_units: amount,
       maintenance_weight_minor_units: minorUnits(maintenanceWeightCzk.value, false),
     }
+    if (payload.legal_basis === 'statutory') {
+      delete payload.priority_date
+      if (payload.same_order_as_claim_id !== null) {
+        delete payload.first_payer_delivered_on
+      }
+    } else {
+      payload.first_payer_delivered_on = null
+    }
     if (editingClaimId.value === null) {
       await payrollEnforcementApi.addClaim(current.id, payload)
     } else {
@@ -872,6 +886,7 @@ function editClaim(claim: EnforcementClaim) {
     outstanding_minor_units: claim.outstanding_minor_units,
     maintenance_weight_minor_units: claim.maintenance_weight_minor_units,
     priority_date: claim.priority_date,
+    first_payer_delivered_on: claim.first_payer_delivered_on,
     order_issued_on: claim.order_issued_on,
     legal_title_verified: claim.legal_title_verified,
     order_or_notice_delivered: claim.order_or_notice_delivered,
@@ -901,6 +916,22 @@ function cancelClaimForm() {
 function startNewClaim() {
   cancelClaimForm()
   showClaim.value = true
+}
+
+function claimDeliveryDateReadonly(): boolean {
+  if (newClaim.value.same_order_as_claim_id !== null) return true
+  if (editingClaimId.value === null) return false
+  return detail.value?.claims.find(claim => claim.id === editingClaimId.value)
+    ?.first_payer_delivered_on !== null
+}
+
+function copySameOrderPriority() {
+  if (detail.value?.case_kind === 'voluntary_agreement') return
+  const sameOrderId = newClaim.value.same_order_as_claim_id
+  const reference = sameOrderId === null
+    ? null
+    : detail.value?.claims.find(claim => claim.id === sameOrderId)
+  newClaim.value.first_payer_delivered_on = reference?.first_payer_delivered_on ?? null
 }
 
 async function deleteClaim(claim: EnforcementClaim) {
@@ -1186,7 +1217,7 @@ onMounted(load)
               {{ t('payroll.enforcement.recipient_account') }}
               <select v-model="detail.recipient_institution_id" :disabled="!canWrite" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
                 <option :value="null">{{ t('payroll.enforcement.recipient_account_none') }}</option>
-                <option v-for="account in recipientOptions" :key="account.institution_id" :value="account.institution_id">{{ account.institution_name }} · {{ account.bank_account_masked }}</option>
+                <option v-for="account in recipientOptions" :key="account.institution_id" :value="account.institution_id">{{ recipientAccountLabel(account) }}</option>
               </select>
               <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.enforcement.recipient_account_hint') }}</span>
             </label>
@@ -1203,11 +1234,13 @@ onMounted(load)
             <h3 class="font-medium text-neutral-900">{{ t('payroll.enforcement.settlement.title') }}</h3>
             <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.hint') }}</p>
           </div>
-          <dl class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+          <dl class="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.original') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.original_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.withheld_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="mt-1 font-medium text-warning-600">{{ money(detail.settlement.held_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.liability') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.liability_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="mt-1 font-medium text-success-700">{{ money(detail.settlement.settled_minor) }}</dd></div>
+            <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining_to_withhold') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_to_withhold_minor) }}</dd></div>
             <div class="rounded-md border border-neutral-200 px-3 py-2"><dt class="text-xs text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="mt-1 font-medium text-neutral-900">{{ money(detail.settlement.remaining_minor) }}</dd></div>
           </dl>
           <p v-if="detail.settlement.held_minor > 0" class="mt-3 text-xs text-warning-600">{{ t('payroll.enforcement.settlement.held_hint') }}</p>
@@ -1218,16 +1251,28 @@ onMounted(load)
                 <span class="text-sm font-medium text-neutral-900">{{ t(`payroll.enforcement.categories.${claim.category}`) }}</span>
                 <span class="text-xs text-neutral-500">{{ claim.priority_date || '—' }}<span v-if="!claim.is_active"> · {{ t('payroll.enforcement.settlement.inactive') }}</span></span>
               </div>
-              <dl class="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <dl class="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-6">
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.original') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.original_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.withheld') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.withheld_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.held') }}</dt><dd class="font-medium text-warning-700">{{ money(claim.held_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remitted') }}</dt><dd class="font-medium text-success-700">{{ money(claim.settled_minor) }}</dd></div>
+                <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remaining_to_withhold') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.remaining_to_withhold_minor) }}</dd></div>
                 <div><dt class="text-neutral-500">{{ t('payroll.enforcement.settlement.remaining') }}</dt><dd class="font-medium text-neutral-900">{{ money(claim.remaining_minor) }}</dd></div>
               </dl>
             </li>
           </ul>
           <p v-else class="mt-2 text-sm text-neutral-500">{{ t('payroll.enforcement.settlement.empty') }}</p>
         </section>
+
+        <EnforcementLegalFacts
+          :key="detail.id"
+          :case-id="detail.id"
+          :case-status="detail.status"
+          :claims="detail.claims"
+          :can-write="canWrite"
+          :can-read-documents="canReadDocuments"
+          :recipient-accounts="recipientAccounts"
+        />
 
         <section v-if="canManageInsolvency && monthEvidence" ref="monthlySection" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -1301,12 +1346,13 @@ onMounted(load)
                   <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.protected_override_czk') }}<input v-model="protectedOverrideCzk" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                   <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.protected_amount_override_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.protected_override_verified') }}</label>
                 </div>
-                <div class="space-y-3">
-                  <label class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.insolvency_mode') }}<select v-model="monthEvidence.insolvency_mode" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="none">{{ t('payroll.enforcement.month_evidence.insolvency_none') }}</option><option value="alert_only">{{ t('payroll.enforcement.month_evidence.insolvency_alert') }}</option><option value="approved_standard">{{ t('payroll.enforcement.month_evidence.insolvency_standard') }}</option><option value="court_determined_amount">{{ t('payroll.enforcement.month_evidence.insolvency_court') }}</option></select></label>
-                  <p data-test="insolvency-mode-impact" class="rounded-md border border-warning-500/40 bg-warning-50 p-2 text-xs text-warning-600">{{ t(`payroll.enforcement.month_evidence.insolvency_impact.${monthEvidence.insolvency_mode}`) }}</p>
-                  <label v-if="monthEvidence.insolvency_mode === 'court_determined_amount'" class="block text-xs text-neutral-600">{{ t('payroll.enforcement.month_evidence.court_amount_czk') }}<input v-model="courtAmountCzk" data-test="month-evidence-court-amount" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_decision_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_decision') }}</label>
-                  <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="monthEvidence.insolvency_recipient_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.month_evidence.insolvency_recipient') }}</label>
+                <div class="space-y-3 rounded-md border border-payroll-200 bg-payroll-50 p-3">
+                  <p class="text-sm font-medium text-neutral-900">{{ t('payroll.enforcement.insolvency_workspace_title') }}</p>
+                  <p class="text-xs text-neutral-600">{{ t('payroll.enforcement.insolvency_workspace_hint') }}</p>
+                  <RouterLink :to="`/payroll/insolvency?person=${detail?.employee_id}&period=${evidencePeriod}`" :class="btnOutline('primary')" data-test="open-insolvency-workspace">
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+                    {{ t('payroll.enforcement.open_insolvency_workspace') }}
+                  </RouterLink>
                 </div>
               </div>
             </div>
@@ -1354,9 +1400,10 @@ onMounted(load)
             <h4 class="font-medium text-neutral-900 sm:col-span-2 lg:col-span-4">{{ t(editingClaimId === null ? 'payroll.enforcement.add_claim' : 'payroll.enforcement.edit_claim') }}</h4>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.claim_category') }}<select v-model="newClaim.category" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="category in claimCategories" :key="category" :value="category">{{ t(`payroll.enforcement.categories.${category}`) }}</option></select></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.outstanding_czk') }}<input v-model="claimAmountCzk" required inputmode="decimal" data-test="claim-amount" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-            <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.priority_date') }}<input v-model="newClaim.priority_date" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+            <label v-if="detail.case_kind !== 'voluntary_agreement'" class="text-xs text-neutral-600">{{ t('payroll.enforcement.first_payer_delivered_on') }}<input v-model="newClaim.first_payer_delivered_on" :readonly="claimDeliveryDateReadonly()" required type="date" data-test="first-payer-delivered-on" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+            <label v-else class="text-xs text-neutral-600">{{ t('payroll.enforcement.priority_date') }}<input v-model="newClaim.priority_date" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.order_issued_on') }}<input v-model="newClaim.order_issued_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-            <label v-if="detail.claims.length && editingClaimId === null" class="text-xs text-neutral-600">{{ t('payroll.enforcement.same_order_as') }}<select v-model="newClaim.same_order_as_claim_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option :value="null">{{ t('payroll.enforcement.new_order') }}</option><option v-for="claim in detail.claims" :key="claim.id" :value="claim.id">{{ t(`payroll.enforcement.categories.${claim.category}`) }} · {{ claim.priority_date || '—' }}</option></select></label>
+            <label v-if="detail.claims.length && editingClaimId === null" class="text-xs text-neutral-600">{{ t('payroll.enforcement.same_order_as') }}<select v-model="newClaim.same_order_as_claim_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="copySameOrderPriority"><option :value="null">{{ t('payroll.enforcement.new_order') }}</option><option v-for="claim in detail.claims" :key="claim.id" :value="claim.id">{{ t(`payroll.enforcement.categories.${claim.category}`) }} · {{ claim.priority_date || '—' }}</option></select></label>
             <label v-if="newClaim.category.includes('maintenance')" class="text-xs text-neutral-600">{{ t('payroll.enforcement.maintenance_weight_czk') }}<input v-model="maintenanceWeightCzk" required inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
             <div class="space-y-2 text-sm sm:col-span-2 lg:col-span-3"><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.legal_title_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.legal_title') }}</label><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.order_or_notice_delivered" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.delivered') }}</label><label class="flex items-center gap-2"><input v-model="newClaim.priority_classification_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.priority') }}</label><label v-if="detail.case_kind === 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.agreement_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.agreement') }}</label><label v-if="detail.case_kind !== 'voluntary_agreement'" class="flex items-center gap-2"><input v-model="newClaim.due_monetary_claim_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.verification.due_claim') }}</label></div>
             <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4"><button type="button" :class="btnOutline('neutral')" @click="cancelClaimForm"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button><button type="submit" data-test="save-claim" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t(editingClaimId === null ? 'common.save' : 'payroll.enforcement.save_claim_changes') }}</button></div>

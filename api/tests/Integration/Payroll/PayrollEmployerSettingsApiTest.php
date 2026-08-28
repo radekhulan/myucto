@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
+use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -25,6 +26,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
 
     private Connection $db;
     private PayrollEmployerSettingsAction $action;
+    private PayrollOfficeRegistrationAction $registrationAction;
     private PayrollEmployerSettingsRepository $repository;
     private int $userId;
     private int $supplierId;
@@ -42,6 +44,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             $container = Bootstrap::buildApp()->getContainer();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollEmployerSettingsAction::class);
+            $this->registrationAction = $container->get(PayrollOfficeRegistrationAction::class);
             $this->repository = $container->get(PayrollEmployerSettingsRepository::class);
             $seeder = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -155,14 +158,13 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         self::assertSame(0, (int) $count->fetchColumn());
     }
 
-    public function testOfficeSocialVariableSymbolIsValidatedAndPreservedWhenOmitted(): void
+    public function testLegacyOfficeVariableSymbolCannotBeOverwrittenByBulkSettings(): void
     {
-        $payload = $this->payload('MAIN', 'Mzdová účtárna');
-        $payload['offices'][0]['social_security_variable_symbol'] = '0012345678';
-        $created = $this->put($this->supplierId, $payload);
+        $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
         self::assertSame(200, $created->getStatusCode());
-        $office = $this->json($created)['settings']['offices'][0];
-        self::assertSame('0012345678', $office['social_security_variable_symbol']);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_offices SET social_security_variable_symbol = ? WHERE supplier_id = ? AND code = ?'
+        )->execute(['0012345678', $this->supplierId, 'MAIN']);
 
         $withoutNewField = $this->payload('MAIN', 'Přejmenovaná účtárna');
         $withoutNewField['row_version'] = 1;
@@ -171,12 +173,55 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         $office = $this->json($updated)['settings']['offices'][0];
         self::assertSame('0012345678', $office['social_security_variable_symbol']);
 
-        $invalid = $this->payload('MAIN', 'Mzdová účtárna');
-        $invalid['row_version'] = 2;
-        $invalid['offices'][0]['social_security_variable_symbol'] = 'VS-123';
-        $rejected = $this->put($this->supplierId, $invalid);
+        $overwrite = $this->payload('MAIN', 'Mzdová účtárna');
+        $overwrite['row_version'] = 2;
+        $overwrite['offices'][0]['social_security_variable_symbol'] = '0099999999';
+        $rejected = $this->put($this->supplierId, $overwrite);
         self::assertSame(422, $rejected->getStatusCode());
         self::assertSame('validation_failed', $this->json($rejected)['error']['code']);
+        $stored = $this->db->pdo()->prepare(
+            'SELECT social_security_variable_symbol FROM payroll_offices WHERE supplier_id = ? AND code = ?'
+        );
+        $stored->execute([$this->supplierId, 'MAIN']);
+        self::assertSame('0012345678', $stored->fetchColumn());
+    }
+
+    public function testEffectiveOfficeRegistrationAcceptsEvidencedPastAndIsSessionTenantScoped(): void
+    {
+        if (!$this->db->hasTable('payroll_office_registration_versions')) {
+            self::markTestSkipped('Migrace 1595 neproběhla.');
+        }
+        $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
+        self::assertSame(200, $created->getStatusCode());
+        $officeId = (int) $this->json($created)['settings']['offices'][0]['id'];
+        $body = [
+            'effective_from' => '2026-01-01',
+            'social_security_variable_symbol' => '0012345678',
+            'source_reference' => 'synthetic:cssz-confirmation',
+        ];
+
+        $saved = $this->registrationAction->create(
+            $this->request('POST', $this->supplierId)->withParsedBody($body),
+            new Response(),
+            ['officeId' => (string) $officeId],
+        );
+        self::assertSame(201, $saved->getStatusCode());
+        self::assertSame('2026-01-01', $this->json($saved)['registration']['effective_from']);
+
+        $foreign = $this->registrationAction->list(
+            $this->request('GET', $this->otherSupplierId),
+            new Response(),
+            ['officeId' => (string) $officeId],
+        );
+        self::assertSame([], $this->json($foreign)['registrations']);
+
+        $bearer = $this->registrationAction->list(
+            $this->request('GET', $this->supplierId, 'admin', 'bearer'),
+            new Response(),
+            ['officeId' => (string) $officeId],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
     }
 
     public function testCompositeForeignKeyRejectsOfficeFromAnotherTenant(): void

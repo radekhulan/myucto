@@ -49,6 +49,7 @@ final class MonthlyHealthInsuranceCalculator
                 null,
                 $ruleset->id,
                 $ruleset->canonicalHash,
+                null,
             );
         }
 
@@ -65,6 +66,7 @@ final class MonthlyHealthInsuranceCalculator
         );
         $employerStandard = $standardContribution - $employeeStandard;
 
+        $minimumContributionStep = null;
         $topUpStep = null;
         $topUp = 0;
         if ($minimumBase > $input->assessmentBaseMinorUnits) {
@@ -74,7 +76,19 @@ final class MonthlyHealthInsuranceCalculator
                 $rate,
                 RoundingMode::Ceil,
             );
-            $topUp = PayrollRounding::ceilToCzk($topUpStep->outputMinorUnits);
+            $minimumContributionStep = CalculationStep::calculate(
+                'monthly-health-insurance-minimum-total',
+                $minimumBase,
+                $rate,
+                RoundingMode::Ceil,
+            );
+            $minimumContribution = PayrollRounding::ceilToCzk(
+                $minimumContributionStep->outputMinorUnits,
+            );
+            $topUp = PayrollRounding::healthMinimumTopUp(
+                $standardContribution,
+                $minimumContribution,
+            );
         }
         $employeeTopUp = $input->minimumTopUpPayer === HealthMinimumTopUpPayer::Employee
             ? $topUp
@@ -98,6 +112,7 @@ final class MonthlyHealthInsuranceCalculator
             $topUpStep,
             $ruleset->id,
             $ruleset->canonicalHash,
+            $minimumContributionStep,
         );
     }
 

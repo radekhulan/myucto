@@ -58,8 +58,10 @@ final class PayrollEmployeeDeletionRepository
         'document' => [
             'tables' => [
                 'payroll_generated_documents',
+                'payroll_document_delivery_events',
                 'payroll_annual_document_revisions',
                 'payroll_annual_document_sources',
+                'payroll_document_batch_items',
             ],
             'code' => 'payroll_employee_has_documents',
             'message' => 'Zaměstnanci už byla vydaná výplatní páska, mzdový list nebo roční '
@@ -122,10 +124,17 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_enforcement_month_results',
                 'payroll_enforcement_person_month_evidence',
                 'payroll_insolvency_payment_instructions',
+                'payroll_enforcement_xmlzam_requests',
             ],
             'code' => 'payroll_employee_has_enforcement',
             'message' => 'Na zaměstnance je vedená exekuce nebo insolvence. '
                 . 'Ty záznamy jsou neměnné, takže osobu smazat nelze.',
+        ],
+        'statutory_obligation' => [
+            'tables' => ['payroll_statutory_obligation_evidence'],
+            'code' => 'payroll_employee_has_statutory_obligation_evidence',
+            'message' => 'K zaměstnanci je uložený neměnný důkaz splněné zákonné povinnosti. '
+                . 'Smazat ho nelze.',
         ],
     ];
 
@@ -168,6 +177,7 @@ final class PayrollEmployeeDeletionRepository
             'payroll_person_health_other_employer_bases',
             'payroll_person_social_jurisdictions',
             'payroll_person_social_discount_claims',
+            'payroll_person_foreign_permits',
         ],
         'payout_rules' => ['payroll_payout_rules'],
     ];
@@ -208,7 +218,9 @@ final class PayrollEmployeeDeletionRepository
         'payroll_employment_exit_revisions',
         'payroll_employment_external_ids',
         'payroll_identity_resolution_tasks',
+        'payroll_registration_a1_profiles',
         'payroll_registration_identity_snapshots',
+        'payroll_registration_event_snapshots',
     ];
 
     public function __construct(

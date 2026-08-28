@@ -359,12 +359,12 @@ final class PayrollEnforcementEvidenceScopeRunTest extends TestCase
         $pdo->prepare(
             'INSERT INTO payroll_enforcement_claims
                 (supplier_id, case_id, claim_key, enforcement_order_key,
-                 legal_basis, category, outstanding_minor_units, priority_date,
+                 legal_basis, category, outstanding_minor_units, priority_date, first_payer_delivered_on,
                  order_issued_on, legal_title_verified, order_or_notice_delivered,
                  priority_classification_verified, due_monetary_claim_verified,
                  is_active)
              VALUES (?, ?, "claim-synthetic", "order-synthetic", "statutory",
-                     "non_priority", 10000000, "2026-01-15", "2022-01-02",
+                     "non_priority", 10000000, "2026-01-15", "2026-01-15", "2022-01-02",
                      1, 1, 1, 1, 1)'
         )->execute([$this->supplierId, $caseId]);
     }

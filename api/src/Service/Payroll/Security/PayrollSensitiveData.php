@@ -20,7 +20,7 @@ final class PayrollSensitiveData
         int $supplierId,
         int $entityId,
     ): SealedPayrollValue {
-        $plaintext = $this->validatePlaintext($plaintext);
+        $plaintext = $this->validatePlaintext($plaintext, $field);
         $normalized = $this->normalize($plaintext, $field);
         $context = $this->context($field, $supplierId, $entityId);
 
@@ -88,7 +88,10 @@ final class PayrollSensitiveData
 
     private function normalize(string $plaintext, PayrollSensitiveField $field): string
     {
-        $plaintext = $this->validatePlaintext($plaintext);
+        $plaintext = $this->validatePlaintext($plaintext, $field);
+        if ($field === PayrollSensitiveField::REGISTRATION_A1_PROFILE) {
+            return $plaintext;
+        }
         $value = match ($field) {
             PayrollSensitiveField::CONTACT_EMAIL =>
                 mb_strtolower($plaintext, 'UTF-8'),
@@ -106,6 +109,7 @@ final class PayrollSensitiveData
             PayrollSensitiveField::CONTACT_EMAIL => $value,
             PayrollSensitiveField::CONTACT_PHONE =>
                 preg_replace('/[\s()\/.\-]+/u', '', $value),
+            PayrollSensitiveField::REGISTRATION_A1_PROFILE => $value,
         };
         if (!is_string($value) || $value === '') {
             throw new \InvalidArgumentException('Citlivou hodnotu nelze normalizovat.');
@@ -114,10 +118,16 @@ final class PayrollSensitiveData
         return $value;
     }
 
-    private function validatePlaintext(string $plaintext): string
+    private function validatePlaintext(
+        string $plaintext,
+        ?PayrollSensitiveField $field = null,
+    ): string
     {
         $value = trim($plaintext);
-        if ($value === '' || mb_strlen($value, 'UTF-8') > 191) {
+        $maximumLength = $field === PayrollSensitiveField::REGISTRATION_A1_PROFILE
+            ? 10_000_000
+            : 191;
+        if ($value === '' || mb_strlen($value, 'UTF-8') > $maximumLength) {
             throw new \InvalidArgumentException('Citlivá hodnota je prázdná nebo příliš dlouhá.');
         }
         if (preg_match('/[\x00-\x1F\x7F]/u', $value) === 1) {
@@ -182,6 +192,9 @@ final class PayrollSensitiveData
 
     private function maskNormalized(string $normalized, PayrollSensitiveField $field): string
     {
+        if ($field === PayrollSensitiveField::REGISTRATION_A1_PROFILE) {
+            return '••••••••';
+        }
         $length = mb_strlen($normalized, 'UTF-8');
         if ($field === PayrollSensitiveField::CONTACT_EMAIL) {
             [$local, $domain] = array_pad(explode('@', $normalized, 2), 2, '');

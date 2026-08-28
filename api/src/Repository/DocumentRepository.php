@@ -33,17 +33,7 @@ final class DocumentRepository
      */
     private function scopeClause(DocumentViewerContext $viewer, string $alias = ''): array
     {
-        if ($viewer->isAdmin) {
-            return ['', []];
-        }
-        $col = $alias !== '' ? $alias . '.' : '';
-        if ($viewer->userId === null) {
-            return [" AND {$col}scope = 'company'", []];
-        }
-        return [
-            " AND ({$col}scope = 'company' OR ({$col}scope = 'user' AND {$col}owner_user_id = ?))",
-            [$viewer->userId],
-        ];
+        return DocumentVisibility::clause($viewer, $alias);
     }
 
     /**
@@ -170,6 +160,36 @@ final class DocumentRepository
         return [
             'id' => (int) $rowId,
             'sha256' => $sha256,
+        ];
+    }
+
+    /** @return array{id:int,sha256:string,filename:string,size_bytes:int,mime_type:string}|null */
+    public function findActiveFileReferenceForUpdate(
+        int $id,
+        int $supplierId,
+        DocumentViewerContext $viewer,
+    ): ?array {
+        [$scopeSql, $scopeParams] = $this->scopeClause($viewer);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, sha256, filename, size_bytes, mime_type
+               FROM documents
+              WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL'
+            . $scopeSql
+            . ' FOR UPDATE'
+        );
+        $stmt->execute(array_merge([$id, $supplierId], $scopeParams));
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row) || !is_string($row['sha256'] ?? null)
+            || !is_string($row['filename'] ?? null) || !is_string($row['mime_type'] ?? null)
+        ) {
+            return null;
+        }
+        return [
+            'id' => (int) $row['id'],
+            'sha256' => (string) $row['sha256'],
+            'filename' => (string) $row['filename'],
+            'size_bytes' => (int) $row['size_bytes'],
+            'mime_type' => (string) $row['mime_type'],
         ];
     }
 
@@ -430,6 +450,38 @@ final class DocumentRepository
         );
         $stmt->execute([$supplierId, $id, $id]);
         return $stmt->rowCount() > 0;
+    }
+
+    /** @return list<array{id:int,sha256:string,filename:string,thumb_path:?string}> */
+    public function privacyPurgeRows(int $supplierId, int $rootId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'WITH RECURSIVE document_tree AS (
+                SELECT id, parent_document_id
+                  FROM documents
+                 WHERE supplier_id = ? AND id = ?
+                UNION ALL
+                SELECT child.id, child.parent_document_id
+                  FROM documents child
+                  JOIN document_tree parent ON child.parent_document_id = parent.id
+                 WHERE child.supplier_id = ?
+             )
+             SELECT document.id, document.sha256, document.filename, document.thumb_path
+               FROM documents document
+               JOIN document_tree tree ON tree.id = document.id
+              WHERE document.supplier_id = ?
+              ORDER BY document.id'
+        );
+        $stmt->execute([$supplierId, $rootId, $supplierId, $supplierId]);
+        return array_map(
+            static fn (array $row): array => [
+                'id' => (int) $row['id'],
+                'sha256' => (string) $row['sha256'],
+                'filename' => (string) $row['filename'],
+                'thumb_path' => $row['thumb_path'] !== null ? (string) $row['thumb_path'] : null,
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+        );
     }
 
     /**

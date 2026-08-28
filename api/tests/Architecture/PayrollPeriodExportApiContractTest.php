@@ -25,6 +25,8 @@ final class PayrollPeriodExportApiContractTest extends TestCase
         foreach ([
             '/exports/monthly/{period:[0-9]{4}-[0-9]{2}}',
             '/exports/annual/{year:[0-9]{4}}',
+            '/exports/jobs/{jobId:[0-9]+}',
+            '/exports/jobs/{jobId:[0-9]+}/download-grants',
             '/exports/{exportId:[0-9]+}/download-grants',
             '/exports/download',
         ] as $route) {
@@ -40,6 +42,15 @@ final class PayrollPeriodExportApiContractTest extends TestCase
         );
         self::assertStringContainsString(
             "'Cache-Control', 'private, no-store'",
+            $action,
+        );
+        self::assertStringContainsString(
+            'PayrollPeriodExportQueueService',
+            $action,
+        );
+        self::assertStringContainsString('), 202)', $action);
+        self::assertStringNotContainsString(
+            '$this->exports->createMonthly(',
             $action,
         );
         self::assertStringContainsString(

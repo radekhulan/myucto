@@ -9,6 +9,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlException;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -17,10 +18,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Přihlášení pracovního vztahu u ČSSZ (PREZEC / REGZEC).
  *
- * Endpoint NEPŘIJÍMÁ kód formuláře ani kód akce. Kdyby je přijímal, stačil by
- * jeden řetězec v těle požadavku k tomu, aby se serializovaly opravy a storna
- * (REGZEC A2–A8), které tenhle core vědomě neumí. Interakci vybírá výhradně
- * `PayrollRegistrationInteractionResolver` z faktů o pracovním vztahu.
+ * Běžný preview/prepare NEPŘIJÍMÁ kód formuláře ani kód akce. Registrace A1
+ * vybírá interakci z faktů o pracovním vztahu; A2–A8 vznikají jen z odděleného
+ * schváleného a neměnného eventu.
  *
  * Session-only jako ostatní podání: `preview` vrací celý obsah přihlášky včetně
  * osobních identifikátorů a `prepare` zakládá úřední podání.
@@ -31,6 +31,7 @@ final class PayrollRegistrationAction
 
     public function __construct(
         private readonly PayrollRegistrationSubmissionService $registrations,
+        private readonly PayrollRegistrationIdentityService $identities,
         private readonly PayrollModuleAccess $access,
     ) {}
 
@@ -54,6 +55,7 @@ final class PayrollRegistrationAction
                 $this->currentSupplierId($request),
                 $this->environment($request),
                 $this->employmentId($args),
+                $this->eventId($request),
             );
         });
     }
@@ -81,8 +83,119 @@ final class PayrollRegistrationAction
                 $this->environment($request),
                 $this->employmentId($args),
                 $this->userId($request),
+                $this->eventId($request),
             );
         }, 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function events(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::READ);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => [
+            'items' => $this->registrations->listEvents(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->employmentId($args),
+            ),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function a2EvidenceCandidates(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::READ);
+        if ($denied !== null) {
+            return $denied;
+        }
+        $effectiveOn = $request->getQueryParams()['effective_on'] ?? null;
+        if (!is_string($effectiveOn)) {
+            return $this->noStore(Json::error(
+                $response,
+                'validation_failed',
+                'effective_on musí být datum RRRR-MM-DD.',
+                422,
+            ));
+        }
+
+        return $this->run($response, fn (): array =>
+            $this->registrations->a2EvidenceCandidates(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->employmentId($args),
+                $effectiveOn,
+            ));
+    }
+
+    /** @param array<string,string> $args */
+    public function approveEvent(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array =>
+            $this->registrations->approveEvent(
+                $this->currentSupplierId($request),
+                $this->environment($request),
+                $this->employmentId($args),
+                (array) ($request->getParsedBody() ?? []),
+                $this->userId($request),
+            ), 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function a1Profile(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::READ);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => [
+            'profile' => $this->identities->a1Profile(
+                $this->currentSupplierId($request),
+                $this->employmentId($args),
+            ),
+        ]);
+    }
+
+    /** @param array<string,string> $args */
+    public function saveA1Profile(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => [
+            'profile' => $this->identities->saveA1Profile(
+                $this->currentSupplierId($request),
+                $this->employmentId($args),
+                (array) ($request->getParsedBody() ?? []),
+                $this->userId($request),
+            ),
+        ], 201);
     }
 
     /**
@@ -103,11 +216,15 @@ final class PayrollRegistrationAction
                 422,
             ));
         } catch (PayrollRegistrationIdentitySnapshotException $exception) {
+            $status = $exception->validationCode
+                === 'registration_regzec_a1_profile_conflict'
+                    ? 409
+                    : 422;
             return $this->noStore(Json::error(
                 $response,
                 $exception->validationCode,
                 $exception->getMessage(),
-                422,
+                $status,
             ));
         } catch (\OutOfBoundsException $exception) {
             return $this->noStore(Json::error(
@@ -198,6 +315,25 @@ final class PayrollRegistrationAction
         if (preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
             throw new \InvalidArgumentException(
                 'employmentId musí být kladné celé číslo.',
+            );
+        }
+
+        return (int) $value;
+    }
+
+    private function eventId(Request $request): ?int
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $value = $body['event_id']
+            ?? ($request->getQueryParams()['event_id'] ?? null);
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if ((!is_int($value) && !is_string($value))
+            || preg_match('/^[1-9][0-9]*$/D', (string) $value) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'event_id musí být kladné celé číslo.',
             );
         }
 

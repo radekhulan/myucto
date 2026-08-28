@@ -58,9 +58,11 @@ final readonly class SubmissionInboxService
         private SubmissionChannelRegistry $channels,
         private InboxMessageClassifier $classifier,
         private DocumentIngestService $documents,
+        private SubmissionInboxStorageSettingsService $storageSettings,
         private DeliveryResolutionService $delivery,
         private ActivityLogger $activity,
         private LoggerInterface $logger,
+        private ?SubmissionInboxMessageProcessor $messageProcessor = null,
     ) {}
 
     /**
@@ -84,7 +86,6 @@ final readonly class SubmissionInboxService
     public function poll(
         ChannelContext $context,
         string $channelCode,
-        ?int $folderId = null,
         int $limit = 50,
         ?int $actorUserId = null,
     ): array
@@ -99,7 +100,6 @@ final readonly class SubmissionInboxService
             $context,
             $channelCode,
             $this->channels->inbox($channelCode),
-            $folderId,
             $limit,
             $actorUserId,
         );
@@ -117,12 +117,11 @@ final readonly class SubmissionInboxService
         ChannelContext $context,
         string $channelCode,
         SubmissionInboxChannel $channel,
-        ?int $folderId = null,
         int $limit = 50,
         ?int $actorUserId = null,
     ): array {
         $this->assertActorPresent($actorUserId);
-        return $this->pollUsing($context, $channelCode, $channel, $folderId, $limit, $actorUserId);
+        return $this->pollUsing($context, $channelCode, $channel, $limit, $actorUserId);
     }
 
     /**
@@ -132,7 +131,6 @@ final readonly class SubmissionInboxService
         ChannelContext $context,
         string $channelCode,
         SubmissionInboxChannel $channel,
-        ?int $folderId,
         int $limit,
         ?int $actorUserId,
     ): array {
@@ -186,7 +184,14 @@ final readonly class SubmissionInboxService
             }
 
             try {
-                $stored = $this->ingest($context, $channelCode, $channel, $header, $boxKinds, $folderId);
+                $stored = $this->ingest(
+                    $context,
+                    $channelCode,
+                    $channel,
+                    $header,
+                    $boxKinds,
+                    $actorUserId,
+                );
                 $result['stored']++;
                 if ($stored['classification'] === InboxMessageClassifier::UNCLASSIFIED) {
                     $result['unclassified']++;
@@ -222,9 +227,21 @@ final readonly class SubmissionInboxService
     }
 
     /** @return list<array<string,mixed>> */
-    public function listRecent(int $supplierId, string $environment, ?string $classification = null, int $limit = 100): array
+    public function listRecent(
+        int $supplierId,
+        string $environment,
+        ?string $classification = null,
+        int $limit = 100,
+        string $visibility = 'active',
+    ): array
     {
-        return $this->inbox->listRecent($supplierId, $environment, $classification, $limit);
+        return $this->inbox->listRecent(
+            $supplierId,
+            $environment,
+            $classification,
+            $limit,
+            $visibility,
+        );
     }
 
     /** @return array<string,mixed>|null */
@@ -233,8 +250,20 @@ final readonly class SubmissionInboxService
         return $this->inbox->pollState($supplierId, $channelCode, $environment);
     }
 
+    /** @return array<string,mixed>|null */
+    public function findById(int $supplierId, int $messageId): ?array
+    {
+        return $this->inbox->findById($supplierId, $messageId);
+    }
+
     /** Ruční zařazení zprávy, kterou automat nepoznal. */
-    public function reclassify(int $supplierId, int $messageId, string $classification, ?int $outboxId): bool
+    public function reclassify(
+        int $supplierId,
+        int $messageId,
+        string $classification,
+        ?int $outboxId,
+        int $expectedVersion,
+    ): bool
     {
         $allowed = [
             InboxMessageClassifier::DELIVERY_RECEIPT,
@@ -253,7 +282,53 @@ final readonly class SubmissionInboxService
                 400,
             );
         }
-        return $this->inbox->reclassify($supplierId, $messageId, $classification, $outboxId);
+        $current = $this->inbox->findById($supplierId, $messageId);
+        if ($current === null) {
+            return false;
+        }
+        if ($current['matched_outbox_id'] !== null
+            && (int) $current['matched_outbox_id'] !== $outboxId
+        ) {
+            throw new SubmissionChannelException(
+                'isds_inbox_business_link_immutable',
+                'Zpráva už je navázaná na podání a tuto evidenční vazbu nelze ručním zařazením odpojit ani změnit.',
+                409,
+            );
+        }
+        if ((int) $current['lifecycle_row_version'] !== $expectedVersion
+            || $current['hidden_at'] !== null
+            || (string) $current['local_content_state'] !== 'available'
+        ) {
+            throw new SubmissionChannelException(
+                'isds_inbox_privacy_conflict',
+                'Zprávu mezitím změnil jiný uživatel. Načtěte seznam znovu.',
+                409,
+            );
+        }
+        $updated = $this->inbox->reclassify(
+            $supplierId,
+            $messageId,
+            $classification,
+            $outboxId,
+            $expectedVersion,
+        );
+        if (!$updated) {
+            $fresh = $this->inbox->findById($supplierId, $messageId);
+            if ($fresh !== null && $fresh['matched_outbox_id'] !== null) {
+                throw new SubmissionChannelException(
+                    'isds_inbox_business_link_immutable',
+                    'Zprávu mezitím navázalo podání; evidenční vazbu nelze odpojit ani změnit.',
+                    409,
+                );
+            }
+            throw new SubmissionChannelException(
+                'isds_inbox_privacy_conflict',
+                'Zprávu mezitím změnil jiný uživatel. Načtěte seznam znovu.',
+                409,
+            );
+        }
+
+        return true;
     }
 
     // ───────────────────────── interní ─────────────────────────
@@ -302,16 +377,22 @@ final readonly class SubmissionInboxService
         SubmissionInboxChannel $channel,
         InboxMessageHeader $header,
         array $boxKinds,
-        ?int $folderId,
+        ?int $actorUserId,
     ): array {
         $bytes = $channel->download($header->externalMessageId, $context);
+        $folderId = $this->storageSettings->resolveFolder(
+            $context->supplierId,
+            $context->environment,
+            $header,
+            $actorUserId,
+        );
 
         $ingested = $this->documents->ingestZfoBytes(
             $bytes,
             $context->supplierId,
             $folderId,
             'datova-zprava-' . $header->externalMessageId . '.zfo',
-            null,
+            $actorUserId,
         );
 
         $verdict = $this->classifier->classify($context->supplierId, $context->environment, $header, $boxKinds);
@@ -339,6 +420,44 @@ final readonly class SubmissionInboxService
         $this->resolveDelivery($message);
 
         $this->applyDeliveryReceipt($context, $verdict, $header);
+
+        if ($this->messageProcessor !== null) {
+            try {
+                $processed = $this->messageProcessor->process(
+                    $context->supplierId,
+                    $context->environment,
+                    (int) $message['id'],
+                    $header,
+                    $verdict,
+                    $bytes,
+                    $actorUserId,
+                );
+                if ($processed['status'] !== 'not_applicable') {
+                    $this->activity->log(
+                        'submission_inbox_message_processed',
+                        $actorUserId,
+                        'submission_inbox_message',
+                        (int) $message['id'],
+                        [
+                            'status' => $processed['status'],
+                            'code' => $processed['code'],
+                            'submission_id' => $processed['submission_id'],
+                            'receipt_id' => $processed['receipt_id'],
+                            'remote_status' => $processed['remote_status'],
+                        ],
+                        null,
+                        null,
+                        $context->supplierId,
+                    );
+                }
+            } catch (\Throwable $e) {
+                $this->logger->error('Submission inbox message automation failed', [
+                    'supplier_id' => $context->supplierId,
+                    'message_id' => $header->externalMessageId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return $verdict;
     }

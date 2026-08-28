@@ -48,7 +48,7 @@ final readonly class JmhzSubmissionBridgeService
         private PayrollSubmissionService $submissions,
         private ClockInterface $clock,
         private PayrollObligationService $obligations,
-        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
+        private JmhzDeadlinePolicy $deadlines,
     ) {}
 
     /**

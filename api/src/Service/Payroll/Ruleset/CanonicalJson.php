@@ -6,7 +6,7 @@ namespace MyInvoice\Service\Payroll\Ruleset;
 
 final class CanonicalJson
 {
-    /** @param array<string, mixed> $value */
+    /** @param array<array-key, mixed> $value */
     public static function encode(array $value): string
     {
         return json_encode(

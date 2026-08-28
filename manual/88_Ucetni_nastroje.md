@@ -212,6 +212,24 @@ zašifrované. Cílová instalace proto musí bezpečně převzít původní
 Automatický round-trip test hlídá počty, vazby a hashe souborů, ale archiv stále
 nenahrazuje celoinstanční zálohu databáze.
 
+Po každé zkušební obnově proveďte ruční kontrolu alespoň tohoto vzorku:
+
+- porovnejte počet osob a pracovních vztahů a otevřete náhodně vybranou osobní
+  kartu včetně historických údajů;
+- u dvou různých měsíců porovnejte schválenou revizi mzdy, čistou mzdu,
+  zákonné odvody a stav jejich skutečné úhrady;
+- otevřete náhodnou výplatní pásku a další mzdové PDF, ověřte jejich obsah a
+  možnost stažení oprávněným uživatelem;
+- u JMHZ a přehledu zdravotní pojišťovny porovnejte stav, období, neměnný
+  odeslaný artefakt a přijatý protokol nebo jiný důkaz doručení;
+- ověřte, že bankovní export lze zpřístupnit až po nastavení správného
+  šifrovacího klíče a že uživatel bez mzdových práv osobní údaje neuvidí.
+
+Výsledek, datum, verzi aplikace, kontrolované měsíce a případné rozdíly zapište
+do provozního protokolu obnovy. Teprve po úspěšné kontrole je obnovená instalace
+připravená k používání; zkušební databázi ani datový adresář nepřipojujte k
+ostrému provozu.
+
 ### 88.6.2 Obsah kompletního exportu
 
 Správce instalace najde v nabídce **Administrace → Kompletní export dat** jeden
@@ -236,6 +254,17 @@ nikoli vstup pro import.
 V podvojném účetnictví export slouží také jako praktický podklad pro zákonnou
 retenci účetních a daňových záznamů. Přehled lhůt a zadržení skartace najdete v
 sekci **Účetnictví → Retence**.
+
+### 88.6.3 Interní ověření mzdového produktu
+
+Produkční kvalifikaci, syntetické paralelní běhy a recovery drill provádí
+výhradně tým MyÚčta v izolovaném interním prostředí. Zákazník tyto důkazy
+nevytváří, nenahrává kvalifikační protokol a neodemyká ostrý provoz své firmy.
+
+Dokud interní ověření není dokončené, aplikace globálně blokuje ostrá mzdová
+podání a mzdové platební příkazy. Výpočty, dokumenty, zaúčtování a podání do
+testovacích prostředí zůstávají dostupné. Uvolnění produkčního provozu přijde
+v aktualizaci aplikace a nemůže ho obejít nastavení jednotlivé firmy.
 
 ## 88.7 Retence a právní zadržení na backendu
 

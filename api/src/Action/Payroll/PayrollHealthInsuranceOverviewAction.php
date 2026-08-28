@@ -8,10 +8,14 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceOverviewException;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverview;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewReconciliationService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -22,6 +26,8 @@ final class PayrollHealthInsuranceOverviewAction
 
     public function __construct(
         private readonly HealthPaymentOverviewService $service,
+        private readonly HealthPaymentOverviewReconciliationService $reconciliation,
+        private readonly HealthInsuranceSubmissionService $submissions,
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -40,10 +46,12 @@ final class PayrollHealthInsuranceOverviewAction
         try {
             $revisionId = $this->routePositiveInt($args, 'revisionId');
             $items = array_map(
-                static fn (HealthPaymentOverview $overview): array => [
+                fn (HealthPaymentOverview $overview): array => [
                     ...$overview->toArray(),
                     'sha256' => $overview->sha256(),
                     'filename' => $overview->filename(),
+                    'payment_reconciliation' =>
+                        $this->reconciliation->forOverview($overview),
                 ],
                 $this->service->overviews(
                     $this->currentSupplierId($request),
@@ -69,8 +77,17 @@ final class PayrollHealthInsuranceOverviewAction
         return Json::ok($response, [
             'items' => $items,
             'electronic_submission' => [
-                'supported' => false,
-                'reason_code' => 'health_insurance_transport_unavailable',
+                'direct_portal' => [
+                    'supported' => false,
+                    'reason_code' =>
+                        'health_insurance_portal_transport_undocumented',
+                ],
+                'isds' => [
+                    'supported' => true,
+                    'requires_ready' => true,
+                    'requires_production_gate' => true,
+                    'requires_user_confirmation' => true,
+                ],
             ],
         ]);
     }
@@ -86,10 +103,17 @@ final class PayrollHealthInsuranceOverviewAction
         }
 
         try {
-            $overview = $this->service->overview(
+            $revisionId = $this->routePositiveInt($args, 'revisionId');
+            $insurerCode = $args['insurerCode'];
+            if (!HealthInsurers::isValid($insurerCode)) {
+                throw new \InvalidArgumentException(
+                    HealthInsurers::invalidCodeMessage($insurerCode),
+                );
+            }
+            $artifact = $this->submissions->paymentOverviewDownload(
                 $this->currentSupplierId($request),
-                $this->routePositiveInt($args, 'revisionId'),
-                $args['insurerCode'],
+                $revisionId,
+                $insurerCode,
             );
         } catch (\OutOfBoundsException) {
             return Json::error(
@@ -105,6 +129,13 @@ final class PayrollHealthInsuranceOverviewAction
                 $exception->getMessage(),
                 422,
             );
+        } catch (HealthNotificationException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                422,
+            );
         } catch (\InvalidArgumentException $exception) {
             return Json::error(
                 $response,
@@ -114,21 +145,26 @@ final class PayrollHealthInsuranceOverviewAction
             );
         }
 
-        $this->auditDownload($request, $overview);
-        $bytes = $overview->downloadBytes();
+        $this->auditDownload(
+            $request,
+            $revisionId,
+            $insurerCode,
+            $artifact['sha256'],
+        );
+        $bytes = $artifact['bytes'];
         $response->getBody()->write($bytes);
 
         return $response
-            ->withHeader('Content-Type', 'application/json; charset=utf-8')
+            ->withHeader('Content-Type', $artifact['mime_type'])
             ->withHeader(
                 'Content-Disposition',
-                'attachment; filename="' . $overview->filename() . '"',
+                'attachment; filename="' . $artifact['filename'] . '"',
             )
             ->withHeader('X-Content-Type-Options', 'nosniff')
             ->withHeader('Cache-Control', 'private, no-store')
             ->withHeader('Pragma', 'no-cache')
             ->withHeader('Content-Length', (string) strlen($bytes))
-            ->withHeader('Content-SHA256', $overview->sha256());
+            ->withHeader('Content-SHA256', $artifact['sha256']);
     }
 
     private function guard(
@@ -174,7 +210,9 @@ final class PayrollHealthInsuranceOverviewAction
 
     private function auditDownload(
         Request $request,
-        HealthPaymentOverview $overview,
+        int $revisionId,
+        string $insurerCode,
+        string $sha256,
     ): void {
         $serverParams = [];
         foreach ($request->getServerParams() as $key => $value) {
@@ -186,10 +224,10 @@ final class PayrollHealthInsuranceOverviewAction
             'payroll.health_overview.downloaded',
             $this->userId($request),
             'payroll_run_revisions',
-            $overview->revisionId,
+            $revisionId,
             [
-                'insurer_code' => $overview->insurerCode,
-                'sha256' => $overview->sha256(),
+                'insurer_code' => $insurerCode,
+                'sha256' => $sha256,
             ],
             $this->ipMatcher->clientIpFromRequest($serverParams),
             $request->getHeaderLine('User-Agent'),

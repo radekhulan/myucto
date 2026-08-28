@@ -77,6 +77,28 @@ final class DocumentFileRepository
         return $row !== false ? $this->hydrate($row) : null;
     }
 
+    /** @param list<int> $documentIds @return list<array<string,mixed>> */
+    public function listForPrivacyPurge(int $supplierId, array $documentIds): array
+    {
+        $documentIds = array_values(array_unique(array_map('intval', $documentIds)));
+        if ($documentIds === []) {
+            return [];
+        }
+        $result = [];
+        foreach (array_chunk($documentIds, 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT ' . self::COLS . ' FROM document_files
+                  WHERE supplier_id = ? AND document_id IN (' . $placeholders . ')'
+            );
+            $stmt->execute(array_merge([$supplierId], $chunk));
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+                $result[] = $this->hydrate($row);
+            }
+        }
+        return $result;
+    }
+
     /** Soft-delete souboru (bajty čistí až ref-counting nad diskem). */
     public function remove(int $id, int $documentId, int $supplierId): bool
     {

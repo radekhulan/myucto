@@ -35,7 +35,7 @@ final readonly class PayrollRegistrationTransportService
             'root' => 'REGZEC',
             'namespace' => 'http://schemas.cssz.cz/REGZEC/2025',
             'class' => 'CSSZ_REGZEC',
-            'actions' => [1],
+            'actions' => [1, 2, 3, 4, 5, 6, 7, 8],
         ],
     ];
 
@@ -209,7 +209,7 @@ final readonly class PayrollRegistrationTransportService
         }
         $agenda = $obligation['agenda_code'];
         if (!isset(self::DOCUMENTS[$agenda])) {
-            throw new \DomainException('Transport podporuje pouze PREZEC P1/P2 a REGZEC A1.');
+            throw new \DomainException('Transport podporuje pouze registrační agendy PREZEC a REGZEC.');
         }
 
         return [
@@ -296,8 +296,24 @@ final readonly class PayrollRegistrationTransportService
                 || !in_array((int) $action, $document['actions'], true)
             ) {
                 throw new \DomainException(
-                    'Transport podporuje pouze PREZEC P1/P2 a REGZEC A1.',
+                    'Transport podporuje pouze schválenou podporovanou akci PREZEC/REGZEC.',
                 );
+            }
+            if ($agendaCode === 'REGZEC25' && (int) $action === 1) {
+                try {
+                    PayrollRegistrationBusinessMatrix::requireActionVariant(
+                        1,
+                        null,
+                        null,
+                        false,
+                    );
+                } catch (PayrollRegistrationXmlException $exception) {
+                    throw new \DomainException(
+                        $exception->getMessage(),
+                        0,
+                        $exception,
+                    );
+                }
             }
         }
         $symbols = [];

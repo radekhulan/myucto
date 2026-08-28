@@ -38,6 +38,43 @@ final class SyntheticZfoBuilder
         return self::wrapInCms(self::envelopeXml($fields));
     }
 
+    /**
+     * @param list<array{name:string,mime:string,bytes:string,meta_type?:string}> $attachments
+     */
+    public static function receivedMessage(array $attachments, array $fields = []): string
+    {
+        $values = $fields + [
+            'message_id' => '9900002',
+            'sender_box_id' => 'test111',
+            'sender_name' => 'Zkušební odesílatel (syntetická data)',
+            'recipient_box_id' => 'test999',
+            'recipient_name' => 'Zkušební příjemce (syntetická data)',
+            'annotation' => 'Syntetická zpráva s přílohami',
+        ];
+        $files = '';
+        foreach ($attachments as $attachment) {
+            $files .= '<p:dmFile dmFileMetaType="' . self::esc($attachment['meta_type'] ?? 'enclosure')
+                . '" dmFileDescr="' . self::esc($attachment['name'])
+                . '" dmMimeType="' . self::esc($attachment['mime']) . '">'
+                . '<p:dmEncodedContent>' . base64_encode($attachment['bytes']) . '</p:dmEncodedContent>'
+                . '</p:dmFile>';
+        }
+
+        $xml = '<?xml version="1.0" encoding="UTF-8"?>'
+            . '<q:MessageDownloadResponse xmlns:q="http://isds.czechpoint.cz/v20/ReceivedMessage">'
+            . '<q:dmReturnedMessage><p:dmDm xmlns:p="http://isds.czechpoint.cz/v20">'
+            . '<p:dmID>' . self::esc((string) $values['message_id']) . '</p:dmID>'
+            . '<p:dbIDSender>' . self::esc((string) $values['sender_box_id']) . '</p:dbIDSender>'
+            . '<p:dmSender>' . self::esc((string) $values['sender_name']) . '</p:dmSender>'
+            . '<p:dbIDRecipient>' . self::esc((string) $values['recipient_box_id']) . '</p:dbIDRecipient>'
+            . '<p:dmRecipient>' . self::esc((string) $values['recipient_name']) . '</p:dmRecipient>'
+            . '<p:dmAnnotation>' . self::esc((string) $values['annotation']) . '</p:dmAnnotation>'
+            . '<p:dmFiles>' . $files . '</p:dmFiles>'
+            . '</p:dmDm></q:dmReturnedMessage></q:MessageDownloadResponse>';
+
+        return self::wrapInCms($xml);
+    }
+
     /** @param array<string,mixed> $fields */
     public static function envelopeXml(array $fields = []): string
     {

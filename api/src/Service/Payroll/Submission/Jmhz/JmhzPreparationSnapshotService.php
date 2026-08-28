@@ -22,7 +22,9 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V6_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v6';
     private const PREVIOUS_V7_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v7';
     private const PREVIOUS_V8_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v8';
-    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v9';
+    private const PREVIOUS_V9_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v9';
+    private const PREVIOUS_V10_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v10';
+    private const CURRENT_MANIFEST_SCHEMA = 'payroll-jmhz-preparation-source-manifest.v11';
     private const LEGACY_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v1';
     private const PREVIOUS_V2_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v2';
     private const PREVIOUS_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v3';
@@ -31,7 +33,9 @@ final readonly class JmhzPreparationSnapshotService
     private const PREVIOUS_V6_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v6';
     private const PREVIOUS_V7_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v7';
     private const PREVIOUS_V8_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v8';
-    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v9';
+    private const PREVIOUS_V9_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v9';
+    private const PREVIOUS_V10_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v10';
+    private const CURRENT_REQUEST_SCHEMA = 'payroll-jmhz-preparation-request.v11';
 
     public function __construct(
         private JmhzPreparationSnapshotRepository $repository,
@@ -43,6 +47,7 @@ final readonly class JmhzPreparationSnapshotService
         private JmhzEldpEvidenceSnapshotService $eldpEvidence,
         private JmhzOrdinaryEvidenceService $ordinaryEvidence,
         private JmhzAnnualEvidenceService $annualEvidence,
+        private JmhzEmployerAnnualEvidenceService $employerAnnualEvidence,
     ) {}
 
     public function loadVerified(
@@ -224,11 +229,20 @@ final readonly class JmhzPreparationSnapshotService
                 $sourceRevisionId,
                 $createdBy,
             );
+            $sourceIssues = [
+                ...$sourceIssues,
+                ...$ordinaryEvidence['issues'],
+            ];
             $annualEvidence = $this->annualEvidence->snapshotsForPreparation(
                 $supplierId,
                 $this->employeeIds($input),
                 (int) substr((string) $revision['period_start'], 0, 4),
             );
+            $employerAnnualEvidence = $this->employerAnnualEvidence
+                ->snapshotForPreparation(
+                    $supplierId,
+                    (string) $revision['period_start'],
+                );
             $snapshot = $this->builder->build(
                 $supplierId,
                 $environment,
@@ -237,8 +251,9 @@ final readonly class JmhzPreparationSnapshotService
                 $mappingSources,
                 $sourceIssues,
                 $eldpSources,
-                $ordinaryEvidence,
+                $ordinaryEvidence['sources'],
                 $annualEvidence,
+                $employerAnnualEvidence,
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -303,7 +318,8 @@ final readonly class JmhzPreparationSnapshotService
                 'run_id' => $scope['run_id'],
                 'source_revision_id' => $sourceRevisionId,
                 'period_start' => $scope['period_start'],
-                'scenario_key' => 'scenario_1',
+                'scenario_key' => 'mixed',
+                'scenario_set_json' => CanonicalJson::encode($scope['scenario_set'] ?? []),
                 'builder_version' => JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
                 'readiness_status' => $readiness['status'],
                 'issue_count' => $readiness['issue_count'],
@@ -495,6 +511,25 @@ final readonly class JmhzPreparationSnapshotService
         }
         $scope = $manifest['scope'] ?? null;
         $contracts = $this->contracts((string) ($stored['builder_version'] ?? ''));
+        $scenarioScopeMatches = false;
+        if (is_array($scope) && !array_is_list($scope)) {
+            $scenarioScopeMatches = ($scope['scenario_key'] ?? null) === ($stored['scenario_key'] ?? null);
+        }
+        if (is_array($scope) && !array_is_list($scope)
+            && ($stored['builder_version'] ?? null) === JmhzPreparationSnapshotBuilder::BUILDER_VERSION
+        ) {
+            $storedScenarioSet = $stored['scenario_set_json'] ?? null;
+            if (!is_string($storedScenarioSet)) {
+                $scenarioScopeMatches = false;
+            } else {
+                $decodedScenarioSet = json_decode($storedScenarioSet, true);
+                $scenarioScopeMatches = ($stored['scenario_key'] ?? null) === 'mixed'
+                    && is_array($decodedScenarioSet)
+                    && array_is_list($decodedScenarioSet)
+                    && CanonicalJson::encode($decodedScenarioSet)
+                        === CanonicalJson::encode($scope['scenario_set'] ?? null);
+            }
+        }
         if (!is_array($scope) || array_is_list($scope)
             || ($manifest['schema_reference'] ?? null)
                 !== $contracts['manifest_schema']
@@ -510,7 +545,7 @@ final readonly class JmhzPreparationSnapshotService
             || ($scope['source_revision_id'] ?? null)
                 !== ($stored['source_revision_id'] ?? null)
             || ($scope['period_start'] ?? null) !== ($stored['period_start'] ?? null)
-            || ($scope['scenario_key'] ?? null) !== ($stored['scenario_key'] ?? null)
+            || !$scenarioScopeMatches
             || ($readiness['status'] ?? null) !== ($stored['readiness_status'] ?? null)
             || ($readiness['issue_count'] ?? null) !== ($stored['issue_count'] ?? null)
             || ($readiness['official_submission_supported'] ?? null) !== false
@@ -674,6 +709,16 @@ final readonly class JmhzPreparationSnapshotService
                 'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V8_SCHEMA_REFERENCE,
                 'manifest_schema' => self::PREVIOUS_V8_MANIFEST_SCHEMA,
                 'request_schema' => self::PREVIOUS_V8_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V9_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V9_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V9_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V9_REQUEST_SCHEMA,
+            ],
+            JmhzPreparationSnapshotBuilder::PREVIOUS_V10_BUILDER_VERSION => [
+                'snapshot_schema' => JmhzPreparationSnapshot::PREVIOUS_V10_SCHEMA_REFERENCE,
+                'manifest_schema' => self::PREVIOUS_V10_MANIFEST_SCHEMA,
+                'request_schema' => self::PREVIOUS_V10_REQUEST_SCHEMA,
             ],
             JmhzPreparationSnapshotBuilder::BUILDER_VERSION => [
                 'snapshot_schema' => JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE,

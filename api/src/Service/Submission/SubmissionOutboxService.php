@@ -9,6 +9,7 @@ use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Submission\Channel\AcceptanceState;
+use MyInvoice\Service\Submission\Channel\AcceptanceEvidence;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelStatus;
 use MyInvoice\Service\Submission\Channel\DispatchState;
@@ -41,7 +42,7 @@ use Psr\Log\LoggerInterface;
  */
 final readonly class SubmissionOutboxService
 {
-    private const ARTIFACT_KINDS = ['payroll_submission', 'tax_submission', 'document'];
+    private const ARTIFACT_KINDS = ['payroll_submission', 'tax_submission', 'document', 'payroll_xmlzam'];
     private const ENVIRONMENTS = ['production', 'test'];
 
     public function __construct(
@@ -93,6 +94,12 @@ final readonly class SubmissionOutboxService
                 404,
             );
         }
+        $this->validator->assertTransportAuthority(
+            $artifactKind,
+            $artifact,
+            $environment,
+            $agendaCode,
+        );
 
         $recipientBoxId = null;
         if ($recipientId !== null) {
@@ -186,6 +193,25 @@ final readonly class SubmissionOutboxService
                     $id,
                     'artifact_missing',
                     'Podklad k odeslání už v aplikaci není. Vygenerujte ho znovu a zařaďte podání do fronty znovu.',
+                    (int) $claimed['row_version'],
+                ),
+                'dispatched' => false,
+            ];
+        }
+        try {
+            $this->validator->assertTransportAuthority(
+                (string) $claimed['artifact_kind'],
+                $artifact,
+                (string) $claimed['environment'],
+                (string) $claimed['agenda_code'],
+            );
+        } catch (SubmissionChannelException $exception) {
+            return [
+                'row' => $this->outbox->markFailed(
+                    $supplierId,
+                    $id,
+                    $exception->errorCode,
+                    $exception->getMessage(),
                     (int) $claimed['row_version'],
                 ),
                 'dispatched' => false,
@@ -613,6 +639,59 @@ final readonly class SubmissionOutboxService
             $status->evidence->value,
             $status->note,
             $version,
+        );
+    }
+
+    /**
+     * Promítne výsledek samostatného, kryptograficky ověřeného protokolu.
+     * Doručenka sem nikdy nejde; schopnost číst protokol musí být doložená
+     * pro přesnou dvojici kanál + agenda.
+     *
+     * @return array<string,mixed>
+     */
+    public function applyVerifiedProtocolOutcome(
+        int $supplierId,
+        int $id,
+        string $remoteStatus,
+        ?string $note = null,
+    ): array {
+        $row = $this->outbox->find($supplierId, $id);
+        if ($row === null) {
+            throw new SubmissionChannelException(
+                'submission_not_found',
+                'Podání ve frontě není.',
+                404,
+            );
+        }
+        if (AgendaReceiptCapability::forChannel(
+            (string) $row['channel'],
+            (string) $row['agenda_code'],
+        ) !== AgendaReceiptCapability::ProcessingProtocol) {
+            throw new SubmissionChannelException(
+                'processing_protocol_undocumented',
+                'Tahle agenda nemá doložený strojově čitelný protokol.',
+                409,
+            );
+        }
+        if ((string) $row['acceptance_state'] !== AcceptanceState::Unknown->value) {
+            return $row;
+        }
+        $acceptance = match ($remoteStatus) {
+            'accepted' => AcceptanceState::Accepted,
+            'rejected', 'correction_required' => AcceptanceState::Rejected,
+            default => null,
+        };
+        if ($acceptance === null) {
+            return $row;
+        }
+
+        return $this->outbox->recordAcceptance(
+            $supplierId,
+            $id,
+            $acceptance->value,
+            AcceptanceEvidence::AgencyProtocolMessage->value,
+            $note,
+            (int) $row['row_version'],
         );
     }
 

@@ -11,9 +11,9 @@ use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
-use MyInvoice\Service\Payroll\Document\PayrollDocumentStorageScope;
-use MyInvoice\Service\Payroll\Document\PreparedApprovedRevisionPayslipBatch;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
 use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -23,6 +23,7 @@ final class PayrollRunCommandService
 {
     private const COMMAND_SAVEPOINT = 'payroll_run_command';
     private const DELETE_SAVEPOINT = 'payroll_run_delete';
+    private readonly PayrollYearCloseGuard $yearClose;
 
     public function __construct(
         private readonly Connection $db,
@@ -33,8 +34,7 @@ final class PayrollRunCommandService
         private readonly PayrollPeriodOwnershipService $ownership,
         private readonly ?PayrollApprovedRevisionPostingService
             $approvedPosting = null,
-        private readonly ?ApprovedRevisionPayslipBatchService
-            $approvedPayslips = null,
+        ?ApprovedRevisionPayslipBatchService $approvedPayslips = null,
         private readonly ?PayrollControlTotalsService
             $controlTotals = null,
         private readonly ?PayrollRunPaymentPreparationService
@@ -43,7 +43,11 @@ final class PayrollRunCommandService
             $paymentSettlement = null,
         private readonly ?PayrollModuleActivationService
             $moduleActivation = null,
-    ) {}
+        private readonly ?PayrollDocumentBatchQueueService
+            $documentQueue = null,
+    ) {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /** @return array<string,mixed> */
     public function createRun(
@@ -63,6 +67,7 @@ final class PayrollRunCommandService
         }
         try {
             $this->assertModuleAvailable($supplierId, $periodStart);
+            $this->assertYearOpen($supplierId, $periodStart);
             $run = $this->runs->createOrGet(
                 $supplierId,
                 $periodStart,
@@ -310,6 +315,7 @@ final class PayrollRunCommandService
                 $supplierId,
                 (string) $run['period_start'],
             );
+            $this->assertYearOpen($supplierId, (string) $run['period_start']);
             $currentVersion = (int) $run['row_version'];
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollRunConflictException($currentVersion);
@@ -439,47 +445,11 @@ final class PayrollRunCommandService
 
         $pdo = $this->db->pdo();
         $nestedTransaction = $pdo->inTransaction();
-        $preparedPayslips = null;
-        if ($command === PayrollRunCommand::APPROVE
-            && $this->approvedPayslips !== null
-        ) {
-            if ($nestedTransaction) {
-                throw new \DomainException(
-                    'Schválení s generováním výplatních pásek musí proběhnout v samostatné databázové transakci.',
-                );
-            }
-            if ($this->runs->commandReceipt(
-                $supplierId,
-                $keyHashBinary,
-            ) === null) {
-                $runForRendering = $this->runs->find($supplierId, $runId);
-                if ($runForRendering === null) {
-                    throw new \OutOfBoundsException('Mzdový běh nebyl nalezen.');
-                }
-                $currentVersion = (int) $runForRendering['row_version'];
-                if ($currentVersion !== $expectedVersion) {
-                    throw new PayrollRunConflictException($currentVersion);
-                }
-                $revisionForRendering = $this->runs->currentRevision(
-                    $supplierId,
-                    $runId,
-                );
-                if ($revisionForRendering === null) {
-                    throw new \DomainException('Mzdový běh nemá revizi.');
-                }
-                $preparedPayslips = $this->approvedPayslips->prepare(
-                    $supplierId,
-                    $runId,
-                    (int) $revisionForRendering['id'],
-                );
-            }
-        }
         if ($nestedTransaction) {
             $pdo->exec('SAVEPOINT ' . self::COMMAND_SAVEPOINT);
         } else {
             $pdo->beginTransaction();
         }
-        $payslipStorageScope = null;
         try {
             $run = $this->runs->lock($supplierId, $runId);
             if ($run === null) {
@@ -503,6 +473,7 @@ final class PayrollRunCommandService
                 $supplierId,
                 (string) $run['period_start'],
             );
+            $this->assertYearOpen($supplierId, (string) $run['period_start']);
             $currentVersion = (int) $run['row_version'];
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollRunConflictException($currentVersion);
@@ -699,8 +670,6 @@ final class PayrollRunCommandService
                 if ($revision === null) {
                     throw new \DomainException('Mzdový běh nemá revizi.');
                 }
-                $payslipStorageScope = $this->approvedPayslips
-                    ?->beginStorageScope();
                 $resultSnapshot = self::snapshotObject(
                     $revision['result_snapshot'] ?? null,
                     'výsledný',
@@ -741,20 +710,12 @@ final class PayrollRunCommandService
                     $resultSnapshot,
                     $actorUserId,
                 );
-                if ($this->approvedPayslips !== null) {
-                    if (!$preparedPayslips
-                        instanceof PreparedApprovedRevisionPayslipBatch
-                    ) {
-                        throw new \LogicException(
-                            'Výplatní pásky nebyly připraveny před schvalovací transakcí.',
-                        );
-                    }
-                    $this->approvedPayslips->archivePrepared(
-                        $preparedPayslips,
-                        $actorUserId,
-                        $payslipStorageScope,
-                    );
-                }
+                $this->documentQueue?->enqueueApprovedRevision(
+                    $supplierId,
+                    $runId,
+                    (int) $revision['id'],
+                    $actorUserId,
+                );
                 // Druhá spoušť aktivace modulu: schválený mzdový běh je důkaz,
                 // že nastavení je fakticky hotové. Idempotentní — druhé
                 // schválení už stav nemění.
@@ -858,11 +819,6 @@ final class PayrollRunCommandService
                 $actorUserId,
             );
             $this->finishCommandTransaction($pdo, $nestedTransaction);
-            if ($payslipStorageScope instanceof PayrollDocumentStorageScope) {
-                $this->approvedPayslips->commitStorageScope(
-                    $payslipStorageScope,
-                );
-            }
             return new PayrollRunCommandResult(
                 $command,
                 $transition->from,
@@ -874,23 +830,6 @@ final class PayrollRunCommandService
             );
         } catch (\Throwable $e) {
             $this->rollbackCommandTransaction($pdo, $nestedTransaction);
-            if (
-                $payslipStorageScope instanceof PayrollDocumentStorageScope
-                && $this->approvedPayslips
-                    instanceof ApprovedRevisionPayslipBatchService
-            ) {
-                try {
-                    $this->approvedPayslips->cleanupStorageScope(
-                        $supplierId,
-                        $payslipStorageScope,
-                    );
-                } catch (\Throwable $cleanupException) {
-                    throw new \RuntimeException(
-                        'Schválení selhalo a soubory výplatních pásek se nepodařilo uklidit.',
-                        previous: $cleanupException,
-                    );
-                }
-            }
             throw $e;
         }
     }
@@ -1086,6 +1025,11 @@ final class PayrollRunCommandService
         ) {
             throw new \DomainException('Období předchází aktivaci plného mzdového modulu.');
         }
+    }
+
+    private function assertYearOpen(int $supplierId, string $periodStart): void
+    {
+        $this->yearClose->assertOpenForDateRange($supplierId, $periodStart, $periodStart);
     }
 
     private function period(string $periodStart): \DateTimeImmutable

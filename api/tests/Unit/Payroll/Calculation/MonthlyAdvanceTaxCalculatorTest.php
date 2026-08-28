@@ -96,6 +96,57 @@ final class MonthlyAdvanceTaxCalculatorTest extends TestCase
         self::assertSame(0, $belowBonus->taxBonusMinorUnits);
     }
 
+    public function testMonthlyBonusIncomeThresholdIsInclusiveAndAuditable(): void
+    {
+        $result = $this->calculator()->calculate(
+            '2026-08-03',
+            new MonthlyAdvanceTaxInput(
+                taxableIncomeMinorUnits: 1_120_000,
+                signedDeclaration: true,
+                claimTaxpayerCredit: true,
+                childCreditMinorUnits: 126_700,
+            ),
+        );
+
+        self::assertTrue($result->taxBonusEligible);
+        self::assertSame(126_700, $result->taxBonusMinorUnits);
+        self::assertSame(1_120_000, $result->taxBonusMinimumIncomeMinorUnits);
+        self::assertSame(5_000, $result->taxBonusMinimumAmountMinorUnits);
+        self::assertSame(126_700, $result->taxBonusCandidateMinorUnits);
+        self::assertTrue($result->taxBonusIncomeThresholdMet);
+        self::assertTrue($result->taxBonusAmountThresholdMet);
+        self::assertSame('eligible', $result->taxBonusEligibilityReason);
+    }
+
+    public function testMonthlyBonusExplainsIncomeAndAmountThresholdFailures(): void
+    {
+        $belowIncome = $this->calculator()->calculate(
+            '2026-08-03',
+            new MonthlyAdvanceTaxInput(
+                taxableIncomeMinorUnits: 1_119_900,
+                signedDeclaration: true,
+                claimTaxpayerCredit: true,
+                childCreditMinorUnits: 126_700,
+            ),
+        );
+        self::assertSame('income_below_threshold', $belowIncome->taxBonusEligibilityReason);
+        self::assertFalse($belowIncome->taxBonusIncomeThresholdMet);
+        self::assertTrue($belowIncome->taxBonusAmountThresholdMet);
+
+        $belowAmount = $this->calculator()->calculate(
+            '2026-08-03',
+            new MonthlyAdvanceTaxInput(
+                taxableIncomeMinorUnits: 4_790_000,
+                signedDeclaration: true,
+                claimTaxpayerCredit: true,
+                childCreditMinorUnits: 465_000,
+            ),
+        );
+        self::assertSame('amount_below_threshold', $belowAmount->taxBonusEligibilityReason);
+        self::assertTrue($belowAmount->taxBonusIncomeThresholdMet);
+        self::assertFalse($belowAmount->taxBonusAmountThresholdMet);
+    }
+
     /**
      * Dřív se tady tvrdilo, že dodaná sada počítat NESMÍ, dokud ji někdo neschválí.
      * To je právě to, co majitel zrušil: za dodané hodnoty ručí dodavatel a zákazník

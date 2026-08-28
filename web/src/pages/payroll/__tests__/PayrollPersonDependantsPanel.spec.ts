@@ -57,6 +57,8 @@ function response(overrides: Partial<PayrollDependantsResponse> = {}): PayrollDe
       id: 7,
       relation: 'child_own',
       full_name: 'Syntetické Dítě',
+      given_name: 'Syntetické',
+      family_name: 'Dítě',
       birth_date: '2015-02-02',
       birth_number_masked: '••••••0003',
       has_birth_number: true,

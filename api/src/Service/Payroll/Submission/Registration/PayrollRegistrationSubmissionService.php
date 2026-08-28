@@ -19,10 +19,9 @@ use Psr\Clock\ClockInterface;
  *
  * Čtyři rozhodnutí, na kterých vrstva stojí:
  *
- * 1. **Interakci vybírá resolver, ne volající.** Endpoint nepřijímá kód
- *    formuláře. Kdyby ho přijímal, dal by se allowlist PREZEC P1/P2 a REGZEC A1
- *    obejít jedním řetězcem v těle požadavku a opravy či storna by se
- *    serializovaly bez odporu.
+ * 1. **Interakci vybírá resolver nebo schválený event, ne volající.** Běžný
+ *    endpoint nepřijímá kód formuláře; REGZEC A2–A8 se připravují pouze ze
+ *    samostatně schváleného a neměnného zdroje.
  * 2. **Zmrazené XML je pravda podání.** Vzniká právě jednou, uloží se jako
  *    artefakt a při idempotentním opakování se NESTAVÍ ZNOVU — nové GUIDy by
  *    pod týmž podáním vyrobily jiný dokument a přijatou duplicitu nelze u ČSSZ
@@ -70,6 +69,7 @@ final readonly class PayrollRegistrationSubmissionService
     public function __construct(
         private PayrollRegistrationSubmissionRepository $registrations,
         private PayrollRegistrationIdentityService $identities,
+        private PayrollRegistrationEventService $events,
         private PayrollRegistrationIdentitySnapshotBuilder $snapshots,
         private PayrollRegistrationInteractionResolver $interactions,
         private PayrollRegistrationXmlSerializer $serializer,
@@ -100,12 +100,14 @@ final readonly class PayrollRegistrationSubmissionService
         int $supplierId,
         string $environment,
         int $employmentId,
+        ?int $eventId = null,
     ): array {
         $resolved = $this->resolve(
             $supplierId,
             $environment,
             $employmentId,
             0,
+            $eventId,
         );
 
         return [
@@ -122,6 +124,53 @@ final readonly class PayrollRegistrationSubmissionService
                 'reason' => 'Tohle je test: podání se nezakládá a nic se neodesílá.',
             ],
         ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function listEvents(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): array {
+        $this->requireContext($supplierId, $employmentId);
+
+        return $this->events->list($supplierId, $environment, $employmentId);
+    }
+
+    /** @return array<string,mixed> */
+    public function a2EvidenceCandidates(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $effectiveOn,
+    ): array {
+        $this->requireContext($supplierId, $employmentId);
+
+        return $this->events->a2EvidenceCandidates(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $effectiveOn,
+        );
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function approveEvent(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        array $input,
+        int $approvedBy,
+    ): array {
+        $this->requireContext($supplierId, $employmentId);
+
+        return $this->events->approve(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $input,
+            $approvedBy,
+        );
     }
 
     /**
@@ -141,18 +190,27 @@ final readonly class PayrollRegistrationSubmissionService
         string $environment,
         int $employmentId,
         ?int $createdBy = null,
+        ?int $eventId = null,
     ): array {
         // Povinnost a lhůta vznikají mimo transakci podání a nezávisle na tom,
         // jestli se podání povede připravit. Kdyby vznikaly až spolu s ním,
         // neúspěšná příprava by po sobě nenechala ani stopu po termínu.
         $context = $this->requireContext($supplierId, $employmentId);
-        $this->registerEmployerObligation(
+        if ($eventId === null) {
+            $this->registerEmployerObligation(
+                $supplierId,
+                $environment,
+                $context,
+                $createdBy,
+            );
+        }
+        $probe = $this->resolve(
             $supplierId,
             $environment,
-            $context,
-            $createdBy,
+            $employmentId,
+            0,
+            $eventId,
         );
-        $probe = $this->resolve($supplierId, $environment, $employmentId, 0);
         $obligation = $this->registerObligation(
             $supplierId,
             $environment,
@@ -168,11 +226,20 @@ final readonly class PayrollRegistrationSubmissionService
             $createdBy,
             $probe,
             $obligation,
+            $eventId,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
                 throw new PayrollRegistrationXmlException(
                     'registration_supplier_missing',
                     'Firma registračního podání nebyla nalezena.',
+                );
+            }
+            if ($eventId !== null) {
+                $this->events->assertA2EvidenceCurrent(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $eventId,
                 );
             }
             $sourceHash = $probe['source_hash'];
@@ -214,18 +281,25 @@ final readonly class PayrollRegistrationSubmissionService
                 $environment,
                 $employmentId,
                 (int) $submission['id'],
+                $eventId,
             );
             $part = $this->submissions->addPart(
                 $supplierId,
                 (int) $submission['id'],
                 (int) $submission['row_version'],
-                $this->partReference($frozen['interaction'], $employmentId),
+                $this->partReference(
+                    $frozen['interaction'],
+                    $employmentId,
+                    $eventId,
+                ),
                 $frozen['interaction']->documentType,
                 PayrollRegistrationSubmissionRepository::employmentReference(
                     $employmentId,
                 ),
-                'payroll_employment',
-                self::sourceEventReference($employmentId),
+                $eventId === null
+                    ? 'payroll_employment'
+                    : 'payroll_registration_event',
+                self::sourceEventReference($employmentId, $eventId),
                 $frozen['source_hash'],
             );
             $artifact = $this->submissions->storeArtifact(
@@ -264,13 +338,27 @@ final readonly class PayrollRegistrationSubmissionService
                 (int) $validated['row_version'],
                 'ready',
             );
-            $this->registrations->setChecklistDueDate(
-                $supplierId,
-                $employmentId,
-                self::CHECKLIST_PHASE,
-                self::CHECKLIST_ITEM_KEY,
-                $frozen['deadline']->dueOn,
-            );
+            if ($eventId === null) {
+                $this->registrations->setChecklistDueDate(
+                    $supplierId,
+                    $employmentId,
+                    self::CHECKLIST_PHASE,
+                    self::CHECKLIST_ITEM_KEY,
+                    $frozen['deadline']->dueOn,
+                );
+            } elseif (in_array(
+                $frozen['interaction']->actionCode,
+                [2, 8],
+                true,
+            )) {
+                $this->registrations->setChecklistDueDate(
+                    $supplierId,
+                    $employmentId,
+                    'offboarding',
+                    'social_jmhz_deregistration',
+                    $frozen['deadline']->dueOn,
+                );
+            }
 
             return [
                 'submission_id' => (int) $submission['id'],
@@ -289,12 +377,24 @@ final readonly class PayrollRegistrationSubmissionService
         });
     }
 
-    public static function sourceEventReference(int $employmentId): string
+    public static function sourceEventReference(
+        int $employmentId,
+        ?int $eventId = null,
+    ): string
     {
         if ($employmentId <= 0) {
             throw new \InvalidArgumentException(
                 'Pracovní vztah musí být kladné číslo.',
             );
+        }
+
+        if ($eventId !== null) {
+            if ($eventId <= 0) {
+                throw new \InvalidArgumentException(
+                    'Zdrojová událost musí být kladné číslo.',
+                );
+            }
+            return "payroll_registration_event:{$eventId}";
         }
 
         return "payroll_employment_registration:{$employmentId}";
@@ -319,13 +419,25 @@ final readonly class PayrollRegistrationSubmissionService
         string $environment,
         int $employmentId,
         int $submissionId,
+        ?int $eventId = null,
     ): array {
         $context = $this->requireContext($supplierId, $employmentId);
-        $effectiveOn = $this->effectiveDate($context);
+        $event = $eventId === null
+            ? null
+            : $this->events->load(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $eventId,
+            );
+        $effectiveOn = $event === null
+            ? $this->effectiveDate($context)
+            : (string) $event['effective_on'];
         $interactionContext = $this->interactionContext(
             $supplierId,
             $environment,
             $context,
+            $event,
         );
         $source = $this->identities->sensitiveSnapshotSourceAt(
             $supplierId,
@@ -334,6 +446,24 @@ final readonly class PayrollRegistrationSubmissionService
             $environment,
             $effectiveOn,
         );
+        if ($event !== null
+            && is_array($event['employment_external_identifier'] ?? null)
+        ) {
+            $currentExternal = is_array(
+                $source['employment_external_identifier'] ?? null,
+            ) ? $source['employment_external_identifier'] : [];
+            $source['employment_external_identifier'] = array_merge(
+                $currentExternal,
+                $event['employment_external_identifier'],
+                [
+                    'employee_id' => $context['employee_id'],
+                    'employment_id' => $employmentId,
+                    'environment' => $environment,
+                    'identifier_type' => 'id_ppv',
+                ],
+            );
+            $source['resolution']['employment_external_id'] = 'resolved';
+        }
         // Snapshot nese agendu ve svém rozsahu a resolver na shodě trvá, takže
         // agendu je nutné znát DŘÍV než interakci. Rozhoduje o ní `agendaFor()`
         // téhož resolveru — tady se nic neodvozuje podruhé. `resolve()` pak
@@ -355,6 +485,19 @@ final readonly class PayrollRegistrationSubmissionService
             ),
             $source,
         );
+        if ($event !== null) {
+            $eventEmploymentIdentifier = $event['employment_external_identifier']['value']
+                ?? null;
+            if (!is_string($eventEmploymentIdentifier)
+                || ($snapshot->employmentExternalIdentifier['value'] ?? null)
+                    !== $eventEmploymentIdentifier
+            ) {
+                throw new PayrollRegistrationXmlException(
+                    'registration_event_id_ppv_snapshot_mismatch',
+                    'ID PPV v neměnném zdroji neodpovídá identitě účinné k datu události.',
+                );
+            }
+        }
         $interaction = $this->interactions->resolve(
             $snapshot,
             $interactionContext,
@@ -364,6 +507,7 @@ final readonly class PayrollRegistrationSubmissionService
             $interaction,
             $context,
             $effectiveOn,
+            $event,
         );
         $xml = $this->serializer->serialize($payload);
         // Validátor si XML serializuje znovu a porovná bajty; volá se i tady,
@@ -375,10 +519,28 @@ final readonly class PayrollRegistrationSubmissionService
             'interaction' => $interaction,
             'snapshot' => $snapshot,
             'xml' => $xml,
-            'source_hash' => hash('sha256', $snapshot->canonicalJson()),
+            'source_hash' => $event === null
+                ? hash('sha256', CanonicalJson::encode([
+                    'identity' => $snapshot->toArray(),
+                    'event_fingerprint' => null,
+                ]))
+                : $this->eventFingerprint($event),
             'schema_version' => $interaction->documentType,
-            'deadline' => $this->deadlineFor($interaction, $context),
-            'employer_deadline' => $this->employerDeadline($context),
+            'deadline' => $this->deadlineFor(
+                $interaction,
+                $context,
+                $event === null
+                    ? $effectiveOn
+                    : (string) ($event['notification_trigger_on'] ?? ''),
+            ),
+            'employer_deadline' => $event === null
+                ? $this->employerDeadline($context)
+                : null,
+            'event_effective_on' => $event === null ? null : $effectiveOn,
+            'source_event_reference' => self::sourceEventReference(
+                $employmentId,
+                $eventId,
+            ),
         ];
     }
 
@@ -421,8 +583,13 @@ final readonly class PayrollRegistrationSubmissionService
         PayrollRegistrationInteraction $interaction,
         array $context,
         string $effectiveOn,
+        ?array $event,
     ): PayrollRegistrationXmlPayload {
-        $variableSymbol = $context['employer_variable_symbol'];
+        $eventEmployer = is_array($event['employer'] ?? null)
+            ? $event['employer']
+            : null;
+        $variableSymbol = $eventEmployer['variable_symbol']
+            ?? $context['employer_variable_symbol'];
         if (!is_string($variableSymbol) || $variableSymbol === '') {
             throw new PayrollRegistrationXmlException(
                 'registration_employer_variable_symbol_missing',
@@ -444,32 +611,40 @@ final readonly class PayrollRegistrationSubmissionService
             formGuid: $this->guids->next(),
             preparedOn: $this->today(),
             expectedStartOn: $effectiveOn,
-            actualStartOn: $regzec ? $effectiveOn : null,
+            actualStartOn: $regzec && $event === null ? $effectiveOn : null,
             employerVariableSymbol: $variableSymbol,
-            employerName: $regzec ? $context['employer_name'] : null,
-            csszWorkplaceCode: $regzec
-                ? $context['cssz_workplace_code']
+            employerName: $regzec
+                ? (string) ($eventEmployer['name']
+                    ?? $context['employer_name'])
                 : null,
+            csszWorkplaceCode: $regzec
+                ? (string) ($eventEmployer['workplace_code']
+                    ?? $context['cssz_workplace_code'])
+                : null,
+            eventSnapshot: $event,
         );
     }
 
     /**
-     * Fakta pro resolver. `full_registration_data` NEZNAMENÁ „máme vyplněná
-     * pole" — znamená „plnou registraci lze doložit jako skutečnost". Před
-     * nástupem českého občana se za doloženou vědomě nepovažuje: `job/@fro`
+     * Fakta pro resolver. `full_registration_data` potvrzuje jen základní
+     * metadata zaměstnavatele a skutečný nástup, nikoli právní úplnost A1;
+     * úplnou variantní sadu samostatně hlídá business matice. Před nástupem
+     * českého občana se za doloženou vědomě nepovažuje: `job/@fro`
      * je datum SKUTEČNÉHO nástupu a předjímat ho znamená tvrdit ČSSZ událost,
      * která se ještě nestala. Přesně na tuhle mezeru je PREZEC.
      *
      * @param array<string,mixed> $context
      * @return array{
      *   work_started:bool,full_registration_data:bool,
-     *   pre_registration_accepted:bool,did_not_start:bool
+     *   pre_registration_accepted:bool,did_not_start:bool,
+     *   employment_ended:bool
      * }
      */
     private function interactionContext(
         int $supplierId,
         string $environment,
         array $context,
+        ?array $event = null,
     ): array {
         $workStarted = $context['actual_start_date'] !== null
             || in_array(
@@ -477,13 +652,13 @@ final readonly class PayrollRegistrationSubmissionService
                 ['active', 'suspended', 'ended', 'archived'],
                 true,
             );
-        $employerDataComplete = $context['employer_name'] !== ''
+        $employerMetadataComplete = $context['employer_name'] !== ''
             && $context['employer_variable_symbol'] !== null
             && $context['cssz_workplace_code'] !== null;
 
         return [
             'work_started' => $workStarted,
-            'full_registration_data' => $employerDataComplete && $workStarted,
+            'full_registration_data' => $employerMetadataComplete && $workStarted,
             'pre_registration_accepted' =>
                 $this->registrations->hasAcceptedPreRegistration(
                     $supplierId,
@@ -492,6 +667,14 @@ final readonly class PayrollRegistrationSubmissionService
                     self::AGENDA_PREZEC,
                 ),
             'did_not_start' => $context['status'] === 'no_show',
+            'employment_ended' => in_array(
+                $context['status'],
+                ['ended', 'archived'],
+                true,
+            ) || $context['end_date'] !== null,
+            'event_interaction' => is_string($event['interaction'] ?? null)
+                ? $event['interaction']
+                : null,
         ];
     }
 
@@ -499,7 +682,18 @@ final readonly class PayrollRegistrationSubmissionService
     private function deadlineFor(
         PayrollRegistrationInteraction $interaction,
         array $context,
+        ?string $effectiveOn = null,
     ): PayrollEmployeeRegistrationDeadlineWindow {
+        if ($interaction->documentType === self::AGENDA_REGZEC
+            && $interaction->actionCode >= 2
+        ) {
+            return $this->deadlines->forFollowUp(
+                $interaction->actionCode,
+                $effectiveOn
+                    ?? (string) ($context['end_date']
+                        ?? $this->effectiveDate($context)),
+            );
+        }
         $startOn = $this->effectiveDate($context);
 
         return $interaction->interaction === 'pre_registration_no_show'
@@ -564,7 +758,8 @@ final readonly class PayrollRegistrationSubmissionService
             'employment_id' => $context['employment_id'],
             'agenda_code' => $interaction->documentType,
             'interaction' => $interaction->interaction,
-            'effective_on' => $this->effectiveDate($context),
+            'effective_on' => $resolved['event_effective_on']
+                ?? $this->effectiveDate($context),
         ]));
 
         return $this->obligations->register(
@@ -577,7 +772,7 @@ final readonly class PayrollRegistrationSubmissionService
             'regular',
             self::CHANNEL,
             self::SOURCE_EVENT_TYPE,
-            self::sourceEventReference($context['employment_id']),
+            $resolved['source_event_reference'],
             $sourceHash,
             $window->earliestRegistrationOn,
             $window->dueOn,
@@ -659,10 +854,11 @@ final readonly class PayrollRegistrationSubmissionService
         array $resolved,
         int $obligationId,
     ): array {
-        $stored = $this->registrations->latestRegistration(
+        $stored = $this->registrations->registrationBySubmission(
             $supplierId,
             $environment,
             $employmentId,
+            (int) $submission['id'],
         );
         if ($stored === null || $stored['artifact_sha256'] === null) {
             throw new PayrollRegistrationXmlException(
@@ -761,9 +957,17 @@ final readonly class PayrollRegistrationSubmissionService
     private function partReference(
         PayrollRegistrationInteraction $interaction,
         int $employmentId,
+        ?int $eventId = null,
     ): string {
         return strtolower($interaction->documentType)
-            . ':' . $employmentId;
+            . ':' . $employmentId
+            . ($eventId === null ? '' : ':event:' . $eventId);
+    }
+
+    /** @param array<string,mixed> $event */
+    private function eventFingerprint(array $event): string
+    {
+        return hash('sha256', CanonicalJson::encode($event));
     }
 
     /** @return array{submission:string,artifact:string} */

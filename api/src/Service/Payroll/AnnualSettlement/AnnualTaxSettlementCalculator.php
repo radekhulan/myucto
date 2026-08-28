@@ -178,6 +178,8 @@ final class AnnualTaxSettlementCalculator
                 'order' => $child->order,
                 'months' => $child->months,
                 'ztp_p_months' => $child->ztpPMonths,
+                'claimed_months' => $child->claimedMonths,
+                'ztp_p_claimed_months' => $child->ztpPClaimedMonths,
                 'amount_minor_units' => $amount,
             ];
             $childEntitlement = TaxIntegerMath::add($childEntitlement, $amount);
@@ -195,8 +197,15 @@ final class AnnualTaxSettlementCalculator
             $external['gross_income_minor_units'],
         );
         $thresholdMet = $qualifyingIncome >= $rates->bonusMinimumIncomeMinorUnits;
-        $annualBonus = ($thresholdMet
-            && $bonusCandidate >= AnnualSettlementStatute::ANNUAL_BONUS_MINIMUM_MINOR_UNITS)
+        $amountThresholdMet = AnnualSettlementStatute::isAnnualBonusAmountEligible(
+            $bonusCandidate,
+        );
+        $bonusEligibilityReason = match (true) {
+            !$thresholdMet => 'income_below_threshold',
+            !$amountThresholdMet => 'amount_below_threshold',
+            default => 'eligible',
+        };
+        $annualBonus = ($thresholdMet && $amountThresholdMet)
             ? $bonusCandidate
             : 0;
 
@@ -290,6 +299,9 @@ final class AnnualTaxSettlementCalculator
                 'payout_threshold_minor_units' =>
                     AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
             ],
+            annualTaxBonusCandidateMinorUnits: $bonusCandidate,
+            annualBonusAmountThresholdMet: $amountThresholdMet,
+            annualBonusEligibilityReason: $bonusEligibilityReason,
         );
     }
 

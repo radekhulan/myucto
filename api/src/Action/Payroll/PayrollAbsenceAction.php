@@ -22,9 +22,11 @@ use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Service\Payroll\Absence\LeaveEntitlementCalculator;
+use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Absence\SicknessCompensationCalculator;
 use MyInvoice\Service\Payroll\PayrollAbsenceValidator;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -46,6 +48,7 @@ final class PayrollAbsenceAction
         private readonly LeaveEntitlementCalculator $leaveCalculator,
         private readonly AutomaticLeaveEntitlementService $automaticLeaveEntitlements,
         private readonly SicknessCompensationCalculator $sicknessCalculator,
+        private readonly PayrollSicknessInputMaterializer $sicknessInputs,
         private readonly PayrollModuleAccess $access,
         private readonly PayrollRulesetProvider $rulesets,
         private readonly PayrollAverageEarningDeletionRepository $averageDeletion,
@@ -121,6 +124,8 @@ final class PayrollAbsenceAction
                 $this->validator->absence($this->body($request)),
                 $this->userId($request),
             );
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollAbsenceOverlapException $e) {
@@ -191,6 +196,16 @@ final class PayrollAbsenceAction
                     $decision,
                     $this->userId($request),
                 );
+                if ($decision === 'approved'
+                    && in_array($absence['absence_type'], ['dpn', 'quarantine'], true)
+                    && is_array($calculation)
+                ) {
+                    $this->sicknessInputs->materialize(
+                        $supplierId,
+                        (int) $calculation['id'],
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -200,6 +215,8 @@ final class PayrollAbsenceAction
                 }
                 throw $e;
             }
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollAbsenceConflictException $e) {
@@ -238,6 +255,15 @@ final class PayrollAbsenceAction
                     $version,
                     $this->userId($request),
                 );
+                if (in_array($before['absence_type'], ['dpn', 'quarantine'], true)
+                    && $before['status'] === 'approved'
+                ) {
+                    $this->sicknessInputs->reverseForAbsence(
+                        $supplierId,
+                        $id,
+                        $this->userId($request),
+                    );
+                }
                 if ($ownsTransaction) {
                     $pdo->commit();
                 }
@@ -247,6 +273,8 @@ final class PayrollAbsenceAction
                 }
                 throw $e;
             }
+        } catch (PayrollYearClosedException $e) {
+            return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollAbsenceConflictException $e) {

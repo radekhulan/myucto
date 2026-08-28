@@ -140,11 +140,9 @@ final class PayrollEmployerSettingsValidator
             $socialVariableSymbol = trim(
                 (string) ($office['social_security_variable_symbol'] ?? '')
             );
-            if ($socialVariableSymbol !== ''
-                && preg_match('/^[0-9]{1,10}$/', $socialVariableSymbol) !== 1
-            ) {
+            if ($socialVariableSymbolProvided && $socialVariableSymbol !== '') {
                 throw new \InvalidArgumentException(
-                    'VS ČSSZ mzdové účtárny musí obsahovat nejvýše 10 číslic.'
+                    'VS ČSSZ spravujte přes účinnou historii registrace mzdové účtárny.'
                 );
             }
             $seen[$code] = true;

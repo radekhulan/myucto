@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCancellationRequest;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCancellationXmlSerializer;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionEnvelope;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
@@ -94,6 +96,7 @@ final class JmhzCancellationXmlSerializerTest extends TestCase
             '1234567890',
             2026,
             7,
+            deadlines: $this->deadlines(),
             today: '2026-08-25',
         );
     }
@@ -105,6 +108,7 @@ final class JmhzCancellationXmlSerializerTest extends TestCase
             '1234567890',
             2026,
             7,
+            deadlines: $this->deadlines(),
             today: '2026-08-20',
         );
 
@@ -121,6 +125,7 @@ final class JmhzCancellationXmlSerializerTest extends TestCase
                     '1234567890',
                     2026,
                     $month,
+                    deadlines: $this->deadlines(),
                     today: '2026-05-15',
                 );
                 self::fail("Storno za {$month}/2026 musí být odmítnuto.");
@@ -141,6 +146,7 @@ final class JmhzCancellationXmlSerializerTest extends TestCase
             '12345',
             2026,
             7,
+            deadlines: $this->deadlines(),
             today: '2026-08-10',
         );
     }
@@ -152,8 +158,14 @@ final class JmhzCancellationXmlSerializerTest extends TestCase
             '1234567890',
             2026,
             7,
+            deadlines: $this->deadlines(),
             today: '2026-08-10',
         );
+    }
+
+    private function deadlines(): JmhzDeadlinePolicy
+    {
+        return new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider());
     }
 
     private function serialize(): string

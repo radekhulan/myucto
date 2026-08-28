@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import type {
   EnforcementCaseDetail,
+  EnforcementCaseParty,
   EnforcementCaseSummary,
+  EnforcementClaimBreakdown,
   EnforcementDependant,
   EnforcementMonthEvidence,
 } from '@/api/payrollEnforcement'
@@ -13,6 +15,11 @@ const m = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   casesPage: vi.fn(),
   detail: vi.fn(),
+  parties: vi.fn(),
+  claimBreakdowns: vi.fn(),
+  recipientInstructions: vi.fn(),
+  appendRecipientInstruction: vi.fn(),
+  documentSearch: vi.fn(),
   monthEvidence: vi.fn(),
   dependants: vi.fn(),
   peoplePage: vi.fn(),
@@ -40,6 +47,12 @@ vi.mock('@/api/payrollEnforcement', () => ({
   payrollEnforcementApi: {
     casesPage: m.casesPage,
     detail: m.detail,
+    parties: m.parties,
+    claimBreakdowns: m.claimBreakdowns,
+    recipientInstructions: m.recipientInstructions,
+    appendParty: vi.fn(),
+    appendClaimBreakdown: vi.fn(),
+    appendRecipientInstruction: m.appendRecipientInstruction,
     create: vi.fn(),
     addClaim: vi.fn(),
     updateClaim: m.updateClaim,
@@ -63,7 +76,7 @@ vi.mock('@/api/payroll', () => ({
 }))
 
 vi.mock('@/api/documents', () => ({
-  documentsApi: { search: vi.fn() },
+  documentsApi: { search: m.documentSearch },
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -127,11 +140,13 @@ function detailOf(item: EnforcementCaseSummary): EnforcementCaseDetail {
     ledger: [],
     settlement: {
       claims: [],
+      original_minor: 0,
       withheld_minor: 0,
       held_minor: 0,
       liability_minor: 0,
       settled_minor: 0,
       outstanding_minor: 0,
+      remaining_to_withhold_minor: 0,
       remaining_minor: 0,
     },
   }
@@ -146,6 +161,7 @@ function verifiedClaim(): EnforcementCaseDetail['claims'][number] {
     outstanding_minor_units: 250_000,
     maintenance_weight_minor_units: null,
     priority_date: '2026-05-01',
+    first_payer_delivered_on: '2026-05-01',
     order_issued_on: '2026-05-01',
     legal_title_verified: true,
     order_or_notice_delivered: true,
@@ -174,6 +190,11 @@ function monthEvidenceOf(
     insolvency_mode: 'none',
     insolvency_decision_verified: false,
     insolvency_recipient_verified: false,
+    insolvency_payment_instruction_id: null,
+    insolvency_employment_id: null,
+    insolvency_institution_account_id: null,
+    insolvency_decision_document_id: null,
+    insolvency_payment_instruction_hash: null,
     court_determined_amount_minor_units: null,
     row_version: 1,
     ...overrides,
@@ -213,6 +234,20 @@ describe('EnforcementCases', () => {
     m.canWrite.mockReturnValue(true)
     m.casesPage.mockResolvedValue(page([summary()]))
     m.detail.mockImplementation(async () => detailOf(summary()))
+    m.parties.mockResolvedValue([])
+    m.claimBreakdowns.mockResolvedValue([])
+    m.recipientInstructions.mockResolvedValue([])
+    m.appendRecipientInstruction.mockResolvedValue({
+      id: 93,
+      revision_no: 2,
+      effective_from: '2026-05-01',
+      recipient_party_id: 72,
+      payment_account_id: 91,
+      source_document_id: 83,
+      change_reason: 'Změna instrukce podle nového rozhodnutí.',
+      created_at: '2026-05-01 08:00:00',
+    })
+    m.documentSearch.mockResolvedValue([])
     m.peoplePage.mockResolvedValue({ items: [], total: 0, limit: 25, offset: 0 })
     m.person.mockResolvedValue({ id: 3, full_name: 'Syntetický Povinný' })
     m.institutionAccounts.mockResolvedValue([])
@@ -226,6 +261,155 @@ describe('EnforcementCases', () => {
     })
     m.monthEvidence.mockResolvedValue(monthEvidenceOf())
     m.dependants.mockResolvedValue([])
+  })
+
+  it('shows documented parties and the immutable claim breakdown in the case detail', async () => {
+    const claim = verifiedClaim()
+    m.detail.mockResolvedValue({ ...detailOf(summary()), claims: [claim] })
+    m.parties.mockResolvedValue([{
+      id: 71,
+      party_role: 'executor',
+      revision_no: 2,
+      effective_from: '2026-05-01',
+      party_name: 'Syntetický exekutor',
+      party_reference: 'TEST-EX-1',
+      source_document_id: 81,
+      created_at: '2026-05-01 08:00:00',
+    } satisfies EnforcementCaseParty])
+    m.claimBreakdowns.mockResolvedValue([{
+      id: 72,
+      revision_no: 1,
+      principal_minor_units: 200_000,
+      interest_minor_units: 25_000,
+      costs_minor_units: 25_000,
+      maintenance_minor_units: 0,
+      total_minor_units: 250_000,
+      source_document_id: 82,
+      change_reason: null,
+      created_at: '2026-05-01 08:00:00',
+    } satisfies EnforcementClaimBreakdown])
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const facts = wrapper.get('[data-test="enforcement-legal-facts"]')
+    expect(facts.text()).toContain('Syntetický exekutor')
+    expect(facts.text()).toContain('TEST-EX-1')
+    expect(m.parties).toHaveBeenCalledWith(11)
+    expect(m.claimBreakdowns).toHaveBeenCalledWith(11, 51)
+    wrapper.unmount()
+  })
+
+  it('records a documented recipient instruction only through current legal party, verified account and DMS evidence', async () => {
+    const claim = verifiedClaim()
+    m.detail.mockResolvedValue({ ...detailOf(summary()), claims: [claim] })
+    m.parties.mockResolvedValue([
+      {
+        id: 71,
+        party_role: 'executor',
+        revision_no: 1,
+        effective_from: '2026-05-01',
+        party_name: 'Syntetický exekutor',
+        party_reference: 'TEST-EX-1',
+        source_document_id: 81,
+        created_at: '2026-05-01 08:00:00',
+      },
+      {
+        id: 72,
+        party_role: 'beneficiary',
+        revision_no: 1,
+        effective_from: '2026-05-01',
+        party_name: 'Syntetický oprávněný',
+        party_reference: 'TEST-OPR-1',
+        source_document_id: 82,
+        created_at: '2026-05-01 08:00:00',
+      },
+    ] satisfies EnforcementCaseParty[])
+    m.institutionAccounts.mockResolvedValue([{
+      id: 91,
+      supplier_id: 1,
+      institution_id: 9,
+      institution_type: 'other_recipient',
+      institution_code: 'SYNTH-RECIPIENT',
+      institution_name: 'Syntetický exekutor',
+      bank_account: '1000000005/0100',
+      bank_account_masked: '******0005/0100',
+      currency_code: 'CZK',
+      variable_symbol: '1234567890',
+      specific_symbol: '55',
+      constant_symbol: null,
+      valid_from: '2026-01-01',
+      valid_to: null,
+      source_kind: 'manual_verified',
+      source_reference: 'synthetic-test',
+      verified_on: '2026-01-01',
+      verified_by: 1,
+      row_version: 1,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+    }])
+    m.recipientInstructions.mockResolvedValueOnce([{
+      id: 90,
+      revision_no: 1,
+      effective_from: '2026-05-01',
+      recipient_party_id: 71,
+      party_role: 'executor',
+      party_name: 'Syntetický exekutor',
+      payment_account_id: 91,
+      source_document_id: 81,
+      change_reason: 'Původní doložená instrukce.',
+      created_at: '2026-05-01 08:00:00',
+    }]).mockResolvedValueOnce([{
+      id: 93,
+      revision_no: 2,
+      effective_from: '2026-05-01',
+      recipient_party_id: 72,
+      party_role: 'beneficiary',
+      party_name: 'Syntetický oprávněný',
+      payment_account_id: 91,
+      source_document_id: 83,
+      change_reason: 'Změna instrukce podle nového rozhodnutí.',
+      created_at: '2026-05-01 08:00:00',
+    }])
+    m.documentSearch.mockResolvedValue([{
+      id: 83,
+      title: 'Syntetické rozhodnutí o změně účtu',
+      doc_type: 'pdf',
+    }])
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    const facts = wrapper.get('[data-test="enforcement-legal-facts"]')
+    expect(facts.get('[data-test="recipient-instruction-history"]').text())
+      .toContain('Původní doložená instrukce.')
+    await facts.get('[data-test="add-recipient-instruction"]').trigger('click')
+    await facts.get('[data-test="recipient-instruction-party"]').setValue('72')
+    await facts.get('[data-test="recipient-instruction-account"]').setValue('91')
+    await facts.get('[data-test="recipient-instruction-document"]').setValue('Syntetické')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    await facts.get('[data-test="recipient-instruction-document-83"]').trigger('click')
+    await facts.get('[data-test="recipient-instruction-reason"]')
+      .setValue('Změna instrukce podle nového rozhodnutí.')
+    await facts.get('[data-test="recipient-instruction-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.appendRecipientInstruction).toHaveBeenCalledWith(11, {
+      effective_from: expect.any(String),
+      recipient_party_id: 72,
+      payment_account_id: 91,
+      source_document_id: 83,
+      change_reason: 'Změna instrukce podle nového rozhodnutí.',
+    })
+    expect(m.success).toHaveBeenCalledWith(
+      'payroll.enforcement.legal_facts.recipient_instruction_saved',
+    )
+    expect(facts.get('[data-test="recipient-instruction-history"]').text())
+      .toContain('Změna instrukce podle nového rozhodnutí.')
+    wrapper.unmount()
   })
 
   it('offers deletion for an unused received case even after draft evidence changed', async () => {
@@ -281,6 +465,24 @@ describe('EnforcementCases', () => {
     await wrapper.get('[data-test="enforcement-next-step-action"]').trigger('click')
 
     expect(wrapper.find('[data-test="enforcement-claim-form"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('nechá datum doručení při zakládání opravit před uložením', async () => {
+    const unused = summary({ claim_count: 0, outstanding_minor_units: 0 })
+    m.casesPage.mockResolvedValue(page([unused]))
+    m.detail.mockResolvedValue(detailOf(unused))
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+    await wrapper.get('[data-test="enforcement-next-step-action"]').trigger('click')
+
+    const input = wrapper.get('[data-test="first-payer-delivered-on"]')
+    expect(input.attributes('readonly')).toBeUndefined()
+    await input.setValue('2026-05-20')
+    expect(input.attributes('readonly')).toBeUndefined()
+    await input.setValue('2026-05-21')
+    expect((input.element as HTMLInputElement).value).toBe('2026-05-21')
     wrapper.unmount()
   })
 
@@ -389,6 +591,71 @@ describe('EnforcementCases', () => {
       .toContain('payroll.enforcement.commands.defer_no_withholding')
     expect(wrapper.get('[data-test="enforcement-state-actions"]').text())
       .toContain('payroll.enforcement.commands.stop')
+    wrapper.unmount()
+  })
+
+  it('ukáže účet se symboly a oddělí zůstatek ke sražení od zůstatku k odeslání', async () => {
+    const active = summary({ status: 'remit', evidence_complete: true, recipient_verified: true })
+    m.institutionAccounts.mockResolvedValue([{
+      id: 91,
+      supplier_id: 1,
+      institution_id: 9,
+      institution_type: 'other_recipient',
+      institution_code: 'SYNTH-EXE',
+      institution_name: 'Syntetický exekutor',
+      bank_account: '1000000005/0100',
+      bank_account_masked: '******0005/0100',
+      currency_code: 'CZK',
+      variable_symbol: '1234567890',
+      specific_symbol: '55',
+      constant_symbol: null,
+      valid_from: '2026-01-01',
+      valid_to: null,
+      source_kind: 'manual_verified',
+      source_reference: 'synthetic-test',
+      verified_on: '2026-01-01',
+      verified_by: 1,
+      row_version: 1,
+      created_at: '2026-01-01 00:00:00',
+      updated_at: '2026-01-01 00:00:00',
+    }])
+    m.detail.mockResolvedValue({
+      ...detailOf(active),
+      recipient_institution_id: 9,
+      settlement: {
+        claims: [{
+          claim_id: 51,
+          category: 'non_priority',
+          priority_date: '2026-05-01',
+          is_active: true,
+          original_minor: 300_00,
+          outstanding_minor: 300_00,
+          withheld_minor: 300_00,
+          held_minor: 0,
+          liability_minor: 300_00,
+          settled_minor: 100_00,
+          remaining_to_withhold_minor: 0,
+          remaining_minor: 200_00,
+        }],
+        original_minor: 300_00,
+        withheld_minor: 300_00,
+        held_minor: 0,
+        liability_minor: 300_00,
+        settled_minor: 100_00,
+        outstanding_minor: 300_00,
+        remaining_to_withhold_minor: 0,
+        remaining_minor: 200_00,
+      },
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await expandFirstCase(wrapper)
+
+    expect(wrapper.text()).toContain('Syntetický exekutor · 1000000005/0100 · VS 1234567890 · SS 55')
+    expect(wrapper.text()).toContain('payroll.enforcement.settlement.original')
+    expect(wrapper.text()).toContain('payroll.enforcement.settlement.remaining_to_withhold')
+    expect(wrapper.text()).toContain('payroll.enforcement.settlement.remaining')
     wrapper.unmount()
   })
 
@@ -604,15 +871,13 @@ describe('EnforcementCases', () => {
         .toContain('payroll.enforcement.dependants_summary')
 
       await wrapper.get('[data-test="month-exceptions-toggle"]').trigger('click')
+      await wrapper.get('input[type="month"]').setValue('2025-12')
+      await flushPromises()
       const exceptions = wrapper.get('[data-test="month-exceptions-panel"]')
       expect(exceptions.find('[data-test="month-evidence-multiple-payers"]').exists()).toBe(true)
-      expect(exceptions.get('[data-test="insolvency-mode-impact"]').text())
-        .toContain('payroll.enforcement.month_evidence.insolvency_impact.court_determined_amount')
-      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
-        .toBe('123.45')
-      await exceptions.find('[data-test="month-evidence-court-amount"]').setValue('150')
-      expect((exceptions.find('[data-test="month-evidence-court-amount"]').element as HTMLInputElement).value)
-        .toBe('150')
+      expect(exceptions.find('[data-test="insolvency-mode-impact"]').exists()).toBe(false)
+      expect(exceptions.get('[data-test="open-insolvency-workspace"]').attributes('to'))
+        .toBe('/payroll/insolvency?person=3&period=2025-12')
 
       await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
       expect(wrapper.get('[data-test="dependants-panel"]').text())

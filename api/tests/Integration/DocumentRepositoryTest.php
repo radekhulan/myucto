@@ -227,8 +227,10 @@ final class DocumentRepositoryTest extends TestCase
         // document_links zavádí druhý created_at (jinak „ambiguous column" → 500).
         $id = $this->insertDoc('LINKEDDOC', str_repeat('6', 64));
         $this->pdo->prepare(
-            'INSERT INTO document_links (document_id, entity_type, entity_id) VALUES (?, "invoice", ?)'
-        )->execute([$id, 987654]);
+            'INSERT INTO document_links
+                (supplier_id, document_id, entity_type, entity_id)
+             VALUES (?, ?, "invoice", ?)'
+        )->execute([$this->supplierId, $id, 987654]);
 
         $res = $this->docs->listByEntity($this->supplierId, 'invoice', 987654, $this->admin);
         self::assertContains($id, array_map(static fn($r) => $r['id'], $res));

@@ -80,6 +80,11 @@ final class PayrollComponentDefaults
                 ['PREMIE_PRIPLATKY', 'Prémie a příplatky', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                // Náhrada mzdy při DPN je zákonem osvobozená a není vyměřovacím
+                // základem pojistného. JMHZ a exekuční model zůstávají shodné
+                // s obecnou náhradou mzdy; jejich odlišný režim by vyžadoval
+                // samostatné zákonné pravidlo, které tento katalog neodhaduje.
+                ['NAHRADA_MZDY_DPN', 'Náhrada mzdy při DPN', 'compensation', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, 'statutory_exempt'],
                 ['ODSTUPNE', 'Odstupné', 'severance', 'monetary', 'one_off', 'included', 'excluded', 'excluded', 'excluded', 'included', 'included', 'included', null, null],
                 ['NAHRADA_KONKURENCNI_DOLOZKA', 'Náhrada za konkurenční doložku', 'competitive_clause', 'monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
                 ['DOPLATEK_MZDY', 'Doplatek mzdy za minulé období', 'backpay', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],

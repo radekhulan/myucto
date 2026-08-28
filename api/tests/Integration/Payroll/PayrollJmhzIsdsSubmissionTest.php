@@ -16,14 +16,22 @@ use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
+use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
+use MyInvoice\Service\Document\ZfoExtractor;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use MyInvoice\Tests\Support\SyntheticZfoBuilder;
+use MyInvoice\Tests\Unit\Payroll\Submission\JmhzTransportSample;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Slim\Psr7\Factory\ResponseFactory;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Symfony\Component\Clock\MockClock;
@@ -47,6 +55,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
     private Connection $db;
     private PayrollObligationService $obligations;
     private PayrollSubmissionService $submissions;
+    private SubmissionOutboxService $outboxService;
     private JmhzIsdsSubmissionService $isds;
     private IsdsGatewayAction $gatewayAction;
     private int $supplierId;
@@ -60,6 +69,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         self::assertInstanceOf(Connection::class, $connection);
         self::assertInstanceOf(SecretEncryption::class, $encryption);
         self::assertInstanceOf(SubmissionOutboxService::class, $outbox);
+        $this->outboxService = $outbox;
 
         $this->db = $connection;
         $pdo = $connection->pdo();
@@ -169,6 +179,117 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         self::assertSame($first['outbox_id'], $second['outbox_id']);
     }
 
+    public function testDownloadedSignedProtocolUpdatesTheExactJmhzSubmission(): void
+    {
+        $submissionId = $this->frozenSubmission('inbox-protocol', false);
+        $draft = $this->submissions->get($this->supplierId, $submissionId);
+        $validated = $this->submissions->transition(
+            $this->supplierId,
+            $submissionId,
+            (int) $draft['row_version'],
+            'validated',
+        );
+        $this->submissions->transition(
+            $this->supplierId,
+            $submissionId,
+            (int) $validated['row_version'],
+            'ready',
+        );
+        $queued = $this->isds->enqueue(
+            $this->supplierId,
+            'test',
+            $submissionId,
+            null,
+        );
+        $outbox = new SubmissionOutboxRepository($this->db);
+        $userId = (int) $this->db->pdo()->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $claimed = $outbox->claimForManualSending(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            $userId,
+        );
+        self::assertNotNull($claimed);
+        $sentMessageId = '1752953337';
+        $outbox->markSentManually(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+            $sentMessageId,
+            new \DateTimeImmutable('2026-08-15 08:00:00'),
+            (int) $claimed['row_version'],
+        );
+
+        $correlation = 'CID-INBOX-0001';
+        $protocol = JmhzTransportSample::partialProtocol(
+            correlationId: $correlation,
+        );
+        $attachmentName = 'ČSSZ_Protokol_o_zpracování_e-Podání_CSSZ_JMHZ-'
+            . $correlation . '-' . $sentMessageId . '.xml';
+        $zfo = SyntheticZfoBuilder::receivedMessage([[
+            'name' => $attachmentName,
+            'mime' => 'application/xml',
+            'bytes' => $protocol,
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-JMHZ-PROTOCOL']);
+        $signatures = new class implements JmhzProtocolSignatureVerifierInterface {
+            public function verifiedProtocolXml(string $bytes, string $environment): string
+            {
+                return $bytes;
+            }
+        };
+        $container = Bootstrap::buildContainer();
+        $processor = new JmhzIsdsInboxProcessor(
+            $outbox,
+            new PayrollSubmissionRepository($this->db),
+            $this->submissions,
+            new PayrollSubmissionDispatchProjection(
+                new PayrollSubmissionRepository($this->db),
+                $this->submissions,
+                new NullLogger(),
+            ),
+            $this->outboxService,
+            $container->get(ZfoExtractor::class),
+            $signatures,
+        );
+
+        $processed = $processor->process(
+            $this->supplierId,
+            'test',
+            987654,
+            new InboxMessageHeader(
+                'DM-JMHZ-PROTOCOL',
+                '9tsaf6s',
+                'Česká správa sociálního zabezpečení',
+                'ČSSZ - Odpověď na e-Podání. [CSSZ_JMHZ-'
+                    . $correlation . '-' . $sentMessageId . ']',
+                null,
+                new \DateTimeImmutable('2026-08-15 09:00:00'),
+                null,
+            ),
+            [
+                'classification' => 'cssz_protocol',
+                'matched_outbox_id' => (int) $queued['outbox_id'],
+            ],
+            $zfo,
+            $userId,
+        );
+
+        self::assertSame(
+            'processed',
+            $processed['status'],
+            json_encode($processed, JSON_THROW_ON_ERROR),
+        );
+        self::assertSame($submissionId, $processed['submission_id']);
+        self::assertSame('accepted', $processed['remote_status']);
+        self::assertSame('accepted', $this->submissions->get(
+            $this->supplierId,
+            $submissionId,
+        )['status']);
+        self::assertSame('accepted', $outbox->find(
+            $this->supplierId,
+            (int) $queued['outbox_id'],
+        )['acceptance_state']);
+    }
+
     /**
      * Číselník je editovatelný, takže se na něj u mzdových údajů nespoléhá
      * slepě: přepsané ID schránky musí podání zastavit, ne ho poslat jinam.
@@ -250,7 +371,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             . '</jmhz>';
     }
 
-    private function frozenSubmission(string $key): int
+    private function frozenSubmission(string $key, bool $ready = true): int
     {
         $obligation = $this->obligations->register(
             $this->supplierId,
@@ -281,7 +402,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             'isds-2026-07-' . $key,
             environment: 'test',
         );
-        $this->submissions->storeArtifact(
+        $artifact = $this->submissions->storeArtifact(
             $this->supplierId,
             $submission['id'],
             $submission['row_version'],
@@ -295,6 +416,20 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             self::CHANNEL,
             'artifact-isds-2026-07-' . $key,
         );
+        if ($ready) {
+            $validated = $this->submissions->transition(
+                $this->supplierId,
+                $submission['id'],
+                $artifact['submission_row_version'],
+                'validated',
+            );
+            $this->submissions->transition(
+                $this->supplierId,
+                $submission['id'],
+                $validated['row_version'],
+                'ready',
+            );
+        }
 
         return (int) $submission['id'];
     }

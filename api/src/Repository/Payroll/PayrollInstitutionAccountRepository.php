@@ -60,6 +60,53 @@ final class PayrollInstitutionAccountRepository
             );
     }
 
+    /** @return array{variable_symbol:?string,specific_symbol:?string,constant_symbol:?string}|null */
+    public function findEffectivePaymentIdentifiers(
+        int $supplierId,
+        string $institutionType,
+        string $institutionCode,
+        string $currencyCode,
+        string $effectiveOn,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.variable_symbol, account.specific_symbol, account.constant_symbol
+               FROM payroll_institution_accounts account
+               JOIN payroll_institutions institution
+                 ON institution.supplier_id = account.supplier_id
+                AND institution.id = account.institution_id
+              WHERE account.supplier_id = ?
+                AND institution.institution_type = ?
+                AND institution.institution_code = ?
+                AND account.currency_code = ?
+                AND account.valid_from <= ?
+                AND (account.valid_to IS NULL OR account.valid_to >= ?)
+              ORDER BY account.id
+              LIMIT 2'
+        );
+        $statement->execute([
+            $supplierId,
+            $institutionType,
+            $institutionCode,
+            $currencyCode,
+            $effectiveOn,
+            $effectiveOn,
+        ]);
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            return null;
+        }
+        if (count($rows) !== 1) {
+            throw new \RuntimeException('Pro instituci je účinných více platebních účtů.');
+        }
+        $row = self::databaseRow($rows[0]);
+
+        return [
+            'variable_symbol' => self::nullableString($row, 'variable_symbol'),
+            'specific_symbol' => self::nullableString($row, 'specific_symbol'),
+            'constant_symbol' => self::nullableString($row, 'constant_symbol'),
+        ];
+    }
+
     /**
      * @return list<array{
      *   id:int,

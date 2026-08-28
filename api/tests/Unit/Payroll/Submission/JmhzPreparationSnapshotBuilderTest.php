@@ -27,7 +27,7 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         );
 
         self::assertSame(
-            'payroll-jmhz-preparation-source.v9',
+            'payroll-jmhz-preparation-source.v11',
             $snapshot->payload['schema_reference'],
         );
         self::assertSame('blocked', $snapshot->readiness()['status']);
@@ -96,6 +96,35 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
             ],
             $snapshot->payload['people'][0]['employments'][0]
                 ['earnings_by_attribute_minor'],
+        );
+    }
+
+    public function testMixedScenarioSetIsFrozenPerEmploymentAndBlockedWithoutXmlSupport(): void
+    {
+        $source = $this->sourceWithTwoOffices();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+        $input['people'][1]['employments'][0]['term']['activity_code'] = 'M';
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash('sha256', $source['revision']['input_snapshot_json']);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+        $snapshot = (new JmhzPreparationSnapshotBuilder())->build(7, 'test', $source, [], []);
+
+        self::assertSame('payroll-jmhz-preparation-source.v11', $snapshot->payload['schema_reference']);
+        self::assertArrayNotHasKey('scenario_key', $snapshot->payload['scope']);
+        self::assertSame(['scenario_1', 'scenario_2'], $snapshot->payload['scope']['scenario_set']);
+        self::assertSame(
+            'scenario_2',
+            $snapshot->payload['people'][1]['employments'][0]['scenario_resolution']['scenario_key'],
+        );
+        self::assertContains(
+            'jmhz_scenario_2_preparation_unsupported',
+            $snapshot->payload['readiness_issue_codes'],
         );
     }
 
@@ -262,6 +291,9 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                     'term_row_version' => 1,
                     'work_summary_id' => 301,
                     'work_summary_sha256' => str_repeat('d', 64),
+                    'scenario_resolution' => [
+                        'scenario_key' => 'scenario_1',
+                    ],
                 ],
                 'eldp_sections' => [[
                     'ordinal' => 1,
@@ -466,6 +498,50 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         return array_values(array_filter($codes, 'is_string'));
     }
 
+    public function testDecemberNamesMissingEmployerAnnualSourcesAndPinsTheirRevision(): void
+    {
+        $builder = new JmhzPreparationSnapshotBuilder();
+        $missing = $builder->build(7, 'test', $this->sourceForDecember(), [], []);
+        self::assertContains(
+            'jmhz_employer_annual_collective_agreement_missing',
+            $missing->payload['readiness_issue_codes'],
+        );
+        self::assertContains(
+            'jmhz_employer_annual_ownership_missing',
+            $missing->payload['readiness_issue_codes'],
+        );
+        self::assertContains(
+            'jmhz_employer_annual_ozp_summary_missing',
+            $missing->payload['readiness_issue_codes'],
+        );
+
+        $evidence = [
+            'id' => 901,
+            'report_year' => 2026,
+            'revision_no' => 2,
+            'schema_reference' => 'payroll-jmhz-employer-annual-evidence.v1',
+            'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            'payload_sha256' => str_repeat('d', 64),
+        ];
+        $present = $builder->build(
+            7,
+            'test',
+            $this->sourceForDecember(),
+            [],
+            [],
+            employerAnnualEvidence: $evidence,
+        );
+        self::assertNotContains(
+            'jmhz_employer_annual_collective_agreement_missing',
+            $present->payload['readiness_issue_codes'],
+        );
+        self::assertSame(
+            JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+            $present->payload['source_versions']['employer_annual_evidence']
+                ['spec_manifest_sha256'],
+        );
+    }
+
     /**
      * @param array<string,mixed> $relationship
      * @return array<string,mixed>
@@ -481,6 +557,41 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertIsArray($result);
         $result['people'][0]['statutory']['social_insurance']['relationships'][0]
             = ['relationship_id' => 'employment:101'] + $relationship;
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        return $source;
+    }
+
+    /** @return array<string,mixed> */
+    private function sourceForDecember(): array
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        $input['period_start'] = '2026-12-01';
+        $input['period_end'] = '2026-12-31';
+        $input['people'][0]['employments'][0]['average_earning']['applicable_quarter'] = 4;
+        $source['revision']['period_start'] = '2026-12-01';
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
         $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
         $source['revision']['result_snapshot_hash'] = hash(
             'sha256',
@@ -513,6 +624,13 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
                 'id' => 101,
                 'employee_id' => 11,
                 'office_id' => 9,
+                'office_registration' => [
+                    'id' => 91,
+                    'sha256' => str_repeat('9', 64),
+                    'office_code' => 'UC9',
+                    'office_name' => 'Mzdová účtárna 9',
+                    'social_security_variable_symbol' => '1234567890',
+                ],
                 'relation_type' => 'employment',
                 'is_primary' => true,
             ],
@@ -665,7 +783,16 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
     public function testRegistrationWithoutVariableSymbolNamesItsOffice(): void
     {
         $source = $this->sourceWithTwoOffices();
-        $source['offices'][1]['social_security_variable_symbol'] = null;
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][1]['employments'][0]['employment']['office_registration']['social_security_variable_symbol'] = null;
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash('sha256', $source['revision']['input_snapshot_json']);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
 
         $snapshot = (new JmhzPreparationSnapshotBuilder())->build(
             7,
@@ -837,6 +964,54 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         self::assertSame('blocked', $snapshot->readiness()['status']);
     }
 
+    public function testEvidenceFromPreviousScenarioClassificationHasSpecificFailure(): void
+    {
+        $source = $this->source();
+        $input = json_decode(
+            $source['revision']['input_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        $result = json_decode(
+            $source['revision']['result_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertIsArray($input);
+        self::assertIsArray($result);
+        $input['people'][0]['employments'][0]['term']['activity_code'] = 'M';
+        $source['revision']['input_snapshot_json'] = CanonicalJson::encode($input);
+        $source['revision']['input_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['input_snapshot_json'],
+        );
+        $result['source_snapshot_hash'] = $source['revision']['input_snapshot_hash'];
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash(
+            'sha256',
+            $source['revision']['result_snapshot_json'],
+        );
+
+        try {
+            (new JmhzPreparationSnapshotBuilder())->build(
+                7,
+                'test',
+                $source,
+                [],
+                [],
+                [],
+                [],
+                [101 => $this->ordinaryEvidenceSource($source, 11, 101, 701)],
+            );
+            self::fail('Evidence z předchozí klasifikace scénáře musí být odmítnuta.');
+        } catch (JmhzPreparationSnapshotException $exception) {
+            self::assertSame(
+                'jmhz_ordinary_evidence_selector_mismatch',
+                $exception->validationCode,
+            );
+        }
+    }
+
     /** Evidence patřící vztahu mimo revizi je pojmenovaná chyba, ne nález. */
     public function testOrdinaryEvidenceForAForeignEmploymentIsRejected(): void
     {
@@ -973,6 +1148,13 @@ final class JmhzPreparationSnapshotBuilderTest extends TestCase
         $person['employments'][0]['employment']['id'] = 102;
         $person['employments'][0]['employment']['employee_id'] = 12;
         $person['employments'][0]['employment']['office_id'] = 12;
+        $person['employments'][0]['employment']['office_registration'] = [
+            'id' => 121,
+            'sha256' => str_repeat('2', 64),
+            'office_code' => 'UC12',
+            'office_name' => 'Mzdová účtárna 12',
+            'social_security_variable_symbol' => '9990001234',
+        ];
         $person['employments'][0]['term']['id'] = 202;
         $input['people'][] = $person;
 

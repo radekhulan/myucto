@@ -131,13 +131,20 @@ kontrolovatelných podkladů a roční archivaci.
 1. Otevřete **Mzdy → Dokumenty a výstupy → Archiv mezd**.
 2. Pro měsíční archiv vyberte měsíc, pro roční archiv rok.
 3. Stiskněte **Vytvořit a stáhnout měsíční ZIP** nebo **Vytvořit a stáhnout
-   roční ZIP**. Příprava větší firmy může chvíli trvat; tlačítko po dobu práce
-   nelze spustit podruhé.
+   roční ZIP**. Požadavek se zařadí do samostatné fronty; příprava větší firmy
+   může chvíli trvat a tlačítko po dobu práce nelze spustit podruhé.
 4. Stažený soubor uložte do firemního zabezpečeného úložiště. Obsahuje osobní
    a mzdové údaje a musí mít stejnou ochranu jako výplatní pásky.
 5. Při dlouhodobé archivaci ověřte `CHECKSUMS.txt` proti souborům v ZIPu a
    `manifest.json`, který popisuje období, zdrojové revize, velikosti a SHA-256
    otisky.
+
+Fronta pro každý vybraný měsíc nebo rok ukazuje stav čekání, zpracování,
+opakování po dočasné chybě nebo selhání. Po dočasné chybě systém požadavek
+bezpečně zopakuje; po vyčerpání pokusů jej označí jako selhaný, aby jej bylo
+možné vyvolat znovu a prověřit provozní přehled mezd. Samotné zařazení ani
+zpracování nevystavuje soubor ke stažení: aplikace vytvoří jednorázové oprávnění
+až pro dokončený archiv.
 
 Archiv vychází jen ze schválených nebo pozdější revizí nahrazených zmrazených
 mzdových zdrojů. Měsíční ZIP zahrne všechny takové revize vybraného měsíce ve
@@ -156,8 +163,8 @@ před zařazením dešifruje pouze v paměti a ověří klíčovaným otiskem; d
 šifrovaný blob se do ZIPu nekopíruje.
 
 Vytvořený ZIP je v serverovém archivu uložen šifrovaně a odděleně pro právě
-zvolenou firmu. Prohlížeč nejprve vytvoří archiv, potom získá krátkodobé
-jednorázové oprávnění a teprve nakonec soubor stáhne. Oprávnění je svázané s
+zvolenou firmu. Po dokončení fronty prohlížeč získá krátkodobé jednorázové
+oprávnění a teprve nakonec soubor stáhne. Oprávnění je svázané s
 přihlášeným uživatelem i firmou, neposílá se v adrese a po prvním použití už
 neplatí. Pokud za období není žádná schválená mzdová revize nebo nesouhlasí
 integrita zdroje, aplikace ZIP nevytvoří a zobrazí důvod.

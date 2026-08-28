@@ -11,16 +11,10 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 /**
  * Čtecí cesta k limitům § 93 přes registr rulesetů.
  *
- * Projekt má tvrdé pravidlo, že zákonné hranice žijí v rulesetu a ne v kódu —
- * naposledy se jeho porušení projevilo vadou u hranice srážkové daně. Klíče
- * v {@see \MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026} zatím
- * nejsou (soubor právě mění jiná větev), takže tenhle resolver chybějící klíč
- * NEBERE jako chybu a spadne zpátky na zákonnou hodnotu z § 93. Jakmile se
- * klíče do rulesetu doplní, začnou se používat bez zásahu do téhle třídy.
- *
- * Fallback je vědomě tichý jen co do výsledku, ne co do doložitelnosti:
- * `OvertimeLimits::$fromRuleset` nese informaci, odkud hodnoty pocházejí, a
- * propisuje se až do odpovědi API.
+ * Projekt má tvrdé pravidlo, že zákonné hranice žijí v rulesetu a ne v kódu.
+ * Chybějící, neúčinný, ručně-posuzovaný nebo špatně typovaný parametr proto
+ * výpočet zastaví. Zákonný limit nelze bezpečně nahradit „poslední známou"
+ * konstantou: po změně práva by tak kontrola tiše hlásila špatný stav.
  *
  * Očekávané klíče (doména `employment_thresholds`, typ `integer`):
  *   overtime.ordered.weekly_max_minutes            480   (§ 93 odst. 2)
@@ -38,20 +32,6 @@ final class OvertimeLimitRules
     public const KEY_AVERAGING_WEEKS = 'overtime.averaging.max_weeks';
     public const KEY_EARLY_WARNING = 'overtime.annual.early_warning_basis_points';
 
-    /** § 93 odst. 2 — 8 hodin v jednotlivých týdnech. */
-    private const STATUTORY_WEEKLY_MINUTES = 480;
-
-    /** § 93 odst. 2 — 150 hodin v kalendářním roce. */
-    private const STATUTORY_YEARLY_MINUTES = 9_000;
-
-    /** § 93 odst. 4 — průměr nejvýše 8 hodin týdně. */
-    private const STATUTORY_AVERAGING_WEEKLY_MINUTES = 480;
-
-    /** § 93 odst. 4 — vyrovnávací období nejvýše 26 týdnů po sobě jdoucích. */
-    private const STATUTORY_AVERAGING_WEEKS = 26;
-
-    private const DEFAULT_EARLY_WARNING_BASIS_POINTS = 8_000;
-
     /**
      * Registr je POVINNÝ — jako volitelný parametr by ho PHP-DI nevyplnilo a
      * hlídání by tiše počítalo z vestavěných hodnot místo z administrátorského
@@ -64,55 +44,28 @@ final class OvertimeLimitRules
 
     public function forDate(string $date): OvertimeLimits
     {
-        // Období mimo pokrytí rulesetu (starší docházka, kterou si účetní jen
-        // prohlíží) nesmí obrazovku shodit — v takovém případě se použije
-        // zákonné znění § 93, které se od roku 2006 nezměnilo.
-        try {
-            $version = $this->rulesets->forDate(
-                PayrollRulesetDomain::EmploymentThresholds,
-                $date,
-            );
-        } catch (PayrollRulesetException|\InvalidArgumentException) {
-            $version = null;
-        }
+        $version = $this->rulesets->forCalculation(
+            PayrollRulesetDomain::EmploymentThresholds,
+            $date,
+        );
+        $read = static function (string $key) use ($version): int {
+            $parameter = $version->parameter($key);
+            if ($parameter->type !== 'integer' || !is_int($parameter->value)) {
+                throw new PayrollRulesetException(
+                    "Parametr rulesetu {$key} musí být celé číslo.",
+                );
+            }
 
-        $resolved = 0;
-        $read = function (string $key, int $fallback) use ($version, &$resolved): int {
-            if ($version === null) {
-                return $fallback;
-            }
-            try {
-                $value = $version->parameter($key)->value;
-            } catch (PayrollRulesetException) {
-                return $fallback;
-            }
-            if (!is_int($value)) {
-                return $fallback;
-            }
-            ++$resolved;
-
-            return $value;
+            return $parameter->value;
         };
 
-        $weekly = $read(self::KEY_WEEKLY, self::STATUTORY_WEEKLY_MINUTES);
-        $yearly = $read(self::KEY_YEARLY, self::STATUTORY_YEARLY_MINUTES);
-        $averagingWeekly = $read(
-            self::KEY_AVERAGING_WEEKLY,
-            self::STATUTORY_AVERAGING_WEEKLY_MINUTES,
-        );
-        $averagingWeeks = $read(self::KEY_AVERAGING_WEEKS, self::STATUTORY_AVERAGING_WEEKS);
-        $earlyWarning = $read(
-            self::KEY_EARLY_WARNING,
-            self::DEFAULT_EARLY_WARNING_BASIS_POINTS,
-        );
-
         return new OvertimeLimits(
-            $weekly,
-            $yearly,
-            $averagingWeekly,
-            $averagingWeeks,
-            $earlyWarning,
-            $resolved === 5,
+            $read(self::KEY_WEEKLY),
+            $read(self::KEY_YEARLY),
+            $read(self::KEY_AVERAGING_WEEKLY),
+            $read(self::KEY_AVERAGING_WEEKS),
+            $read(self::KEY_EARLY_WARNING),
+            true,
         );
     }
 }

@@ -7,7 +7,9 @@ namespace MyInvoice\Service\Payroll\Submission;
 use MyInvoice\Repository\Payroll\PayrollSubmissionConflictException;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService;
 use Psr\Clock\ClockInterface;
 
 final class PayrollSubmissionService
@@ -72,6 +74,7 @@ final class PayrollSubmissionService
         private readonly PayrollSubmissionStateMachine $stateMachine,
         private readonly SecretEncryption $encryption,
         private readonly ClockInterface $clock,
+        private readonly ?PayrollRegistrationReceiptIdentityService $registrationReceiptIdentities = null,
     ) {}
 
     /**
@@ -656,6 +659,66 @@ final class PayrollSubmissionService
     }
 
     /**
+     * @return array{row_version:int,status:string,year_close_reopen_required:bool}
+     */
+    private function applyVerifiedReceiptTransitions(
+        int $supplierId,
+        int $submissionId,
+        int $currentVersion,
+        string $currentStatus,
+        ?PayrollVerifiedReceipt $verified,
+        ?string $remoteStatus,
+        ?string $trustedCorrelationReference,
+    ): array {
+        $yearCloseReopenRequired = false;
+        if ($verified !== null
+            && $remoteStatus !== null
+            && $currentStatus === 'submitted'
+            && !in_array($remoteStatus, ['submitted', 'processing'], true)
+        ) {
+            try {
+                $processing = $this->transitionVerifiedReceipt(
+                    $supplierId,
+                    $submissionId,
+                    $currentVersion,
+                    $verified,
+                    $trustedCorrelationReference,
+                    true,
+                );
+                $currentVersion = $processing['row_version'];
+                $currentStatus = 'processing';
+            } catch (PayrollYearClosedException) {
+                $yearCloseReopenRequired = true;
+            }
+        }
+        if ($verified !== null
+            && $remoteStatus !== null
+            && $remoteStatus !== $currentStatus
+            && $this->shouldApplyRemoteStatus($currentStatus, $remoteStatus)
+        ) {
+            try {
+                $result = $this->transitionVerifiedReceipt(
+                    $supplierId,
+                    $submissionId,
+                    $currentVersion,
+                    $verified,
+                    $trustedCorrelationReference,
+                );
+                $currentVersion = $result['row_version'];
+                $currentStatus = $result['status'];
+            } catch (PayrollYearClosedException) {
+                $yearCloseReopenRequired = true;
+            }
+        }
+
+        return [
+            'row_version' => $currentVersion,
+            'status' => $currentStatus,
+            'year_close_reopen_required' => $yearCloseReopenRequired,
+        ];
+    }
+
+    /**
      * @return array{id:int,status:string,row_version:int}
      */
     private function transitionWithEvidence(
@@ -889,7 +952,7 @@ final class PayrollSubmissionService
      * @return array{
      *   id:int,artifact_id:int,artifact_sha256:string,
      *   submission_status:string,submission_row_version:int,created:bool,
-     *   trusted:bool
+     *   trusted:bool,year_close_reopen_required:bool
      * }
      */
     public function importReceipt(
@@ -1041,15 +1104,24 @@ final class PayrollSubmissionService
                         'Idempotency klíč protokolu už patří jinému obsahu.',
                     );
                 }
-
+                $transition = $this->applyVerifiedReceiptTransitions(
+                    $supplierId,
+                    $submissionId,
+                    $submission['row_version'],
+                    $submission['status'],
+                    $verified,
+                    $remoteStatus,
+                    $trustedCorrelationReference,
+                );
                 return [
                     'id' => $existing['id'],
                     'artifact_id' => $existing['artifact_id'],
                     'artifact_sha256' => $summaryHash,
-                    'submission_status' => $submission['status'],
-                    'submission_row_version' => $submission['row_version'],
+                    'submission_status' => $transition['status'],
+                    'submission_row_version' => $transition['row_version'],
                     'created' => false,
                     'trusted' => $existing['remote_status'] !== null,
+                    'year_close_reopen_required' => $transition['year_close_reopen_required'],
                 ];
             }
             if ($submission['row_version'] !== $expectedRowVersion) {
@@ -1093,6 +1165,7 @@ final class PayrollSubmissionService
             );
             $currentVersion = $artifact['submission_row_version'];
             $currentStatus = $submission['status'];
+            $yearCloseReopenRequired = false;
             if ($verified !== null) {
                 foreach ($verified->partStatuses as $verifiedPartId => $status) {
                     if (!in_array(
@@ -1174,44 +1247,18 @@ final class PayrollSubmissionService
                     'manual_review',
                 );
             }
-            if ($verified !== null
-                && $remoteStatus !== null
-                && $currentStatus === 'submitted'
-                && !in_array(
-                    $remoteStatus,
-                    ['submitted', 'processing'],
-                    true,
-                )
-            ) {
-                $processing = $this->transitionVerifiedReceipt(
-                    $supplierId,
-                    $submissionId,
-                    $currentVersion,
-                    $verified,
-                    $trustedCorrelationReference,
-                    true,
-                );
-                $currentVersion = $processing['row_version'];
-                $currentStatus = 'processing';
-            }
-            if ($verified !== null
-                && $remoteStatus !== null
-                && $remoteStatus !== $currentStatus
-                && $this->shouldApplyRemoteStatus(
-                    $currentStatus,
-                    $remoteStatus,
-                )
-            ) {
-                $result = $this->transitionVerifiedReceipt(
-                    $supplierId,
-                    $submissionId,
-                    $currentVersion,
-                    $verified,
-                    $trustedCorrelationReference,
-                );
-                $currentVersion = $result['row_version'];
-                $currentStatus = $result['status'];
-            }
+            $transition = $this->applyVerifiedReceiptTransitions(
+                $supplierId,
+                $submissionId,
+                $currentVersion,
+                $currentStatus,
+                $verified,
+                $remoteStatus,
+                $trustedCorrelationReference,
+            );
+            $currentVersion = $transition['row_version'];
+            $currentStatus = $transition['status'];
+            $yearCloseReopenRequired = $transition['year_close_reopen_required'];
             $receiptId = $this->repository->insertReceipt(
                 $supplierId,
                 $submission['environment'],
@@ -1230,9 +1277,13 @@ final class PayrollSubmissionService
                 $importedBy,
             );
             if ($verified !== null && $verified->formOutcomes !== []) {
-                if ($protocolCode !== 'CSSZ_JMHZ') {
+                if (!in_array(
+                    $protocolCode,
+                    ['CSSZ_JMHZ', 'CSSZ_REGZEC', 'CSSZ_PREZEC'],
+                    true,
+                )) {
                     throw new \DomainException(
-                        'Výsledky formulářů lze uložit jen k protokolu JMHZ.',
+                        'Výsledky formulářů lze uložit jen k protokolu ČSSZ.',
                     );
                 }
                 foreach ($verified->formOutcomes as $outcome) {
@@ -1271,6 +1322,31 @@ final class PayrollSubmissionService
                     );
                 }
             }
+            if ($trusted
+                && in_array(
+                    $remoteStatus,
+                    ['accepted', 'partially_accepted'],
+                    true,
+                )
+                && $this->registrationReceiptIdentities !== null
+            ) {
+                $this->registrationReceiptIdentities
+                    ->applyAcceptedVariableSymbolTransfer(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $receiptId,
+                        $importedBy,
+                    );
+                $this->registrationReceiptIdentities
+                    ->applyAcceptedEmploymentRegistration(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $receiptId,
+                        $importedBy,
+                    );
+            }
 
             return [
                 'id' => $receiptId,
@@ -1280,6 +1356,7 @@ final class PayrollSubmissionService
                 'submission_row_version' => $currentVersion,
                 'created' => true,
                 'trusted' => $trusted,
+                'year_close_reopen_required' => $yearCloseReopenRequired,
             ];
         });
     }

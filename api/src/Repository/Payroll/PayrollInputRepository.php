@@ -365,6 +365,7 @@ final class PayrollInputRepository
                 4,
             );
             $split = null;
+            $entitlement = null;
             if ($definition->annualLimitMinor !== null
                 || $definition->exemptionBasket !== null
             ) {
@@ -431,13 +432,20 @@ final class PayrollInputRepository
                         ),
                         $amountMinor,
                         $entitlements,
+                        $definition->exemptionBasket->scalesWithShifts()
+                            ? $this->mealBasketEntitlements(
+                                $supplierId,
+                                $employeeId,
+                                $definition->exemptionBasket,
+                                $periodStart,
+                            )
+                            : null,
                     );
                 } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
                     throw new PayrollInputApprovalException(
                         'benefit_basket_limit_unavailable',
                         'Limit koše osvobození není pro rozhodné období k dispozici, '
-                        . 'rozpad plnění proto nelze určit.',
-                        previous: $e,
+                        . 'rozpad plnění proto nelze určit: ' . $e->getMessage(),
                     );
                 }
             }
@@ -461,6 +469,14 @@ final class PayrollInputRepository
             ];
             $json = CanonicalJson::encode($snapshot);
             $hash = hash('sha256', $json, true);
+            $benefitAllocation = $split?->allocation;
+            if ($benefitAllocation !== null && $entitlement !== null) {
+                $benefitAllocation = [
+                    ...$benefitAllocation,
+                    'entitlement_basis' => $entitlement->basis,
+                    'entitlement_snapshot' => $entitlement->jsonSerialize(),
+                ];
+            }
 
             $update = $pdo->prepare(
                 'UPDATE payroll_inputs
@@ -470,6 +486,7 @@ final class PayrollInputRepository
                         benefit_basket = ?,
                         benefit_exempt_minor = ?,
                         benefit_taxable_minor = ?,
+                        benefit_allocation_json = ?,
                         approved_by = ?,
                         approved_at = NOW(),
                         row_version = row_version + 1
@@ -482,6 +499,9 @@ final class PayrollInputRepository
                 $split?->basket->value,
                 $split?->exemptMinor,
                 $split?->taxableMinor,
+                $benefitAllocation === null
+                    ? null
+                    : CanonicalJson::encode($benefitAllocation),
                 $userId,
                 $supplierId,
                 $id,
@@ -909,6 +929,58 @@ final class PayrollInputRepository
             $stmt->fetchColumn(),
             'monthly_basket_total',
         );
+    }
+
+    /**
+     * Počet nároků zmrazený u dříve schválených příspěvků stejného měsíce.
+     * Neauditovatelný legacy nebo rozdílný počet je pojmenovaný blocker, ne
+     * příležitost znovu použít měsíční pooling.
+     */
+    public function mealBasketEntitlements(
+        int $supplierId,
+        int $employeeId,
+        PayrollBenefitExemptionBasket $basket,
+        string $periodStart,
+    ): ?int {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.benefit_allocation_json
+               FROM payroll_benefit_accumulators accumulator
+               JOIN payroll_inputs input
+                 ON input.supplier_id = accumulator.supplier_id
+                AND input.id = accumulator.input_id
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = accumulator.supplier_id
+                AND component.id = accumulator.component_id
+              WHERE accumulator.supplier_id = ?
+                AND accumulator.employee_id = ?
+                AND accumulator.status = "active"
+                AND input.period_start = ?
+                AND component.exemption_basket = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId, $periodStart, $basket->value]);
+        $expected = null;
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $json) {
+            if (!is_string($json)) {
+                throw new \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException(
+                    'Dříve schválený příspěvek nemá auditovatelnou alokaci na jednotlivé nároky.',
+                );
+            }
+            $allocation = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+            $count = is_array($allocation) ? ($allocation['entitlement_count'] ?? null) : null;
+            if (!is_int($count) || $count < 0) {
+                throw new \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException(
+                    'Dříve schválený příspěvek nemá platný počet nároků v auditní alokaci.',
+                );
+            }
+            if ($expected !== null && $expected !== $count) {
+                throw new \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException(
+                    'Dříve schválené příspěvky používají rozdílný počet nároků.',
+                );
+            }
+            $expected = $count;
+        }
+
+        return $expected;
     }
 
     /**

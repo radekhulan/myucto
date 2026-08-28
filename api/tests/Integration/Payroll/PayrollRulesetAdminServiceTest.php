@@ -121,6 +121,83 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         self::assertSame('0.15', $this->parameter($after, 'advance.low_rate'));
     }
 
+    public function testImpactPreviewShowsExactCandidateChangeWithoutRewritingSnapshots(): void
+    {
+        $rulesetId = 'cz-payroll-2026.income-tax.v1';
+        $this->service->reset(
+            $rulesetId,
+            'Testovací obnova výchozího rulesetu před náhledem.',
+            self::EDITOR,
+        );
+        $saved = $this->service->save(
+            $rulesetId,
+            ['parameters' => ['advance.low_rate' => ['type' => 'decimal_rate', 'value' => '0.16']]],
+            'Náhled dopadu změny sazby.',
+            0,
+            self::EDITOR,
+        );
+
+        $preview = $this->service->impactPreview($rulesetId)
+            ?? self::fail('Náhled dopadu rulesetu chybí.');
+
+        self::assertSame($rulesetId, $preview['ruleset']['ruleset_id']);
+        self::assertSame('income_tax', $preview['ruleset']['domain']);
+        self::assertSame('reviewed', $preview['ruleset']['lifecycle']);
+        self::assertSame('2026-01-01', $preview['effective']['from']);
+        self::assertSame('2026-12-31', $preview['effective']['to']);
+        self::assertSame($rulesetId, $preview['baseline']['ruleset_id']);
+        self::assertSame('vendor', $preview['baseline']['origin']);
+        self::assertCount(1, $preview['parameter_diff']['changed']);
+        self::assertSame('advance.low_rate', $preview['parameter_diff']['changed'][0]['key']);
+        self::assertSame('0.15', $preview['parameter_diff']['changed'][0]['before']['value']);
+        self::assertSame('0.16', $preview['parameter_diff']['changed'][0]['after']['value']);
+        self::assertTrue($preview['activation_effect']['new_snapshots_would_change']);
+        self::assertTrue($preview['activation_effect']['existing_snapshots_are_immutable']);
+        self::assertNull($preview['activation_effect']['money_delta']);
+        self::assertSame(
+            'no_locked_input_snapshot',
+            $preview['activation_effect']['money_delta_unavailable_reason'],
+        );
+        self::assertSame((int) $saved['row_version'], (int) $preview['ruleset']['row_version']);
+    }
+
+    public function testImpactPreviewUsesThePreviouslyActiveOverrideAsItsBaseline(): void
+    {
+        $rulesetId = 'cz-payroll-2026.income-tax.v1';
+        $this->service->reset(
+            $rulesetId,
+            'Testovací obnova výchozího rulesetu před aktivací.',
+            self::EDITOR,
+        );
+        $saved = $this->service->save(
+            $rulesetId,
+            ['parameters' => ['advance.low_rate' => ['type' => 'decimal_rate', 'value' => '0.16']]],
+            'První zákaznická sazba.',
+            0,
+            self::EDITOR,
+        );
+        $approved = $this->apply($rulesetId, 'approve', 'Schválení první sazby.', self::APPROVER, $saved);
+        $this->apply($rulesetId, 'activate', 'Aktivace první sazby.', self::APPROVER, $approved);
+
+        $active = $this->service->detail($rulesetId) ?? self::fail('Aktivní override chybí.');
+        $this->service->save(
+            $rulesetId,
+            ['parameters' => ['advance.low_rate' => ['type' => 'decimal_rate', 'value' => '0.17']]],
+            'Druhá zákaznická sazba.',
+            (int) $active['row_version'],
+            self::EDITOR,
+        );
+
+        $preview = $this->service->impactPreview($rulesetId)
+            ?? self::fail('Náhled dopadu rulesetu chybí.');
+
+        self::assertSame('customer_override', $preview['baseline']['origin']);
+        self::assertSame('previous_active_snapshot', $preview['baseline']['source']);
+        self::assertCount(1, $preview['parameter_diff']['changed']);
+        self::assertSame('0.16', $preview['parameter_diff']['changed'][0]['before']['value']);
+        self::assertSame('0.17', $preview['parameter_diff']['changed'][0]['after']['value']);
+    }
+
     /**
      * Zákazník po instalaci nic neodklikává. Dodaná sada je účinná a domény, které
      * NEJSOU vedené jako ruční posouzení, počítají hned.
@@ -440,9 +517,9 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         $byDomain = array_column($domains, null, 'domain');
 
         // Ruční posouzení drží CAPABILITY, ne stav. Překlopení dodané sady na
-        // `active` proto na těchhle čtyřech doménách nesmí změnit vůbec nic —
+        // `active` proto na těchhle třech doménách nesmí změnit vůbec nic —
         // aplikace tu vědomě netvrdí žádné číslo.
-        foreach (['compensation_averages', 'deadlines', 'codebooks', 'submissions'] as $domain) {
+        foreach (['compensation_averages', 'codebooks', 'submissions'] as $domain) {
             self::assertSame('manual_review', $byDomain[$domain]['status'], $domain);
             self::assertFalse($byDomain[$domain]['calculation_ready'], $domain);
             self::assertTrue($byDomain[$domain]['manual_review_by_design'], $domain);
@@ -456,41 +533,45 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         }
 
         $deadlines = $byDomain['deadlines'];
-        self::assertSame(1, $deadlines['manual_review_parameter_count']);
-        self::assertSame(1, $deadlines['parameter_count']);
-        self::assertIsString($deadlines['manual_review_explanation']);
+        self::assertSame('ready', $deadlines['status']);
+        self::assertTrue($deadlines['calculation_ready']);
+        self::assertFalse($deadlines['manual_review_by_design']);
+        self::assertSame(0, $deadlines['manual_review_parameter_count']);
+        self::assertSame(9, $deadlines['parameter_count']);
 
         // Sociální pojištění ruční posouzení MÁ, ale jen u části parametrů —
         // doména jako celek zůstává použitelná.
         $social = $byDomain['social_insurance'];
         self::assertFalse($social['manual_review_by_design']);
         self::assertSame(1, $social['manual_review_parameter_count']);
-        self::assertSame(16, $social['parameter_count']);
+        self::assertSame(21, $social['parameter_count']);
         self::assertNotSame('manual_review', $social['status']);
     }
 
     public function testManualReviewParameterExplainsWhatTheUserShouldDo(): void
     {
-        $detail = $this->service->detail('cz-payroll-2026.deadlines.v1')
-            ?? self::fail('Vestavěný ruleset lhůt chybí.');
+        $detail = $this->service->detail('cz-payroll-2026.social-insurance.v1')
+            ?? self::fail('Vestavěný ruleset sociálního pojištění chybí.');
         /** @var list<array<string, mixed>> $parameters */
         $parameters = $detail['parameters'];
-        $calendar = array_column($parameters, null, 'key')['submission_calendar'];
+        $discount = array_column($parameters, null, 'key')[
+            'employee.discount.agriculture_dpp'
+        ];
 
-        self::assertSame('manual_review', $calendar['capability']);
-        self::assertIsString($calendar['manual_review_why']);
-        self::assertIsString($calendar['manual_review_action']);
-        self::assertStringContainsString('neschvalujete', $calendar['manual_review_action']);
+        self::assertSame('manual_review', $discount['capability']);
+        self::assertIsString($discount['manual_review_why']);
+        self::assertIsString($discount['manual_review_action']);
+        self::assertStringContainsString('uplatněte slevu ručně', $discount['manual_review_action']);
 
         /** @var list<array<string, mixed>> $warnings */
         $warnings = $detail['warnings'];
         $codes = array_column($warnings, 'code');
-        self::assertContains('manual_review_capability', $codes);
+        self::assertNotContains('manual_review_capability', $codes);
         self::assertContains('manual_review_parameters', $codes);
         foreach ($warnings as $warning) {
             if ($warning['code'] === 'manual_review_parameters') {
                 self::assertSame(1, $warning['context']['manual_review_count']);
-                self::assertSame(1, $warning['context']['parameter_count']);
+                self::assertSame(21, $warning['context']['parameter_count']);
             }
         }
     }

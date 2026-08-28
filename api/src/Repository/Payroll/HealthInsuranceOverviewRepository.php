@@ -34,6 +34,7 @@ final class HealthInsuranceOverviewRepository
             'SELECT revision.id,
                     revision.run_id,
                     revision.revision_no,
+                    revision.revision_kind,
                     revision.status AS revision_status,
                     run.period_start,
                     run.current_revision_no
@@ -70,6 +71,7 @@ final class HealthInsuranceOverviewRepository
                     $revision['revision_no'] ?? null,
                     'revision_no',
                 ),
+                'revision_kind' => $revision['revision_kind'] ?? null,
                 'revision_status' => $revision['revision_status'] ?? null,
                 'period_start' => $revision['period_start'] ?? null,
                 'current_revision_no' => $this->dbPositiveInt(

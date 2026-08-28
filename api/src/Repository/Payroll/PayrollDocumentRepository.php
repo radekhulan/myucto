@@ -663,6 +663,89 @@ final class PayrollDocumentRepository
         return $stmt->rowCount() === 1;
     }
 
+    /**
+     * @param 'handover'|'downloaded'|'external_notification' $eventType
+     * @return array<string,mixed>
+     */
+    public function appendDeliveryEvent(
+        int $supplierId,
+        int $documentId,
+        int $employeeId,
+        string $eventType,
+        int $actorUserId,
+    ): array {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_document_delivery_events
+                (supplier_id, payroll_document_id, employee_id, event_type, recorded_by)
+             VALUES (?, ?, ?, ?, ?)',
+        );
+        $stmt->execute([$supplierId, $documentId, $employeeId, $eventType, $actorUserId]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $event = $this->deliveryEvent($supplierId, $documentId, $id);
+        if ($event === null) {
+            throw new \RuntimeException('Payroll document delivery event could not be loaded.');
+        }
+        return $event;
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function deliveryEventsForDocument(int $supplierId, int $documentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, payroll_document_id, employee_id, event_type, recorded_by, occurred_at, created_at
+               FROM payroll_document_delivery_events
+              WHERE supplier_id = ? AND payroll_document_id = ?
+              ORDER BY occurred_at, id',
+        );
+        $stmt->execute([$supplierId, $documentId]);
+        return array_values(array_map(self::castDeliveryEvent(...), $stmt->fetchAll(PDO::FETCH_ASSOC)));
+    }
+
+    /**
+     * @param list<int> $documentIds
+     * @return array<int,array{handed_over_at:?string,downloaded_at:?string,external_notification_at:?string}>
+     */
+    public function deliverySummaries(int $supplierId, array $documentIds): array
+    {
+        $documentIds = array_values(array_filter($documentIds, static fn (int $id): bool => $id > 0));
+        if ($documentIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($documentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT payroll_document_id,
+                    MAX(CASE WHEN event_type = "handover" THEN occurred_at END) AS handed_over_at,
+                    MAX(CASE WHEN event_type = "downloaded" THEN occurred_at END) AS downloaded_at,
+                    MAX(CASE WHEN event_type = "external_notification" THEN occurred_at END) AS external_notification_at
+               FROM payroll_document_delivery_events
+              WHERE supplier_id = ? AND payroll_document_id IN (' . $placeholders . ')
+              GROUP BY payroll_document_id',
+        );
+        $stmt->execute([$supplierId, ...$documentIds]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $result[(int) $row['payroll_document_id']] = [
+                'handed_over_at' => $row['handed_over_at'] === null ? null : (string) $row['handed_over_at'],
+                'downloaded_at' => $row['downloaded_at'] === null ? null : (string) $row['downloaded_at'],
+                'external_notification_at' => $row['external_notification_at'] === null ? null : (string) $row['external_notification_at'],
+            ];
+        }
+        return $result;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function deliveryEvent(int $supplierId, int $documentId, int $eventId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, payroll_document_id, employee_id, event_type, recorded_by, occurred_at, created_at
+               FROM payroll_document_delivery_events
+              WHERE supplier_id = ? AND payroll_document_id = ? AND id = ?',
+        );
+        $stmt->execute([$supplierId, $documentId, $eventId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : self::castDeliveryEvent($row);
+    }
+
     public function linkToDms(
         int $supplierId,
         int $payrollDocumentId,
@@ -718,6 +801,16 @@ final class PayrollDocumentRepository
                 : json_decode((string) $row['manifest_json'], true, 512, JSON_THROW_ON_ERROR);
             unset($row['manifest_json']);
         }
+        return $row;
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private static function castDeliveryEvent(array $row): array
+    {
+        foreach (['id', 'payroll_document_id', 'employee_id'] as $key) {
+            $row[$key] = (int) $row[$key];
+        }
+        $row['recorded_by'] = $row['recorded_by'] === null ? null : (int) $row['recorded_by'];
         return $row;
     }
 }

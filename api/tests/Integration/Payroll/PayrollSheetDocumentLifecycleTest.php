@@ -1141,6 +1141,12 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         )->execute([$this->supplierId]);
         $officeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from,
+                 social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", "0012345678", "synthetic:payroll-sheet")'
+        )->execute([$this->supplierId, $officeId]);
+        $pdo->prepare(
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, office_id, code, relation_type, status,
                  start_date, actual_start_date, monthly_gross_minor, is_primary)

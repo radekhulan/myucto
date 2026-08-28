@@ -36,7 +36,7 @@ final class PayrollPeriodExportService
     public function createMonthly(
         int $supplierId,
         string $period,
-        int $userId,
+        ?int $userId,
     ): array {
         if (preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
             throw new \InvalidArgumentException(
@@ -61,7 +61,7 @@ final class PayrollPeriodExportService
     public function createAnnual(
         int $supplierId,
         int $year,
-        int $userId,
+        ?int $userId,
     ): array {
         if ($year < 2000 || $year > 2199) {
             throw new \InvalidArgumentException(
@@ -76,6 +76,98 @@ final class PayrollPeriodExportService
             sprintf('%04d-12-31', $year),
             $userId,
         );
+    }
+
+    /**
+     * @return list<array{part_key:string,part_kind:string,source_id:int,source_sha256:?string,source_size_bytes:?int}>
+     */
+    public function partPlan(
+        int $supplierId,
+        PayrollPeriodExportScope $scope,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $source = $this->repository->source($supplierId, $scope->value, $periodStart, $periodEnd);
+        $plan = [];
+        foreach ($source['documents'] as $document) {
+            $plan[] = $this->partDescriptor('document', $this->integerField($document, 'id'), $this->stringField($document, 'file_sha256'), $this->integerField($document, 'size_bytes'));
+        }
+        foreach ($source['artifacts'] as $artifact) {
+            $plan[] = $this->partDescriptor('submission_artifact', $this->integerField($artifact, 'id'), $this->stringField($artifact, 'artifact_sha256'), $this->integerField($artifact, 'byte_size'));
+        }
+        foreach ($source['protocols'] as $protocol) {
+            $payload = $this->stringField($protocol, 'payload_xml');
+            $plan[] = $this->partDescriptor('submission_protocol', $this->integerField($protocol, 'id'), $this->stringField($protocol, 'payload_sha256'), strlen($payload));
+        }
+        $plan[] = [
+            'part_key' => hash('sha256', implode(':', ['archive', $scope->value, $periodStart, $periodEnd])),
+            'part_kind' => 'archive',
+            'source_id' => 0,
+            'source_sha256' => null,
+            'source_size_bytes' => null,
+        ];
+
+        return $plan;
+    }
+
+    /** @param array<string,mixed> $part */
+    public function materializePart(
+        int $supplierId,
+        PayrollPeriodExportScope $scope,
+        string $periodStart,
+        string $periodEnd,
+        array $part,
+    ): ?string {
+        $kind = $this->stringField($part, 'part_kind');
+        if ($kind === 'archive') {
+            return null;
+        }
+        $sourceId = $this->integerField($part, 'source_id');
+        $source = $this->repository->source($supplierId, $scope->value, $periodStart, $periodEnd);
+        $expectedHash = $this->stringField($part, 'source_sha256');
+        $expectedSize = $this->integerField($part, 'source_size_bytes');
+        $bytes = match ($kind) {
+            'document' => $this->documentPartBytes($supplierId, $source['documents'], $sourceId),
+            'submission_artifact' => $this->submissionPartBytes($supplierId, $source['artifacts'], $sourceId),
+            'submission_protocol' => $this->protocolPartBytes($source['protocols'], $sourceId),
+            default => throw new \UnexpectedValueException('Druh části exportu mezd není podporovaný.'),
+        };
+        $this->assertArchivedBytes($bytes, $expectedHash, $expectedSize);
+        $stored = $this->storage->store($supplierId, $bytes);
+        if (!hash_equals($expectedHash, $stored['storage_key'])) {
+            throw new \UnexpectedValueException('Uložená část exportu mezd nemá očekávaný otisk.');
+        }
+
+        return $stored['storage_key'];
+    }
+
+    /** @param list<array<string,mixed>> $parts
+     * @return array{id:int,export_scope:string,period_start:string,period_end:string,file_sha256:string,size_bytes:int,storage_key:string,suggested_filename:string,source_manifest_hash:string,manifest_json:string,mime_type:string,created_at:string}
+     */
+    public function createFromCompletedParts(int $supplierId, PayrollPeriodExportScope $scope, string $periodStart, string $periodEnd, ?int $userId, array $parts): array
+    {
+        $stored = [];
+        foreach ($parts as $part) {
+            $kind = $this->stringField($part, 'part_kind');
+            if ($kind === 'archive') {
+                continue;
+            }
+            $key = $kind . ':' . $this->integerField($part, 'source_id');
+            $storageKey = $this->stringField($part, 'storage_key');
+            if (!hash_equals($this->stringField($part, 'source_sha256'), $storageKey)) {
+                throw new \UnexpectedValueException('Dokončená část exportu mezd ztratila očekávaný otisk.');
+            }
+            $stored[$key] = $storageKey;
+        }
+        return $this->create($supplierId, $scope, $periodStart, $periodEnd, $userId, function (string $kind, int $sourceId, string $hash, int $size) use ($supplierId, $stored): string {
+            $storageKey = $stored[$kind . ':' . $sourceId] ?? null;
+            if (!is_string($storageKey) || !hash_equals($hash, $storageKey)) {
+                throw new \UnexpectedValueException('Chybí dokončená neměnná část exportu mezd.');
+            }
+            $bytes = $this->storage->readVerified($supplierId, $storageKey);
+            $this->assertArchivedBytes($bytes, $hash, $size);
+            return $bytes;
+        });
     }
 
     /**
@@ -252,11 +344,12 @@ final class PayrollPeriodExportService
         PayrollPeriodExportScope $scope,
         string $periodStart,
         string $periodEnd,
-        int $userId,
+        ?int $userId,
+        ?callable $completedPartBytes = null,
     ): array {
-        if ($supplierId <= 0 || $userId <= 0) {
+        if ($supplierId <= 0 || ($userId !== null && $userId <= 0)) {
             throw new \InvalidArgumentException(
-                'Firma a uživatel exportu musí být kladná čísla.',
+                'Firma a případný uživatel exportu musí být kladná čísla.',
             );
         }
 
@@ -337,10 +430,9 @@ final class PayrollPeriodExportService
             $fileHash = $this->stringField($document, 'file_sha256');
             $fileSize = $this->integerField($document, 'size_bytes');
             $mimeType = $this->stringField($document, 'mime_type');
-            $bytes = $this->documents->readVerified(
-                $supplierId,
-                $storageKey,
-            );
+            $bytes = $completedPartBytes === null
+                ? $this->documents->readVerified($supplierId, $storageKey)
+                : $completedPartBytes('document', $documentId, $fileHash, $fileSize);
             $this->assertArchivedBytes(
                 $bytes,
                 $fileHash,
@@ -372,10 +464,9 @@ final class PayrollPeriodExportService
             );
             $artifactSize = $this->integerField($artifact, 'byte_size');
             $mimeType = $this->stringField($artifact, 'mime_type');
-            $bytes = $this->submissions->artifactBytes(
-                $supplierId,
-                $artifactId,
-            );
+            $bytes = $completedPartBytes === null
+                ? $this->submissions->artifactBytes($supplierId, $artifactId)
+                : $completedPartBytes('submission_artifact', $artifactId, $artifactHash, $artifactSize);
             $this->assertArchivedBytes(
                 $bytes,
                 $artifactHash,
@@ -404,11 +495,12 @@ final class PayrollPeriodExportService
             }
             $protocolId = $this->integerField($protocol, 'id');
             $environment = $this->stringField($protocol, 'environment');
-            $this->assertArchivedBytes(
-                $payload,
-                $this->stringField($protocol, 'payload_sha256'),
-                strlen($payload),
-            );
+            $protocolHash = $this->stringField($protocol, 'payload_sha256');
+            $protocolSize = strlen($payload);
+            $payload = $completedPartBytes === null
+                ? $payload
+                : $completedPartBytes('submission_protocol', $protocolId, $protocolHash, $protocolSize);
+            $this->assertArchivedBytes($payload, $protocolHash, $protocolSize);
             $entries[] = new PayrollPeriodExportEntry(
                 sprintf(
                     'protocols/%s/jmhz-protocol-%012d.xml',
@@ -470,6 +562,54 @@ final class PayrollPeriodExportService
                 'Archivovaný mzdový podklad nemá platnou integritu.',
             );
         }
+    }
+
+    /** @return array{part_key:string,part_kind:string,source_id:int,source_sha256:string,source_size_bytes:int} */
+    private function partDescriptor(string $kind, int $sourceId, string $hash, int $size): array
+    {
+        if ($sourceId <= 0 || $size <= 0 || preg_match('/^[a-f0-9]{64}$/D', $hash) !== 1) {
+            throw new \UnexpectedValueException('Zdroj části exportu mezd není platný.');
+        }
+        return [
+            'part_key' => hash('sha256', implode(':', [$kind, (string) $sourceId, $hash, (string) $size])),
+            'part_kind' => $kind,
+            'source_id' => $sourceId,
+            'source_sha256' => $hash,
+            'source_size_bytes' => $size,
+        ];
+    }
+
+    /** @param list<array<string,mixed>> $documents */
+    private function documentPartBytes(int $supplierId, array $documents, int $sourceId): string
+    {
+        foreach ($documents as $document) {
+            if ($this->integerField($document, 'id') === $sourceId) {
+                return $this->documents->readVerified($supplierId, $this->stringField($document, 'storage_key'));
+            }
+        }
+        throw new \DomainException('Zdrojový dokument části exportu mezd nebyl nalezen.');
+    }
+
+    /** @param list<array<string,mixed>> $artifacts */
+    private function submissionPartBytes(int $supplierId, array $artifacts, int $sourceId): string
+    {
+        foreach ($artifacts as $artifact) {
+            if ($this->integerField($artifact, 'id') === $sourceId) {
+                return $this->submissions->artifactBytes($supplierId, $sourceId);
+            }
+        }
+        throw new \DomainException('Zdrojový artefakt části exportu mezd nebyl nalezen.');
+    }
+
+    /** @param list<array<string,mixed>> $protocols */
+    private function protocolPartBytes(array $protocols, int $sourceId): string
+    {
+        foreach ($protocols as $protocol) {
+            if ($this->integerField($protocol, 'id') === $sourceId) {
+                return $this->stringField($protocol, 'payload_xml');
+            }
+        }
+        throw new \DomainException('Zdrojový protokol části exportu mezd nebyl nalezen.');
     }
 
     private function extension(string $mimeType): string

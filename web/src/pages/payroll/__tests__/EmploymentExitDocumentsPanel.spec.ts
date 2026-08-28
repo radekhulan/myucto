@@ -49,6 +49,7 @@ function employment(relationType: PayrollEmployment['relation_type'] = 'employme
     office_name: null,
     code: 'TEST-12',
     relation_type: relationType,
+    meal_entitlement_basis: 'shift',
     status: 'ended',
     is_primary: true,
     start_date: '2026-01-01',

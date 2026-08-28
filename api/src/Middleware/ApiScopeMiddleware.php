@@ -118,6 +118,18 @@ final class ApiScopeMiddleware implements MiddlewareInterface
     ];
 
     /**
+     * Citlivé session-only výjimky uvnitř jinak veřejné účetní read-only plochy.
+     * Legacy mzdové routy vracejí personální identifikátory a mzdové listy, proto
+     * je široký accounting allowlist nesmí zpřístupnit bearer tokenu.
+     *
+     * @var list<string>
+     */
+    private const BEARER_SESSION_ONLY = [
+        '#^/api/accounting/payroll(/|$)#',
+        '#^/api/accounting/reports/payroll-sheet$#',
+    ];
+
+    /**
      * Cesty, které jsou přes bearer token dostupné VÝHRADNĚ KE ČTENÍ — i pro token
      * se scope `read_write`.
      *
@@ -216,6 +228,12 @@ final class ApiScopeMiddleware implements MiddlewareInterface
 
     private function isBearerAllowed(string $path): bool
     {
+        foreach (self::BEARER_SESSION_ONLY as $pattern) {
+            if (preg_match($pattern, $path) === 1) {
+                return false;
+            }
+        }
+
         foreach (self::BEARER_ALLOWED as $pattern) {
             if (preg_match($pattern, $path) === 1) {
                 return true;

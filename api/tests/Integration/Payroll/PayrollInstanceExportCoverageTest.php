@@ -55,6 +55,10 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         'payroll_data_migration_markers',
         'payroll_document_download_grants',
         'payroll_payment_export_download_grants',
+        'payroll_period_export_jobs',
+        'payroll_period_export_job_attempts',
+        'payroll_period_export_job_parts',
+        'payroll_period_export_job_part_attempts',
         'payroll_ruleset_audit',
         'payroll_submission_signing_profiles',
         'payroll_submission_artifact_download_grants',
@@ -121,6 +125,7 @@ final class PayrollInstanceExportCoverageTest extends TestCase
             $this->removeDir(RuntimePaths::storage('instance-exports/sup-' . $this->supplierId));
             $this->removeDir(RuntimePaths::storage('payroll-documents/sup-' . $this->supplierId));
             $this->removeDir(RuntimePaths::storage('payroll-payment-exports/sup-' . $this->supplierId));
+            $this->removeDir(RuntimePaths::storage('payroll-period-exports/sup-' . $this->supplierId));
         }
         if (isset($this->db) && $this->inTx && $this->db->pdo()->inTransaction()) {
             $this->db->pdo()->rollBack();
@@ -202,6 +207,19 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         self::assertTrue(TenantScopeResolver::isSecretColumn('certificate_ciphertext'));
         self::assertTrue(TenantScopeResolver::isSecretColumn('certificate_passphrase_ciphertext'));
         self::assertTrue(TenantScopeResolver::isSecretColumn('private_key_ciphertext'));
+    }
+
+    public function testAuthoritativeA1ProfilesAreIncludedInRestorableTenantData(): void
+    {
+        $scope = $this->scopes->resolveAll($this->supplierId)['payroll_registration_a1_profiles'] ?? null;
+        self::assertNotNull($scope, 'Autoritativní profily REGZEC A1 musí být v obnovitelném exportu firmy.');
+        self::assertSame('supplier_id = ?', $scope->where);
+        foreach ([
+            'supplier_id', 'employee_id', 'employment_id', 'effective_on',
+            'profile_ciphertext', 'profile_hash', 'reference_hash', 'row_version',
+        ] as $column) {
+            self::assertContains($column, $scope->columns, "Export REGZEC A1 postrádá {$column}.");
+        }
     }
 
     public function testNoRestoredPayrollRowRequiresAnOmittedCredential(): void
@@ -356,6 +374,15 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         $paymentPath = $paymentDir . '/' . $paymentStorageKey;
         self::assertSame(strlen($paymentBytes), file_put_contents($paymentPath, $paymentBytes));
 
+        $periodStorageKey = str_repeat('b', 64);
+        $periodBytes = 'enc:v2:synthetic-encrypted-period-export';
+        $periodDir = RuntimePaths::storage(
+            'payroll-period-exports/sup-' . $this->supplierId . '/bb',
+        );
+        self::assertTrue(@mkdir($periodDir, 0750, true) || is_dir($periodDir));
+        $periodPath = $periodDir . '/' . $periodStorageKey;
+        self::assertSame(strlen($periodBytes), file_put_contents($periodPath, $periodBytes));
+
         $result = $this->export->runForSupplier($this->supplierId, [InstanceExportService::PART_FILES]);
         $this->tempPaths[] = (string) $result['abs_path'];
         $this->tempPaths[] = (string) $result['abs_path'] . '.sha256';
@@ -367,15 +394,19 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         $documentStoragePath = 'payroll-documents/sup-' . $this->supplierId . '/'
             . substr($documentHash, 0, 2) . '/' . $documentHash;
         $paymentStoragePath = 'payroll-payment-exports/sup-' . $this->supplierId . '/aa/' . $paymentStorageKey;
+        $periodStoragePath = 'payroll-period-exports/sup-' . $this->supplierId . '/bb/' . $periodStorageKey;
         self::assertArrayHasKey($documentStoragePath, $assets, 'Výplatní PDF je obnovitelná příloha.');
         self::assertArrayHasKey($paymentStoragePath, $assets, 'Zašifrovaný bankovní export mezd je obnovitelná příloha.');
+        self::assertArrayHasKey($periodStoragePath, $assets, 'Zašifrovaný měsíční nebo roční archiv mezd je obnovitelná příloha.');
         self::assertSame($documentHash, $assets[$documentStoragePath]['sha256'] ?? null);
         self::assertSame(hash('sha256', $paymentBytes), $assets[$paymentStoragePath]['sha256'] ?? null);
+        self::assertSame(hash('sha256', $periodBytes), $assets[$periodStoragePath]['sha256'] ?? null);
 
         $archive = new ZipArchive();
         self::assertTrue($archive->open((string) $result['abs_path']) === true);
         self::assertSame($documentBytes, $archive->getFromName((string) $assets[$documentStoragePath]['entry']));
         self::assertSame($paymentBytes, $archive->getFromName((string) $assets[$paymentStoragePath]['entry']));
+        self::assertSame($periodBytes, $archive->getFromName((string) $assets[$periodStoragePath]['entry']));
         $archive->close();
     }
 

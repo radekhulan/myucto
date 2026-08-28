@@ -29,7 +29,8 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
  * jiného právního předpisu". Tam je jednotkou KALENDÁŘNÍ DEN a podmínka druhého
  * příspěvku zní jinak: „pokud během tohoto dne zaměstnanec vykonával práci
  * alespoň 11 hodin", tedy NEOSTŘE a o odpracované době, ne o délce intervalu.
- * V datech se větve poznají podle toho, jsou-li za měsíc publikované směny.
+ * Větev je explicitní vlastností pracovního vztahu. Absence publikovaného
+ * rozvrhu sama o sobě nikdy nesmí změnit právní režim na kalendářní dny.
  *
  * ── Fail-closed ────────────────────────────────────────────────────────────────
  * Nárok se nikdy neodhaduje z úvazku ani z počtu pracovních dnů. Není-li docházka
@@ -51,6 +52,15 @@ final class PayrollMealShiftEvidenceService
      * odpracovaný čas. Nula nároků by tu byla tvrzení, ne zjištění.
      */
     public const MISSING_ATTENDANCE = 'attendance_missing';
+
+    /** Směnový režim má odpracovaný čas, ale chybí publikovaný rozvrh. */
+    public const MISSING_SHIFT_SCHEDULE = 'shift_schedule_missing';
+
+    /** Kalendářní režim je v rozporu s publikovanými směnami. */
+    public const MEAL_BASIS_CONFLICT = 'meal_basis_conflict';
+
+    /** Přestávku v intervalu přes půlnoc nelze bez další evidence přiřadit ke dni. */
+    public const CALENDAR_DAY_BREAK_ALLOCATION_MISSING = 'calendar_day_break_allocation_missing';
 
     public function __construct(
         private readonly PayrollMealShiftEvidenceRepository $repository,
@@ -95,22 +105,55 @@ final class PayrollMealShiftEvidenceService
             $this->repository->shifts($supplierId, $ids, $periodStart),
             $periodStart,
         );
-        $worked = $this->inPeriod(
-            $this->repository->workedIntervals($supplierId, $ids, $periodStart),
-            $periodStart,
-        );
+        $worked = $this->repository->workedIntervals($supplierId, $ids, $periodStart);
         $trips = $this->repository->mealAllowanceTrips($supplierId, $ids, $periodStart);
-        $missing = $this->missingEvidence($employments, $shifts, $worked);
+        $missing = $this->missingEvidence($employments, $shifts, $worked, $periodStart);
 
-        [$qualifying, $second] = $shifts === []
-            ? $this->byCalendarDay($worked, $trips, $minimumWork, $secondDay)
-            : $this->byShift($shifts, $worked, $trips, $minimumWork, $secondShift);
+        $qualifying = 0;
+        $second = 0;
+        $bases = [];
+        foreach ($employments as $employment) {
+            $employmentId = $employment['employment_id'];
+            $employmentShifts = $this->forEmployment($shifts, $employmentId);
+            $employmentWorked = $this->forEmployment($worked, $employmentId);
+            $employmentTrips = $this->forEmployment($trips, $employmentId);
+            $basis = $employment['meal_entitlement_basis'];
+            if ($basis === PayrollMealShiftEntitlement::BASIS_CALENDAR_DAY) {
+                if ($this->hasAmbiguousCalendarDayBreak($employmentWorked, $periodStart)) {
+                    $employmentQualifying = 0;
+                    $employmentSecond = 0;
+                } else {
+                    [$employmentQualifying, $employmentSecond] = $this->byCalendarDay(
+                        $employmentWorked,
+                        $employmentTrips,
+                        $minimumWork,
+                        $secondDay,
+                        $periodStart,
+                    );
+                }
+            } else {
+                [$employmentQualifying, $employmentSecond] = $this->byShift(
+                    $employmentShifts,
+                    $employmentWorked,
+                    $employmentTrips,
+                    $minimumWork,
+                    $secondShift,
+                );
+            }
+            $bases[$basis] = true;
+            $qualifying += $employmentQualifying;
+            $second += $employmentSecond;
+        }
+
+        $basis = match (count($bases)) {
+            0 => PayrollMealShiftEntitlement::BASIS_CALENDAR_DAY,
+            1 => (string) array_key_first($bases),
+            default => PayrollMealShiftEntitlement::BASIS_MIXED,
+        };
 
         return new PayrollMealShiftEntitlement(
             $periodStart,
-            $shifts === []
-                ? PayrollMealShiftEntitlement::BASIS_CALENDAR_DAY
-                : PayrollMealShiftEntitlement::BASIS_SHIFT,
+            $basis,
             $qualifying,
             $second,
             $missing === [],
@@ -131,35 +174,61 @@ final class PayrollMealShiftEvidenceService
      *    nějakou evidenci opravdu mají — jinak by statutární orgán bez docházky
      *    blokoval schválení celé firmě.
      *
-     * @param list<array{employment_id:int, month_status:?string}> $employments
+     * @param list<array{employment_id:int, meal_entitlement_basis:string, month_status:?string}> $employments
      * @param list<array{employment_id:int, ...}> $shifts
      * @param list<array{employment_id:int, ...}> $worked
      * @return list<string>
      */
-    private function missingEvidence(array $employments, array $shifts, array $worked): array
+    private function missingEvidence(
+        array $employments,
+        array $shifts,
+        array $worked,
+        string $periodStart,
+    ): array
     {
-        $withEvidence = [];
-        foreach ([...$shifts, ...$worked] as $row) {
-            $withEvidence[$row['employment_id']] = true;
-        }
-        $anyMonth = false;
-        $openMonth = false;
+        $reasons = [];
         foreach ($employments as $employment) {
-            if ($employment['month_status'] !== null) {
-                $anyMonth = true;
-                $withEvidence[$employment['employment_id']] = true;
+            $id = $employment['employment_id'];
+            $employmentShifts = $this->forEmployment($shifts, $id);
+            $employmentWorked = $this->forEmployment($worked, $id);
+            if ($employment['month_status'] === null) {
+                $reasons[self::MISSING_ATTENDANCE] = true;
+                continue;
             }
-            if (isset($withEvidence[$employment['employment_id']])
-                && $employment['month_status'] !== 'approved'
+            if ($employment['month_status'] !== 'approved') {
+                $reasons[self::MISSING_ATTENDANCE_MONTH] = true;
+            }
+            if ($employment['meal_entitlement_basis'] === PayrollMealShiftEntitlement::BASIS_SHIFT
+                && $this->inPeriod($employmentWorked, $periodStart) !== []
+                && $employmentShifts === []
             ) {
-                $openMonth = true;
+                $reasons[self::MISSING_SHIFT_SCHEDULE] = true;
             }
-        }
-        if (!$anyMonth && $withEvidence === []) {
-            return [self::MISSING_ATTENDANCE];
+            if ($employment['meal_entitlement_basis'] === PayrollMealShiftEntitlement::BASIS_CALENDAR_DAY
+                && $employmentShifts !== []
+            ) {
+                $reasons[self::MEAL_BASIS_CONFLICT] = true;
+            }
+            if ($employment['meal_entitlement_basis'] === PayrollMealShiftEntitlement::BASIS_CALENDAR_DAY
+                && $this->hasAmbiguousCalendarDayBreak($employmentWorked, $periodStart)
+            ) {
+                $reasons[self::CALENDAR_DAY_BREAK_ALLOCATION_MISSING] = true;
+            }
         }
 
-        return $openMonth ? [self::MISSING_ATTENDANCE_MONTH] : [];
+        return array_keys($reasons);
+    }
+
+    /**
+     * @param list<array{employment_id:int, ...}> $rows
+     * @return list<array{employment_id:int, ...}>
+     */
+    private function forEmployment(array $rows, int $employmentId): array
+    {
+        return array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['employment_id'] === $employmentId,
+        ));
     }
 
     /**
@@ -170,7 +239,7 @@ final class PayrollMealShiftEvidenceService
      *
      * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $shifts
      * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $worked
-     * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips
+     * @param list<array{employment_id:int, starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips
      * @return array{0:int,1:int}
      */
     private function byShift(
@@ -212,7 +281,7 @@ final class PayrollMealShiftEvidenceService
      * Větev kalendářních dnů — výkon práce není rozvržen na směny.
      *
      * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $worked
-     * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips
+     * @param list<array{employment_id:int, starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips
      * @return array{0:int,1:int}
      */
     private function byCalendarDay(
@@ -220,18 +289,21 @@ final class PayrollMealShiftEvidenceService
         array $trips,
         int $minimumWork,
         int $secondDay,
+        string $periodStart,
     ): array {
         /** @var array<string,int> $days */
         $days = [];
         /** @var array<string,bool> $tripDays */
         $tripDays = [];
         foreach ($worked as $entry) {
-            [$start, $end] = $this->bounds($entry);
-            $day = $this->localDay($entry);
-            $days[$day] = ($days[$day] ?? 0)
-                + max(0, intdiv($end - $start, 60) - $entry['break_minutes']);
-            if ($this->overlapsTrip($start, $end, $trips)) {
-                $tripDays[$day] = true;
+            foreach ($this->calendarDaySegments($entry) as [$day, $start, $end, $minutes]) {
+                if (substr($day, 0, 7) !== substr($periodStart, 0, 7)) {
+                    continue;
+                }
+                $days[$day] = ($days[$day] ?? 0) + $minutes;
+                if ($this->overlapsTrip($start, $end, $trips)) {
+                    $tripDays[$day] = true;
+                }
             }
         }
         $qualifying = 0;
@@ -247,6 +319,71 @@ final class PayrollMealShiftEvidenceService
         }
 
         return [$qualifying, $second];
+    }
+
+    /**
+     * Rozpad jednoho UTC intervalu po místních kalendářních dnech.
+     *
+     * Interval přes půlnoc s přestávkou sem nesmí projít: bez přesnější evidence
+     * nelze určit, kterému dni se má přestávka odečíst, a caller ho proto označí
+     * jako nedoložený podklad.
+     *
+     * @param array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int} $entry
+     * @return list<array{0:string,1:int,2:int,3:int}>
+     */
+    private function calendarDaySegments(array $entry): array
+    {
+        $zone = new \DateTimeZone($entry['timezone_name']);
+        $utc = new \DateTimeZone('UTC');
+        $cursor = (new \DateTimeImmutable($entry['starts_at_utc'], $utc))->setTimezone($zone);
+        $end = (new \DateTimeImmutable($entry['ends_at_utc'], $utc))->setTimezone($zone);
+        $segments = [];
+        while ($cursor < $end) {
+            $nextMidnight = $cursor->modify('tomorrow')->setTime(0, 0);
+            $segmentEnd = $nextMidnight < $end ? $nextMidnight : $end;
+            $startTimestamp = $cursor->getTimestamp();
+            $endTimestamp = $segmentEnd->getTimestamp();
+            $segments[] = [
+                $cursor->format('Y-m-d'),
+                $startTimestamp,
+                $endTimestamp,
+                max(
+                    0,
+                    intdiv($endTimestamp - $startTimestamp, 60) - $entry['break_minutes'],
+                ),
+            ];
+            $cursor = $segmentEnd;
+        }
+
+        return $segments;
+    }
+
+    /**
+     * @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string, break_minutes:int}> $worked
+     */
+    private function hasAmbiguousCalendarDayBreak(array $worked, string $periodStart): bool
+    {
+        $utc = new \DateTimeZone('UTC');
+        foreach ($worked as $entry) {
+            if ($entry['break_minutes'] <= 0) {
+                continue;
+            }
+            $zone = new \DateTimeZone($entry['timezone_name']);
+            $start = (new \DateTimeImmutable($entry['starts_at_utc'], $utc))->setTimezone($zone);
+            $end = (new \DateTimeImmutable($entry['ends_at_utc'], $utc))->setTimezone($zone);
+            if ($end <= $start
+                || $start->format('Y-m-d') === $end->modify('-1 second')->format('Y-m-d')
+            ) {
+                continue;
+            }
+            $monthStart = new \DateTimeImmutable(substr($periodStart, 0, 7) . '-01', $zone);
+            $monthEnd = $monthStart->modify('first day of next month');
+            if ($start < $monthEnd && $end > $monthStart) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -291,7 +428,7 @@ final class PayrollMealShiftEvidenceService
         ];
     }
 
-    /** @param list<array{starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips */
+    /** @param list<array{employment_id:int, starts_at_utc:string, ends_at_utc:string, timezone_name:string}> $trips */
     private function overlapsTrip(int $start, int $end, array $trips): bool
     {
         foreach ($trips as $trip) {

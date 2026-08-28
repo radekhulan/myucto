@@ -66,6 +66,12 @@ function fixture(): PayrollRunResultPerson[] {
             tax_bonus_eligible: true,
             tax_after_credits_minor_units: 598_600,
             tax_bonus_minor_units: 5_000,
+            tax_bonus_candidate_minor_units: 5_000,
+            tax_bonus_minimum_income_minor_units: 1_120_000,
+            tax_bonus_minimum_amount_minor_units: 5_000,
+            tax_bonus_income_threshold_met: true,
+            tax_bonus_amount_threshold_met: true,
+            tax_bonus_eligibility_reason: 'eligible',
             ruleset_id: 'income-tax-2026',
             ruleset_hash: 'synthetic-ruleset-hash',
           },
@@ -165,6 +171,28 @@ describe('PayrollIncomeTaxBreakdown', () => {
     expect(wrapper.find('.md\\:hidden').exists()).toBe(true)
     expect(wrapper.text()).toContain('15')
     expect(wrapper.text()).toContain('23')
+    const bonus = wrapper.get('[data-test="monthly-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain('payroll.runs.tax.bonus_eligibility.eligible')
+    expect(bonus.text()).toContain('11 200')
+    expect(bonus.text()).toContain('50')
+  })
+
+  it('vysvětlí nulový měsíční bonus příjmem pod hranicí', () => {
+    const people = fixture()
+    const advance = people[0]!.statutory!.income_tax!.advance_tax!
+    advance.tax_bonus_eligible = false
+    advance.tax_bonus_minor_units = 0
+    advance.tax_bonus_candidate_minor_units = 126_700
+    advance.taxable_income_minor_units = 1_000_000
+    advance.tax_bonus_income_threshold_met = false
+    advance.tax_bonus_amount_threshold_met = true
+    advance.tax_bonus_eligibility_reason = 'income_below_threshold'
+
+    const wrapper = mount(PayrollIncomeTaxBreakdown, { props: { people } })
+    const bonus = wrapper.get('[data-test="monthly-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain('payroll.runs.tax.bonus_eligibility.income_below_threshold')
+    expect(bonus.text()).toContain('10 000')
+    expect(bonus.text()).toContain('11 200')
   })
 
   it('switches person tabs and explains manual review with known and unknown reasons', async () => {

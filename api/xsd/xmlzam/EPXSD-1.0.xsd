@@ -1,0 +1,546 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+Schema pro komunikaci mezi soudnim exekutorem a platcem mzdy
+verze: 1.0, ve zneni vyhl MSp c. 394/2023 Sb.
+publikovano: 23.1.2024
+-->
+<xs:schema version="1.0" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+	<xs:element name="dokument"/>
+	<xs:complexType name="exekucni_prikaz">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="exekutor" type="exekutor" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="opravneny" type="opravneny" minOccurs="1" maxOccurs="unbounded"/>
+			<xs:element name="povinny" type="povinny" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekucni_prikaz" type="exekucniprikaz" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pohledavka" type="pohledavka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povereni_prehled" type="povereniprehled" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="exekucni_prikaz_odpoved">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="reakce_na" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_povinny" type="kontakt_povinny" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_zamestnavatel" type="kontakt_zamestnavatel" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="poradi_exekucniho_prikazu" type="poradi_exekucniho_prikazu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pracovni_pomer" type="pracovni_pomer" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="exekucni_prikaz_zmena">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="exekutor" type="exekutor" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="opravneny" type="opravneny" minOccurs="1" maxOccurs="unbounded"/>
+			<xs:element name="povinny" type="povinny" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekucni_prikaz" type="exekucniprikaz" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pohledavka" type="pohledavka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povereni_prehled" type="povereniprehled" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="soucinnost">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_soucinnosti" type="druhSoucinnosti" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="exekutor" type="exekutor" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="opravneny" type="opravneny" minOccurs="1" maxOccurs="unbounded"/>
+			<xs:element name="povinny" type="povinny" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekucni_prikaz" type="exekucniprikaz" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="pohledavka" type="pohledavka" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="povereni_prehled" type="povereniprehled" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="soucinnost_odpoved">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="reakce_na" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_povinny" type="kontakt_povinny" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_zamestnavatel" type="kontakt_zamestnavatel" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="poradi_exekucniho_prikazu" type="poradi_exekucniho_prikazu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pracovni_pomer" type="pracovni_pomer" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="nabyti_pm">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="exekutor" type="exekutor" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povinny" type="povinny" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekucni_prikaz" type="exekucniprikaz" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pohledavka" type="pohledavka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povereni_prehled" type="povereniprehled" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="nabyti_pm_odpoved">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="reakce_na" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_povinny" type="kontakt_povinny" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_zamestnavatel" type="kontakt_zamestnavatel" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="poradi_exekucniho_prikazu" type="poradi_exekucniho_prikazu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pracovni_pomer" type="pracovni_pomer" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="zustatek_dotaz">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="reakce_na" type="identifikator" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_povinny" type="kontakt_povinny" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="kontakt_zamestnavatel" type="kontakt_zamestnavatel" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="poradi_exekucniho_prikazu" type="poradi_exekucniho_prikazu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pracovni_pomer" type="pracovni_pomer" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="zustatek">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="reakce_na" type="identifikator" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="exekutor" type="exekutor" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povinny" type="povinny" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekucni_prikaz" type="exekucniprikaz" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pohledavka" type="pohledavka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povereni_prehled" type="povereniprehled" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="ukonceni_ep">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="prazdnyString250" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="exekutor" type="exekutor" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="povinny" type="povinny" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekucni_prikaz" type="exekucniprikaz" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="chybne_zpracovani">
+		<xs:sequence>
+			<xs:element name="identifikator" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="znacka_rizeni" type="spisovaZnacka" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="reakce_na" type="identifikator" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="druh_dokumentu" type="druhDokumentu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="poznamka" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prilohy" type="prilohy" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="exekutor">
+		<xs:sequence>
+			<xs:element name="nazev" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="adresa" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="senat" type="senat" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="ic" type="ico" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="idds" type="neprazdnyString7" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="email" type="email" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="telefon" type="telefon" minOccurs="0" maxOccurs="1"/>
+			<xs:element name="platebni_udaje" minOccurs="1" maxOccurs="1">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="xs:string">
+							<xs:attribute name="vs" type="vsnss" use="required"/>
+							<xs:attribute name="ss" type="vsnss" use="optional"/>
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="opravneny">
+		<xs:sequence>
+			<xs:element name="nazev" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="adresa" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="ic" type="prazdnyString20" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="narozen" type="prazdnyDate" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="povinny">
+		<xs:sequence>
+			<xs:element name="jmeno" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="prijmeni" type="neprazdnyString250" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="narozen" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="rc" type="rc" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="adresa" type="neprazdnyString250" minOccurs="0" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="exekucniprikaz">
+		<xs:sequence>
+			<xs:element name="spisova_znacka" type="spisovaZnacka" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="cislo_listu" type="cisloListu" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="datum_vystaveni" type="neprazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="doruceni_prvnimu_platci" type="prazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="pravni_moc" type="prazdnyDate" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="pohledavka">
+		<xs:sequence>
+			<xs:element name="druh_pohledavky" type="druhPohledavky" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="zustatek" minOccurs="1" maxOccurs="1">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="castka">
+							<xs:attribute name="datum" type="neprazdnyDate" use="required"/>
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+			<xs:element name="finance" type="finance" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="finance">
+		<xs:sequence>
+			<xs:element name="povinnost" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="povereniprehled">
+		<xs:sequence>
+			<xs:element name="povereni" minOccurs="1" maxOccurs="unbounded">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="xs:string">
+							<xs:attribute name="vydal" type="neprazdnyString250" use="required"/>
+							<xs:attribute name="cislo" type="neprazdnyString250" use="required"/>
+							<xs:attribute name="vydano" type="neprazdnyDate" use="required"/>
+							<xs:attribute name="pravni_moc" type="prazdnyDate" use="required"/>
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="prilohy">
+		<xs:sequence>
+			<xs:element name="priloha" minOccurs="0" maxOccurs="unbounded">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="neprazdnyString250">
+							<xs:attribute name="druh" type="druhPrilohy" use="required"/>
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="jistina">
+		<xs:simpleContent>
+			<xs:extension base="castka">
+				<xs:attribute name="mena" type="mena" use="required"/>
+				<xs:attribute name="popis" type="neprazdnyString250" use="required"/>
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:complexType name="jistina_opakovana">
+		<xs:simpleContent>
+			<xs:extension base="castka">
+				<xs:attribute name="od_data" type="neprazdnyDate" use="required"/>
+				<xs:attribute name="do_data" type="prazdnyDate" use="required"/>
+				<xs:attribute name="vypocet" type="interval" use="required"/>
+				<xs:attribute name="zaklad" type="castka" use="required"/>
+				<xs:attribute name="mena" type="mena" use="required"/>
+				<xs:attribute name="popis" type="neprazdnyString250" use="required"/>
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:complexType name="prislusenstvi">
+		<xs:simpleContent>
+			<xs:extension base="castka">
+				<xs:attribute name="od_data" type="prazdnyDate" use="required"/>
+				<xs:attribute name="do_data" type="prazdnyDate" use="required"/>
+				<xs:attribute name="procento" type="procento" use="required"/>
+				<xs:attribute name="vypocet" type="interval" use="required"/>
+				<xs:attribute name="zaklad" type="castka" use="required"/>
+				<xs:attribute name="min_castka" type="castka" use="required"/>
+				<xs:attribute name="max_castka" type="castka" use="required"/>
+				<xs:attribute name="mena" type="mena" use="required"/>
+				<xs:attribute name="popis" type="neprazdnyString250" use="required"/>
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:complexType name="naklady">
+		<xs:simpleContent>
+			<xs:extension base="castka">
+				<xs:attribute name="mena" type="mena" use="required"/>
+				<xs:attribute name="popis" type="neprazdnyString250" use="required"/>
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:complexType name="kontakt_povinny">
+		<xs:sequence>
+			<xs:element name="telefon" type="telefon" minOccurs="0" maxOccurs="unbounded"/>
+			<xs:element name="email" type="email" minOccurs="0" maxOccurs="unbounded"/>
+			<xs:element name="adresa" type="neprazdnyString250" minOccurs="0" maxOccurs="unbounded"/>
+			<xs:element name="mzda_ucet" type="cisloUctu" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="kontakt_zamestnavatel">
+		<xs:sequence>
+			<xs:element name="telefon" type="telefon" minOccurs="0" maxOccurs="unbounded"/>
+			<xs:element name="email" type="email" minOccurs="0" maxOccurs="unbounded"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="poradi_exekucniho_prikazu">
+		<xs:simpleContent>
+			<xs:extension base="xs:short">
+				<xs:attribute name="sdilene_poradi" type="xs:boolean" use="required"/>
+			</xs:extension>
+		</xs:simpleContent>
+	</xs:complexType>
+	<xs:complexType name="pracovni_pomer">
+		<xs:sequence>
+			<xs:element name="aktivni" type="xs:boolean" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="zamestnan_od" type="prazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="zamestnan_do" type="prazdnyDate" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="mzda_prehled" type="mzdaPrehled" minOccurs="1" maxOccurs="1"/>
+			<xs:element name="exekuce_prehled" type="exekuce_prehled" minOccurs="1" maxOccurs="1"/>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="mzdaPrehled">
+		<xs:sequence>
+			<xs:element name="mzda" minOccurs="0" maxOccurs="unbounded">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="castka">
+							<xs:attribute name="obdobi" type="obdobi" use="required"/>
+							<xs:attribute name="srazeno_celkem" type="castka" use="required"/>
+							<xs:attribute name="vyzivovane_osoby" type="xs:short" use="required"/>
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:complexType name="exekuce_prehled">
+		<xs:sequence>
+			<xs:element name="exekuce" minOccurs="0" maxOccurs="unbounded">
+				<xs:complexType>
+					<xs:simpleContent>
+						<xs:extension base="castka">
+							<xs:attribute name="poradi" type="xs:short" use="required"/>
+							<xs:attribute name="subjekt" type="neprazdnyString250" use="required"/>
+							<xs:attribute name="senat" type="senat" use="required"/>
+							<xs:attribute name="spisova_znacka" type="neprazdnyString50" use="required"/>
+							<xs:attribute name="druh_pohledavky" type="druhPohledavky" use="required"/>
+							<xs:attribute name="datum_doruceni" type="neprazdnyDate" use="required"/>
+							<xs:attribute name="datum_poradi" type="neprazdnyDate" use="required"/>
+						</xs:extension>
+					</xs:simpleContent>
+				</xs:complexType>
+			</xs:element>
+		</xs:sequence>
+	</xs:complexType>
+	<xs:simpleType name="neprazdnyString250">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="250"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="mena">
+		<xs:restriction base="xs:string">
+			<xs:length value="3"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="prazdnyString250">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="250"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="prazdnyString20">
+		<xs:restriction base="xs:string">
+			<xs:maxLength value="20"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="neprazdnyString7">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="7"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="neprazdnyString50">
+		<xs:restriction base="xs:string">
+			<xs:minLength value="1"/>
+			<xs:maxLength value="50"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="identifikator">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="\d{3}\-\d{8}\-[a-zA-Z0-9]{1,5}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="senat">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="\d{3}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="ico">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="\d{8}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="rc">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="\d{6}/\d{3,4}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="telefon">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="\s*|\+{0,1}\d*"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="spisovaZnacka">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="EX \d{6}/\d{2}"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="cisloListu">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="([a-zA-Z0-9]{1,5})"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="prazdnyDate">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="(\s*|((1|2)\d{3})\-(0[1-9]|1[0-2])\-(0[1-9]|[12]\d|3[01]))"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="neprazdnyDate">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="((1|2)\d{3})\-(0[1-9]|1[0-2])\-(0[1-9]|[12]\d|3[01])"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="cisloUctu">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="(\s*|(\s*|[0-9]{1,6}(\-){0,1})[0-9]{10}/[0-9]{4})"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="vsnss">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="(\d{0,10})"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="procento">
+		<xs:restriction base="xs:decimal">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="9999.9999"/>
+			<xs:fractionDigits value="4"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="interval">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="U0001"/>
+			<xs:enumeration value="U0007"/>
+			<xs:enumeration value="U0014"/>
+			<xs:enumeration value="U0100"/>
+			<xs:enumeration value="U0300"/>
+			<xs:enumeration value="U0600"/>
+			<xs:enumeration value="U1200"/>
+			<xs:enumeration value="R0001"/>
+			<xs:enumeration value="R0002"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="castka">
+		<xs:restriction base="xs:decimal">
+			<xs:minInclusive value="0"/>
+			<xs:maxInclusive value="999999999999.99"/>
+			<xs:fractionDigits value="2"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="email">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="([0-9a-zA-Z]([-.\w]*[0-9a-z_A-Z])*@([0-9a-zA-Z][-\w]*[0-9a-zA-Z]\.)+[a-zA-Z]{2,9})"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="obdobi">
+		<xs:restriction base="xs:normalizedString">
+			<xs:pattern value="([12]\d{3}\-(0[1-9]|1[0-2]))"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="druhPohledavky">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="prednostni"/>
+			<xs:enumeration value="neprednostni"/>
+			<xs:enumeration value="vyzivne"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="druhPrilohy">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="exekucni_prikaz"/>
+			<xs:enumeration value="soucinnost"/>
+			<xs:enumeration value="ostatni"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="druhDokumentu">
+		<xs:restriction base="xs:string">
+			<xs:enumeration value="exekucni_prikaz"/>
+			<xs:enumeration value="exekucni_prikaz_odpoved"/>
+			<xs:enumeration value="exekucni_prikaz_zmena"/>
+			<xs:enumeration value="soucinnost"/>
+			<xs:enumeration value="soucinnost_odpoved"/>
+			<xs:enumeration value="nabyti_pm"/>
+			<xs:enumeration value="nabyti_pm_odpoved"/>
+			<xs:enumeration value="zustatek_dotaz"/>
+			<xs:enumeration value="zustatek"/>
+			<xs:enumeration value="ukonceni_ep"/>
+			<xs:enumeration value="chybne_zpracovani"/>
+		</xs:restriction>
+	</xs:simpleType>
+	<xs:simpleType name="druhSoucinnosti">
+		<xs:restriction>
+			<xs:simpleType>
+				<xs:list>
+					<xs:simpleType>
+						<xs:restriction base="xs:token">
+							<xs:enumeration value="vyse_srazek"/>
+							<xs:enumeration value="trvani_praconiho_pomeru"/>
+							<xs:enumeration value="poradi_exekuce"/>
+							<xs:enumeration value="telefon"/>
+							<xs:enumeration value="email"/>
+							<xs:enumeration value="adresa"/>
+							<xs:enumeration value="mzda_ucet"/>
+						</xs:restriction>
+					</xs:simpleType>
+				</xs:list>
+			</xs:simpleType>
+			<xs:minLength value="1"/>
+		</xs:restriction>
+	</xs:simpleType>
+</xs:schema>

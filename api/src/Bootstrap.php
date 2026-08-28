@@ -134,6 +134,18 @@ final class Bootstrap
 
             ResponseFactory::class => fn () => new ResponseFactory(),
             Connection::class      => fn (ContainerInterface $c) => new Connection($c->get(Config::class), $c->get(LoggerInterface::class)),
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier::class,
+                ),
+            \MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Submission\CompositeSubmissionInboxMessageProcessor::class,
+                ),
+            \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPdfTemplateProvider::class =>
+                fn (ContainerInterface $c) => $c->get(
+                    \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthPaymentOverviewPdfTemplateProvider::class,
+                ),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollEnforcementRepository::class,
@@ -235,8 +247,10 @@ final class Bootstrap
             // zdrojového XLSX, což je na každý požadavek zbytečně drahé —
             // kontejner ho proto drží jako singleton.
             \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::class =>
-                static fn (): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
-                    => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(),
+                static fn (ContainerInterface $c): \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator
+                    => \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlValidator::create(
+                        $c->get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                    ),
             // Volitelný class-parametr PHP-DI neautowiruje — bez tohohle bindu
             // by se doplatek z ročního zúčtování do mzdového běhu nikdy
             // nedostal a přeplatek by se zaměstnanci nevrátil.
@@ -300,6 +314,9 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\PayrollModuleActivationService::class,
                     ),
+                    $c->get(
+                        \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
+                    ),
                 ),
             // Identifikace software jde do datové věty JMHZ a ČSSZ ji porovnává
             // s obálkou. Verze se čte ze souboru VERSION, aby v protokolu
@@ -317,6 +334,14 @@ final class Bootstrap
                         $version === '' ? '0.0.0' : $version,
                     );
                 },
+            \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService::class
+                => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Submission\PayrollSubmissionService(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine::class),
+                    $c->get(\MyInvoice\Service\Auth\SecretEncryption::class),
+                    $c->get(ClockInterface::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationReceiptIdentityService::class),
+                ),
             \MyInvoice\Service\Epo\EpoDirectResponseParser::class => function () use ($config, $rootDir): \MyInvoice\Service\Epo\EpoDirectResponseParser {
                 $caBundle = trim((string) $config->get('epo.ca_bundle_path', ''));
                 if (

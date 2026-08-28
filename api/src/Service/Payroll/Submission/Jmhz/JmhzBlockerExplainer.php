@@ -18,6 +18,12 @@ final class JmhzBlockerExplainer
         'jmhz_identity_id_ppv_missing' => 'Chybí identifikátor pracovního vztahu pro ČSSZ.',
         'jmhz_scenario_activity_code_missing' => 'Chybí kód druhu činnosti pro JMHZ.',
         'jmhz_scenario_relationship_detail_missing' => 'Chybí upřesnění druhu pracovního vztahu pro JMHZ.',
+        'jmhz_scenario1_scope_unsupported' => 'Příprava obsahuje smíšené nebo zvláštní scénáře JMHZ, které nelze vydat za běžné hlášení.',
+        'jmhz_scenario2_scope_unsupported' => 'Příprava neobsahuje zmrazený scénář odměny pěstouna.',
+        'jmhz_scenario2_source_version_unsupported' => 'Příprava nemá verzi potřebnou pro bezpečné rozpoznání odměny pěstouna.',
+        'jmhz_scenario2_frozen_resolution_invalid' => 'Zmrazené zařazení odměny pěstouna neodpovídá připnutému katalogu nebo XSD.',
+        'jmhz_scenario2_frozen_resolution_missing' => 'Příprava označuje odměnu pěstouna, ale neobsahuje její zmrazený pracovní vztah.',
+        'jmhz_scenario2_evidence_gap' => 'Zmrazená příprava nenese ověřený zdroj všech povinných údajů odměny pěstouna.',
         'jmhz_verified_boolean_missing' => 'Chybí potvrzení povinných voleb ano/ne.',
         'jmhz_work_month_not_approved' => 'Pracovní doba za vykazovaný měsíc není schválená.',
         'jmhz_workplace_codebooks_unverified' => 'Chybí ověřené číselníkové údaje pracoviště.',
@@ -73,6 +79,8 @@ final class JmhzBlockerExplainer
 
     /** @var array<string,string> */
     private const ACTIONS = [
+        'jmhz_scenario1_scope_unsupported' => 'Zkontrolujte druhy činnosti v přípravě a nepodporované vztahy zpracujte individuálně.',
+        'jmhz_scenario2_evidence_gap' => 'Tento scénář zatím zpracujte individuálně podle podkladů ČSSZ; hodnoty nelze bezpečně doplnit odhadem.',
         'component_jmhz_mapping_missing' => 'Otevřete Mzdy → Mzdové složky a doplňte zařazení.',
         'component_jmhz_manual_review' => 'Otevřete Mzdy → Mzdové složky a potvrďte zařazení.',
         'component_jmhz_treatment_invalid' => 'Otevřete Mzdy → Mzdové složky a opravte nastavení.',

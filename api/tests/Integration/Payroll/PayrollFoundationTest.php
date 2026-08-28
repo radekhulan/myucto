@@ -131,41 +131,6 @@ final class PayrollFoundationTest extends TestCase
         self::assertSame(2, $disabled['row_version']);
     }
 
-    public function testFirstApprovedRunCannotActivateProductionAutomatically(): void
-    {
-        $this->states->setActivation(
-            $this->supplierId,
-            true,
-            '2026-06-01',
-            0,
-            $this->userId,
-        );
-
-        $this->moduleActivation->activateAfterApprovedRun(
-            $this->supplierId,
-            $this->userId,
-        );
-
-        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
-    }
-
-    public function testCompletedSetupCannotActivateProductionAutomatically(): void
-    {
-        $this->states->setActivation(
-            $this->supplierId,
-            true,
-            '2026-06-01',
-            0,
-            $this->userId,
-        );
-
-        self::assertNull($this->moduleActivation->activateWhenSetupComplete(
-            $this->supplierId,
-            $this->userId,
-        ));
-        self::assertSame('setup', $this->states->get($this->supplierId)['status']);
-    }
-
     public function testStaleActivationVersionIsRejected(): void
     {
         $this->states->setActivation($this->supplierId, true, '2026-06-01', 0, null);
@@ -488,6 +453,152 @@ final class PayrollFoundationTest extends TestCase
         );
     }
 
+    public function testCompanyCapabilityPreflightIsTenantScopedAndReturnedByBothReadEndpoints(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $this->states->setActivation(
+            $this->otherSupplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $this->foreignEmployment($this->otherSupplierId, 'CIZI-OTHER');
+
+        $capabilities = $this->capabilitiesAction->__invoke(
+            $this->request('GET', 'admin'),
+            new Response(),
+        );
+        $activation = $this->activationAction->get(
+            $this->request('GET', 'admin'),
+            new Response(),
+        );
+
+        self::assertSame(200, $capabilities->getStatusCode());
+        self::assertSame(200, $activation->getStatusCode());
+        self::assertTrue($this->json($capabilities)['company_capability']['production_ready']);
+        self::assertSame([], $this->json($activation)['company_capability']['blockers']);
+
+        $this->foreignEmployment($this->supplierId, 'CIZI-CURRENT');
+        $capabilities = $this->capabilitiesAction->__invoke(
+            $this->request('GET', 'admin'),
+            new Response(),
+        );
+        $assessment = $this->json($capabilities)['company_capability'];
+
+        self::assertFalse($assessment['production_ready']);
+        self::assertSame('2026-06-01', $assessment['assessed_from']);
+        self::assertSame('foreign_employment_regime', $assessment['blockers'][0]['code']);
+        self::assertSame('foreign_regime', $assessment['blockers'][0]['capability_key']);
+        self::assertStringContainsString('CIZI-CURRENT', $assessment['blockers'][0]['message']);
+        self::assertStringNotContainsString('CIZI-OTHER', $assessment['blockers'][0]['message']);
+    }
+
+    public function testQualificationRechecksCurrentCompanyFactsAndFailsClosed(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state
+                SET status = "qualification_required"
+              WHERE supplier_id = ?'
+        )->execute([$this->supplierId]);
+
+        $preflight = $this->activationAction->get(
+            $this->request('GET', 'admin'),
+            new Response(),
+        );
+        self::assertTrue($this->json($preflight)['company_capability']['production_ready']);
+
+        $firstRunId = $this->qualifyingRun('2026-04-01', 'regular');
+        $correctionRunId = $this->qualifyingRun('2026-05-01', 'correction');
+        $evidenceDocumentId = $this->evidenceDocument('capability-toctou');
+        $this->foreignEmployment($this->supplierId, 'CIZI-PO-PREFLIGHTU');
+
+        $response = $this->activationAction->qualify(
+            $this->request('POST', 'admin')->withParsedBody([
+                'row_version' => 1,
+                'support_matrix_version' => SupportMatrix::VERSION,
+                'evidence' => $this->completeQualificationEvidence(
+                    $firstRunId,
+                    $correctionRunId,
+                    $evidenceDocumentId,
+                ),
+            ]),
+            new Response(),
+        );
+        $body = $this->json($response);
+
+        self::assertSame(409, $response->getStatusCode(), json_encode($body));
+        self::assertSame('company_capability_blocked', $body['error']['code']);
+        self::assertSame(
+            'foreign_employment_regime',
+            $body['error']['details']['blockers'][0]['code'],
+        );
+        self::assertSame('qualification_required', $this->states->get($this->supplierId)['status']);
+        $count = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_production_qualifications WHERE supplier_id = ?'
+        );
+        $count->execute([$this->supplierId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testCompanyCapabilityDetectsForeignJurisdictionsAndSpecialJmhzScenario(): void
+    {
+        $this->states->setActivation(
+            $this->supplierId,
+            true,
+            '2026-06-01',
+            0,
+            $this->userId,
+        );
+        $employmentId = $this->specialJmhzEmployment($this->supplierId, 'JMHZ-SPECIAL');
+        $employee = $this->db->pdo()->prepare(
+            'SELECT employee_id FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $employee->execute([$this->supplierId, $employmentId]);
+        $employeeId = (int) $employee->fetchColumn();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_social_jurisdictions
+                (supplier_id, employee_id, jurisdiction, foreign_country_code,
+                 jurisdiction_evidence_reference, a1_status, effective_from)
+             VALUES (?, ?, "foreign_regime_verified", "DE", "synthetic-social",
+                     "not_applicable", "2026-01-01")'
+        )->execute([$this->supplierId, $employeeId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, foreign_country_code,
+                 jurisdiction_evidence_reference, insurer_status, effective_from)
+             VALUES (?, ?, "foreign_regime_verified", "DE", "synthetic-health",
+                     "not_applicable", "2026-01-01")'
+        )->execute([$this->supplierId, $employeeId]);
+
+        $response = $this->capabilitiesAction->__invoke(
+            $this->request('GET', 'admin'),
+            new Response(),
+        );
+        $assessment = $this->json($response)['company_capability'];
+
+        self::assertFalse($assessment['production_ready']);
+        self::assertSame([
+            'foreign_health_jurisdiction',
+            'foreign_social_jurisdiction',
+            'unsupported_jmhz_scenario',
+        ], array_column($assessment['blockers'], 'code'));
+    }
+
     public function testExplicitProductionQualificationStoresEvidenceAndActivates(): void
     {
         $this->states->setActivation(
@@ -780,6 +891,74 @@ final class PayrollFoundationTest extends TestCase
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function foreignEmployment(int $supplierId, string $code): int
+    {
+        $pdo = $this->db->pdo();
+        $employee = $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, ?, "employee", "hpp", 0, 0, 0, NULL, 0, 1)'
+        );
+        $employee->execute([$supplierId, 'Syntetická zahraniční osoba']);
+        $employeeId = (int) $pdo->lastInsertId();
+        $employment = $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, is_primary, monthly_gross_minor)
+             VALUES (?, ?, ?, "employment", "active", "2026-01-01", 1, 5000000)'
+        );
+        $employment->execute([$supplierId, $employeeId, $code]);
+        $employmentId = (int) $pdo->lastInsertId();
+        $term = $pdo->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on,
+                 activity_code, jmhz_relationship_detail_code,
+                 social_insurance_participation, health_insurance_participation,
+                 tax_regime, foreign_legislation_country_code, is_primary)
+             VALUES (?, ?, "2026-01-01", "2026-01-01", "1", "1",
+                     "foreign", "foreign", "foreign", "DE", 1)'
+        );
+        $term->execute([$supplierId, $employmentId]);
+
+        return $employmentId;
+    }
+
+    private function specialJmhzEmployment(int $supplierId, string $code): int
+    {
+        $pdo = $this->db->pdo();
+        $employee = $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, employment_type,
+                 tax_declaration_signed, tax_credit_taxpayer, child_count,
+                 monthly_gross, auto_post, is_active)
+             VALUES (?, "Syntetická zvláštní osoba", "employee", "hpp",
+                     0, 0, 0, NULL, 0, 1)'
+        );
+        $employee->execute([$supplierId]);
+        $employeeId = (int) $pdo->lastInsertId();
+        $employment = $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, is_primary, monthly_gross_minor)
+             VALUES (?, ?, ?, "employment", "active", "2026-01-01", 1, 5000000)'
+        );
+        $employment->execute([$supplierId, $employeeId, $code]);
+        $employmentId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on,
+                 activity_code, jmhz_relationship_detail_code,
+                 social_insurance_participation, health_insurance_participation,
+                 tax_regime, is_primary)
+             VALUES (?, ?, "2026-01-01", "2026-01-01", "1", "2",
+                     "automatic", "automatic", "advance", 1)'
+        )->execute([$supplierId, $employmentId]);
+
+        return $employmentId;
     }
 
     /** @return array<string,mixed> */

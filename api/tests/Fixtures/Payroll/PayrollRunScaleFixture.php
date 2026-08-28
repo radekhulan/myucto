@@ -549,20 +549,21 @@ final class PayrollRunScaleFixture
                 sprintf('SCALE-CASE-%05d', $index),
             ],
         );
-        // Novější priority_date vložíme první — dávkový dotaz musí výsledek
-        // seřadit podle `priority_date, id`, ne podle pořadí zápisu.
+        // Novější datum doručení vložíme první — dávkový dotaz musí výsledek
+        // seřadit podle odvozeného `priority_date, id`, ne podle pořadí zápisu.
         foreach ([['2026-03-01', 50_000], ['2026-02-01', 40_000]] as $ordinal => $claim) {
             $this->exec(
                 'INSERT INTO payroll_enforcement_claims
                     (id, supplier_id, case_id, claim_key, legal_basis, category,
-                     outstanding_minor_units, priority_date, is_active)
-                 VALUES (?, ?, ?, ?, "statutory", "non_priority", ?, ?, 1)',
+                     outstanding_minor_units, priority_date, first_payer_delivered_on, is_active)
+                 VALUES (?, ?, ?, ?, "statutory", "non_priority", ?, ?, ?, 1)',
                 [
                     $this->id(15, $index, $ordinal),
                     $this->supplierId,
                     $caseId,
                     sprintf('SCALE-CLAIM-%05d-%d', $index, $ordinal),
                     $claim[1],
+                    $claim[0],
                     $claim[0],
                 ],
             );

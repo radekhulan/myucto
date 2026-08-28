@@ -60,9 +60,12 @@ má vždy přednost před oběma.
 | `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
 | `cron-epo-status.{cmd,sh}` | Bezpečné vyzvedávání dodejek a stavů přímých EPO podání s řízeným odstupem; původní podání nikdy neopakuje |
 | `cron-jmhz-poll.{cmd,sh}` | Dotažení protokolu ČSSZ k měsíčnímu hlášení a uzavření transakce u VREP; neúspěšný dotaz nikdy neuzavře podání (`--limit=N`) |
+| `cron-jmhz-source-monitor.{cmd,ps1,sh}` | Denní read-only sledování veřejných indexů dokumentace JMHZ MPSV/ČSSZ. Do **Systém → Plánované úlohy** ukládá konkrétní nový/změněný dokument, starou a novou verzi, URL a hash; nikdy samo neaktualizuje číselník (`--dry-run`) |
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
+| `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu (`--limit=N`; PowerShell: `-Limit N`) |
+| `cron-payroll-period-export-worker.{cmd,ps1,sh}` | Asynchronní sestavení mzdového exportu období/roku; durable lease a retry (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí (`--supplier=N`, `--days=N`, `--dry-run`) |
 | `cron-payroll-post.{cmd,sh}` | **1× měsíčně** — zaúčtuje mzdovou rekapitulaci za předchozí měsíc zaměstnancům, kteří mají na kartě „Účtovat automaticky" a vyplněnou pravidelnou hrubou mzdu (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`). Jen podvojné účetnictví; datum zápisu je poslední den účtovaného měsíce |
 | `cron-vat-clearing.{cmd,sh}` | **1× měsíčně** — interní doklad zúčtování DPH: převede daň zdaňovacího období z analytik 343.100 (vstup) a 343.200 (výstup) na zúčtovací 343.900 (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`, `--force`). Jen plátci v podvojném účetnictví; datum zápisu je poslední den období, zaúčtování idempotentní |
@@ -161,9 +164,12 @@ chrání sám, na Apache to řeší až přidání do `.htaccess` výše):
 | `cron-document-request-reminders` | 1× denně (pracovní dny) | 09:30, Po–Pá |
 | `cron-epo-status` | každou minutu; jednotlivé pokusy mají vlastní backoff | `* * * * *` |
 | `cron-jmhz-poll` | každých 10 minut; odstup dotazů si řídí sám ledger pokusů | `*/10 * * * *` |
+| `cron-jmhz-source-monitor` | 1× denně; jen kontroluje veřejné podklady a vypíše diff, nic neaktualizuje | 07:00 |
 | `cron-generate-recurring-invoices` | 1× denně | 06:30 |
 | `cron-automation-digest` | každou hodinu v ranním okně | 06:00–08:00 |
 | `cron-ai-worker` | každých 10 minut | `*/10 * * * *` |
+| `cron-payroll-document-worker` | každou minutu | `* * * * *` |
+| `cron-payroll-period-export-worker` | každou minutu | `* * * * *` |
 | `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
 | `cron-vat-status-apply` | 1× denně (po půlnoci) | 00:30 |
 | `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
@@ -230,9 +236,12 @@ schtasks /create /tn "MyUcto ApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto DocumentRequestReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-document-request-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:30 /ru SYSTEM
 schtasks /create /tn "MyUcto EpoStatus" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-epo-status.cmd" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto JmhzPoll"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-jmhz-poll.cmd" /sc minute /mo 10 /ru SYSTEM
+schtasks /create /tn "MyUcto JmhzSourceMonitor" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-jmhz-source-monitor.cmd" /sc daily /st 07:00 /ru SYSTEM
 schtasks /create /tn "MyUcto Recurring"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-generate-recurring-invoices.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto AutomationDigest"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-automation-digest.cmd" /sc hourly /mo 1 /st 06:00 /et 08:59 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Worker"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-worker.cmd" /sc minute /mo 10 /ru SYSTEM
+schtasks /create /tn "MyUcto Payroll Documents" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-document-worker.ps1" /sc minute /mo 1 /ru SYSTEM
+schtasks /create /tn "MyUcto Payroll Period Export" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-period-export-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Rule Miner"     /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-rule-miner.cmd" /sc daily /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VatStatusApply"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-status-apply.cmd"          /sc daily /st 00:30 /ru SYSTEM
 schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
@@ -289,9 +298,12 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
  30  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-document-request-reminders.sh
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-epo-status.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-jmhz-poll.sh
+  0  7  *   *   *    /var/www/myucto.cz/cmd/cron-jmhz-source-monitor.sh
  30  6  *   *   *    /var/www/myucto.cz/cmd/cron-generate-recurring-invoices.sh
   0  6-8 *   *   *    /var/www/myucto.cz/cmd/cron-automation-digest.sh
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-ai-worker.sh
+  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-document-worker.sh
+  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-period-export-worker.sh
   0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh
  30  0  *   *   *    /var/www/myucto.cz/cmd/cron-vat-status-apply.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
@@ -357,6 +369,8 @@ k dispozici `--dry-run`:
 ```cmd
 cmd\cron-send-reminders.cmd --dry-run
 cmd\cron-send-reminders.cmd --days=5 --cooldown=14
+pwsh -File cmd\cron-payroll-document-worker.ps1 -Limit 100
+pwsh -File cmd\cron-payroll-period-export-worker.ps1 -Limit 1
 ```
 
 ## Docker

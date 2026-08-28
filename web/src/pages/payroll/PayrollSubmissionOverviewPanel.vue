@@ -2,6 +2,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
+import { dataBoxApi } from '@/api/dataBox'
+import {
+  payrollHealthNotificationApi,
+  type HealthPreparedOverview,
+} from '@/api/payrollHealthNotifications'
 import {
   payrollApi,
   type PayrollHealthPaymentOverview,
@@ -19,7 +24,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
-import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
 import { localPayrollPeriod } from './payrollComponentsUi'
@@ -82,6 +87,7 @@ const healthOverviews = ref<PayrollHealthPaymentOverview[]>([])
 const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const jmhzApprovedRuns = ref<PayrollRun[]>([])
 const downloadingHealthKey = ref<string | null>(null)
+const sendingHealthKey = ref<string | null>(null)
 const downloadingJmhzKey = ref<string | null>(null)
 const jmhzError = ref('')
 /**
@@ -346,11 +352,36 @@ async function downloadJmhz(preview: PayrollJmhzPvpojPreview) {
   }
 }
 
+async function prepareHealth(overview: PayrollHealthPaymentOverview): Promise<HealthPreparedOverview> {
+  return payrollHealthNotificationApi.preparePaymentOverview(
+    overview.revision_id,
+    overview.insurer.code,
+    environment.value,
+  )
+}
+
+async function officialHealthArtifact(prepared: HealthPreparedOverview) {
+  const format = prepared.dispatch.channel.isds_attachment_format
+  const artifactId = format === 'text_pdf'
+    ? prepared.pdf_artifact_id
+    : prepared.artifact_id
+  const mimeType = format === 'text_pdf' ? 'application/pdf' : 'application/xml'
+  const detail = await payrollApi.submissionDetail(prepared.submission_id)
+  const artifact = (artifactId !== undefined
+    ? detail.artifacts.find(candidate => candidate.id === artifactId)
+    : undefined)
+    ?? detail.artifacts.find(candidate => candidate.mime_type === mimeType)
+  if (!artifact) throw new Error('health_submission_artifact_missing')
+  return artifact
+}
+
 async function downloadHealth(overview: PayrollHealthPaymentOverview) {
   healthError.value = ''
   downloadingHealthKey.value = healthOverviewKey(overview)
   try {
-    await payrollApi.downloadHealthPaymentOverview(overview)
+    const prepared = await prepareHealth(overview)
+    const artifact = await officialHealthArtifact(prepared)
+    await payrollApi.downloadSubmissionArtifact(prepared.submission_id, artifact)
   } catch (exception) {
     healthError.value = apiErrorMessage(
       exception,
@@ -358,6 +389,34 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
     )
   } finally {
     downloadingHealthKey.value = null
+  }
+}
+
+async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
+  healthError.value = ''
+  sendingHealthKey.value = healthOverviewKey(overview)
+  try {
+    const prepared = await prepareHealth(overview)
+    if (!prepared.schema_validated || prepared.status !== 'ready') {
+      throw new Error('health_submission_not_ready')
+    }
+    const queued = await payrollHealthNotificationApi.enqueuePaymentOverviewIsds(
+      prepared.submission_id,
+      prepared.insurer_code,
+    )
+    if (queued.transport.automatic) {
+      const gateway = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
+      window.location.assign(gateway.redirect_url)
+      return
+    }
+    window.location.assign(queued.outbox_url)
+  } catch (exception) {
+    healthError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.health_send_failed'),
+    )
+  } finally {
+    sendingHealthKey.value = null
   }
 }
 
@@ -997,17 +1056,32 @@ onMounted(load)
                   }) }}
                 </p>
               </div>
-              <button
-                type="button"
-                :class="btnOutlineSm('neutral')"
-                :disabled="downloadingHealthKey === healthOverviewKey(overview)"
-                @click="downloadHealth(overview)"
-              >
-                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                  <path :d="ICONS.download" />
-                </svg>
-                {{ t('common.download') }}
-              </button>
+              <div class="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  type="button"
+                  :class="btnOutlineSm('neutral')"
+                  :disabled="downloadingHealthKey === healthOverviewKey(overview) || sendingHealthKey === healthOverviewKey(overview)"
+                  data-test="health-overview-download"
+                  @click="downloadHealth(overview)"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.download" />
+                  </svg>
+                  {{ t('payroll.submissions.overview.health_download_official') }}
+                </button>
+                <button
+                  type="button"
+                  :class="btnFilledSm('primary')"
+                  :disabled="sendingHealthKey === healthOverviewKey(overview) || downloadingHealthKey === healthOverviewKey(overview)"
+                  data-test="health-overview-send-isds"
+                  @click="sendHealthViaDataBox(overview)"
+                >
+                  <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.send" />
+                  </svg>
+                  {{ t('payroll.submissions.overview.health_send_isds') }}
+                </button>
+              </div>
             </div>
             <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
               <div>
@@ -1020,6 +1094,23 @@ onMounted(load)
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_total') }}</dt>
                 <dd class="mt-0.5 font-medium text-neutral-900">
                   {{ formatMinor(overview.totals.total_contribution_minor_units) }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_bank_settled') }}</dt>
+                <dd class="mt-0.5 font-medium text-neutral-900">
+                  {{ formatMinor(overview.payment_reconciliation?.bank_settled_minor ?? 0) }}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_payment_state') }}</dt>
+                <dd
+                  class="mt-0.5 font-medium"
+                  :class="(overview.payment_reconciliation?.closing_blocked ?? true) ? 'text-danger-700' : 'text-success-700'"
+                >
+                  {{ (overview.payment_reconciliation?.closing_blocked ?? true)
+                    ? t('payroll.submissions.overview.health_payment_blocked')
+                    : t('payroll.submissions.overview.health_payment_settled') }}
                 </dd>
               </div>
             </dl>

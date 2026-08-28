@@ -7,7 +7,7 @@ namespace MyInvoice\Action\Document;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Repository\DocumentViewerContext;
-use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Document\DocumentViewerResolver;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /** Sdílené pomocné metody pro Document akce (supplier scope, user, IP). */
@@ -31,9 +31,7 @@ trait DocumentActionTrait
      */
     private function viewer(Request $request): DocumentViewerContext
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $uid  = isset($user['id']) ? (int) $user['id'] : null;
-        return DocumentViewerContext::fromAuthorization(RequestAuthorization::isSuperadmin($request), $uid);
+        return DocumentViewerResolver::fromRequest($request);
     }
 
     private function clientIp(Request $request): ?string

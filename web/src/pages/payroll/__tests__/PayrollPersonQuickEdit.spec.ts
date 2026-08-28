@@ -119,6 +119,7 @@ function employment(overrides: Partial<PayrollEmployment> = {}): PayrollEmployme
     checklist: [],
     timeline: [],
     ...overrides,
+    meal_entitlement_basis: overrides.meal_entitlement_basis ?? 'shift',
   }
 }
 

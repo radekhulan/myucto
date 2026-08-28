@@ -59,7 +59,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = 'c158225f5dee3fda4d1593d1dc5b7a31742145ffa260cdeb3eae407eb0eed679';
+    private const EXPECTED_MANIFEST_SHA256 = '2434aa72ec9ba9e7f153c254624d6832aba04a085f28aba87f406006a2b35c52';
 
     protected function setUp(): void
     {
@@ -247,7 +247,6 @@ final class CzechPayrollRulesets2026Test extends TestCase
         $provider = CzechPayrollRulesets2026::provider();
         $manualReviewDomains = [
             PayrollRulesetDomain::CompensationAverages,
-            PayrollRulesetDomain::Deadlines,
             PayrollRulesetDomain::Codebooks,
             PayrollRulesetDomain::Submissions,
         ];
@@ -361,6 +360,11 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'maximum_assessment_base.yearly' => ['money_minor', 235_041_600],
                 'participation.dpp.minimum' => ['money_minor', 1_200_000],
                 'participation.small_scale.minimum' => ['money_minor', 450_000],
+                'risky_savings.effective_from' => ['text', '2026-01-01'],
+                'risky_savings.minimum_shift_eighths' => ['integer', 24],
+                'risky_savings.payment_due.months_after_period' => ['integer', 1],
+                'risky_savings.payment_due.rule' => ['text', 'last_day_of_month'],
+                'risky_savings.rate' => ['decimal_rate', '0.04'],
             ],
             'health_insurance' => [
                 'employee.rate' => ['decimal_rate', '0.045'],

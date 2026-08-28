@@ -42,6 +42,7 @@ use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountReason;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPersonMonthInput;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialRelationshipKindMapper;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojDiscountEligibility;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojIntentEvidence;
@@ -88,6 +89,7 @@ final class PayrollRunStatutoryInputAssembler
         $taxDate = $this->date($statutoryPeriod['tax_calculation_date'] ?? null);
         $socialDate = $this->date($statutoryPeriod['social_calculation_date'] ?? null);
         $healthDate = $this->date($statutoryPeriod['health_calculation_date'] ?? null);
+        $riskySavingsRuleset = $this->object($snapshot['risky_savings_ruleset'] ?? null);
         $people = $this->list($snapshot['people'] ?? null);
         if ($supplierId === null
             || $periodStart === null
@@ -109,6 +111,8 @@ final class PayrollRunStatutoryInputAssembler
         $socialPeople = [];
         $healthPeople = [];
         $incomeTax = [];
+        $seenEmployeeIds = [];
+        $seenEmploymentIds = [];
         foreach ($people as $person) {
             if (!is_array($person) || array_is_list($person)) {
                 $this->issue('snapshot', 'person_shape_invalid');
@@ -121,6 +125,15 @@ final class PayrollRunStatutoryInputAssembler
                 continue;
             }
             $personReference = "employee:{$employeeId}";
+            if (isset($seenEmployeeIds[$employeeId])) {
+                $this->issue(
+                    'snapshot',
+                    'duplicate_employee_reference',
+                    $personReference,
+                );
+                continue;
+            }
+            $seenEmployeeIds[$employeeId] = true;
             $evidence = $this->object($person['statutory_evidence'] ?? null);
             if ($evidence === null
                 || ($evidence['schema_version'] ?? null)
@@ -158,6 +171,32 @@ final class PayrollRunStatutoryInputAssembler
                     ((int) ($left['employment']['id'] ?? 0))
                     <=> ((int) ($right['employment']['id'] ?? 0)),
             );
+            $hasDuplicateEmployment = false;
+            foreach ($employments as $employmentRow) {
+                if (!is_array($employmentRow) || array_is_list($employmentRow)) {
+                    continue;
+                }
+                $employment = $this->object($employmentRow['employment'] ?? null);
+                $employmentId = $this->positiveInt($employment['id'] ?? null);
+                if ($employmentId === null) {
+                    continue;
+                }
+                $relationshipReference = "employment:{$employmentId}";
+                if (isset($seenEmploymentIds[$employmentId])) {
+                    $this->issue(
+                        'snapshot',
+                        'duplicate_employment_reference',
+                        $personReference,
+                        $relationshipReference,
+                    );
+                    $hasDuplicateEmployment = true;
+                    continue;
+                }
+                $seenEmploymentIds[$employmentId] = true;
+            }
+            if ($hasDuplicateEmployment) {
+                continue;
+            }
 
             $before = count($this->issues);
             $social = $this->socialPerson(
@@ -169,6 +208,7 @@ final class PayrollRunStatutoryInputAssembler
                 $personReference,
                 $periodStart,
                 $periodEnd,
+                $riskySavingsRuleset,
             );
             if ($social !== null
                 && !$this->hasDomainIssueSince('social_insurance', $before)
@@ -251,6 +291,7 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $periodStart,
         string $periodEnd,
+        ?array $riskySavingsRuleset,
     ): ?SocialPersonMonthInput {
         $socialEvidence = $this->object($evidence['social'] ?? null);
         $jurisdictionRow = $this->object($socialEvidence['jurisdiction'] ?? null);
@@ -345,6 +386,7 @@ final class PayrollRunStatutoryInputAssembler
                 $personReference,
                 $periodStart,
                 $periodEnd,
+                $riskySavingsRuleset,
             );
             if ($relationship !== null) {
                 $relationships[] = $relationship;
@@ -388,6 +430,7 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $periodStart,
         string $periodEnd,
+        ?array $riskySavingsRuleset,
     ): ?SocialInsuranceRelationshipInput {
         if (!is_array($snapshot) || array_is_list($snapshot)) {
             $this->issue(
@@ -523,16 +566,34 @@ final class PayrollRunStatutoryInputAssembler
                 );
                 $rateCategory = SocialEmployerRateCategory::Unverified;
                 $rateCategoryEvidence = null;
-            } elseif ($this->riskySavingsPolicy->obligationArises(
-                $riskySavingsEvidence,
-                $periodStart,
-            )) {
-                // § 5a odst. 3 zákona č. 589/1992 Sb.: vznikne-li za měsíc
-                // povinný 4% příspěvek, přednost má běžná sazba zaměstnavatele.
-                $rateCategory = SocialEmployerRateCategory::Ordinary;
-                // Běžná kategorie sama odkaz na kategorizaci nenese; původ
-                // přepnutí zůstává ve zmrazené evidenci povinného spoření.
-                $rateCategoryEvidence = null;
+            } else {
+                $riskySavingsRules = null;
+                try {
+                    $riskySavingsRules = PayrollRiskySavingsRules::fromSnapshot(
+                        $riskySavingsRuleset ?? [],
+                    );
+                } catch (\InvalidArgumentException | \OverflowException) {
+                    $this->issue(
+                        'social_insurance',
+                        'risky_savings_ruleset_invalid',
+                        $personReference,
+                        $relationshipReference,
+                    );
+                    $rateCategory = SocialEmployerRateCategory::Unverified;
+                    $rateCategoryEvidence = null;
+                }
+                if ($riskySavingsRules !== null && $this->riskySavingsPolicy->obligationArises(
+                    $riskySavingsEvidence,
+                    $periodStart,
+                    $riskySavingsRules,
+                )) {
+                    // § 5a odst. 3 zákona č. 589/1992 Sb.: vznikne-li za měsíc
+                    // povinný příspěvek, přednost má běžná sazba zaměstnavatele.
+                    $rateCategory = SocialEmployerRateCategory::Ordinary;
+                    // Běžná kategorie sama odkaz na kategorizaci nenese; původ
+                    // přepnutí zůstává ve zmrazené evidenci povinného spoření.
+                    $rateCategoryEvidence = null;
+                }
             }
         }
         [$discountEvidence, $discountReason, $discountEvidenceReference] =

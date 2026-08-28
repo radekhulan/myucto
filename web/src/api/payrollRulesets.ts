@@ -138,6 +138,25 @@ export interface PayrollRulesetDetail extends PayrollRulesetSummary {
   previous_ruleset_id: string | null
 }
 
+export interface PayrollRulesetImpactPreview {
+  ruleset: PayrollRulesetSummary
+  baseline: {
+    ruleset_id: string
+    version: string
+    origin: PayrollRulesetOrigin
+    canonical_hash: string
+    source: 'vendor_default' | 'previous_active_snapshot'
+  } | null
+  effective: { from: string; to: string }
+  parameter_diff: PayrollRulesetDiff['parameters'] | null
+  activation_effect: {
+    new_snapshots_would_change: boolean | null
+    existing_snapshots_are_immutable: boolean
+    money_delta: null
+    money_delta_unavailable_reason: 'no_locked_input_snapshot'
+  }
+}
+
 /**
  * `status` rozpadá dřívější binární „povoleno / blokováno":
  * `awaiting_activation` je fronta, kterou uživatel odbaví jedním příkazem na
@@ -222,6 +241,12 @@ export const payrollRulesetsApi = {
         { params: { against } },
       )
       .then(response => response.data.diff),
+  impactPreview: (rulesetId: string) =>
+    api
+      .get<{ impact_preview: PayrollRulesetImpactPreview }>(
+        `/payroll/rulesets/${encodeURIComponent(rulesetId)}/impact-preview`,
+      )
+      .then(response => response.data.impact_preview),
   save: (rulesetId: string, payload: PayrollRulesetSavePayload) =>
     api
       .put<{ ruleset: PayrollRulesetDetail }>(

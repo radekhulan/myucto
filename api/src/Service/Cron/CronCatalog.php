@@ -178,6 +178,19 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // MZ-28-W08: pouze čte veřejné indexy MPSV/ČSSZ a porovnává
+                // jejich normalizovaný inventář dokumentů s předchozím během.
+                // Změna se ukáže v provozním přehledu jako konkrétní dokument,
+                // verze a URL; nikdy sama neinstaluje číselník ani nemění mzdy.
+                'script' => 'cron-jmhz-source-monitor',
+                'recommended' => 'daily_0700',
+                'linux_cron' => '0 7 * * *',
+                'windows_schtasks' => '/sc daily /st 07:00',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-generate-recurring-invoices',
                 'recommended' => 'daily_0630',
                 'linux_cron' => '30 6 * * *',
@@ -185,6 +198,24 @@ final class CronCatalog
                 'max_age_hours' => 36,
                 'weekdays_only' => false,
                 'critical' => true,
+            ],
+            [
+                'script' => 'cron-payroll-document-worker',
+                'recommended' => 'every_1_min',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
+                'script' => 'cron-payroll-period-export-worker',
+                'recommended' => 'every_1_min',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => false,
             ],
             [
                 // Jediná měsíční úloha v katalogu. Účtuje předchozí měsíc, takže musí běžet

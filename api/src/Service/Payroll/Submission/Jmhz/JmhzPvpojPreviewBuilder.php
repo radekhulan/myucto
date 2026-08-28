@@ -198,7 +198,7 @@ final class JmhzPvpojPreviewBuilder
         $frozenPeople = $this->frozenPeople($revisionInput);
         $office = $this->resolveOffice(
             $this->officeIds($frozenPeople),
-            $this->rows($source['offices'] ?? null, 'offices'),
+            $this->frozenOffices($frozenPeople),
             $officeId,
         );
         $reconciled = $this->reconcilePeople(
@@ -400,13 +400,8 @@ final class JmhzPvpojPreviewBuilder
             ),
             'zmrazeného vstupu revize',
         );
-        $known = [];
-        foreach ($this->rows($source['offices'] ?? null, 'offices') as $office) {
-            $id = $office['id'] ?? null;
-            if (is_int($id) && $id > 0) {
-                $known[$id] = $office;
-            }
-        }
+        unset($source);
+        $known = $this->frozenOffices($this->frozenPeople($input));
         $result = [];
         foreach ($this->officeIds($this->frozenPeople($input)) as $officeId) {
             $office = $known[$officeId] ?? null;
@@ -420,8 +415,8 @@ final class JmhzPvpojPreviewBuilder
             $valid = self::isSubmittableVariableSymbol($variableSymbol);
             $result[] = [
                 'office_id' => $officeId,
-                'code' => $this->nonEmptyString($office['code'] ?? null, 'offices.code'),
-                'name' => $this->nonEmptyString($office['name'] ?? null, 'offices.name'),
+                'code' => $this->nonEmptyString($office['code'] ?? null, 'office_registration.office_code'),
+                'name' => $this->nonEmptyString($office['name'] ?? null, 'office_registration.office_name'),
                 'social_security_variable_symbol' => $valid
                     ? (string) $variableSymbol
                     : null,
@@ -489,6 +484,47 @@ final class JmhzPvpojPreviewBuilder
         return $ids;
     }
 
+    /** @return array<int,array{ id:int, code:string, name:string, social_security_variable_symbol:string, registration_version_id:int, registration_sha256:string }> */
+    private function frozenOffices(array $frozenPeople): array
+    {
+        $offices = [];
+        foreach ($frozenPeople as $person) {
+            foreach ($person['relationships'] as $employmentId => $entry) {
+                $employment = $this->object($entry['employment'] ?? null, 'input.employment');
+                $officeId = $employment['office_id'] ?? null;
+                if (!is_int($officeId) || $officeId <= 0) {
+                    continue;
+                }
+                $registration = $employment['office_registration'] ?? null;
+                if (!is_array($registration)
+                    || !is_int($registration['id'] ?? null)
+                    || !is_string($registration['sha256'] ?? null)
+                    || preg_match('/^[a-f0-9]{64}$/D', $registration['sha256']) !== 1
+                    || !self::isSubmittableVariableSymbol($registration['social_security_variable_symbol'] ?? null)
+                ) {
+                    $this->invalid(
+                        'office_registration_history_missing',
+                        "Pracovní vztah employment:{$employmentId} nemá zmrazenou doloženou registraci ČSSZ mzdové účtárny office:{$officeId}.",
+                    );
+                }
+                $candidate = [
+                    'id' => $officeId,
+                    'code' => $this->nonEmptyString($registration['office_code'] ?? null, 'office_registration.office_code'),
+                    'name' => $this->nonEmptyString($registration['office_name'] ?? null, 'office_registration.office_name'),
+                    'social_security_variable_symbol' => $registration['social_security_variable_symbol'],
+                    'registration_version_id' => $registration['id'],
+                    'registration_sha256' => $registration['sha256'],
+                ];
+                if (isset($offices[$officeId]) && $offices[$officeId] !== $candidate) {
+                    $this->invalid('office_registration_snapshot_mismatch', "Zmrazené registrace ČSSZ pro office:{$officeId} nejsou shodné.");
+                }
+                $offices[$officeId] = $candidate;
+            }
+        }
+
+        return $offices;
+    }
+
     /**
      * Registrace u OSSZ, za kterou se přehled podává.
      *
@@ -498,7 +534,7 @@ final class JmhzPvpojPreviewBuilder
      * platná a přehled by se přiřadil k cizí nebo k žádné registraci.
      *
      * @param list<int> $officeIds
-     * @param list<array<string,mixed>> $offices
+     * @param array<int,array{id:int,code:string,name:string,social_security_variable_symbol:string,registration_version_id:int,registration_sha256:string}> $offices
      * @return array{office_id:int,code:string,name:string,variable_symbol:string}
      */
     private function resolveOffice(
@@ -521,10 +557,8 @@ final class JmhzPvpojPreviewBuilder
                 "Mzdová účtárna office:{$officeId} nemá v této revizi žádný pracovní vztah.",
             );
         }
-        foreach ($offices as $office) {
-            if (($office['id'] ?? null) !== $officeId) {
-                continue;
-            }
+        $office = $offices[$officeId] ?? null;
+        if ($office !== null) {
             $variableSymbol = $office['social_security_variable_symbol'] ?? null;
             if (!self::isSubmittableVariableSymbol($variableSymbol)) {
                 $this->invalid(

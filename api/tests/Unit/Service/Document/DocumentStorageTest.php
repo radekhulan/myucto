@@ -12,6 +12,35 @@ use PHPUnit\Framework\TestCase;
 
 final class DocumentStorageTest extends TestCase
 {
+    private string|false $previousDataDir;
+    private string $dataDir;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->previousDataDir = getenv('MYINVOICE_DATA_DIR');
+        $this->dataDir = sys_get_temp_dir() . '/myucto-document-storage-' . bin2hex(random_bytes(8));
+        putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
+    }
+
+    protected function tearDown(): void
+    {
+        if (is_dir($this->dataDir)) {
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($this->dataDir, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($iterator as $item) {
+                $item->isDir() ? rmdir($item->getPathname()) : unlink($item->getPathname());
+            }
+            rmdir($this->dataDir);
+        }
+        $this->previousDataDir === false
+            ? putenv('MYINVOICE_DATA_DIR')
+            : putenv('MYINVOICE_DATA_DIR=' . $this->previousDataDir);
+        parent::tearDown();
+    }
+
     private function storage(int $maxBytes = 50 * 1024 * 1024): DocumentStorage
     {
         $config = $this->createStub(Config::class);
@@ -124,6 +153,23 @@ final class DocumentStorageTest extends TestCase
     {
         $this->expectException(DocumentException::class);
         $this->storage()->classify('php', 'text/x-php');
+    }
+
+    public function testStoresHtmlExtractedFromZfoAsDownloadOnlyAttachment(): void
+    {
+        $html = '<!doctype html><html><body><h1>Důležité oznámení</h1></body></html>';
+
+        $stored = $this->storage()->storeZfoAttachmentFromBytes(
+            $html,
+            42,
+            'oznámení.html',
+            'text/html',
+        );
+
+        self::assertSame('application/octet-stream', $stored['mime_type']);
+        self::assertSame('other', $stored['doc_type']);
+        self::assertSame('html', $stored['ext']);
+        self::assertSame($html, file_get_contents($stored['abs_path']));
     }
 
     // ───────── maxFileBytes ─────────

@@ -19,6 +19,19 @@ final class PayrollRounding
         return self::ceilToMultiple($minorUnits, 10_000);
     }
 
+    public static function healthMinimumTopUp(
+        int $standardContribution,
+        int $minimumContribution,
+    ): int {
+        if ($standardContribution < 0 || $minimumContribution < 0) {
+            throw new InvalidArgumentException(
+                'Health insurance contributions must be non-negative.',
+            );
+        }
+
+        return max(0, $minimumContribution - $standardContribution);
+    }
+
     public static function ceilToMultiple(int $value, int $multiple): int
     {
         if ($value < 0) {

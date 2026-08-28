@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\RiskySavings;
 
+use MyInvoice\Service\Payroll\Calculation\CalculationStep;
+use MyInvoice\Service\Payroll\Calculation\PayrollRounding;
+use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+
 final readonly class PayrollRiskySavingsCalculator
 {
     public function __construct(private PayrollRiskySavingsPolicy $policy) {}
@@ -17,15 +21,10 @@ final readonly class PayrollRiskySavingsCalculator
         string $periodStart,
         int $assessmentBaseMinor,
         array $evidence,
+        PayrollRiskySavingsRules $rules,
     ): array {
         if ($employmentId <= 0 || $assessmentBaseMinor < 0) {
             throw new \InvalidArgumentException('Vstup povinného spoření není platný.');
-        }
-        if ($assessmentBaseMinor > intdiv(
-            PHP_INT_MAX - 999_999,
-            PayrollRiskySavingsPolicy::RATE_BASIS_POINTS,
-        )) {
-            throw new \OverflowException('Vyměřovací základ povinného spoření je příliš vysoký.');
         }
         $issues = $this->policy->issues($evidence, $periodStart);
         if ($issues !== []) {
@@ -38,13 +37,14 @@ final readonly class PayrollRiskySavingsCalculator
             ];
         }
         $eighths = (int) $evidence['qualifying_shift_eighths'];
-        $arises = $this->policy->obligationArises($evidence, $periodStart);
+        $arises = $this->policy->obligationArises($evidence, $periodStart, $rules);
         $contributionMinor = $arises
-            ? intdiv(
-                $assessmentBaseMinor * PayrollRiskySavingsPolicy::RATE_BASIS_POINTS
-                    + 999_999,
-                1_000_000,
-            ) * 100
+            ? PayrollRounding::ceilToCzk(CalculationStep::calculate(
+                'risky_savings.contribution',
+                $assessmentBaseMinor,
+                $rules->rate,
+                RoundingMode::Ceil,
+            )->outputMinorUnits)
             : 0;
         return [
             'employment_id' => $employmentId,
@@ -69,7 +69,8 @@ final readonly class PayrollRiskySavingsCalculator
             'variable_symbol' => $evidence['variable_symbol'] ?? null,
             'specific_symbol' => $evidence['specific_symbol'] ?? null,
             'payment_message' => $evidence['payment_message'] ?? null,
-            'payment_due_on' => $this->policy->dueOn($periodStart),
+            'payment_due_on' => $this->policy->dueOn($periodStart, $rules),
+            'ruleset' => $rules->toSnapshot(),
         ];
     }
 }

@@ -5,34 +5,40 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\SocialInsurance;
 
 use InvalidArgumentException;
+use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
 
 final class SocialRelationshipKindMapper
 {
     public function fromRelationType(string $relationType): SocialRelationshipKindMapping
     {
-        return match ($relationType) {
-            'employment' => new SocialRelationshipKindMapping(
+        $type = PayrollRelationType::tryFrom($relationType);
+        if ($type === null) {
+            throw new InvalidArgumentException(
+                'Unsupported payroll relation type for social insurance.',
+            );
+        }
+
+        return match ($type) {
+            PayrollRelationType::Employment => new SocialRelationshipKindMapping(
                 SocialEmploymentKind::Employment,
                 SocialParticipationAggregationGroup::RegularRelationship,
             ),
-            'small_scale_employment' => new SocialRelationshipKindMapping(
+            PayrollRelationType::SmallScaleEmployment => new SocialRelationshipKindMapping(
                 SocialEmploymentKind::Employment,
                 SocialParticipationAggregationGroup::SmallScaleCandidate,
             ),
-            'dpp' => new SocialRelationshipKindMapping(
+            PayrollRelationType::Dpp => new SocialRelationshipKindMapping(
                 SocialEmploymentKind::Dpp,
                 SocialParticipationAggregationGroup::Dpp,
             ),
-            'dpc' => new SocialRelationshipKindMapping(
+            PayrollRelationType::Dpc => new SocialRelationshipKindMapping(
                 SocialEmploymentKind::Dpc,
                 SocialParticipationAggregationGroup::SmallScaleCandidate,
             ),
-            'partner_dependent', 'statutory_body' => new SocialRelationshipKindMapping(
+            PayrollRelationType::PartnerDependent,
+            PayrollRelationType::StatutoryBody => new SocialRelationshipKindMapping(
                 SocialEmploymentKind::CorporateBody,
                 SocialParticipationAggregationGroup::SmallScaleCandidate,
-            ),
-            default => throw new InvalidArgumentException(
-                'Unsupported payroll relation type for social insurance.',
             ),
         };
     }

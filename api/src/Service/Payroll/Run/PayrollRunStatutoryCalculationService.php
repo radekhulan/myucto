@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsCalculator;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
+use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerCategoryResult;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialInsuranceMonthCalculator;
@@ -395,6 +396,23 @@ final class PayrollRunStatutoryCalculationService
                     'snapshot.employment',
                 );
                 $employmentId = self::positiveInt($employment, 'id');
+                try {
+                    $riskySavingsRules = PayrollRiskySavingsRules::fromSnapshot(
+                        self::object(
+                            $snapshot['risky_savings_ruleset'] ?? null,
+                            'risky_savings_ruleset',
+                        ),
+                    );
+                } catch (\InvalidArgumentException | \OverflowException | \UnexpectedValueException) {
+                    $results[] = [
+                        'employment_id' => $employmentId,
+                        'status' => 'manual_review',
+                        'issues' => ['risky_savings_ruleset_invalid'],
+                        'assessment_base_minor' => null,
+                        'contribution_minor' => null,
+                    ];
+                    continue;
+                }
                 if (!is_array($evidence) || array_is_list($evidence)
                     || !array_key_exists($employmentId, $bases)
                 ) {
@@ -412,6 +430,7 @@ final class PayrollRunStatutoryCalculationService
                     $periodStart,
                     $bases[$employmentId],
                     $evidence,
+                    $riskySavingsRules,
                 );
             }
         }

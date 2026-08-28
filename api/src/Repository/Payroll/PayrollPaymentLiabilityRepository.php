@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use PDO;
 
 final class PayrollPaymentLiabilityRepository
 {
     private int $savepointSequence = 0;
+    private readonly PayrollYearCloseGuard $yearClose;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(private readonly Connection $db)
+    {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /**
      * @template T
@@ -475,16 +480,7 @@ final class PayrollPaymentLiabilityRepository
         string $idempotencyKeyHash,
         ?int $createdBy,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'INSERT INTO payroll_payment_liabilities
-                (supplier_id, revision_id, employee_id,
-                 liability_reference, liability_kind, direction,
-                 recipient_reference, due_on, currency_code, amount_minor,
-                 previous_liability_id, source_snapshot_json,
-                 source_snapshot_hash, idempotency_key_hash, created_by)
-             VALUES (?, ?, ?, ?, "net_wage", ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?)'
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
             $supplierId,
             $revisionId,
             $employeeId,
@@ -498,9 +494,35 @@ final class PayrollPaymentLiabilityRepository
             $sourceSnapshotHash,
             $idempotencyKeyHash,
             $createdBy,
-        ]);
+        ): int {
+            $this->yearClose->assertOpenForRevision($supplierId, $revisionId);
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_payment_liabilities
+                    (supplier_id, revision_id, employee_id,
+                     liability_reference, liability_kind, direction,
+                     recipient_reference, due_on, currency_code, amount_minor,
+                     previous_liability_id, source_snapshot_json,
+                     source_snapshot_hash, idempotency_key_hash, created_by)
+                 VALUES (?, ?, ?, ?, "net_wage", ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?)'
+            );
+            $statement->execute([
+                $supplierId,
+                $revisionId,
+                $employeeId,
+                $liabilityReference,
+                $direction,
+                $recipientReference,
+                $dueOn,
+                $amountMinor,
+                $previousLiabilityId,
+                $sourceSnapshotJson,
+                $sourceSnapshotHash,
+                $idempotencyKeyHash,
+                $createdBy,
+            ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+            return (int) $this->db->pdo()->lastInsertId();
+        });
     }
 
     public function insertInstitutional(
@@ -518,16 +540,7 @@ final class PayrollPaymentLiabilityRepository
         string $idempotencyKeyHash,
         ?int $createdBy,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'INSERT INTO payroll_payment_liabilities
-                (supplier_id, revision_id, employee_id,
-                 liability_reference, liability_kind, direction,
-                 recipient_reference, due_on, currency_code, amount_minor,
-                 previous_liability_id, source_snapshot_json,
-                 source_snapshot_hash, idempotency_key_hash, created_by)
-             VALUES (?, ?, NULL, ?, ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?)'
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
             $supplierId,
             $revisionId,
             $liabilityReference,
@@ -541,9 +554,35 @@ final class PayrollPaymentLiabilityRepository
             $sourceSnapshotHash,
             $idempotencyKeyHash,
             $createdBy,
-        ]);
+        ): int {
+            $this->yearClose->assertOpenForRevision($supplierId, $revisionId);
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_payment_liabilities
+                    (supplier_id, revision_id, employee_id,
+                     liability_reference, liability_kind, direction,
+                     recipient_reference, due_on, currency_code, amount_minor,
+                     previous_liability_id, source_snapshot_json,
+                     source_snapshot_hash, idempotency_key_hash, created_by)
+                 VALUES (?, ?, NULL, ?, ?, ?, ?, ?, "CZK", ?, ?, ?, ?, ?, ?)'
+            );
+            $statement->execute([
+                $supplierId,
+                $revisionId,
+                $liabilityReference,
+                $liabilityKind,
+                $direction,
+                $recipientReference,
+                $dueOn,
+                $amountMinor,
+                $previousLiabilityId,
+                $sourceSnapshotJson,
+                $sourceSnapshotHash,
+                $idempotencyKeyHash,
+                $createdBy,
+            ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+            return (int) $this->db->pdo()->lastInsertId();
+        });
     }
 
     /** @param array<string,mixed> $row */

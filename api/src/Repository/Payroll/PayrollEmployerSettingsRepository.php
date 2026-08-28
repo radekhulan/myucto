@@ -233,13 +233,10 @@ final class PayrollEmployerSettingsRepository
 
         $upsert = $pdo->prepare(
             'INSERT INTO payroll_offices
-                (supplier_id, code, name, social_security_variable_symbol, is_active)
-             VALUES (?, ?, ?, ?, ?)
+                (supplier_id, code, name, is_active)
+             VALUES (?, ?, ?, ?)
              ON DUPLICATE KEY UPDATE
                 name = VALUES(name),
-                social_security_variable_symbol =
-                    IF(?, VALUES(social_security_variable_symbol),
-                        social_security_variable_symbol),
                 is_active = VALUES(is_active),
                 row_version = row_version + 1'
         );
@@ -248,9 +245,7 @@ final class PayrollEmployerSettingsRepository
                 $supplierId,
                 $office['code'],
                 $office['name'],
-                $office['social_security_variable_symbol'],
                 (int) $office['is_active'],
-                (int) $office['social_security_variable_symbol_provided'],
             ]);
         }
 

@@ -107,7 +107,12 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     accounting_mode = 'double_entry',
                     company_name = 'Syntetický zaměstnavatel',
                     display_name = 'Syntetický zaměstnavatel',
-                    ic = '00000019'
+                    ic = '00000019',
+                    street = 'Zkušební',
+                    street_number_pop = '12',
+                    zip = '110 00',
+                    city = 'Praha 1',
+                    phone = '+420111222333'
               WHERE id = ?",
         )->execute([$this->supplierId]);
 
@@ -125,6 +130,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
 
         $officeId = $this->createOffice();
         $this->configureSocialInsuranceOutput($officeId);
+        $this->configureHealthInsuranceOutput();
         $baseComponentId = $this->createComponent('MZDA_MESICNI_FLOW', 'base_wage', 'regular');
         $bonusComponentId = $this->createComponent('ODMENA_FLOW', 'bonus', 'one_off');
         $definitions = [
@@ -173,8 +179,10 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         if (!$runRepository instanceof PayrollRunRepository) {
             throw new \RuntimeException('Repository mzdového běhu není dostupné.');
         }
-        $posting = $this->createStub(PayrollApprovedRevisionPostingService::class);
-        $posting->method('post')->willReturn([]);
+        $posting = $this->container->get(PayrollApprovedRevisionPostingService::class);
+        if (!$posting instanceof PayrollApprovedRevisionPostingService) {
+            throw new \RuntimeException('Služba zaúčtování schválené revize není dostupná.');
+        }
         $this->runs = new PayrollRunCommandService(
             $db,
             $runRepository,
@@ -270,8 +278,18 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         );
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $overview = $this->json($response);
-        self::assertFalse($overview['electronic_submission']['supported']);
-        self::assertSame('health_insurance_transport_unavailable', $overview['electronic_submission']['reason_code']);
+        self::assertFalse(
+            $overview['electronic_submission']['direct_portal']['supported'],
+        );
+        self::assertSame(
+            'health_insurance_portal_transport_undocumented',
+            $overview['electronic_submission']['direct_portal']['reason_code'],
+        );
+        self::assertTrue($overview['electronic_submission']['isds']['supported']);
+        self::assertTrue($overview['electronic_submission']['isds']['requires_ready']);
+        self::assertTrue(
+            $overview['electronic_submission']['isds']['requires_production_gate'],
+        );
         self::assertNotEmpty($overview['items']);
         self::assertSame('111', $overview['items'][0]['insurer']['code']);
         self::assertCount(3, $overview['items'][0]['people']);
@@ -294,21 +312,83 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $preview->sha256());
     }
 
-    public function testOrdinaryHppReachesValidJmhzTestSubmissionWithoutTransport(): void
+    public function testLowIncomeHppWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(): void
     {
+        $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+            'hpp',
+            'employment',
+            'employee',
+            4,
+            'jmhz-hpp-4500',
+        );
+    }
+
+    public function testStatutoryBodyAt4500WithoutDeclarationOrTaxpayerCreditReachesValidScenarioThreeSubmissionWithoutTransport(): void
+    {
+        $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+            'statutory_body',
+            'statutory_body',
+            'managing_partner',
+            5,
+            'jmhz-statutory-body-4500',
+            false,
+            'ineligible',
+            true,
+            false,
+        );
+    }
+
+    public function testPartnerDependentAt4500WithoutDeclarationOrTaxpayerCreditReachesValidScenarioThreeSubmissionWithoutTransport(): void
+    {
+        $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+            'hpp',
+            'partner_dependent',
+            'managing_partner',
+            6,
+            'jmhz-partner-dependent-4500',
+            false,
+            'ineligible',
+            true,
+            false,
+        );
+    }
+
+    private function assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
+        string $employmentType,
+        string $relationType,
+        string $taxpayerType,
+        int $sequence,
+        string $scenario,
+        ?bool $taxpayerCreditTaxpayer = null,
+        ?string $otherWithholdingEligibility = null,
+        bool $scenarioThree = false,
+        bool $withAverageEarning = true,
+    ): void {
         $officeId = $this->createOffice('JMHZ', 'Syntetická registrace JMHZ', '9990001234');
         $person = $this->createEmployment(
             $officeId,
             'Dana Testovací',
-            4,
-            'hpp',
-            'employment',
+            $sequence,
+            $employmentType,
+            $relationType,
             40,
             10_000,
+            false,
+            '2026-07-01',
+            false,
+            $taxpayerType,
+            $taxpayerCreditTaxpayer,
+            $otherWithholdingEligibility,
         );
-        $this->completeJmhzEmployment($person);
-        $this->createApprovedTimeMonth($person['employment_id']);
-        $this->createApprovedAverage($person['employment_id']);
+        $this->assertEmployeeTaxConfiguration($person['employee_id'], false, $taxpayerCreditTaxpayer ?? false);
+        if ($otherWithholdingEligibility !== null) {
+            $this->assertOtherWithholdingEligibility($person['employment_id'], $otherWithholdingEligibility);
+        }
+        $this->completeJmhzEmployment($person, $scenarioThree ? 'S' : '1');
+        $this->createApprovedTimeMonth($person['employment_id'], '2026-07');
+        if ($withAverageEarning) {
+            $this->createApprovedAverage($person['employment_id'], 3);
+        }
         $this->assignJmhzIdentity($person);
 
         $baseComponentId = $this->componentId('MZDA_MESICNI_FLOW');
@@ -317,12 +397,12 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             throw new \RuntimeException('Mapování mzdových složek JMHZ není dostupné.');
         }
         $mappings->put($this->supplierId, $baseComponentId, '10329', null, $this->actors[0]);
-        $this->createApprovedInput($person, $baseComponentId, 4_200_000, 'jmhz-base');
+        $this->createApprovedInput($person, $baseComponentId, 450_000, $scenario . '-base', '2026-07-01');
 
         $run = $this->runs->createRun(
             $this->supplierId,
-            '2026-06-01',
-            '2026-07-15',
+            '2026-07-01',
+            '2026-08-15',
             $officeId,
             $this->actors[0],
         );
@@ -341,6 +421,18 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             $this->actors[0],
         );
         self::assertSame([], $this->blockingValidations((int) $calculated->revision['id']));
+        $health = $this->healthResultSnapshot((int) $calculated->revision['id']);
+        self::assertSame(20_300, $health['employee_standard_contribution_minor_units']);
+        self::assertSame(241_600, $health['employee_minimum_top_up_minor_units']);
+        self::assertSame(261_900, $health['employee_contribution_minor_units']);
+        self::assertSame(40_500, $health['employer_contribution_minor_units']);
+        if ($scenarioThree) {
+            $statutory = $calculated->revision['result_snapshot']['statutory']['people'][0];
+            self::assertSame('advance', $statutory['income_tax']['relationships'][0]['regime']);
+            self::assertSame(450_000, $statutory['income_tax']['advance_tax']['taxable_income_minor_units']);
+            self::assertSame(67_500, $statutory['income_tax']['advance_tax']['tax_after_credits_minor_units']);
+            self::assertSame(450_000, $statutory['social_insurance']['relationships'][0]['assessment_base_minor_units']);
+        }
         $reviewed = $this->runs->review(
             $this->supplierId,
             (int) $run['id'],
@@ -368,7 +460,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         }
         $preparationResponse = $prepare(
             $this->request('POST', "/api/payroll/jmhz/preparations/{$revisionId}")
-                ->withHeader('Idempotency-Key', 'synthetic-jmhz-full-flow')
+                ->withHeader('Idempotency-Key', $scenario)
                 ->withParsedBody(['environment' => 'test']),
             new Response(),
             ['revisionId' => (string) $revisionId],
@@ -388,8 +480,25 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame(200, $dryRunResponse->getStatusCode(), (string) $dryRunResponse->getBody());
         $tested = $this->json($dryRunResponse);
         self::assertSame('dry_run_valid', $tested['status'], CanonicalJson::encode($tested));
+        self::assertTrue($tested['controls']['submittable'], CanonicalJson::encode($tested['controls']));
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $tested['xml_sha256']);
         self::assertSame(hash('sha256', $tested['xml']), $tested['xml_sha256']);
+        self::assertStringContainsString('<form:zuctovanoCelkem>4500</form:zuctovanoCelkem>', $tested['xml']);
+        self::assertStringContainsString('<form:vypoctenaZaloha>675</form:vypoctenaZaloha>', $tested['xml']);
+        self::assertStringContainsString('<form:prohlaseniPoplatnika>false</form:prohlaseniPoplatnika>', $tested['xml']);
+        self::assertMatchesRegularExpression('/<form:zdravPojZamestnanec>\s*<form:zdravotniPojisteni>2619<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnanec>/', $tested['xml']);
+        if ($scenarioThree) {
+            self::assertStringContainsString('<form:cinnostKS ', $tested['xml']);
+            self::assertStringNotContainsString('<form:bezPriznaku>', $tested['xml']);
+            self::assertStringNotContainsString('<form:zdravPojZamestnavatel>', $tested['xml']);
+            self::assertStringNotContainsString('<form:vymerovaciZakladParagraf5>', $tested['xml']);
+            self::assertStringContainsString('<form:kod>S++</form:kod>', $tested['xml']);
+            self::assertStringContainsString('<form:vymerovaciZaklad>4500</form:vymerovaciZaklad>', $tested['xml']);
+        } else {
+            self::assertMatchesRegularExpression('/<form:zdravPojZamestnavatel>\s*<form:zdravotniPojisteni>405<\/form:zdravotniPojisteni>\s*<\/form:zdravPojZamestnavatel>/', $tested['xml']);
+        }
+        self::assertStringContainsString('<form:socialniPojisteni>320</form:socialniPojisteni>', $tested['xml']);
+        self::assertStringContainsString('<form:socialniPojisteni>1116</form:socialniPojisteni>', $tested['xml']);
 
         $freezeResponse = $freeze(
             $this->request('POST', "/api/payroll/jmhz/preparations/{$preparationId}/submission")
@@ -405,6 +514,54 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertSame(0, $this->transportAttemptCount((int) $submission['submission_id']));
     }
 
+    private function assertEmployeeTaxConfiguration(
+        int $employeeId,
+        bool $taxDeclarationSigned,
+        bool $taxpayerCreditTaxpayer,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT tax_declaration_signed, tax_credit_taxpayer
+               FROM payroll_employees
+              WHERE supplier_id = ? AND id = ?',
+        );
+        $statement->execute([$this->supplierId, $employeeId]);
+        $configuration = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($configuration);
+        self::assertSame($taxDeclarationSigned ? 1 : 0, (int) $configuration['tax_declaration_signed']);
+        self::assertSame($taxpayerCreditTaxpayer ? 1 : 0, (int) $configuration['tax_credit_taxpayer']);
+    }
+
+    private function assertOtherWithholdingEligibility(int $employmentId, string $eligibility): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT other_withholding_eligibility
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1',
+        );
+        $statement->execute([$this->supplierId, $employmentId]);
+        self::assertSame($eligibility, $statement->fetchColumn());
+    }
+
+    /** @return array<string,mixed> */
+    private function healthResultSnapshot(int $revisionId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT person.result_snapshot_json
+               FROM payroll_statutory_person_results person
+               JOIN payroll_statutory_results result
+                 ON result.supplier_id = person.supplier_id
+                AND result.id = person.statutory_result_id
+              WHERE result.supplier_id = ? AND result.revision_id = ?
+                AND result.calculation_kind = "health_insurance"'
+        );
+        $stmt->execute([$this->supplierId, $revisionId]);
+        $snapshot = json_decode((string) $stmt->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($snapshot);
+        return $snapshot;
+    }
+
     private function createOffice(
         string $code = 'FLOW',
         string $name = 'Syntetická účtárna',
@@ -416,7 +573,14 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                 (supplier_id, code, name, social_security_variable_symbol, is_active)
              VALUES (?, ?, ?, ?, 1)',
         )->execute([$this->supplierId, $code, $name, $variableSymbol]);
-        return (int) $this->db->pdo()->lastInsertId();
+        $officeId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from,
+                 social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", ?, "synthetic:full-flow")',
+        )->execute([$this->supplierId, $officeId, $variableSymbol]);
+        return $officeId;
     }
 
     private function configureSocialInsuranceOutput(int $officeId): void
@@ -447,6 +611,29 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         ], $this->actors[0]);
     }
 
+    private function configureHealthInsuranceOutput(): void
+    {
+        $accounts = $this->container->get(PayrollInstitutionAccountRepository::class);
+        if (!$accounts instanceof PayrollInstitutionAccountRepository) {
+            throw new \RuntimeException('Evidence účtů institucí není dostupná.');
+        }
+        $accounts->create($this->supplierId, [
+            'institution_type' => 'health_insurer',
+            'institution_code' => '111',
+            'institution_name' => 'Syntetická zdravotní pojišťovna',
+            'bank_account' => '1000000005/0100',
+            'currency_code' => 'CZK',
+            'variable_symbol' => '0000001900',
+            'specific_symbol' => null,
+            'constant_symbol' => null,
+            'valid_from' => '2026-01-01',
+            'valid_to' => null,
+            'source_kind' => 'official_document',
+            'source_reference' => 'synthetic:full-flow-health-account',
+            'verified_on' => '2026-06-15',
+        ], $this->actors[0]);
+    }
+
     /** @return array{employee_id:int,employment_id:int,name:string} */
     private function createEmployment(
         int $officeId,
@@ -456,15 +643,29 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         string $relationType,
         int $weeklyHours,
         int $workloadBasisPoints,
+        bool $taxDeclarationSigned = true,
+        string $periodStart = '2026-06-01',
+        bool $withHealthMonthEvidence = true,
+        string $taxpayerType = 'employee',
+        ?bool $taxpayerCreditTaxpayer = null,
+        ?string $otherWithholdingEligibility = null,
     ): array {
         $pdo = $this->db->pdo();
+        $taxpayerCreditTaxpayer ??= $taxDeclarationSigned;
         $pdo->prepare(
             'INSERT INTO payroll_employees
                 (supplier_id, full_name, taxpayer_type, employment_type,
                  tax_declaration_signed, tax_credit_taxpayer, child_count,
                  monthly_gross, auto_post, is_active)
-             VALUES (?, ?, "employee", ?, 1, 1, 0, 0, 0, 1)',
-        )->execute([$this->supplierId, $name, $employmentType]);
+             VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 1)',
+        )->execute([
+            $this->supplierId,
+            $name,
+            $taxpayerType,
+            $employmentType,
+            $taxDeclarationSigned ? 1 : 0,
+            $taxpayerCreditTaxpayer ? 1 : 0,
+        ]);
         $employeeId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             'INSERT INTO payroll_employee_profiles
@@ -487,23 +688,37 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                  health_insurance_participation, tax_regime,
                  tax_declaration_signed, is_primary)
              VALUES (?, ?, ?, "2026-01-01", "2026-01-01", "2026-01-01",
-                     ?, ?, "automatic", "automatic", "advance", 1, 1)',
+                     ?, ?, "automatic", "automatic", "advance", ?, 1)',
         )->execute([
             $this->supplierId,
             $employmentId,
             $officeId,
             $weeklyHours,
             $workloadBasisPoints,
+            $taxDeclarationSigned ? 1 : 0,
         ]);
+        if ($otherWithholdingEligibility !== null) {
+            $pdo->prepare(
+                'UPDATE payroll_employment_terms
+                    SET other_withholding_eligibility = ?
+                  WHERE supplier_id = ? AND employment_id = ?',
+            )->execute([$otherWithholdingEligibility, $this->supplierId, $employmentId]);
+        }
         $evidence = $this->container->get(PayrollPersonStatutoryEvidenceRepository::class);
         if (!$evidence instanceof PayrollPersonStatutoryEvidenceRepository) {
             throw new \RuntimeException('Zákonná evidence osoby není dostupná.');
         }
+        $healthEvidenceDocumentId = $this->createHealthEvidenceDocument($sequence);
         $evidence->save(
             $this->supplierId,
             $employeeId,
-            $this->statutoryEvidence(),
-            '2026-06-30',
+            $this->statutoryEvidence(
+                $periodStart,
+                $taxDeclarationSigned,
+                $withHealthMonthEvidence,
+                $healthEvidenceDocumentId,
+            ),
+            date('Y-m-t', strtotime($periodStart)),
             $this->actors[0],
             null,
             'payroll-full-flow-test',
@@ -514,8 +729,8 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                 (supplier_id, employee_id, period_start,
                  claim_register_evidence_complete, dependants_evidence_complete,
                  spouse_evidence_complete, pension_evidence, updated_by)
-             VALUES (?, ?, "2026-06-01", 1, 1, 1, "none", ?)',
-        )->execute([$this->supplierId, $employeeId, $this->actors[0]]);
+             VALUES (?, ?, ?, 1, 1, 1, "none", ?)',
+        )->execute([$this->supplierId, $employeeId, $periodStart, $this->actors[0]]);
         return ['employee_id' => $employeeId, 'employment_id' => $employmentId, 'name' => $name];
     }
 
@@ -539,7 +754,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @param array{employee_id:int,employment_id:int,name:string} $person */
-    private function createApprovedInput(array $person, int $componentId, int $amountMinor, string $externalId): void
+    private function createApprovedInput(array $person, int $componentId, int $amountMinor, string $externalId, string $periodStart = '2026-06-01'): void
     {
         $component = $this->db->pdo()->prepare(
             'SELECT * FROM payroll_component_definitions WHERE supplier_id = ? AND id = ?',
@@ -577,13 +792,14 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                  period_start, amount_minor, source_kind, external_id, status,
                  component_snapshot_json, component_snapshot_hash,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, "2026-06-01", ?, "manual", ?, "approved",
+             VALUES (?, ?, ?, ?, ?, ?, "manual", ?, "approved",
                      ?, ?, ?, NOW())',
         )->execute([
             $this->supplierId,
             $person['employee_id'],
             $person['employment_id'],
             $componentId,
+            $periodStart,
             $amountMinor,
             $externalId,
             $json,
@@ -632,15 +848,15 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function createApprovedAverage(int $employmentId): array
+    private function createApprovedAverage(int $employmentId, int $quarter = 2): array
     {
         $averageResponse = $this->absences->createAverage(
             $this->request('POST', '/api/payroll/absences/average')->withParsedBody([
                 'employment_id' => $employmentId,
                 'applicable_year' => 2026,
-                'applicable_quarter' => 2,
-                'decisive_from' => '2026-01-01',
-                'decisive_to' => '2026-03-31',
+                'applicable_quarter' => $quarter,
+                'decisive_from' => $quarter === 3 ? '2026-04-01' : '2026-01-01',
+                'decisive_to' => $quarter === 3 ? '2026-06-30' : '2026-03-31',
                 'gross_earnings_minor' => 12_000_000,
                 'longer_period_allocated_minor' => 0,
                 'worked_minutes' => 9_600,
@@ -665,11 +881,11 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @param array{employee_id:int,employment_id:int,name:string} $person */
-    private function completeJmhzEmployment(array $person): void
+    private function completeJmhzEmployment(array $person, string $activityCode = '1'): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms
-                SET activity_code = "1",
+                SET activity_code = ?,
                     jmhz_relationship_detail_code = "1",
                     work_place = "Hlavní město Praha",
                     jmhz_workplace_municipality_code = "554782",
@@ -682,6 +898,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     risky_work = 0
               WHERE supplier_id = ? AND employment_id = ?',
         )->execute([
+            $activityCode,
             JmhzExternalCodebookCatalog::DEFAULT_OVERLAY_KEY,
             JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256,
             $this->supplierId,
@@ -698,7 +915,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $this->insertPersonIdentifier($person['employee_id'], 'birth_number', '9102030014');
     }
 
-    private function createApprovedTimeMonth(int $employmentId): void
+    private function createApprovedTimeMonth(int $employmentId, string $period = '2026-06'): void
     {
         $calendar = $this->time->calendar(
             $this->request('PUT', "/api/payroll/time/calendars/{$employmentId}")
@@ -728,8 +945,8 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $entry = $this->time->entry(
             $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
                 'employment_id' => $employmentId,
-                'starts_at' => '2026-06-01T08:00:00+02:00',
-                'ends_at' => '2026-06-01T16:00:00+02:00',
+                'starts_at' => "{$period}-01T08:00:00+02:00",
+                'ends_at' => "{$period}-01T16:00:00+02:00",
                 'timezone' => 'Europe/Prague',
                 'category' => 'regular',
                 'break_minutes' => 30,
@@ -743,7 +960,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         $monthVersion = (int) $this->json($entry)['month']['row_version'];
         $overview = $this->time->month(
             $this->request('GET', '/api/payroll/time/month')
-                ->withQueryParams(['period' => '2026-06']),
+                ->withQueryParams(['period' => $period]),
             new Response(),
         );
         self::assertSame(200, $overview->getStatusCode(), (string) $overview->getBody());
@@ -757,7 +974,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertIsArray($item);
         $preview = $item['jmhz_work_summary']['preview'];
         $approved = $this->time->approve(
-            $this->request('POST', '/api/payroll/time/months/2026-06/approve')
+            $this->request('POST', "/api/payroll/time/months/{$period}/approve")
                 ->withParsedBody([
                     'employment_id' => $employmentId,
                     'row_version' => $monthVersion,
@@ -773,7 +990,7 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     ],
                 ]),
             new Response(),
-            ['period' => '2026-06'],
+            ['period' => $period],
         );
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
     }
@@ -817,13 +1034,18 @@ final class PayrollSyntheticFullFlowTest extends TestCase
     }
 
     /** @return array<string,mixed> */
-    private function statutoryEvidence(): array
+    private function statutoryEvidence(
+        string $periodStart,
+        bool $taxDeclarationSigned,
+        bool $withHealthMonthEvidence,
+        int $healthEvidenceDocumentId,
+    ): array
     {
         return [
-            'effective_on' => '2026-06-30',
+            'effective_on' => date('Y-m-t', strtotime($periodStart)),
             'sections' => [
                 'tax_declarations' => [[
-                    'status' => 'signed',
+                    'status' => $taxDeclarationSigned ? 'signed' : 'not-signed',
                     'evidence_reference' => 'document:synthetic-tax-declaration',
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
@@ -858,18 +1080,39 @@ final class PayrollSyntheticFullFlowTest extends TestCase
                     'insurer_status' => 'verified',
                     'insurer_code' => '111',
                     'insurer_evidence_reference' => 'document:synthetic-health-card',
+                    'health_evidence_document_id' => $healthEvidenceDocumentId,
                     'effective_from' => '2026-01-01',
                     'effective_to' => null,
                 ]],
-                'health_month_evidence' => [[
-                    'period_start' => '2026-06-01',
+                'health_month_evidence' => $withHealthMonthEvidence ? [[
+                    'period_start' => $periodStart,
                     'top_up_responsibility' => 'employer_obstacle_verified',
                     'top_up_responsibility_evidence_reference' => 'document:synthetic-obstacle',
                     'selected_top_up_employer_reference' => null,
                     'selected_top_up_employer_evidence_reference' => null,
-                ]],
+                ]] : [],
             ],
         ];
+    }
+
+    private function createHealthEvidenceDocument(int $sequence): int
+    {
+        $sha256 = hash('sha256', 'synthetic-health-evidence-' . $sequence);
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO documents
+                (supplier_id, title, original_name, filename, sha256, mime_type,
+                 size_bytes, doc_type, source, uploaded_by, scope)
+             VALUES (?, "Syntetický zdravotní důkaz", "health-evidence.pdf", ?, ?,
+                     "application/pdf", 1, "pdf", "manual", ?, "company")',
+        );
+        $statement->execute([
+            $this->supplierId,
+            $sha256 . '.pdf',
+            $sha256,
+            $this->actors[0],
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
     }
 
     private function createOpeningBalances(int $employeeId, int $sequence): void

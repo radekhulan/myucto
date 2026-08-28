@@ -249,7 +249,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
      * Variabilní symbol je jediné, čím se přehled přiřadí k registraci. Prázdná
      * hodnota by v podání vypadala jako platná — proto fail-closed.
      */
-    public function testRejectsOfficeWithoutVariableSymbol(): void
+    public function testLiveOfficeVariableSymbolCannotChangeFrozenPreview(): void
     {
         $source = $this->twoOfficeSource();
         $source['offices'] = [
@@ -257,10 +257,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
             $this->office(7, null),
         ];
 
-        $this->expectCode(
-            'jmhz_office_variable_symbol_missing',
-            fn () => $this->builder->build(41, $source, 7),
-        );
+        self::assertSame('9876543210', $this->builder->build(41, $source, 7)->office['variable_symbol']);
     }
 
     /**
@@ -269,7 +266,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
      * `variabilniSymbol`, `xs:length 10`). Kratší symbol musí zastavit
      * přehled, ne až XSD, kde už není poznat, které účtárny se to týká.
      */
-    public function testRejectsVariableSymbolShorterThanTheSubmittableLength(): void
+    public function testLiveShortVariableSymbolCannotChangeFrozenPreview(): void
     {
         $source = $this->twoOfficeSource();
         $source['offices'] = [
@@ -277,10 +274,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
             $this->office(7, '12345'),
         ];
 
-        $this->expectCode(
-            'jmhz_office_variable_symbol_missing',
-            fn () => $this->builder->build(41, $source, 7),
-        );
+        self::assertSame('9876543210', $this->builder->build(41, $source, 7)->office['variable_symbol']);
     }
 
     public function testListsOfficesOfTheRevisionWithSubmittability(): void
@@ -304,15 +298,15 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
                     'office_id' => 7,
                     'code' => 'UC7',
                     'name' => 'Mzdová účtárna 7',
-                    'social_security_variable_symbol' => null,
-                    'submittable' => false,
+                    'social_security_variable_symbol' => '9876543210',
+                    'submittable' => true,
                 ],
             ],
             $this->builder->offices($source),
         );
     }
 
-    public function testUsesSelectedOfficeVariableSymbolWithoutPaymentAccount(): void
+    public function testUsesFrozenOfficeRegistrationInsteadOfLiveOfficeSymbol(): void
     {
         $source = $this->source();
         $source['offices'] = [$this->office(4, '5555555555')];
@@ -320,7 +314,7 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
 
         $preview = $this->builder->build(41, $source);
 
-        self::assertSame('5555555555', $preview->office['variable_symbol']);
+        self::assertSame('1234567890', $preview->office['variable_symbol']);
     }
 
     public function testRejectsFrozenEmploymentWithoutOffice(): void
@@ -651,6 +645,13 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
         $input = $source['statutory_result']['input_snapshot'];
         self::assertIsArray($input['people']);
         $input['people'][1]['employments'][0]['employment']['office_id'] = 7;
+        $input['people'][1]['employments'][0]['employment']['office_registration'] = [
+            'id' => 707,
+            'sha256' => str_repeat('7', 64),
+            'office_code' => 'UC7',
+            'office_name' => 'Mzdová účtárna 7',
+            'social_security_variable_symbol' => '9876543210',
+        ];
         $input['office_id'] = null;
         $source['statutory_result']['input_snapshot'] = $input;
         $source['statutory_result']['input_snapshot_hash'] = $this->hash($input);
@@ -733,6 +734,13 @@ final class JmhzPvpojPreviewBuilderTest extends TestCase
                         'id' => $employmentId,
                         'employee_id' => $employeeId,
                         'office_id' => 4,
+                        'office_registration' => [
+                            'id' => 404,
+                            'sha256' => str_repeat('4', 64),
+                            'office_code' => 'UC4',
+                            'office_name' => 'Mzdová účtárna 4',
+                            'social_security_variable_symbol' => '1234567890',
+                        ],
                     ],
                 ],
                 $employmentIds,

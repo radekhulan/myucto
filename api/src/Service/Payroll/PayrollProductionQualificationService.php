@@ -20,6 +20,7 @@ final class PayrollProductionQualificationService
         private readonly Connection $db,
         private readonly PayrollModuleStateRepository $state,
         private readonly SupportMatrix $supportMatrix,
+        private readonly PayrollCompanyCapabilityService $companyCapability,
         private readonly ActivityLogger $logger,
         private readonly DocumentRepository $documents,
     ) {}
@@ -81,6 +82,17 @@ final class PayrollProductionQualificationService
         }
 
         try {
+            $companyCapability = $this->companyCapability->assessForUpdate(
+                $supplierId,
+                $startPeriod,
+            );
+            if (!$companyCapability['production_ready']) {
+                throw new PayrollProductionQualificationException(
+                    'company_capability_blocked',
+                    'Produkční provoz nelze aktivovat, dokud aktuální mzdová data vyžadují nepodporovaný scénář.',
+                    ['blockers' => $companyCapability['blockers']],
+                );
+            }
             $normalizedEvidence = $this->normalizeEvidence($supplierId, $evidence);
             $matrixJson = CanonicalJson::encode($this->supportMatrix->all());
             $matrixHash = hash('sha256', $matrixJson);

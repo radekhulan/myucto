@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use DragonOfMercy\PhpPdf\PdfEditor;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
@@ -95,6 +96,7 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         $employeeId = $this->employee($pdo);
         $this->employmentId = $this->employment($pdo, $employeeId);
         $this->coverage($pdo, $employeeId);
+        $this->healthInsurerAccount($pdo);
         $this->revisionId = $this->revision($pdo, $employeeId);
         $this->storeResult($employeeId);
     }
@@ -600,6 +602,25 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             $result['pdf_artifact_sha256'],
             hash('sha256', $pdf),
         );
+        self::assertSame([
+            false,
+            'Praha 1',
+            '420111222333',
+            'Syntetický plátce s.r.o.',
+            'Zkušební',
+            '12',
+            '1234567800',
+            '11000',
+            date('j.n.Y'),
+            '1',
+            '10000',
+            '1350',
+            '06/2026',
+            true,
+        ], array_map(
+            static fn ($field): string|bool|array|null => $field->value,
+            PdfEditor::fromBytes($pdf)->formFields(),
+        ));
 
         if (!$bundleAvailable) {
             $issues = $this->db->pdo()->prepare(
@@ -658,6 +679,108 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         );
     }
 
+    public function testCorrectionRevisionBeforeFirstFilingCreatesAndReplaysRegularOverview(): void
+    {
+        $this->revisionId = $this->correctionRevision();
+        $employeeId = (int) $this->db->pdo()->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId,
+        )->fetchColumn();
+        $this->storeResult($employeeId);
+
+        $first = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        $submission = $this->repository->findSubmission(
+            $this->supplierId,
+            $first['submission_id'],
+        );
+        self::assertIsArray($submission);
+        self::assertSame('regular', $submission['submission_kind']);
+        self::assertNull($submission['corrects_submission_id']);
+        self::assertStringContainsString(
+            '<typPrehledu>radny</typPrehledu>',
+            $this->submissions->artifactBytes(
+                $this->supplierId,
+                (int) $first['artifact_id'],
+            ),
+        );
+
+        $replayed = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        self::assertSame($first['submission_id'], $replayed['submission_id']);
+        self::assertFalse($replayed['created']);
+    }
+
+    public function testCorrectionRevisionCreatesCorrectiveOverviewLinkedToAcceptedPredecessor(): void
+    {
+        $regular = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $this->revisionId,
+            '111',
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP(), row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $regular['submission_id']]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_obligations
+                SET status = "fulfilled", row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $regular['obligation_id']]);
+
+        $correctionRevisionId = $this->correctionRevision();
+        $this->revisionId = $correctionRevisionId;
+        $employeeId = (int) $this->db->pdo()->query(
+            'SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId,
+        )->fetchColumn();
+        $this->storeResult($employeeId);
+
+        $correction = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $correctionRevisionId,
+            '111',
+        );
+        $submission = $this->repository->findSubmission(
+            $this->supplierId,
+            $correction['submission_id'],
+        );
+        self::assertIsArray($submission);
+        self::assertSame('correction', $submission['submission_kind']);
+        self::assertSame($regular['submission_id'], $submission['corrects_submission_id']);
+        self::assertStringContainsString(
+            '<typPrehledu>opravny</typPrehledu>',
+            $this->submissions->artifactBytes(
+                $this->supplierId,
+                (int) $correction['artifact_id'],
+            ),
+        );
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_submissions
+                SET status = "accepted", submitted_at = UTC_TIMESTAMP(),
+                    decided_at = UTC_TIMESTAMP(), row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $correction['submission_id']]);
+        $replayed = $this->service->preparePaymentOverview(
+            $this->supplierId,
+            'production',
+            $correctionRevisionId,
+            '111',
+        );
+        self::assertSame($correction['submission_id'], $replayed['submission_id']);
+        self::assertFalse($replayed['created']);
+    }
+
     public function testInsurerWithoutAnOverviewIsRefused(): void
     {
         $this->expectException(\OutOfBoundsException::class);
@@ -700,6 +823,27 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
             self::fail('Bez IČO nelze sestavit číslo plátce.');
         } catch (HealthNotificationException $e) {
             self::assertSame('zp_payer_business_id_missing', $e->errorCode);
+        }
+    }
+
+    public function testMissingInsurerPayerNumberStopsTheSubmission(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_institution_accounts
+                SET variable_symbol = NULL, row_version = row_version + 1
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+
+        try {
+            $this->service->preparePaymentOverview(
+                $this->supplierId,
+                'production',
+                $this->revisionId,
+                '111',
+            );
+            self::fail('Bez čísla plátce u konkrétní pojišťovny nesmí podání vzniknout.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_payer_number_missing', $e->errorCode);
         }
     }
 
@@ -830,6 +974,40 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         )->execute([$this->supplierId, $employeeId]);
     }
 
+    private function healthInsurerAccount(PDO $pdo): void
+    {
+        $actorId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')
+            ->fetchColumn();
+        if ($actorId <= 0) {
+            throw new \RuntimeException('Chybí syntetický uživatel pro ověření účtu.');
+        }
+        $pdo->prepare(
+            'INSERT INTO payroll_institutions
+                (supplier_id, institution_type, institution_code)
+             VALUES (?, "health_insurer", "111")',
+        )->execute([$this->supplierId]);
+        $institutionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_institution_accounts
+                (supplier_id, institution_id, institution_name,
+                 bank_account_ciphertext, bank_account_hash,
+                 bank_account_masked, currency_code, variable_symbol,
+                 valid_from, source_kind, source_reference, verified_on,
+                 verified_by, created_by, updated_by)
+             VALUES (?, ?, "VZP", "synthetic", ?, "synthetic",
+                     "CZK", "1234567800", "2026-01-01",
+                     "user_verified", "synthetic-test", "2026-01-01",
+                     ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $institutionId,
+            hash('sha256', 'synthetic-vzp-account', true),
+            $actorId,
+            $actorId,
+            $actorId,
+        ]);
+    }
+
     private function revision(PDO $pdo, int $employeeId): int
     {
         $pdo->prepare(
@@ -869,6 +1047,52 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
                 (supplier_id, revision_id, employee_id, status)
              VALUES (?, ?, ?, "calculated")',
         )->execute([$this->supplierId, $revisionId, $employeeId]);
+
+        return $revisionId;
+    }
+
+    private function correctionRevision(): int
+    {
+        $pdo = $this->db->pdo();
+        $regular = $pdo->query(
+            'SELECT run_id, input_snapshot_json, input_snapshot_hash,
+                    result_snapshot_json, result_snapshot_hash
+               FROM payroll_run_revisions WHERE id = ' . $this->revisionId,
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($regular);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind,
+                 previous_revision_id, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 2, "correction", ?, "approved",
+                     "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            (int) $regular['run_id'],
+            $this->revisionId,
+            str_repeat('a', 64),
+            $regular['input_snapshot_json'],
+            $regular['input_snapshot_hash'],
+            $regular['result_snapshot_json'],
+            $regular['result_snapshot_hash'],
+            hash('sha256', 'synthetic-zp-correction:' . $this->revisionId, true),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'UPDATE payroll_runs
+                SET current_revision_no = 2
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, (int) $regular['run_id']]);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, period_start, employee_id, status)
+             SELECT supplier_id, ?, period_start, employee_id, "calculated"
+               FROM payroll_run_persons
+              WHERE supplier_id = ? AND revision_id = ?'
+        )->execute([$revisionId, $this->supplierId, $this->revisionId]);
 
         return $revisionId;
     }

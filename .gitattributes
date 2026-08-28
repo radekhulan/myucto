@@ -14,6 +14,7 @@
 # Vendorovaná XSD schémata se pinují bajt po bajtu přes api/xsd/jmhz/SHA256SUMS.
 # Git je nesmí nijak konvertovat, jinak manifest sedí jen na jedné platformě.
 *.xsd -text
+api/xsd/cssz/**/*.xsd -text -diff
 *.xlsx -text
 api/resources/payroll/jmhz/**/*.csv -text -diff
 api/resources/payroll/jmhz/**/*.ttl -text -diff

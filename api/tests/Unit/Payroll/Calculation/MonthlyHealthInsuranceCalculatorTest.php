@@ -58,7 +58,7 @@ final class MonthlyHealthInsuranceCalculatorTest extends TestCase
         self::assertSame(257_400, $employerTopUp->employerContributionMinorUnits);
     }
 
-    public function testRoundsMinimumTopUpSeparatelyFromStandardPremium(): void
+    public function testRoundsMinimumTotalOnceAndUsesTopUpAsDifference(): void
     {
         $result = $this->calculator()->calculate(
             '2026-08-03',
@@ -71,8 +71,32 @@ final class MonthlyHealthInsuranceCalculatorTest extends TestCase
         );
 
         self::assertSame(1_400, $result->standardContributionMinorUnits);
-        self::assertSame(301_100, $result->employeeMinimumTopUpMinorUnits);
-        self::assertSame(302_500, $result->totalContributionMinorUnits);
+        self::assertSame(301_000, $result->employeeMinimumTopUpMinorUnits);
+        self::assertSame(302_400, $result->totalContributionMinorUnits);
+        self::assertSame(
+            'monthly-health-insurance-minimum-total',
+            $result->minimumContributionStep?->label,
+        );
+    }
+
+    public function testMatchesAcceptedLowIncomeDirectorHealthContribution(): void
+    {
+        $result = $this->calculator()->calculate(
+            '2026-08-03',
+            new MonthlyHealthInsuranceInput(
+                450_000,
+                true,
+                2_240_000,
+                HealthMinimumTopUpPayer::Employee,
+            ),
+        );
+
+        self::assertSame(60_800, $result->standardContributionMinorUnits);
+        self::assertSame(20_300, $result->employeeStandardContributionMinorUnits);
+        self::assertSame(40_500, $result->employerStandardContributionMinorUnits);
+        self::assertSame(241_600, $result->employeeMinimumTopUpMinorUnits);
+        self::assertSame(261_900, $result->employeeContributionMinorUnits);
+        self::assertSame(302_400, $result->totalContributionMinorUnits);
     }
 
     public function testNonParticipationProducesNoContributionAndRejectsMinimum(): void

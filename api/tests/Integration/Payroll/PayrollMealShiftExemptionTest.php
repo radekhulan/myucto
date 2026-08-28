@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -56,6 +57,7 @@ final class PayrollMealShiftExemptionTest extends TestCase
 
     private Connection $db;
     private PayrollComponentsAction $components;
+    private PayrollEmploymentAction $employments;
     private PayrollInputsAction $inputs;
     private int $supplierId;
     private int $employeeId;
@@ -70,9 +72,11 @@ final class PayrollMealShiftExemptionTest extends TestCase
         }
         $db = $container->get(Connection::class);
         $components = $container->get(PayrollComponentsAction::class);
+        $employments = $container->get(PayrollEmploymentAction::class);
         $inputs = $container->get(PayrollInputsAction::class);
         if (!$db instanceof Connection
             || !$components instanceof PayrollComponentsAction
+            || !$employments instanceof PayrollEmploymentAction
             || !$inputs instanceof PayrollInputsAction
         ) {
             throw new \RuntimeException('Payroll služby nejsou dostupné.');
@@ -82,6 +86,7 @@ final class PayrollMealShiftExemptionTest extends TestCase
             $this->markTestSkipped('Migrace docházky neproběhly.');
         }
         $this->components = $components;
+        $this->employments = $employments;
         $this->inputs = $inputs;
 
         $pdo = $this->db->pdo();
@@ -177,11 +182,14 @@ final class PayrollMealShiftExemptionTest extends TestCase
         $this->seedShift('2026-07-07 06:00', '2026-07-07 17:01', 30);
         $this->seedWorkedTime('2026-07-07 06:00', '2026-07-07 12:00', 0);
 
-        $preview = $this->basket($this->preview($exactlyEleven, 4 * self::MEAL_LIMIT_MINOR));
+        $preview = $this->basket($this->preview(
+            $exactlyEleven,
+            3 * (self::MEAL_LIMIT_MINOR + 100),
+        ));
         // Dvě směny: první dá jeden nárok, druhá dva (základní a další příspěvek).
         self::assertSame(3, $preview['shift_entitlements']);
         self::assertSame(3 * self::MEAL_LIMIT_MINOR, $preview['limit_minor']);
-        self::assertSame(self::MEAL_LIMIT_MINOR, $preview['taxable_minor']);
+        self::assertSame(300, $preview['taxable_minor']);
     }
 
     /**
@@ -203,6 +211,88 @@ final class PayrollMealShiftExemptionTest extends TestCase
         self::assertSame(
             ['meal_per_shift', self::MEAL_LIMIT_MINOR, 1],
             $this->frozenSplit('stravne-presah'),
+        );
+        self::assertEquals([
+            'mode' => 'uniform_per_entitlement',
+            'entitlement_count' => 1,
+            'amount_per_entitlement_minor' => self::MEAL_LIMIT_MINOR + 1,
+            'limit_per_entitlement_minor' => self::MEAL_LIMIT_MINOR,
+            'exempt_per_entitlement_minor' => self::MEAL_LIMIT_MINOR,
+            'taxable_per_entitlement_minor' => 1,
+            'entitlement_basis' => 'shift',
+            'entitlement_snapshot' => [
+                'period_start' => self::PERIOD_START,
+                'basis' => 'shift',
+                'qualifying_count' => 1,
+                'second_contribution_count' => 0,
+                'count' => 1,
+                'complete' => true,
+                'missing' => [],
+            ],
+        ], $this->frozenAllocation('stravne-presah'));
+    }
+
+    public function testApprovedMealInputFreezesBasisAndEntitlementSnapshot(): void
+    {
+        $this->approveAttendanceMonth();
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00', 30);
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 09:30', 30);
+
+        $component = $this->createMealComponent('STRAVNE_SNAPSHOT_REZIMU');
+        self::assertSame(
+            200,
+            $this->approve($component, self::MEAL_LIMIT_MINOR, 'stravne-snapshot-rezimu')
+                ->getStatusCode(),
+        );
+        $allocation = $this->frozenAllocation('stravne-snapshot-rezimu');
+
+        self::assertSame('shift', $allocation['entitlement_basis'] ?? null);
+        self::assertEquals([
+            'period_start' => self::PERIOD_START,
+            'basis' => 'shift',
+            'qualifying_count' => 1,
+            'second_contribution_count' => 0,
+            'count' => 1,
+            'complete' => true,
+            'missing' => [],
+        ], $allocation['entitlement_snapshot'] ?? null);
+    }
+
+    public function testApprovedActiveMealInputLocksEmploymentBasis(): void
+    {
+        $this->approveAttendanceMonth();
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00', 30);
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 09:30', 30);
+
+        $component = $this->createMealComponent('STRAVNE_ZAMEK_REZIMU');
+        self::assertSame(
+            200,
+            $this->approve($component, self::MEAL_LIMIT_MINOR, 'stravne-zamek-rezimu')
+                ->getStatusCode(),
+        );
+
+        $response = $this->employments->setMealEntitlementBasis(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$this->employmentId}/meal-entitlement-basis",
+            )->withParsedBody([
+                'row_version' => 1,
+                'meal_entitlement_basis' => 'calendar_day',
+            ]),
+            new Response(),
+            ['id' => (string) $this->employmentId],
+        );
+
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        $error = PayrollTimeValue::row($this->json($response)['error'] ?? null, 'error');
+        self::assertSame('meal_entitlement_basis_locked', $error['code'] ?? null);
+        self::assertStringContainsString('schválený příspěvek', (string) ($error['message'] ?? ''));
+        self::assertSame(
+            'shift',
+            $this->db->pdo()->query(
+                'SELECT meal_entitlement_basis FROM payroll_employments'
+                . ' WHERE id = ' . $this->employmentId,
+            )->fetchColumn(),
         );
     }
 
@@ -287,12 +377,13 @@ final class PayrollMealShiftExemptionTest extends TestCase
      */
     public function testWithoutPublishedShiftsTheCalendarDayBranchApplies(): void
     {
+        $this->setMealBasis($this->employmentId, 'calendar_day');
         $this->approveAttendanceMonth();
         $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 09:00', 0);
         $this->seedWorkedTime('2026-07-07 06:00', '2026-07-07 17:00', 0);
 
         $component = $this->createMealComponent('STRAVNE_BEZ_ROZVRHU');
-        $preview = $this->basket($this->preview($component, 100));
+        $preview = $this->basket($this->preview($component, 300));
 
         // 6. 7. přesně 3 hodiny → jeden nárok. 7. 7. přesně 11 hodin → dva.
         self::assertSame(3, $preview['shift_entitlements']);
@@ -306,6 +397,7 @@ final class PayrollMealShiftExemptionTest extends TestCase
      */
     public function testCalendarDayCoveredByABusinessTripMealAllowanceGrantsNothing(): void
     {
+        $this->setMealBasis($this->employmentId, 'calendar_day');
         $this->approveAttendanceMonth();
         $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 14:00', 0);
         $this->seedWorkedTime('2026-07-07 06:00', '2026-07-07 14:00', 0);
@@ -316,6 +408,202 @@ final class PayrollMealShiftExemptionTest extends TestCase
 
         // Zůstane jediný den bez pracovní cesty.
         self::assertSame(1, $preview['shift_entitlements']);
+    }
+
+    public function testCalendarDayWorkIsSplitAtLocalMidnight(): void
+    {
+        $this->setMealBasis($this->employmentId, 'calendar_day');
+        $this->approveAttendanceMonth();
+        $this->seedWorkedTime('2026-07-06 22:00', '2026-07-07 01:00', 0);
+
+        $component = $this->createMealComponent('STRAVNE_PULNOC');
+        $preview = $this->basket($this->preview($component, self::MEAL_LIMIT_MINOR));
+
+        self::assertSame(0, $preview['shift_entitlements']);
+        self::assertSame(0, $preview['limit_minor']);
+        self::assertSame(self::MEAL_LIMIT_MINOR, $preview['taxable_minor']);
+    }
+
+    public function testCalendarDayCrossMidnightBreakRequiresPreciseAllocation(): void
+    {
+        $this->setMealBasis($this->employmentId, 'calendar_day');
+        $this->approveAttendanceMonth();
+        $this->seedWorkedTime('2026-07-06 22:00', '2026-07-07 01:00', 30);
+
+        $component = $this->createMealComponent('STRAVNE_PULNOC_PRESTAVKA');
+        $preview = $this->preview($component, self::MEAL_LIMIT_MINOR);
+
+        self::assertSame('manual_review', $preview['support_status']);
+        self::assertStringContainsString(
+            'calendar_day_break_allocation_missing',
+            (string) $preview['blocker'],
+        );
+        self::assertNull($preview['exemption_basket']);
+        $entitlement = PayrollTimeValue::row(
+            $preview['meal_entitlement'] ?? null,
+            'meal_entitlement',
+        );
+        self::assertFalse($entitlement['complete']);
+        self::assertContains(
+            'calendar_day_break_allocation_missing',
+            $entitlement['missing'],
+        );
+    }
+
+    public function testCalendarDayIncludesTargetMonthPartOfCrossBoundaryWork(): void
+    {
+        $this->setMealBasis($this->employmentId, 'calendar_day');
+        $this->approveAttendanceMonth();
+        $this->seedWorkedTime('2026-06-30 22:00', '2026-07-01 01:00', 0);
+        $this->seedWorkedTime('2026-07-01 01:00', '2026-07-01 03:00', 0);
+
+        $component = $this->createMealComponent('STRAVNE_HRANICE_MESICE');
+        $preview = $this->basket($this->preview($component, self::MEAL_LIMIT_MINOR));
+
+        self::assertSame(1, $preview['shift_entitlements']);
+        self::assertSame(self::MEAL_LIMIT_MINOR, $preview['limit_minor']);
+        self::assertSame(0, $preview['taxable_minor']);
+    }
+
+    public function testWorkedMinutesAreNeverBorrowedAcrossEmployments(): void
+    {
+        $otherEmploymentId = $this->createEmployment('SYN-STRAVNE-DPP');
+        $this->setMealBasis($otherEmploymentId, 'calendar_day');
+        $this->approveAttendanceMonth();
+        $this->approveAttendanceMonth($otherEmploymentId);
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00', 0);
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 08:59', 0);
+        $this->seedWorkedTime(
+            '2026-07-06 08:59',
+            '2026-07-06 09:00',
+            0,
+            $otherEmploymentId,
+        );
+
+        $component = $this->createMealComponent('STRAVNE_VZTAHY_MINUTY');
+        $preview = $this->basket($this->preview($component, self::MEAL_LIMIT_MINOR));
+
+        self::assertSame(0, $preview['shift_entitlements']);
+        self::assertSame(0, $preview['limit_minor']);
+        self::assertSame('mixed', $preview['entitlement']['basis'] ?? null);
+    }
+
+    public function testMixedEmploymentsUseTheirOwnStatutoryBranch(): void
+    {
+        $otherEmploymentId = $this->createEmployment('SYN-STRAVNE-MIMO-SMENY');
+        $this->setMealBasis($otherEmploymentId, 'calendar_day');
+        $this->approveAttendanceMonth();
+        $this->approveAttendanceMonth($otherEmploymentId);
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00', 0);
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 09:00', 0);
+        $this->seedWorkedTime(
+            '2026-07-07 06:00',
+            '2026-07-07 17:00',
+            0,
+            $otherEmploymentId,
+        );
+
+        $component = $this->createMealComponent('STRAVNE_VZTAHY_VETVE');
+        $preview = $this->basket($this->preview($component, 3 * self::MEAL_LIMIT_MINOR));
+        $entitlement = PayrollTimeValue::row(
+            $preview['entitlement'] ?? null,
+            'meal_entitlement',
+        );
+
+        self::assertSame('mixed', $entitlement['basis']);
+        self::assertSame(2, $entitlement['qualifying_count']);
+        self::assertSame(1, $entitlement['second_contribution_count']);
+        self::assertSame(3, $entitlement['count']);
+        self::assertSame(3, $preview['shift_entitlements']);
+    }
+
+    public function testShiftBasisDoesNotFallBackToCalendarDayWithoutSchedule(): void
+    {
+        $this->approveAttendanceMonth();
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 14:00', 0);
+
+        $component = $this->createMealComponent('STRAVNE_CHYBI_ROZVRH');
+        $preview = $this->preview($component, self::MEAL_LIMIT_MINOR);
+
+        self::assertSame('manual_review', $preview['support_status']);
+        self::assertStringContainsString('shift_schedule_missing', (string) $preview['blocker']);
+        self::assertNull($preview['exemption_basket']);
+    }
+
+    public function testShiftBasisIgnoresPriorMonthWorkWhenCheckingJulySchedule(): void
+    {
+        $this->approveAttendanceMonth();
+        $this->seedWorkedTime('2026-06-30 20:00', '2026-07-01 01:00', 0);
+
+        $component = $this->createMealComponent('STRAVNE_SMENA_HRANICE_MESICE');
+        $preview = $this->basket($this->preview($component, self::MEAL_LIMIT_MINOR));
+
+        self::assertSame(0, $preview['shift_entitlements']);
+        self::assertSame(0, $preview['limit_minor']);
+        self::assertSame(self::MEAL_LIMIT_MINOR, $preview['taxable_minor']);
+    }
+
+    public function testActiveSecondEmploymentWithoutAttendanceFailsClosed(): void
+    {
+        $this->createEmployment('SYN-STRAVNE-BEZ-PODKLADU');
+        $this->approveAttendanceMonth();
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00', 0);
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 09:00', 0);
+
+        $component = $this->createMealComponent('STRAVNE_DRUHY_VZTAH');
+        $preview = $this->preview($component, self::MEAL_LIMIT_MINOR);
+
+        self::assertSame('manual_review', $preview['support_status']);
+        self::assertStringContainsString('attendance_missing', (string) $preview['blocker']);
+        self::assertNull($preview['exemption_basket']);
+    }
+
+    public function testNonUniformMealAmountIsANamedPreviewBlocker(): void
+    {
+        $this->approveAttendanceMonth();
+        foreach (['2026-07-06', '2026-07-07'] as $day) {
+            $this->seedShift($day . ' 06:00', $day . ' 14:00', 0);
+            $this->seedWorkedTime($day . ' 06:00', $day . ' 09:00', 0);
+        }
+
+        $component = $this->createMealComponent('STRAVNE_NEROVNOMERNE');
+        $preview = $this->preview($component, (2 * self::MEAL_LIMIT_MINOR) + 1);
+
+        self::assertSame('manual_review', $preview['support_status']);
+        self::assertStringContainsString('rovnoměrně', (string) $preview['blocker']);
+        self::assertNull($preview['exemption_basket']);
+
+        $approval = $this->approve(
+            $component,
+            (2 * self::MEAL_LIMIT_MINOR) + 1,
+            'stravne-nerovnomerne',
+        );
+        self::assertSame(409, $approval->getStatusCode());
+        self::assertStringContainsString(
+            'rovnoměrně',
+            (string) ($this->json($approval)['error']['message'] ?? ''),
+        );
+    }
+
+    public function testMealAllowanceTripOnlyExcludesItsOwnEmployment(): void
+    {
+        $otherEmploymentId = $this->createEmployment('SYN-STRAVNE-CESTA');
+        $this->approveAttendanceMonth();
+        $this->approveAttendanceMonth($otherEmploymentId);
+        $this->seedShift('2026-07-06 06:00', '2026-07-06 14:00', 0);
+        $this->seedWorkedTime('2026-07-06 06:00', '2026-07-06 09:00', 0);
+        $this->seedBusinessTrip(
+            '2026-07-06 05:00',
+            '2026-07-06 15:00',
+            18_500,
+            $otherEmploymentId,
+        );
+
+        $component = $this->createMealComponent('STRAVNE_VZTAHY_CESTA');
+        $preview = $this->basket($this->preview($component, self::MEAL_LIMIT_MINOR));
+
+        self::assertSame(1, $preview['shift_entitlements']);
+        self::assertSame(self::MEAL_LIMIT_MINOR, $preview['exempt_minor']);
     }
 
     /**
@@ -389,12 +677,12 @@ final class PayrollMealShiftExemptionTest extends TestCase
         );
     }
 
-    private function approveAttendanceMonth(): void
+    private function approveAttendanceMonth(?int $employmentId = null): void
     {
-        $this->seedAttendanceMonth('approved');
+        $this->seedAttendanceMonth('approved', $employmentId);
     }
 
-    private function seedAttendanceMonth(string $status): void
+    private function seedAttendanceMonth(string $status, ?int $employmentId = null): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_time_months
@@ -402,14 +690,19 @@ final class PayrollMealShiftExemptionTest extends TestCase
              VALUES (?, ?, ?, ?, IF(? = "approved", NOW(), NULL))'
         )->execute([
             $this->supplierId,
-            $this->employmentId,
+            $employmentId ?? $this->employmentId,
             self::PERIOD_START,
             $status,
             $status,
         ]);
     }
 
-    private function seedShift(string $localStart, string $localEnd, int $breakMinutes): void
+    private function seedShift(
+        string $localStart,
+        string $localEnd,
+        int $breakMinutes,
+        ?int $employmentId = null,
+    ): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_shifts
@@ -418,7 +711,7 @@ final class PayrollMealShiftExemptionTest extends TestCase
              VALUES (?, ?, ?, ?, ?, "Europe/Prague", ?, "published", NOW())'
         )->execute([
             $this->supplierId,
-            $this->employmentId,
+            $employmentId ?? $this->employmentId,
             bin2hex(random_bytes(16)),
             $this->utc($localStart),
             $this->utc($localEnd),
@@ -426,7 +719,12 @@ final class PayrollMealShiftExemptionTest extends TestCase
         ]);
     }
 
-    private function seedWorkedTime(string $localStart, string $localEnd, int $breakMinutes): void
+    private function seedWorkedTime(
+        string $localStart,
+        string $localEnd,
+        int $breakMinutes,
+        ?int $employmentId = null,
+    ): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_time_entries
@@ -437,7 +735,7 @@ final class PayrollMealShiftExemptionTest extends TestCase
                      "approved", NOW())'
         )->execute([
             $this->supplierId,
-            $this->employmentId,
+            $employmentId ?? $this->employmentId,
             bin2hex(random_bytes(16)),
             $this->utc($localStart),
             $this->utc($localEnd),
@@ -446,7 +744,12 @@ final class PayrollMealShiftExemptionTest extends TestCase
         ]);
     }
 
-    private function seedBusinessTrip(string $from, string $to, int $entitlementMinor): void
+    private function seedBusinessTrip(
+        string $from,
+        string $to,
+        int $entitlementMinor,
+        ?int $employmentId = null,
+    ): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_business_trips
@@ -461,7 +764,7 @@ final class PayrollMealShiftExemptionTest extends TestCase
         )->execute([
             $this->supplierId,
             $this->employeeId,
-            $this->employmentId,
+            $employmentId ?? $this->employmentId,
             // Cesta nese UTC instant + zónu, stejně jako směna výše.
             $this->utc($from),
             $this->utc($to),
@@ -478,6 +781,28 @@ final class PayrollMealShiftExemptionTest extends TestCase
         return (new \DateTimeImmutable($local, new \DateTimeZone('Europe/Prague')))
             ->setTimezone(new \DateTimeZone('UTC'))
             ->format('Y-m-d H:i:s');
+    }
+
+    private function createEmployment(string $code): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 start_date, actual_start_date, monthly_gross_minor, is_legacy_projection)
+             VALUES (?, ?, ?, "dpp", "active",
+                     "2026-01-01", "2026-01-01", 1000000, 0)'
+        )->execute([$this->supplierId, $this->employeeId, $code]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function setMealBasis(int $employmentId, string $basis): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET meal_entitlement_basis = ?
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$basis, $this->supplierId, $employmentId]);
     }
 
     private function createMealComponent(string $code): int
@@ -549,6 +874,23 @@ final class PayrollMealShiftExemptionTest extends TestCase
             $row['benefit_exempt_minor'] === null ? null : (int) $row['benefit_exempt_minor'],
             $row['benefit_taxable_minor'] === null ? null : (int) $row['benefit_taxable_minor'],
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function frozenAllocation(string $externalId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT benefit_allocation_json
+               FROM payroll_inputs
+              WHERE supplier_id = ? AND external_id = ?'
+        );
+        $stmt->execute([$this->supplierId, $externalId]);
+        $json = $stmt->fetchColumn();
+        self::assertIsString($json);
+        $allocation = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($allocation);
+
+        return $allocation;
     }
 
     /** @return array<string,mixed> */

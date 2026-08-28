@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 
@@ -48,6 +49,172 @@ final readonly class PayrollRegistrationIdentityService
             $onDate,
             false,
         );
+    }
+
+    /** @return array<string,mixed>|null */
+    public function a1Profile(
+        int $supplierId,
+        int $employmentId,
+    ): ?array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+        ): ?array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null) {
+                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+            }
+            $stored = $this->repository->latestA1Profile(
+                $supplierId,
+                $employment['employee_id'],
+                $employmentId,
+            );
+
+            return $stored === null ? null : $this->publicA1Profile(
+                $stored,
+                $this->decodeA1Profile($stored),
+                false,
+            );
+        });
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function saveA1Profile(
+        int $supplierId,
+        int $employmentId,
+        array $input,
+        ?int $createdBy,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $expectedVersion = $input['row_version'] ?? null;
+        if (!is_int($expectedVersion) || $expectedVersion < 0) {
+            throw new \InvalidArgumentException(
+                'row_version profilu REGZEC A1 musí být nezáporné celé číslo.',
+            );
+        }
+        $effectiveOn = $input['effective_on'] ?? null;
+        if (!is_string($effectiveOn)) {
+            throw new \InvalidArgumentException(
+                'Profil REGZEC A1 vyžaduje rozhodné datum.',
+            );
+        }
+        $this->date($effectiveOn, 'Rozhodné datum profilu REGZEC A1');
+        unset($input['row_version'], $input['created_at'], $input['reference_hash']);
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $input,
+            $effectiveOn,
+            $expectedVersion,
+            $createdBy,
+        ): array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null) {
+                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+            }
+            $employeeId = $employment['employee_id'];
+            $registrationOn = $employment['actual_start_date']
+                ?? $employment['start_date'];
+            if ($registrationOn !== $effectiveOn) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'registration_regzec_a1_source_scope_mismatch',
+                    'Rozhodné datum profilu REGZEC A1 musí odpovídat skutečnému datu nástupu pracovního vztahu.',
+                );
+            }
+            $current = $this->repository->latestA1Profile(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                true,
+            );
+            $currentVersion = (int) ($current['row_version'] ?? 0);
+            if ($expectedVersion !== $currentVersion) {
+                throw new PayrollRegistrationIdentitySnapshotException(
+                    'registration_regzec_a1_profile_conflict',
+                    'Profil REGZEC A1 mezitím změnil jiný uživatel. Načtěte jej znovu.',
+                );
+            }
+            $identity = $this->sensitiveIdentityAtInternal(
+                $supplierId,
+                $employeeId,
+                $effectiveOn,
+                true,
+            )['identity'];
+            $scope = [
+                'supplier_id' => $supplierId,
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                'effective_on' => $effectiveOn,
+            ];
+            $provisional = array_merge($input, ['source' => [
+                'source_key' => 'payroll_registration_a1_profile',
+                'source_id' => 1,
+                'row_version' => $currentVersion + 1,
+                'reference_hash' => str_repeat('0', 64),
+                ...$scope,
+            ]]);
+            $snapshot = (new PayrollRegistrationA1SnapshotBuilder())->build(
+                $provisional,
+                $identity,
+                $scope,
+            );
+            $profile = $this->a1ProfileData($snapshot);
+            $canonical = CanonicalJson::encode($profile);
+            $referenceHash = $this->sensitiveData->keyedFingerprint(
+                $canonical,
+                'registration-a1-profile',
+                $supplierId,
+            );
+            if ($current !== null
+                && hash_equals($current['reference_hash'], $referenceHash)
+            ) {
+                return $this->publicA1Profile($current, $profile, false);
+            }
+            $sealed = $this->sensitiveData->seal(
+                $canonical,
+                PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+                $supplierId,
+                $employmentId,
+            );
+            $rowVersion = $currentVersion + 1;
+            $id = $this->repository->insertA1Profile(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $effectiveOn,
+                $sealed->ciphertext,
+                $sealed->lookupHash,
+                $referenceHash,
+                $rowVersion,
+                $createdBy,
+            );
+            $stored = [
+                'id' => $id,
+                'supplier_id' => $supplierId,
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                'effective_on' => $effectiveOn,
+                'reference_hash' => $referenceHash,
+                'row_version' => $rowVersion,
+                'created_at' => gmdate('Y-m-d H:i:s'),
+            ];
+
+            return $this->publicA1Profile($stored, $profile, true);
+        });
     }
 
     /**
@@ -187,7 +354,7 @@ final readonly class PayrollRegistrationIdentityService
                 ];
             }
 
-            return [
+            $result = [
                 'identity' => $person['identity'],
                 'identifiers' => $person['identifiers'],
                 'identifier_sources' => $person['identifier_sources'],
@@ -199,6 +366,22 @@ final readonly class PayrollRegistrationIdentityService
                         : 'resolved',
                 ],
             ];
+            $a1Stored = $this->repository->latestA1Profile(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                true,
+            );
+            if ($a1Stored !== null
+                && $a1Stored['effective_on'] === $onDate
+            ) {
+                $result['regzec_a1'] = array_merge(
+                    $this->decodeA1Profile($a1Stored),
+                    ['source' => $this->a1Source($a1Stored)],
+                );
+            }
+
+            return $result;
         });
     }
 
@@ -223,6 +406,7 @@ final readonly class PayrollRegistrationIdentityService
         int $employmentId,
         string $environment,
         string $onDate,
+        bool $requireTrustedReceipt = false,
     ): array {
         $this->positive($supplierId, 'Firma');
         $this->positive($employeeId, 'Osoba');
@@ -236,6 +420,7 @@ final readonly class PayrollRegistrationIdentityService
             $employmentId,
             $environment,
             $onDate,
+            $requireTrustedReceipt,
         ): array {
             $employment = $this->repository->lockEmployment(
                 $supplierId,
@@ -312,6 +497,28 @@ final readonly class PayrollRegistrationIdentityService
             );
             self::oic($personIdentifier['value']);
             self::idPpv($employmentIdentifier['value']);
+            if ($requireTrustedReceipt) {
+                $this->assertTrustedReceiptSource(
+                    $personIdentifier,
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $employmentId,
+                    'ik_mpsv',
+                    'registration_a2_oic_provenance_invalid',
+                    'OIČ / IK MPSV',
+                );
+                $this->assertTrustedReceiptSource(
+                    $employmentIdentifier,
+                    $supplierId,
+                    $environment,
+                    $employeeId,
+                    $employmentId,
+                    'id_ppv',
+                    'registration_a2_id_ppv_provenance_invalid',
+                    'ID PPV',
+                );
+            }
 
             return [
                 'environment' => $environment,
@@ -319,6 +526,44 @@ final readonly class PayrollRegistrationIdentityService
                 'employment_external_identifier' => $employmentIdentifier,
             ];
         });
+    }
+
+    /**
+     * @param array{
+     *   id:int,identifier_type:string,value:string,valid_from:string,
+     *   valid_to:?string,source_kind:string,source_receipt_id:?int,
+     *   source_reference_hash:string,row_version:int
+     * } $identifier
+     */
+    private function assertTrustedReceiptSource(
+        array $identifier,
+        int $supplierId,
+        string $environment,
+        int $employeeId,
+        int $employmentId,
+        string $identifierType,
+        string $validationCode,
+        string $label,
+    ): void {
+        $receiptId = $identifier['source_receipt_id'];
+        if ($identifier['source_kind'] !== 'trusted_receipt'
+            || $receiptId === null
+            || !$this->repository->hasAcceptedRegistrationIdentifierReceipt(
+                $supplierId,
+                $environment,
+                $receiptId,
+                $employeeId,
+                $employmentId,
+                $identifierType,
+                $identifier['value'],
+                PayrollEmployeeRegistrationDeadlinePolicy::REGISTRATION_RULESET_ID,
+            )
+        ) {
+            throw new PayrollRegistrationIdentitySnapshotException(
+                $validationCode,
+                "REGZEC A2 vyžaduje {$label} z důvěryhodného protokolu stejné firmy a prostředí.",
+            );
+        }
     }
 
     /**
@@ -810,6 +1055,108 @@ final readonly class PayrollRegistrationIdentityService
         });
     }
 
+    public function activePersonExternalIdMatches(
+        int $supplierId,
+        int $employeeId,
+        string $environment,
+        string $value,
+    ): ?bool {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employeeId, 'Osoba');
+        $this->environment($environment);
+        $normalizedValue = self::oic($value);
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employeeId,
+            $environment,
+            $normalizedValue,
+        ): ?bool {
+            $existing = $this->repository->activePersonExternalId(
+                $supplierId,
+                $employeeId,
+                $environment,
+                'ik_mpsv',
+            );
+            if ($existing === null) {
+                return null;
+            }
+            $plaintext = $this->sensitiveData->reveal(
+                $existing['value_ciphertext'],
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+                $existing['id'],
+            );
+            $storedHash = $this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            if (!hash_equals($existing['value_hash'], $storedHash)) {
+                throw new \RuntimeException('Otisk OIČ neodpovídá ciphertextu.');
+            }
+            $inputHash = $this->sensitiveData->lookupHash(
+                $normalizedValue,
+                PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+
+            return hash_equals($existing['value_hash'], $inputHash);
+        });
+    }
+
+    public function activeEmploymentExternalIdMatches(
+        int $supplierId,
+        int $employmentId,
+        string $environment,
+        string $value,
+    ): ?bool {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+        $this->environment($environment);
+        $normalizedValue = self::idPpv($value);
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $environment,
+            $normalizedValue,
+        ): ?bool {
+            $existing = $this->repository->activeExternalId(
+                $supplierId,
+                $employmentId,
+                $environment,
+                'id_ppv',
+            );
+            if ($existing === null) {
+                return null;
+            }
+            $plaintext = $this->sensitiveData->reveal(
+                $existing['value_ciphertext'],
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+                $existing['id'],
+            );
+            $storedHash = $this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+            if (!hash_equals($existing['value_hash'], $storedHash)) {
+                throw new \RuntimeException(
+                    'Otisk externího ID neodpovídá ciphertextu.',
+                );
+            }
+            $inputHash = $this->sensitiveData->lookupHash(
+                $normalizedValue,
+                PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
+                $supplierId,
+            );
+
+            return hash_equals($existing['value_hash'], $inputHash);
+        });
+    }
+
     /**
      * @return array{
      *   id:int,employment_id:int,employee_id:int,environment:string,
@@ -1227,6 +1574,106 @@ final readonly class PayrollRegistrationIdentityService
             'source_kind' => (string) $stored['source_kind'],
             'row_version' => (int) $stored['row_version'],
         ];
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @return array<string,mixed>
+     */
+    private function decodeA1Profile(array $stored): array
+    {
+        $canonical = $this->sensitiveData->reveal(
+            (string) $stored['profile_ciphertext'],
+            PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+            (int) $stored['supplier_id'],
+            (int) $stored['employment_id'],
+        );
+        $hash = $this->sensitiveData->lookupHash(
+            $canonical,
+            PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+            (int) $stored['supplier_id'],
+        );
+        if (!hash_equals((string) $stored['profile_hash'], $hash)) {
+            throw new \RuntimeException(
+                'Otisk autoritativního profilu REGZEC A1 neodpovídá ciphertextu.',
+            );
+        }
+        try {
+            $profile = json_decode(
+                $canonical,
+                true,
+                512,
+                JSON_THROW_ON_ERROR,
+            );
+        } catch (\JsonException $exception) {
+            throw new \RuntimeException(
+                'Autoritativní profil REGZEC A1 není platný JSON.',
+                previous: $exception,
+            );
+        }
+        if (!is_array($profile) || array_is_list($profile)) {
+            throw new \RuntimeException(
+                'Autoritativní profil REGZEC A1 nemá platný objekt.',
+            );
+        }
+
+        return $profile;
+    }
+
+    /** @return array<string,mixed> */
+    private function a1ProfileData(PayrollRegistrationA1Snapshot $snapshot): array
+    {
+        return [
+            'permanent_address' => $snapshot->permanentAddress,
+            'tax_residency' => $snapshot->taxResidency,
+            'employment' => $snapshot->employment,
+            'pension' => $snapshot->pension,
+            'health_insurance_code' => $snapshot->healthInsuranceCode,
+            'facts' => $snapshot->facts,
+            'foreign_legislation' => $snapshot->foreignLegislation,
+            'proof_identity' => $snapshot->proofIdentity,
+            'foreign_worker' => $snapshot->foreignWorker,
+            'czech_residence_address' => $snapshot->czechResidenceAddress,
+            'contact_address' => $snapshot->contactAddress,
+            'attachments' => $snapshot->attachments,
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @return array<string,mixed>
+     */
+    private function a1Source(array $stored): array
+    {
+        return [
+            'source_key' => 'payroll_registration_a1_profile',
+            'source_id' => (int) $stored['id'],
+            'row_version' => (int) $stored['row_version'],
+            'reference_hash' => (string) $stored['reference_hash'],
+            'supplier_id' => (int) $stored['supplier_id'],
+            'employee_id' => (int) $stored['employee_id'],
+            'employment_id' => (int) $stored['employment_id'],
+            'effective_on' => (string) $stored['effective_on'],
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $stored
+     * @param array<string,mixed> $profile
+     * @return array<string,mixed>
+     */
+    private function publicA1Profile(
+        array $stored,
+        array $profile,
+        bool $created,
+    ): array {
+        return array_merge($profile, [
+            'effective_on' => (string) $stored['effective_on'],
+            'row_version' => (int) $stored['row_version'],
+            'reference_hash' => (string) $stored['reference_hash'],
+            'created_at' => (string) $stored['created_at'],
+            'created' => $created,
+        ]);
     }
 
     private static function oic(string $value): string

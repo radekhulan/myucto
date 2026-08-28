@@ -108,6 +108,10 @@ nebo zaměstnavatele. Jednotlivé kategorie se mohou překrývat, proto se jejic
 součet nesmí automaticky rovnat celkovým neodpracovaným hodinám. Evidence
 absencí slouží jako podklad k ruční kontrole, nikoli jako automatická právní
 klasifikace. Nevyřízená absence nebo čekající oprava schválení měsíce blokuje.
+Schválená placená dovolená může projít běžným profilem JMHZ jen tehdy, když
+souhlasí s publikovanými směnami a potvrzený pracovní souhrn ji vykazuje celou
+jako placené neodpracované hodiny. Neplacené volno a ostatní nestandardní
+absence zůstávají bez doložených údajů pro ELDP bezpečně zablokované.
 
 > [!WARNING]
 > Agenda je označena **Vyžaduje ruční kontrolu**. Bez schváleného průměru,

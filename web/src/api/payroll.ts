@@ -45,9 +45,33 @@ export interface PayrollSupportMatrix {
   features: PayrollCapability[]
 }
 
+export interface PayrollCompanyCapabilityBlocker {
+  code: 'unsupported_relation_type'
+    | 'foreign_employment_regime'
+    | 'unsupported_jmhz_scenario'
+    | 'foreign_social_jurisdiction'
+    | 'foreign_health_jurisdiction'
+    | string
+  capability_key: string
+  source_type: string
+  source_id: number
+  message: string
+  parameters: Record<string, unknown>
+}
+
+export interface PayrollCompanyCapabilityAssessment {
+  production_ready: boolean
+  assessed_from: string | null
+  blockers: PayrollCompanyCapabilityBlocker[]
+}
+
 export interface PayrollCapabilitiesResponse {
   state: PayrollModuleState
   support_matrix: PayrollSupportMatrix
+  company_capability: PayrollCompanyCapabilityAssessment
+  production_release: {
+    released: boolean
+  }
 }
 
 export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
@@ -126,6 +150,7 @@ export interface PayrollEmployment {
   office_name: string | null
   code: string
   relation_type: PayrollRelationType
+  meal_entitlement_basis: PayrollMealEntitlementBasis
   status: PayrollEmploymentStatus
   is_primary: boolean
   start_date: string | null
@@ -267,9 +292,12 @@ export type PayrollEmploymentTermsPayload = Omit<
 export interface PayrollEmploymentCreatePayload {
   code: string
   relation_type: PayrollRelationType
+  meal_entitlement_basis?: PayrollMealEntitlementBasis
   monthly_gross_minor: number | null
   terms: PayrollEmploymentTermsPayload
 }
+
+export type PayrollMealEntitlementBasis = 'shift' | 'calendar_day'
 
 export interface PayrollPerson extends PayrollPersonListItem {
   employments: PayrollEmployment[]
@@ -490,6 +518,49 @@ export interface PayrollStatutoryEvidence {
 export interface PayrollStatutoryEvidencePayload {
   effective_on: string
   sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
+}
+
+export type PayrollForeignPermitKind = 'residence' | 'work'
+export type PayrollForeignPermitStatus = 'future' | 'valid' | 'expiring' | 'expired' | 'superseded'
+
+export interface PayrollForeignPermit {
+  id: number
+  permit_kind: PayrollForeignPermitKind
+  permit_label: string
+  issuing_country_code: string
+  effective_from: string
+  valid_until: string
+  document_id: number | null
+  supersedes_permit_id: number | null
+  recorded_at: string
+  status: PayrollForeignPermitStatus
+}
+
+export interface PayrollForeignPermitAlert {
+  permit_id: number
+  permit_kind: PayrollForeignPermitKind
+  permit_label: string
+  valid_until: string
+  status: Extract<PayrollForeignPermitStatus, 'expiring' | 'expired'>
+  days_remaining: number
+}
+
+export interface PayrollForeignPermitView {
+  employee_id: number
+  as_of: string
+  warning_days: number
+  history: PayrollForeignPermit[]
+  alerts: PayrollForeignPermitAlert[]
+}
+
+export interface PayrollForeignPermitPayload {
+  permit_kind: PayrollForeignPermitKind
+  permit_label: string
+  issuing_country_code: string
+  effective_from: string
+  valid_until: string
+  document_id: number
+  supersedes_permit_id?: number | null
 }
 
 export interface PayrollPersonProfile {
@@ -1057,6 +1128,16 @@ export type PayrollExemptionBasis =
   | 'benefit_basket'
   | 'periodic_benefit_limit'
 
+export interface PayrollMealShiftEntitlement {
+  period_start: string
+  basis: 'shift' | 'calendar_day' | 'mixed'
+  qualifying_count: number
+  second_contribution_count: number
+  count: number
+  complete: boolean
+  missing: string[]
+}
+
 export interface PayrollBenefitBasketUsage {
   basket: PayrollBenefitExemptionBasket
   statute: string
@@ -1065,6 +1146,7 @@ export interface PayrollBenefitBasketUsage {
    * limit na směnách nestojí — nula by tvrdila, že se nic neodpracovalo.
    */
   shift_entitlements: number | null
+  entitlement?: PayrollMealShiftEntitlement | null
   limit_minor: number
   used_before_minor: number
   used_after_minor: number
@@ -1072,6 +1154,14 @@ export interface PayrollBenefitBasketUsage {
   exempt_minor: number
   taxable_minor: number
   limit_exceeded: boolean
+  allocation?: {
+    mode: 'uniform_per_entitlement' | 'no_entitlement'
+    entitlement_count: number
+    amount_per_entitlement_minor: number
+    limit_per_entitlement_minor: number
+    exempt_per_entitlement_minor: number
+    taxable_per_entitlement_minor: number
+  } | null
 }
 
 export interface PayrollComponent {
@@ -1193,7 +1283,11 @@ export interface PayrollEmploymentJmhzEvidenceOptions {
     verified_through: string
     base_spec_manifest_sha256: string
   }
-  activity_codes: Array<{ code: string; label: string }>
+  activity_codes: Array<{
+    code: string
+    label: string
+    relationship_detail_mode: 'forbidden' | 'select' | 'fixed_none'
+  }>
   relationship_detail_codes: Array<{ code: string; label: string }>
   apz_instruments: Array<{ code: string; label: string }>
   countries: Array<{ code: string; label: string }>
@@ -1495,6 +1589,7 @@ export interface PayrollInputPreview {
   annual_after_minor: number
   annual_limit_exceeded: boolean
   exemption_basket: PayrollBenefitBasketUsage | null
+  meal_entitlement?: PayrollMealShiftEntitlement | null
 }
 
 export interface PayrollRecurringMaterialization {
@@ -1609,6 +1704,16 @@ export interface PayrollOffice {
   social_security_variable_symbol: string | null
   is_active: boolean
   row_version: number
+}
+
+export interface PayrollOfficeRegistration {
+  id: number
+  office_id: number
+  effective_from: string
+  social_security_variable_symbol: string
+  source_reference: string
+  created_by: number | null
+  created_at: string
 }
 
 export interface PayrollEmployerSettings {
@@ -1756,6 +1861,125 @@ export interface PayrollSubmissionOverviewResponse {
   limit: number
   offset: number
 }
+
+export interface PayrollOperationalHealth {
+  document_batches: {
+    queued: number
+    running: number
+    retry_wait: number
+    failed: number
+    oldest_pending_at: string | null
+    oldest_pending_age_seconds: number | null
+    last_completed_at: string | null
+  }
+  period_export_jobs: {
+    queued: number
+    processing: number
+    retry_wait: number
+    failed: number
+    oldest_pending_at: string | null
+    oldest_pending_age_seconds: number | null
+    last_completed_at: string | null
+  }
+  submissions: {
+    rejected: number
+    correction_required: number
+    open_blocker_or_error_issues: number
+  }
+  isds_outbox: {
+    failed: number
+    send_uncertain: number
+    rejected: number
+  }
+  archive_capacity: {
+    measured: boolean
+    content_bytes: number | null
+    object_count: number | null
+    components: Record<
+      'generated_documents' | 'payment_exports' | 'period_exports' | 'submission_artifacts',
+      { measured: boolean; content_bytes: number | null; object_count: number | null }
+    >
+  }
+  reconciliation: {
+    open: number
+    diff: number
+    blocked: number
+    not_materialized: number
+    periods: number
+    oldest_first_seen_at: string | null
+  }
+  overdue_unpaid_liabilities: number
+}
+
+export type PayrollStatutoryAgendaCapability =
+  | 'manual_review'
+  | 'prepared_only'
+  | 'not_supported'
+
+export interface PayrollStatutoryAgendaCapabilityItem {
+  agenda_code: 'NEMPRI' | 'HZUPN' | 'ELDP' | 'STATUTORY_ACCIDENT_INSURANCE'
+  replacement_mode: 'fully_replaced' | 'partially_replaced' | 'standalone' | 'unknown'
+  capability: PayrollStatutoryAgendaCapability
+  transport_capability: 'not_supported'
+  evidence_supported: boolean
+  reason_code: string
+  workflow_codes: string[]
+}
+
+export interface PayrollStatutoryObligationEvidence {
+  id: number
+  environment: PayrollRegzelEnvironment
+  agenda_code: 'NEMPRI' | 'HZUPN' | 'STATUTORY_ACCIDENT_INSURANCE'
+  employee_id: number | null
+  full_name: string | null
+  period_start: string
+  period_end: string
+  case_reference: string
+  receipt_reference: string
+  completed_on: string
+  payment_amount_minor: number | null
+  payment_currency: 'CZK' | null
+  document_id: number
+  document_title: string
+  document_sha256: string
+  capability_matrix_version: string
+  capability_matrix_sha256: string
+  attestation_version: string
+  created_by: number
+  created_at: string
+}
+
+export interface PayrollStatutoryObligationOverview {
+  environment: PayrollRegzelEnvironment
+  period: string
+  matrix_version: string
+  matrix_sha256: string
+  agendas: PayrollStatutoryAgendaCapabilityItem[]
+  evidence: PayrollStatutoryObligationEvidence[]
+}
+
+interface PayrollStatutoryObligationEvidencePayloadBase {
+  environment: PayrollRegzelEnvironment
+  period: string
+  case_reference: string
+  receipt_reference: string
+  completed_on: string
+  document_id: number
+}
+
+export type PayrollStatutoryObligationEvidencePayload =
+  PayrollStatutoryObligationEvidencePayloadBase & (
+    | {
+      agenda_code: 'NEMPRI' | 'HZUPN'
+      employee_id: number
+      manual_submission_confirmed: true
+    }
+    | {
+      agenda_code: 'STATUTORY_ACCIDENT_INSURANCE'
+      payment_amount: string
+      manual_payment_confirmed: true
+    }
+  )
 
 export interface PayrollSubmissionDetail {
   submission: {
@@ -1925,6 +2149,20 @@ export interface PayrollHealthPaymentOverview {
     employer_contribution_minor_units: number
     total_contribution_minor_units: number
   }>
+  /** Živá read-only projekce platebního ledgeru; není součástí otisku PPZ. */
+  payment_reconciliation: {
+    liability_ids: number[]
+    expected_minor: number
+    liability_minor: number
+    liability_difference_minor: number
+    bank_settled_minor: number
+    outgoing_remaining_minor: number
+    incoming_remaining_minor: number
+    bank_remaining_minor: number
+    state: 'missing' | 'mismatch' | 'open' | 'partially_settled' | 'settled'
+    closing_blocked: boolean
+    blockers: Array<'liability_missing' | 'liability_difference' | 'bank_unsettled'>
+  }
   sha256: string
   filename: string
 }
@@ -1940,6 +2178,47 @@ export interface PayrollJmhzPvpojOffice {
   name: string
   social_security_variable_symbol: string | null
   submittable: boolean
+}
+
+export interface PayrollJmhzCodebookEntry {
+  item_code: string
+  label: string
+  ordinal: number
+}
+
+export interface PayrollJmhzEmployerAnnualEvidence {
+  id: number
+  report_year: number
+  revision_no: number
+  previous_revision_id: number | null
+  schema_reference: string
+  spec_manifest_sha256: string
+  collective_agreement_types: string[]
+  ownership_form: string
+  average_headcount_hundredths: number
+  average_disabled_headcount_hundredths: number
+  disabled_share_hundredths: number
+  ozp_reporting_office_id: number | null
+  evidence_reference: string | null
+  payload_sha256: string
+  created_at: string
+}
+
+export interface PayrollJmhzEmployerAnnualEvidenceView {
+  evidence: PayrollJmhzEmployerAnnualEvidence | null
+  offices: Array<{ id: number; code: string; name: string }>
+  collective_agreement_types: PayrollJmhzCodebookEntry[]
+  ownership_forms: PayrollJmhzCodebookEntry[]
+}
+
+export interface PayrollJmhzEmployerAnnualEvidencePayload {
+  expected_revision_id: number | null
+  collective_agreement_types: string[]
+  ownership_form: string
+  average_headcount: string
+  average_disabled_headcount: string
+  ozp_reporting_office_id: number | null
+  evidence_reference: string | null
 }
 
 export interface PayrollJmhzPvpojPreview {
@@ -2254,6 +2533,89 @@ export interface PayrollRegistrationSubmission {
   deadline: PayrollRegistrationDeadline
 }
 
+export interface PayrollRegistrationA1Profile extends Record<string, unknown> {
+  effective_on: string
+  row_version: number
+  reference_hash: string
+  created_at: string
+  created: boolean
+}
+
+export interface PayrollRegistrationA1ProfilePayload extends Record<string, unknown> {
+  effective_on: string
+  row_version: number
+}
+
+export type PayrollRegistrationEventInteraction =
+  | 'termination'
+  | 'change'
+  | 'correction'
+  | 'variable_symbol_transfer'
+  | 'czech_legislation_start'
+  | 'czech_legislation_end'
+  | 'cancellation'
+
+export interface PayrollRegistrationEvent {
+  id: number
+  employment_id: number
+  environment: PayrollJmhzTransportEnvironment
+  interaction: PayrollRegistrationEventInteraction
+  action_code: 2 | 3 | 4 | 5 | 6 | 7 | 8
+  effective_on: string
+  source_kind: string
+  source_reference: string
+  snapshot_fingerprint: string
+  approved_at: string
+  consumed: boolean
+  created: boolean
+}
+
+export interface PayrollRegistrationPensionPeriodInput {
+  from: string
+  to: string
+}
+
+export interface PayrollRegistrationEventInput {
+  environment: PayrollJmhzTransportEnvironment
+  interaction: PayrollRegistrationEventInteraction
+  effective_on: string
+  source_reference?: string
+  ended_by_death?: boolean
+  unemployment?: {
+    mode?: 'provided' | 'not_provided_2' | 'not_provided_3'
+    early_termination_reason?: string
+    average_net_earnings?: string
+    pension_periods?: PayrollRegistrationPensionPeriodInput[]
+    employment_type?: '1' | '2'
+    termination_reason?: string
+    service_termination_reason?: string
+    entitlement?: boolean
+    paid_in_full?: boolean
+    replacement?: string
+    golden_handshake?: string
+    severance_pay?: string
+    disposal?: string
+  }
+  changes?: Record<string, unknown>
+  corrections?: Record<string, unknown>
+  discovered_on?: string
+  source_submission_id?: number
+  new_variable_symbol?: string
+  foreign_insurance?: {
+    current: 'P' | 'S'
+    name: string
+    country_code: string
+    identifier?: string
+    street?: string
+    house_number?: string
+    orientation_number?: string
+    postal_code?: string
+    city?: string
+    sector?: string
+  }
+  not_started?: true
+}
+
 /** Ručně spuštěný VREP přenos jedné zmrazené PREZEC/REGZEC registrace. */
 export interface PayrollRegistrationTransportResult {
   agenda_code: PayrollRegistrationAgenda
@@ -2345,6 +2707,41 @@ export interface PayrollEldpSupport {
   stops_at_status: string
   legal_basis: string
   deadline_rulesets: string[]
+}
+
+export type PayrollEldpAuthorityStatus = 'submitted' | 'accepted'
+
+export interface PayrollEldpManualEvidence {
+  id: number
+  statement_id: number
+  obligation_id: number
+  authority_status: PayrollEldpAuthorityStatus
+  confirmation_document_id: number
+  confirmation_sha256: string
+  confirmation_byte_size: number
+  confirmation_mime_type: string
+  authority_reference: string
+  confirmed_on: string
+  recorded_by: number
+  recorded_at: string | null
+}
+
+export interface PayrollEldpManualCompletionOverview {
+  statement_id: number
+  obligation_id: number
+  obligation_status: string
+  obligation_row_version: number
+  submission_id: number
+  local_submission_status: string
+  evidence: PayrollEldpManualEvidence[]
+}
+
+export interface PayrollEldpManualCompletionResult extends PayrollEldpManualEvidence {
+  created: boolean
+  obligation_status: string
+  obligation_row_version: number
+  local_submission_status: string
+  submission_id: number
 }
 
 export interface PayrollRegzelSnapshot {
@@ -2659,6 +3056,86 @@ export interface PayrollPeriodExport {
   suggested_filename: string
 }
 
+export type PayrollPeriodExportJobStatus =
+  | 'queued'
+  | 'processing'
+  | 'retry_wait'
+  | 'failed'
+  | 'completed'
+
+export interface PayrollPeriodExportJob {
+  id: number
+  scope: PayrollPeriodExportScope
+  period_start: string
+  period_end: string
+  status: PayrollPeriodExportJobStatus
+  attempt_count: number
+  available_at: string
+  export_id: number | null
+  last_error_code: string | null
+  last_error_message: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export type PayrollYearCloseStatus = 'open' | 'closed'
+
+export type PayrollYearCloseBlockerCode =
+  | 'schema_unavailable'
+  | 'missing_months'
+  | 'open_corrections'
+  | 'open_submissions'
+  | 'open_liabilities'
+  | 'open_leave'
+  | 'open_enforcement'
+  | 'reconciliation_differences'
+
+export interface PayrollYearCloseBlocker {
+  code: PayrollYearCloseBlockerCode
+  count?: number
+  months?: string[]
+  tables?: string[]
+}
+
+export interface PayrollYearClose {
+  id: number | null
+  supplier_id: number
+  calendar_year: number
+  status: PayrollYearCloseStatus
+  row_version: number
+  closed_at: string | null
+  closed_by: number | null
+  reopened_at: string | null
+  reopened_by: number | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface PayrollYearCloseStatusResponse {
+  closure: PayrollYearClose
+  blockers: PayrollYearCloseBlocker[]
+}
+
+export interface PayrollAnnualReportMonth {
+  period: string
+  approved_revision_count: number
+  headcount: number
+  gross_minor: number | null
+  employer_cost_minor: number | null
+}
+
+export interface PayrollAnnualReport {
+  year: number
+  totals: {
+    approved_revision_count: number
+    headcount_person_months: number
+    gross_minor: number | null
+    employer_cost_minor: number | null
+  }
+  months: PayrollAnnualReportMonth[]
+}
+
 /* ── Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP) ─────────────── */
 
 /** Požádal poplatník o roční zúčtování? `unknown` NENÍ „nepožádal". */
@@ -2686,6 +3163,18 @@ export type PayrollAnnualSettlementAnnualClaims =
   | 'unknown'
   | 'none'
   | 'present_unsupported'
+
+export type PayrollAnnualSettlementCaregiverStatus = 'unknown' | 'none' | 'present'
+
+export interface PayrollAnnualSettlementCaregiver {
+  id?: number
+  position?: number
+  given_name: string
+  family_name: string
+  birth_date: string
+  /** Leden až prosinec; A = uplatňoval(a), N = neuplatňoval(a). */
+  months_mask: string
+}
 
 /** Jak zúčtování dopadlo. */
 export type PayrollAnnualSettlementOutcome =
@@ -2718,6 +3207,7 @@ export type PayrollAnnualSettlementBlocker =
   | 'credit_evidence_unverified'
   | 'child_evidence_unverified'
   | 'child_claim_conflict'
+  | 'child_jmhz_evidence_incomplete'
   | 'already_settled'
   | 'ruleset_year_not_covered'
 
@@ -2734,6 +3224,8 @@ export interface PayrollAnnualSettlementRequest {
   filing_obligation_reason: string | null
   annual_claims: PayrollAnnualSettlementAnnualClaims
   annual_claims_note: string | null
+  other_household_caregiver_status: PayrollAnnualSettlementCaregiverStatus
+  other_household_caregivers: PayrollAnnualSettlementCaregiver[]
   note: string | null
   row_version: number
 }
@@ -2757,6 +3249,18 @@ export interface PayrollAnnualSettlementResult {
   settlement_difference_minor_units: number
   payable_minor_units: number
   annual_bonus_threshold_met: boolean
+  annual_bonus_candidate_minor_units?: number
+  annual_bonus_income_threshold_met?: boolean
+  annual_bonus_amount_threshold_met?: boolean
+  annual_bonus_eligible?: boolean
+  annual_bonus_eligibility_reason?:
+    | 'income_below_threshold'
+    | 'amount_below_threshold'
+    | 'eligible'
+  bonus_qualifying_income_minor_units?: number
+  bonus_minimum_income_minor_units?: number
+  bonus_minimum_amount_minor_units?: number
+  monthly_tax_bonus_minor_units?: number
 }
 
 export interface PayrollAnnualSettlementStoredOutcome {
@@ -2907,6 +3411,8 @@ export interface PayrollAnnualSettlementRequestPayload {
   filing_obligation_reason: string | null
   annual_claims: PayrollAnnualSettlementAnnualClaims
   annual_claims_note: string | null
+  other_household_caregiver_status: PayrollAnnualSettlementCaregiverStatus
+  other_household_caregivers: PayrollAnnualSettlementCaregiver[]
   note: string | null
   row_version?: number
 }
@@ -2983,33 +3489,50 @@ export interface PayrollAverageEarningsStatementEvidence {
   correction_reason: string | null
 }
 
-export interface PayrollDocumentBatchExitDocument {
-  required: boolean
-  archived: boolean
-  document_id: number | null
-  available: boolean
-  readiness_code: string | null
-}
+export type PayrollDocumentBatchStatus =
+  | 'queued'
+  | 'running'
+  | 'retry_wait'
+  | 'failed'
+  | 'completed'
 
-export interface PayrollDocumentBatchExit {
-  employment_id: number
-  employee_id: number
-  employee_name: string | null
-  end_date: string
-  relation_type: string
-  documents: Record<string, PayrollDocumentBatchExitDocument>
-}
+export type PayrollDocumentBatchItemStatus =
+  | 'queued'
+  | 'processing'
+  | 'retry_wait'
+  | 'failed'
+  | 'succeeded'
 
-export interface PayrollDocumentBatchReport {
+export interface PayrollDocumentBatch {
+  id: number
   run_id: number
   revision_id: number
   period_start: string
-  period_end: string
-  payslips: { archived: number, document_ids: number[] }
-  monthly_bundle: { document_id: number }
-  employment_exits: PayrollDocumentBatchExit[]
-  missing: string[]
-  complete: boolean
+  status: PayrollDocumentBatchStatus
+  item_count: number
+  succeeded_count: number
+  failed_count: number
+  bundle_document_id: number | null
+  bundle_filename: string | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+}
+
+export interface PayrollDocumentBatchItem {
+  id: number
+  batch_id: number
+  employee_id: number
+  employee_name: string
+  status: PayrollDocumentBatchItemStatus
+  attempt_count: number
+  available_at: string
+  document_id: number | null
+  last_error_code: string | null
+  last_error_message: string | null
+  completed_at: string | null
+  updated_at: string
 }
 
 export interface PayrollEmploymentCertificateDeductionEvidence {
@@ -3142,6 +3665,16 @@ export interface PayrollIncomeTaxAdvanceResult {
   tax_bonus_eligible: boolean
   tax_after_credits_minor_units: number
   tax_bonus_minor_units: number
+  tax_bonus_candidate_minor_units?: number
+  tax_bonus_minimum_income_minor_units?: number
+  tax_bonus_minimum_amount_minor_units?: number
+  tax_bonus_income_threshold_met?: boolean
+  tax_bonus_amount_threshold_met?: boolean
+  tax_bonus_eligibility_reason?:
+    | 'eligible'
+    | 'declaration_not_signed'
+    | 'income_below_threshold'
+    | 'amount_below_threshold'
   ruleset_id: string
   ruleset_hash: string
 }
@@ -3228,36 +3761,63 @@ export interface PayrollRun {
   validations: PayrollRunValidation[]
 }
 
+export type PayrollRunHistoryTotalKey =
+  | 'cash_payable_minor'
+  | 'enforcement_withheld_minor'
+  | 'payable_after_enforcement_minor'
+
+export interface PayrollRunHistoryTotalDiff {
+  before: number | null
+  after: number | null
+  delta: number | null
+}
+
+export interface PayrollRunRevisionDiff {
+  input_changed: boolean
+  ruleset_changed: boolean
+  result_changed: boolean
+  totals: Partial<Record<PayrollRunHistoryTotalKey, PayrollRunHistoryTotalDiff>>
+}
+
+export interface PayrollRunRevisionHistory {
+  id: number
+  revision_no: number
+  previous_revision_id: number | null
+  revision_kind: 'regular' | 'correction'
+  status: string
+  created_at: string
+  calculated_at: string | null
+  reviewed_at: string | null
+  approved_at: string | null
+  ruleset_manifest_hash: string
+  input_snapshot_hash: string
+  result_snapshot_hash: string | null
+  totals: Partial<Record<PayrollRunHistoryTotalKey, number | null>> | null
+  diff_from_previous: PayrollRunRevisionDiff | null
+}
+
+export interface PayrollRunHistoryEvent {
+  id: number
+  revision_id: number | null
+  event_type: string
+  from_status: PayrollRunStatus | null
+  to_status: PayrollRunStatus | null
+  reason: string | null
+  actor_name: string | null
+  created_at: string
+}
+
+export interface PayrollRunHistory {
+  run_id: number
+  revisions: PayrollRunRevisionHistory[]
+  events: PayrollRunHistoryEvent[]
+}
+
 export interface PayrollRunsPage {
   runs: PayrollRun[]
   total: number
   limit: number
   offset: number
-}
-
-export interface PayrollProductionQualification {
-  id: number
-  supplier_id: number
-  module_state_row_version: number
-  support_matrix_version: string
-  support_matrix_sha256: string
-  evidence_sha256: string
-  qualified_by: number | null
-  qualified_at: string
-}
-
-export interface PayrollProductionQualificationEvidence {
-  parallel_runs: Array<{ payroll_run_id: number; document_id: number }>
-  correction_scenario: { payroll_run_id: number; document_id: number }
-  recovery_drill: { completed_on: string; document_id: number }
-  expert_approval: {
-    approver_name: string
-    approver_role: string
-    approved_on: string
-    document_id: number
-  }
-  rollback_plan: { verified_on: string; document_id: number }
-  post_go_live_monitoring: { prepared_on: string; document_id: number }
 }
 
 export interface PayrollRunCommandResponse {
@@ -3326,6 +3886,8 @@ export interface PayrollDependant {
   id: number
   relation: PayrollDependantRelation
   full_name: string
+  given_name: string | null
+  family_name: string | null
   birth_date: string
   birth_number_masked: string | null
   has_birth_number: boolean
@@ -3349,6 +3911,8 @@ export interface PayrollDependantsResponse {
 export interface PayrollDependantPayload {
   relation: PayrollDependantRelation
   full_name: string
+  given_name: string | null
+  family_name: string | null
   birth_date: string
   birth_number?: string | null
   ztp_p: boolean
@@ -3714,18 +4278,14 @@ export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
   activation: () =>
-    api.get<{ state: PayrollModuleState; production_qualification: PayrollProductionQualification | null }>('/payroll/settings/activation')
+    api.get<{
+      state: PayrollModuleState
+      company_capability: PayrollCompanyCapabilityAssessment
+      production_release: { released: boolean }
+    }>('/payroll/settings/activation')
       .then(response => response.data),
   setActivation: (payload: { enabled: boolean; start_period: string | null; row_version: number }) =>
     api.put<{ state: PayrollModuleState }>('/payroll/settings/activation', payload).then(response => response.data.state),
-  qualifyProduction: (payload: {
-    row_version: number
-    support_matrix_version: string
-    evidence: PayrollProductionQualificationEvidence
-  }) => api.post<{
-    state: PayrollModuleState
-    qualification: PayrollProductionQualification
-  }>('/payroll/settings/activation/production-qualification', payload).then(response => response.data),
   /**
    * Stránka seznamu osob. Filtr i hledání jdou na server — kdyby zužoval
    * prohlížeč, hledal by jen v načtené stránce a člověka ze třetí stránky by
@@ -3775,6 +4335,16 @@ export const payrollApi = {
       `/payroll/people/${employeeId}/statutory-evidence`,
       payload,
     ).then(response => response.data.evidence),
+  foreignPermits: (employeeId: number, asOf?: string) =>
+    api.get<{ permits: PayrollForeignPermitView }>(
+      `/payroll/people/${employeeId}/foreign-permits`,
+      { params: asOf === undefined ? {} : { as_of: asOf } },
+    ).then(response => response.data.permits),
+  createForeignPermit: (employeeId: number, payload: PayrollForeignPermitPayload) =>
+    api.post<{ permits: PayrollForeignPermitView }>(
+      `/payroll/people/${employeeId}/foreign-permits`,
+      payload,
+    ).then(response => response.data.permits),
     /** Počáteční stavy zákonných kumulací za rok — úhrny z předchozího zpracování. */
   statutoryOpenings: (employeeId: number, year: number) =>
     api.get<{ openings: PayrollOpeningBalances }>(
@@ -3794,6 +4364,15 @@ export const payrollApi = {
     api.patch<{ employment: PayrollEmployment }>(
       `/payroll/employments/${employmentId}/code`,
       { row_version: rowVersion, code },
+    ).then(response => response.data.employment),
+  setEmploymentMealEntitlementBasis: (
+    employmentId: number,
+    rowVersion: number,
+    mealEntitlementBasis: PayrollMealEntitlementBasis,
+  ) =>
+    api.patch<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/meal-entitlement-basis`,
+      { row_version: rowVersion, meal_entitlement_basis: mealEntitlementBasis },
     ).then(response => response.data.employment),
   savePersonProfile: (id: number, payload: PayrollPersonProfilePayload) =>
     api.put<{ profile: PayrollPersonProfile }>(`/payroll/people/${id}/profile`, payload)
@@ -3946,6 +4525,13 @@ export const payrollApi = {
     api.get<PayrollEmployerSettingsResponse>('/payroll/settings/employer').then(response => response.data.settings),
   saveEmployerSettings: (payload: PayrollEmployerSettingsPayload) =>
     api.put<PayrollEmployerSettingsResponse>('/payroll/settings/employer', payload).then(response => response.data.settings),
+  officeRegistrations: (officeId: number) =>
+    api.get<{ registrations: PayrollOfficeRegistration[] }>(`/payroll/settings/offices/${officeId}/registrations`)
+      .then(response => response.data.registrations),
+  createOfficeRegistration: (officeId: number, payload: Pick<PayrollOfficeRegistration,
+    'effective_from' | 'social_security_variable_symbol' | 'source_reference'>) =>
+    api.post<{ registration: PayrollOfficeRegistration }>(`/payroll/settings/offices/${officeId}/registrations`, payload)
+      .then(response => response.data.registration),
   /**
    * `agenda_group` filtruje na SERVERU. Odfiltrovat si skupinu až z přijaté
    * stránky by znamenalo pager počítaný přes všechny agendy nad tabulkou,
@@ -3964,6 +4550,27 @@ export const payrollApi = {
         ...pageParams(options),
       },
     }).then(response => response.data),
+  operationalHealth: () =>
+    api.get<PayrollOperationalHealth>('/payroll/operational-health')
+      .then(response => response.data),
+  statutoryObligationOverview: (
+    environment: PayrollRegzelEnvironment,
+    period: string,
+  ) => api.get<PayrollStatutoryObligationOverview>(
+    '/payroll/submissions/statutory-obligations',
+    { params: { environment, period } },
+  ).then(response => response.data),
+  recordStatutoryObligationEvidence: (
+    payload: PayrollStatutoryObligationEvidencePayload,
+    idempotencyKey: string,
+  ) => api.post<{
+    evidence: PayrollStatutoryObligationEvidence
+    created: boolean
+  }>(
+    '/payroll/submissions/statutory-obligations/evidence',
+    payload,
+    { headers: { 'Idempotency-Key': idempotencyKey } },
+  ).then(response => response.data),
   submissionDetail: (submissionId: number) =>
     api.get<PayrollSubmissionDetail>(`/payroll/submissions/${submissionId}`)
       .then(response => response.data),
@@ -4054,6 +4661,17 @@ export const payrollApi = {
     api.get<{ offices: PayrollJmhzPvpojOffice[] }>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}/offices`,
     ).then(response => response.data.offices),
+  jmhzEmployerAnnualEvidence: (reportYear: number) =>
+    api.get<PayrollJmhzEmployerAnnualEvidenceView>(
+      `/payroll/submissions/jmhz-employer-annual-evidence/${reportYear}`,
+    ).then(response => response.data),
+  saveJmhzEmployerAnnualEvidence: (
+    reportYear: number,
+    payload: PayrollJmhzEmployerAnnualEvidencePayload,
+  ) => api.post<PayrollJmhzEmployerAnnualEvidenceView>(
+    `/payroll/submissions/jmhz-employer-annual-evidence/${reportYear}`,
+    payload,
+  ).then(response => response.data),
   jmhzPvpojPreview: (revisionId: number, officeId?: number | null) =>
     api.get<PayrollJmhzPvpojPreview>(
       `/payroll/submissions/jmhz-pvpoj/${revisionId}`,
@@ -4133,16 +4751,44 @@ export const payrollApi = {
   previewEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'test',
+    eventId?: number | null,
   ) => api.get<PayrollRegistrationPreview>(
     `/payroll/submissions/registration/${employmentId}`,
-    { params: { environment } },
+    { params: { environment, ...(eventId == null ? {} : { event_id: eventId }) } },
   ).then(response => response.data),
   prepareEmploymentRegistration: (
     employmentId: number,
     environment: 'test' | 'production' = 'test',
+    eventId?: number | null,
   ) => api.post<PayrollRegistrationSubmission>(
     `/payroll/submissions/registration/${employmentId}`,
-    { environment },
+    { environment, ...(eventId == null ? {} : { event_id: eventId }) },
+  ).then(response => response.data),
+  employmentRegistrationA1Profile: (
+    employmentId: number,
+  ) => api.get<{ profile: PayrollRegistrationA1Profile | null }>(
+    `/payroll/submissions/registration/${employmentId}/a1-profile`,
+  ).then(response => response.data.profile),
+  saveEmploymentRegistrationA1Profile: (
+    employmentId: number,
+    payload: PayrollRegistrationA1ProfilePayload,
+  ) => api.put<{ profile: PayrollRegistrationA1Profile }>(
+    `/payroll/submissions/registration/${employmentId}/a1-profile`,
+    payload,
+  ).then(response => response.data.profile),
+  employmentRegistrationEvents: (
+    employmentId: number,
+    environment: PayrollJmhzTransportEnvironment = 'test',
+  ) => api.get<{ items: PayrollRegistrationEvent[] }>(
+    `/payroll/submissions/registration/${employmentId}/events`,
+    { params: { environment } },
+  ).then(response => response.data.items),
+  approveEmploymentRegistrationEvent: (
+    employmentId: number,
+    payload: PayrollRegistrationEventInput,
+  ) => api.post<PayrollRegistrationEvent>(
+    `/payroll/submissions/registration/${employmentId}/events`,
+    payload,
   ).then(response => response.data),
   sendEmploymentRegistrationTransport: (
     submissionId: number,
@@ -4209,7 +4855,15 @@ export const payrollApi = {
   healthPaymentOverviews: (revisionId: number) =>
     api.get<{
       items: PayrollHealthPaymentOverview[]
-      electronic_submission: { supported: false; reason_code: string }
+      electronic_submission: {
+        direct_portal: { supported: false; reason_code: string }
+        isds: {
+          supported: true
+          requires_ready: true
+          requires_production_gate: true
+          requires_user_confirmation: true
+        }
+      }
     }>(`/payroll/submissions/health-overviews/${revisionId}`)
       .then(response => response.data),
   downloadHealthPaymentOverview: async (
@@ -4219,11 +4873,20 @@ export const payrollApi = {
       `/payroll/submissions/health-overviews/${overview.revision_id}/${overview.insurer.code}/download`,
       { responseType: 'blob' },
     )
+    const disposition = response.headers['content-disposition']
+    const matchedFilename = typeof disposition === 'string'
+      ? /filename="([^"]+)"/u.exec(disposition)?.[1]
+      : undefined
+    const contentType = String(
+      response.headers['content-type'] ?? response.data.type,
+    )
+    const extension = contentType.includes('pdf') ? 'pdf' : 'xml'
     const objectUrl = URL.createObjectURL(response.data)
     try {
       const anchor = document.createElement('a')
       anchor.href = objectUrl
-      anchor.download = overview.filename
+      anchor.download = matchedFilename
+        ?? `zp-prehled-${overview.period}-${overview.insurer.code}-revize-${overview.revision_id}.${extension}`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -4239,6 +4902,7 @@ export const payrollApi = {
     api.get<{
       statement: PayrollEldpStatement | null
       supported: PayrollEldpSupport
+      manual_completion: PayrollEldpManualCompletionOverview | null
     }>('/payroll/submissions/eldp', { params })
       .then(response => response.data),
   prepareEldp: (payload: {
@@ -4254,6 +4918,19 @@ export const payrollApi = {
   }) =>
     api.post<{ statement: PayrollEldpPrepared }>('/payroll/submissions/eldp', payload)
       .then(response => response.data.statement),
+  completeEldp: (statementId: number, payload: {
+    environment: PayrollRegzelEnvironment
+    expected_obligation_row_version: number
+    authority_status: PayrollEldpAuthorityStatus
+    confirmation_document_id: number
+    authority_reference: string
+    confirmed_on: string
+    idempotency_key: string
+  }) =>
+    api.post<{ manual_completion: PayrollEldpManualCompletionResult }>(
+      `/payroll/submissions/eldp/${statementId}/manual-completion`,
+      payload,
+    ).then(response => response.data.manual_completion),
   regzelProfile: () =>
     api.get<PayrollRegzelProfileResponse>('/payroll/submissions/regzel/profile')
       .then(response => response.data),
@@ -4437,6 +5114,21 @@ export const payrollApi = {
       `/payroll/annual-settlements/${year}/people/${employeeId}/settle`,
       {},
     ).then(response => response.data),
+  yearCloseStatus: (year: number) =>
+    api.get<PayrollYearCloseStatusResponse>(`/payroll/year-close/${year}`)
+      .then(response => response.data),
+  closeYear: (year: number, rowVersion: number) =>
+    api.post<{ closure: PayrollYearClose }>(`/payroll/year-close/${year}/close`, {
+      row_version: rowVersion,
+    }).then(response => response.data.closure),
+  reopenYear: (year: number, rowVersion: number, reason: string) =>
+    api.post<{ closure: PayrollYearClose }>(`/payroll/year-close/${year}/reopen`, {
+      row_version: rowVersion,
+      reason,
+    }).then(response => response.data.closure),
+  annualReport: (year: number) =>
+    api.get<{ report: PayrollAnnualReport }>(`/payroll/reports/annual/${year}`)
+      .then(response => response.data.report),
   generatePayrollSheet: (employeeId: number, year: number) =>
     api.post<PayrollDocument>(
       `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,
@@ -4466,17 +5158,29 @@ export const payrollApi = {
     scope: PayrollPeriodExportScope,
     period: string | number,
   ): Promise<PayrollPeriodExport> => {
-    const exported = await api.post<PayrollPeriodExport>(
+    let job = await api.post<PayrollPeriodExportJob>(
       `/payroll/exports/${scope}/${period}`,
       {},
     ).then(response => response.data)
+    for (let poll = 0; job.status !== 'completed' && poll < 120; poll += 1) {
+      if (job.status === 'failed') {
+        throw new Error(job.last_error_message ?? 'Export mezd selhal.')
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 1000))
+      job = await api.get<PayrollPeriodExportJob>(
+        `/payroll/exports/jobs/${job.id}`,
+      ).then(response => response.data)
+    }
+    if (job.status !== 'completed' || job.export_id === null) {
+      throw new Error('Export mezd se nedokončil v očekávaném čase.')
+    }
     const grant = await api.post<{
       grant_id: number
       export_id: number
       token: string
       expires_at: string
     }>(
-      `/payroll/exports/${exported.id}/download-grants`,
+      `/payroll/exports/jobs/${job.id}/download-grants`,
       { ttl_seconds: 120 },
     ).then(response => response.data)
     const response = await api.post<Blob>(
@@ -4488,7 +5192,7 @@ export const payrollApi = {
     try {
       const anchor = document.createElement('a')
       anchor.href = objectUrl
-      anchor.download = exported.suggested_filename
+      anchor.download = `mzdy-${scope === 'monthly' ? String(period) : String(period)}.zip`
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -4496,7 +5200,15 @@ export const payrollApi = {
       URL.revokeObjectURL(objectUrl)
     }
 
-    return exported
+    return {
+      id: job.export_id,
+      scope: job.scope,
+      period_start: job.period_start,
+      period_end: job.period_end,
+      file_sha256: '',
+      size_bytes: 0,
+      suggested_filename: `mzdy-${scope === 'monthly' ? String(period) : String(period)}.zip`,
+    }
   },
   employmentExitDocuments: (employmentId: number) =>
     api.get<PayrollEmploymentExitDocumentList>(
@@ -4533,10 +5245,25 @@ export const payrollApi = {
       { headers: { 'Idempotency-Key': idempotencyKey } },
     ).then(response => response.data),
   generateDocumentBatch: (runId: number, revisionId: number) =>
-    api.post<PayrollDocumentBatchReport>(
+    api.post<{ batch: PayrollDocumentBatch }>(
       `/payroll/runs/${runId}/revisions/${revisionId}/documents/batch`,
       {},
+      { headers: { 'Idempotency-Key': `payroll-document-batch:${runId}:${revisionId}` } },
+    ).then(response => response.data.batch),
+  documentBatch: (batchId: number) =>
+    api.get<{ batch: PayrollDocumentBatch }>(
+      `/payroll/documents/batches/${batchId}`,
+    ).then(response => response.data.batch),
+  documentBatchItems: (batchId: number, page?: PayrollPageParams) =>
+    api.get<{ items: PayrollDocumentBatchItem[], total: number }>(
+      `/payroll/documents/batches/${batchId}/items`,
+      { params: pageParams(page) },
     ).then(response => response.data),
+  retryDocumentBatchItem: (batchId: number, itemId: number) =>
+    api.post<{ item: PayrollDocumentBatchItem }>(
+      `/payroll/documents/batches/${batchId}/items/${itemId}/retry`,
+      {},
+    ).then(response => response.data.item),
   /**
    * Stránka seznamu běhů. `result_snapshot` nese jen `totals` — osobní rozpad
    * v seznamu není, ten se dotahuje přes `run()` pro jeden konkrétní běh.
@@ -4558,6 +5285,10 @@ export const payrollApi = {
   run: (runId: number) =>
     api.get<{ run: PayrollRun }>(`/payroll/runs/${runId}`)
       .then(response => response.data.run),
+  /** Lehká auditní historie bez vstupních a výsledkových snapshotů. */
+  runHistory: (runId: number) =>
+    api.get<{ history: PayrollRunHistory }>(`/payroll/runs/${runId}/history`)
+      .then(response => response.data.history),
   createRun: (payload: {
     period_start: string
     payment_date: string

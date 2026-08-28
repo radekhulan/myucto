@@ -153,7 +153,8 @@ jednosměrná**. Čtení funguje normálně, zápis odmítne i token se scope
 
 | Cesta | `GET` | zápis |
 |---|---|---|
-| `/api/v1/accounting/**` | ano | **ne** |
+| `/api/v1/accounting/**` mimo mzdové podcesty | ano | **ne** |
+| `/api/v1/accounting/payroll/**`, `/api/v1/accounting/reports/payroll-sheet` | **ne** | **ne** |
 | `/api/v1/reports/**` | ano | **ne** |
 | `/api/v1/tax/**`, `/api/v1/tax-evidence/**` | ano | **ne** |
 
@@ -163,6 +164,11 @@ chyba znamená opravné podání. Dělají se proto výhradně z webového rozhr
 kde je vidět kontext a krok se potvrzuje. Integraci ani AI asistentovi to
 nebrání v tom podstatném — obratovku, rozvahu, výsledovku, saldo i odhad DPH
 si přes API přečtou.
+
+Mzdové endpointy jsou kvůli rodným číslům, adresám, mzdovým částkám a dalším
+personálním údajům dostupné pouze přihlášenému uživateli ve webové aplikaci.
+Bearer token na ně vrátí `403 token_endpoint_forbidden`; veřejný mzdový API
+kontrakt zatím neexistuje.
 
 ## 99.8 Omezení tokenu podle IP adresy
 

@@ -50,7 +50,7 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
             ]);
         $action = new PayrollJmhzTransportAction(
             $dispatch,
-            $this->createStub(JmhzProtocolExplainer::class),
+            new JmhzProtocolExplainer(),
             $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
             $access,
             $gate,

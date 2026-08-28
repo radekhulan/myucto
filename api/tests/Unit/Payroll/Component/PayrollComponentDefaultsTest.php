@@ -9,6 +9,13 @@ use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentKind;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRuleValue;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -110,6 +117,45 @@ final class PayrollComponentDefaultsTest extends TestCase
                 "Limit koše {$basket} neodpovídá zákonné částce.",
             );
         }
+    }
+
+    #[DataProvider('inconsistentMealRules')]
+    public function testMealLimitFailsClosedWhenTheSeventyPercentRuleDiverges(
+        PayrollRulesetDomain $domain,
+        string $key,
+        PayrollRuleValue $value,
+    ): void {
+        $baskets = new PayrollBenefitBasketService(
+            self::providerWithParameter($domain, $key, $value),
+        );
+
+        $this->expectException(PayrollRulesetException::class);
+        $this->expectExceptionMessage('benefit_exemption.meal.per_shift');
+        $baskets->limitMinor(
+            PayrollBenefitExemptionBasket::MealPerShift,
+            '2026-01-01',
+            1,
+        );
+    }
+
+    /** @return iterable<string,array{PayrollRulesetDomain,string,PayrollRuleValue}> */
+    public static function inconsistentMealRules(): iterable
+    {
+        yield 'explicit per-shift limit' => [
+            PayrollRulesetDomain::IncomeTax,
+            'benefit_exemption.meal.per_shift',
+            PayrollRuleValue::moneyMinor(12_949),
+        ];
+        yield '70 percent rate' => [
+            PayrollRulesetDomain::IncomeTax,
+            'benefit_exemption.meal.shift_rate',
+            PayrollRuleValue::rate('0.69'),
+        ];
+        yield 'travel allowance ceiling' => [
+            PayrollRulesetDomain::TravelAllowances,
+            'meal_allowance.band_1.tax_exempt_maximum',
+            PayrollRuleValue::moneyMinor(18_400),
+        ];
     }
 
     public function testComponentsWithoutADocumentedBasketStayEmpty(): void
@@ -257,5 +303,36 @@ final class PayrollComponentDefaultsTest extends TestCase
         }
 
         self::fail("Výchozí klasifikace nemá verzi účinnou od {$validFrom}.");
+    }
+
+    private static function providerWithParameter(
+        PayrollRulesetDomain $domain,
+        string $key,
+        PayrollRuleValue $value,
+    ): PayrollRulesetProvider {
+        $versions = CzechPayrollRulesets2026::provider()->versions();
+        foreach ($versions as $index => $delivered) {
+            if ($delivered->domain !== $domain || !$delivered->contains('2026-01-01')) {
+                continue;
+            }
+            $parameters = $delivered->parameters;
+            $parameters[$key] = $value;
+            ksort($parameters, SORT_STRING);
+            $versions[$index] = new PayrollRulesetVersion(
+                $delivered->id,
+                $delivered->version,
+                $delivered->domain,
+                $delivered->effectiveFrom,
+                $delivered->effectiveTo,
+                PayrollRulesetLifecycle::Active,
+                $delivered->capability,
+                $delivered->sources,
+                $parameters,
+                $delivered->approval,
+                $delivered->technicalReview,
+            );
+        }
+
+        return new PayrollRulesetProvider($versions);
     }
 }

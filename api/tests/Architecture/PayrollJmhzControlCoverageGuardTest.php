@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1ControlEvaluator;
 use PHPUnit\Framework\TestCase;
 
@@ -24,7 +26,7 @@ final class PayrollJmhzControlCoverageGuardTest extends TestCase
     {
         $catalog = JmhzControlSourceCatalog::load();
         $known = $catalog->definitions();
-        $evaluator = new JmhzScenario1ControlEvaluator($catalog->parameters());
+        $evaluator = $this->evaluator($catalog);
 
         $declared = array_merge(
             $evaluator->implementedControlIds(),
@@ -49,7 +51,7 @@ final class PayrollJmhzControlCoverageGuardTest extends TestCase
     public function testImplementedAndNotEvaluableSetsAreDisjoint(): void
     {
         $catalog = JmhzControlSourceCatalog::load();
-        $evaluator = new JmhzScenario1ControlEvaluator($catalog->parameters());
+        $evaluator = $this->evaluator($catalog);
         $overlap = array_values(array_intersect(
             $evaluator->implementedControlIds(),
             array_keys($evaluator->notEvaluableControlIds()),
@@ -66,7 +68,7 @@ final class PayrollJmhzControlCoverageGuardTest extends TestCase
     public function testEveryNotEvaluableControlCarriesAReason(): void
     {
         $catalog = JmhzControlSourceCatalog::load();
-        $evaluator = new JmhzScenario1ControlEvaluator($catalog->parameters());
+        $evaluator = $this->evaluator($catalog);
 
         foreach ($evaluator->notEvaluableControlIds() as $controlId => $reason) {
             self::assertGreaterThan(
@@ -85,7 +87,7 @@ final class PayrollJmhzControlCoverageGuardTest extends TestCase
     public function testDeviationsOnlyDescribeImplementedControls(): void
     {
         $catalog = JmhzControlSourceCatalog::load();
-        $evaluator = new JmhzScenario1ControlEvaluator($catalog->parameters());
+        $evaluator = $this->evaluator($catalog);
         $implemented = $evaluator->implementedControlIds();
 
         foreach ($evaluator->documentedDeviations() as $controlId => $reason) {
@@ -131,10 +133,18 @@ final class PayrollJmhzControlCoverageGuardTest extends TestCase
         sort($routed);
 
         $catalog = JmhzControlSourceCatalog::load();
-        $expected = (new JmhzScenario1ControlEvaluator($catalog->parameters()))
+        $expected = $this->evaluator($catalog)
             ->implementedControlIds();
         sort($expected);
 
         self::assertSame($expected, $routed);
+    }
+
+    private function evaluator(JmhzControlSourceCatalog $catalog): JmhzScenario1ControlEvaluator
+    {
+        return new JmhzScenario1ControlEvaluator(
+            $catalog->parameters(),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+        );
     }
 }

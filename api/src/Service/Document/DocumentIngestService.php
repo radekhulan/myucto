@@ -8,6 +8,7 @@ use MyInvoice\Repository\DmsMessageRepository;
 use MyInvoice\Repository\DocumentFileRepository;
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
+use MyInvoice\Repository\DocumentViewerContext;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -223,32 +224,15 @@ final class DocumentIngestService
 
         $this->dms->insert($containerId, $parsed['metadata']);
 
-        /** @var array<string,int> $byBaseName  basename → doc id (pro P7S asociaci) */
-        $byBaseName = [];
-        $p7sChildren = [];
-        foreach ($parsed['attachments'] as $att) {
-            try {
-                $childStored = $this->storage->storeFromBytes($att['bytes'], $supplierId, $att['name']);
-            } catch (DocumentException $e) {
-                $skipped[] = ['name' => $att['name'], 'reason' => $e->errorCode];
-                continue;
-            }
-            $childId = $this->insertAndProcess($childStored, $supplierId, $folderId, $att['name'], $userId, 'zfo_extract', $containerId);
-            $created[] = $childId;
-
-            $base = pathinfo($att['name'], PATHINFO_FILENAME);
-            $byBaseName[$base] = $childId;
-            if ($childStored['doc_type'] === 'p7s') {
-                $p7sChildren[$childId] = $base;
-            }
-        }
-
-        // P7S asociace: podpis ukazuje na podepsaný dokument se shodným basename.
-        foreach ($p7sChildren as $sigId => $base) {
-            if (isset($byBaseName[$base]) && $byBaseName[$base] !== $sigId) {
-                $this->documents->setSignatureFor($sigId, $byBaseName[$base]);
-            }
-        }
+        $attachments = $this->ingestZfoAttachments(
+            $parsed['attachments'],
+            $supplierId,
+            $folderId,
+            $userId,
+            $containerId,
+        );
+        $created = array_merge($created, $attachments['created_ids']);
+        $skipped = array_merge($skipped, $attachments['skipped']);
 
         return ['kind' => 'zfo', 'created_ids' => $created, 'container_id' => $containerId, 'skipped' => $skipped];
     }
@@ -338,6 +322,43 @@ final class DocumentIngestService
         ];
     }
 
+    /**
+     * Znovu rozbalí přílohy z již uloženého ZFO bez stažení datové schránky.
+     * Existující shodné přílohy zachová a nevytvoří duplicity.
+     *
+     * @return array{created_ids:list<int>,skipped:list<array{name:string,reason:string}>}
+     */
+    public function reextractZfoAttachments(
+        int $containerId,
+        int $supplierId,
+        DocumentViewerContext $viewer,
+        ?int $userId,
+    ): array {
+        $container = $this->documents->findRaw($containerId, $supplierId, $viewer);
+        if ($container === null || (string) ($container['doc_type'] ?? '') !== 'zfo'
+            || ($container['parent_document_id'] ?? null) !== null) {
+            throw new DocumentException('zfo_not_found', 'ZFO dokument nebyl nalezen.', 404);
+        }
+        $path = $this->storage->pathFor(
+            $supplierId,
+            (string) $container['sha256'],
+            (string) $container['filename'],
+        );
+        if (!is_file($path)) {
+            throw new DocumentException('zfo_not_found', 'Soubor ZFO nebyl nalezen na disku.', 404);
+        }
+
+        $parsed = $this->zfo->extract((string) file_get_contents($path));
+        return $this->ingestZfoAttachments(
+            $parsed['attachments'],
+            $supplierId,
+            $container['folder_id'] !== null ? (int) $container['folder_id'] : null,
+            $userId,
+            $containerId,
+            $this->documents->listChildren($containerId, $supplierId, $viewer),
+        );
+    }
+
     /** Bezpečně rozbalí ZIP z cesty na entries (pro job — vrací entries k ingestu). */
     public function extractZip(string $zipPath): array
     {
@@ -359,15 +380,93 @@ final class DocumentIngestService
             return ['created_ids' => $created, 'skipped' => [['name' => $originalName, 'reason' => $e->errorCode]]];
         }
         $this->dms->insert($containerId, $parsed['metadata']);
-        foreach ($parsed['attachments'] as $att) {
-            try {
-                $childStored = $this->storage->storeFromBytes($att['bytes'], $supplierId, $att['name']);
-            } catch (DocumentException $e) {
-                $skipped[] = ['name' => $att['name'], 'reason' => $e->errorCode];
+        $attachments = $this->ingestZfoAttachments(
+            $parsed['attachments'],
+            $supplierId,
+            $folderId,
+            $userId,
+            $containerId,
+        );
+        $created = array_merge($created, $attachments['created_ids']);
+        $skipped = array_merge($skipped, $attachments['skipped']);
+        return ['created_ids' => $created, 'skipped' => $skipped];
+    }
+
+    /**
+     * @param list<array{name:string,mime:string,meta_type:string,bytes:string}> $attachments
+     * @param list<array<string,mixed>> $existingChildren
+     * @return array{created_ids:list<int>,skipped:list<array{name:string,reason:string}>}
+     */
+    private function ingestZfoAttachments(
+        array $attachments,
+        int $supplierId,
+        ?int $folderId,
+        ?int $userId,
+        int $containerId,
+        array $existingChildren = [],
+    ): array {
+        $created = [];
+        $skipped = [];
+        $known = [];
+        /** @var array<string,int> $byBaseName */
+        $byBaseName = [];
+        /** @var array<int,string> $p7sChildren */
+        $p7sChildren = [];
+
+        foreach ($existingChildren as $child) {
+            $name = (string) ($child['original_name'] ?? '');
+            $known[strtolower($name) . "\0" . (string) ($child['sha256'] ?? '')] = true;
+            $base = pathinfo($name, PATHINFO_FILENAME);
+            $childId = (int) ($child['id'] ?? 0);
+            if ($childId > 0) {
+                $byBaseName[$base] = $childId;
+                if (($child['doc_type'] ?? '') === 'p7s') {
+                    $p7sChildren[$childId] = $base;
+                }
+            }
+        }
+
+        foreach ($attachments as $attachment) {
+            $key = strtolower($attachment['name']) . "\0" . hash('sha256', $attachment['bytes']);
+            if (isset($known[$key])) {
                 continue;
             }
-            $created[] = $this->insertAndProcess($childStored, $supplierId, $folderId, $att['name'], $userId, 'zfo_extract', $containerId);
+            try {
+                $stored = $this->storage->storeZfoAttachmentFromBytes(
+                    $attachment['bytes'],
+                    $supplierId,
+                    $attachment['name'],
+                    $attachment['mime'],
+                );
+            } catch (DocumentException $e) {
+                $skipped[] = ['name' => $attachment['name'], 'reason' => $e->errorCode];
+                continue;
+            }
+            $childId = $this->insertAndProcess(
+                $stored,
+                $supplierId,
+                $folderId,
+                $attachment['name'],
+                $userId,
+                'zfo_extract',
+                $containerId,
+            );
+            $created[] = $childId;
+            $known[$key] = true;
+
+            $base = pathinfo($attachment['name'], PATHINFO_FILENAME);
+            $byBaseName[$base] = $childId;
+            if ($stored['doc_type'] === 'p7s') {
+                $p7sChildren[$childId] = $base;
+            }
         }
+
+        foreach ($p7sChildren as $signatureId => $base) {
+            if (isset($byBaseName[$base]) && $byBaseName[$base] !== $signatureId) {
+                $this->documents->setSignatureFor($signatureId, $byBaseName[$base]);
+            }
+        }
+
         return ['created_ids' => $created, 'skipped' => $skipped];
     }
 }

@@ -12,6 +12,9 @@ const m = vi.hoisted(() => ({
   overview: vi.fn(),
   detail: vi.fn(),
   diff: vi.fn(),
+  impactPreview: vi.fn(),
+  command: vi.fn(),
+  warning: vi.fn(),
   isSuperadmin: { value: false },
 }))
 
@@ -25,9 +28,10 @@ vi.mock('@/api/payrollRulesets', async () => {
       overview: m.overview,
       detail: m.detail,
       diff: m.diff,
+      impactPreview: m.impactPreview,
       save: vi.fn(),
       reset: vi.fn(),
-      command: vi.fn(),
+      command: m.command,
     },
   }
 })
@@ -37,7 +41,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: m.warning }),
 }))
 
 // `useTablePrefs` táhne @/i18n, které volá skutečné `createI18n` — továrna
@@ -168,6 +172,8 @@ describe('PayrollRulesets', () => {
     vi.clearAllMocks()
     m.isSuperadmin.value = false
     m.diff.mockResolvedValue(null)
+    m.impactPreview.mockResolvedValue(null)
+    m.command.mockResolvedValue({ ruleset: detail([parameter()]), changed: true })
   })
 
   it('tells a domain waiting for activation apart from one with nothing to approve', async () => {
@@ -356,5 +362,72 @@ describe('PayrollRulesets', () => {
     expect(tab.text()).toContain('VZP: metodika')
     expect(tab.text()).toContain('VZP: platby 2026')
     expect(tab.text()).toContain('payroll.rulesets.provenance.no_approval')
+  })
+
+  it('requires a current impact preview and confirmation before activation', async () => {
+    m.isSuperadmin.value = true
+    const activating = detail([parameter({ key: 'advance.low_rate', value: '0.16' })], {
+      ruleset_id: 'cz-payroll-2026.income-tax.v1',
+      domain: 'income_tax',
+      canonical_hash: 'b'.repeat(64),
+      row_version: 7,
+      lifecycle: 'approved',
+      next_command: 'activate',
+    })
+    m.detail.mockResolvedValue(activating)
+    m.impactPreview.mockResolvedValue({
+      ruleset: activating,
+      baseline: {
+        ruleset_id: activating.ruleset_id,
+        version: activating.version,
+        origin: 'customer_override',
+        canonical_hash: 'a'.repeat(64),
+        source: 'previous_active_snapshot',
+      },
+      effective: { from: '2026-01-01', to: '2026-12-31' },
+      parameter_diff: {
+        added: [],
+        removed: [],
+        changed: [{ key: 'advance.low_rate', before: { type: 'decimal_rate', value: '0.15' }, after: { type: 'decimal_rate', value: '0.16' } }],
+        unchanged_count: 18,
+        identical: false,
+      },
+      activation_effect: {
+        new_snapshots_would_change: true,
+        existing_snapshots_are_immutable: true,
+        money_delta: null,
+        money_delta_unavailable_reason: 'no_locked_input_snapshot',
+      },
+    })
+    const wrapper = await mountPage([group({ versions: [activating] })])
+    await wrapper.get('section table tbody button').trigger('click')
+    await flushPromises()
+
+    const activate = wrapper.get('[data-test="ruleset-command-activate"]')
+    expect(activate.attributes('disabled')).toBeDefined()
+    await activate.trigger('click')
+    expect(m.command).not.toHaveBeenCalled()
+
+    await wrapper.get('[data-test="ruleset-impact-preview-load"]').trigger('click')
+    await flushPromises()
+    expect(m.impactPreview).toHaveBeenCalledWith(activating.ruleset_id)
+    expect(wrapper.get('[data-test="ruleset-impact-preview-effective"]').text())
+      .toContain('payroll.rulesets.impact_preview.effective')
+    expect(wrapper.get('[data-test="ruleset-impact-preview-diff"]').text()).toContain('advance.low_rate')
+    expect(wrapper.get('[data-test="ruleset-impact-preview-immutable"]').text())
+      .toContain('payroll.rulesets.impact_preview.immutable')
+    expect(wrapper.get('[data-test="ruleset-impact-preview-money"]').text())
+      .toContain('payroll.rulesets.impact_preview.money_unavailable')
+    expect(activate.attributes('disabled')).toBeDefined()
+
+    await wrapper.get('[data-test="ruleset-impact-preview-confirm"]').setValue(true)
+    expect(activate.attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="ruleset-reason"]').setValue('Aktivace po náhledu.')
+    await activate.trigger('click')
+    await flushPromises()
+    expect(m.command).toHaveBeenCalledWith(activating.ruleset_id, 'activate', {
+      reason: 'Aktivace po náhledu.',
+      row_version: 7,
+    })
   })
 })

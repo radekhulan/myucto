@@ -74,6 +74,16 @@ final class PayrollEnumContractTest extends TestCase
         // Mzdový běh
         'payroll.ts::PayrollPeriodExportScope'
             => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
+        'payroll.ts::PayrollPeriodExportJobStatus'
+            => 'const:MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository::STATUSES',
+        'payroll.ts::PayrollForeignPermitKind'
+            => 'db:payroll_person_foreign_permits.permit_kind',
+        'payroll.ts::PayrollForeignPermitStatus'
+            => 'const:MyInvoice\Repository\Payroll\PayrollForeignPermitRepository::STATUSES',
+        'payroll.ts::PayrollYearCloseStatus'
+            => 'db:payroll_year_closures.status',
+        'payroll.ts::PayrollYearCloseBlockerCode'
+            => 'const:MyInvoice\Service\Payroll\PayrollYearCloseService::BLOCKER_CODES',
         'payroll.ts::PayrollBenefitExemptionBasket'
             => 'enum:MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket',
         // Čím je nezdanění složky podložené. Klient hodnotu vybírá ve formuláři
@@ -123,7 +133,9 @@ final class PayrollEnumContractTest extends TestCase
 
         // Pracovní vztah a jeho podmínky
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
-        'payroll.ts::PayrollRelationType'            => 'db:payroll_employments.relation_type',
+        'payroll.ts::PayrollRelationType'
+            => 'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
+        'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
         // Doména sloupce je ÚZKO tři hodnoty; PHP enum OtherWithholdingEligibility
         // má navíc `automatic`, protože to není volba uživatele, ale zařazení,
@@ -182,6 +194,8 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollInstitutionType'          => 'enum:MyInvoice\Service\Payroll\InstitutionAccountType',
         'payroll.ts::PayrollInstitutionAccountSource' => 'enum:MyInvoice\Service\Payroll\InstitutionAccountSourceKind',
         'payroll.ts::PayrollDocumentKind'             => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
+        'payroll.ts::PayrollDocumentBatchStatus'      => 'db:payroll_document_batches.status',
+        'payroll.ts::PayrollDocumentBatchItemStatus'  => 'db:payroll_document_batch_items.status',
         // Způsob skončení vztahu na odděleném potvrzení podle § 313 odst. 2
         // zákoníku práce. Doménu drží doklad, protože právě on ji tiskne.
         'payroll.ts::PayrollTerminationReasonKind'
@@ -197,6 +211,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementFilingObligation',
         'payroll.ts::PayrollAnnualSettlementAnnualClaims'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
+        'payroll.ts::PayrollAnnualSettlementCaregiverStatus'
+            => 'db:payroll_annual_settlement_requests.other_household_caregiver_status',
         'payroll.ts::PayrollAnnualSettlementOutcome'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementOutcome',
         'payroll.ts::PayrollAnnualSettlementBlocker'
@@ -226,6 +242,10 @@ final class PayrollEnumContractTest extends TestCase
         'payrollRetention.ts::PayrollErasureOutcome'      => 'db:payroll_erasure_proposal_items.outcome',
 
         // Podání
+        'payroll.ts::PayrollStatutoryAgendaCapability'
+            => 'const:MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog::CAPABILITIES',
+        'payroll.ts::PayrollEldpAuthorityStatus'
+            => 'db:payroll_eldp_manual_completions.authority_status',
         'payroll.ts::PayrollSubmissionObligationStatus'     => 'db:payroll_obligations.status',
         'payroll.ts::PayrollSubmissionInboxStatus'          => 'db:payroll_submission_inbox_items.status',
         'payroll.ts::PayrollSubmissionInboxProblemKind'     => 'db:payroll_submission_inbox_items.problem_kind',
@@ -335,6 +355,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const CLIENT_ONLY_UNIONS = [
+        'payroll.ts::PayrollRunHistoryTotalKey' =>
+            'Bezpečný read model historie zpřístupňuje jen tři výslovně vybrané součty '
+            . 'z JSON výsledku; nejde o uložený stav ani samostatný backendový číselník.',
         'payroll.ts::PayrollPersonProfileStatus' =>
             'Sloupec `payroll_employee_profiles.profile_status` zná legacy/setup/ready; '
             . '`missing` je čistě klientský stav „profil ještě nevznikl" a v DB být nemůže.',
@@ -360,6 +383,10 @@ final class PayrollEnumContractTest extends TestCase
             . 'tabulek, sám o sobě to číselník domény není.',
         'payroll.ts::PayrollSigningEnvironment' => 'Totéž co PayrollRegzelEnvironment, pro podepisování.',
         'payroll.ts::PayrollJmhzTransportEnvironment' => 'Totéž co PayrollRegzelEnvironment, pro cJMHZ.',
+        'payroll.ts::PayrollRegistrationEventInteraction' =>
+            'Editor následných událostí nabízí jen A2 až A8; backendový katalog '
+            . 'PayrollRegistrationInteraction::SUPPORTED navíc obsahuje vstupní P1 a A1, '
+            . 'které vznikají jinými průvodci a v tomto unionu být nesmějí.',
         'payrollPayments.ts::PayrollPaymentLiabilityState' =>
             'Stav závazku se neukládá — PayrollPaymentQueryService ho dopočítává '
             . 'z pokrytí dávkami a spárováním.',
@@ -437,6 +464,9 @@ final class PayrollEnumContractTest extends TestCase
 
         'payroll.documents.kind' => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
 
+        'payroll.submissions.statutory.capability'
+            => 'const:MyInvoice\Service\Payroll\Submission\PayrollStatutoryAgendaCatalog::CAPABILITIES',
+
         // Rozklad pojistného skládá klíče dynamicky (`t(\`…allocation_blocker.${reason}\`)`).
         // Chybějící věta by u rozdělení, které nevzniklo, vypsala syrový kód —
         // právě tam, kde má být řečeno, PROČ osobní podíl nedostal.
@@ -476,6 +506,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementFilingObligation',
         'payroll.annual_settlement.annual_claims_options'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
+        'payroll.annual_settlement.other_caregiver_options'
+            => 'db:payroll_annual_settlement_requests.other_household_caregiver_status',
 
         'payroll.deductions.status'      => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementStatus',
         'payroll.deductions.commands'    => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
@@ -708,6 +740,23 @@ final class PayrollEnumContractTest extends TestCase
         sort($sortedColumn);
         self::assertSame($sortedColumn, $states, 'PayrollEmploymentLifecycle zná jiné stavy než sloupec.');
         self::assertSame([], $unknownTargets, 'Přechod míří na stav, který sloupec nepřipouští.');
+    }
+
+    public function testPayrollRelationTypeEnumMatchesDatabaseColumn(): void
+    {
+        $enum = $this->domain(
+            'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
+        );
+        $column = $this->domain('db:payroll_employments.relation_type');
+        sort($enum, SORT_STRING);
+        sort($column, SORT_STRING);
+
+        self::assertNotEmpty($column, 'Doména payroll_employments.relation_type je prázdná.');
+        self::assertSame(
+            $column,
+            $enum,
+            'Společný enum pracovních vztahů se rozešel s databázovým sloupcem.',
+        );
     }
 
     /**

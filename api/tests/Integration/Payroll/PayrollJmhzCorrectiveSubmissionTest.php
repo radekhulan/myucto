@@ -9,7 +9,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormLedgerResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEffectiveFormStateResolver;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
@@ -100,6 +102,7 @@ final class PayrollJmhzCorrectiveSubmissionTest extends TestCase
             $this->obligations,
             $frozen,
             $this->clock,
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
         );
         $this->effectiveForms = new JmhzEffectiveFormLedgerResolver(
             $this->repository,

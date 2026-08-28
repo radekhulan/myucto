@@ -9,17 +9,21 @@ import {
   type PayrollEmployerAccounts,
   type PayrollEmployerSettings,
   type PayrollEmployerSettingsPayload,
+  type PayrollOffice,
+  type PayrollOfficeRegistration,
 } from '@/api/payroll'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnIconSm, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
+import Modal from '@/components/ui/Modal.vue'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
 import PayrollDimensions from './PayrollDimensions.vue'
 import RegzelProfileSettings from './RegzelProfileSettings.vue'
+import JmhzEmployerAnnualEvidenceSettings from './JmhzEmployerAnnualEvidenceSettings.vue'
 import { codeFromName, OFFICE_CODE_MAX_LENGTH } from '@/utils/slugifyCode'
 import {
   PAYROLL_ACCOUNT_TYPES,
@@ -96,6 +100,14 @@ const form = reactive<EmployerSettingsForm>({
   accounts: { ...defaultAccounts },
 })
 const formOffices = ref<FormOffice[]>([])
+const registrationOffice = ref<PayrollOffice | null>(null)
+const registrationHistory = ref<PayrollOfficeRegistration[]>([])
+const registrationSaving = ref(false)
+const registrationForm = reactive({
+  effective_from: new Date().toISOString().slice(0, 10),
+  social_security_variable_symbol: '',
+  source_reference: '',
+})
 
 const canWrite = computed(() => auth.canWrite('payroll.settings'))
 const canWriteSubmissions = computed(() => auth.canWrite('payroll.submissions'))
@@ -112,8 +124,7 @@ const duplicateOfficeCodes = computed(() => new Set(
 ))
 const hasInvalidOffice = computed(() => formOffices.value.some((_office, index) =>
   officeCodeError(index) !== null
-  || officeNameError(index) !== null
-  || officeSocialSecurityVariableSymbolError(index) !== null,
+  || officeNameError(index) !== null,
 ))
 const defaultOfficeValid = computed(() =>
   activeOffices.value.some(office => office.code.trim().toUpperCase() === form.default_office_code),
@@ -222,7 +233,9 @@ async function save() {
       offices: formOffices.value.map(office => ({
         code: office.code.trim().toUpperCase(),
         name: office.name.trim(),
-        social_security_variable_symbol: nullable(office.social_security_variable_symbol),
+        // VS has append-only effective history; the bulk profile may never
+        // overwrite the legacy live projection.
+        social_security_variable_symbol: null,
         is_active: office.is_active,
       })),
     })
@@ -240,6 +253,44 @@ async function save() {
     }
   } finally {
     saving.value = false
+  }
+}
+
+async function openRegistration(office: PayrollOffice) {
+  registrationOffice.value = office
+  registrationForm.effective_from = new Date().toISOString().slice(0, 10)
+  registrationForm.social_security_variable_symbol = ''
+  registrationForm.source_reference = ''
+  try {
+    registrationHistory.value = await payrollApi.officeRegistrations(office.id)
+  } catch {
+    registrationHistory.value = []
+    toast.error(t('payroll.employer.registration_history_failed'))
+  }
+}
+
+function closeRegistration() {
+  registrationOffice.value = null
+}
+
+async function saveRegistration() {
+  if (!registrationOffice.value || !/^\d{10}$/.test(registrationForm.social_security_variable_symbol)
+    || registrationForm.source_reference.trim() === '') return
+  registrationSaving.value = true
+  try {
+    const saved = await payrollApi.createOfficeRegistration(registrationOffice.value.id, {
+      effective_from: registrationForm.effective_from,
+      social_security_variable_symbol: registrationForm.social_security_variable_symbol,
+      source_reference: registrationForm.source_reference.trim(),
+    })
+    registrationHistory.value = [saved, ...registrationHistory.value]
+    toast.success(t('payroll.employer.registration_saved'))
+  } catch (error: unknown) {
+    const message = isAxiosError<{ error?: { message?: string } }>(error)
+      ? error.response?.data?.error?.message : null
+    toast.error(message || t('payroll.employer.registration_save_failed'))
+  } finally {
+    registrationSaving.value = false
   }
 }
 
@@ -319,14 +370,6 @@ function officeCodeError(index: number): string | null {
 function officeNameError(index: number): string | null {
   const name = formOffices.value[index]?.name.trim() ?? ''
   return name === '' || name.length > 190 ? t('payroll.employer.validation.office_name') : null
-}
-
-function officeSocialSecurityVariableSymbolError(index: number): string | null {
-  const value = formOffices.value[index]?.social_security_variable_symbol?.trim() ?? ''
-  if (value === '') return null
-  return /^\d{1,10}$/.test(value)
-    ? null
-    : t('payroll.employer.validation.social_security_variable_symbol')
 }
 
 function accountLabel(key: string): string {
@@ -609,8 +652,16 @@ onMounted(load)
                   <span v-else-if="office.is_new" class="mt-1 block max-w-48 text-xs text-neutral-500">{{ t('payroll.employer.office_code_hint') }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
-                  <input v-model="office.social_security_variable_symbol" data-office-social-vs type="text" inputmode="numeric" maxlength="10" autocomplete="off" :disabled="!canWrite" :aria-invalid="showValidation && officeSocialSecurityVariableSymbolError(index) !== null" class="h-9 w-40 rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-                  <span v-if="showValidation && officeSocialSecurityVariableSymbolError(index)" class="mt-1 block max-w-52 text-xs text-danger-600">{{ officeSocialSecurityVariableSymbolError(index) }}</span>
+                  <button
+                    v-if="office.id > 0"
+                    type="button"
+                    :class="btnOutline('neutral')"
+                    :disabled="!canWrite"
+                    @click="openRegistration(office)"
+                  >
+                    {{ t('payroll.employer.manage_registration') }}
+                  </button>
+                  <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>
                 </td>
                 <td class="px-3 py-3 align-top">
                   <label class="inline-flex min-h-9 cursor-pointer items-center gap-2">
@@ -652,8 +703,10 @@ onMounted(load)
               </label>
               <label class="block">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_social_security_variable_symbol') }}</span>
-                <input v-model="office.social_security_variable_symbol" data-office-social-vs type="text" inputmode="numeric" maxlength="10" autocomplete="off" :disabled="!canWrite" :aria-invalid="showValidation && officeSocialSecurityVariableSymbolError(index) !== null" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20 disabled:bg-neutral-50 disabled:text-neutral-500">
-                <span v-if="showValidation && officeSocialSecurityVariableSymbolError(index)" class="mt-1 block text-xs text-danger-600">{{ officeSocialSecurityVariableSymbolError(index) }}</span>
+                <button v-if="office.id > 0" type="button" :class="btnOutline('neutral')" :disabled="!canWrite" @click="openRegistration(office)">
+                  {{ t('payroll.employer.manage_registration') }}
+                </button>
+                <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>
               </label>
               <label class="inline-flex min-h-10 cursor-pointer items-center gap-2">
                 <input v-model="office.is_active" type="checkbox" :disabled="!canWrite" class="h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500" @change="updateOfficeActivity(index)">
@@ -791,10 +844,10 @@ onMounted(load)
 
       <PayrollDimensions v-if="activeTab === 'dimensions'" :can-write="canWrite" />
 
-      <RegzelProfileSettings
-        v-if="activeTab === 'submissions'"
-        :can-write="canWriteSubmissions"
-      />
+      <div v-if="activeTab === 'submissions'" class="space-y-6">
+        <RegzelProfileSettings :can-write="canWriteSubmissions" />
+        <JmhzEmployerAnnualEvidenceSettings :can-write="canWriteSubmissions" />
+      </div>
 
       <div
         v-if="!canWrite && (activeTab === 'employer' || activeTab === 'accounting')"
@@ -817,5 +870,42 @@ onMounted(load)
         </button>
       </div>
     </template>
+
+    <Modal
+      v-if="registrationOffice"
+      :title="t('payroll.employer.registration_dialog_title', { office: registrationOffice.name })"
+      @close="closeRegistration"
+    >
+      <div class="space-y-4">
+        <p class="text-sm text-neutral-600">{{ t('payroll.employer.registration_dialog_hint') }}</p>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.registration_effective_from') }}</span>
+          <input v-model="registrationForm.effective_from" type="date" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.office_social_security_variable_symbol') }}</span>
+          <input v-model="registrationForm.social_security_variable_symbol" data-registration-vs type="text" inputmode="numeric" maxlength="10" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono text-sm">
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.registration_source_reference') }}</span>
+          <input v-model="registrationForm.source_reference" data-registration-source type="text" maxlength="500" class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+        </label>
+        <p v-if="registrationHistory.length === 0" class="text-sm text-warning-700">{{ t('payroll.employer.registration_history_empty') }}</p>
+        <ul v-else class="divide-y divide-neutral-200 rounded-md border border-neutral-200 text-sm">
+          <li v-for="version in registrationHistory" :key="version.id" class="px-3 py-2">
+            <span class="font-mono">{{ version.effective_from }} · {{ version.social_security_variable_symbol }}</span>
+            <span class="ml-2 text-neutral-500">{{ version.source_reference }}</span>
+          </li>
+        </ul>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="closeRegistration">{{ t('common.cancel') }}</button>
+          <button type="button" :class="btnFilled('primary')" :disabled="registrationSaving || !/^\d{10}$/.test(registrationForm.social_security_variable_symbol) || registrationForm.source_reference.trim() === ''" @click="saveRegistration">
+            {{ registrationSaving ? t('common.saving') : t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
   </div>
 </template>

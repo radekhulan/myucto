@@ -33,7 +33,7 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
                 'body' => '',
                 'cookies' => $secondLogin
                     ? ['IPCZ-X-COOKIE' => 'session-cookie-123']
-                    : ['S-COOKIE' => 'state-cookie-123'],
+                    : ['IPCZ-S-COOKIE' => 'state-cookie-123'],
             ];
         };
         $authenticator = new MobileKeyIsdsAuthenticator($this->crypto(), new InMemoryIsdsAuthFlowStore(), $http);
@@ -49,7 +49,9 @@ final class MobileKeyIsdsAuthenticatorTest extends TestCase
         self::assertSame('session-cookie-123', $completed['context']->credentials->sessionCookie?->reveal());
         self::assertCount(3, $calls);
         self::assertSame('status', $calls[1][0]);
+        self::assertSame('IPCZ-S-COOKIE=state-cookie-123', $calls[1][2]['cookie'] ?? null);
         self::assertSame('login', $calls[2][0]);
+        self::assertSame('IPCZ-S-COOKIE=state-cookie-123', $calls[2][2]['cookie'] ?? null);
     }
 
     public function testFlowTokenIsBoundToSupplierAndUser(): void

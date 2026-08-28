@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   downloadJmhzPreview: vi.fn(),
   healthOverviews: vi.fn(),
   downloadHealthOverview: vi.fn(),
+  prepareHealthOverview: vi.fn(),
   submissionInbox: vi.fn(),
   acknowledgeInboxItem: vi.fn(),
   snoozeInboxItem: vi.fn(),
@@ -90,7 +91,7 @@ vi.mock('@/api/payrollHealthNotifications', () => ({
       },
       unresolved_employments: [],
     }),
-    preparePaymentOverview: vi.fn(),
+    preparePaymentOverview: m.prepareHealthOverview,
   },
 }))
 
@@ -268,10 +269,27 @@ function setup() {
       filename: `zp-prehled-2026-08-111-revize-${revisionId}.json`,
     }],
     electronic_submission: {
-      supported: false,
-      reason_code: 'health_insurance_transport_unavailable',
+      direct_portal: {
+        supported: false,
+        reason_code: 'health_insurance_portal_transport_undocumented',
+      },
+      isds: {
+        supported: true,
+        requires_ready: true,
+        requires_production_gate: true,
+        requires_user_confirmation: true,
+      },
     },
   }))
+  m.prepareHealthOverview.mockResolvedValue({
+    submission_id: 31,
+    artifact_id: 51,
+    pdf_artifact_id: 52,
+    insurer_code: '111',
+    status: 'ready',
+    schema_validated: true,
+    dispatch: { channel: { isds_attachment_format: 'text_pdf' } },
+  })
   // Přehled se podává za REGISTRACI u OSSZ, takže panel se nejdřív ptá,
   // za které účtárny se z revize podává.
   m.jmhzOffices.mockImplementation(async () => [{
@@ -403,6 +421,17 @@ function setup() {
       catalog_version: null,
       channel: 'manual_upload',
       created_at: '2026-09-01 08:01:00',
+    }, {
+      id: 52,
+      part_id: 41,
+      artifact_kind: 'outbound_pdf',
+      direction: 'outbound',
+      mime_type: 'application/pdf',
+      byte_size: 4096,
+      xsd_version: null,
+      catalog_version: null,
+      channel: 'manual_upload',
+      created_at: '2026-09-01 08:01:00',
     }],
     receipts: [],
     issues: [{
@@ -450,10 +479,13 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Devět včetně vlastní záložky pro záměr uplatňovat slevu
+    // Deset včetně vlastní záložky pro záměr uplatňovat slevu
     // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
-    // „Ostatní" zůstává záchytná skupina; zdravotní povinnosti mají jednu kartu.
-    expect(wrapper.findAll('[role="tab"]')).toHaveLength(9)
+    // „Další povinnosti" vede explicitní NEMPRI/HZUPN/ELDP/úrazovou matici,
+    // zatímco „Ostatní" zůstává záchytná skupina pro neznámé kódy.
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(10)
+    expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()
     expect(wrapper.findAll('input[role="combobox"]').length).toBeGreaterThanOrEqual(2)
@@ -594,9 +626,12 @@ describe('PayrollSubmissions', () => {
     const download = wrapper.get('[data-test="health-payment-overviews"] button')
     await download.trigger('click')
     await flushPromises()
-    expect(m.downloadHealthOverview).toHaveBeenCalledWith(
-      expect.objectContaining({ revision_id: 18, insurer: { code: '111' } }),
+    expect(m.prepareHealthOverview).toHaveBeenCalledWith(18, '111', 'production')
+    expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(
+      31,
+      expect.objectContaining({ id: 52, mime_type: 'application/pdf' }),
     )
+    expect(m.downloadHealthOverview).not.toHaveBeenCalled()
   })
 
   it('nabídne bezpečně označený PVPOJ kontrolní náhled ke stažení', async () => {
@@ -622,6 +657,42 @@ describe('PayrollSubmissions', () => {
     expect(m.downloadJmhzPreview).toHaveBeenCalledWith(
       expect.objectContaining({ revision_id: 18, workflow_status: 'preview_only' }),
     )
+  })
+
+  it('stará immutable ordinary evidence vede účetní k nové revizi, ne k editaci vztahu', async () => {
+    m.jmhzOrdinaryEvidence.mockResolvedValue({
+      scopes: [{
+        employee_id: 3,
+        employment_id: 4,
+        employee_name: 'Cyril Syntetický',
+        confirmed: false,
+        resolution: 'attention_required',
+        attention_code: 'jmhz_ordinary_evidence_scope_mismatch',
+        attention_message: 'Zmrazené potvrzení už neodpovídá aktuální specifikaci.',
+      }],
+      evidences: [],
+    })
+
+    const wrapper = mount(PayrollSubmissions, {
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a :data-to="to"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await clickTab(wrapper, 'jmhz')
+    await flushPromises()
+
+    const evidence = wrapper.get('[data-test="jmhz-ordinary-evidence"]')
+    expect(evidence.text()).toContain('Zmrazené potvrzení už neodpovídá aktuální specifikaci.')
+    expect(evidence.text())
+      .toContain('payroll.submissions.overview.jmhz_evidence_attention_revision_action')
+    expect(evidence.text())
+      .not.toContain('payroll.submissions.overview.jmhz_evidence_attention_employment_action')
   })
 
   /**

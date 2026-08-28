@@ -5,13 +5,18 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use PDO;
 
 final class PayrollPaymentMatchRepository
 {
     private int $savepointSequence = 0;
+    private readonly PayrollYearCloseGuard $yearClose;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(private readonly Connection $db)
+    {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /**
      * @template T
@@ -454,15 +459,7 @@ final class PayrollPaymentMatchRepository
         string $idempotencyKeyHash,
         ?int $matchedBy,
     ): int {
-        $statement = $this->db->pdo()->prepare(
-            'INSERT INTO payroll_payment_matches
-                (supplier_id, allocation_id, liability_id,
-                 event_kind, source_match_id,
-                 amount_minor, bank_statement_id, bank_transaction_id,
-                 cash_document_id, idempotency_key_hash, matched_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        );
-        $statement->execute([
+        return $this->transaction(function () use (
             $supplierId,
             $allocationId,
             $liabilityId,
@@ -474,9 +471,32 @@ final class PayrollPaymentMatchRepository
             $cashDocumentId,
             $idempotencyKeyHash,
             $matchedBy,
-        ]);
+        ): int {
+            $this->yearClose->assertOpenForLiability($supplierId, $liabilityId);
+            $statement = $this->db->pdo()->prepare(
+                'INSERT INTO payroll_payment_matches
+                    (supplier_id, allocation_id, liability_id,
+                     event_kind, source_match_id,
+                     amount_minor, bank_statement_id, bank_transaction_id,
+                     cash_document_id, idempotency_key_hash, matched_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            );
+            $statement->execute([
+                $supplierId,
+                $allocationId,
+                $liabilityId,
+                $eventKind,
+                $sourceMatchId,
+                $amountMinor,
+                $bankStatementId,
+                $bankTransactionId,
+                $cashDocumentId,
+                $idempotencyKeyHash,
+                $matchedBy,
+            ]);
 
-        return (int) $this->db->pdo()->lastInsertId();
+            return (int) $this->db->pdo()->lastInsertId();
+        });
     }
 
     /**

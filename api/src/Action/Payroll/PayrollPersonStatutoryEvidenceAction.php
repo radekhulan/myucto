@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollPersonNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceConflictException;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -56,6 +57,9 @@ final class PayrollPersonStatutoryEvidenceAction
         if ($view === null) {
             return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
         }
+        if (!RequestAuthorization::allows($request, 'payroll.health_evidence', AccessLevel::READ)) {
+            $view = $this->withoutHealthEvidenceDocumentMetadata($view);
+        }
 
         return Json::ok($response, ['evidence' => $view]);
     }
@@ -86,6 +90,17 @@ final class PayrollPersonStatutoryEvidenceAction
         if ($effectiveOn === null) {
             return $this->invalidEffectiveOn($response);
         }
+        if ($this->containsHealthEvidenceDocument($payload)
+            && !$this->requirePermission(
+                $request,
+                $response,
+                'payroll.health_evidence',
+                AccessLevel::WRITE,
+                $error,
+            )
+        ) {
+            return $this->errorResponse($error);
+        }
 
         try {
             $view = $this->evidence->save(
@@ -113,6 +128,9 @@ final class PayrollPersonStatutoryEvidenceAction
             );
         } catch (\InvalidArgumentException $exception) {
             return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+        if (!RequestAuthorization::allows($request, 'payroll.health_evidence', AccessLevel::READ)) {
+            $view = $this->withoutHealthEvidenceDocumentMetadata($view);
         }
 
         return Json::ok($response, ['evidence' => $view]);
@@ -171,6 +189,51 @@ final class PayrollPersonStatutoryEvidenceAction
             'effective_on musí být datum YYYY-MM-DD.',
             422,
         );
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function containsHealthEvidenceDocument(array $payload): bool
+    {
+        $sections = $payload['sections'] ?? null;
+        if (!is_array($sections)) {
+            return false;
+        }
+        $coverages = $sections['health_coverages'] ?? null;
+        if (!is_array($coverages)) {
+            return false;
+        }
+        foreach ($coverages as $coverage) {
+            if (is_array($coverage)
+                && ($coverage['health_evidence_document_id'] ?? null) !== null
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** @param array<string,mixed> $view
+     *  @return array<string,mixed>
+     */
+    private function withoutHealthEvidenceDocumentMetadata(array $view): array
+    {
+        $coverages = $view['sections']['health_coverages'] ?? null;
+        if (!is_array($coverages)) {
+            return $view;
+        }
+        foreach ($coverages as $index => $coverage) {
+            if (!is_array($coverage)) {
+                continue;
+            }
+            unset(
+                $coverage['health_evidence_document_id'],
+                $coverage['health_evidence_document_sha256'],
+            );
+            $coverages[$index] = $coverage;
+        }
+        $view['sections']['health_coverages'] = $coverages;
+
+        return $view;
     }
 
     private function clientIp(Request $request): ?string

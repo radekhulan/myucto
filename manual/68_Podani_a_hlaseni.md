@@ -115,6 +115,29 @@ použít omezenou předregistraci PREZEC, nebo je potřeba úplná registrace RE
 Náhled i následné zmrazení používají stejný historický zdroj a stejné kontroly;
 pozdější změna osobní karty už nemění dříve zmrazené podání.
 
+Úplnou registraci REGZEC s akcí A1 aplikace nepřipraví ani neodešle, dokud
+nemá zmrazený povinný druh činnosti a úplnou datovou sadu odpovídající varianty
+OST, 10 nebo SPEC. Navazující akce A5 až A8 jsou dostupné pouze pro variantu
+OST; u variant 10 a SPEC je aplikace odmítne ještě před schválením události.
+
+Úplný podklad zadáte na kartě pracovního vztahu v části **Registrace vztahu na
+ČSSZ → Autoritativní profil REGZEC A1**. Profil obsahuje rozhodné datum a druh
+činnosti, trvalou adresu, variantní údaje pracovního místa a podle situace také
+daňovou rezidenci, zdravotní pojišťovnu, vzdělání, důchodové skutečnosti a údaje
+cizince. Vyplňujte pouze údaje doložené personálními podklady. Server před
+uložením zkontroluje variantu OST, 10 nebo SPEC a všechny její povinné vazby;
+neúplný profil neuloží. Každé úspěšné uložení vytvoří novou šifrovanou verzi,
+starší verzi nepřepisuje. Náhled a podání pak zmrazí přesné ID verze i její
+otisk, takže pozdější oprava profilu už hotové podání nezmění.
+
+Při ukončovací akci REGZEC A2 aplikace prověří také všechna dotčená období od
+ledna 2026 do měsíce skončení. Pokud byla mzda za některý měsíc opravena,
+vyžaduje aktuální schválenou opravnou revizi, skutečně dokončený přenos jejího
+JMHZ, shodnou korelaci důvěryhodné doručenky a přijatý výsledek daného vztahu.
+Chybějící, čekající nebo odmítnutý měsíc přípravu A2 zablokuje a uvede konkrétní
+období. Při přípravě se celý plán pod zámkem znovu ověří a uloží se jeho
+neměnný otisk; pozdější historie se nepřepisuje.
+
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto
@@ -305,6 +328,18 @@ Budoucí měsíce se nevyžadují. Chybí-li ale některá revize uvnitř takto
 vymezeného období, příprava zůstane zablokovaná, protože by nebylo možné
 doložit souvislou dobu pojištění ani vyměřovací základ.
 
+Vygenerované XML slouží pouze ke kontrole údajů. Není to transportní datová
+věta a MyÚčto je neodesílá ani nevkládá do datové schránky. ELDP dokončete
+v aktuálním oficiálním rozhraní ČSSZ a výsledek potom doložte aktivním firemním
+dokumentem z DMS, referencí potvrzení a skutečným datem.
+
+Rozlišujte dva výsledky. **Podáno (`submitted`)** znamená, že máte doklad o
+podání, ale ještě ne konečné přijetí; povinnost proto zůstává ve stavu čekání
+na výsledek. **Přijato (`accepted`)** použijte jen tehdy, když připojený dokument
+výslovně dokládá konečné přijetí. Teprve tento důkaz označí zákonnou povinnost
+za splněnou. Kontrolní XML přitom zůstává stále jen ve stavu připraveno a nikdy
+se nevykazuje jako odeslané.
+
 ## 68.11 Podání zdravotním pojišťovnám
 
 Záložky zdravotních pojišťoven oddělují dvě povinnosti:
@@ -343,3 +378,30 @@ stejného centrálního katalogu pojišťoven jako sestavení souboru. Akci vžd
 spustí uživatel; vytvoření záznamu ve frontě ani konceptu není odeslání.
 Zkontrolujte adresáta, období a přílohu, v ISDS koncept výslovně schvalte
 a následně ověřte doručenku i věcnou odpověď pojišťovny.
+
+## 68.12 Nemocenské a další zákonné povinnosti
+
+Záložka **Další povinnosti** ukazuje pro vybraný měsíc přesnou matici toho,
+co MyÚčto umí a co musí zůstat ruční. NEMPRI je po zavedení JMHZ nahrazené
+jen částečně a HZUPN zůstává samostatným hlášením. MyÚčto pro ně nevytváří
+XML ani je neodesílá. Účetní ověří případ a zdrojová data, podání dokončí
+v oficiálním kanálu ČSSZ a skutečnou doručenku nebo protokol uloží jako
+firemní dokument do DMS.
+
+Po ručním splnění lze u NEMPRI nebo HZUPN zapsat zaměstnance, referenci
+případu, referenci doručenky, datum a ID firemního DMS dokumentu. Server
+ověří vlastnictví dokumentu firmou a sám zmrazí jeho SHA-256. Záznam je
+neměnný; oprava se přidává jako nový důkaz. Produkční a testovací důkazy se
+nemíchají. Samotné vyplnění formuláře v MyÚčtu nikdy nenahrazuje podání
+v oficiálním kanálu.
+
+**Zákonné úrazové pojištění** je v matici výslovně uvedené jako samostatná
+ruční povinnost. MyÚčto nyní nepočítá základ ani sazbu, nevytváří předpis,
+výstup nebo platební závazek a nenabízí transport. Částku proto určete podle
+odborně ověřených externích podkladů a skutečnou úhradu proveďte mimo MyÚčto.
+Potvrzení úhrady nebo konkrétní oficiální doklad uložte jako firemní dokument
+do DMS. Teprve potom lze zapsat externě ověřenou částku v CZK, referenci
+povinnosti, referenci platby a DMS dokument jako neměnný důkaz. Zápis je
+výslovné potvrzení uživatele; MyÚčto správnost výpočtu ani provedení platby
+automaticky neověřuje. Absence automatizace neznamená, že povinnost zanikla
+nebo ji nahradilo JMHZ.

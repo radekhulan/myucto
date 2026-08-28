@@ -25,6 +25,8 @@ final class PayrollDependantValidatorTest extends TestCase
         self::assertSame('010101/0008', $result['birth_number']);
         self::assertTrue($result['birth_number_present']);
         self::assertSame('2001-01-01', $result['birth_date']);
+        self::assertSame('Syntetické', $result['given_name']);
+        self::assertSame('Dítě', $result['family_name']);
         self::assertNull($result['existence_to']);
     }
 
@@ -149,6 +151,8 @@ final class PayrollDependantValidatorTest extends TestCase
         return $overrides + [
             'relation' => 'child_own',
             'full_name' => 'Syntetické Dítě',
+            'given_name' => 'Syntetické',
+            'family_name' => 'Dítě',
             'birth_date' => '2001-01-01',
             'birth_number' => '010101/0008',
             'ztp_p' => false,

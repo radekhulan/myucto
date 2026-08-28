@@ -153,8 +153,15 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
              VALUES (?, "PVPOJ-SYN", "Syntetická účtárna PVPOJ",
                      "1234567890", 1)',
         )->execute([$supplierId]);
+        $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from,
+                 social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", "1234567890", "synthetic:pvpoj")',
+        )->execute([$supplierId, $officeId]);
 
-        return (int) $pdo->lastInsertId();
+        return $officeId;
     }
 
     private function employee(PDO $pdo, int $supplierId): int
@@ -202,6 +209,28 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
              VALUES (?, "2026-06-01", "2026-07-10", "approved", 1)',
         )->execute([$supplierId]);
         $runId = (int) $pdo->lastInsertId();
+        $registrationStatement = $pdo->prepare(
+            'SELECT version.id, version.effective_from,
+                    version.social_security_variable_symbol,
+                    version.source_reference, office.code, office.name
+               FROM payroll_office_registration_versions version
+               JOIN payroll_offices office
+                 ON office.supplier_id = version.supplier_id
+                AND office.id = version.office_id
+              WHERE version.supplier_id = ? AND version.office_id = ?',
+        );
+        $registrationStatement->execute([$supplierId, $officeId]);
+        $registrationRow = $registrationStatement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($registrationRow);
+        $officeRegistration = [
+            'id' => (int) $registrationRow['id'],
+            'effective_from' => (string) $registrationRow['effective_from'],
+            'social_security_variable_symbol' => (string) $registrationRow['social_security_variable_symbol'],
+            'source_reference' => (string) $registrationRow['source_reference'],
+            'office_code' => (string) $registrationRow['code'],
+            'office_name' => (string) $registrationRow['name'],
+        ];
+        $officeRegistration['sha256'] = $this->hash($officeRegistration);
         $personInput = [
             'employee' => ['id' => $employeeId],
             'employments' => [[
@@ -209,6 +238,7 @@ final class PayrollJmhzPvpojPreviewServiceTest extends TestCase
                     'id' => $employmentId,
                     'employee_id' => $employeeId,
                     'office_id' => $officeId,
+                    'office_registration' => $officeRegistration,
                 ],
             ]],
         ];

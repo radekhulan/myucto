@@ -192,9 +192,9 @@ final class JmhzScenario1ControlEvaluator
 
     public function __construct(
         private readonly JmhzControlParameterCatalog $parameters,
+        private readonly JmhzDeadlinePolicy $deadlines,
         private readonly ?JmhzExternalCodebookCatalog $externalCodebooks = null,
         private readonly ?JmhzCodebookCatalog $codebooks = null,
-        private readonly JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
     ) {}
 
     /** @return list<int> */
@@ -204,7 +204,8 @@ final class JmhzScenario1ControlEvaluator
             1, 3, 4, 8, 10, 11, 12, 13, 20, 23, 31, 37, 43, 44, 45, 50, 56, 57, 58,
             60, 61, 62, 72, 74, 78, 79, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 112, 118, 121, 124, 129, 131, 132, 134, 135, 137, 138, 144, 145, 152,
-            153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 204, 207, 208,
+            150, 151, 153, 154, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
+            204, 207, 208,
             191, 192, 193, 211, 216, 227, 232, 233, 235,
             236, 237, 240, 244, 248, 251,
             253, 255, 260, 267, 270, 271, 272, 273, 275, 282, 283, 284, 286,
@@ -448,6 +449,9 @@ final class JmhzScenario1ControlEvaluator
             134 => $this->insuranceDaysWithinInterval($projection),
             144 => $this->obstacleWithinAgreedFund($projection, '10471'),
             145 => $this->obstacleWithinAgreedFund($projection, '10472'),
+            150 => $this->collectiveAgreementTypes($projection),
+            151 => $this->ownershipForm($projection),
+            194 => $this->decemberOnlyEmployerAnnual($projection),
             152, 335 => $this->workplaceMunicipality($projection),
             153 => $this->workplaceCountry($projection),
             154 => $this->activePolicyInstrument($projection),
@@ -2536,6 +2540,75 @@ final class JmhzScenario1ControlEvaluator
     }
 
     /** @return list<JmhzControlVerdict> */
+    /** @return list<JmhzControlVerdict> */
+    private function collectiveAgreementTypes(JmhzAttributeProjection $projection): array
+    {
+        $occurrences = $projection->summary()->all('10214');
+        if ($occurrences === []) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUMMARY)];
+        }
+        $values = array_map(
+            static fn (JmhzAttributeOccurrence $occurrence): string => $occurrence->value,
+            $occurrences,
+        );
+        foreach ($values as $value) {
+            if (!in_array($value, ['0', '1', '2', '3', '4', '5'], true)) {
+                return [JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_SUMMARY,
+                    null,
+                    "Typ kolektivní smlouvy {$value} není v číselníku 0–5.",
+                )];
+            }
+        }
+        if (in_array('0', $values, true) && $values !== ['0']) {
+            return [JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUMMARY,
+                null,
+                'Kód 0 znamená neexistenci kolektivní smlouvy a nesmí se kombinovat s jiným typem.',
+            )];
+        }
+
+        return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUMMARY)];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function ownershipForm(JmhzAttributeProjection $projection): array
+    {
+        $value = $projection->summary()->value('10220');
+        if ($value === null) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUMMARY)];
+        }
+
+        return [in_array($value, ['1', '2', '3', '4'], true)
+            ? JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUMMARY)
+            : JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUMMARY,
+                null,
+                "Forma vlastnictví {$value} není v číselníku 1–4.",
+            )];
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function decemberOnlyEmployerAnnual(JmhzAttributeProjection $projection): array
+    {
+        $present = false;
+        foreach (['10452', '10038', '10039', '10220', '10214'] as $attributeId) {
+            $present = $projection->summary()->has($attributeId) || $present;
+        }
+        if (!$present) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUMMARY)];
+        }
+        $month = $projection->submission()->integer('10010');
+
+        return [$month === 12
+            ? JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUMMARY)
+            : JmhzControlVerdict::failed(
+                JmhzAttributeProjection::PART_SUMMARY,
+                null,
+                'Roční údaje zaměstnavatele lze uvést jen v prosincovém hlášení.',
+            )];
+    }
+
     private function annualSettlementMonths(JmhzAttributeProjection $projection): array
     {
         $month = $projection->submission()->integer('10010');

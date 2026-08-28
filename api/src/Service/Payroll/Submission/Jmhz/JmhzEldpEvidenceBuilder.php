@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
 
 final class JmhzEldpEvidenceBuilder
 {
@@ -22,8 +23,9 @@ final class JmhzEldpEvidenceBuilder
     private ?array $specManifest = null;
 
     /**
-     * Odvodí potvrzení pouze pro běžný bezabsenční řez. Výsledný kandidát vždy
-     * projde stejnou úplnou validací jako ručně dodané potvrzení.
+     * Odvodí potvrzení pouze pro běžný řez bez ELDP vyloučených a odečítaných
+     * dob. Výsledný kandidát vždy projde stejnou úplnou validací jako ručně
+     * dodané potvrzení.
      *
      * @param array<string,mixed> $source
      * @return array<string,mixed>
@@ -154,14 +156,21 @@ final class JmhzEldpEvidenceBuilder
         }
         $relationshipDetailCode = $term['jmhz_relationship_detail_code'] ?? null;
         $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
-        $selection = JmhzScenario1SelectorResolver::load()->resolve($activityCode, $relationshipDetailCode);
+        $selectorRelationshipDetailCode = is_string($relationshipDetailCode) ? $relationshipDetailCode : null;
+        $selection = JmhzScenarioSelectorResolver::load()->resolve($activityCode, $selectorRelationshipDetailCode);
         if (!$selection['supported']) {
-            $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného standardního scénáře.');
+            $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného scénáře.');
+        }
+        $scenarioResolution = $selection['evidence'] ?? null;
+        $scenarioKey = is_array($scenarioResolution) ? ($scenarioResolution['scenario_key'] ?? null) : null;
+        if (!is_string($scenarioKey)) {
+            throw new \UnexpectedValueException('Resolver scénáře JMHZ nevrátil klíč scénáře.');
         }
         $absences = $entry['absences'] ?? null;
-        if (!is_array($absences) || !array_is_list($absences) || $absences !== []) {
-            $this->invalid('jmhz_eldp_absences_unsupported', 'První ELDP řez nepodporuje měsíc s absencí.');
+        if (!is_array($absences) || !array_is_list($absences)) {
+            $this->invalid('jmhz_eldp_source_invalid', 'Absence ELDP musí být seznam.');
         }
+        $this->assertOrdinaryAbsenceSlice($absences, $periodStart, $periodEnd);
         $workSummary = is_array($entry['time_month'] ?? null)
             ? ($entry['time_month']['jmhz_work_summary'] ?? null)
             : null;
@@ -211,7 +220,7 @@ final class JmhzEldpEvidenceBuilder
         if (($participates && $days !== $inclusiveDays) || (!$participates && $days !== 0)) {
             $this->invalid('jmhz_eldp_days_mismatch', 'Počet dnů ELDP neodpovídá inkluzivnímu intervalu.');
         }
-        $this->assertWorkSummaryConsistency($workSummary, $days, $relationType);
+        $this->assertWorkSummaryConsistency($workSummary, $days, $relationType, $absences);
         $code = $confirmation['code'] ?? null;
         $confirmedBase = $confirmation['assessment_base_czk'] ?? null;
         $entryMetadata = null;
@@ -253,7 +262,7 @@ final class JmhzEldpEvidenceBuilder
                 'employee_id' => $employeeId,
                 'employment_id' => $employmentId,
                 'period_start' => $periodStart,
-                'scenario_key' => 'scenario_1',
+                'scenario_key' => $scenarioKey,
             ],
             'specification' => [
                 'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
@@ -276,7 +285,7 @@ final class JmhzEldpEvidenceBuilder
                 'work_summary_id' => $workSummary['id'],
                 'work_summary_sha256' => $workSummary['summary_sha256'],
                 'social_relationship' => $relationship,
-                'scenario_resolution' => $selection['evidence'],
+                'scenario_resolution' => $scenarioResolution,
                 'attribute_ids' => self::ATTRIBUTE_IDS,
             ],
             'insurance_interval' => [
@@ -392,9 +401,10 @@ final class JmhzEldpEvidenceBuilder
             'employment' => 'employment',
             'dpc' => 'dpc',
             'dpp' => 'dpp',
+            'partner_dependent', 'statutory_body' => 'corporate_body',
             default => $this->invalid(
                 'jmhz_eldp_relationship_kind_unsupported',
-                'První ELDP řez podporuje pracovní poměr, účastnou DPČ a neúčastnou DPP.',
+                'ELDP podporuje pracovní poměr, DPČ, DPP a člena statutárního orgánu.',
             ),
         };
         $status = $participation['status'] ?? null;
@@ -404,7 +414,7 @@ final class JmhzEldpEvidenceBuilder
         ) {
             $this->invalid('jmhz_eldp_social_relationship_unsupported', 'Druh vztahu a výsledek sociální účasti si odporují.');
         }
-        if (in_array($relationType, ['employment', 'dpc'], true)
+        if (in_array($relationType, ['employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'], true)
             && $status === 'participates'
         ) {
             return true;
@@ -414,7 +424,7 @@ final class JmhzEldpEvidenceBuilder
         }
         $this->invalid(
             'jmhz_eldp_social_relationship_unsupported',
-            'První ELDP řez podporuje účastný pracovní poměr nebo DPČ a podlimitní neúčastnou DPP.',
+            'ELDP podporuje účastný pracovní poměr, DPČ, DPP, člena statutárního orgánu a podlimitní neúčastnou DPP.',
         );
     }
 
@@ -455,6 +465,7 @@ final class JmhzEldpEvidenceBuilder
         array $workSummary,
         int $insuranceDays,
         string $relationType,
+        array $absences,
     ): void
     {
         $values = $this->object($workSummary['values'] ?? null, 'work_summary.values');
@@ -462,9 +473,34 @@ final class JmhzEldpEvidenceBuilder
         $expectedEvidenceDays = in_array($relationType, ['dpc', 'dpp'], true) ? 0 : $insuranceDays;
         if (($workSummary['conditional_blocks_confirmed'] ?? null) !== true
             || ($values['evidence_days'] ?? null) !== $expectedEvidenceDays
-            || ($interactions['IN07'] ?? null) !== false
             || ($interactions['IN08'] ?? null) !== false
         ) {
+            $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn nepotvrzuje běžný bezabsenční ELDP interval.');
+        }
+        if ($absences !== []) {
+            $vacation = $values['vacation_millihours'] ?? null;
+            if (($interactions['IN07'] ?? null) !== true
+                || !is_int($vacation)
+                || $vacation <= 0
+                || ($values['unworked_total_millihours'] ?? null) !== $vacation
+                || ($values['unworked_paid_millihours'] ?? null) !== $vacation
+            ) {
+                $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn nepotvrzuje placenou dovolenou v ordinary ELDP řezu.');
+            }
+            foreach ([
+                'dpn_without_employer_compensation_millihours',
+                'dpn_with_employer_compensation_millihours',
+                'care_millihours',
+                'employee_obstacle_paid_millihours',
+                'employer_obstacle_millihours',
+            ] as $field) {
+                if (!array_key_exists($field, $values) || $values[$field] !== null) {
+                    $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn mísí dovolenou s jinou nepřítomností.');
+                }
+            }
+            return;
+        }
+        if (($interactions['IN07'] ?? null) !== false) {
             $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn nepotvrzuje běžný bezabsenční ELDP interval.');
         }
         foreach ([
@@ -480,6 +516,40 @@ final class JmhzEldpEvidenceBuilder
             if (!array_key_exists($field, $values) || $values[$field] !== null) {
                 $this->invalid('jmhz_eldp_work_summary_mismatch', 'Pracovní souhrn obsahuje neodpracované hodiny mimo ordinary ELDP řez.');
             }
+        }
+    }
+
+    /** @param list<array<string,mixed>> $absences */
+    private function assertOrdinaryAbsenceSlice(
+        array $absences,
+        string $periodStart,
+        string $periodEnd,
+    ): void {
+        if ($absences === []) {
+            return;
+        }
+        foreach ($absences as $absence) {
+            if (!is_array($absence)
+                || array_is_list($absence)
+                || ($absence['absence_type'] ?? null) !== 'vacation'
+            ) {
+                $this->invalid(
+                    'jmhz_eldp_absences_unsupported',
+                    'Ordinary ELDP automaticky podporuje jen doloženou placenou dovolenou.',
+                );
+            }
+        }
+        $derived = (new EldpExcludedPeriodDeriver())->derive(
+            $absences,
+            $periodStart,
+            $periodEnd,
+            substr($periodStart, 0, 7),
+        );
+        if ($derived['blockers'] !== [] || $derived['total'] !== 0) {
+            $this->invalid(
+                'jmhz_eldp_absences_unsupported',
+                'Absence nelze bezpečně potvrdit jako ordinary ELDP bez vyloučených nebo odečítaných dob.',
+            );
         }
     }
 

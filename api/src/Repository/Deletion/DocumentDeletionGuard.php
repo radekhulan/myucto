@@ -64,6 +64,16 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ['table' => 'payroll_enforcement_case_documents', 'column' => 'dms_document_id'],
                     ['table' => 'payroll_enforcement_events', 'column' => 'decision_document_id'],
                     ['table' => 'payroll_insolvency_payment_instructions', 'column' => 'decision_document_id'],
+                    ['table' => 'payroll_enforcement_case_parties', 'column' => 'source_document_id'],
+                    ['table' => 'payroll_enforcement_claim_breakdowns', 'column' => 'source_document_id'],
+                    ['table' => 'payroll_enforcement_recipient_instructions', 'column' => 'source_document_id'],
+                ],
+            ],
+            'payroll_enforcement_xmlzam_source' => [
+                'message' => 'Doklad je ověřenou zdrojovou přílohou požadavku XMLZAM na součinnost '
+                    . 'exekutorovi (%d vazeb). Je součástí neměnné důkazní stopy a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'payroll_enforcement_xmlzam_requests', 'column' => 'source_document_id'],
                 ],
             ],
             'payroll_production_qualification' => [
@@ -76,6 +86,43 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     ],
                 ],
             ],
+            'payroll_foreign_permit' => [
+                'message' => 'Doklad je autoritativním podkladem pobytového nebo pracovního oprávnění '
+                    . 'zaměstnance (%d vazeb). Historie oprávnění je neměnná a doklad nelze odstranit.',
+                'references' => [
+                    ['table' => 'payroll_person_foreign_permits', 'column' => 'document_id'],
+                ],
+            ],
+            'payroll_health_evidence' => [
+                'message' => 'Doklad je neměnným důkazem zdravotního pojištění zaměstnance '
+                    . '(%d vazeb). Historie pojistného krytí se bez něj nesmí odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_person_health_coverage_history',
+                        'column' => 'health_evidence_document_id',
+                    ],
+                ],
+            ],
+            'payroll_statutory_obligation_evidence' => [
+                'message' => 'Doklad je neměnným důkazem ručně splněné mzdové zákonné povinnosti '
+                    . '(%d vazeb). Doručenku, protokol nebo potvrzení úhrady nelze z důkazní stopy odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_statutory_obligation_evidence',
+                        'column' => 'document_id',
+                    ],
+                ],
+            ],
+            'payroll_eldp_manual_completion' => [
+                'message' => 'Doklad prokazuje ruční dokončení ELDP v oficiálním rozhraní '
+                    . '(%d vazeb). Je součástí neměnné důkazní stopy a nelze ho odstranit.',
+                'references' => [
+                    [
+                        'table' => 'payroll_eldp_manual_completions',
+                        'column' => 'confirmation_document_id',
+                    ],
+                ],
+            ],
             'tax_submission_artifact' => [
                 'message' => 'Doklad je součástí podání na finanční správu — odeslané XML, podepsaný '
                     . 'soubor nebo potvrzení EPO (%d vazeb). Kdyby zmizel, ztratíte důkaz o tom, '
@@ -83,6 +130,24 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
                     . 'neztratí; smazat půjde teprve tehdy, když zanikne samotné podání.',
                 'references' => [
                     ['table' => 'tax_submission_artifacts', 'column' => 'document_id'],
+                ],
+            ],
+            'document_link' => [
+                'message' => 'Doklad je propojený s jinou agendou přes vazby Dokumentů (%d vazeb). Odpojte ho nejdřív v detailu příslušné agendy.',
+                'references' => [
+                    ['table' => 'document_links', 'column' => 'document_id'],
+                ],
+            ],
+            'monthly_report_send' => [
+                'message' => 'Doklad je archivovanou kopií odeslaného měsíčního reportu (%d vazeb) a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'monthly_report_sends', 'column' => 'document_id'],
+                ],
+            ],
+            'submission_receipt' => [
+                'message' => 'Doklad je doručenkou podání v datové schránce (%d vazeb) a nelze ho odstranit.',
+                'references' => [
+                    ['table' => 'submission_outbox', 'column' => 'receipt_document_id'],
                 ],
             ],
         ];
@@ -102,7 +167,10 @@ final class DocumentDeletionGuard extends ForeignKeyDeletionGuard
      */
     public static function deliberateCascadeBlockers(): array
     {
-        return ['tax_submission_artifacts'];
+        return [
+            'tax_submission_artifacts',
+            'document_links',
+        ];
     }
 
     /**

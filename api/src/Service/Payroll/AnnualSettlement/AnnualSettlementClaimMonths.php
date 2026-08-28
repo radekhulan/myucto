@@ -166,11 +166,17 @@ final class AnnualSettlementClaimMonths
                 continue;
             }
             $orders[$order] = true;
+            $claimedMonths = array_map('intval', array_keys($data['months']));
+            sort($claimedMonths);
+            $ztpPClaimedMonths = array_map('intval', array_keys($data['ztp_p']));
+            sort($ztpPClaimedMonths);
             $children[] = new AnnualSettlementChildMonths(
                 (string) $reference,
                 $order,
-                count($data['months']),
-                count($data['ztp_p']),
+                count($claimedMonths),
+                count($ztpPClaimedMonths),
+                $claimedMonths,
+                $ztpPClaimedMonths,
             );
         }
 

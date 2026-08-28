@@ -31,7 +31,7 @@ final readonly class JmhzContentCorrectionSubmissionService
         private PayrollSubmissionService $submissions,
         private PayrollObligationService $obligations,
         private ClockInterface $clock,
-        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
+        private JmhzDeadlinePolicy $deadlines,
     ) {}
 
     /** @return array<string,mixed> */

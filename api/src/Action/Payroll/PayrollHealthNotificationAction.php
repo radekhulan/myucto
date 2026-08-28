@@ -239,9 +239,19 @@ final class PayrollHealthNotificationAction
         }
 
         try {
+            $body = (array) ($request->getParsedBody() ?? []);
+            $environment = (string) ($body['environment'] ?? 'production');
+            if (!in_array($environment, ['production', 'test'], true)) {
+                return Json::error(
+                    $response,
+                    'invalid_environment',
+                    'Neznámé prostředí podání.',
+                    400,
+                );
+            }
             $result = $this->service->preparePaymentOverview(
                 $this->currentSupplierId($request),
-                'production',
+                $environment,
                 $this->routePositiveInt($args, 'revisionId'),
                 (string) ($args['insurerCode'] ?? ''),
                 $this->userId($request),

@@ -24,6 +24,7 @@ use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentSnapshotWriter;
 use MyInvoice\Service\Payroll\Garnishment\PayrollGarnishmentCalculation;
 use MyInvoice\Service\Payroll\Garnishment\PayrollEnforcementStoredResultIntegrity;
 use MyInvoice\Service\Payroll\Garnishment\PayrollInsolvencyPaymentInstructionService;
+use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
@@ -48,11 +49,14 @@ final class PayrollEnforcementRepository implements
     public const LIST_MAX_LIMIT = 100;
 
     public const LIST_DEFAULT_LIMIT = 50;
+    private readonly PayrollYearCloseGuard $yearClose;
 
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollInsolvencyPaymentInstructionService $insolvencyInstructions,
-    ) {}
+    ) {
+        $this->yearClose = new PayrollYearCloseGuard($db);
+    }
 
     /**
      * Seznam exekučních případů se stránkováním.
@@ -185,21 +189,35 @@ final class PayrollEnforcementRepository implements
             throw new \InvalidArgumentException('Neplatný typ srážkového případu.');
         }
         self::assertDate($effectiveFrom, 'effective_from');
-        $this->assertEmployee($supplierId, $employeeId);
         $caseKey = 'case_' . bin2hex(random_bytes(16));
         $pdo = $this->db->pdo();
-        $stmt = $pdo->prepare(
-            'INSERT INTO payroll_enforcement_cases
-                (supplier_id, employee_id, case_key, case_kind, effective_from,
-                 created_by, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
-        );
-        $stmt->execute([
-            $supplierId, $employeeId, $caseKey, $caseKind, $effectiveFrom,
-            $userId, $userId,
-        ]);
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->yearClose->assertOpenForDateRange($supplierId, $effectiveFrom, $effectiveFrom);
+            $this->assertEmployee($supplierId, $employeeId);
+            $stmt = $pdo->prepare(
+                'INSERT INTO payroll_enforcement_cases
+                    (supplier_id, employee_id, case_key, case_kind, effective_from,
+                     created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            $stmt->execute([
+                $supplierId, $employeeId, $caseKey, $caseKind, $effectiveFrom,
+                $userId, $userId,
+            ]);
+            $id = (int) $pdo->lastInsertId();
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            self::rollbackOwned($pdo, $ownsTransaction);
+            throw $e;
+        }
 
-        return $this->findCase($supplierId, (int) $pdo->lastInsertId())
+        return $this->findCase($supplierId, $id)
             ?? throw new \RuntimeException('Exekuční případ nebyl po vytvoření nalezen.');
     }
 
@@ -235,6 +253,11 @@ final class PayrollEnforcementRepository implements
             if ($currentVersion !== $expectedVersion) {
                 throw new PayrollEnforcementConflictException($currentVersion);
             }
+            $effectiveFrom = PayrollTimeValue::string(
+                $case['effective_from'] ?? null,
+                'effective_from',
+            );
+            $this->yearClose->assertOpenForDateRange($supplierId, $effectiveFrom, $effectiveFrom);
 
             $this->assertCaseCanBeDeleted($supplierId, $caseId, $case);
 
@@ -246,7 +269,10 @@ final class PayrollEnforcementRepository implements
             try {
                 $delete->execute([$supplierId, $caseId, $expectedVersion]);
             } catch (\PDOException $e) {
-                $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+                $errorInfoState = $e->errorInfo[0] ?? null;
+                $sqlState = is_string($errorInfoState)
+                    ? $errorInfoState
+                    : (string) $e->getCode();
                 if (!in_array($sqlState, ['23000', '45000'], true)) {
                     throw $e;
                 }
@@ -303,20 +329,31 @@ final class PayrollEnforcementRepository implements
             $outstanding = self::nonNegativeInt($data, 'outstanding_minor_units');
             $weight = self::nullablePositiveInt($data, 'maintenance_weight_minor_units');
             self::assertMaintenanceWeight($category, $weight);
-            $priorityDate = self::nullableDate($data, 'priority_date');
             $orderIssuedOn = self::nullableDate($data, 'order_issued_on');
             $sameOrderClaimId = self::nullablePositiveInt($data, 'same_order_as_claim_id');
-            $orderKey = $sameOrderClaimId === null
+            $sameOrder = $sameOrderClaimId === null
+                ? null
+                : $this->orderForClaim($supplierId, $caseId, $sameOrderClaimId);
+            $orderKey = $sameOrder === null
                 ? 'order_' . bin2hex(random_bytes(16))
-                : $this->orderKeyForClaim($supplierId, $caseId, $sameOrderClaimId);
+                : PayrollTimeValue::string($sameOrder['enforcement_order_key'] ?? null, 'enforcement_order_key');
+            [$priorityDate, $firstPayerDeliveredOn] = $legalBasis === DeductionLegalBasis::Statutory
+                ? $this->newStatutoryPriority($data, $sameOrder)
+                : $this->voluntaryPriority($data);
+            $this->assertFactDatesOpen(
+                $supplierId,
+                $priorityDate,
+                $firstPayerDeliveredOn,
+                $orderIssuedOn,
+            );
             $stmt = $pdo->prepare(
                 'INSERT INTO payroll_enforcement_claims
                     (supplier_id, case_id, claim_key, enforcement_order_key, legal_basis,
                      category, outstanding_minor_units, maintenance_weight_minor_units,
-                     priority_date, order_issued_on, legal_title_verified,
+                     priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified,
                      order_or_notice_delivered, priority_classification_verified,
                      agreement_verified, due_monetary_claim_verified)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -328,6 +365,7 @@ final class PayrollEnforcementRepository implements
                 $outstanding,
                 $weight,
                 $priorityDate,
+                $firstPayerDeliveredOn,
                 $orderIssuedOn,
                 self::boolInt($data, 'legal_title_verified'),
                 self::boolInt($data, 'order_or_notice_delivered'),
@@ -403,12 +441,12 @@ final class PayrollEnforcementRepository implements
             $outstanding = self::nonNegativeInt($data, 'outstanding_minor_units');
             $weight = self::nullablePositiveInt($data, 'maintenance_weight_minor_units');
             self::assertMaintenanceWeight($category, $weight);
-            $priorityDate = self::nullableDate($data, 'priority_date');
             $orderIssuedOn = self::nullableDate($data, 'order_issued_on');
             $storedOrderKey = $claim['enforcement_order_key'] ?? null;
             $orderKey = is_string($storedOrderKey) && $storedOrderKey !== ''
                 ? $storedOrderKey
                 : 'order_' . bin2hex(random_bytes(16));
+            $sameOrder = null;
             if (array_key_exists('same_order_as_claim_id', $data)) {
                 $sameOrderClaimId = self::nullablePositiveInt(
                     $data,
@@ -419,16 +457,31 @@ final class PayrollEnforcementRepository implements
                         'Pohledávka nemůže odkazovat sama na sebe jako na stejný příkaz.',
                     );
                 }
-                $orderKey = $sameOrderClaimId === null
+                $sameOrder = $sameOrderClaimId === null
+                    ? null
+                    : $this->orderForClaim($supplierId, $caseId, $sameOrderClaimId);
+                $orderKey = $sameOrder === null
                     ? 'order_' . bin2hex(random_bytes(16))
-                    : $this->orderKeyForClaim($supplierId, $caseId, $sameOrderClaimId);
+                    : PayrollTimeValue::string(
+                        $sameOrder['enforcement_order_key'] ?? null,
+                        'enforcement_order_key',
+                    );
             }
+            [$priorityDate, $firstPayerDeliveredOn] = $legalBasis === DeductionLegalBasis::Statutory
+                ? $this->existingStatutoryPriority($data, $claim, $sameOrder)
+                : $this->voluntaryPriority($data);
+            $this->assertFactDatesOpen(
+                $supplierId,
+                $priorityDate,
+                $firstPayerDeliveredOn,
+                $orderIssuedOn,
+            );
 
             $update = $pdo->prepare(
                 'UPDATE payroll_enforcement_claims
                     SET enforcement_order_key = ?, legal_basis = ?, category = ?,
                         outstanding_minor_units = ?, maintenance_weight_minor_units = ?,
-                        priority_date = ?, order_issued_on = ?, legal_title_verified = ?,
+                        priority_date = ?, first_payer_delivered_on = ?, order_issued_on = ?, legal_title_verified = ?,
                         order_or_notice_delivered = ?, priority_classification_verified = ?,
                         agreement_verified = ?, due_monetary_claim_verified = ?,
                         row_version = row_version + 1
@@ -442,6 +495,7 @@ final class PayrollEnforcementRepository implements
                     $outstanding,
                     $weight,
                     $priorityDate,
+                    $firstPayerDeliveredOn,
                     $orderIssuedOn,
                     self::boolInt($data, 'legal_title_verified'),
                     self::boolInt($data, 'order_or_notice_delivered'),
@@ -508,6 +562,15 @@ final class PayrollEnforcementRepository implements
                 throw new PayrollEnforcementConflictException($currentVersion);
             }
             $this->assertClaimCanBeMutated($supplierId, $caseId, $claimId, $claim, $case);
+            $this->assertFactDatesOpen(
+                $supplierId,
+                self::nullableStringValue($claim['priority_date'] ?? null, 'priority_date'),
+                self::nullableStringValue(
+                    $claim['first_payer_delivered_on'] ?? null,
+                    'first_payer_delivered_on',
+                ),
+                self::nullableStringValue($claim['order_issued_on'] ?? null, 'order_issued_on'),
+            );
 
             $delete = $pdo->prepare(
                 'DELETE FROM payroll_enforcement_claims
@@ -584,6 +647,17 @@ final class PayrollEnforcementRepository implements
                 throw new \DomainException(
                     'Případ nelze označit za úplný, dokud nejsou ověřeny všechny pohledávky.',
                 );
+            }
+            if ($evidenceComplete && $recipientVerified) {
+                (new PayrollEnforcementFactsRepository($this->db))
+                    ->assertLegalRecipientReadyForActivation(
+                        $supplierId,
+                        $caseId,
+                        PayrollTimeValue::string(
+                            $case['effective_from'] ?? null,
+                            'effective_from',
+                        ),
+                    );
             }
             if ($updateRecipientInstitution && $recipientInstitutionId !== null) {
                 $this->assertPaymentRecipientInstitution(
@@ -692,6 +766,21 @@ final class PayrollEnforcementRepository implements
             $from = EnforcementCaseStatus::from(
                 PayrollTimeValue::string($case['status'] ?? null, 'status'),
             );
+            if (in_array($command, [
+                EnforcementCaseCommand::MarkFinal,
+                EnforcementCaseCommand::AuthorizeRemittance,
+                EnforcementCaseCommand::ResumeRemittance,
+            ], true)) {
+                (new PayrollEnforcementFactsRepository($this->db))
+                    ->assertLegalRecipientReadyForActivation(
+                        $supplierId,
+                        $caseId,
+                        PayrollTimeValue::string(
+                            $case['effective_from'] ?? null,
+                            'effective_from',
+                        ),
+                    );
+            }
             $decisionDocumentId = $decisionDocument?->documentId;
             $decisionEvidenceHash = $decisionDocument?->sha256;
             $to = $lifecycle->transition($from, $command, new EnforcementTransitionContext(
@@ -735,6 +824,18 @@ final class PayrollEnforcementRepository implements
                 $caseDocumentId,
                 $userId,
             ]);
+            $eventId = (int) $pdo->lastInsertId();
+            if (in_array($command, [
+                EnforcementCaseCommand::AuthorizeRemittance,
+                EnforcementCaseCommand::ResumeRemittance,
+            ], true)) {
+                $this->releaseHeldForRemittance(
+                    $supplierId,
+                    $caseId,
+                    $eventId,
+                    $userId,
+                );
+            }
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -760,28 +861,46 @@ final class PayrollEnforcementRepository implements
         ?int $expectedVersion,
     ): array {
         $periodStart = self::periodStart($period);
-        $this->assertEmployee($supplierId, $employeeId);
-        $pension = PensionEvidence::from(self::requiredString($data, 'pension_evidence'));
-        $insolvency = InsolvencyMode::from(self::requiredString($data, 'insolvency_mode'));
-        $override = self::nullableNonNegativeInt(
-            $data,
-            'protected_amount_override_minor_units',
-        );
-        $courtAmount = self::nullablePositiveInt($data, 'court_determined_amount_minor_units');
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
             $pdo->beginTransaction();
         }
         try {
+            $this->yearClose->assertOpenForDateRange($supplierId, $periodStart, $periodStart);
+            $this->assertEmployee($supplierId, $employeeId);
+            $pension = PensionEvidence::from(self::requiredString($data, 'pension_evidence'));
+            $insolvency = InsolvencyMode::from(self::requiredString($data, 'insolvency_mode'));
+            $override = self::nullableNonNegativeInt(
+                $data,
+                'protected_amount_override_minor_units',
+            );
+            $courtAmount = self::nullablePositiveInt($data, 'court_determined_amount_minor_units');
             $versionStmt = $pdo->prepare(
-                'SELECT row_version
+                'SELECT row_version, insolvency_mode,
+                        insolvency_payment_instruction_id
                    FROM payroll_enforcement_person_month_evidence
                   WHERE supplier_id = ? AND employee_id = ? AND period_start = ?
                   FOR UPDATE'
             );
             $versionStmt->execute([$supplierId, $employeeId, $periodStart]);
-            $currentVersion = $versionStmt->fetchColumn();
+            $currentRowValue = $versionStmt->fetch(PDO::FETCH_ASSOC);
+            $currentRow = is_array($currentRowValue) ? $currentRowValue : null;
+            $currentVersion = $currentRow === null
+                ? false
+                : PayrollTimeValue::int($currentRow['row_version'] ?? null, 'row_version');
+            $currentInsolvencyMode = $currentRow['insolvency_mode'] ?? null;
+            $currentInstructionId = self::nullableIntValue(
+                $currentRow['insolvency_payment_instruction_id'] ?? null,
+            );
+            if ($currentInsolvencyMode === InsolvencyMode::ApprovedStandard->value
+                && $insolvency !== InsolvencyMode::ApprovedStandard
+            ) {
+                throw new \DomainException(
+                    'Schválené standardní oddlužení lze ukončit jen '
+                    . 'výslovným zrušením před použitím platebního pokynu.',
+                );
+            }
             $instruction = null;
             if ($insolvency === InsolvencyMode::ApprovedStandard) {
                 if (!self::boolValue($data, 'insolvency_decision_verified')
@@ -795,6 +914,22 @@ final class PayrollEnforcementRepository implements
                 if ($userId === null || $userId <= 0) {
                     throw new \DomainException(
                         'Platební pokyn oddlužení musí vytvořit konkrétní uživatel.',
+                    );
+                }
+                $requestedInstructionId = self::nullablePositiveInt(
+                    $data,
+                    'insolvency_payment_instruction_id',
+                );
+                if ($currentInstructionId !== null
+                    && $requestedInstructionId !== $currentInstructionId
+                    && $this->insolvencyInstructionWasUsed(
+                        $supplierId,
+                        $currentInstructionId,
+                    )
+                ) {
+                    throw new \DomainException(
+                        'Použitý platební pokyn oddlužení nelze změnit ani zrušit '
+                        . 'v měsíční evidenci; použijte opravnou revizi.',
                     );
                 }
                 $instruction = $this->insolvencyInstructions->resolve(
@@ -821,7 +956,12 @@ final class PayrollEnforcementRepository implements
                 $insolvency->value,
                 self::boolInt($data, 'insolvency_decision_verified'),
                 self::boolInt($data, 'insolvency_recipient_verified'),
-                $instruction === null ? null : (int) $instruction['id'],
+                $instruction === null
+                    ? null
+                    : PayrollTimeValue::int(
+                        $instruction['id'] ?? null,
+                        'insolvency_payment_instruction.id',
+                    ),
                 $courtAmount,
                 $userId,
             ];
@@ -884,6 +1024,98 @@ final class PayrollEnforcementRepository implements
     }
 
     /** @return array<string,mixed> */
+    public function cancelInsolvency(
+        int $supplierId,
+        int $employeeId,
+        string $period,
+        int $expectedVersion,
+        ?int $userId,
+    ): array {
+        $periodStart = self::periodStart($period);
+        if ($expectedVersion <= 0) {
+            throw new \InvalidArgumentException('row_version musí být kladné celé číslo.');
+        }
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->yearClose->assertOpenForDateRange($supplierId, $periodStart, $periodStart);
+            $this->assertEmployee($supplierId, $employeeId);
+            $statement = $pdo->prepare(
+                'SELECT row_version, insolvency_mode,
+                        insolvency_payment_instruction_id
+                   FROM payroll_enforcement_person_month_evidence
+                  WHERE supplier_id = ? AND employee_id = ? AND period_start = ?
+                  FOR UPDATE',
+            );
+            $statement->execute([$supplierId, $employeeId, $periodStart]);
+            $rowValue = $statement->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($rowValue)) {
+                throw new \DomainException(
+                    'Pro tento měsíc není schválené oddlužení ke zrušení.',
+                );
+            }
+            $row = PayrollTimeValue::row($rowValue, 'insolvency_evidence');
+            $currentVersion = PayrollTimeValue::int(
+                $row['row_version'] ?? null,
+                'row_version',
+            );
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            $instructionId = self::nullableIntValue(
+                $row['insolvency_payment_instruction_id'] ?? null,
+            );
+            if (($row['insolvency_mode'] ?? null)
+                    !== InsolvencyMode::ApprovedStandard->value
+                || $instructionId === null
+            ) {
+                throw new \DomainException(
+                    'Pro tento měsíc není schválené oddlužení ke zrušení.',
+                );
+            }
+            if ($this->insolvencyInstructionWasUsed($supplierId, $instructionId)) {
+                throw new \DomainException(
+                    'Použitý platební pokyn oddlužení nelze změnit ani zrušit '
+                    . 'v měsíční evidenci; použijte opravnou revizi.',
+                );
+            }
+            $update = $pdo->prepare(
+                'UPDATE payroll_enforcement_person_month_evidence
+                    SET insolvency_mode = "none",
+                        insolvency_decision_verified = 0,
+                        insolvency_recipient_verified = 0,
+                        insolvency_payment_instruction_id = NULL,
+                        court_determined_amount_minor_units = NULL,
+                        updated_by = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND employee_id = ? AND period_start = ?
+                    AND row_version = ?',
+            );
+            $update->execute([
+                $userId,
+                $supplierId,
+                $employeeId,
+                $periodStart,
+                $currentVersion,
+            ]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEnforcementConflictException($currentVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            self::rollbackOwned($pdo, $ownsTransaction);
+            throw $e;
+        }
+
+        return $this->monthEvidenceRow($supplierId, $employeeId, $periodStart)
+            ?? throw new \RuntimeException('Oddlužení nebylo po zrušení nalezeno.');
+    }
+
+    /** @return array<string,mixed> */
     public function monthEvidence(
         int $supplierId,
         int $employeeId,
@@ -913,6 +1145,25 @@ final class PayrollEnforcementRepository implements
             'court_determined_amount_minor_units' => null,
             'row_version' => null,
         ];
+    }
+
+    /**
+     * @return array{
+     *   employments:list<array<string,mixed>>,
+     *   recipient_accounts:list<array<string,mixed>>
+     * }
+     */
+    public function insolvencyOptions(
+        int $supplierId,
+        int $employeeId,
+        string $period,
+    ): array {
+        $this->assertEmployee($supplierId, $employeeId);
+        return $this->insolvencyInstructions->options(
+            $supplierId,
+            $employeeId,
+            self::periodStart($period),
+        );
     }
 
     /** @return list<array<string,mixed>> */
@@ -949,7 +1200,6 @@ final class PayrollEnforcementRepository implements
         int $employeeId,
         array $data,
     ): array {
-        $this->assertEmployee($supplierId, $employeeId);
         $kind = self::requiredString($data, 'dependant_kind');
         if (!in_array($kind, ['dependant', 'spouse_partner'], true)) {
             throw new \InvalidArgumentException('Neplatný druh vyživované osoby.');
@@ -966,6 +1216,12 @@ final class PayrollEnforcementRepository implements
             $pdo->beginTransaction();
         }
         try {
+            $this->yearClose->assertOpenForDateRange(
+                $supplierId,
+                $validFrom,
+                $validTo ?? $validFrom,
+            );
+            $this->assertEmployee($supplierId, $employeeId);
             $stmt = $pdo->prepare(
                 'INSERT INTO payroll_enforcement_dependants
                     (supplier_id, employee_id, dependant_key, dependant_kind,
@@ -1267,6 +1523,11 @@ final class PayrollEnforcementRepository implements
                 AND c.status IN ('withhold_and_hold', 'remit', 'deferred_hold')
                 AND c.effective_from <= ?
                 AND (c.effective_to IS NULL OR c.effective_to >= ?)
+                AND (
+                    cl.legal_basis <> 'statutory'
+                    OR cl.first_payer_delivered_on IS NULL
+                    OR cl.first_payer_delivered_on <= ?
+                )
               ORDER BY cl.priority_date, cl.id",
                 implode(', ', array_fill(0, count($chunk), '?')),
             ));
@@ -1274,6 +1535,7 @@ final class PayrollEnforcementRepository implements
                 $periodStart,
                 $supplierId,
                 ...$chunk,
+                $paymentDate,
                 $paymentDate,
                 $paymentDate,
             ]);
@@ -1363,6 +1625,11 @@ final class PayrollEnforcementRepository implements
             $pdo->beginTransaction();
         }
         try {
+            $this->yearClose->assertOpenForDateRange(
+                $request->supplierId,
+                $periodStart,
+                $periodStart,
+            );
             $existing = $pdo->prepare(
                 'SELECT id, revision_id, input_snapshot_hash, result_snapshot_hash
                    FROM payroll_enforcement_month_results
@@ -1471,7 +1738,7 @@ final class PayrollEnforcementRepository implements
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, case_id, legal_basis, category, outstanding_minor_units,
-                    maintenance_weight_minor_units, priority_date, order_issued_on,
+                    maintenance_weight_minor_units, priority_date, first_payer_delivered_on, order_issued_on,
                     legal_title_verified, order_or_notice_delivered,
                     priority_classification_verified, agreement_verified,
                     due_monetary_claim_verified, is_active, row_version,
@@ -1537,7 +1804,9 @@ final class PayrollEnforcementRepository implements
      *   held_minor:int,
      *   liability_minor:int,
      *   settled_minor:int,
+     *   original_minor:int,
      *   outstanding_minor:int,
+     *   remaining_to_withhold_minor:int,
      *   remaining_minor:int
      * }
      */
@@ -1550,7 +1819,9 @@ final class PayrollEnforcementRepository implements
             'held_minor' => 0,
             'liability_minor' => 0,
             'settled_minor' => 0,
+            'original_minor' => 0,
             'outstanding_minor' => 0,
+            'remaining_to_withhold_minor' => 0,
             'remaining_minor' => 0,
         ];
         foreach ($claims as $claim) {
@@ -1561,7 +1832,10 @@ final class PayrollEnforcementRepository implements
             $totals['held_minor'] += $claim['held_minor'];
             $totals['liability_minor'] += $claim['liability_minor'];
             $totals['settled_minor'] += $claim['settled_minor'];
+            $totals['original_minor'] += $claim['original_minor'];
             $totals['outstanding_minor'] += $claim['outstanding_minor'];
+            $totals['remaining_to_withhold_minor'] +=
+                $claim['remaining_to_withhold_minor'];
             $totals['remaining_minor'] += $claim['remaining_minor'];
         }
 
@@ -1596,14 +1870,17 @@ final class PayrollEnforcementRepository implements
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, claim_id, month_result_id, entry_kind, amount_minor_units,
-                    actor_user_id, created_at
+                    actor_user_id, decision_event_id, created_at
                FROM payroll_enforcement_ledger
               WHERE supplier_id = ? AND case_id = ? ORDER BY id DESC'
         );
         $stmt->execute([$supplierId, $caseId]);
         return array_map(static fn (array $row): array => self::castBooleansAndIntegers(
             $row,
-            ['id', 'claim_id', 'month_result_id', 'amount_minor_units', 'actor_user_id'],
+            [
+                'id', 'claim_id', 'month_result_id', 'amount_minor_units',
+                'actor_user_id', 'decision_event_id',
+            ],
             [],
         ), PayrollTimeValue::rows(
             $stmt->fetchAll(PDO::FETCH_ASSOC),
@@ -1756,14 +2033,7 @@ final class PayrollEnforcementRepository implements
         ClaimCategory $category,
         ?int $weight,
     ): void {
-        if (
-            in_array($category, [
-                ClaimCategory::CurrentMaintenance,
-                ClaimCategory::MaintenanceArrears,
-                ClaimCategory::SubstituteMaintenance,
-            ], true)
-            && $weight === null
-        ) {
+        if ($category->requiresMaintenanceWeight() && $weight === null) {
             throw new \InvalidArgumentException(
                 'Pohledávka výživného vyžaduje kladnou měsíční výši.',
             );
@@ -1955,20 +2225,139 @@ final class PayrollEnforcementRepository implements
         throw new PayrollEnforcementConflictException((int) $version);
     }
 
-    private function orderKeyForClaim(int $supplierId, int $caseId, int $claimId): string
+    /** @return array<string,mixed> */
+    private function orderForClaim(int $supplierId, int $caseId, int $claimId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT enforcement_order_key FROM payroll_enforcement_claims
+            'SELECT enforcement_order_key, priority_date, first_payer_delivered_on
+               FROM payroll_enforcement_claims
               WHERE supplier_id = ? AND case_id = ? AND id = ?'
         );
         $stmt->execute([$supplierId, $caseId, $claimId]);
-        $key = $stmt->fetchColumn();
-        if (!is_string($key) || $key === '') {
+        $value = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($value === false) {
             throw new \InvalidArgumentException(
                 'Referenční pohledávka stejného exekučního příkazu nebyla nalezena.',
             );
         }
-        return $key;
+        $reference = PayrollTimeValue::row($value, 'enforcement_order_reference');
+        if (!is_string($reference['enforcement_order_key'] ?? null)
+            || $reference['enforcement_order_key'] === '') {
+            throw new \InvalidArgumentException(
+                'Referenční pohledávka stejného exekučního příkazu nemá platný klíč.',
+            );
+        }
+        return $reference;
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @param array<string,mixed>|null $sameOrder
+     * @return array{0:string,1:string}
+     */
+    private function newStatutoryPriority(array $data, ?array $sameOrder): array
+    {
+        $this->rejectClientPriorityDate($data);
+        if ($sameOrder !== null) {
+            $delivery = self::nullableStringValue(
+                $sameOrder['first_payer_delivered_on'] ?? null,
+                'first_payer_delivered_on',
+            );
+            if ($delivery === null) {
+                throw new \InvalidArgumentException(
+                    'Referenční pohledávka nemá datum doručení prvnímu plátci.',
+                );
+            }
+            if (array_key_exists('first_payer_delivered_on', $data)
+                && self::nullableDate($data, 'first_payer_delivered_on') !== $delivery) {
+                throw new \InvalidArgumentException(
+                    'Stejný exekuční příkaz musí převzít datum doručení prvnímu plátci.',
+                );
+            }
+            return [$delivery, $delivery];
+        }
+
+        $delivery = self::nullableDate($data, 'first_payer_delivered_on');
+        if ($delivery === null) {
+            throw new \InvalidArgumentException(
+                'Pole first_payer_delivered_on je pro zákonnou pohledávku povinné.',
+            );
+        }
+        return [$delivery, $delivery];
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $claim
+     * @param array<string,mixed>|null $sameOrder
+     * @return array{0:?string,1:?string}
+     */
+    private function existingStatutoryPriority(
+        array $data,
+        array $claim,
+        ?array $sameOrder,
+    ): array {
+        $this->rejectClientPriorityDate($data);
+        $storedDelivery = self::nullableStringValue(
+            $claim['first_payer_delivered_on'] ?? null,
+            'first_payer_delivered_on',
+        );
+        $storedPriority = self::nullableStringValue(
+            $claim['priority_date'] ?? null,
+            'priority_date',
+        );
+        $delivery = $storedDelivery;
+        if (array_key_exists('first_payer_delivered_on', $data)) {
+            $requestedDelivery = self::nullableDate($data, 'first_payer_delivered_on');
+            if ($storedDelivery !== null && $requestedDelivery !== $storedDelivery) {
+                throw new \InvalidArgumentException(
+                    'Datum doručení prvnímu plátci nelze po založení pohledávky změnit.',
+                );
+            }
+            if ($storedDelivery === null && $requestedDelivery !== null) {
+                $delivery = $requestedDelivery;
+            }
+        }
+        if ($sameOrder !== null) {
+            $referenceDelivery = self::nullableStringValue(
+                $sameOrder['first_payer_delivered_on'] ?? null,
+                'first_payer_delivered_on',
+            );
+            if ($referenceDelivery === null
+                || ($storedDelivery !== null && $referenceDelivery !== $storedDelivery)) {
+                throw new \InvalidArgumentException(
+                    'Stejný exekuční příkaz nemůže změnit datum doručení prvnímu plátci.',
+                );
+            }
+            $delivery = $referenceDelivery;
+        }
+        return $delivery === null
+            ? [$storedPriority, null]
+            : [$delivery, $delivery];
+    }
+
+    /** @param array<string,mixed> $data */
+    private function rejectClientPriorityDate(array $data): void
+    {
+        if (array_key_exists('priority_date', $data)) {
+            throw new \InvalidArgumentException(
+                'Priorita zákonné pohledávky se odvozuje z data doručení prvnímu plátci.',
+            );
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $data
+     * @return array{0:?string,1:null}
+     */
+    private function voluntaryPriority(array $data): array
+    {
+        if (self::nullableDate($data, 'first_payer_delivered_on') !== null) {
+            throw new \InvalidArgumentException(
+                'Dobrovolná dohoda nemá datum doručení prvnímu plátci.',
+            );
+        }
+        return [self::nullableDate($data, 'priority_date'), null];
     }
 
     /** @return array<string,mixed>|null */
@@ -2033,7 +2422,11 @@ final class PayrollEnforcementRepository implements
                         'protected_amount_override_verified',
                         'insolvency_decision_verified', 'insolvency_recipient_verified'],
                 );
-                $rows[(int) $cast['employee_id']] ??= $cast;
+                $employeeId = PayrollTimeValue::int(
+                    $cast['employee_id'] ?? null,
+                    'enforcement_month_evidence.employee_id',
+                );
+                $rows[$employeeId] ??= $cast;
             }
         }
 
@@ -2229,17 +2622,111 @@ final class PayrollEnforcementRepository implements
         string $entryKind,
         int $amount,
         string $idempotencyKey,
+        ?int $actorUserId = null,
+        ?int $decisionEventId = null,
     ): void {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_enforcement_ledger
                 (supplier_id, case_id, claim_id, month_result_id, entry_kind,
-                 amount_minor_units, idempotency_key_hash)
-             VALUES (?, ?, ?, ?, ?, ?, ?)'
+                 amount_minor_units, idempotency_key_hash, actor_user_id,
+                 decision_event_id)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $supplierId, $caseId, $claimId, $resultId, $entryKind, $amount,
             hash('sha256', $idempotencyKey, true),
+            $actorUserId,
+            $decisionEventId,
         ]);
+    }
+
+    private function releaseHeldForRemittance(
+        int $supplierId,
+        int $caseId,
+        int $decisionEventId,
+        ?int $actorUserId,
+    ): void {
+        $statement = $this->db->pdo()->prepare(
+            "SELECT ledger.month_result_id, ledger.claim_id, ledger.entry_kind,
+                    ledger.amount_minor_units
+               FROM payroll_enforcement_ledger ledger
+               JOIN payroll_enforcement_month_results month_result
+                 ON month_result.supplier_id = ledger.supplier_id
+                AND month_result.id = ledger.month_result_id
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = month_result.supplier_id
+                AND revision.id = month_result.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE ledger.supplier_id = ? AND ledger.case_id = ?
+                AND ledger.claim_id IS NOT NULL
+                AND ledger.entry_kind IN (
+                  'held','released_for_remittance','remitted','released_to_employee'
+                )
+                AND revision.status = 'approved'
+                AND revision.revision_no = run.current_revision_no
+              ORDER BY ledger.month_result_id, ledger.claim_id, ledger.id
+              FOR UPDATE"
+        );
+        $statement->execute([$supplierId, $caseId]);
+        $balances = [];
+        foreach (PayrollTimeValue::rows(
+            $statement->fetchAll(PDO::FETCH_ASSOC),
+            'enforcement_held_ledger',
+        ) as $row) {
+            $resultId = PayrollTimeValue::int(
+                $row['month_result_id'] ?? null,
+                'month_result_id',
+            );
+            $claimId = PayrollTimeValue::int($row['claim_id'] ?? null, 'claim_id');
+            $key = "{$resultId}:{$claimId}";
+            $amount = PayrollTimeValue::int(
+                $row['amount_minor_units'] ?? null,
+                'amount_minor_units',
+            );
+            $balances[$key] ??= [
+                'result_id' => $resultId,
+                'claim_id' => $claimId,
+                'held' => 0,
+                'released' => 0,
+                'remitted' => 0,
+                'returned' => 0,
+            ];
+            $bucket = match (PayrollTimeValue::string(
+                $row['entry_kind'] ?? null,
+                'entry_kind',
+            )) {
+                'held' => 'held',
+                'released_for_remittance' => 'released',
+                'remitted' => 'remitted',
+                'released_to_employee' => 'returned',
+                default => throw new \UnexpectedValueException(
+                    'Neznámý druh pohybu depozita exekuce.',
+                ),
+            };
+            $balances[$key][$bucket] += $amount;
+        }
+
+        foreach ($balances as $balance) {
+            $amount = $balance['held'] - $balance['returned']
+                - max($balance['released'], $balance['remitted']);
+            if ($amount <= 0) {
+                continue;
+            }
+            $this->insertLedger(
+                $supplierId,
+                $caseId,
+                $balance['claim_id'],
+                $balance['result_id'],
+                'released_for_remittance',
+                $amount,
+                "deposit-release:event:{$decisionEventId}:result:{$balance['result_id']}"
+                    . ":claim:{$balance['claim_id']}",
+                $actorUserId,
+                $decisionEventId,
+            );
+        }
     }
 
     private function assertStoredResultIntegrity(
@@ -2423,6 +2910,20 @@ final class PayrollEnforcementRepository implements
         return false;
     }
 
+    private function insolvencyInstructionWasUsed(
+        int $supplierId,
+        int $instructionId,
+    ): bool {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_enforcement_month_results
+              WHERE supplier_id = ? AND insolvency_payment_instruction_id = ?
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $instructionId]);
+        return $statement->fetchColumn() !== false;
+    }
+
     /** @param array<string,mixed> $data */
     private static function nullableDate(array $data, string $key): ?string
     {
@@ -2442,6 +2943,15 @@ final class PayrollEnforcementRepository implements
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
         if ($date === false || $date->format('Y-m-d') !== $value) {
             throw new \InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
+        }
+    }
+
+    private function assertFactDatesOpen(int $supplierId, ?string ...$dates): void
+    {
+        foreach ($dates as $date) {
+            if ($date !== null) {
+                $this->yearClose->assertOpenForDateRange($supplierId, $date, $date);
+            }
         }
     }
 

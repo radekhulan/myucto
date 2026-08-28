@@ -130,6 +130,11 @@ final class AnnualSettlementStatute
         return $amountMinorUnits > self::PAYOUT_THRESHOLD_MINOR_UNITS;
     }
 
+    public static function isAnnualBonusAmountEligible(int $amountMinorUnits): bool
+    {
+        return $amountMinorUnits >= self::ANNUAL_BONUS_MINIMUM_MINOR_UNITS;
+    }
+
     private static function date(int $year, int $month, int $day): DateTimeImmutable
     {
         $date = DateTimeImmutable::createFromFormat(

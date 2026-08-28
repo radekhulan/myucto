@@ -96,4 +96,17 @@ final class PayrollJmhzPreparationSnapshotMigrationTest extends TestCase
         );
         self::assertStringNotContainsString('UPDATE ', $sql);
     }
+
+    public function testMixedPreparationScopeIsAdditiveAndKeepsLegacySnapshots(): void
+    {
+        $sql = file_get_contents(
+            dirname(__DIR__, 4)
+            . '/db/migrations/1591_payroll_jmhz_mixed_preparation_snapshot.sql',
+        );
+        self::assertIsString($sql);
+        self::assertStringContainsString('ADD COLUMN IF NOT EXISTS scenario_set_json', $sql);
+        self::assertStringContainsString("scenario_key IN ('scenario_1', 'mixed')", $sql);
+        self::assertStringContainsString("'jmhz-preparation-source.v11'", $sql);
+        self::assertStringNotContainsString('UPDATE ', $sql);
+    }
 }

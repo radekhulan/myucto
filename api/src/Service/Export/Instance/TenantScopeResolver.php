@@ -71,6 +71,10 @@ final class TenantScopeResolver
         'payroll_submission_signing_profiles',
         'payroll_document_download_grants',
         'payroll_payment_export_download_grants',
+        'payroll_period_export_jobs',
+        'payroll_period_export_job_attempts',
+        'payroll_period_export_job_parts',
+        'payroll_period_export_job_part_attempts',
         'payroll_submission_artifact_download_grants',
     ];
 

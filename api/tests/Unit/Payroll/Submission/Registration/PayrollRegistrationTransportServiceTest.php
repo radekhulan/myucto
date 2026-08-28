@@ -37,12 +37,12 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
                 . '<employees><employee act="9"><comp vs="1234567890"/></employee></employees>'
                 . '</PREZEC>',
         ];
-        yield 'REGZEC A1' => [
+        yield 'REGZEC A2' => [
             'REGZEC25',
             'CSSZ_REGZEC',
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
                 . '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025">'
-                . '<employees><employee act="1"><comp vs="1234567890"/></employee></employees>'
+                . '<employees><employee act="2"><comp vs="1234567890"/></employee></employees>'
                 . '</REGZEC>',
         ];
     }
@@ -156,10 +156,10 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
     }
 
-    public function testRegzecA2NeverReachesTheTransport(): void
+    public function testUnknownRegzecActionNeverReachesTheTransport(): void
     {
         $xml = '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
-            . '<employee act="2"><comp vs="1234567890"/></employee></employees></REGZEC>';
+            . '<employee act="9"><comp vs="1234567890"/></employee></employees></REGZEC>';
         $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
         $frozen->method('bytes')->willReturn($xml);
         $dispatch = $this->createMock(JmhzDispatchService::class);
@@ -172,7 +172,7 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage('A1');
+        $this->expectExceptionMessage('podporovanou akci');
 
         $service->send(
             self::SUPPLIER,
@@ -183,10 +183,37 @@ final class PayrollRegistrationTransportServiceTest extends TestCase
         );
     }
 
-    public function testIdempotencyKeyIsForwardedAndAReplayDoesNotCreateAnotherAction(): void
+    public function testIncompleteRegzecA1NeverReachesTheTransport(): void
     {
         $xml = '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
             . '<employee act="1"><comp vs="1234567890"/></employee></employees></REGZEC>';
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($xml);
+        $dispatch = $this->createMock(JmhzDispatchService::class);
+        $dispatch->expects(self::never())->method('send');
+        $service = new PayrollRegistrationTransportService(
+            $this->repository('REGZEC25'),
+            $this->createStub(PayrollSubmissionTransportAttemptRepository::class),
+            $frozen,
+            $dispatch,
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('chybí povinný druh činnosti');
+
+        $service->send(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            'incomplete-a1',
+            7,
+        );
+    }
+
+    public function testIdempotencyKeyIsForwardedAndAReplayDoesNotCreateAnotherAction(): void
+    {
+        $xml = '<REGZEC xmlns="http://schemas.cssz.cz/REGZEC/2025"><employees>'
+            . '<employee act="2"><comp vs="1234567890"/></employee></employees></REGZEC>';
         $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
         $frozen->method('bytes')->willReturn($xml);
         $lookup = 0;

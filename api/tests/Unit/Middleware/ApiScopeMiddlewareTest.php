@@ -118,6 +118,38 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
+    public function testBearerCannotReachLegacyPayrollAccountingSurface(): void
+    {
+        foreach ([
+            ['GET', '/api/accounting/payroll/employees'],
+            ['POST', '/api/accounting/payroll/preview'],
+            ['POST', '/api/accounting/payroll/post'],
+            ['PUT', '/api/accounting/payroll/employees/7'],
+            ['DELETE', '/api/accounting/payroll/employees/7'],
+            ['GET', '/api/accounting/reports/payroll-sheet'],
+        ] as [$method, $path]) {
+            $response = $this->middleware()->process(
+                $this->bearer($method, $path, 'read_write'),
+                $this->okHandler(),
+            );
+
+            self::assertSame(403, $response->getStatusCode(), "bearer {$method} {$path}");
+            self::assertSame(
+                'token_endpoint_forbidden',
+                $this->errorCode($response),
+                "bearer {$method} {$path}",
+            );
+        }
+
+        $session = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/accounting/payroll/employees')
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+        self::assertSame(
+            204,
+            $this->middleware()->process($session, $this->okHandler())->getStatusCode(),
+        );
+    }
+
     public function testBearerCanReachStockAndEshopModules(): void
     {
         // MCP server nad nimi staví nástroje pro zboží a zásoby; případné vypnutí

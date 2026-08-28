@@ -275,7 +275,7 @@ final class DocumentsAction
         if (!$this->links->entityBelongsToSupplier($type, $eid, $sid)) {
             return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
         }
-        $this->links->attach($id, $type, $eid);
+        $this->links->attach($sid, $id, $type, $eid);
         return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid)]);
     }
 
@@ -291,7 +291,7 @@ final class DocumentsAction
         $q = $request->getQueryParams();
         $type = (string) ($body['entity_type'] ?? $q['entity_type'] ?? '');
         $eid = (int) ($body['entity_id'] ?? $q['entity_id'] ?? 0);
-        $this->links->detach($id, $type, $eid);
+        $this->links->detach($sid, $id, $type, $eid);
         return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid)]);
     }
 
@@ -436,8 +436,12 @@ final class DocumentsAction
                 }
                 // Složky: zákaz přesunu do sebe / vlastního potomka (cyklus).
                 foreach ($folderIds as $fid) {
+                    $subtreeIds = $this->folders->descendantIds($fid, $sid);
+                    if (!$this->folders->canMutateSubtree($sid, $subtreeIds, $viewer)) {
+                        continue;
+                    }
                     if ($folderId !== null && ($folderId === $fid
-                        || in_array($folderId, $this->folders->descendantIds($fid, $sid), true))) {
+                        || in_array($folderId, $subtreeIds, true))) {
                         continue;
                     }
                     if ($this->folders->move($fid, $sid, $folderId)) $affected++;
@@ -452,7 +456,16 @@ final class DocumentsAction
                 }
                 foreach ($folderIds as $fid) {
                     if ($this->folders->find($fid, $sid) === null) continue;
-                    $this->folders->softDeleteSubtree($fid, $sid, $userId, $viewer);
+                    $subtreeIds = $this->folders->descendantIds($fid, $sid);
+                    if (
+                        $this->folders->containsRetainedEvidence($sid, $subtreeIds)
+                        || !$this->folders->canMutateSubtree($sid, $subtreeIds, $viewer)
+                    ) {
+                        continue;
+                    }
+                    if ($this->folders->softDeleteSubtree($fid, $sid, $userId, $viewer) === []) {
+                        continue;
+                    }
                     $affected++;
                 }
                 break;

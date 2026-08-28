@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Repository\Payroll\PayrollEnforcementRepository;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -245,6 +246,220 @@ final class PayrollRunPersistenceTest extends TestCase
             'session_required',
             $this->json($bearerResponse)['error']['code'],
         );
+    }
+
+    public function testCreateReturnsConflictWhenLegacyPayrollOwnsPeriod(): void
+    {
+        $role = new EffectiveRole(
+            93,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            ['payroll.inputs.write' => AccessLevel::WRITE->value],
+        );
+        $this->container->get(PayrollPeriodOwnershipService::class)->claimLegacy(
+            $this->supplierId,
+            2026,
+            6,
+            9001,
+            $this->actors[0],
+        );
+
+        $response = $this->action->create(
+            $this->apiRequest('POST', '/api/payroll/runs', $role)
+                ->withParsedBody([
+                    'period_start' => '2026-06-01',
+                    'payment_date' => '2026-07-15',
+                ]),
+            new Response(),
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame('payroll_period_owned', $this->json($response)['error']['code']);
+    }
+
+    public function testSessionHistoryReturnsOnlySafeRevisionSummariesAndDirectDiff(): void
+    {
+        $role = new EffectiveRole(
+            91,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            ['payroll' => AccessLevel::READ->value],
+        );
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $this->approvedInput(10_000, 'HISTORY_CORRECTION', 'correction');
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'history-request-correction',
+            $this->actors[2],
+            'Syntetická oprava pro historii.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            'history-reopen-correction',
+            $this->actors[1],
+            'Syntetická oprava pro historii.',
+        );
+        $this->service->calculate(
+            $this->supplierId,
+            $runId,
+            (int) $reopened->run['row_version'],
+            'history-calculate-correction',
+            $this->actors[0],
+        );
+
+        $response = $this->action->history(
+            $this->apiRequest('GET', "/api/payroll/runs/{$runId}/history", $role),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $history = $this->json($response)['history'];
+        self::assertSame($runId, $history['run_id']);
+        self::assertCount(2, $history['revisions']);
+        self::assertNotEmpty($history['events']);
+        self::assertSame([
+            'id',
+            'revision_no',
+            'previous_revision_id',
+            'revision_kind',
+            'status',
+            'created_at',
+            'calculated_at',
+            'reviewed_at',
+            'approved_at',
+            'ruleset_manifest_hash',
+            'input_snapshot_hash',
+            'result_snapshot_hash',
+            'totals',
+            'diff_from_previous',
+        ], array_keys($history['revisions'][0]));
+        self::assertSame([
+            'cash_payable_minor',
+            'enforcement_withheld_minor',
+            'payable_after_enforcement_minor',
+        ], array_keys($history['revisions'][0]['totals']));
+        self::assertSame('regular', $history['revisions'][0]['revision_kind']);
+        self::assertNull($history['revisions'][0]['diff_from_previous']);
+        $correctionEvent = array_values(array_filter(
+            $history['events'],
+            static fn (array $event): bool => $event['reason']
+                === 'Syntetická oprava pro historii.',
+        ));
+        self::assertCount(2, $correctionEvent);
+        self::assertSame('Synthetic approver', $correctionEvent[0]['actor_name']);
+
+        $diff = $history['revisions'][1]['diff_from_previous'];
+        self::assertTrue($diff['input_changed']);
+        self::assertFalse($diff['ruleset_changed']);
+        self::assertTrue($diff['result_changed']);
+        foreach ([
+            'cash_payable_minor',
+            'enforcement_withheld_minor',
+            'payable_after_enforcement_minor',
+        ] as $total) {
+            self::assertSame(
+                ['before', 'after', 'delta'],
+                array_keys($diff['totals'][$total]),
+            );
+            self::assertSame(
+                $diff['totals'][$total]['after'] - $diff['totals'][$total]['before'],
+                $diff['totals'][$total]['delta'],
+            );
+        }
+
+        $encoded = json_encode($history, JSON_THROW_ON_ERROR);
+        foreach ([
+            'input_snapshot_json',
+            'result_snapshot_json',
+            'input_snapshot',
+            'result_snapshot',
+            'metadata_json',
+            'idempotency_key_hash',
+            'calculated_by',
+            'reviewed_by',
+            'approved_by',
+            'actor_user_id',
+        ] as $forbidden) {
+            self::assertStringNotContainsString('"' . $forbidden . '"', $encoded);
+        }
+    }
+
+    public function testHistoryReturnsNotFoundForForeignTenant(): void
+    {
+        $role = new EffectiveRole(
+            92,
+            'Syntetická mzdová účetní',
+            'staff',
+            true,
+            ['payroll' => AccessLevel::READ->value],
+        );
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+
+        $response = $this->action->history(
+            $this->apiRequest('GET', "/api/payroll/runs/{$runId}/history", $role)
+                ->withAttribute(
+                    SupplierScopeMiddleware::ATTR_CURRENT_ID,
+                    $this->otherSupplierId,
+                ),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+
+        self::assertSame(404, $response->getStatusCode());
+        self::assertSame('not_found', $this->json($response)['error']['code']);
+    }
+
+    public function testHistoryRequiresPayrollReadAndSessionAuthentication(): void
+    {
+        $run = $this->createRun();
+        $runId = (int) $run['id'];
+        $withoutPayroll = new EffectiveRole(
+            93,
+            'Bez mezd',
+            'staff',
+            true,
+            [],
+        );
+        $forbidden = $this->action->history(
+            $this->apiRequest(
+                'GET',
+                "/api/payroll/runs/{$runId}/history",
+                $withoutPayroll,
+            ),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+        self::assertSame(403, $forbidden->getStatusCode());
+        self::assertSame('forbidden', $this->json($forbidden)['error']['code']);
+
+        $payrollRead = new EffectiveRole(
+            94,
+            'Mzdové čtení',
+            'staff',
+            true,
+            ['payroll' => AccessLevel::READ->value],
+        );
+        $bearer = $this->action->history(
+            $this->apiRequest(
+                'GET',
+                "/api/payroll/runs/{$runId}/history",
+                $payrollRead,
+                'bearer',
+            ),
+            new Response(),
+            ['id' => (string) $runId],
+        );
+        self::assertSame(403, $bearer->getStatusCode());
+        self::assertSame('session_required', $this->json($bearer)['error']['code']);
     }
 
     protected function tearDown(): void
@@ -1202,7 +1417,7 @@ final class PayrollRunPersistenceTest extends TestCase
         );
     }
 
-    public function testApprovalWithPayslipGenerationRejectsOuterTransaction(): void
+    public function testApprovalInOuterTransactionOnlyPersistsDocumentQueueIntent(): void
     {
         $run = $this->createRun();
         $locked = $this->service->lockInputs(
@@ -1230,7 +1445,7 @@ final class PayrollRunPersistenceTest extends TestCase
         $approvedPosting = $this->createMock(
             PayrollApprovedRevisionPostingService::class,
         );
-        $approvedPosting->expects(self::never())->method('post');
+        $approvedPosting->method('post')->willReturn([]);
         $approvedPayslips = $this->createMock(
             ApprovedRevisionPayslipBatchService::class,
         );
@@ -1251,25 +1466,22 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->container->get(PayrollPeriodOwnershipService::class),
             $approvedPosting,
             $approvedPayslips,
+            null,
+            null,
+            null,
+            null,
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
+            ),
         );
 
-        try {
-            $service->approve(
-                $this->supplierId,
-                (int) $run['id'],
-                (int) $reviewed->run['row_version'],
-                'approve-in-outer-transaction',
-                $this->actors[2],
-            );
-            self::fail(
-                'Generování výplatních pásek nesmí proběhnout v cizí transakci.',
-            );
-        } catch (\DomainException $e) {
-            self::assertStringContainsString(
-                'samostatné databázové transakci',
-                $e->getMessage(),
-            );
-        }
+        $approved = $service->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'approve-in-outer-transaction',
+            $this->actors[2],
+        );
 
         $persistedRun = $this->runs->find(
             $this->supplierId,
@@ -1279,13 +1491,25 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->supplierId,
             (int) $reviewed->revision['id'],
         );
-        self::assertSame('reviewed', $persistedRun['status']);
+        self::assertSame('approved', $approved->run['status']);
+        self::assertSame('approved', $persistedRun['status']);
+        self::assertSame('approved', $persistedRevision['status']);
         self::assertSame(
-            (int) $reviewed->run['row_version'],
-            (int) $persistedRun['row_version'],
+            1,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_document_batches
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $reviewed->revision['id']],
+            ),
         );
-        self::assertSame('reviewed', $persistedRevision['status']);
-        self::assertNull($persistedRevision['approved_by']);
+        self::assertSame(
+            0,
+            (int) $this->scalar(
+                'SELECT COUNT(*) FROM payroll_generated_documents
+                  WHERE supplier_id = ? AND revision_id = ?',
+                [$this->supplierId, $reviewed->revision['id']],
+            ),
+        );
     }
 
     public function testProductionPipelineBlocksApprovalUntilRulesetIsActive(): void
@@ -1389,12 +1613,12 @@ final class PayrollRunPersistenceTest extends TestCase
             'INSERT INTO payroll_enforcement_claims
                 (supplier_id, case_id, claim_key, enforcement_order_key,
                  legal_basis, category, outstanding_minor_units,
-                 priority_date, order_issued_on, legal_title_verified,
+                 priority_date, first_payer_delivered_on, order_issued_on, legal_title_verified,
                  order_or_notice_delivered, priority_classification_verified,
                  agreement_verified, due_monetary_claim_verified)
              VALUES (?, ?, "synthetic-runtime-claim", "synthetic-runtime-order",
                      "statutory", "non_priority", 10000000,
-                     "2026-05-01", "2026-04-30", 1, 1, 1, 0, 1)'
+                     "2026-05-01", "2026-05-01", "2026-04-30", 1, 1, 1, 0, 1)'
         )->execute([$this->supplierId, $caseId]);
 
         $run = $this->createRun();
@@ -1502,6 +1726,59 @@ final class PayrollRunPersistenceTest extends TestCase
                   WHERE supplier_id = ? AND revision_id = ?',
                 [$this->supplierId, $approved->revision['id']],
             ),
+        );
+    }
+
+    public function testStatutoryClaimDeliveredAfterPayDateIsNotSelectedUntilDelivery(): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_cases
+                (supplier_id, employee_id, case_key, case_kind, status,
+                 effective_from, evidence_complete, recipient_verified,
+                 created_by, updated_by)
+             VALUES (?, ?, "synthetic-future-delivery-case", "enforcement",
+                     "withhold_and_hold", "2026-06-01", 1, 1, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->actors[0],
+            $this->actors[0],
+        ]);
+        $caseId = (int) $this->db->pdo()->lastInsertId();
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_claims
+                (supplier_id, case_id, claim_key, enforcement_order_key,
+                 legal_basis, category, outstanding_minor_units,
+                 priority_date, first_payer_delivered_on, order_issued_on,
+                 legal_title_verified, order_or_notice_delivered,
+                 priority_classification_verified, agreement_verified,
+                 due_monetary_claim_verified)
+             VALUES (?, ?, "synthetic-future-delivery-claim", "synthetic-future-delivery-order",
+                     "statutory", "non_priority", 100000,
+                     "2026-07-20", "2026-07-20", "2026-07-01", 1, 1, 1, 0, 1)',
+        )->execute([$this->supplierId, $caseId]);
+
+        $enforcement = $this->container->get(PayrollEnforcementRepository::class);
+        self::assertInstanceOf(PayrollEnforcementRepository::class, $enforcement);
+
+        $beforeDelivery = $enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06',
+            '2026-07-15',
+        );
+        self::assertSame([], $beforeDelivery->claims);
+
+        $afterDelivery = $enforcement->evidenceFor(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-06',
+            '2026-07-20',
+        );
+        self::assertCount(1, $afterDelivery->claims);
+        self::assertSame(
+            'synthetic-future-delivery-claim',
+            $afterDelivery->claims[0]->id,
         );
     }
 
@@ -1696,6 +1973,49 @@ final class PayrollRunPersistenceTest extends TestCase
                 $event['event_type'] === 'request_correction',
         ))[0];
         self::assertSame('Doplatek syntetické prémie.', $correctionEvent['reason']);
+    }
+
+    public function testRevisionSummariesOmitSnapshotsButKeepMetadataAndHashes(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $revisionId = (int) $approved->revision['id'];
+
+        $summaries = $this->runs->revisions($this->supplierId, $runId);
+
+        self::assertCount(1, $summaries);
+        self::assertSame($revisionId, $summaries[0]['id']);
+        self::assertSame(1, $summaries[0]['revision_no']);
+        self::assertSame('approved', $summaries[0]['status']);
+        self::assertSame(
+            $approved->revision['input_snapshot_hash'],
+            $summaries[0]['input_snapshot_hash'],
+        );
+        self::assertSame(
+            $approved->revision['result_snapshot_hash'],
+            $summaries[0]['result_snapshot_hash'],
+        );
+        self::assertTrue($summaries[0]['has_input_snapshot']);
+        self::assertTrue($summaries[0]['has_result_snapshot']);
+        self::assertArrayNotHasKey('input_snapshot_json', $summaries[0]);
+        self::assertArrayNotHasKey('result_snapshot_json', $summaries[0]);
+        self::assertArrayNotHasKey('input_snapshot', $summaries[0]);
+        self::assertArrayNotHasKey('result_snapshot', $summaries[0]);
+
+        $fullRevision = $this->runs->revision($this->supplierId, $revisionId);
+        self::assertIsArray($fullRevision['input_snapshot']);
+        self::assertIsArray($fullRevision['result_snapshot']);
+
+        $currentRevision = $this->runs->currentRevision($this->supplierId, $runId);
+        self::assertIsArray($currentRevision['input_snapshot']);
+        self::assertIsArray($currentRevision['result_snapshot']);
+
+        $latestApproved = $this->runs->latestApprovedRevision(
+            $this->supplierId,
+            $runId,
+        );
+        self::assertIsArray($latestApproved['input_snapshot']);
+        self::assertIsArray($latestApproved['result_snapshot']);
     }
 
     public function testCancelledUnapprovedRunReopensFromCurrentInputsAsRegularRevision(): void
@@ -1963,6 +2283,12 @@ final class PayrollRunPersistenceTest extends TestCase
              VALUES (?, "MZ09", "Syntetická účtárna", 1)'
         )->execute([$this->supplierId]);
         $officeId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_office_registration_versions
+                (supplier_id, office_id, effective_from,
+                 social_security_variable_symbol, source_reference)
+             VALUES (?, ?, "2026-01-01", "0012345678", "synthetic:run-persistence")'
+        )->execute([$this->supplierId, $officeId]);
         $pdo->prepare(
             'INSERT INTO payroll_employments
                 (supplier_id, employee_id, office_id, code, relation_type, status,

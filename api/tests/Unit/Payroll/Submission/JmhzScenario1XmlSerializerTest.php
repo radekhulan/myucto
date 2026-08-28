@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionForm;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionPlan;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlContext;
@@ -82,7 +83,9 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             ]),
         );
 
-        $report = JmhzScenario1ControlValidator::create()->validate(
+        $report = JmhzScenario1ControlValidator::create(
+            CzechPayrollRulesets2026::provider(),
+        )->validate(
             $result['xml'],
             new JmhzControlContext('2026-08-26', schemaValidated: true),
         );
@@ -862,7 +865,7 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 'revision_no' => 1,
                 'period_start' => '2026-07-01',
                 'period_end' => '2026-07-31',
-                'scenario_key' => 'scenario_1',
+                'scenario_set' => ['scenario_1'],
             ],
             'specification' => [
                 'package_key' => 'synthetic-package',

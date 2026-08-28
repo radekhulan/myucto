@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { i18n } from '@/i18n'
 import {
   formatCompactNumber,
+  formatDateTime,
   formatMoneyMinor,
   formatNumber,
   formatPercent,
   formatPeriod,
+  formatUtcDateTime,
 } from '@/composables/useFormat'
 
 afterEach(() => {
@@ -52,6 +54,13 @@ describe('formatPeriod', () => {
     expect(formatPeriod(null)).toBe('—')
     expect(formatPeriod(undefined)).toBe('—')
     expect(formatPeriod('')).toBe('—')
+  })
+})
+
+describe('formatUtcDateTime', () => {
+  it('interpretuje databázový timestamp jako UTC okamžik', () => {
+    expect(formatUtcDateTime('2026-08-26 22:06:48'))
+      .toBe(formatDateTime('2026-08-26T22:06:48Z'))
   })
 })
 

@@ -358,6 +358,63 @@ final class PayrollTimeApiTest extends TestCase
         }
     }
 
+    public function testPartnerDependentCanConfirmZeroFundWithoutShiftCalendar(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employments
+                SET relation_type = 'partner_dependent'
+              WHERE supplier_id = ? AND id = ?"
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $overview = $this->action->month(
+            $this->request('GET', '/api/payroll/time/month')
+                ->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        );
+        self::assertSame(200, $overview->getStatusCode());
+        $item = $this->json($overview)['items'][0];
+        $preview = $item['jmhz_work_summary']['preview'];
+        self::assertSame([], $preview['issues']);
+        self::assertSame('0', $preview['suggestions']['agreed_fund_hours']);
+        self::assertSame('0', $preview['suggestions']['worked_hours']);
+
+        $approved = $this->action->approve(
+            $this->request('POST', '/api/payroll/time/months/2026-05/approve')
+                ->withParsedBody([
+                    'employment_id' => $this->employmentId,
+                    'row_version' => $item['month']['row_version'],
+                    'jmhz_work_summary' => [
+                        'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
+                        'standard_fund_hours' => '0',
+                        'agreed_fund_hours' => '0',
+                        'weekly_work_hours' => '99',
+                        'worked_hours' => '0',
+                        'unworked_hours_occurred' => false,
+                        'work_obstacles_occurred' => false,
+                        'confirmation_note' => 'Ověřeno podle podkladu ČSSZ.',
+                    ],
+                ]),
+            new Response(),
+            ['period' => '2026-05'],
+        );
+        self::assertSame(200, $approved->getStatusCode());
+
+        $stored = $this->db->pdo()->prepare(
+            'SELECT standard_fund_millihours, agreed_fund_millihours,
+                    weekly_work_centihours, evidence_days, worked_millihours
+               FROM payroll_jmhz_work_month_revisions
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $stored->execute([$this->supplierId, $this->employmentId]);
+        $revision = $stored->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($revision);
+        self::assertSame(0, (int) $revision['standard_fund_millihours']);
+        self::assertSame(0, (int) $revision['agreed_fund_millihours']);
+        self::assertSame(9900, (int) $revision['weekly_work_centihours']);
+        self::assertSame(31, (int) $revision['evidence_days']);
+        self::assertSame(0, (int) $revision['worked_millihours']);
+    }
+
     public function testJmhzConditionalWorkBlocksAreExplicitAndFailClosed(): void
     {
         $calendar = $this->action->calendar(

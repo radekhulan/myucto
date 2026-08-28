@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Payment;
 use MyInvoice\Repository\Payroll\PayrollEnforcementPaymentRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
+use MyInvoice\Service\Payroll\Garnishment\ClaimCategory;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -29,15 +30,6 @@ final class PayrollEnforcementLiabilityMaterializer
 {
     private const SOURCE_SCHEMA = 'payroll-payment-enforcement-source.v1';
     private const INSTITUTION_TYPE = 'other_recipient';
-
-    /** @var array<string,int> */
-    private const CATEGORY_RANK = [
-        'current_maintenance' => 0,
-        'maintenance_arrears' => 1,
-        'substitute_maintenance' => 2,
-        'other_priority' => 3,
-        'non_priority' => 4,
-    ];
 
     public function __construct(
         private readonly PayrollPaymentLiabilityRepository $liabilities,
@@ -154,6 +146,9 @@ final class PayrollEnforcementLiabilityMaterializer
                 $targetSnapshot = $target['target_snapshot']
                     ?? $previous['target_snapshot']
                     ?? throw new \LogicException('Chybí snapshot příjemce.');
+                $releaseEvidence = $target === null
+                    ? ($previous['release_evidence'] ?? self::emptyReleaseEvidence())
+                    : $target['release_evidence'];
                 $source = [
                     'schema_reference' => self::SOURCE_SCHEMA,
                     'run_id' => $revision['run_id'],
@@ -164,6 +159,7 @@ final class PayrollEnforcementLiabilityMaterializer
                     'liability_kind' =>
                         PayrollEnforcementPaymentRepository::LIABILITY_KIND,
                     ...$targetSnapshot,
+                    ...$releaseEvidence,
                     'target_amount_minor' => $targetAmount,
                     'prior_signed_minor' => $priorSigned,
                     'delta_signed_minor' => $delta,
@@ -253,6 +249,7 @@ final class PayrollEnforcementLiabilityMaterializer
      *   recipient_reference:string,
      *   amount_minor:int,
      *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }>
      */
@@ -289,16 +286,27 @@ final class PayrollEnforcementLiabilityMaterializer
                     "Případ {$caseId} nemá ověřeného příjemce srážky.",
                 );
             }
-            $institutionCode = $row['institution_code'];
-            if ($row['recipient_institution_id'] === null
-                || $institutionCode === null
-                || $row['institution_type'] !== self::INSTITUTION_TYPE
-            ) {
+            $instruction = $this->enforcement->documentedRecipientForPayment(
+                $supplierId,
+                $caseId,
+                $dueOn,
+            );
+            if ($instruction === null) {
                 throw new \DomainException(
-                    "Případ {$caseId} nemá příjemce v katalogu platebních účtů "
-                    . 'institucí.',
+                    "Případ {$caseId} nemá doloženou instrukci příjemce; "
+                    . 'historický případ vyžaduje explicitní backfill.',
                 );
             }
+            if (!$instruction['authority_current']
+                || !$instruction['beneficiary_current']
+                || !$instruction['recipient_party_current']
+                || $instruction['institution_type'] !== self::INSTITUTION_TYPE) {
+                throw new \DomainException(
+                    "Případ {$caseId} nemá aktuální doloženou právní stranu "
+                    . 'pro příjemce platby.',
+                );
+            }
+            $institutionCode = $instruction['institution_code'];
             if (preg_match(
                 '/^[A-Z0-9][A-Z0-9._-]{0,31}$/D',
                 $institutionCode,
@@ -325,6 +333,12 @@ final class PayrollEnforcementLiabilityMaterializer
                 );
             }
             $account = $accounts[0];
+            if ($account['id'] !== $instruction['payment_account_id']) {
+                throw new \DomainException(
+                    "Doložený účet příjemce případu {$caseId} není k datu "
+                    . 'výplaty aktuálním jednoznačným účtem katalogu.',
+                );
+            }
             $this->assertVerifiedAccount($supplierId, $dueOn, $account);
             $accountId = $account['id'];
             $verificationHash = hash(
@@ -361,14 +375,26 @@ final class PayrollEnforcementLiabilityMaterializer
                     . ":{$institutionCode}:account:{$accountId}",
                 'amount_minor' => $remittable,
                 'sort_key' => [
-                    self::CATEGORY_RANK[$row['claim_category']] ?? 9,
+                    ClaimCategory::from((string) $row['claim_category'])
+                        ->paymentPriorityRank(),
                     $row['claim_priority_date'] ?? '9999-12-31',
                     $claimId,
+                ],
+                'release_evidence' => [
+                    'release_decision_event_id' =>
+                        $row['release_decision_event_id'],
+                    'release_decision_document_id' =>
+                        $row['release_decision_document_id'],
+                    'release_decision_evidence_hash' =>
+                        $row['release_decision_evidence_hash'],
                 ],
                 'target_snapshot' => [
                     'case_id' => $caseId,
                     'claim_id' => $claimId,
                     'claim_category' => $row['claim_category'],
+                    'recipient_party_id' => $instruction['recipient_party_id'],
+                    'recipient_instruction_document_id' => $instruction['source_document_id'],
+                    'recipient_instruction_document_sha256' => $instruction['source_document_sha256'],
                     'institution_type' => self::INSTITUTION_TYPE,
                     'institution_code' => $institutionCode,
                     'payment_target_id' => $accountId,
@@ -390,12 +416,14 @@ final class PayrollEnforcementLiabilityMaterializer
      *   recipient_reference:string,
      *   amount_minor:int,
      *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }|null $left
      * @param array{
      *   recipient_reference:string,
      *   amount_minor:int,
      *   sort_key:array{int,string,int},
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }|null $right
      */
@@ -493,6 +521,7 @@ final class PayrollEnforcementLiabilityMaterializer
      *   recipient_reference:string,
      *   signed_minor:int,
      *   latest_id:int,
+     *   release_evidence:array<string,mixed>,
      *   target_snapshot:array<string,mixed>
      * }>
      */
@@ -521,6 +550,9 @@ final class PayrollEnforcementLiabilityMaterializer
                 'case_id',
                 'claim_id',
                 'claim_category',
+                'recipient_party_id',
+                'recipient_instruction_document_id',
+                'recipient_instruction_document_sha256',
                 'institution_type',
                 'institution_code',
                 'payment_target_id',
@@ -538,6 +570,14 @@ final class PayrollEnforcementLiabilityMaterializer
                     'recipient_reference' => $row['recipient_reference'],
                     'signed_minor' => 0,
                     'latest_id' => $row['id'],
+                    'release_evidence' => [
+                        'release_decision_event_id' =>
+                            $source['release_decision_event_id'] ?? null,
+                        'release_decision_document_id' =>
+                            $source['release_decision_document_id'] ?? null,
+                        'release_decision_evidence_hash' =>
+                            $source['release_decision_evidence_hash'] ?? null,
+                    ],
                     'target_snapshot' => $snapshot,
                 ];
             } elseif ($state[$reference]['recipient_reference']
@@ -553,6 +593,14 @@ final class PayrollEnforcementLiabilityMaterializer
                 $signed,
             );
             $state[$reference]['latest_id'] = $row['id'];
+            $state[$reference]['release_evidence'] = [
+                'release_decision_event_id' =>
+                    $source['release_decision_event_id'] ?? null,
+                'release_decision_document_id' =>
+                    $source['release_decision_document_id'] ?? null,
+                'release_decision_evidence_hash' =>
+                    $source['release_decision_evidence_hash'] ?? null,
+            ];
         }
         foreach ($state as $item) {
             if ($item['signed_minor'] < 0) {
@@ -563,6 +611,16 @@ final class PayrollEnforcementLiabilityMaterializer
         }
 
         return $state;
+    }
+
+    /** @return array<string,null> */
+    private static function emptyReleaseEvidence(): array
+    {
+        return [
+            'release_decision_event_id' => null,
+            'release_decision_document_id' => null,
+            'release_decision_evidence_hash' => null,
+        ];
     }
 
     /**

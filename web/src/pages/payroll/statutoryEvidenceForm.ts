@@ -27,6 +27,7 @@ export type StatutoryFieldKind =
   | 'country'
   | 'date'
   | 'evidence'
+  | 'document'
   | 'insurer'
   | 'employer'
 
@@ -69,7 +70,7 @@ export const CANONICAL_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9_.:/-]*$/
 
 function text(row: PayrollStatutoryEvidenceRow, key: string): string {
   const value = row[key]
-  return typeof value === 'string' ? value.trim() : ''
+  return typeof value === 'string' ? value.trim() : typeof value === 'number' ? String(value) : ''
 }
 
 const isForeign = (row: PayrollStatutoryEvidenceRow): boolean =>
@@ -172,6 +173,11 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
       {
         key: 'insurer_evidence_reference',
         kind: 'evidence',
+        visible: row => text(row, 'insurer_status') === 'verified',
+      },
+      {
+        key: 'health_evidence_document_id',
+        kind: 'document',
         visible: row => text(row, 'insurer_status') === 'verified',
       },
     ],
@@ -374,6 +380,7 @@ const DEFAULT_VALUES: Readonly<
     insurer_status: 'verified',
     insurer_code: null,
     insurer_evidence_reference: null,
+    health_evidence_document_id: null,
   },
   health_month_evidence: {
     top_up_responsibility: 'employee',

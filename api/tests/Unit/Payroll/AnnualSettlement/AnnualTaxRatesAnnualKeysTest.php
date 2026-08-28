@@ -46,6 +46,8 @@ final class AnnualTaxRatesAnnualKeysTest extends TestCase
         );
         self::assertTrue(AnnualSettlementStatute::isPayable(5_001));
         self::assertFalse(AnnualSettlementStatute::isPayable(5_000));
+        self::assertTrue(AnnualSettlementStatute::isAnnualBonusAmountEligible(10_000));
+        self::assertFalse(AnnualSettlementStatute::isAnnualBonusAmountEligible(9_999));
 
         // § 35bb — roční sleva na manžela, zdvojnásobení u přiznaného nároku na
         // průkaz ZTP/P a limit vlastního příjmu manžela.

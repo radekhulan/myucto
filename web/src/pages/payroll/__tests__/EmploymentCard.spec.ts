@@ -6,6 +6,7 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     transitionEmployment: vi.fn(),
     renameEmployment: vi.fn(),
+    setEmploymentMealEntitlementBasis: vi.fn(),
     addEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
     deleteEmployment: vi.fn(),
@@ -22,8 +23,9 @@ vi.mock('@/api/payroll', () => ({
       },
       apz_instruments: [{ code: '1', label: 'VPP' }],
       activity_codes: [
-        { code: '1', label: 'Pracovní poměr' },
-        { code: 'A', label: 'Dohoda' },
+        { code: '1', label: 'Pracovní poměr', relationship_detail_mode: 'select' },
+        { code: 'A', label: 'Dohoda', relationship_detail_mode: 'forbidden' },
+        { code: 'S', label: 'Společník nebo jednatel', relationship_detail_mode: 'fixed_none' },
       ],
       relationship_detail_codes: [{ code: '1', label: 'Žádné' }],
       countries: [{ code: 'CZ', label: 'Česko' }],
@@ -94,6 +96,7 @@ function employment(): PayrollEmployment {
     office_name: null,
     code: 'HPP-1',
     relation_type: 'employment',
+    meal_entitlement_basis: 'shift',
     status: 'planned',
     is_primary: true,
     start_date: '2026-01-01',
@@ -456,7 +459,7 @@ describe('EmploymentCard', () => {
     expect(payload?.social_part_time_discount_evidence).toBeNull()
   })
 
-  it('vyžádá 10502 jen pro druh činnosti 1 až 9 a při změně jej vyčistí', async () => {
+  it('řídí 10502 podle serverové politiky a pro S nastaví pevné Žádné', async () => {
     const wrapper = mount(EmploymentCard, {
       props: { employment: employment(), canWrite: true },
     })
@@ -471,6 +474,32 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="jmhz-relationship-detail"]').setValue('1')
     await wrapper.get('[data-test="jmhz-activity-code"]').setValue('A')
     expect(wrapper.find('[data-test="jmhz-relationship-detail"]').exists()).toBe(false)
+    await wrapper.get('[data-test="jmhz-activity-code"]').setValue('S')
+    const fixedDetail = wrapper.get('[data-test="jmhz-relationship-detail"]')
+    expect((fixedDetail.element as HTMLSelectElement).value).toBe('1')
+    expect((fixedDetail.element as HTMLSelectElement).disabled).toBe(true)
+  })
+
+  it('při otevření opravy odstraní historické 10502 u činnosti, která je zakazuje', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const legacy = employment()
+    legacy.terms[0]!.activity_code = 'A'
+    legacy.terms[0]!.jmhz_relationship_detail_code = '1'
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: legacy, canWrite: true },
+    })
+    const edit = wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )
+    await edit!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-relationship-detail"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    expect(payload?.jmhz_relationship_detail_code).toBeNull()
   })
 
   it('vybere obec atomicky z připnutého CISOB a odešle kanonický název i kód', async () => {
@@ -784,6 +813,49 @@ describe('EmploymentCard', () => {
     await flushPromises()
 
     expect(payrollApi.renameEmployment).toHaveBeenCalledWith(10, 1, 'DOCHAZKA-7')
+  })
+
+  it('uloží explicitní zákonný režim nároku na stravování', async () => {
+    const updated = { ...employment(), meal_entitlement_basis: 'calendar_day' as const }
+    vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockResolvedValue(updated)
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="employment-meal-entitlement-basis"]')
+      .setValue('calendar_day')
+    await flushPromises()
+
+    expect(payrollApi.setEmploymentMealEntitlementBasis)
+      .toHaveBeenCalledWith(10, 1, 'calendar_day')
+    expect(wrapper.emitted('updated')).toEqual([[updated]])
+  })
+
+  it('česky vysvětlí zámek režimu po schváleném příspěvku', async () => {
+    toastMocks.error.mockClear()
+    vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            code: 'meal_entitlement_basis_locked',
+            message: 'Serverová technická zpráva.',
+          },
+        },
+      },
+    })
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="employment-meal-entitlement-basis"]')
+      .setValue('calendar_day')
+    await flushPromises()
+
+    expect(toastMocks.error)
+      .toHaveBeenCalledWith('payroll.people.meal_entitlement_basis.locked')
+    expect(wrapper.emitted('updated')).toBeUndefined()
   })
 
   /**

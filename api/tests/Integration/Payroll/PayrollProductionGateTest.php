@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -21,11 +22,19 @@ final class PayrollProductionGateTest extends TestCase
     private PayrollProductionGate $gate;
     private int $supplierId;
 
+    public function testDistributedBuildKeepsProductionReleaseClosed(): void
+    {
+        self::assertFalse(PayrollProductionGate::PRODUCT_RELEASED);
+    }
+
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
-        $this->gate = $container->get(PayrollProductionGate::class);
+        $this->gate = new PayrollProductionGate(
+            $container->get(PayrollModuleStateRepository::class),
+            false,
+        );
         $pdo = $this->db->pdo();
         $sourceSupplierId = (int) $pdo->query(
             'SELECT MIN(id) FROM supplier',
@@ -51,14 +60,14 @@ final class PayrollProductionGateTest extends TestCase
         $this->db->close();
     }
 
-    public function testTestTransportRemainsAvailableDuringQualification(): void
+    public function testTestTransportRemainsAvailableDuringInternalVerification(): void
     {
         $this->gate->assertEnvironmentActive($this->supplierId, 'test');
 
         self::addToAssertionCount(1);
     }
 
-    public function testProductionTransportIsRejectedDuringQualification(): void
+    public function testProductionTransportIsRejectedDuringInternalVerification(): void
     {
         $this->expectException(PayrollProductionGateException::class);
 
@@ -68,17 +77,43 @@ final class PayrollProductionGateTest extends TestCase
         );
     }
 
-    public function testProductionTransportIsAvailableOnlyAfterQualification(): void
+    public function testActiveCustomerCannotBypassPendingInternalProductRelease(): void
     {
         $this->db->pdo()->prepare(
             'UPDATE payroll_module_state SET status = "active"
               WHERE supplier_id = ?',
         )->execute([$this->supplierId]);
 
+        $this->expectException(PayrollProductionGateException::class);
         $this->gate->assertEnvironmentActive(
             $this->supplierId,
             'production',
         );
+    }
+
+    public function testReleasedProductStillRequiresCompletedCustomerSetup(): void
+    {
+        $released = new PayrollProductionGate(
+            new PayrollModuleStateRepository($this->db),
+            true,
+        );
+
+        $this->expectException(PayrollProductionGateException::class);
+        $released->assertEnvironmentActive($this->supplierId, 'production');
+    }
+
+    public function testReleasedProductAllowsProductionAfterOrdinarySetup(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state SET status = "active"
+              WHERE supplier_id = ?',
+        )->execute([$this->supplierId]);
+        $released = new PayrollProductionGate(
+            new PayrollModuleStateRepository($this->db),
+            true,
+        );
+
+        $released->assertEnvironmentActive($this->supplierId, 'production');
         self::addToAssertionCount(1);
     }
 }

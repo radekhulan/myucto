@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   warning: vi.fn(),
   error: vi.fn(),
   success: vi.fn(),
+  canWrite: true,
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -64,7 +65,7 @@ vi.mock('@/api/errors', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: () => true }),
+  useAuthStore: () => ({ canWrite: () => m.canWrite }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -152,15 +153,24 @@ function result(overrides: Record<string, unknown> = {}) {
     tax_before_credits_minor_units: 7_500_000,
     annual_credits_minor_units: 3_084_000,
     applied_credits_minor_units: 3_084_000,
-    child_entitlement_minor_units: 0,
+    child_entitlement_minor_units: 1_520_400,
     child_credit_minor_units: 0,
-    annual_tax_bonus_minor_units: 0,
+    annual_tax_bonus_minor_units: 1_520_400,
     tax_after_all_credits_minor_units: 4_416_000,
     tax_difference_minor_units: 120_000,
-    bonus_difference_minor_units: 0,
-    settlement_difference_minor_units: 120_000,
-    payable_minor_units: 120_000,
+    bonus_difference_minor_units: 253_400,
+    settlement_difference_minor_units: 373_400,
+    payable_minor_units: 373_400,
     annual_bonus_threshold_met: true,
+    annual_bonus_candidate_minor_units: 1_520_400,
+    annual_bonus_income_threshold_met: true,
+    annual_bonus_amount_threshold_met: true,
+    annual_bonus_eligible: true,
+    annual_bonus_eligibility_reason: 'eligible',
+    bonus_qualifying_income_minor_units: 14_000_000,
+    bonus_minimum_income_minor_units: 13_440_000,
+    bonus_minimum_amount_minor_units: 10_000,
+    monthly_tax_bonus_minor_units: 1_267_000,
     ...overrides,
   }
 }
@@ -213,6 +223,7 @@ function mountPage() {
 describe('Roční zúčtování', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.canWrite = true
     m.listAnnualSettlements.mockResolvedValue(listResponse([person()]))
     m.previewAnnualSettlement.mockResolvedValue(previewResponse())
   })
@@ -287,6 +298,18 @@ describe('Roční zúčtování', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-test="annual-settlement-result"]').exists()).toBe(true)
+    const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain('payroll.annual_settlement.bonus_eligibility.eligible')
+    expect(wrapper.get('[data-test="annual-tax-bonus-income"]').text()).toContain('140 000')
+    expect(wrapper.get('[data-test="annual-tax-bonus-income-threshold"]').text())
+      .toContain('134 400')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text())
+      .toContain('payroll.annual_settlement.row_annual_tax_bonus')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('15 204')
+    expect(wrapper.get('[data-test="annual-tax-bonus-paid-monthly"]').text())
+      .toContain('payroll.annual_settlement.row_monthly_tax_bonus')
+    expect(wrapper.get('[data-test="annual-tax-bonus-paid-monthly"]').text()).toContain('12 670')
+    expect(wrapper.get('[data-test="annual-settlement-result"]').text()).toContain('2 534')
     const settle = wrapper.find('[data-action="settle"]')
     expect(settle.attributes('disabled')).toBeUndefined()
 
@@ -296,6 +319,57 @@ describe('Roční zúčtování', () => {
     expect(m.settleAnnualSettlement).toHaveBeenCalledWith(defaultYear, 7)
     expect(m.success).toHaveBeenCalledWith('payroll.annual_settlement.settled')
     expect(wrapper.find('[data-test="annual-settlement-download"]').exists()).toBe(true)
+  })
+
+  it('vysvětlí nulový roční bonus příjmem pod roční hranicí', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        annual_bonus_threshold_met: false,
+        annual_bonus_income_threshold_met: false,
+        annual_bonus_amount_threshold_met: true,
+        annual_bonus_eligible: false,
+        annual_bonus_eligibility_reason: 'income_below_threshold',
+        bonus_qualifying_income_minor_units: 10_000_000,
+        annual_tax_bonus_minor_units: 0,
+        bonus_difference_minor_units: 0,
+      }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain(
+      'payroll.annual_settlement.bonus_eligibility.income_below_threshold',
+    )
+    expect(wrapper.get('[data-test="annual-tax-bonus-income"]').text()).toContain('100 000')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('0,00')
+  })
+
+  it('vysvětlí nulový bonus kandidátem pod ročním minimem', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      result: result({
+        annual_bonus_candidate_minor_units: 9_900,
+        annual_bonus_income_threshold_met: true,
+        annual_bonus_amount_threshold_met: false,
+        annual_bonus_eligible: false,
+        annual_bonus_eligibility_reason: 'amount_below_threshold',
+        annual_tax_bonus_minor_units: 0,
+        bonus_difference_minor_units: 0,
+      }),
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const bonus = wrapper.get('[data-test="annual-tax-bonus-eligibility"]')
+    expect(bonus.text()).toContain(
+      'payroll.annual_settlement.bonus_eligibility.amount_below_threshold',
+    )
+    expect(wrapper.get('[data-test="annual-tax-bonus-candidate"]').text()).toContain('99,00')
+    expect(wrapper.get('[data-test="annual-tax-bonus-entitlement"]').text()).toContain('0,00')
   })
 
   /**
@@ -430,6 +504,31 @@ describe('Roční zúčtování', () => {
         request_evidence_reference: 'synthetic',
       }),
     )
+  })
+
+  it('read-only uživateli uzamkne celou evidenci jiné osoby uplatňující dítě', async () => {
+    m.canWrite = false
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      request: {
+        ...previewResponse().request,
+        other_household_caregiver_status: 'present',
+        other_household_caregivers: [{
+          given_name: 'Jana',
+          family_name: 'Syntetická',
+          birth_date: '1990-01-01',
+          months_mask: 'ANNNNNNNNNNN',
+        }],
+      },
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="annual-settlement-caregiver-fields"]')
+      .attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="annual-settlement-save-request"]')
+      .attributes('disabled')).toBeDefined()
   })
 
   it('uloží žádost i potvrzení bez volitelných odkazů na podklady', async () => {

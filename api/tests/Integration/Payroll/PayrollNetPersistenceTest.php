@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Net\PayoutAllocationRequest;
 use MyInvoice\Service\Payroll\Net\PayoutAllocationService;
 use MyInvoice\Service\Payroll\Net\PayrollNetCalculator;
 use MyInvoice\Service\Payroll\Net\PayrollNetInput;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
@@ -120,6 +121,14 @@ final class PayrollNetPersistenceTest extends TestCase
             $this->employeeId,
         );
         self::assertNotNull($stored);
+        self::assertSame('2026-06-01', (string) $stored['period_start']);
+        self::assertSame(
+            hash('sha256', CanonicalJson::encode([
+                'net' => $result->jsonSerialize(),
+                'payout' => $payout->jsonSerialize(),
+            ])),
+            $stored['result_hash'],
+        );
         self::assertSame(804_000, $stored['net_payable_minor']);
         $allocations = $this->repository->allocations(
             $this->supplierId,

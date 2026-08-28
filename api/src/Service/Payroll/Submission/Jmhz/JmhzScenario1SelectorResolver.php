@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
+
 final class JmhzScenario1SelectorResolver
 {
     public const SCENARIO_ROW_SHA256 = '1c2264dfdd94ceb8a1b779ae5cf7640b372d4dc10c976cee15fe59707cf906c2';
@@ -74,12 +76,24 @@ final class JmhzScenario1SelectorResolver
                 return $this->blocked('jmhz_scenario_relationship_detail_invalid', ['10502']);
             }
         }
-
         if (in_array($activityCode, self::DIRECT_ACTIVITY_CODES, true)) {
             if ($relationshipDetailCode !== null) {
                 return $this->blocked('jmhz_scenario_relationship_detail_not_applicable', ['10502']);
             }
             return $this->supported($activityCode, null);
+        }
+        try {
+            $relationshipDetailCode = PayrollRegistrationRelationshipDetailPolicy::requireForActivity(
+                $activityCode,
+                $relationshipDetailCode,
+            );
+        } catch (\InvalidArgumentException) {
+            return $this->blocked(
+                $relationshipDetailCode === null
+                    ? 'jmhz_scenario_relationship_detail_missing'
+                    : 'jmhz_scenario_relationship_detail_not_applicable',
+                ['10502'],
+            );
         }
         if (preg_match('/^[1-9]$/D', $activityCode) === 1) {
             if ($relationshipDetailCode === null) {

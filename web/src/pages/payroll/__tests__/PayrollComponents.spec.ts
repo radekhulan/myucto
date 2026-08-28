@@ -117,9 +117,7 @@ describe('PayrollComponents', () => {
     // do dalších a ty by měřily něco jiného, než co mají v názvu.
     m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
-    // PayrollRiskySavingsPanel se montuje uvnitř této obrazovky a načítá se sám.
-    // Bez těchto dvou mocků skončí jeho `load()` v catch větvi a vyhodí toast,
-    // který pak měří testy o něčem úplně jiném.
+    // PayrollRiskySavingsPanel se načte po otevření vlastní záložky.
     m.riskySavings.mockResolvedValue({
       items: [],
       minimum_shift_eighths: 24,
@@ -304,6 +302,40 @@ describe('PayrollComponents', () => {
     })
   })
 
+  it('keeps hazardous-work savings out of the monthly-input workflow', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('payroll.risky_savings.title')
+    expect(m.riskySavings).not.toHaveBeenCalled()
+
+    const riskyTab = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.risky_savings')
+    await riskyTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payroll.risky_savings.title')
+    expect(m.riskySavings).toHaveBeenCalledWith('2026-08')
+  })
+
+  it('uses at most three backend requests while mounting the default inputs tab', async () => {
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const requestCount = [
+      m.components,
+      m.recurringComponents,
+      m.inputs,
+      m.absenceContext,
+      m.accountOptions,
+      m.componentJmhzTargets,
+      m.componentJmhzMappings,
+    ].reduce((total, request) => total + request.mock.calls.length, 0)
+
+    expect(requestCount).toBeLessThanOrEqual(3)
+    wrapper.unmount()
+  })
+
   /**
    * Zúžení z karty zaměstnance musí jít na server u OBOU seznamů — opakovaných
    * složek i mzdových vstupů. Vstupy dřív zužoval prohlížeč nad načtenou
@@ -312,6 +344,10 @@ describe('PayrollComponents', () => {
   it('sends the narrowing to the server for both recurring components and inputs', async () => {
     m.routeQuery = { employment: '12' }
     const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.recurring')!
+      .trigger('click')
     await flushPromises()
 
     expect(m.recurringComponents).toHaveBeenLastCalledWith(12, { limit: 25, offset: 0 })
@@ -535,14 +571,17 @@ describe('PayrollComponents', () => {
   it('uses searchable selectors including account suggestions in the catalogue editor', async () => {
     const wrapper = mount(PayrollComponents)
     await flushPromises()
-    expect(m.accountOptions).toHaveBeenCalledTimes(1)
+    expect(m.accountOptions).not.toHaveBeenCalled()
 
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.catalog')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.catalog.add')!
       .trigger('click')
+    await flushPromises()
+    expect(m.accountOptions).toHaveBeenCalledTimes(1)
 
     const editor = wrapper.get('[data-testid="payroll-component-editor"]')
     expect(editor.find('select').exists()).toBe(false)
@@ -636,6 +675,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.recurring')!
       .trigger('click')
+    await flushPromises()
 
     await wrapper.findAll('[data-testid="payroll-recurring-delete"]')[0].trigger('click')
     await flushPromises()
@@ -719,6 +759,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.recurring')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.recurring.add')!
       .trigger('click')
@@ -737,6 +778,7 @@ describe('PayrollComponents', () => {
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.tabs.inputs')!
       .trigger('click')
+    await flushPromises()
     await wrapper.findAll('button')
       .find(button => button.text() === 'payroll.components.inputs.add')!
       .trigger('click')
@@ -832,6 +874,118 @@ describe('PayrollComponents', () => {
       .toContain('payroll.components.inputs.basket_usage')
     expect(wrapper.get('[data-testid="payroll-input-basket-over"]').text())
       .toContain('payroll.components.inputs.basket_over_limit')
+    wrapper.unmount()
+  })
+
+  it('shows the meal entitlement counts and mixed evidence basis', async () => {
+    m.previewInput.mockResolvedValue({
+      support_status: 'supported',
+      blocker: null,
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: 0,
+      annual_after_minor: 30000,
+      exemption_basket: {
+        basket: 'meal_per_shift',
+        statute: '§ 6 odst. 9 písm. b) ZDP',
+        shift_entitlements: 3,
+        limit_minor: 38850,
+        used_before_minor: 0,
+        used_after_minor: 30000,
+        remaining_minor: 8850,
+        exempt_minor: 30000,
+        taxable_minor: 0,
+        limit_exceeded: false,
+        allocation: {
+          mode: 'uniform_per_entitlement',
+          entitlement_count: 3,
+          amount_per_entitlement_minor: 10000,
+          limit_per_entitlement_minor: 12950,
+          exempt_per_entitlement_minor: 10000,
+          taxable_per_entitlement_minor: 0,
+        },
+        entitlement: {
+          period_start: '2026-06-01',
+          basis: 'mixed',
+          qualifying_count: 2,
+          second_contribution_count: 1,
+          count: 3,
+          complete: true,
+          missing: [],
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('300')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+
+    const entitlement = wrapper.get('[data-testid="payroll-input-meal-entitlement"]')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_entitlement_summary')
+    expect(entitlement.attributes('data-basis')).toBe('mixed')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_complete')
+    expect(wrapper.get('[data-testid="payroll-input-meal-allocation"]').text())
+      .toContain('payroll.components.inputs.meal_allocation_uniform')
+    wrapper.unmount()
+  })
+
+  it('warns with a translated reason when meal evidence is incomplete', async () => {
+    m.previewInput.mockResolvedValue({
+      support_status: 'manual_review',
+      blocker: 'Chybí úplný podklad: calendar_day_break_allocation_missing.',
+      annual_limit_exceeded: false,
+      annual_limit_minor: null,
+      annual_used_minor: 0,
+      annual_after_minor: 10000,
+      exemption_basket: null,
+      meal_entitlement: {
+        period_start: '2026-06-01',
+        basis: 'calendar_day',
+        qualifying_count: 0,
+        second_contribution_count: 0,
+        count: 0,
+        complete: false,
+        missing: [
+          'attendance_month_open',
+          'calendar_day_break_allocation_missing',
+        ],
+      },
+    })
+
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.tabs.inputs')!
+      .trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.add')!
+      .trigger('click')
+    await wrapper.get('[data-testid="payroll-input-amount"]').setValue('100')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.components.inputs.preview')!
+      .trigger('click')
+    await flushPromises()
+
+    const entitlement = wrapper.get('[data-testid="payroll-input-meal-entitlement"]')
+    expect(entitlement.text()).toContain('payroll.components.inputs.meal_evidence_incomplete')
+    expect(entitlement.text()).toContain(
+      'payroll.components.inputs.meal_missing.attendance_month_open',
+    )
+    expect(entitlement.text()).toContain(
+      'payroll.components.inputs.meal_missing.calendar_day_break_allocation_missing',
+    )
+    expect(wrapper.get('[data-testid="payroll-input-preview"]').classes())
+      .toContain('border-warning-500/40')
     wrapper.unmount()
   })
 

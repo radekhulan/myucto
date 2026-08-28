@@ -20,6 +20,7 @@ const loading = ref(true)
 const loadError = ref('')
 const result = ref<PayrollPostingReconciliation | null>(null)
 const expandedKey = ref<PayrollPostingReconciliationCategoryKey | null>(null)
+let loadSequence = 0
 
 const CATEGORY_KEYS: PayrollPostingReconciliationCategoryKey[] = [
   'gross_wages',
@@ -32,16 +33,21 @@ const CATEGORY_KEYS: PayrollPostingReconciliationCategoryKey[] = [
 ]
 
 async function load(): Promise<void> {
+  const sequence = ++loadSequence
+  const requestedPeriod = period.value
   loading.value = true
   loadError.value = ''
   expandedKey.value = null
   try {
-    result.value = await payrollPostingApi.reconciliation(period.value)
+    const response = await payrollPostingApi.reconciliation(requestedPeriod)
+    if (sequence !== loadSequence || requestedPeriod !== period.value) return
+    result.value = response
   } catch (error: unknown) {
+    if (sequence !== loadSequence || requestedPeriod !== period.value) return
     loadError.value = apiErrorMessage(error, t('payroll.posting_reconciliation.load_failed'))
     result.value = null
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -133,7 +139,13 @@ onMounted(load)
             @change="load"
           >
         </label>
-        <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load">
+        <button
+          type="button"
+          :class="btnOutline('neutral')"
+          :disabled="loading"
+          data-test="reconciliation-reload"
+          @click="load"
+        >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.cycle" />
           </svg>
@@ -148,7 +160,12 @@ onMounted(load)
       role="alert"
     >
       <p>{{ loadError }}</p>
-      <button type="button" :class="[btnOutline('danger'), 'mt-3']" @click="load">
+      <button
+        type="button"
+        :class="[btnOutline('danger'), 'mt-3']"
+        data-test="reconciliation-retry"
+        @click="load"
+      >
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path :d="ICONS.cycle" />
         </svg>
@@ -199,7 +216,11 @@ onMounted(load)
           </p>
         </section>
 
-        <section v-if="showCategories" class="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-surface shadow-sm md:block">
+        <section
+          v-if="showCategories"
+          class="hidden overflow-x-auto rounded-xl border border-neutral-200 bg-surface shadow-sm md:block"
+          data-test="reconciliation-desktop"
+        >
           <table class="min-w-full divide-y divide-neutral-200 text-sm">
             <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500">
               <tr>
@@ -219,7 +240,18 @@ onMounted(load)
                   class="cursor-pointer hover:bg-neutral-50"
                   @click="toggle(category.key)"
                 >
-                  <td class="px-3 py-3 font-medium text-neutral-900">{{ categoryLabel(category.key) }}</td>
+                  <td class="px-3 py-3 font-medium text-neutral-900">
+                    <button
+                      type="button"
+                      class="text-left font-medium"
+                      :aria-expanded="expandedKey === category.key"
+                      :aria-controls="`payroll-reconciliation-desktop-detail-${category.key}`"
+                      :data-test="`reconciliation-desktop-toggle-${category.key}`"
+                      @click.stop="toggle(category.key)"
+                    >
+                      {{ categoryLabel(category.key) }}
+                    </button>
+                  </td>
                   <td class="px-3 py-3 text-right font-mono">{{ formatMoney(category.payroll_minor) }}</td>
                   <td class="px-3 py-3 text-right font-mono">{{ formatMoney(category.journal_minor) }}</td>
                   <td
@@ -242,7 +274,10 @@ onMounted(load)
                     </span>
                   </td>
                 </tr>
-                <tr v-if="expandedKey === category.key">
+                <tr
+                  v-if="expandedKey === category.key"
+                  :id="`payroll-reconciliation-desktop-detail-${category.key}`"
+                >
                   <td colspan="8" class="bg-neutral-50 px-3 py-3 text-xs text-neutral-600">
                     {{ t('payroll.posting_reconciliation.detail_hint') }}
                   </td>
@@ -252,7 +287,11 @@ onMounted(load)
           </table>
         </section>
 
-        <section v-if="showCategories" class="space-y-3 md:hidden">
+        <section
+          v-if="showCategories"
+          class="space-y-3 md:hidden"
+          data-test="reconciliation-mobile"
+        >
           <article
             v-for="category in orderedCategories"
             :key="`mobile-${category.key}`"
@@ -260,7 +299,16 @@ onMounted(load)
             @click="toggle(category.key)"
           >
             <div class="flex items-start justify-between gap-3">
-              <p class="font-medium text-neutral-900">{{ categoryLabel(category.key) }}</p>
+              <button
+                type="button"
+                class="text-left font-medium text-neutral-900"
+                :aria-expanded="expandedKey === category.key"
+                :aria-controls="`payroll-reconciliation-mobile-detail-${category.key}`"
+                :data-test="`reconciliation-mobile-toggle-${category.key}`"
+                @click.stop="toggle(category.key)"
+              >
+                {{ categoryLabel(category.key) }}
+              </button>
               <span class="inline-flex shrink-0 rounded-full px-2 py-0.5 text-xs font-medium" :class="statusBadgeClass(category.status)">
                 {{ statusLabel(category.status) }}
               </span>
@@ -289,6 +337,13 @@ onMounted(load)
             >
               {{ t('payroll.posting_reconciliation.table.diff_journal') }}: {{ formatDiff(category.diff_payroll_journal_minor) }}
               · {{ t('payroll.posting_reconciliation.table.diff_payments') }}: {{ formatDiff(category.diff_payroll_payments_minor) }}
+            </p>
+            <p
+              v-if="expandedKey === category.key"
+              :id="`payroll-reconciliation-mobile-detail-${category.key}`"
+              class="mt-3 border-t border-neutral-200 pt-3 text-xs text-neutral-600"
+            >
+              {{ t('payroll.posting_reconciliation.detail_hint') }}
             </p>
           </article>
         </section>

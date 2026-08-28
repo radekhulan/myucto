@@ -25,6 +25,8 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
          * tam tvrdila, že se za období nic neodpracovalo.
          */
         public ?int $shiftEntitlements = null,
+        /** @var array<string,int|string>|null */
+        public ?array $allocation = null,
     ) {}
 
     public function usedAfterMinor(): int
@@ -42,7 +44,7 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
         return $this->taxableMinor > 0;
     }
 
-    /** @return array<string,int|string|bool|null> */
+    /** @return array<string,int|string|bool|array<string,int|string>|null> */
     public function jsonSerialize(): array
     {
         return [
@@ -56,6 +58,7 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
             'exempt_minor' => $this->exemptMinor,
             'taxable_minor' => $this->taxableMinor,
             'limit_exceeded' => $this->exceedsLimit(),
+            'allocation' => $this->allocation,
         ];
     }
 }

@@ -24,7 +24,7 @@ final readonly class JmhzScenario1XmlDryRunService
         private JmhzScenario1XmlValidator $validator,
         private JmhzSubmissionGuidFactory $guids,
         private JmhzScenario1ControlValidator $controls,
-        private JmhzDeadlinePolicy $deadlines = new JmhzDeadlinePolicy(),
+        private JmhzDeadlinePolicy $deadlines,
     ) {}
 
     /**
@@ -49,13 +49,51 @@ final readonly class JmhzScenario1XmlDryRunService
             $resolution->blockers,
         );
         if ($resolution->status() !== 'resolved') {
-            return [
+            $result = [
                 'status' => 'blocked',
                 'preparation_id' => $preparationId,
                 'office_id' => $officeId,
                 'blockers' => $blockers,
                 'official_submission' => $this->officialSubmission(),
             ];
+            if (in_array(
+                'jmhz_scenario1_scope_unsupported',
+                array_column($blockers, 'code'),
+                true,
+            )) {
+                $scenario2 = $this->documents->resolveScenario2(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                );
+                $result['scenario_2'] = [
+                    'status' => $scenario2->status(),
+                    'candidate' => $scenario2->candidate?->payload,
+                    'candidate_sha256' => $scenario2->candidate?->sha256(),
+                    'blockers' => array_map(
+                        static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
+                        $scenario2->blockers,
+                    ),
+                ];
+                $specialScenarios = $this->documents->resolveSpecialScenarios(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                );
+                if ($specialScenarios !== null) {
+                    $result['special_scenarios'] = [
+                        'status' => $specialScenarios->status(),
+                        'candidate' => $specialScenarios->candidate?->payload,
+                        'candidate_sha256' => $specialScenarios->candidate?->sha256(),
+                        'blockers' => array_map(
+                            static fn (JmhzScenario1Blocker $blocker): array => $blocker->toArray(),
+                            $specialScenarios->blockers,
+                        ),
+                    ];
+                }
+            }
+
+            return $result;
         }
 
         $document = $resolution->requireResolvedDocument();
