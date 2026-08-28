@@ -102,8 +102,20 @@ final class AnnualSettlementEligibility
             $blockers[] = AnnualSettlementBlocker::NonResident;
         }
 
+        // § 38ch odst. 1 a 4: zúčtování je úkon nad UPLYNULÝM zdaňovacím
+        // obdobím. Lhůta má dva konce — dokud rok neskončil, není z čeho
+        // počítat úhrn, a roční sleva na poplatníka se přitom nekrátí, takže by
+        // z půlky roku vyšel přeplatek, který poplatníkovi nenáleží.
+        $day = $today->setTime(0, 0);
+        if ($day < AnnualSettlementStatute::settlementEarliest($taxYear)) {
+            $blockers[] = AnnualSettlementBlocker::TaxYearNotFinished;
+        }
+
         // § 38ch odst. 4: zúčtování se provádí nejpozději do 31. března.
-        if ($today > AnnualSettlementStatute::settlementDeadline($taxYear)) {
+        // Porovnává se DEN, ne okamžik: `new DateTimeImmutable()` nese i čas,
+        // takže syrové porovnání by 31. března v devět ráno vyhodnotilo jako
+        // „po lhůtě" a poslední den lhůty by se nedal využít.
+        if ($day > AnnualSettlementStatute::settlementDeadline($taxYear)) {
             $blockers[] = AnnualSettlementBlocker::SettlementDeadlinePassed;
         }
 

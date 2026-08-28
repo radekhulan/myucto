@@ -91,6 +91,19 @@ final class PayrollInputsAction
         if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
             return $error;
         }
+        // ── Proč se TADY neschvaluje automaticky ───────────────────────────────
+        // Jednotlivý mzdový vstup má celý životní cyklus postavený na konceptu:
+        // upravit (`update()`) i zrušit (`cancel()`) jde jen koncept a teprve
+        // schválení ho zmrazí. Kdyby řádek vznikal rovnou schválený, ztratil by
+        // uživatel obojí hned po založení — a chybové hlášky by se zhoršily:
+        // vstup navázaný na cestovní příkaz by místo „je navázaný na vyúčtování
+        // cesty" hlásil obecné „špatný stav", protože by na kontrolu vazby
+        // vůbec nedošlo. U benefitů by se navíc roční koš § 6 odst. 9 ZDP čerpal
+        // už při zadání, tedy dřív, než si to kdokoli stihl rozmyslet.
+        //
+        // Klikání to nepřidává: hromadné zadávání jde přes rychlé zadání, které
+        // schvaluje rovnou a umí i opravu, a na všechno ostatní je
+        // {@see approveBatch()}.
         try {
             $input = $this->inputs->create(
                 $this->currentSupplierId($request),
@@ -102,6 +115,89 @@ final class PayrollInputsAction
         }
         $this->audit($request, 'payroll.input.created', $input);
         return Json::ok($response, ['input' => $input], 201);
+    }
+
+    /**
+     * Hromadné schválení mzdových vstupů.
+     *
+     * Bez něj se 500 zaměstnanců schvaluje po jednom řádku — tisíc kliků na
+     * obrazovce, kam uživatel přišel jen proto, že mzdový běh drží blokátor
+     * `draft_inputs_present`.
+     *
+     * Přijímá buď výčet `ids`, nebo `period` (volitelně zúžené na jeden vztah),
+     * kdy si dávku poskládá server ze všech konceptů měsíce. Idempotentní: už
+     * schválený vstup se hlásí jako přeskočený, ne jako chyba.
+     */
+    public function approveBatch(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            AccessLevel::WRITE,
+            'payroll.approve',
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        $supplierId = $this->currentSupplierId($request);
+        try {
+            $ids = $this->batchIds($body);
+            if ($ids === null) {
+                $ids = $this->inputs->draftInputIds(
+                    $supplierId,
+                    $this->period($body['period'] ?? null),
+                    self::narrowingId($body, 'employment_id'),
+                );
+            }
+            $result = $this->inputs->approveBatch($supplierId, $ids, $this->userId($request));
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        $this->logger->log(
+            'payroll.inputs.approved_batch',
+            $this->userId($request),
+            'payroll_input',
+            null,
+            [
+                'approved_count' => count($result['approved']),
+                'skipped_count' => count($result['skipped']),
+                'failed_count' => count($result['failed']),
+            ],
+            $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
+            $request->getHeaderLine('User-Agent'),
+            $supplierId,
+        );
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * @param array<string,mixed> $body
+     * @return ?list<int> null = výčet nebyl poslán, dávku určí období
+     */
+    private function batchIds(array $body): ?array
+    {
+        $ids = $body['ids'] ?? null;
+        if ($ids === null) {
+            return null;
+        }
+        if (!is_array($ids) || !array_is_list($ids)) {
+            throw new \InvalidArgumentException('ids musí být seznam identifikátorů.');
+        }
+        return array_map(
+            static function (mixed $id): int {
+                $value = filter_var($id, FILTER_VALIDATE_INT, [
+                    'options' => ['min_range' => 1],
+                ]);
+                if ($value === false) {
+                    throw new \InvalidArgumentException(
+                        'ids musí obsahovat jen kladná celá čísla.',
+                    );
+                }
+                return (int) $value;
+            },
+            $ids,
+        );
     }
 
     /** @param array<string,string> $args */

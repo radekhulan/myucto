@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -545,6 +546,7 @@ final class PayrollInstitutionAccountRepository
                     PayrollSensitiveField::BANK_ACCOUNT,
                     $supplierId,
                     self::requiredInt($row, 'id'),
+                    PayrollRevealPurpose::PAYMENT_INSTITUTION_ACCOUNT,
                 );
             } catch (\Throwable) {
                 // Cizí klíč, poškozený záznam nebo nedokončený zápis — přehled

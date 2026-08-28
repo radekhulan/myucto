@@ -102,8 +102,11 @@ final class AbsenceCalculationLockTest extends TestCase
         yield 'skutečný průměr s dopočtem delšího období' => [
             5_000_000, 250_000, 8_640, 45, null, null, 'actual', 36_458,
         ];
-        yield 'minimální nenulové vstupy' => [
-            1, 0, 1, 21, null, null, 'actual', 60,
+        // Vydělený průměr je 0,60 Kč za hodinu, tedy hluboko pod minimální mzdou.
+        // Zámek proto od doplnění § 357 odst. 1 ZP drží zvednutou hodnotu —
+        // 60 haléřů byl výsledek dělení, ne průměrný výdělek.
+        yield 'minimální nenulové vstupy zvedne minimální mzda' => [
+            1, 0, 1, 21, null, null, 'actual', 13_440,
         ];
     }
 

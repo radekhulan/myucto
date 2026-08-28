@@ -14,6 +14,7 @@ import {
   type PayrollRunResultPerson,
   type PayrollRunValidation,
 } from '@/api/payroll'
+import { apiErrorMessage } from '@/api/errors'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
@@ -546,6 +547,43 @@ async function confirmCommand() {
   )
 }
 
+/**
+ * Schválit rovnou z obrazovky běhu všechny mzdové vstupy, které ho drží.
+ *
+ * Blokátor `draft_inputs_present` dosud jen odkázal na jinou stránku, kde se
+ * schvalovalo řádek po řádku — u 500 zaměstnanců zhruba tisíc kliknutí. Odkaz
+ * zůstává (koncept může být potřeba nejdřív opravit), tohle je zkratka pro
+ * případ, kdy je vstupů jen moc.
+ */
+async function approveDraftInputs(run: PayrollRun) {
+  if (!canOverride.value) return
+  saving.value = true
+  try {
+    const result = await payrollApi.approveInputsBatch({
+      period: run.period_start.slice(0, 7),
+    })
+    if (result.failed.length > 0) {
+      toast.error(t('payroll.runs.validation.draft_inputs_approve_partial', {
+        approved: result.approved.length,
+        failed: result.failed.length,
+        reason: result.failed[0].message,
+      }))
+    } else {
+      toast.success(t('payroll.runs.validation.draft_inputs_approved', {
+        count: result.approved.length,
+      }))
+    }
+    await load()
+  } catch (error: any) {
+    toast.error(apiErrorMessage(
+      error,
+      t('payroll.runs.validation.draft_inputs_approve_failed'),
+    ))
+  } finally {
+    saving.value = false
+  }
+}
+
 function askOverride(run: PayrollRun, validation: PayrollRunValidation) {
   if (!canOverride.value || !overrideEditable(run)) return
   pendingOverride.value = { run, validation }
@@ -1033,6 +1071,23 @@ onMounted(load)
               </svg>
               {{ t('payroll.runs.validation.open_remediation') }}
             </a>
+            <!--
+              Zkratka přímo z běhu: odkaz výš vede tam, kde se koncepty
+              schvalují po jednom, a to je u větší firmy stovky kliknutí.
+            -->
+            <button
+              v-if="validation.code === 'draft_inputs_present' && canOverride"
+              type="button"
+              :data-testid="`payroll-validation-${validation.id}-approve-inputs`"
+              :class="[btnOutlineSm('success'), 'mt-2 ml-2 inline-flex']"
+              :disabled="saving"
+              @click="approveDraftInputs(run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.badgeCheck" />
+              </svg>
+              {{ t('payroll.runs.validation.draft_inputs_approve_all') }}
+            </button>
 
             <!--
               Varování, které čeká na člověka. Bez téhle věty uživatel vidí jen

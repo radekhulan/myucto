@@ -314,6 +314,20 @@ final class PayrollEnumContractTest extends TestCase
         'payrollEnforcement.ts::EnforcementClaimCategory'
             => 'enum:MyInvoice\Service\Payroll\Garnishment\ClaimCategory',
         'payrollEnforcement.ts::EnforcementCaseKind' => 'db:payroll_enforcement_cases.case_kind',
+        // Doložení důchodu, které od 1. 1. 2025 podmiňuje čtvrtinu na
+        // manžela/partnera (nař. vlády č. 441/2024 Sb.). Hodnota chodí po drátě
+        // OBĚMA směry: klient ji u manžela posílá při zakládání vyživované osoby
+        // a čte ji zpátky u existujících záznamů. `unknown` se nenabízí k výběru,
+        // ale klient ho znát MUSÍ — starší záznamy ho nesou a je to jediný stav,
+        // ze kterého vzniká blokátor `spouse_quarter_pension_evidence_unknown`.
+        'payrollEnforcement.ts::SpousePensionEvidence'
+            => 'enum:MyInvoice\Service\Payroll\Garnishment\SpousePensionEvidence',
+        // Držitel a druh důchodu enum nemají — doménu drží sloupec, který je
+        // zavedl (migrace 1612), a validace v repozitáři se páruje s ním.
+        'payrollEnforcement.ts::SpousePensionHolder'
+            => 'db:payroll_enforcement_dependants.quarter_pension_holder',
+        'payrollEnforcement.ts::SpousePensionKind'
+            => 'db:payroll_enforcement_dependants.quarter_pension_kind',
 
         'payrollRulesets.ts::PayrollRulesetLifecycle'
             => 'enum:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetLifecycle',
@@ -522,6 +536,17 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.enforcement.kinds'          => 'db:payroll_enforcement_cases.case_kind',
         'payroll.enforcement.ledger_kind'    => 'db:payroll_enforcement_ledger.entry_kind',
         'payroll.enforcement.dependant_kind' => 'db:payroll_enforcement_dependants.dependant_kind',
+        // Editor vyživované osoby skládá popisky dynamicky
+        // (`t(\`payroll.enforcement.spouse_pension.kind.${value}\`)`). Bez věty
+        // by u manžela svítilo `invalidity_second_degree` právě tam, kde má být
+        // řečeno, který důchod čtvrtinu zakládá — a u `unknown` by místo
+        // vysvětlení, proč se čtvrtina nezapočítala, zůstal holý kód.
+        'payroll.enforcement.spouse_pension.evidence'
+            => 'enum:MyInvoice\Service\Payroll\Garnishment\SpousePensionEvidence',
+        'payroll.enforcement.spouse_pension.holder'
+            => 'db:payroll_enforcement_dependants.quarter_pension_holder',
+        'payroll.enforcement.spouse_pension.kind'
+            => 'db:payroll_enforcement_dependants.quarter_pension_kind',
 
         'payroll.employer.dimensions.type_options' => 'db:payroll_dimensions.dimension_type',
 
@@ -574,6 +599,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\IncomeTax\TaxRegime::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxResidence::class,
         \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain::class,
+        \MyInvoice\Service\Payroll\Security\PayrollRevealPurpose::class,
         \MyInvoice\Service\Payroll\Security\PayrollSensitiveField::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialComponentTreatment::class,

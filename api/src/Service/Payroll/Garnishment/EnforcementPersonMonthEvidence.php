@@ -21,13 +21,29 @@ final readonly class EnforcementPersonMonthEvidence
         public bool $protectedAmountOverrideVerified,
         public bool $claimRegisterEvidenceComplete,
         public InsolvencyInstruction $insolvency,
+        public SpousePensionEvidence $spousePensionEvidence =
+            SpousePensionEvidence::Unknown,
     ) {
         if ($eligibleDependants < 0) {
             throw new InvalidArgumentException('Eligible dependant count cannot be negative.');
         }
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Klíč `spouse_pension_evidence` se serializuje jen tehdy, když někdo
+     * doložení důchodu podle nař. vlády č. 441/2024 Sb. skutečně zodpověděl.
+     *
+     * Kanonický tvar evidence se na několika místech porovnává BAJTOVĚ —
+     * potvrzený JMHZ ordinary profil ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOrdinaryEvidenceBuilder}),
+     * idempotence uložených výsledků srážek, zmrazené snímky běhu. Zmrazené
+     * záznamy pořízené před novelou klíč neobsahují, takže kdyby ho tvar
+     * přidával bezpodmínečně, rozešel by se sám se sebou a zablokoval podání.
+     * Vynechaný klíč se čte jako {@see SpousePensionEvidence::Unknown}, což je
+     * přesně stav těch záznamů; jakmile účetní doložení vyplní, klíč přibude
+     * a změna tvaru je záměrná.
+     *
+     * @return array<string,mixed>
+     */
     public function toCanonicalArray(): array
     {
         $claims = $this->claims;
@@ -47,6 +63,9 @@ final readonly class EnforcementPersonMonthEvidence
             'dependants_evidence_complete' => $this->dependantsEvidenceComplete,
             'eligible_spouse' => $this->eligibleSpouse,
             'spouse_evidence_complete' => $this->spouseEvidenceComplete,
+            ...($this->spousePensionEvidence === SpousePensionEvidence::Unknown
+                ? []
+                : ['spouse_pension_evidence' => $this->spousePensionEvidence->value]),
             'pension_evidence' => $this->pensionEvidence->value,
             'has_multiple_payers' => $this->hasMultiplePayers,
             'protected_amount_override_minor_units' =>
@@ -115,7 +134,29 @@ final readonly class EnforcementPersonMonthEvidence
                 ),
                 self::nullableInt($insolvency, 'employment_id'),
             ),
+            self::spousePension($data),
         );
+    }
+
+    /**
+     * Snímky pořízené před nařízením vlády č. 441/2024 Sb. klíč neobsahují —
+     * chybějící hodnota je fail-closed {@see SpousePensionEvidence::Unknown}.
+     *
+     * @param array<string,mixed> $data
+     */
+    private static function spousePension(array $data): SpousePensionEvidence
+    {
+        $value = $data['spouse_pension_evidence'] ?? null;
+        if ($value === null) {
+            return SpousePensionEvidence::Unknown;
+        }
+        if (!is_string($value)) {
+            throw new InvalidArgumentException(
+                'spouse_pension_evidence must be a string.',
+            );
+        }
+
+        return SpousePensionEvidence::from($value);
     }
 
     /** @return array<string,mixed> */

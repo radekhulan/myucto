@@ -47,6 +47,9 @@ final class ChartAccountUsage
             'social_insurance_credit_account', 'health_insurance_credit_account',
             'income_tax_credit_account', 'other_deductions_credit_account',
             'employer_insurance_debit_account', 'partner_settlement_credit_account',
+            'risky_savings_debit_account', 'risky_savings_credit_account',
+            'employee_receivable_debit_account',
+            'non_deductible_benefit_debit_account', 'travel_expense_debit_account',
         ],
     ];
 

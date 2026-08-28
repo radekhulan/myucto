@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Payroll\Security;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PHPUnit\Framework\TestCase;
@@ -40,7 +41,10 @@ final class PayrollSensitiveDataTest extends TestCase
         self::assertStringStartsWith('enc:v2:', $sealed->ciphertext);
         self::assertSame(32, strlen($sealed->lookupHash));
         self::assertStringNotContainsString('TEST', $sealed->ciphertext);
-        self::assertStringEndsWith('0001', $sealed->masked);
+        // Osobní identifikátor odhaluje jen DVĚ poslední číslice (W1/P-06) —
+        // se čtyřmi by šlo z data narození a pohlaví složit celé rodné číslo.
+        self::assertStringEndsWith('01', $sealed->masked);
+        self::assertStringNotContainsString('0001', $sealed->masked);
         self::assertSame(
             'TEST / ID-0001',
             $this->service->reveal(
@@ -48,6 +52,7 @@ final class PayrollSensitiveDataTest extends TestCase
                 PayrollSensitiveField::PERSONAL_IDENTIFIER,
                 10,
                 20,
+                PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
             ),
         );
     }
@@ -140,6 +145,7 @@ final class PayrollSensitiveDataTest extends TestCase
                 PayrollSensitiveField::REGISTRATION_A1_PROFILE,
                 10,
                 20,
+                PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
             ),
         );
         self::assertSame(
@@ -194,6 +200,7 @@ final class PayrollSensitiveDataTest extends TestCase
                 PayrollSensitiveField::CONTACT_EMAIL,
                 10,
                 21,
+                PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
             ),
         );
 
@@ -203,6 +210,7 @@ final class PayrollSensitiveDataTest extends TestCase
             PayrollSensitiveField::CONTACT_PHONE,
             10,
             21,
+            PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
         );
     }
 
@@ -221,7 +229,7 @@ final class PayrollSensitiveDataTest extends TestCase
             [10, 20, PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER],
         ] as [$supplierId, $entityId, $field]) {
             try {
-                $this->service->reveal($sealed->ciphertext, $field, $supplierId, $entityId);
+                $this->service->reveal($sealed->ciphertext, $field, $supplierId, $entityId, PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL);
                 self::fail('Změněný kontext musí decrypt odmítnout.');
             } catch (\RuntimeException $e) {
                 self::assertSame('Decryption failed', $e->getMessage());
@@ -241,6 +249,7 @@ final class PayrollSensitiveDataTest extends TestCase
                     PayrollSensitiveField::PERSONAL_IDENTIFIER,
                     10,
                     20,
+                    PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
                 );
                 self::fail('Mzdový wrapper nesmí přijmout plaintext ani starý ciphertext bez kontextu.');
             } catch (\RuntimeException $e) {
@@ -271,6 +280,69 @@ final class PayrollSensitiveDataTest extends TestCase
         self::assertSame(
             '••••',
             $this->service->mask('ABC', PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER),
+        );
+    }
+
+    /**
+     * W1/P-03 — účel odhalení musí umět odlišit zákonnou náležitost dokumentu
+     * nebo podání (systémový průchod, na interaktivní důvod není kde se zeptat)
+     * od platebního styku a od odhalení na výslovnou žádost uživatele.
+     */
+    public function testRevealPurposeSeparatesStatutoryOutputsFromTheRest(): void
+    {
+        foreach ([
+            PayrollRevealPurpose::DOCUMENT_PAYROLL_SHEET,
+            PayrollRevealPurpose::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
+            PayrollRevealPurpose::DOCUMENT_ANNUAL_SETTLEMENT,
+            PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
+        ] as $purpose) {
+            self::assertTrue(
+                $purpose->isStatutoryOutput(),
+                $purpose->value . ' je zákonná náležitost výstupu.',
+            );
+        }
+        foreach ([
+            PayrollRevealPurpose::PAYMENT_INSTITUTION_ACCOUNT,
+            PayrollRevealPurpose::PAYMENT_LIABILITY_ACCOUNT,
+            PayrollRevealPurpose::PAYMENT_BATCH,
+            PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
+        ] as $purpose) {
+            self::assertFalse(
+                $purpose->isStatutoryOutput(),
+                $purpose->value . ' není zákonná náležitost výstupu.',
+            );
+        }
+    }
+
+    /**
+     * Maska rodného čísla nesmí umožnit jeho rekonstrukci (W1/P-06).
+     *
+     * Ve stejné odpovědi jako maska chodí `birth_date` a `sex`, ze kterých plyne
+     * prvních šest číslic. Kdyby maska ukazovala celou čtyřmístnou koncovku,
+     * bylo by rodné číslo známé beze zbytku — a to za pouhé právo `payroll` READ.
+     */
+    public function testPersonalIdentifierMaskHidesEnoughForReconstruction(): void
+    {
+        $masked = $this->service->mask(
+            '900101/1234',
+            PayrollSensitiveField::PERSONAL_IDENTIFIER,
+        );
+
+        self::assertSame('••••••••34', $masked);
+        self::assertStringNotContainsString('1234', $masked);
+        self::assertStringNotContainsString('900101', $masked);
+    }
+
+    /** Číslo účtu ani telefon se nezkracují — u nich rekonstrukce z jiných polí nehrozí. */
+    public function testBankAccountAndPhoneMasksAreUnchanged(): void
+    {
+        self::assertSame(
+            '••••123456',
+            $this->service->mask('9876123456', PayrollSensitiveField::BANK_ACCOUNT),
+        );
+        self::assertSame(
+            '•••••••••2333',
+            $this->service->mask('+420 111 222 333', PayrollSensitiveField::CONTACT_PHONE),
         );
     }
 

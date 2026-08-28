@@ -10,13 +10,23 @@ use PDO;
 /**
  * Identifikace zaměstnance/jednatele-společníka pro mzdový list (§38j ZDP).
  *
- * Záměrně jednoduchá evidence — jméno, rodné číslo/datum narození, adresa a prohlášení
- * poplatníka (sleva na poplatníka, počet dětí). Neduplikuje `PayrollCalculator::types()`
+ * Záměrně jednoduchá evidence — jméno, datum narození a prohlášení poplatníka
+ * (sleva na poplatníka, počet dětí). Neduplikuje `PayrollCalculator::types()`
  * (typ poplatníka řídí kontaci 521/331 vs. 522/366), jen ho eviduje spolu s identifikací.
+ *
+ * ── Rodné číslo a adresa tudy NEVEDOU (W1/P-02) ───────────────────────────────
+ * Sloupce `birth_number` a `address` v `payroll_employees` drží legacy hodnoty
+ * v OTEVŘENÉM tvaru. Tahle routa je přitom chráněná jen právem `accounting`,
+ * tedy dostupná i uživateli bez jediného mzdového práva — plné rodné číslo tak
+ * teklo do JSONu mimo `payroll_person_identifiers` (šifrováno, maskováno,
+ * s auditní stopou o odhalení). Repository je proto ani nečte, ani nezapisuje:
+ * jediná legální cesta k rodnému číslu je nový mzdový modul přes
+ * {@see \MyInvoice\Service\Payroll\Security\PayrollPersonSensitiveRevealService}.
+ * Sloupce zůstávají v DB kvůli datům, která nikdo nepřesealoval — viz migrace 1611.
  */
 final class PayrollEmployeeRepository
 {
-    private const COLS = 'id, supplier_id, full_name, birth_date, birth_number, address,
+    private const COLS = 'id, supplier_id, full_name, birth_date,
         taxpayer_type, employment_type, tax_declaration_signed,
         tax_credit_taxpayer, child_count, net_settlement_account_code,
         monthly_gross, auto_post, is_active, created_at, updated_at';
@@ -55,17 +65,15 @@ final class PayrollEmployeeRepository
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO payroll_employees
-                (supplier_id, full_name, birth_date, birth_number, address,
+                (supplier_id, full_name, birth_date,
                  taxpayer_type, employment_type, tax_declaration_signed,
                  tax_credit_taxpayer, child_count, net_settlement_account_code,
                  monthly_gross, auto_post, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $data['full_name'],
             $data['birth_date'] ?? null,
-            $data['birth_number'] ?? null,
-            $data['address'] ?? null,
             $data['taxpayer_type'],
             $data['employment_type'] ?? 'hpp',
             array_key_exists('tax_declaration_signed', $data) ? (int) (bool) $data['tax_declaration_signed'] : 1,
@@ -85,8 +93,10 @@ final class PayrollEmployeeRepository
      */
     public function update(int $supplierId, int $id, array $fields): bool
     {
+        // `birth_number` ani `address` v seznamu ZÁMĚRNĚ nejsou — legacy routa
+        // nesmí zapisovat otevřené rodné číslo (W1/P-02).
         $allowed = [
-            'full_name', 'birth_date', 'birth_number', 'address',
+            'full_name', 'birth_date',
             'taxpayer_type', 'employment_type', 'tax_declaration_signed',
             'tax_credit_taxpayer', 'child_count', 'net_settlement_account_code',
             'monthly_gross', 'auto_post', 'is_active',

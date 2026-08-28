@@ -22,6 +22,7 @@ const m = vi.hoisted(() => ({
   documentSearch: vi.fn(),
   monthEvidence: vi.fn(),
   dependants: vi.fn(),
+  addDependant: vi.fn(),
   peoplePage: vi.fn(),
   person: vi.fn(),
   institutionAccounts: vi.fn(),
@@ -44,6 +45,14 @@ vi.mock('vue-router', async (importOriginal) => ({
 
 vi.mock('@/api/payrollEnforcement', () => ({
   pensionEvidenceValues: ['unknown', 'none', 'verified'],
+  spousePensionEvidenceOptions: ['documented', 'not_documented'],
+  spousePensionHolderOptions: ['debtor', 'spouse_partner'],
+  spousePensionKindOptions: [
+    'old_age',
+    'invalidity_second_degree',
+    'invalidity_third_degree',
+    'orphan',
+  ],
   payrollEnforcementApi: {
     casesPage: m.casesPage,
     detail: m.detail,
@@ -63,7 +72,7 @@ vi.mock('@/api/payrollEnforcement', () => ({
     monthEvidence: m.monthEvidence,
     saveMonthEvidence: vi.fn(),
     dependants: m.dependants,
-    addDependant: vi.fn(),
+    addDependant: m.addDependant,
   },
 }))
 
@@ -211,6 +220,12 @@ function dependantOf(overrides: Partial<EnforcementDependant> = {}): Enforcement
     valid_to: null,
     eligibility_verified: true,
     excluded_for_maintenance: false,
+    // Doložení důchodu podle nař. vlády č. 441/2024 Sb. U dítěte je bez významu;
+    // testy manžela si ho přebijí přes overrides.
+    quarter_pension_evidence: 'not_documented',
+    quarter_pension_holder: null,
+    quarter_pension_kind: null,
+    quarter_pension_documented_on: null,
     row_version: 1,
     ...overrides,
   }
@@ -995,6 +1010,158 @@ describe('EnforcementCases', () => {
         .toBeUndefined()
       expect(wrapper.get('[data-test="month-evidence-dependants"]').attributes('disabled'))
         .toBeUndefined()
+      wrapper.unmount()
+    })
+  })
+
+  /*
+   * Nař. vlády č. 441/2024 Sb. — od 1. 1. 2025 se manžel do nezabavitelné
+   * částky nezapočítává automaticky. Formulář se proto ptá na doložení
+   * důchodu, ale JEN u manžela/partnera: u dítěte se podmínka neuplatní
+   * a pole navíc by při 500 zaměstnancích znamenalo 500 zbytečných kliků.
+   */
+  describe('doložení důchodu u manžela/partnera', () => {
+    async function openDependants() {
+      const wrapper = mountPage()
+      await flushPromises()
+      await expandFirstCase(wrapper)
+      await wrapper.get('[data-test="dependants-toggle"]').trigger('click')
+      return wrapper
+    }
+
+    it('ptá se na důchod jen u manžela, ne u dítěte', async () => {
+      const wrapper = await openDependants()
+
+      expect(wrapper.find('[data-test="spouse-pension-fields"]').exists()).toBe(false)
+      await wrapper.get('[data-test="dependant-kind"]').setValue('spouse_partner')
+      expect(wrapper.get('[data-test="spouse-pension-fields"]').text())
+        .toContain('payroll.enforcement.spouse_pension.why')
+      wrapper.unmount()
+    })
+
+    /*
+     * `unknown` je stav starších záznamů, ne odpověď. Kdyby ho výběr nabízel,
+     * účetní by mohla vyrobit nový záznam, který jí shodí měsíc se srážkou do
+     * ručního posouzení — a ještě by to vypadalo jako legitimní volba.
+     */
+    it('nenabízí „nedoplněno" jako volbu', async () => {
+      const wrapper = await openDependants()
+      await wrapper.get('[data-test="dependant-kind"]').setValue('spouse_partner')
+
+      const values = wrapper.get('[data-test="spouse-pension-evidence"]')
+        .findAll('option').map(option => option.attributes('value'))
+      expect(values).toEqual(['documented', 'not_documented'])
+      wrapper.unmount()
+    })
+
+    it('pošle u doloženého důchodu držitele, druh i datum', async () => {
+      m.addDependant.mockResolvedValue({})
+      const wrapper = await openDependants()
+      await wrapper.get('[data-test="dependant-kind"]').setValue('spouse_partner')
+      await wrapper.get('[data-test="spouse-pension-evidence"]').setValue('documented')
+      await wrapper.get('[data-test="spouse-pension-holder"]').setValue('spouse_partner')
+      await wrapper.get('[data-test="spouse-pension-kind"]')
+        .setValue('invalidity_third_degree')
+      await wrapper.get('[data-test="spouse-pension-documented-on"]').setValue('2025-03-04')
+
+      await wrapper.get('[data-test="dependants-panel"] form').trigger('submit')
+      await flushPromises()
+
+      expect(m.addDependant).toHaveBeenCalledWith(3, expect.objectContaining({
+        dependant_kind: 'spouse_partner',
+        quarter_pension_evidence: 'documented',
+        quarter_pension_holder: 'spouse_partner',
+        quarter_pension_kind: 'invalidity_third_degree',
+        quarter_pension_documented_on: '2025-03-04',
+      }))
+      wrapper.unmount()
+    })
+
+    /*
+     * „Nedoložen" je ÚPLNÝ stav evidence, ne mezera — povinný důkazní břemeno
+     * neunesl. Držitel ani druh důchodu k němu nepatří a nesmí odejít.
+     */
+    it('u nedoloženého důchodu neposílá držitele ani druh', async () => {
+      m.addDependant.mockResolvedValue({})
+      const wrapper = await openDependants()
+      await wrapper.get('[data-test="dependant-kind"]').setValue('spouse_partner')
+
+      expect(wrapper.find('[data-test="spouse-pension-holder"]').exists()).toBe(false)
+      await wrapper.get('[data-test="dependants-panel"] form').trigger('submit')
+      await flushPromises()
+
+      expect(m.addDependant).toHaveBeenCalledWith(3, expect.objectContaining({
+        quarter_pension_evidence: 'not_documented',
+        quarter_pension_holder: null,
+        quarter_pension_kind: null,
+        quarter_pension_documented_on: null,
+      }))
+      wrapper.unmount()
+    })
+
+    /* U dítěte se pole nesmí přimíchat ani omylem — server je tam ignoruje. */
+    it('u dítěte pole důchodu vůbec neposílá', async () => {
+      m.addDependant.mockResolvedValue({})
+      const wrapper = await openDependants()
+
+      await wrapper.get('[data-test="dependants-panel"] form').trigger('submit')
+      await flushPromises()
+
+      expect(m.addDependant.mock.calls[0][1]).not.toHaveProperty('quarter_pension_evidence')
+      wrapper.unmount()
+    })
+
+    /*
+     * Existující záznam s `unknown` musí být vidět i s důvodem — právě na něm
+     * vzniká blokátor `spouse_quarter_pension_evidence_unknown` ve výpočtu.
+     */
+    it('u staršího záznamu bez doložení ukáže větu, co s tím', async () => {
+      m.dependants.mockResolvedValue([dependantOf({
+        id: 7,
+        dependant_kind: 'spouse_partner',
+        quarter_pension_evidence: 'unknown',
+      })])
+      const wrapper = await openDependants()
+
+      expect(wrapper.get('[data-test="spouse-pension-unknown"]').text())
+        .toBe('payroll.enforcement.blocker.spouse_quarter_pension_evidence_unknown')
+      expect(wrapper.get('[data-test="dependant-pension-7"]').text())
+        .toContain('payroll.enforcement.spouse_pension.evidence.unknown')
+      wrapper.unmount()
+    })
+
+    it('u doloženého záznamu varování neukáže', async () => {
+      m.dependants.mockResolvedValue([dependantOf({
+        id: 7,
+        dependant_kind: 'spouse_partner',
+        quarter_pension_evidence: 'documented',
+        quarter_pension_holder: 'debtor',
+        quarter_pension_kind: 'old_age',
+        quarter_pension_documented_on: '2025-01-15',
+      })])
+      const wrapper = await openDependants()
+
+      expect(wrapper.find('[data-test="spouse-pension-unknown"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="dependant-pension-7"]').text())
+        .toContain('payroll.enforcement.spouse_pension.kind.old_age')
+      wrapper.unmount()
+    })
+
+    /*
+     * Chyba ze serveru zůstává u formuláře. Toast po pár vteřinách zmizí
+     * a účetní by u pole neměla, čeho se chytit.
+     */
+    it('drží přesný důvod ze serveru u formuláře', async () => {
+      m.addDependant.mockRejectedValue({
+        response: { data: { error: { message: 'U doloženého důchodu chybí datum doložení.' } } },
+      })
+      const wrapper = await openDependants()
+
+      await wrapper.get('[data-test="dependants-panel"] form').trigger('submit')
+      await flushPromises()
+
+      expect(wrapper.get('[data-test="dependant-error"]').text())
+        .toBe('U doloženého důchodu chybí datum doložení.')
       wrapper.unmount()
     })
   })

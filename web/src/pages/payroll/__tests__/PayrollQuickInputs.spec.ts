@@ -133,8 +133,8 @@ describe('PayrollQuickInputs', () => {
       items: [fixture()],
     }))
     m.save.mockImplementation(async payload => ({
-      period: payload.period,
-      items: [],
+      month: { period: payload.period, items: [], total: 0 },
+      failures: [],
     }))
   })
 
@@ -314,8 +314,8 @@ describe('PayrollQuickInputs', () => {
     }))
     // Uložení vrací řádek zpátky, aby druhá polovina testu měla do čeho psát.
     m.save.mockImplementation(async payload => ({
-      period: payload.period,
-      items: [partialMonthRow()],
+      month: { period: payload.period, items: [partialMonthRow()], total: 1 },
+      failures: [],
     }))
 
     const wrapper = mountPage()
@@ -463,5 +463,134 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.text()).not.toContain('Syntetická osoba')
     expect(wrapper.find('[data-testid="quick-payroll-save"]').exists()).toBe(false)
     expect(m.save).not.toHaveBeenCalled()
+  })
+  /*
+   * X-04: jeden vadný řádek nesmí uzamknout uložení celé stránky. Konflikt
+   * s jiným vstupem je věc jednoho zaměstnance, ne dalších čtyřiadvaceti.
+   */
+  it('saves the healthy rows and pins the backend reason to the broken field', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 2,
+      items: [
+        fixture({ base_conflict: true }),
+        fixture({ employment_id: 13, employment_code: 'SYN-DRUHY', full_name: 'Druhá osoba' }),
+      ],
+    }))
+    m.save.mockImplementation(async payload => ({
+      month: {
+        period: payload.period,
+        total: 2,
+        items: [
+          fixture({ base_conflict: true }),
+          fixture({ employment_id: 13, employment_code: 'SYN-DRUHY', full_name: 'Druhá osoba' }),
+        ],
+      },
+      failures: [{
+        employment_id: 12,
+        field: 'base',
+        code: 'input_state_conflict',
+        message: 'Základní mzda je v měsíci evidována rychlým i jiným vstupem.',
+        current_row_version: null,
+      }],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const button = wrapper.get('[data-testid="quick-payroll-save"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+    await button.trigger('click')
+    await flushPromises()
+
+    // Odeslaly se OBA řádky — o tom, co uložit nejde, rozhoduje server.
+    expect(m.save.mock.calls[0][0].rows).toHaveLength(2)
+    expect(wrapper.get('[data-testid="quick-base-server-error-12"]').text())
+      .toContain('Základní mzda je v měsíci evidována')
+    // Chyba se nesmí smrsknout na obecné „nepodařilo se".
+    expect(wrapper.get('[data-testid="quick-payroll-save-error"]').text())
+      .toContain('payroll.quick_inputs.saved_partially')
+  })
+
+  /*
+   * X-05: rozepsaný řádek přežije přelistování. Dřív se ukládala jen zobrazená
+   * stránka, takže 40 lidí znamenalo dvě uložení a dvě šance na konflikt verzí.
+   */
+  it('carries edits from other pages into a single save', async () => {
+    m.load.mockImplementation(async (period, page) => ({
+      period,
+      total: 2,
+      items: page.offset === 0
+        ? [fixture()]
+        : [fixture({ employment_id: 13, employment_code: 'SYN-DRUHA', full_name: 'Druhá osoba' })],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-bonus-12"]').setValue('900')
+
+    const vm = wrapper.vm as unknown as { goToPage: (page: number) => void }
+    vm.goToPage(2)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="quick-bonus-12"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="quick-bonus-13"]').setValue('700')
+
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+
+    const sent = m.save.mock.calls[0][0].rows
+    expect(sent.map((row: { employment_id: number }) => row.employment_id).sort())
+      .toEqual([12, 13])
+    expect(sent.find((row: { employment_id: number }) => row.employment_id === 12)
+      .bonus_amount_minor).toBe(90_000)
+  })
+
+  /*
+   * X-01: kdo smí schvalovat, ukládá rovnou schválené vstupy — a musí je jít
+   * ještě opravit, dokud je nepohltil mzdový běh. Bez toho práva zůstává
+   * schválený vstup zamčený jako dřív.
+   */
+  it('keeps an approved field editable only for someone who may approve', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 1,
+      items: [fixture({
+        inputs: {
+          base: inputRef('approved'),
+          overtime: null,
+          bonus: inputRef('locked', { id: 103 }),
+        },
+      })],
+    }))
+
+    const withApproval = mountPage()
+    await flushPromises()
+    expect(withApproval.get('[data-testid="quick-base-12"]').attributes('disabled'))
+      .toBeUndefined()
+    // Uzamčený vstup patří mzdovému běhu a nesmí jít přepsat ani schvalovateli.
+    expect(withApproval.get('[data-testid="quick-bonus-12"]').attributes('disabled'))
+      .toBeDefined()
+
+    m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.approve')
+    const withoutApproval = mountPage()
+    await flushPromises()
+    expect(withoutApproval.get('[data-testid="quick-base-12"]').attributes('disabled'))
+      .toBeDefined()
+  })
+
+  /** Přepnutí měsíce rozepsané řádky zahazuje — patřily jinému období. */
+  it('drops pending edits when the payroll period changes', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-bonus-12"]').setValue('900')
+
+    await wrapper.get('[data-testid="quick-payroll-period"]').setValue('2026-07')
+    await wrapper.get('[data-testid="quick-payroll-period"]').trigger('change')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[0][0].rows.map((row: { bonus_amount_minor: number }) =>
+      row.bonus_amount_minor)).toEqual([50_000])
   })
 })

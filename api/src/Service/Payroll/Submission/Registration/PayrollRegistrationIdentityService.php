@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 
@@ -324,6 +325,7 @@ final readonly class PayrollRegistrationIdentityService
                     PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
                     $supplierId,
                     $storedExternal['id'],
+                    PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
                 );
                 $hash = $this->sensitiveData->lookupHash(
                     $plaintext,
@@ -630,6 +632,7 @@ final readonly class PayrollRegistrationIdentityService
                 $field,
                 $supplierId,
                 $stored['id'],
+                PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
             );
             $hash = $this->sensitiveData->lookupHash(
                 $plaintext,
@@ -978,6 +981,7 @@ final readonly class PayrollRegistrationIdentityService
                     PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
                     $supplierId,
                     $existing['id'],
+                    PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
                 );
                 $storedHash = $this->sensitiveData->lookupHash(
                     $plaintext,
@@ -1086,6 +1090,7 @@ final readonly class PayrollRegistrationIdentityService
                 PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
                 $supplierId,
                 $existing['id'],
+                PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
             );
             $storedHash = $this->sensitiveData->lookupHash(
                 $plaintext,
@@ -1136,6 +1141,7 @@ final readonly class PayrollRegistrationIdentityService
                 PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
                 $supplierId,
                 $existing['id'],
+                PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
             );
             $storedHash = $this->sensitiveData->lookupHash(
                 $plaintext,
@@ -1252,6 +1258,7 @@ final readonly class PayrollRegistrationIdentityService
                     PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER,
                     $supplierId,
                     $existing['id'],
+                    PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
                 );
                 $storedHash = $this->sensitiveData->lookupHash(
                     $plaintext,
@@ -1523,6 +1530,7 @@ final readonly class PayrollRegistrationIdentityService
             $field,
             $supplierId,
             (int) $stored['id'],
+            PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
         );
         $hash = $this->sensitiveData->lookupHash(
             $plaintext,
@@ -1587,6 +1595,7 @@ final readonly class PayrollRegistrationIdentityService
             PayrollSensitiveField::REGISTRATION_A1_PROFILE,
             (int) $stored['supplier_id'],
             (int) $stored['employment_id'],
+            PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
         );
         $hash = $this->sensitiveData->lookupHash(
             $canonical,

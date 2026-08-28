@@ -550,4 +550,97 @@ describe('AbsenceManagement', () => {
     expect(lastPageArgs()).toEqual({ limit: 12, offset: 0 })
     wrapper.unmount()
   })
+
+  /*
+   * Přečerpání dovolené se NEPTÁ DOPŘEDU. Zaškrtávátko „vím, že přečerpávám"
+   * u každé žádosti by při 500 zaměstnancích bylo pole, které nikdo nečte
+   * a všichni odklikávají — dotaz proto otevře až 409 ze serveru, a to jen
+   * u toho jednoho případu, kterého se týká.
+   */
+  describe('přečerpaná dovolená', () => {
+    function overdrawRejection() {
+      return {
+        response: {
+          data: {
+            error: {
+              code: 'leave_overdraw_confirmation_required',
+              message: 'Čerpání 960 minut přesahuje zůstatek dovolené 480 minut.',
+              balance_minutes: 480,
+              requested_minutes: 960,
+            },
+          },
+        },
+      }
+    }
+
+    async function approveVacation() {
+      m.absencesPage.mockResolvedValue(absencesPage([absence({ absence_type: 'vacation' })]))
+      const wrapper = mount(AbsenceManagement)
+      await flushPromises()
+      const approve = wrapper.findAll('button')
+        .find(button => button.text().includes('payroll_absence.actions.approve'))
+      await approve!.trigger('click')
+      await flushPromises()
+      return wrapper
+    }
+
+    it('běžné schválení nepřidává žádné pole navíc', async () => {
+      const wrapper = await approveVacation()
+
+      expect(wrapper.find('[data-test="leave-overdraw-prompt"]').exists()).toBe(false)
+      expect(m.decide).toHaveBeenCalledWith(44, expect.not.objectContaining({
+        overdraw_confirmed: expect.anything(),
+      }))
+      wrapper.unmount()
+    })
+
+    it('teprve na 409 se zeptá — s konkrétními čísly', async () => {
+      m.decide.mockRejectedValueOnce(overdrawRejection())
+      const wrapper = await approveVacation()
+
+      const prompt = wrapper.get('[data-test="leave-overdraw-prompt"]')
+      expect(prompt.text()).toContain('payroll_absence.leave.overdraw_question')
+      // Čísla musí projít do věty, jinak se účetní rozhoduje naslepo.
+      expect(m.decide).toHaveBeenCalledTimes(1)
+      wrapper.unmount()
+    })
+
+    it('jedním kliknutím potvrdí a pošle overdraw_confirmed', async () => {
+      m.decide.mockRejectedValueOnce(overdrawRejection())
+      const wrapper = await approveVacation()
+
+      await wrapper.get('[data-test="leave-overdraw-confirm"]').trigger('click')
+      await flushPromises()
+
+      expect(m.decide).toHaveBeenLastCalledWith(44, expect.objectContaining({
+        decision: 'approved',
+        overdraw_confirmed: true,
+      }))
+      expect(wrapper.find('[data-test="leave-overdraw-prompt"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    it('odmítnutí dotazu nic nepošle a nechá žádost být', async () => {
+      m.decide.mockRejectedValueOnce(overdrawRejection())
+      const wrapper = await approveVacation()
+
+      await wrapper.get('[data-test="leave-overdraw-cancel"]').trigger('click')
+      await flushPromises()
+
+      expect(m.decide).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('[data-test="leave-overdraw-prompt"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+
+    /* Jiná chyba se na potvrzovací dotaz zaměnit nesmí. */
+    it('jinou chybu na dotaz nepřevleče', async () => {
+      m.decide.mockRejectedValueOnce({
+        response: { data: { error: { code: 'payroll_year_closed', message: 'Rok je uzavřen.' } } },
+      })
+      const wrapper = await approveVacation()
+
+      expect(wrapper.find('[data-test="leave-overdraw-prompt"]').exists()).toBe(false)
+      wrapper.unmount()
+    })
+  })
 })

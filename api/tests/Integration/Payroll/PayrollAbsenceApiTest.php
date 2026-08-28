@@ -392,6 +392,131 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame('payroll_disabled', $this->json($disabled)['error']['code']);
     }
 
+    /**
+     * Stav 3 — nárok na rok vůbec není určený. Zůstatek není nula, je neznámý,
+     * takže se dovolená schválí bez ptaní a odpověď nese jen upozornění. Tohle je
+     * stav každé firmy hned po zavedení modulu; ptát se tu na potvrzení by
+     * znamenalo proklikat u 500 zaměstnanců 500 dialogů.
+     */
+    public function testVacationWithoutDeterminedEntitlementPassesWithWarning(): void
+    {
+        $averageId = $this->createApprovedAverage();
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+
+        $approved = $this->approveVacation($averageId);
+
+        self::assertSame(200, $approved->getStatusCode());
+        $calculation = $this->json($approved)['calculation'];
+        self::assertSame(-480, (int) $calculation['minutes_delta']);
+        self::assertSame(['leave_entitlement_not_determined'], $calculation['warnings']);
+    }
+
+    /** Stav 1 — nárok je určený a zůstatek stačí: projde a nevaruje. */
+    public function testVacationWithinDeterminedEntitlementPassesWithoutWarning(): void
+    {
+        $this->createEntitlement(124_800);
+        $averageId = $this->createApprovedAverage();
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+
+        $approved = $this->approveVacation($averageId);
+
+        self::assertSame(200, $approved->getStatusCode());
+        self::assertSame([], $this->json($approved)['calculation']['warnings']);
+    }
+
+    /**
+     * Stav 2 — nárok je určený, ale je vyčerpaný. Tady je potvrzení na místě:
+     * přeplatek by se jinak poznal až při vypořádání a strhl by se zaměstnanci
+     * ze mzdy.
+     */
+    public function testVacationBeyondDeterminedEntitlementNeedsConfirmation(): void
+    {
+        $this->createEntitlement(124_800);
+        $this->drainLeaveBalance(9_600);
+        $averageId = $this->createApprovedAverage();
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+
+        $created = $this->createAbsence($averageId);
+        self::assertSame(201, $created->getStatusCode());
+        $absence = $this->json($created)['absence'];
+
+        $blocked = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(409, $blocked->getStatusCode());
+        $error = $this->json($blocked)['error'];
+        self::assertSame('leave_overdraw_confirmation_required', $error['code']);
+        self::assertSame(0, $error['balance_minutes']);
+        self::assertSame(480, $error['requested_minutes']);
+
+        $confirmed = $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+                'overdraw_confirmed' => true,
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+        self::assertSame(200, $confirmed->getStatusCode());
+        self::assertSame(-480, (int) $this->json($confirmed)['calculation']['minutes_delta']);
+    }
+
+    private function approveVacation(int $averageId): Response
+    {
+        $created = $this->createAbsence($averageId);
+        self::assertSame(201, $created->getStatusCode());
+        $absence = $this->json($created)['absence'];
+
+        return $this->action->decision(
+            $this->request('POST')->withParsedBody([
+                'row_version' => $absence['row_version'],
+                'decision' => 'approved',
+            ]),
+            new Response(),
+            ['id' => (string) $absence['id']],
+        );
+    }
+
+    private function createEntitlement(int $workedEquivalentMinutes): void
+    {
+        $response = $this->action->createEntitlement(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'relation_type' => 'employment',
+                'weekly_minutes' => 2_400,
+                'entitlement_weeks' => 4,
+                'continuous_calendar_days' => 365,
+                'worked_equivalent_minutes' => $workedEquivalentMinutes,
+                'rationale' => 'Synteticky ověřené započitatelné doby.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $response->getStatusCode());
+    }
+
+    private function drainLeaveBalance(int $minutes): void
+    {
+        $response = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'effective_date' => '2026-01-31',
+                'entry_type' => 'payout',
+                'minutes_delta' => -$minutes,
+                'reason' => 'Syntetické vyčerpání zůstatku pro test přečerpání.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $response->getStatusCode());
+    }
+
     public function testNewEntitlementRevisionReversesPreviousLedgerEntry(): void
     {
         $payload = [

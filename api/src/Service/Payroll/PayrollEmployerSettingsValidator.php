@@ -174,7 +174,16 @@ final class PayrollEmployerSettingsValidator
         $result = [];
         foreach (PayrollAccountingDefaults::ACCOUNTS as $key => $definition) {
             $code = trim((string) ($value[$key] ?? ''));
-            if (!preg_match('/^[0-9]{3}[.A-Z0-9]{0,7}$/', $code)) {
+            // Předkontace, které do sady přibyly později, starší klient
+            // neposílá. Doplní se výchozím účtem ze směrné osnovy — jinak by
+            // přidání nové předkontace znemožnilo uložit nastavení mezd.
+            if ($code === '' && PayrollAccountingDefaults::isOptional($key)) {
+                $code = $definition['code'];
+            }
+            // Analytika je až 13 znaků za syntetikou, stejně jako
+            // PayrollAccountCode::isValid() a zbytek mzdového modulu. Kratší
+            // limit {0,7} tady odmítal kódy, které jinde procházejí.
+            if (!preg_match('/^[0-9]{3}[.A-Z0-9]{0,13}$/D', $code)) {
                 throw new \InvalidArgumentException("Účet {$key} nemá platný kód.");
             }
             $account = $available[$code] ?? null;

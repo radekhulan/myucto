@@ -25,6 +25,18 @@ final class PayrollPostingAccountPolicy
     /** @var list<string> */
     public const NET_WAGE_PREFIXES = ['331', '366'];
 
+    /**
+     * Povinný příspěvek na spoření u rizikové práce.
+     *
+     * ZÁMĚRNĚ není mezi rezervovanými prefixy hrubé mzdy: 527 je běžný účet
+     * zákonných sociálních nákladů (příspěvek na stravování a podobně) a
+     * zakázat ho složkám by rozbil existující kontace. Slouží jen k tomu, aby
+     * reconciliace uměla kategorii pojmenovat.
+     *
+     * @var list<string>
+     */
+    public const RISKY_SAVINGS_PREFIXES = ['527'];
+
     public static function assertGrossCostAccountIsUnambiguous(string $account): void
     {
         $prefix = substr($account, 0, 3);

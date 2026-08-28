@@ -101,6 +101,19 @@ final class AnnualSettlementStatute
         return self::requestDeadline($taxYear);
     }
 
+    /**
+     * První den, kdy smí plátce zúčtování provést — 1. ledna po uplynutí
+     * zdaňovacího období.
+     *
+     * § 38ch odst. 1 mluví o žádosti „po uplynutí zdaňovacího období" a odst. 4
+     * o úhrnu mezd „za uplynulé zdaňovací období". Dokud rok běží, žádný roční
+     * úhrn neexistuje; spodní konec lhůty je proto stejně tvrdý jako horní.
+     */
+    public static function settlementEarliest(int $taxYear): DateTimeImmutable
+    {
+        return self::date($taxYear + 1, 1, 1);
+    }
+
     /** § 38ch odst. 4: poslední den, kdy smí plátce zúčtování provést. */
     public static function settlementDeadline(int $taxYear): DateTimeImmutable
     {

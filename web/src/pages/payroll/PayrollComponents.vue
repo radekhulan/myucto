@@ -1082,6 +1082,48 @@ async function approveInput(input: PayrollInput) {
   }
 }
 
+/*
+ * Kolik konceptů drží mzdový běh. Počítá se ze zobrazené stránky, ale
+ * schvaluje se celé období — proto se v tlačítku ukazuje počet ze serveru
+ * až po akci, ne dopředná domněnka o zbytku seznamu.
+ */
+const draftInputCount = computed(() =>
+  inputs.value.filter(input => input.status === 'draft').length)
+
+/**
+ * Schválit všechny koncepty období najednou.
+ *
+ * Po jednom to je při 500 zaměstnancích zhruba tisíc kliknutí na obrazovce,
+ * kam uživatel přišel jen kvůli blokátoru `draft_inputs_present`. Server si
+ * dávku poskládá sám ze všech konceptů měsíce — ne jen z právě zobrazené
+ * stránky, protože blokuje běh celý měsíc, ne jedna stránka.
+ */
+async function approveAllInputs() {
+  inputError.value = ''
+  saving.value = true
+  try {
+    const result = await payrollApi.approveInputsBatch({ period: period.value })
+    await loadInputsPage()
+    if (result.failed.length > 0) {
+      // Konkrétní důvod, ne „nepodařilo se": u benefitů to bývá překročený
+      // roční limit nebo neuzavřená docházka a uživatel s tím musí něco udělat.
+      inputError.value = t('payroll.components.inputs.approve_all_partial', {
+        approved: result.approved.length,
+        failed: result.failed.length,
+        reason: result.failed[0].message,
+      })
+      return
+    }
+    toast.success(t('payroll.components.inputs.approve_all_done', {
+      count: result.approved.length,
+    }))
+  } catch (error: any) {
+    inputError.value = apiErrorMessage(error, t('payroll.components.inputs.approve_failed'))
+  } finally {
+    saving.value = false
+  }
+}
+
 async function cancelInput(input: PayrollInput) {
   if (!window.confirm(t('payroll.components.inputs.cancel_confirm'))) return
   inputError.value = ''
@@ -1531,7 +1573,24 @@ onMounted(load)
         <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
           <div v-if="inputs.length === 0" class="p-8 text-center"><h3 class="font-semibold text-neutral-900">{{ t('payroll.components.inputs.empty') }}</h3><p class="mt-1 text-sm text-neutral-500">{{ t('payroll.components.inputs.empty_hint') }}</p></div>
           <template v-else>
-            <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 md:flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></div>
+            <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
+              <!--
+                Hromadné schválení stojí nad seznamem, ne u jednotlivých řádků:
+                týká se celého období, ne zobrazené stránky.
+              -->
+              <button
+                v-if="canApprove && draftInputCount > 0"
+                type="button"
+                data-testid="payroll-inputs-approve-all"
+                :class="btnOutline('success')"
+                :disabled="saving"
+                @click="approveAllInputs"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.components.inputs.approve_all', { count: draftInputCount }) }}
+              </button>
+              <span class="hidden items-center gap-2 md:inline-flex"><ColumnPicker :ctrl="inputsTbl" /><DensityToggle :ctrl="inputsTbl" /></span>
+            </div>
             <div data-layout="desktop" class="hidden overflow-x-auto md:block"><table class="min-w-full divide-y divide-neutral-200 text-sm" :class="inputsTbl.densityClass.value"><thead><tr class="text-left text-xs uppercase tracking-wide text-neutral-500"><th class="px-4 py-3">{{ t('payroll.components.fields.employment') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.component') }}</th><th class="px-4 py-3">{{ t('payroll.components.fields.amount') }}</th><th v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t('payroll.components.fields.source') }}</th><th v-if="inputsTbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.components.fields.status') }}</th><th v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3">{{ t('payroll.components.fields.external_id') }}</th><th class="px-4 py-3 text-right">{{ t('payroll.components.fields.actions') }}</th></tr></thead><tbody class="divide-y divide-neutral-100"><tr v-for="input in inputs" :key="input.id"><td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ input.employee_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></td><td class="px-4 py-3"><p>{{ input.component_name }}</p><p class="font-mono text-xs text-neutral-500">{{ input.component_code }}</p></td><td class="px-4 py-3 font-medium">{{ formatMoney(input.amount_minor) }}</td><td v-if="inputsTbl.isVisible('source')" class="px-4 py-3">{{ t(`payroll.components.source.${input.source_kind}`) }}</td><td v-if="inputsTbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></td><td v-if="inputsTbl.isVisible('external_id')" class="px-4 py-3 break-all font-mono text-xs text-neutral-500">{{ input.external_id ?? '—' }}</td><td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button><button v-if="canApprove && canReverseBenefit(input)" data-testid="payroll-input-reverse-benefit" :class="btnOutlineSm('warning')" :disabled="saving" @click="reverseBenefitInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.components.inputs.reverse_benefit') }}</button></div></td></tr></tbody></table></div>
             <div data-layout="mobile" class="space-y-3 p-4 md:hidden"><article v-for="input in inputs" :key="input.id" class="rounded-lg border border-neutral-200 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><div><h3 class="font-semibold text-neutral-900">{{ input.employee_name }}</h3><p class="text-xs text-neutral-500">{{ relationLabel(input.relation_type) }} · {{ input.component_code }}</p><p class="font-mono text-[11px] text-neutral-400">{{ input.employment_code }}</p></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="input.status === 'approved' || input.status === 'locked' ? 'bg-success-50 text-success-600' : input.status === 'cancelled' ? 'bg-neutral-100 text-neutral-500' : 'bg-payroll-50 text-payroll-700'">{{ t(`payroll.components.input_status.${input.status}`) }}</span></div><dl class="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.component') }}</dt><dd>{{ input.component_name }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.amount') }}</dt><dd class="font-semibold">{{ formatMoney(input.amount_minor) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.source') }}</dt><dd>{{ t(`payroll.components.source.${input.source_kind}`) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.components.fields.external_id') }}</dt><dd class="break-all font-mono text-xs">{{ input.external_id ?? '—' }}</dd></div></dl><div class="mt-4 flex flex-wrap gap-2"><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" :class="btnOutlineSm('neutral')" @click="editInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('common.edit') }}</button><button v-if="canWrite && input.status === 'draft' && input.source_kind === 'manual'" data-testid="payroll-input-cancel" :class="btnOutlineSm('danger')" :disabled="saving" @click="cancelInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('payroll.components.inputs.cancel') }}</button><button v-if="canApprove && input.status === 'draft'" :class="btnOutlineSm('success')" :disabled="saving" @click="approveInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.components.inputs.approve') }}</button><button v-if="canApprove && canReverseBenefit(input)" data-testid="payroll-input-reverse-benefit" :class="btnOutlineSm('warning')" :disabled="saving" @click="reverseBenefitInput(input)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.components.inputs.reverse_benefit') }}</button></div></article></div>
             <PaginationBar

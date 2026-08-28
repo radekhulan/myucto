@@ -29,6 +29,7 @@ final class PayrollQuickInputRepository
     private const OVERTIME_CODE = 'PREMIE_PRIPLATKY';
     private const BONUS_CODE = 'ODMENA';
     private const EXTERNAL_PREFIX = 'quick-monthly:';
+    private const SAVE_SAVEPOINT = 'payroll_quick_input_field';
 
     public function __construct(
         private readonly Connection $db,
@@ -529,6 +530,19 @@ final class PayrollQuickInputRepository
      *   overtime_average_snapshot_id:?int,overtime_average_snapshot_version:?int,
      *   versions:array{base:?int,overtime:?int,bonus:?int}
      * }> $rows
+     * @param bool $autoApprove Zadal to někdo s právem `payroll.approve`?
+     *        Pak vstup nemá proč čekat na druhý klik na jiné obrazovce: uloží se
+     *        rovnou jako schválený, včetně zmrazeného snímku definice složky a
+     *        jeho SHA-256 — vyrábí ho táž cesta, která schvaluje po jednom
+     *        ({@see \MyInvoice\Repository\Payroll\PayrollInputRepository::approve()}),
+     *        takže integrita snímku je stejná. Kdo právo nemá, ukládá dál jako
+     *        koncept; dvoustupňový režim tím zůstává možný, jen není povinný.
+     * @param ?list<array{employment_id:int,field:string,code:string,message:string,
+     *        current_row_version:?int}> $failures Výstupní parametr: co se
+     *        neuložilo a proč. Jeden vadný řádek nesmí shodit uložení zbytku
+     *        stránky — u 25 lidí by kvůli jednomu duplicitnímu základu přišlo
+     *        vniveč 24 vyplněných řádků. Každé pole má vlastní savepoint, takže
+     *        po chybě nezůstane rozepsaná polovina řádku.
      * @return array{period:string,items:list<array<string,mixed>>,total:int}
      */
     public function save(
@@ -539,7 +553,10 @@ final class PayrollQuickInputRepository
         int $limit = self::LIST_DEFAULT_LIMIT,
         int $offset = 0,
         ?int $focusEmploymentId = null,
+        bool $autoApprove = false,
+        ?array &$failures = null,
     ): array {
+        $collected = [];
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -565,36 +582,56 @@ final class PayrollQuickInputRepository
                 $employmentId = $row['employment_id'];
                 $item = $items[$employmentId] ?? null;
                 if ($item === null) {
-                    throw new \InvalidArgumentException(
-                        'Pracovní vztah nepatří této firmě nebo není v daném měsíci účinný.'
+                    $collected[] = self::failure(
+                        $employmentId,
+                        'row',
+                        new \InvalidArgumentException(
+                            'Pracovní vztah nepatří této firmě nebo není v daném měsíci účinný.'
+                        ),
                     );
+                    continue;
                 }
-                $this->lockEffectiveEmployment(
+                if (!$this->guard($pdo, $collected, $employmentId, 'row', function () use (
                     $supplierId,
                     $employmentId,
-                    $row['employment_row_version'],
-                );
-                if ((bool) $item['base_conflict']) {
-                    throw new \DomainException(
-                        'Základní mzda je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte v měsíčních vstupech.'
+                    $row,
+                ): void {
+                    $this->lockEffectiveEmployment(
+                        $supplierId,
+                        $employmentId,
+                        $row['employment_row_version'],
                     );
+                })) {
+                    continue;
                 }
-                if ((bool) $item['overtime_conflict'] || (bool) $item['bonus_conflict']) {
-                    throw new \DomainException(
-                        'Přesčas nebo odměna je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte.'
-                    );
-                }
-                if ((bool) $item['base_managed_elsewhere']) {
-                    // Nevyplněné pole (null) si na spravovaný základ nedělá nárok;
-                    // jiná částka ano, a to je konflikt.
-                    if ($row['base_amount_minor'] !== null
-                        && $row['base_amount_minor'] !== (int) $item['base_amount_minor']
-                    ) {
+
+                $this->guard($pdo, $collected, $employmentId, 'base', function () use (
+                    $supplierId,
+                    $employmentId,
+                    $item,
+                    $row,
+                    $componentIds,
+                    $period,
+                    $userId,
+                    $autoApprove,
+                ): void {
+                    if ((bool) $item['base_conflict']) {
                         throw new \DomainException(
-                            'Základní mzdu v tomto měsíci spravuje jiný schválený nebo pravidelný vstup.'
+                            'Základní mzda je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte v měsíčních vstupech.'
                         );
                     }
-                } else {
+                    if ((bool) $item['base_managed_elsewhere']) {
+                        // Nevyplněné pole (null) si na spravovaný základ nedělá nárok;
+                        // jiná částka ano, a to je konflikt.
+                        if ($row['base_amount_minor'] !== null
+                            && $row['base_amount_minor'] !== (int) $item['base_amount_minor']
+                        ) {
+                            throw new \DomainException(
+                                'Základní mzdu v tomto měsíci spravuje jiný schválený nebo pravidelný vstup.'
+                            );
+                        }
+                        return;
+                    }
                     $this->upsert(
                         $supplierId,
                         (int) $item['employee_id'],
@@ -608,64 +645,81 @@ final class PayrollQuickInputRepository
                         $userId,
                         null,
                         true,
+                        $autoApprove,
                     );
-                }
+                });
 
-                $overtimeAmount = $row['overtime_amount_minor'];
-                $hours = $row['overtime_hours_milli'];
-                $overtimeSource = null;
-                if ((bool) $item['overtime_managed_elsewhere']) {
-                    if ($row['overtime_mode'] !== 'amount'
-                        || (int) $overtimeAmount !== (int) $item['overtime_amount_minor']) {
+                $this->guard($pdo, $collected, $employmentId, 'overtime', function () use (
+                    $supplierId,
+                    $employmentId,
+                    $item,
+                    $row,
+                    $componentIds,
+                    $period,
+                    $userId,
+                    $autoApprove,
+                ): void {
+                    if ((bool) $item['overtime_conflict']) {
                         throw new \DomainException(
-                            'Přesčas nebo příplatek v tomto měsíci spravuje jiný vstup.'
+                            'Přesčas je v měsíci evidován rychlým i jiným vstupem. Duplicitní podklady nejprve opravte.'
                         );
                     }
-                } elseif ($row['overtime_mode'] === 'hours') {
-                    if (!(bool) $item['overtime_hours_relation_supported']) {
-                        throw new \DomainException(
-                            'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
-                        );
-                    }
-                    $existing = $item['inputs']['overtime'];
-                    $unchanged = is_array($existing)
-                        && $existing['quantity_milliunits'] === $hours;
-                    if ($unchanged) {
-                        $overtimeAmount = (int) $existing['amount_minor'];
-                        $overtimeSource = $existing['source_snapshot'] ?? null;
-                    } else {
-                        $rate = $item['overtime_hourly_rate_minor'];
-                        if (!is_int($rate) || $rate <= 0
-                            || $row['overtime_average_snapshot_id']
-                                !== $item['overtime_average_snapshot_id']
-                            || $row['overtime_average_snapshot_version']
-                                !== $item['overtime_average_snapshot_version']) {
-                            throw new \InvalidArgumentException(
-                                'Schválený průměrný výdělek se změnil. Obnovte formulář a výpočet zkontrolujte.'
+                    $overtimeAmount = $row['overtime_amount_minor'];
+                    $hours = $row['overtime_hours_milli'];
+                    $overtimeSource = null;
+                    if ((bool) $item['overtime_managed_elsewhere']) {
+                        if ($row['overtime_mode'] !== 'amount'
+                            || (int) $overtimeAmount !== (int) $item['overtime_amount_minor']) {
+                            throw new \DomainException(
+                                'Přesčas nebo příplatek v tomto měsíci spravuje jiný vstup.'
                             );
                         }
-                        if ((int) $hours !== 0 && $rate > intdiv(PHP_INT_MAX, (int) $hours)) {
-                            throw new \InvalidArgumentException(
-                                'Výpočet přesčasu překračuje podporovaný rozsah.'
+                        return;
+                    }
+                    if ($row['overtime_mode'] === 'hours') {
+                        if (!(bool) $item['overtime_hours_relation_supported']) {
+                            throw new \DomainException(
+                                'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
                             );
                         }
-                        $overtimeAmount = RoundingMode::HalfUp->roundFraction(
-                            $rate * (int) $hours,
-                            800,
-                        );
-                        $overtimeSource = [
-                            'schema_version' => 'payroll-quick-overtime-source.v1',
-                            'average_snapshot_id' => $row['overtime_average_snapshot_id'],
-                            'average_snapshot_row_version' =>
-                                $row['overtime_average_snapshot_version'],
-                            'average_hourly_minor' => $rate,
-                            'overtime_hours_milli' => $hours,
-                            'premium_basis_points' => 2_500,
-                            'rounding' => 'half-up-minor-unit',
-                        ];
+                        $existing = $item['inputs']['overtime'];
+                        $unchanged = is_array($existing)
+                            && $existing['quantity_milliunits'] === $hours;
+                        if ($unchanged) {
+                            $overtimeAmount = (int) $existing['amount_minor'];
+                            $overtimeSource = $existing['source_snapshot'] ?? null;
+                        } else {
+                            $rate = $item['overtime_hourly_rate_minor'];
+                            if (!is_int($rate) || $rate <= 0
+                                || $row['overtime_average_snapshot_id']
+                                    !== $item['overtime_average_snapshot_id']
+                                || $row['overtime_average_snapshot_version']
+                                    !== $item['overtime_average_snapshot_version']) {
+                                throw new \InvalidArgumentException(
+                                    'Schválený průměrný výdělek se změnil. Obnovte formulář a výpočet zkontrolujte.'
+                                );
+                            }
+                            if ((int) $hours !== 0 && $rate > intdiv(PHP_INT_MAX, (int) $hours)) {
+                                throw new \InvalidArgumentException(
+                                    'Výpočet přesčasu překračuje podporovaný rozsah.'
+                                );
+                            }
+                            $overtimeAmount = RoundingMode::HalfUp->roundFraction(
+                                $rate * (int) $hours,
+                                800,
+                            );
+                            $overtimeSource = [
+                                'schema_version' => 'payroll-quick-overtime-source.v1',
+                                'average_snapshot_id' => $row['overtime_average_snapshot_id'],
+                                'average_snapshot_row_version' =>
+                                    $row['overtime_average_snapshot_version'],
+                                'average_hourly_minor' => $rate,
+                                'overtime_hours_milli' => $hours,
+                                'premium_basis_points' => 2_500,
+                                'rounding' => 'half-up-minor-unit',
+                            ];
+                        }
                     }
-                }
-                if (!(bool) $item['overtime_managed_elsewhere']) {
                     $this->upsert(
                         $supplierId,
                         (int) $item['employee_id'],
@@ -678,15 +732,34 @@ final class PayrollQuickInputRepository
                         $row['versions']['overtime'],
                         $userId,
                         is_array($overtimeSource) ? $overtimeSource : null,
+                        false,
+                        $autoApprove,
                     );
-                }
-                if ((bool) $item['bonus_managed_elsewhere']) {
-                    if ($row['bonus_amount_minor'] !== (int) $item['bonus_amount_minor']) {
+                });
+
+                $this->guard($pdo, $collected, $employmentId, 'bonus', function () use (
+                    $supplierId,
+                    $employmentId,
+                    $item,
+                    $row,
+                    $componentIds,
+                    $period,
+                    $userId,
+                    $autoApprove,
+                ): void {
+                    if ((bool) $item['bonus_conflict']) {
                         throw new \DomainException(
-                            'Bonus nebo odměnu v tomto měsíci spravuje jiný vstup.'
+                            'Odměna je v měsíci evidována rychlým i jiným vstupem. Duplicitní podklady nejprve opravte.'
                         );
                     }
-                } else {
+                    if ((bool) $item['bonus_managed_elsewhere']) {
+                        if ($row['bonus_amount_minor'] !== (int) $item['bonus_amount_minor']) {
+                            throw new \DomainException(
+                                'Bonus nebo odměnu v tomto měsíci spravuje jiný vstup.'
+                            );
+                        }
+                        return;
+                    }
                     $this->upsert(
                         $supplierId,
                         (int) $item['employee_id'],
@@ -699,8 +772,10 @@ final class PayrollQuickInputRepository
                         $row['versions']['bonus'],
                         $userId,
                         null,
+                        false,
+                        $autoApprove,
                     );
-                }
+                });
             }
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -711,6 +786,7 @@ final class PayrollQuickInputRepository
             }
             throw $e;
         }
+        $failures = $collected;
         // Po uložení se vrací TÁŽ stránka, na které uživatel byl, i s TÝMŽ
         // zúžením. Vracet natvrdo první stránku celého měsíce by ho odhodilo
         // na začátek a do formuláře nasypalo lidi, které při zúžení nevidí —
@@ -1131,6 +1207,78 @@ final class PayrollQuickInputRepository
         ];
     }
 
+    /**
+     * Spustí jeden krok uložení tak, aby jeho selhání nezabilo zbytek dávky.
+     *
+     * Savepoint je tu proto, že „částečné uložení" nesmí znamenat „polovina
+     * řádku v databázi". Selže-li přesčas, vrátí se právě ta jeho část a
+     * základní mzda uložená o kus výš zůstane platná.
+     *
+     * Chytají se jen očekávané doménové chyby. Cokoli jiného (chyba spojení,
+     * porušení integrity) je vada, ne vstupní data uživatele, a musí shodit
+     * celou transakci — jinak by se tvářila jako „jeden řádek se neuložil".
+     *
+     * @param list<array{employment_id:int,field:string,code:string,message:string,
+     *        current_row_version:?int}> $failures
+     */
+    private function guard(
+        PDO $pdo,
+        array &$failures,
+        int $employmentId,
+        string $field,
+        \Closure $step,
+    ): bool {
+        $pdo->exec('SAVEPOINT ' . self::SAVE_SAVEPOINT);
+        try {
+            $step();
+            $pdo->exec('RELEASE SAVEPOINT ' . self::SAVE_SAVEPOINT);
+            return true;
+        } catch (
+            PayrollEmploymentConflictException
+            | PayrollInputConflictException
+            | \DomainException
+            | \InvalidArgumentException $e
+        ) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::SAVE_SAVEPOINT);
+            $failures[] = self::failure($employmentId, $field, $e);
+            return false;
+        }
+    }
+
+    /**
+     * @return array{employment_id:int,field:string,code:string,message:string,
+     *   current_row_version:?int}
+     */
+    private static function failure(int $employmentId, string $field, \Throwable $e): array
+    {
+        // Vlastní kód schvalovací nebo stornovací výjimky se nesmí ztratit:
+        // `benefit_limit_exceeded` a `meal_shift_evidence_incomplete` říkají
+        // uživateli, co má udělat, kdežto obecné „konflikt stavu" nic.
+        $code = match (true) {
+            $e instanceof PayrollEmploymentConflictException
+                => 'employment_row_version_conflict',
+            $e instanceof PayrollInputConflictException => 'row_version_conflict',
+            $e instanceof PayrollInputApprovalException,
+            $e instanceof PayrollInputCancellationException => $e->errorCode,
+            $e instanceof \InvalidArgumentException => 'validation_failed',
+            default => 'input_state_conflict',
+        };
+        $version = null;
+        if ($e instanceof PayrollEmploymentConflictException
+            || $e instanceof PayrollInputConflictException
+        ) {
+            $version = $e->currentVersion;
+        }
+
+        return [
+            'employment_id' => $employmentId,
+            'field' => $field,
+            'code' => $code,
+            'message' => $e->getMessage(),
+            'current_row_version' => $version,
+        ];
+    }
+
     private function rollback(PDO $pdo): void
     {
         if ($pdo->inTransaction()) {
@@ -1184,6 +1332,13 @@ final class PayrollQuickInputRepository
      *        nenese žádnou informaci a řádek by byl jen ten nulový koncept,
      *        kvůli kterému se to celé řešilo.
      * @param array<string,mixed>|null $sourceSnapshot
+     * @param bool $autoApprove Ukládá to někdo s právem `payroll.approve`?
+     *        Pak vstup nekončí jako koncept, ale rovnou jako schválený.
+     *        Už schválený vstup se přitom musí dát ještě opravit, dokud ho
+     *        nepohltil mzdový běh — jinak by si uživatel první uloženou částkou
+     *        zabetonoval vlastní řádek. Proto se vrací do konceptu, přepíše
+     *        a schválí znovu; snímek definice složky tím vzniká NOVÝ, k datu
+     *        toho druhého schválení, což je právě to, co má odpovídat výplatě.
      */
     private function upsert(
         int $supplierId,
@@ -1198,6 +1353,7 @@ final class PayrollQuickInputRepository
         ?int $userId,
         ?array $sourceSnapshot,
         bool $zeroIsAnEntry = false,
+        bool $autoApprove = false,
     ): void {
         $periodStart = $period . '-01';
         $externalId = self::EXTERNAL_PREFIX . $componentCode;
@@ -1222,7 +1378,7 @@ final class PayrollQuickInputRepository
             if ($isEmpty) {
                 return;
             }
-            $this->inputs->create($supplierId, [
+            $data = [
                 'employee_id' => $employeeId,
                 'employment_id' => $employmentId,
                 'component_id' => $componentId,
@@ -1238,15 +1394,38 @@ final class PayrollQuickInputRepository
                 'source_snapshot_hash' => $sourceSnapshot === null
                     ? null
                     : hash('sha256', CanonicalJson::encode($sourceSnapshot), true),
-            ], $userId);
+            ];
+            // Založit koncept a schválit ho druhým zápisem by řádek posunulo na
+            // verzi 2, zatímco formulář by pracoval s jedničkou — každá druhá
+            // editace téhož pole by pak spadla na 409 „změnil to jiný uživatel".
+            // Schválený vstup proto vzniká rovnou, jedním INSERTem.
+            if ($autoApprove) {
+                $this->inputs->createApproved($supplierId, $data, $userId);
+            } else {
+                $this->inputs->create($supplierId, $data, $userId);
+            }
             return;
         }
 
         $currentAmount = (int) $row['amount_minor'];
         $currentQuantity = $row['quantity_milliunits'] === null ? null : (int) $row['quantity_milliunits'];
         $currentVersion = (int) $row['row_version'];
+        $status = (string) $row['status'];
         if ($isEmpty) {
-            if ((string) $row['status'] !== 'draft') {
+            // Vyprázdněné pole = zrušení vstupu. Schválený vlastní vstup se na
+            // to musí nejdřív vrátit do konceptu (`cancel()` bere jen koncept);
+            // dva bumpy verze tu nevadí, protože řádek z formuláře mizí a
+            // prohlížeč na něj příště pošle `versions.* = null`.
+            if ($autoApprove && $status === 'approved') {
+                if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
+                    throw new PayrollInputConflictException($currentVersion);
+                }
+                $this->inputs->revertToDraft($supplierId, (int) $row['id'], $currentVersion);
+                $status = 'draft';
+                $currentVersion += 1;
+                $expectedVersion = $currentVersion;
+            }
+            if ($status !== 'draft') {
                 throw new \DomainException(
                     'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
                 );
@@ -1258,9 +1437,24 @@ final class PayrollQuickInputRepository
             return;
         }
         if ($currentAmount === $amountMinor && $currentQuantity === $quantityMilliunits) {
+            // Beze změny částky se nic nepřepisuje. Koncept, který zadal někdo
+            // bez práva schvalovat, ale smí ten, kdo právo má, uložením potvrdit
+            // — jinak by „Uložit vše" tichým no-opem nechalo běh viset na
+            // blokátoru `draft_inputs_present`.
+            if ($autoApprove && $status === 'draft') {
+                $this->inputs->approve(
+                    $supplierId,
+                    (int) $row['id'],
+                    $currentVersion,
+                    $userId,
+                );
+            }
             return;
         }
-        if ((string) $row['status'] !== 'draft') {
+        // Bez práva schvalovat platí původní pravidlo: přepsat jde jen koncept.
+        // S právem schvalovat jde i vlastní dosud nezamčený schválený vstup —
+        // jinak by si uživatel první uloženou částkou zabetonoval svůj řádek.
+        if ($status !== 'draft' && !($autoApprove && $status === 'approved')) {
             throw new \DomainException(
                 'Schválený nebo uzamčený mzdový vstup nelze rychlým formulářem přepsat.'
             );
@@ -1268,7 +1462,7 @@ final class PayrollQuickInputRepository
         if ($expectedVersion === null || $expectedVersion !== $currentVersion) {
             throw new PayrollInputConflictException($currentVersion);
         }
-        $updated = $this->inputs->update($supplierId, (int) $row['id'], [
+        $data = [
             'employee_id' => $employeeId,
             'employment_id' => $employmentId,
             'component_id' => $componentId,
@@ -1284,7 +1478,19 @@ final class PayrollQuickInputRepository
             'source_snapshot_hash' => $sourceSnapshot === null
                 ? null
                 : hash('sha256', CanonicalJson::encode($sourceSnapshot), true),
-        ], $currentVersion);
+        ];
+        // Nová hodnota i schvalovací sloupce jedním UPDATEm: běžná editace tak
+        // posune `row_version` právě o jedničku, přesně jako před zavedením
+        // automatického schvalování.
+        $updated = $autoApprove
+            ? $this->inputs->updateApproved(
+                $supplierId,
+                (int) $row['id'],
+                $data,
+                $currentVersion,
+                $userId,
+            )
+            : $this->inputs->update($supplierId, (int) $row['id'], $data, $currentVersion);
         if ($updated === null) {
             throw new PayrollInputConflictException($currentVersion);
         }

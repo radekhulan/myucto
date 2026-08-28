@@ -176,11 +176,29 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // nepřidá další dotaz.
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         // Doložené záměry OZUSPOJ mají vlastní množinovou dávku; risky savings
-        // evidence se veze v kořenovém dotazu pracovních vztahů, takže zůstává 82.
+        // evidence se veze v kořenovém dotazu pracovních vztahů.
+        //
+        // Měřená hodnota je 78 (76 round-tripů snapshotu + 2 za samotný
+        // SHOW SESSION STATUS, kterým se měří). Rozpočet se PROTI dřívějším 82
+        // SNIŽUJE, protože obě zákonné kumulace (`social_insurance`,
+        // `income_tax`) se od W11 berou jednou dávkou — druh kumulace je jediná
+        // hodnota ve WHERE, takže volání po jednom platilo dvakrát tytéž tři
+        // dotazy (příslušnost osob k firmě, opening balance, záznamy před
+        // obdobím). Viz PayrollStatutoryAccumulatorRepository::statesBeforePeriodByKind().
+        //
+        // V rozpočtu je vědomě i jeden dotaz navíc, který přibyl s výchozími
+        // analytickými předkontacemi (W7/Ú-08): firma BEZ uloženého nastavení
+        // mezd si v PayrollEmployerSettingsRepository::defaultAccounts() ověří
+        // jedním SELECTem nad `chart_of_accounts`, které analytiky (336.100 /
+        // 336.200) v osnově vůbec má. Sloučit ho nelze — rozhoduje se až podle
+        // toho, že řádek nastavení chybí, a bez něj by snapshot zmrazil účet,
+        // který firma nemá. Je to jeden dotaz na běh, ne na osobu.
+        //
+        // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            82,
+            78,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 82 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 78 round-tripů.',
         );
     }
 

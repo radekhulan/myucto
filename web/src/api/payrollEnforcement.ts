@@ -28,6 +28,58 @@ export const pensionEvidenceValues = ['unknown', 'none', 'verified'] as const
 export type PensionEvidenceValue = typeof pensionEvidenceValues[number]
 
 /**
+ * Doložení důchodu, který od 1. 1. 2025 podmiňuje čtvrtinu na manžela/partnera.
+ *
+ * Nařízení vlády č. 441/2024 Sb. změnilo § 1 nař. vlády č. 595/2006 Sb.: manžel
+ * ani partner povinného se do nezabavitelné částky NEZAPOČÍTÁVÁ automaticky.
+ * Čtvrtina náleží, jen doloží-li povinný, že jemu NEBO manželovi/partnerovi byl
+ * přiznán starobní, invalidní (2. nebo 3. stupně) nebo sirotčí důchod.
+ * Vyživovaných dětí se změna netýká.
+ *
+ * `unknown` je jen stav STARŠÍCH záznamů, které vznikly dřív, než evidence
+ * existovala — čtvrtina se nezapočítá a měsíc se srážkou spadne do ručního
+ * posouzení. Uložit ho nelze; formulář nabízí jen zbylé dvě hodnoty.
+ * Zrcadlí PHP enum `SpousePensionEvidence`.
+ *
+ * Nezaměňovat s {@link PensionEvidenceValue} — ta drží, zda je důchod vyplácen
+ * povinnému kvůli výjimce z pravidla čtyř exekucí (§ 279 odst. 5 o. s. ř.).
+ */
+export type SpousePensionEvidence =
+  | 'unknown'
+  | 'not_documented'
+  | 'documented'
+
+/** Komu byl důchod přiznán — stačí jeden z manželů. */
+export type SpousePensionHolder =
+  | 'debtor'
+  | 'spouse_partner'
+
+/** Druh důchodu, který čtvrtinu zakládá. Jiný důchod ji nezaloží. */
+export type SpousePensionKind =
+  | 'old_age'
+  | 'invalidity_second_degree'
+  | 'invalidity_third_degree'
+  | 'orphan'
+
+/** Hodnoty nabízené ve formuláři — `unknown` se ZADAT nedá, jen zobrazit. */
+export const spousePensionEvidenceOptions = ['documented', 'not_documented'] as const
+export const spousePensionHolderOptions = ['debtor', 'spouse_partner'] as const
+export const spousePensionKindOptions = [
+  'old_age',
+  'invalidity_second_degree',
+  'invalidity_third_degree',
+  'orphan',
+] as const
+
+/** Doložení důchodu, jak se posílá na server a čte zpátky. */
+export interface SpousePensionEvidenceFields {
+  quarter_pension_evidence: SpousePensionEvidence
+  quarter_pension_holder: SpousePensionHolder | null
+  quarter_pension_kind: SpousePensionKind | null
+  quarter_pension_documented_on: string | null
+}
+
+/**
  * Proč měsíční exekuční evidence v daném měsíci platí — nebo proč se
  * nevyžadovala. Zrcadlí PHP enum `EnforcementEvidenceSource`:
  *
@@ -263,7 +315,7 @@ export interface InsolvencyOptions {
   recipient_accounts: InsolvencyRecipientAccountOption[]
 }
 
-export interface EnforcementDependant {
+export interface EnforcementDependant extends SpousePensionEvidenceFields {
   id: number
   employee_id: number
   dependant_kind: 'dependant' | 'spouse_partner'
@@ -272,6 +324,20 @@ export interface EnforcementDependant {
   eligibility_verified: boolean
   excluded_for_maintenance: boolean
   row_version: number
+}
+
+/**
+ * Nová vyživovaná osoba. Pole doložení důchodu jsou nepovinná a u dítěte
+ * nemají význam — server je u `dependant` ignoruje. U manžela/partnera
+ * chybějící `quarter_pension_evidence` znamená `unknown`, tedy záznam, který
+ * shodí měsíc se srážkou do ručního posouzení; formulář ho proto vždy posílá.
+ */
+export interface EnforcementDependantPayload extends Partial<SpousePensionEvidenceFields> {
+  dependant_kind: 'dependant' | 'spouse_partner'
+  valid_from: string
+  valid_to: string | null
+  eligibility_verified: boolean
+  excluded_for_maintenance: boolean
 }
 
 export interface XmlzamCandidate {
@@ -505,13 +571,7 @@ export const payrollEnforcementApi = {
     ).then(response => response.data.dependants),
   addDependant: (
     employeeId: number,
-    payload: {
-      dependant_kind: 'dependant' | 'spouse_partner'
-      valid_from: string
-      valid_to: string | null
-      eligibility_verified: boolean
-      excluded_for_maintenance: boolean
-    },
+    payload: EnforcementDependantPayload,
   ) =>
     api.post<{ dependant: EnforcementDependant }>(
       `/payroll/enforcement/people/${employeeId}/dependants`,

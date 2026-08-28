@@ -24,6 +24,7 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         $result = (new AnnualSettlementClaimMonths())->credits(
             [$this->creditRow('taxpayer', '2020-01-01', null)],
             self::YEAR,
+            true,
         );
 
         self::assertSame([], $result['blockers']);
@@ -41,6 +42,7 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         $result = (new AnnualSettlementClaimMonths())->credits(
             [$this->creditRow('ztp-p', sprintf('%04d-03-20', self::YEAR), null)],
             self::YEAR,
+            false,
         );
 
         self::assertSame([], $result['blockers']);
@@ -57,6 +59,7 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
                 sprintf('%04d-08-31', self::YEAR),
             )],
             self::YEAR,
+            false,
         );
 
         self::assertSame(8, $result['credits'][0]->months);
@@ -79,6 +82,7 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
                 ),
             ],
             self::YEAR,
+            true,
         );
 
         self::assertSame([], $result['blockers']);
@@ -92,6 +96,7 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         $result = (new AnnualSettlementClaimMonths())->credits(
             [$this->creditRow('taxpayer', '2020-01-01', null, 'unverified')],
             self::YEAR,
+            false,
         );
 
         self::assertSame(
@@ -110,12 +115,98 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
                 $this->creditRow('disability-extended', '2020-01-01', null),
             ],
             self::YEAR,
+            false,
         );
 
         self::assertSame(
             [AnnualSettlementBlocker::CreditEvidenceUnverified->value],
             self::codes($result['blockers']),
         );
+    }
+
+    /**
+     * Podepsané prohlášení bez řádku slevy na poplatníka je MEZERA V EVIDENCI,
+     * ne nula.
+     *
+     * Bez téhle překážky projde zúčtování s roční daní o celou slevu vyšší, než
+     * jaká poplatníkovi náleží — a modul to vykáže jako „vše sedí", protože
+     * měsíčně se sleva uplatňovala a ročně ne.
+     */
+    public function testSignedDeclarationWithoutTaxpayerCreditBlocks(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->credits(
+            [$this->creditRow('ztp-p', sprintf('%04d-01-01', self::YEAR), null)],
+            self::YEAR,
+            true,
+        );
+
+        self::assertSame(
+            [AnnualSettlementBlocker::TaxpayerCreditEvidenceMissing->value],
+            self::codes($result['blockers']),
+        );
+    }
+
+    /** Prázdná evidence při podepsaném prohlášení taky nesmí projít jako nula. */
+    public function testSignedDeclarationWithoutAnyCreditRowBlocks(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->credits([], self::YEAR, true);
+
+        self::assertSame(
+            [AnnualSettlementBlocker::TaxpayerCreditEvidenceMissing->value],
+            self::codes($result['blockers']),
+        );
+        self::assertSame([], $result['credits']);
+    }
+
+    /**
+     * Nepodepsané prohlášení je legitimní stav — zúčtování stejně padá na
+     * DeclarationNotSigned, takže tady se druhá překážka nevyrábí.
+     */
+    public function testUnsignedDeclarationWithoutTaxpayerCreditDoesNotBlockHere(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->credits([], self::YEAR, false);
+
+        self::assertSame([], $result['blockers']);
+        self::assertSame([], $result['credits']);
+    }
+
+    /**
+     * Nedoložený řádek slevy na poplatníka vydá OBĚ překážky: nedoloženost
+     * i chybějící nárok. Účetní se musí dozvědět, že řádek sice existuje, ale
+     * do zúčtování nevstoupil.
+     */
+    public function testUnverifiedTaxpayerCreditWithSignedDeclarationBlocksTwice(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->credits(
+            [$this->creditRow('taxpayer', '2020-01-01', null, 'unverified')],
+            self::YEAR,
+            true,
+        );
+
+        self::assertSame(
+            [
+                AnnualSettlementBlocker::CreditEvidenceUnverified->value,
+                AnnualSettlementBlocker::TaxpayerCreditEvidenceMissing->value,
+            ],
+            self::codes($result['blockers']),
+        );
+    }
+
+    /**
+     * Zaměstnanec, který nastoupil v půli roku: sleva na poplatníka se podle
+     * § 35ba odst. 1 písm. a) nekrátí, takže stačí jediný měsíc nároku — ale
+     * ten řádek tam být musí.
+     */
+    public function testTaxpayerCreditForPartOfYearSatisfiesTheEvidenceCheck(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->credits(
+            [$this->creditRow('taxpayer', sprintf('%04d-07-01', self::YEAR), null)],
+            self::YEAR,
+            true,
+        );
+
+        self::assertSame([], $result['blockers']);
+        self::assertSame(6, $result['credits'][0]->months);
     }
 
     /** Interval mimo zdaňovací období nepřidá ani měsíc, ani překážku. */
@@ -129,6 +220,7 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
                 'unverified',
             )],
             self::YEAR,
+            false,
         );
 
         self::assertSame([], $result['blockers']);

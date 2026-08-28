@@ -115,8 +115,19 @@ final readonly class PayrollSheetMonth
         if ($month < 1 || $month > 12 || $sourceRevisionCount <= 0) {
             throw new \InvalidArgumentException('Měsíční řádek mzdového listu nemá platné období.');
         }
-        foreach ($this->amounts() as $amount) {
-            if ($amount < 0 || $amount > 1_000_000_000_000) {
+        foreach ($this->amounts() as $field => $amount) {
+            // Jediná položka, která smí být záporná, je čistá výplata. Měsíc
+            // bez peněžního příjmu s doplatkem zdravotního pojištění do
+            // minimálního vyměřovacího základu (§ 3 odst. 10 z. č. 592/1992
+            // Sb.) skončí dluhem zaměstnance vůči zaměstnavateli a mzdový list
+            // podle § 38j odst. 2 ZDP ho musí ukázat takový, jaký je. Příjmy,
+            // základy, odvody, daň, bonus ani srážky záporné být nesmí — tam
+            // by záporná částka znamenala poškozený podklad, ne skutečnost.
+            $signed = $field === 'net_payable_minor_units';
+            if ((!$signed && $amount < 0)
+                || $amount > 1_000_000_000_000
+                || $amount < -1_000_000_000_000
+            ) {
                 throw new \InvalidArgumentException('Měsíční částka mzdového listu není platná.');
             }
         }

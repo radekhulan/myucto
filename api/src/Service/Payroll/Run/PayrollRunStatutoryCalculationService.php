@@ -235,7 +235,11 @@ final class PayrollRunStatutoryCalculationService
                     $entry['health'],
                     $entry['tax'],
                     0,
-                    min($capacity, $netBeforeDeductions[$employeeId]),
+                    // Ořez na nulu, ne jen `min()`: čistá mzda před srážkami
+                    // může být záporná (doplatek ZP do minimálního
+                    // vyměřovacího základu bez peněžního příjmu) a záporná
+                    // kapacita by neznamenala „nesrážej", ale neplatný vstup.
+                    max(0, min($capacity, $netBeforeDeductions[$employeeId])),
                     $entry['deductions'],
                     $annualSettlements[$employeeId] ?? 0,
                 ),
@@ -486,9 +490,11 @@ final class PayrollRunStatutoryCalculationService
             ->subtract(new Money($advanceTax))
             ->subtract(new Money($withholdingTax))
             ->add(new Money($taxBonus));
-        if ($result->minorUnits < 0) {
-            throw new \DomainException('Čistá mzda před srážkami nesmí být záporná.');
-        }
+        // Podepsaná záporná částka, ne pád: měsíc bez peněžního příjmu
+        // s doplatkem zdravotního pojištění do minimálního vyměřovacího
+        // základu (§ 3 odst. 10 z. č. 592/1992 Sb.) ji vyrobí legitimně.
+        // Co z ní smí plynout, hlídá {@see PayrollNetInput} — srazit se z ní
+        // nedá nic a kapacita dobrovolných srážek se ořezává na nulu níž.
         return $result->minorUnits;
     }
 

@@ -5,6 +5,7 @@
       "net_minor_units": 4000000,
       "eligible_dependants": 0,
       "eligible_spouse": false,
+      "spouse_pension": "not_documented",
       "claim_category": "non_priority",
       "expected_protected_minor_units": 1410200,
       "expected_third_minor_units": 863200,
@@ -16,6 +17,7 @@
       "net_minor_units": 4000000,
       "eligible_dependants": 0,
       "eligible_spouse": false,
+      "spouse_pension": "not_documented",
       "claim_category": "other_priority",
       "expected_protected_minor_units": 1410200,
       "expected_third_minor_units": 863200,
@@ -27,6 +29,7 @@
       "net_minor_units": 6000000,
       "eligible_dependants": 0,
       "eligible_spouse": false,
+      "spouse_pension": "not_documented",
       "claim_category": "non_priority",
       "expected_protected_minor_units": 1410200,
       "expected_third_minor_units": 1050700,
@@ -34,15 +37,64 @@
       "expected_withheld_minor_units": 2488400
     },
     {
-      "name": "official protected amount example with spouse and two children",
+      "name": "spouse with documented pension and two children",
       "net_minor_units": 6000000,
       "eligible_dependants": 2,
       "eligible_spouse": true,
+      "spouse_pension": "documented",
       "claim_category": "non_priority",
       "expected_protected_minor_units": 2467800,
       "expected_third_minor_units": 1050700,
       "expected_excess_minor_units": 380100,
       "expected_withheld_minor_units": 1430800
+    },
+    {
+      "name": "spouse without documented pension and two children",
+      "net_minor_units": 6000000,
+      "eligible_dependants": 2,
+      "eligible_spouse": true,
+      "spouse_pension": "not_documented",
+      "claim_category": "non_priority",
+      "expected_protected_minor_units": 2115300,
+      "expected_third_minor_units": 1050700,
+      "expected_excess_minor_units": 732600,
+      "expected_withheld_minor_units": 1783300
+    },
+    {
+      "name": "married debtor without pension keeps only the debtor allowance",
+      "net_minor_units": 4000000,
+      "eligible_dependants": 0,
+      "eligible_spouse": true,
+      "spouse_pension": "not_documented",
+      "claim_category": "non_priority",
+      "expected_protected_minor_units": 1410200,
+      "expected_third_minor_units": 863200,
+      "expected_excess_minor_units": 0,
+      "expected_withheld_minor_units": 863200
+    },
+    {
+      "name": "married debtor with documented pension gains the spouse quarter",
+      "net_minor_units": 4000000,
+      "eligible_dependants": 0,
+      "eligible_spouse": true,
+      "spouse_pension": "documented",
+      "claim_category": "non_priority",
+      "expected_protected_minor_units": 1762700,
+      "expected_third_minor_units": 745700,
+      "expected_excess_minor_units": 0,
+      "expected_withheld_minor_units": 745700
+    },
+    {
+      "name": "spouse quarter rounds up only after the allowances are summed",
+      "net_minor_units": 6000000,
+      "eligible_dependants": 1,
+      "eligible_spouse": true,
+      "spouse_pension": "documented",
+      "claim_category": "non_priority",
+      "expected_protected_minor_units": 2115300,
+      "expected_third_minor_units": 1050700,
+      "expected_excess_minor_units": 732600,
+      "expected_withheld_minor_units": 1783300
     }
   ]
 }

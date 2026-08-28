@@ -418,6 +418,7 @@ final class JmhzOrdinaryEvidenceBuilder
                 $calculationInput->protectedAmountOverrideVerified,
                 $calculationInput->claimRegisterEvidenceComplete,
                 $calculationInput->insolvency,
+                $calculationInput->spousePensionEvidence,
             );
         } catch (\Throwable) {
             $this->invalid(

@@ -121,7 +121,6 @@ final readonly class PayslipDocumentData
             $taxChildCreditMinorUnits,
             $taxAfterCreditsMinorUnits,
             $taxBonusMinorUnits,
-            $netMinorUnits,
             $employerSocialMinorUnits,
             $employerHealthMinorUnits,
             $annualSettlementMinorUnits,
@@ -129,6 +128,20 @@ final readonly class PayslipDocumentData
             if ($amountMinorUnits < 0 || $amountMinorUnits > self::MAX_MINOR_UNITS) {
                 throw new \InvalidArgumentException('Payslip amounts other than the rounding adjustment must not be negative.');
             }
+        }
+
+        // Čistá mzda je jediná podepsaná položka pásky. Měsíc bez peněžního
+        // příjmu, ve kterém zaměstnavatel odvede doplatek zdravotního
+        // pojištění do minimálního vyměřovacího základu (§ 3 odst. 10
+        // z. č. 592/1992 Sb.) a zaměstnanec ho podle odst. 12 téhož paragrafu
+        // hradí, skončí dluhem zaměstnance. Páska ho musí ukázat — zamlčet ho
+        // by znamenalo vydat doklad, který nesedí na účetnictví ani na to,
+        // co se příští měsíc srazí. Rozpad si dole vynutí přesnou rovnost,
+        // takže znaménko se sem nedostane omylem.
+        if ($netMinorUnits < -self::MAX_MINOR_UNITS
+            || $netMinorUnits > self::MAX_MINOR_UNITS
+        ) {
+            throw new \InvalidArgumentException('Payslip net pay is out of range.');
         }
 
         if ($roundingAdjustmentMinorUnits < -100 || $roundingAdjustmentMinorUnits > 100) {

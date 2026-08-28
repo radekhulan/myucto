@@ -514,6 +514,26 @@ final class GarnishmentCalculator
         );
     }
 
+    /**
+     * Čtvrtina na manžela/partnera od 1. 1. 2025 (nař. vlády č. 441/2024 Sb.).
+     *
+     * Do 31. 12. 2024 se manžel do nezabavitelné částky započítával
+     * automaticky. Od účinnosti novely náleží čtvrtina jen tehdy, doloží-li
+     * povinný plátci mzdy, že jemu NEBO jeho manželovi či partnerovi byl
+     * přiznán starobní důchod, invalidní důchod pro invaliditu druhého nebo
+     * třetího stupně anebo sirotčí důchod. Stačí jeden z nich.
+     *
+     * Nedoložený i nezjištěný důchod tedy čtvrtinu nezakládá — v obou
+     * případech není splněna zákonná podmínka. Rozdíl mezi nimi je jen
+     * v tom, že nezjištěný stav navíc shodí měsíc se srážkou do ručního
+     * posouzení; viz {@see SpousePensionEvidence} a {@see evidenceScope()}.
+     */
+    private static function spouseAllowanceApplies(GarnishmentInput $input): bool
+    {
+        return $input->eligibleSpouse
+            && $input->spousePensionEvidence === SpousePensionEvidence::Documented;
+    }
+
     /** @return array{int, array<string, int|string|bool>} */
     private function protectedAmount(
         GarnishmentInput $input,
@@ -533,7 +553,8 @@ final class GarnishmentCalculator
             ];
         }
 
-        $allowanceCount = $input->eligibleDependants + ($input->eligibleSpouse ? 1 : 0);
+        $spouseAllowance = self::spouseAllowanceApplies($input);
+        $allowanceCount = $input->eligibleDependants + ($spouseAllowance ? 1 : 0);
         $shareDenominator = $policy->integer('dependant_share.denominator');
         $factorNumerator = $shareDenominator
             + ($allowanceCount * $policy->integer('dependant_share.numerator'));
@@ -550,6 +571,8 @@ final class GarnishmentCalculator
                 'step' => 'protected_amount',
                 'court_decision_override' => false,
                 'eligible_allowance_count' => $allowanceCount,
+                'spouse_allowance_applied' => $spouseAllowance,
+                'spouse_pension_evidence' => $input->spousePensionEvidence->value,
                 'unrounded_numerator' => $numerator,
                 'unrounded_denominator' => $denominator,
                 'rounding_multiple_minor_units' => 100,
@@ -573,6 +596,13 @@ final class GarnishmentCalculator
      *    Bez aktivní pohledávky a bez insolvence není co rozdělovat. Insolvence
      *    je uvnitř záměrně, i když si částku určuje sama: souběžná exekuce je
      *    v tom režimu důvod k ručnímu posouzení, takže vědět o ní je věcné;
+     *  • u manžela/partnera je od 1. 1. 2025 součástí doložení i důchod podle
+     *    nař. vlády č. 441/2024 Sb. (viz {@see spouseAllowanceApplies()}).
+     *    Nezjištěný stav (`unknown`, typicky záznam z doby před zavedením
+     *    evidence) proto není doložený nárok: v měsíci se srážkou skončí
+     *    blokátorem, v měsíci bez srážky jen uzavře kapacitu dobrovolných
+     *    dohod. Výslovné „důchod doložen není" je naopak úplná evidence —
+     *    čtvrtina prostě nenáleží a nic se neblokuje;
      *  • nárok na vyživovanou osobu a na manžela zvedá nezabavitelnou částku.
      *    Neuplatněný nárok (počet 0, resp. `false`) ji neposouvá a při souběhu
      *    plátců ji stejně určuje soudní rozhodnutí — v obou případech není co
@@ -606,7 +636,12 @@ final class GarnishmentCalculator
                 $input->eligibleDependants > 0,
                 $input->dependantsEvidenceComplete,
             ),
-            $allowanceScope($input->eligibleSpouse, $input->spouseEvidenceComplete),
+            $allowanceScope(
+                $input->eligibleSpouse,
+                $input->spouseEvidenceComplete
+                    && $input->spousePensionEvidence
+                        !== SpousePensionEvidence::Unknown,
+            ),
         );
     }
 
@@ -617,6 +652,14 @@ final class GarnishmentCalculator
         EnforcementEvidenceScope $scope,
     ): array {
         $issues = $scope->issues();
+        if (
+            $input->eligibleSpouse
+            && $input->spouseEvidenceComplete
+            && $input->spousePensionEvidence === SpousePensionEvidence::Unknown
+            && $scope->spouse === EnforcementEvidenceSource::Missing
+        ) {
+            $issues[] = 'spouse_quarter_pension_evidence_unknown';
+        }
         if (!$this->isPeriod($input->period)) {
             $issues[] = 'invalid_payroll_period';
         }

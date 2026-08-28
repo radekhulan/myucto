@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollInputConflictException;
 use MyInvoice\Repository\Payroll\PayrollQuickInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\Component\PayrollQuickInputValidator;
@@ -91,6 +92,15 @@ final class PayrollQuickInputsAction
         $limit = self::pageLimit($query);
         $offset = max(0, (int) ($query['offset'] ?? 0));
         $employmentId = self::narrowingId($query, 'employment_id');
+        // Kdo smí schvalovat, ať nemusí totéž odklikávat podruhé na jiné
+        // obrazovce. Vstup se uloží rovnou jako schválený; kdo právo nemá,
+        // ukládá dál koncept a ten pak schvaluje účtárna.
+        $autoApprove = RequestAuthorization::allows(
+            $request,
+            'payroll.approve',
+            AccessLevel::WRITE,
+        );
+        $failures = [];
         try {
             $body = $request->getParsedBody();
             $data = $this->validator->validate(
@@ -104,6 +114,8 @@ final class PayrollQuickInputsAction
                 $limit,
                 $offset,
                 $employmentId,
+                $autoApprove,
+                $failures,
             );
         } catch (PayrollEmploymentConflictException $e) {
             return Json::error(
@@ -122,12 +134,37 @@ final class PayrollQuickInputsAction
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
+        // Neuložilo se NIC? Pak to není částečný výsledek, ale chyba, a musí
+        // odejít se svým kódem — jinak by se z jediného konfliktu verzí stalo
+        // „uloženo" s poznámkou pod čarou.
+        $failedEmployments = array_unique(array_column($failures, 'employment_id'));
+        if ($failures !== [] && count($failedEmployments) === count($data['rows'])) {
+            $first = $failures[0];
+            return Json::error(
+                $response,
+                $first['code'],
+                $first['message'],
+                $first['code'] === 'validation_failed' ? 422 : 409,
+                array_filter(
+                    [
+                        'current_row_version' => $first['current_row_version'],
+                        'failures' => $failures,
+                    ],
+                    static fn (mixed $value): bool => $value !== null,
+                ),
+            );
+        }
         $this->logger->log(
             'payroll.quick_inputs.saved',
             $this->userId($request),
             'payroll_month',
             null,
-            ['period' => $data['period'], 'employment_count' => count($data['rows'])],
+            [
+                'period' => $data['period'],
+                'employment_count' => count($data['rows']),
+                'auto_approved' => $autoApprove,
+                'failed_count' => count($failures),
+            ],
             $this->ipMatcher->clientIpFromRequest(
                 PayrollTimeValue::row($request->getServerParams(), 'server_params'),
             ),
@@ -140,6 +177,10 @@ final class PayrollQuickInputsAction
             'limit' => $limit,
             'offset' => $offset,
             'employment_id' => $employmentId,
+            // Co se neuložilo a proč — pole po poli. Prohlížeč to musí umět
+            // ukázat u konkrétního políčka; zredukovat to na jeden toast
+            // „nepodařilo se" znamená poslat uživatele hádat.
+            'failures' => $failures,
         ]);
     }
 

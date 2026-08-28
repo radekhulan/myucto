@@ -177,6 +177,60 @@ final class AnnualSettlementEligibilityTest extends TestCase
         );
     }
 
+    /**
+     * Zdaňovací období ještě běží — zúčtování je úkon nad UPLYNULÝM rokem.
+     *
+     * Bez téhle překážky by šlo v červnu zúčtovat pět uzavřených měsíců a
+     * odečíst od nich celou roční slevu na poplatníka, protože ta se podle
+     * § 35ba odst. 1 písm. a) nekrátí. Vyšel by přeplatek, který poplatníkovi
+     * nenáleží, a `AlreadySettled` by pak zablokovala řádné zúčtování.
+     */
+    public function testSettlementBeforeTaxYearEndsBlocks(): void
+    {
+        $blockers = self::codes($this->evaluate(
+            $this->complete(),
+            today: new DateTimeImmutable(sprintf('%04d-06-15', self::YEAR)),
+        ));
+
+        self::assertSame(
+            [AnnualSettlementBlocker::TaxYearNotFinished->value],
+            $blockers,
+        );
+    }
+
+    /** Poslední den roku ještě ne, první den následujícího už ano. */
+    public function testTaxYearBoundaryIsInclusiveFromFirstJanuary(): void
+    {
+        self::assertSame(
+            sprintf('%04d-01-01', self::YEAR + 1),
+            AnnualSettlementStatute::settlementEarliest(self::YEAR)->format('Y-m-d'),
+        );
+        self::assertSame(
+            [AnnualSettlementBlocker::TaxYearNotFinished->value],
+            self::codes($this->evaluate(
+                $this->complete(),
+                today: new DateTimeImmutable(sprintf('%04d-12-31 23:59:59', self::YEAR)),
+            )),
+        );
+        self::assertSame([], $this->evaluate(
+            $this->complete(),
+            today: new DateTimeImmutable(sprintf('%04d-01-01 00:00:00', self::YEAR + 1)),
+        ));
+    }
+
+    /**
+     * Poslední den lhůty se počítá celý. `new DateTimeImmutable()` nese i čas,
+     * takže syrové porovnání s půlnocí by 31. března dopoledne vyhodnotilo jako
+     * „po lhůtě".
+     */
+    public function testDeadlineDayIsUsableUntilMidnight(): void
+    {
+        self::assertSame([], $this->evaluate(
+            $this->complete(),
+            today: new DateTimeImmutable(sprintf('%04d-03-31 09:15:00', self::YEAR + 1)),
+        ));
+    }
+
     /** § 38g odst. 2: nerezident si přiznání podává sám. */
     public function testNonResidentBlocks(): void
     {

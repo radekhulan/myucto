@@ -139,6 +139,12 @@ export const payrollAbsenceApi = {
     first_day_fully_worked?: boolean
     insurance_eligibility_confirmed?: boolean
     conflicting_benefit_excluded?: boolean
+    /**
+     * Poskytnout dovolenou nad rámec zůstatku. Posílá se AŽ POTOM, co server
+     * schválení odmítl s 409 `leave_overdraw_confirmation_required` — dopředu
+     * by to bylo zaškrtávátko, které nikdo nečte.
+     */
+    overdraw_confirmed?: boolean
   }) =>
     api.post<{ absence: PayrollAbsence }>(`/payroll/time/absences/${id}/decision`, payload)
       .then(response => response.data.absence),

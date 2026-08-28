@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 
@@ -647,6 +648,7 @@ final class PayrollIncomeTaxLiabilityMaterializer
             PayrollSensitiveField::BANK_ACCOUNT,
             $supplierId,
             $account['id'],
+            PayrollRevealPurpose::PAYMENT_LIABILITY_ACCOUNT,
         );
         $actualHash = bin2hex($this->sensitiveData->lookupHash(
             $plaintext,

@@ -1321,7 +1321,11 @@
                 "statutory_incomplete": "The statutory insurance, tax, or net-pay calculation was not completed. Correct the payroll components and employee statutory data, then open a new run revision.",
                 "requires_attention": "A check found data that must be completed or reviewed by a person. Open the place to fix it; the technical detail remains in the audit trail.",
                 "and_more": "and {count} more",
-                "open_remediation": "Open the place to fix"
+                "open_remediation": "Open the place to fix",
+                "draft_inputs_approve_all": "Approve all",
+                "draft_inputs_approved": "Approved {count} payroll inputs.",
+                "draft_inputs_approve_partial": "Approved {approved} inputs, {failed} not. First reason: {reason}",
+                "draft_inputs_approve_failed": "Payroll inputs could not be approved in bulk."
             },
             "override": {
                 "awaiting": "This warning is waiting for a person. Until someone takes responsibility for it and writes down why, the payroll run cannot be approved.",
@@ -1721,7 +1725,11 @@
             "save_blocked_loading": "Wait for the inputs for the selected period to load.",
             "save_blocked_empty": "There is nothing to save for this period — no relation here has a payroll input.",
             "save_blocked_invalid": "Fix the fields marked in red. Saving is blocked while an invalid value remains in the table.",
-            "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again."
+            "save_blocked_rows": "Some row is in a blocking state (a locked input or an ended relation). Resolve it and try saving again.",
+            "save_partial_invalid": "Only rows without errors are saved — {count} row stays unsaved until you fix it. | Only rows without errors are saved — {count} rows stay unsaved until you fix them.",
+            "save_partial_conflict": "{count} row records the amount twice; the rest is saved normally. | {count} rows record the amount twice; the rest is saved normally.",
+            "save_pending_pages": "{count} edited row from other pages is saved as well. | {count} edited rows from other pages are saved as well.",
+            "saved_partially": "Saved {saved} rows, {failed} were not — the reason is shown at the field."
         },
         "risky_savings": {
             "title": "Mandatory savings for hazardous work",
@@ -1889,7 +1897,10 @@
                     "shift_schedule_missing": "The published shift schedule is missing for a shift-based employment.",
                     "meal_basis_conflict": "The selected calendar-day regime conflicts with published shifts.",
                     "calendar_day_break_allocation_missing": "A cross-midnight interval does not document which calendar day contains the break. Split the interval or provide more precise evidence."
-                }
+                },
+                "approve_all": "Approve all ({count})",
+                "approve_all_done": "Approved {count} payroll inputs.",
+                "approve_all_partial": "Approved {approved} inputs, {failed} not. First reason: {reason}"
             },
             "import": {
                 "title": "Monthly input import",
@@ -2344,7 +2355,9 @@
                 "child_claim_conflict": "The child claims contradict each other — check the child order, the shared-household confirmation and the exclusion of the other taxpayer.",
                 "child_jmhz_evidence_incomplete": "Complete the child's name and date of birth on the child card, then state in the annual settlement documents whether another person in the shared household claimed the child.",
                 "already_settled": "The annual settlement for this year has already been performed. It is done once a year.",
-                "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived."
+                "ruleset_year_not_covered": "We have no effective tax rules covering the whole of this year, so annual amounts cannot be derived.",
+                "tax_year_not_finished": "The tax year has not ended yet. The annual settlement can only be performed from 1 January of the following year.",
+                "taxpayer_credit_evidence_missing": "The employee has signed the taxpayer declaration, but the basic taxpayer credit is missing from their claim records. Add it on the employee card — without it the settlement would compute the tax without the annual credit."
             }
         },
         "time": {
@@ -4884,7 +4897,8 @@
             "account_aria_label": "{item} — {side}",
             "account_type": {
                 "expense": "an expense account",
-                "liability": "a liability account"
+                "liability": "a liability account",
+                "asset": "receivable account"
             },
             "accounting": {
                 "employment_gross": "Employee wages outside statutory office",
@@ -4895,7 +4909,11 @@
                 "health_insurance": "Health insurance liability",
                 "income_tax": "Income tax advance or withholding",
                 "other_deductions": "Other payroll deductions",
-                "partner_settlement": "Set-off against shareholder account"
+                "partner_settlement": "Set-off against shareholder account",
+                "risky_savings": "Risk-work retirement savings",
+                "employee_receivable": "Receivable from the employee",
+                "non_deductible_benefit": "Non-deductible part of a benefit",
+                "travel_expense": "Travel reimbursements"
             },
             "validation": {
                 "title": "Correct the highlighted fields before saving.",
@@ -4970,6 +4988,12 @@
                 "delete_failed": "Failed to delete the dimension.",
                 "in_use_error": "This dimension is used in an approved payroll revision — you can only end its validity, not delete it.",
                 "terminate_hint": "This dimension cannot be deleted because it is used in history — end its validity by setting a validity end date instead."
+            },
+            "accounting_row_hint": {
+                "risky_savings": "Statutory employer contribution to retirement savings for risk work (4% of the assessment base from 1 January 2026). It is not paid to the employee but remitted to the pension company, so it is a statutory social expense (527) against other payables (379), not insurance on 336.",
+                "employee_receivable": "Where a negative net wage is reclassified — typically health insurance topped up to the minimum assessment base in a month with no cash income. The employee owes the employer, so this is a receivable (335), not a payable.",
+                "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
+                "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage."
             }
         },
         "status": {
@@ -5680,7 +5704,33 @@
             "load_failed_hint": "Enforcements and insolvencies did not load. An empty list right now does not mean there are none — please try again.",
             "support_failed": "Recipient accounts could not be loaded, so their selection stayed empty. This is not a configuration problem — try loading again.",
             "transition_blocked_document": "Pick the document the transition rests on. Without it the case would lack any trace of where the change came from.",
-            "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped."
+            "transition_blocked_reason": "Write a reason. For this step it is stored in the case history, so it cannot be skipped.",
+            "spouse_pension": {
+                "why": "From 1 January 2025 (Government Regulation No. 441/2024 Coll.) a spouse or partner is no longer counted towards the protected amount automatically. The quarter is granted only if the debtor OR their spouse/partner has been awarded an old-age pension, a second- or third-degree invalidity pension, or an orphan pension. The change does not affect dependent children.",
+                "question": "Is the pension establishing the spouse/partner quarter documented?",
+                "evidence": {
+                    "unknown": "Evidence not filled in — the record predates the change of 1 January 2025",
+                    "not_documented": "Not documented",
+                    "documented": "Documented"
+                },
+                "holder_label": "Who was awarded the pension",
+                "holder": {
+                    "debtor": "The debtor",
+                    "spouse_partner": "The spouse/partner"
+                },
+                "kind_label": "Type of pension",
+                "kind": {
+                    "old_age": "Old-age",
+                    "invalidity_second_degree": "Invalidity, second degree",
+                    "invalidity_third_degree": "Invalidity, third degree",
+                    "orphan": "Orphan"
+                },
+                "documented_on": "Date documented",
+                "documented_on_required": "Fill in the date the pension was documented."
+            },
+            "blocker": {
+                "spouse_quarter_pension_evidence_unknown": "Document the pension establishing the quarter for the spouse/partner, or remove the spouse from the dependants."
+            }
         },
         "retention": {
             "title": "Payroll data retention periods",
@@ -7989,9 +8039,7 @@
         "credit_children": "Child tax credit ({count})",
         "auto_post_badge": "Automatic",
         "form_name": "Full name",
-        "form_birth_number": "Birth number",
         "form_birth_date": "Date of birth",
-        "form_address": "Address (residence)",
         "form_employment_type": "Type of employment",
         "form_statutory_body_mismatch": "Remuneration of a statutory body member is usually posted to 522/366, i.e. with the taxpayer type “Managing partner”. You can save it this way — just make sure it is intentional (e.g. a director who also holds an employment contract with the company).",
         "form_child_count": "Number of children",
@@ -17496,7 +17544,9 @@
         "overdrawn": "Overdrawn",
         "payout": "Payout",
         "reversal": "Reversal"
-      }
+      },
+      "overdraw_question": "The leave balance is {balance} h:mm and you are taking {requested} h:mm. Grant leave beyond the entitlement?",
+      "overdraw_confirm": "Grant beyond entitlement"
     },
     "validation": {
       "number": "Enter a valid number within the permitted range.",

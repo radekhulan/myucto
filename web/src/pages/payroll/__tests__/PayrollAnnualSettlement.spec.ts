@@ -282,6 +282,36 @@ describe('Roční zúčtování', () => {
       .toBe('payroll.annual_settlement.blocker.declaration_not_signed')
   })
 
+  /*
+   * Dvě překážky, které do enumu přibyly později. Kód, pro který obrazovka nemá
+   * větu, se nevykreslí jako chyba — vykreslí se jako holý klíč přesně tam, kde
+   * má stát důvod, proč roční zúčtování nejde provést. Kontraktová brána
+   * (PayrollEnumContractTest) hlídá existenci vět v cs.json i en.json; tenhle
+   * test hlídá, že jimi obrazovka opravdu projde.
+   */
+  it.each(['tax_year_not_finished', 'taxpayer_credit_evidence_missing'] as const)(
+    'vypíše překážku %s větou, ne holým kódem',
+    async (code) => {
+      m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+        result: result({
+          performed: false,
+          outcome: null,
+          blockers: [code],
+          payable_minor_units: 0,
+        }),
+      }))
+      const wrapper = mountPage()
+      await flushPromises()
+      await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+      await flushPromises()
+
+      const blockers = wrapper.find('[data-test="annual-settlement-blockers"]')
+      expect(blockers.text()).toContain(`payroll.annual_settlement.blocker.${code}`)
+      expect(wrapper.find('[data-action="settle"]').attributes('data-reason'))
+        .toBe(`payroll.annual_settlement.blocker.${code}`)
+    },
+  )
+
   it('u splněných podmínek ukáže výsledek a nechá zúčtování provést', async () => {
     m.settleAnnualSettlement.mockResolvedValue({
       tax_year: 2026,

@@ -842,6 +842,9 @@ final class Routes
             $g->post('/inputs/preview', [PayrollInputsAction::class, 'preview']);
             $g->post('/inputs', [PayrollInputsAction::class, 'create']);
             $g->put('/inputs/{id:[0-9]+}', [PayrollInputsAction::class, 'update']);
+            // Musí předcházet `/inputs/{id}` — jinak by `approve-batch` spadlo
+            // do vzoru s číselným id a skončilo jako 404.
+            $g->post('/inputs/approve-batch', [PayrollInputsAction::class, 'approveBatch']);
             $g->post('/inputs/{id:[0-9]+}/approve', [PayrollInputsAction::class, 'approve']);
             $g->post('/inputs/{id:[0-9]+}/cancel', [PayrollInputsAction::class, 'cancel']);
             $g->post(

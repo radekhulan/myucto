@@ -115,6 +115,39 @@ enum AnnualSettlementBlocker: string
     case SettlementDeadlinePassed = 'settlement_deadline_passed';
 
     /**
+     * Zdaňovací období ještě neskončilo.
+     *
+     * § 38ch odst. 1 mluví o žádosti „nejpozději do 15. února PO UPLYNUTÍ
+     * zdaňovacího období" a odst. 4 o výpočtu daně „z úhrnu mezd … za uplynulé
+     * zdaňovací období". Roční zúčtování je tedy úkon nad UZAVŘENÝM rokem; do
+     * 31. 12. žádný úhrn za rok neexistuje.
+     *
+     * Bez téhle překážky by šlo spustit zúčtování uprostřed roku: roční daň by
+     * se spočítala jen z uzavřených měsíců, ale roční sleva na poplatníka se
+     * podle § 35ba odst. 1 písm. a) nekrátí, takže by z toho vyšel přeplatek,
+     * který poplatníkovi nenáleží — a `AlreadySettled` by pak zablokovala řádné
+     * zúčtování po konci roku. Je to protějšek {@see SettlementDeadlinePassed}
+     * ze spodní strany lhůty.
+     */
+    case TaxYearNotFinished = 'tax_year_not_finished';
+
+    /**
+     * Prohlášení k dani je podepsané, ale v evidenci nároků na slevy chybí
+     * řádek slevy na poplatníka podle § 35ba odst. 1 písm. a).
+     *
+     * Podepsané prohlášení a nárok na slevu jsou v modulu dvě různé tabulky.
+     * Když druhá chybí, roční zúčtování by proběhlo BEZ slevy na poplatníka —
+     * spočítalo by roční daň o 30 840 Kč vyšší, než jaká poplatníkovi náleží,
+     * a vykázalo nedoplatek nebo „vše sedí" tam, kde měl vyjít přeplatek. Sleva
+     * na poplatníka není volitelná: náleží každému poplatníkovi, který u plátce
+     * podepsal prohlášení, takže její nepřítomnost v evidenci není „nemá na ni
+     * nárok", ale „chybí evidence".
+     *
+     * Účetní ji doplní v kartě zaměstnance, v evidenci nároků na slevy.
+     */
+    case TaxpayerCreditEvidenceMissing = 'taxpayer_credit_evidence_missing';
+
+    /**
      * Poplatník není doložený daňový rezident ČR. § 38g odst. 2 věta čtvrtá:
      * poplatník podle § 2 odst. 3, který uplatňuje slevy podle § 35ba odst. 1
      * písm. b) až e), daňové zvýhodnění nebo nezdanitelnou část základu daně,

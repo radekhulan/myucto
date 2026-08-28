@@ -19,6 +19,13 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   income_tax_credit: 'liability',
   other_deductions_credit: 'liability',
   partner_settlement_credit: 'liability',
+  risky_savings_debit: 'expense',
+  risky_savings_credit: 'liability',
+  // 335 je AKTIVNÍ účet, ne závazkový — přeplatek čisté mzdy je pohledávka za
+  // zaměstnancem. Jediný klíč sady, který nabídku filtruje na `asset`.
+  employee_receivable_debit: 'asset',
+  non_deductible_benefit_debit: 'expense',
+  travel_expense_debit: 'expense',
 }
 
 export function normalizedPayrollAccountCode(value: string): string {
@@ -39,7 +46,11 @@ export function payrollAccountError(
   code: string,
 ): PayrollAccountError | null {
   const normalized = normalizedPayrollAccountCode(code)
-  if (!/^[0-9]{3}[.A-Z0-9]{0,7}$/.test(normalized)) return 'invalid_format'
+  // Analytika je až 13 znaků za syntetikou — stejně jako
+  // PayrollAccountCode::isValid() a PayrollEmployerSettingsValidator. Kratší
+  // limit {0,7} tady odmítal kódy, které backend i zbytek aplikace berou
+  // (a od migrace 1618 je výchozí `336.100` / `336.200`).
+  if (!/^[0-9]{3}[.A-Z0-9]{0,13}$/.test(normalized)) return 'invalid_format'
 
   const account = payrollAccount(accounts, normalized)
   if (!account) return 'not_found'

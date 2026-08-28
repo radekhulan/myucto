@@ -59,8 +59,13 @@ final class PayrollNetResultQueryService
             throw new \DomainException('Výsledek čisté mzdy nepatří zadané osobě.');
         }
 
-        $netPayable = self::nonNegativeInt($net, 'net_payable_minor_units');
-        $payableAfterEnforcement = self::nonNegativeInt(
+        // Obě částky smí být záporné — přeplatek čisté mzdy u osoby bez
+        // peněžního příjmu s doplatkem ZP do minimálního vyměřovacího základu
+        // (§ 3 odst. 10 z. č. 592/1992 Sb.). Rozpad je read model; kdyby tady
+        // padal, účetní by se o dluhu zaměstnance nedozvěděla z obrazovky,
+        // jen z deníku. Vztah „po exekucích ≤ čistá mzda" platí dál.
+        $netPayable = self::integer($net, 'net_payable_minor_units');
+        $payableAfterEnforcement = self::integer(
             $personResult,
             'payable_after_enforcement_minor',
         );
@@ -104,7 +109,7 @@ final class PayrollNetResultQueryService
                 'bonus_minor' => self::nonNegativeInt($net, 'tax_bonus_minor_units'),
             ],
             'correction_minor' => self::integer($net, 'correction_minor_units'),
-            'net_before_deductions_minor' => self::nonNegativeInt(
+            'net_before_deductions_minor' => self::integer(
                 $net,
                 'net_before_deductions_minor_units',
             ),
@@ -241,6 +246,16 @@ final class PayrollNetResultQueryService
      */
     private function payout(array $personSnapshot, int $payableMinorUnits): array
     {
+        if ($payableMinorUnits < 0) {
+            // Není co rozdělovat: přeplatek se neposílá na účty, vede se jako
+            // pohledávka za zaměstnancem. Vlastní stav, ne „no_rules" —
+            // pravidla osoba má, jen tenhle měsíc nic nedostane.
+            return [
+                'status' => 'employee_receivable',
+                'allocations' => [],
+                'total_minor' => 0,
+            ];
+        }
         $rules = self::rows($personSnapshot['payout_rules'] ?? [], 'person.payout_rules');
         if ($rules === []) {
             return ['status' => 'no_rules', 'allocations' => [], 'total_minor' => 0];

@@ -1156,16 +1156,16 @@ final class PayrollRunSnapshotBuilder
             'issue_code' => 'annual_accumulator_missing',
             'state' => null,
         ];
-        $states = [];
-        foreach (['social_insurance', 'income_tax'] as $calculationKind) {
-            $states[$calculationKind] = $this->statutoryAccumulators?->statesBeforePeriod(
-                $supplierId,
-                $employeeIds,
-                $year,
-                $periodStart,
-                $calculationKind,
-            ) ?? [];
-        }
+        $kinds = ['social_insurance', 'income_tax'];
+        // Oba druhy kumulace jednou dávkou: druh se liší jedinou hodnotou ve
+        // WHERE, takže volání po jednom platilo dvakrát tytéž tři dotazy.
+        $states = $this->statutoryAccumulators?->statesBeforePeriodByKind(
+            $supplierId,
+            $employeeIds,
+            $year,
+            $periodStart,
+            $kinds,
+        ) ?? array_fill_keys($kinds, []);
 
         $result = [];
         foreach ($employeeIds as $employeeId) {

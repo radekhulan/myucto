@@ -274,13 +274,39 @@ final class PayrollRunWorkflowTest extends TestCase
         );
     }
 
-    public function testTransitionMatrixRejectsSkippedApproval(): void
+    /**
+     * Bez pravidla čtyř očí je „Zkontrolovat" jen klik navíc — workflow u něj
+     * nikdy neověřilo jinou osobu. Schválení proto vede rovnou z `CALCULATED`
+     * a kontrolu si zaznamená samo.
+     */
+    public function testApprovalAbsorbsReviewWithoutFourEyes(): void
+    {
+        $approval = $this->workflow->transition(
+            PayrollRunStatus::CALCULATED,
+            PayrollRunCommand::APPROVE,
+            $this->context(reviewedBy: null),
+        );
+        self::assertSame(PayrollRunStatus::APPROVED, $approval->to);
+    }
+
+    public function testApprovalStillRequiresReviewUnderFourEyes(): void
     {
         $this->expectException(\DomainException::class);
         $this->workflow->transition(
             PayrollRunStatus::CALCULATED,
             PayrollRunCommand::APPROVE,
-            $this->context(),
+            $this->context(reviewedBy: null, fourEyesRequired: true),
+        );
+    }
+
+    /** Validace drží i u zkrácené cesty — schválení je neobchází. */
+    public function testShortcutApprovalStillRejectsBlockers(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->workflow->transition(
+            PayrollRunStatus::CALCULATED,
+            PayrollRunCommand::APPROVE,
+            $this->context(reviewedBy: null, blockerCount: 1),
         );
     }
 
@@ -348,6 +374,7 @@ final class PayrollRunWorkflowTest extends TestCase
         bool $hasPostingBatch = true,
         bool $hasPaymentBatch = true,
         ?string $reason = null,
+        bool $fourEyesRequired = false,
     ): PayrollRunTransitionContext {
         return new PayrollRunTransitionContext(
             actorUserId: $actorUserId,
@@ -360,6 +387,7 @@ final class PayrollRunWorkflowTest extends TestCase
             hasPostingBatch: $hasPostingBatch,
             hasPaymentBatch: $hasPaymentBatch,
             reason: $reason,
+            fourEyesRequired: $fourEyesRequired,
         );
     }
 }

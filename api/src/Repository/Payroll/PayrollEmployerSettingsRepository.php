@@ -23,6 +23,11 @@ final class PayrollEmployerSettingsRepository
         'income_tax_credit' => 'income_tax_credit_account',
         'other_deductions_credit' => 'other_deductions_credit_account',
         'partner_settlement_credit' => 'partner_settlement_credit_account',
+        'risky_savings_debit' => 'risky_savings_debit_account',
+        'risky_savings_credit' => 'risky_savings_credit_account',
+        'employee_receivable_debit' => 'employee_receivable_debit_account',
+        'non_deductible_benefit_debit' => 'non_deductible_benefit_debit_account',
+        'travel_expense_debit' => 'travel_expense_debit_account',
     ];
 
     private const STRING_COLUMNS = [
@@ -35,6 +40,66 @@ final class PayrollEmployerSettingsRepository
     ];
 
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Výchozí sada předkontací pro firmu, která nastavení mezd ještě nemá.
+     *
+     * Není to prosté {@see PayrollAccountingDefaults::codes()}: od W7/Ú-08 je
+     * výchozí kontace pojistného ANALYTICKÁ (336.100 / 336.200), aby se závazek
+     * vůči ČSSZ a vůči zdravotním pojišťovnám na jednom účtu nevynetoval.
+     * Analytiky ale v osnově má jen firma, které se osnova seedovala ze
+     * šablony po migraci 1618 — nebo která si je založila sama.
+     *
+     * Nabídnout účet, který firma v osnově nemá, by mělo dva zlé následky:
+     *  1. `PayrollEmployerSettingsValidator` uložení nastavení odmítne
+     *     („Účet 336.100 neexistuje nebo není aktivní.“) — firma by po nasazení
+     *     nemohla uložit nastavení mezd vůbec.
+     *  2. `PayrollRunSnapshotBuilder` by tentýž účet zmrazil do snapshotu běhu
+     *     a zaúčtování by spadlo na `unknown_account` v PostingService.
+     *
+     * Analytika se proto nabízí jen tehdy, když ji firma reálně má; jinak se
+     * degraduje na svou syntetiku, tedy přesně na dosavadní chování. Nic se
+     * tím nikomu tiše nemění — účty do osnovy stávajícím firmám VĚDOMĚ
+     * nedoplňujeme, protože {@see \MyInvoice\Service\Accounting\Payroll\PayrollPostingAccountResolver}
+     * bere existenci 336.100/336.200 v osnově jako projev vůle účetní.
+     *
+     * @return array<string,string>
+     */
+    private function defaultAccounts(int $supplierId): array
+    {
+        $codes = PayrollAccountingDefaults::codes();
+        $analytics = [];
+        foreach ($codes as $code) {
+            if (str_contains($code, '.')) {
+                $analytics[$code] = true;
+            }
+        }
+        if ($analytics === []) {
+            return $codes;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($analytics), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT account_code
+               FROM chart_of_accounts
+              WHERE supplier_id = ?
+                AND is_active = 1
+                AND account_code IN ({$placeholders})"
+        );
+        $stmt->execute([$supplierId, ...array_keys($analytics)]);
+        $available = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $code) {
+            $available[(string) $code] = true;
+        }
+
+        foreach ($codes as $key => $code) {
+            if (isset($analytics[$code]) && !isset($available[$code])) {
+                $codes[$key] = substr($code, 0, 3);
+            }
+        }
+
+        return $codes;
+    }
 
     /** @return array<string,mixed> */
     public function get(int $supplierId): array
@@ -70,7 +135,7 @@ final class PayrollEmployerSettingsRepository
                 'payroll_contact_name' => null,
                 'payroll_contact_email' => null,
                 'payroll_contact_phone' => null,
-                'accounts' => PayrollAccountingDefaults::codes(),
+                'accounts' => $this->defaultAccounts($supplierId),
                 'offices' => [],
                 'row_version' => 0,
                 'created_at' => null,

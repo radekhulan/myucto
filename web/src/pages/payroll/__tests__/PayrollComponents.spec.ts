@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
 
 const m = vi.hoisted(() => ({
+  approveInputsBatch: vi.fn(),
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   components: vi.fn(),
@@ -65,6 +66,7 @@ vi.mock('@/api/payroll', () => ({
     createInput: m.createInput,
     updateInput: vi.fn(),
     approveInput: vi.fn(),
+    approveInputsBatch: m.approveInputsBatch,
     riskySavings: m.riskySavings,
     institutionAccounts: m.institutionAccounts,
   },
@@ -395,6 +397,26 @@ describe('PayrollComponents', () => {
     const notice = wrapper.find('[data-test="payroll-focus-notice"]')
     expect(notice.exists()).toBe(true)
     expect(notice.text()).toContain('payroll.agendas.focus.missing')
+    wrapper.unmount()
+  })
+
+  /*
+   * Schvalovat 500 vstupů po jednom je zhruba tisíc kliknutí. Hromadné
+   * schválení bere celé období, ne jen zobrazenou stránku — blokátor běhu
+   * drží měsíc, ne stránka.
+   */
+  it('approves every draft input of the period in one request', async () => {
+    m.approveInputsBatch.mockResolvedValue({ approved: [9], skipped: [], failed: [] })
+    const wrapper = mount(PayrollComponents)
+    await flushPromises()
+
+    const button = wrapper.get('[data-testid="payroll-inputs-approve-all"]')
+    expect(button.text()).toContain('payroll.components.inputs.approve_all')
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(m.approveInputsBatch).toHaveBeenCalledWith({ period: expect.any(String) })
+    expect(m.toastSuccess).toHaveBeenCalledWith('payroll.components.inputs.approve_all_done')
     wrapper.unmount()
   })
 

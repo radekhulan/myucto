@@ -408,53 +408,103 @@ final class PayrollStatutoryAccumulatorRepository
         string $periodStart,
         string $calculationKind,
     ): array {
+        return $this->statesBeforePeriodByKind(
+            $supplierId,
+            $employeeIds,
+            $year,
+            $periodStart,
+            [$calculationKind],
+        )[$calculationKind];
+    }
+
+    /**
+     * Táž dávka jako statesBeforePeriod(), ale pro VÍC druhů kumulace najednou.
+     *
+     * Snapshot běhu potřebuje `social_insurance` i `income_tax`; volané po jednom
+     * to stálo dvakrát tři dotazy (kontrola příslušnosti osob k firmě, opening
+     * balance, záznamy před obdobím), přestože se druh kumulace liší jen jednou
+     * hodnotou ve WHERE. Druhy se proto berou jedním `IN (...)` a výsledek se
+     * rozděluje v paměti — dotazů zůstává tři bez ohledu na počet druhů.
+     *
+     * Sestavení stavu i jeho otisk se nemění: stav se skládá pro tutéž dvojici
+     * (osoba, druh) a ze stejných řádků jako u volání po jednom druhu.
+     *
+     * @param list<int> $employeeIds
+     * @param list<string> $calculationKinds
+     * @return array<string,array<int,array<string,mixed>>>
+     */
+    public function statesBeforePeriodByKind(
+        int $supplierId,
+        array $employeeIds,
+        int $year,
+        string $periodStart,
+        array $calculationKinds,
+    ): array {
+        $kinds = array_values(array_unique($calculationKinds));
+        if ($kinds === []) {
+            throw new \InvalidArgumentException(
+                'Nepodporovaný druh zákonné kumulace.',
+            );
+        }
         $unique = array_values(array_unique($employeeIds));
         if ($unique === []) {
-            return [];
+            return array_fill_keys($kinds, []);
         }
         foreach ($unique as $employeeId) {
             $this->assertIdentityArguments($supplierId, $employeeId, $year);
         }
-        $this->normalizeValues(
-            $calculationKind,
-            array_fill_keys(self::VALUE_FIELDS[$calculationKind] ?? [], 0),
-            true,
-        );
+        foreach ($kinds as $calculationKind) {
+            $this->normalizeValues(
+                $calculationKind,
+                array_fill_keys(self::VALUE_FIELDS[$calculationKind] ?? [], 0),
+                true,
+            );
+        }
         $this->assertPeriodStart($periodStart, $year);
         $this->assertEmployeesBelongToSupplier($supplierId, $unique);
 
-        $openings = $this->currentOpenings($supplierId, $unique, $year, $calculationKind);
+        $openings = $this->currentOpenings($supplierId, $unique, $year, $kinds);
+        $withOpening = [];
+        foreach ($openings as $byEmployee) {
+            foreach (array_keys($byEmployee) as $employeeId) {
+                $withOpening[$employeeId] = true;
+            }
+        }
         $entries = $this->entriesBeforePeriod(
             $supplierId,
-            array_keys($openings),
+            array_keys($withOpening),
             $year,
-            $calculationKind,
+            $kinds,
             $periodStart,
         );
 
-        $states = [];
-        foreach ($unique as $employeeId) {
-            $opening = $openings[$employeeId] ?? null;
-            if ($opening === null) {
-                continue;
+        $result = [];
+        foreach ($kinds as $calculationKind) {
+            $states = [];
+            foreach ($unique as $employeeId) {
+                $opening = $openings[$calculationKind][$employeeId] ?? null;
+                if ($opening === null) {
+                    continue;
+                }
+                try {
+                    $states[$employeeId] = $this->assembleState(
+                        $supplierId,
+                        $employeeId,
+                        $year,
+                        $periodStart,
+                        $calculationKind,
+                        null,
+                        $opening,
+                        $entries[$calculationKind][$employeeId] ?? [],
+                    );
+                } catch (PayrollStatutoryAccumulatorUnavailableException) {
+                    continue;
+                }
             }
-            try {
-                $states[$employeeId] = $this->assembleState(
-                    $supplierId,
-                    $employeeId,
-                    $year,
-                    $periodStart,
-                    $calculationKind,
-                    null,
-                    $opening,
-                    $entries[$employeeId] ?? [],
-                );
-            } catch (PayrollStatutoryAccumulatorUnavailableException) {
-                continue;
-            }
+            $result[$calculationKind] = $states;
         }
 
-        return $states;
+        return $result;
     }
 
     /** @return array<string,mixed> */
@@ -718,15 +768,16 @@ final class PayrollStatutoryAccumulatorRepository
      * řádek než dotaz za jednu osobu.
      *
      * @param list<int> $employeeIds
-     * @return array<int,array<string,mixed>>
+     * @param list<string> $calculationKinds
+     * @return array<string,array<int,array<string,mixed>>>
      */
     private function currentOpenings(
         int $supplierId,
         array $employeeIds,
         int $year,
-        string $calculationKind,
+        array $calculationKinds,
     ): array {
-        $openings = [];
+        $openings = array_fill_keys($calculationKinds, []);
         foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
             $stmt = $this->db->pdo()->prepare(sprintf(
                 'SELECT opening.*
@@ -734,7 +785,7 @@ final class PayrollStatutoryAccumulatorRepository
                   WHERE opening.supplier_id = ?
                     AND opening.employee_id IN (%s)
                     AND opening.tax_year = ?
-                    AND opening.calculation_kind = ?
+                    AND opening.calculation_kind IN (%s)
                     AND NOT EXISTS (
                       SELECT 1
                         FROM payroll_statutory_accumulator_openings successor
@@ -742,10 +793,12 @@ final class PayrollStatutoryAccumulatorRepository
                          AND successor.replaces_opening_id = opening.id
                     )',
                 implode(', ', array_fill(0, count($chunk), '?')),
+                implode(', ', array_fill(0, count($calculationKinds), '?')),
             ));
-            $stmt->execute([$supplierId, ...$chunk, $year, $calculationKind]);
+            $stmt->execute([$supplierId, ...$chunk, $year, ...$calculationKinds]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $openings[(int) $row['employee_id']] ??= $this->castOpening($row);
+                $kind = (string) $row['calculation_kind'];
+                $openings[$kind][(int) $row['employee_id']] ??= $this->castOpening($row);
             }
         }
 
@@ -756,16 +809,17 @@ final class PayrollStatutoryAccumulatorRepository
      * Nenahrazené záznamy kumulace před obdobím pro celou množinu osob.
      *
      * @param list<int> $employeeIds
-     * @return array<int,list<array<string,mixed>>>
+     * @param list<string> $calculationKinds
+     * @return array<string,array<int,list<array<string,mixed>>>>
      */
     private function entriesBeforePeriod(
         int $supplierId,
         array $employeeIds,
         int $year,
-        string $calculationKind,
+        array $calculationKinds,
         string $periodStart,
     ): array {
-        $entries = [];
+        $entries = array_fill_keys($calculationKinds, []);
         foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
             $stmt = $this->db->pdo()->prepare(sprintf(
                 'SELECT entry.*
@@ -773,7 +827,7 @@ final class PayrollStatutoryAccumulatorRepository
                   WHERE entry.supplier_id = ?
                     AND entry.employee_id IN (%s)
                     AND entry.tax_year = ?
-                    AND entry.calculation_kind = ?
+                    AND entry.calculation_kind IN (%s)
                     AND entry.period_start < ?
                     AND NOT EXISTS (
                       SELECT 1
@@ -783,16 +837,18 @@ final class PayrollStatutoryAccumulatorRepository
                     )
                   ORDER BY entry.period_start, entry.id',
                 implode(', ', array_fill(0, count($chunk), '?')),
+                implode(', ', array_fill(0, count($calculationKinds), '?')),
             ));
             $stmt->execute([
                 $supplierId,
                 ...$chunk,
                 $year,
-                $calculationKind,
+                ...$calculationKinds,
                 $periodStart,
             ]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $entries[(int) $row['employee_id']][] = $this->castEntry($row);
+                $kind = (string) $row['calculation_kind'];
+                $entries[$kind][(int) $row['employee_id']][] = $this->castEntry($row);
             }
         }
 

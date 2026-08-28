@@ -97,6 +97,11 @@ const defaultAccounts: PayrollEmployerAccounts = {
   income_tax_credit: '342',
   other_deductions_credit: '379',
   partner_settlement_credit: '365',
+  risky_savings_debit: '527',
+  risky_savings_credit: '379',
+  employee_receivable_debit: '335',
+  non_deductible_benefit_debit: '528',
+  travel_expense_debit: '512',
 }
 
 function chartAccount(
@@ -118,8 +123,15 @@ function chartAccount(
 
 function chartAccounts(): PayrollAccountOption[] {
   return [
-    ...['521', '522', '523', '524'].map(code => chartAccount(code, 'expense')),
+    ...['512', '521', '522', '523', '524', '527', '528'].map(code => chartAccount(code, 'expense')),
     ...['331', '336', '342', '365', '366', '379'].map(code => chartAccount(code, 'liability')),
+    // 335 je jediný AKTIVNÍ účet v sadě — přeplatek čisté mzdy je pohledávka
+    // za zaměstnancem, ne závazek.
+    chartAccount('335', 'asset'),
+    // Analytiky pojistného z migrace 1618. Firma je mít nemusí (pak platí
+    // syntetika 336), ale výběr je musí zvládnout — proto jsou v nabídce.
+    chartAccount('336.100', 'liability', true, 'Závazek vůči ČSSZ'),
+    chartAccount('336.200', 'liability', true, 'Závazek vůči zdravotním pojišťovnám'),
     chartAccount('521001', 'expense', true, 'Analytická mzda'),
     chartAccount('521999', 'expense', false, 'Neaktivní mzda'),
   ]
@@ -287,6 +299,75 @@ describe('EmployerSettings — účtová osnova', () => {
     expect(m.saveEmployerSettings).toHaveBeenCalledTimes(1)
     expect(m.saveEmployerSettings.mock.calls[0][0].accounts.employment_gross_debit).toBe('521001')
 
+    wrapper.unmount()
+  })
+
+  /*
+   * Backend zná 17 předkontací; obrazovka jich do migrace 1614/1618 uměla 12.
+   * Chybějící pole se navenek NEPROJEVÍ — uložení projde, protože validátor
+   * chybějící klíč doplní výchozím účtem. Účetní si ale předkontaci nenastaví
+   * a nikdy se nedozví, že podle ní modul účtuje.
+   */
+  it.each([
+    ['risky_savings_debit', '527'],
+    ['risky_savings_credit', '379'],
+    ['employee_receivable_debit', '335'],
+    ['non_deductible_benefit_debit', '528'],
+    ['travel_expense_debit', '512'],
+  ] as const)('nabízí předkontaci %s a pošle ji zpět', async (key, code) => {
+    const wrapper = await mountPage()
+    await openAccounting(wrapper)
+
+    const picker = wrapper.findAll(`[data-account-key="${key}"]`)[0]
+    expect(picker).toBeTruthy()
+    expect(picker.find('input').attributes('aria-invalid')).not.toBe('true')
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings.mock.calls[0][0].accounts[key]).toBe(code)
+    wrapper.unmount()
+  })
+
+  /*
+   * Nové předkontace přibyly do sady, o které se účetní nikde nedočte — proto
+   * má každá z nich pod názvem větu, co na ten účet patří a proč.
+   */
+  it('vysvětluje u nových předkontací, k čemu účet je', async () => {
+    const wrapper = await mountPage()
+    await openAccounting(wrapper)
+
+    for (const row of ['risky_savings', 'employee_receivable',
+      'non_deductible_benefit', 'travel_expense']) {
+      expect(wrapper.find(`[data-account-row-hint="${row}"]`).text())
+        .toBe(`payroll.employer.accounting_row_hint.${row}`)
+    }
+    // Kontace, které tam jsou odjakživa, větu nedostaly — nemá být šum u všeho.
+    expect(wrapper.find('[data-account-row-hint="employment_gross"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
+   * Migrace 1618 dala nové firmě analytiky 336.100 / 336.200, starší firma má
+   * dál syntetiku 336. Obrazovka musí zvládnout obojí — kratší regex {0,7}
+   * a chybějící analytika v nabídce by účetní zamkly nastavení mezd.
+   */
+  it.each(['336', '336.100'])('bere uložený účet pojistného ve tvaru %s', async (code) => {
+    const wrapper = await mountPage(settings({
+      ...defaultAccounts,
+      social_insurance_credit: code,
+    }))
+    await openAccounting(wrapper)
+
+    const picker = wrapper.findAll('[data-account-key="social_insurance_credit"]')[0]
+    expect(picker.find('input').attributes('aria-invalid')).not.toBe('true')
+
+    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')
+    await save!.trigger('click')
+    await flushPromises()
+
+    expect(m.saveEmployerSettings.mock.calls[0][0].accounts.social_insurance_credit).toBe(code)
     wrapper.unmount()
   })
 

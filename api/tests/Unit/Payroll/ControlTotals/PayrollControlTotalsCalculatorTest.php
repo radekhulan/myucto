@@ -39,6 +39,11 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
                 'amount_minor' => 3_000,
             ],
             [
+                'liability_kind' => 'employee_receivable',
+                'direction' => 'incoming',
+                'amount_minor' => 0,
+            ],
+            [
                 'liability_kind' => 'health_insurance',
                 'direction' => 'outgoing',
                 'amount_minor' => 4_050,
@@ -117,10 +122,139 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
         );
     }
 
-    /** @return array<string,mixed> */
-    private function inputSnapshot(): array
+    /**
+     * Ú-04/Ú-05: osoba celý měsíc na neplaceném volnu. Nemá žádný peněžní
+     * příjem, ale zaměstnavatel za ni odvádí doplatek zdravotního pojištění
+     * do minimálního vyměřovacího základu (§ 3 odst. 10 z. č. 592/1992 Sb.),
+     * který podle odst. 12 téhož paragrafu hradí zaměstnanec. Čistá mzda tím
+     * vyjde ZÁPORNÁ a je z ní pohledávka za zaměstnancem, ne chyba podkladů.
+     */
+    public function testNegativeNetPayableBecomesEmployeeReceivableNotFailure(): void
     {
-        return [
+        $totals = $this->calculate(
+            $this->resultSnapshot(overdrawnPerson: true),
+            $this->inputSnapshot(overdrawnPerson: true),
+        );
+
+        $liabilities = $this->liabilityMap($totals);
+        // Závazek čisté mzdy zůstává tím, co se skutečně vyplácí — přeplatek
+        // ho NESNIŽUJE, jinak by nesouhlasil s platebními závazky MZ-17.
+        self::assertSame(23_100, $liabilities['net_wage']);
+        self::assertSame(500, $liabilities['employee_receivable']);
+        // Doplatek ZP je pořád odvod zdravotní pojišťovně, i když jde
+        // z kapsy zaměstnance, kterému se nic nevyplácí.
+        self::assertSame(4_550, $liabilities['health_insurance']);
+        self::assertSame('incoming', $this->liabilityDirection($totals, 'employee_receivable'));
+        self::assertSame('outgoing', $this->liabilityDirection($totals, 'net_wage'));
+        self::assertCount(3, $totals->people);
+    }
+
+    public function testWholeRunInNegativeStillProducesExactTotals(): void
+    {
+        $totals = $this->calculate(
+            $this->resultSnapshot(overdrawnPerson: true, overdrawnOnly: true),
+            $this->inputSnapshot(overdrawnPerson: true, overdrawnOnly: true),
+        );
+
+        $liabilities = $this->liabilityMap($totals);
+        self::assertSame(0, $liabilities['net_wage']);
+        self::assertSame(500, $liabilities['employee_receivable']);
+        self::assertSame(500, $liabilities['health_insurance']);
+        self::assertSame(0, $liabilities['standard_deduction']);
+        self::assertSame($this->metrics(0), $totals->company);
+    }
+
+    /**
+     * Opravná revize, která pohledávku odúčtuje: člověk se do měsíce vrátil,
+     * mzda byla dopočítána a přeplatek zmizel. Kontrolní součty nesmí držet
+     * ani korunu z předchozí verze.
+     */
+    public function testCorrectionRevisionClearsTheEmployeeReceivable(): void
+    {
+        $totals = $this->calculate(
+            $this->resultSnapshot(overdrawnPerson: true, overdrawnSettled: true),
+            $this->inputSnapshot(overdrawnPerson: true),
+        );
+
+        $liabilities = $this->liabilityMap($totals);
+        self::assertSame(0, $liabilities['employee_receivable']);
+        self::assertSame(23_600, $liabilities['net_wage']);
+    }
+
+    /**
+     * NEGATIVNÍ test — povolení záporné čisté mzdy nesmí být plošné. Záporný
+     * odvod pojistného za osobu (a tedy i za účtárnu a firmu) žádný účetní
+     * význam nemá a musí dál padat.
+     */
+    public function testStillFailsClosedForNegativeInsuranceContribution(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nesmí být záporné');
+
+        $this->calculate(
+            $this->resultSnapshot(negativeEmployeeSocial: true),
+        );
+    }
+
+    /**
+     * NEGATIVNÍ test — záporná čistá mzda se nekontroluje znaménkem, ale
+     * rovností s vlastním rozpadem. Rozbitá soustava padá dál.
+     */
+    public function testStillFailsClosedWhenNegativeNetDoesNotMatchItsBreakdown(): void
+    {
+        $result = $this->resultSnapshot(overdrawnPerson: true);
+        $result['people'][2]['statutory']['net_pay']['net_payable_minor_units'] = -400;
+        $result['people'][2]['statutory']['net_payable_minor_units'] = -400;
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('kontrolní součet');
+
+        $this->calculate($result, $this->inputSnapshot(overdrawnPerson: true));
+    }
+
+    /** @return array<string,int> */
+    private function liabilityMap(PayrollControlTotals $totals): array
+    {
+        $result = [];
+        foreach ($totals->liabilities as $liability) {
+            $result[$liability['liability_kind']] = $liability['amount_minor'];
+        }
+
+        return $result;
+    }
+
+    private function liabilityDirection(
+        PayrollControlTotals $totals,
+        string $kind,
+    ): string {
+        foreach ($totals->liabilities as $liability) {
+            if ($liability['liability_kind'] === $kind) {
+                return $liability['direction'];
+            }
+        }
+
+        self::fail("Kontrolní součty neobsahují závazek {$kind}.");
+    }
+
+    /** @return array<string,mixed> */
+    private function inputSnapshot(
+        bool $overdrawnPerson = false,
+        bool $overdrawnOnly = false,
+    ): array {
+        $overdrawn = [
+            'employee' => ['id' => 503],
+            'employments' => [[
+                'employment' => ['id' => 604, 'office_id' => 73],
+                'inputs' => [],
+            ]],
+        ];
+        if ($overdrawnOnly) {
+            return [
+                'schema_version' => 'payroll-run-input.v2',
+                'people' => [$overdrawn],
+            ];
+        }
+        $snapshot = [
             'schema_version' => 'payroll-run-input.v2',
             'people' => [
                 [
@@ -145,6 +279,11 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
                 ],
             ],
         ];
+        if ($overdrawnPerson) {
+            $snapshot['people'][] = $overdrawn;
+        }
+
+        return $snapshot;
     }
 
     /** @return array<string,mixed> */
@@ -153,6 +292,10 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
         int $accountingAmount = 30_000,
         string $statutoryStatus = 'calculated',
         bool $stringPersonSourceAmount = false,
+        bool $overdrawnPerson = false,
+        bool $overdrawnOnly = false,
+        bool $overdrawnSettled = false,
+        bool $negativeEmployeeSocial = false,
     ): array {
         $firstPerson = $this->person(
             501,
@@ -177,13 +320,40 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
                     : $firstPersonSourceAmount,
             ];
         }
-        return [
-            'schema_version' => 'payroll-run-result.v2',
-            'source_snapshot_hash' => hash(
-                'sha256',
-                CanonicalJson::encode($this->inputSnapshot()),
-            ),
-            'people' => [
+        if ($negativeEmployeeSocial) {
+            $firstPerson['statutory']['social_insurance']
+                ['employee_contribution_minor_units'] = -700;
+        }
+        // Neplacené volno celý měsíc: nulový příjem, jediná položka je
+        // doplatek ZP do minimálního vyměřovacího základu. Čistá mzda −500.
+        // V opravné revizi (`overdrawnSettled`) je člověk zpátky v práci
+        // a přeplatek je vyrovnaný.
+        $overdrawn = $overdrawnSettled
+            ? $this->person(
+                503,
+                [$this->relationship(604, 500, 4)],
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                500,
+            )
+            : $this->person(
+                503,
+                [$this->relationship(604, 0, 4)],
+                0,
+                500,
+                0,
+                0,
+                0,
+                0,
+                -500,
+            );
+        $people = $overdrawnOnly
+            ? [$overdrawn]
+            : [
                 $firstPerson,
                 $this->person(
                     502,
@@ -199,16 +369,31 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
                     350,
                     15_350,
                 ),
-            ],
-            'totals' => $this->metrics(30_000),
+                ...($overdrawnPerson ? [$overdrawn] : []),
+            ];
+
+        return [
+            'schema_version' => 'payroll-run-result.v2',
+            'source_snapshot_hash' => hash(
+                'sha256',
+                CanonicalJson::encode(
+                    $this->inputSnapshot($overdrawnPerson, $overdrawnOnly),
+                ),
+            ),
+            'people' => $people,
+            'totals' => $this->metrics(
+                $overdrawnOnly ? 0 : ($overdrawnSettled ? 30_500 : 30_000),
+            ),
             'accounting_totals' => [[
                 'debit_code' => '521',
                 'credit_code' => '331',
-                'amount_minor' => $accountingAmount,
+                'amount_minor' => $overdrawnOnly
+                    ? 0
+                    : ($overdrawnSettled ? 30_500 : $accountingAmount),
             ]],
             'statutory' => [
                 'status' => $statutoryStatus,
-                'employer_social_minor_units' => 4_000,
+                'employer_social_minor_units' => $overdrawnOnly ? 0 : 4_000,
             ],
         ];
     }
@@ -348,13 +533,18 @@ final class PayrollControlTotalsCalculatorTest extends TestCase
         ];
     }
 
-    /** @param array<string,mixed> $result */
-    private function calculate(array $result): PayrollControlTotals
-    {
+    /**
+     * @param array<string,mixed> $result
+     * @param ?array<string,mixed> $input
+     */
+    private function calculate(
+        array $result,
+        ?array $input = null,
+    ): PayrollControlTotals {
         return new PayrollControlTotalsCalculator()->calculate(
             9,
             17,
-            $this->inputSnapshot(),
+            $input ?? $this->inputSnapshot(),
             $result,
             hash('sha256', CanonicalJson::encode($result)),
         );

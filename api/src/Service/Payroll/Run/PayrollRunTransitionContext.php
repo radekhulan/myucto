@@ -17,6 +17,19 @@ final readonly class PayrollRunTransitionContext
         public bool $hasPostingBatch = false,
         public bool $hasPaymentBatch = false,
         public ?string $reason = null,
+        /**
+         * Vyžaduje firma pravidlo čtyř očí?
+         *
+         * Uzavřené produktové rozhodnutí: nikdy. Řada firem má jedinou účetní,
+         * takže samostatný krok „Zkontrolovat" byl jen prázdný obřad před
+         * „Schválit" — workflow ho nikdy nekontrolovalo proti JINÉ osobě, jen
+         * proti tomu, že je vyplněný. `PayrollEmployerPolicyService` proto
+         * `four_eyes_required` drží natvrdo na `false`.
+         *
+         * Příznak tu zůstává, aby podmínka byla vidět a dala se otestovat, ne
+         * aby se pravidlo zapínalo.
+         */
+        public bool $fourEyesRequired = false,
     ) {
         if ($actorUserId <= 0) {
             throw new \InvalidArgumentException('Uživatel přechodu musí být platný.');

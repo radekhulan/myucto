@@ -20,6 +20,7 @@ final class AverageEarningCalculator
         int $workedDays,
         ?int $probableHourlyMinor = null,
         ?string $probableRationale = null,
+        ?int $weeklyMinutes = null,
     ): AverageEarningResult {
         if ($grossEarningsMinor < 0 || $longerPeriodAllocatedMinor < 0) {
             throw new InvalidArgumentException('Započitatelná mzda nesmí být záporná.');
@@ -30,6 +31,8 @@ final class AverageEarningCalculator
 
         $minimumWorkedDays = AbsenceRuleset::forDate($this->rulesets, $applicationDate)
             ->averageEarningMinimumWorkedDays();
+        // § 357 odst. 1 ZP — průměrný výdělek nesmí klesnout pod minimální mzdu.
+        $floor = MinimumWageFloor::forDate($this->rulesets, $applicationDate, $weeklyMinutes);
 
         $earningsMinor = $grossEarningsMinor + $longerPeriodAllocatedMinor;
         if ($earningsMinor < $grossEarningsMinor) {
@@ -47,7 +50,7 @@ final class AverageEarningCalculator
 
             return new AverageEarningResult(
                 'probable',
-                $probableHourlyMinor,
+                $floor->apply($probableHourlyMinor),
                 'manual_review',
                 [
                     'worked_days' => $workedDays,
@@ -56,7 +59,7 @@ final class AverageEarningCalculator
                     'probable_hourly_minor' => $probableHourlyMinor,
                     'rationale' => $rationale,
                     'rule' => 'probable-earning-required-below-minimum-worked-days',
-                ],
+                ] + $floor->trace($probableHourlyMinor),
             );
         }
 
@@ -69,10 +72,11 @@ final class AverageEarningCalculator
             throw new \OverflowException('Výpočet hodinového průměru překročil celočíselný rozsah.');
         }
 
-        $hourlyMinor = RoundingMode::HalfUp->roundFraction(
+        $computedHourlyMinor = RoundingMode::HalfUp->roundFraction(
             $earningsMinor * 60,
             $workedMinutes,
         );
+        $hourlyMinor = $floor->apply($computedHourlyMinor);
 
         return new AverageEarningResult(
             'actual',
@@ -87,7 +91,7 @@ final class AverageEarningCalculator
                 'average_hourly_minor' => $hourlyMinor,
                 'rounding' => 'half-up-to-minor-unit',
                 'rule' => 'gross-earnings-divided-by-worked-time',
-            ],
+            ] + $floor->trace($computedHourlyMinor),
         );
     }
 }

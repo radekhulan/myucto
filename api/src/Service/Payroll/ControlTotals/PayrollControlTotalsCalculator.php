@@ -85,6 +85,7 @@ final class PayrollControlTotalsCalculator
         $seenEmployments = [];
         $liabilityMap = array_fill_keys([
             'advance_tax',
+            'employee_receivable',
             'health_insurance',
             'net_wage',
             'social_insurance',
@@ -280,9 +281,20 @@ final class PayrollControlTotalsCalculator
         ksort($liabilityMap, SORT_STRING);
         $liabilities = [];
         foreach ($liabilityMap as $kind => $amount) {
+            // Každá položka je nezáporná ČÁSTKA a směr říká, kterým směrem
+            // peníze tečou. Pohledávka za zaměstnancem z přeplatku čisté mzdy
+            // je jediná příchozí — firma ji od zaměstnance inkasuje (zápočtem
+            // v dalším měsíci nebo úhradou), neposílá ji.
+            if ($amount < 0) {
+                throw new \DomainException(
+                    "Kontrolní součet závazku {$kind} vyšel záporně.",
+                );
+            }
             $liabilities[] = [
                 'liability_kind' => $kind,
-                'direction' => 'outgoing',
+                'direction' => $kind === 'employee_receivable'
+                    ? 'incoming'
+                    : 'outgoing',
                 'amount_minor' => $amount,
             ];
         }
@@ -512,7 +524,18 @@ final class PayrollControlTotalsCalculator
             $net['deducted_minor_units'] ?? null,
             'net.deducted_minor_units',
         );
-        $netPayable = $this->nonNegativeInt(
+        // ZÁPORNÁ čistá mzda je legitimní výsledek, ne poškozený podklad.
+        // Osoba celý měsíc na neplaceném volnu nemá peněžní příjem, ale platí
+        // (prostřednictvím zaměstnavatele, § 3 odst. 12 z. č. 592/1992 Sb.)
+        // doplatek zdravotního pojištění do minimálního vyměřovacího základu
+        // podle § 3 odst. 10 téhož zákona. Znaménko proto nekontrolujeme —
+        // kontroluje se ROVNOST s vlastním rozpadem čisté mzdy o pár řádků
+        // níž, což je přísnější brána než `nonNegativeInt()`: přehodit
+        // znaménko jedné položce nestačí, musela by sedět celá soustava.
+        //
+        // Fail-closed zůstávají všechny ostatní položky: odvody, daň, bonus
+        // ani sražené částky záporné být nesmí a dál padají.
+        $netPayable = $this->integer(
             $net['net_payable_minor_units'] ?? null,
             'net.net_payable_minor_units',
         );
@@ -541,7 +564,7 @@ final class PayrollControlTotalsCalculator
                 'net.withholding_tax_minor_units',
             )
             || $deducted !== $netDeducted
-            || $netPayable !== $this->nonNegativeInt(
+            || $netPayable !== $this->integer(
                 $statutory['net_payable_minor_units'] ?? null,
                 'statutory.net_payable_minor_units',
             )
@@ -576,7 +599,10 @@ final class PayrollControlTotalsCalculator
             $net['annual_settlement_minor_units'] ?? 0,
             'net.annual_settlement_minor_units',
         );
-        if ($before !== $this->nonNegativeInt(
+        // Také čistá mzda PŘED srážkami smí být záporná — je to tentýž měsíc
+        // bez peněžního příjmu s doplatkem ZP. Hlídá se rovnost s vlastním
+        // rozpadem (`$before`), ne znaménko.
+        if ($before !== $this->integer(
             $net['net_before_deductions_minor_units'] ?? null,
             'net.net_before_deductions_minor_units',
         )
@@ -588,13 +614,24 @@ final class PayrollControlTotalsCalculator
             );
         }
 
+        // Závazek a pohledávka jsou dvě RŮZNÉ veličiny na dvou stranách
+        // rozvahy, ne jedno číslo se znaménkem. Kdyby se záporná čistá mzda
+        // sečetla do `net_wage`, firemní závazek vůči zaměstnancům by tvrdil
+        // méně, než se skutečně vyplácí, a nesouhlasil by ani s deníkem
+        // (kde přeplatek odchází dvojicí MD 335 / D 331, viz
+        // PayrollPostingLineBuilder), ani s platebními závazky MZ-17
+        // (kde se osobě se zápornou výplatou závazek vůbec nezaloží).
+        // Rozpad na dvě položky drží všechny tři pohledy na jednom čísle.
         return [
             'employee_social' => $employeeSocial,
             'advance_tax_offset' => $this->add($taxBonus, $annualSettlement),
             'liabilities' => [
                 'advance_tax' => $advanceTax,
+                'employee_receivable' => $netPayable < 0
+                    ? $this->subtract(0, $netPayable)
+                    : 0,
                 'health_insurance' => $healthTotal,
-                'net_wage' => $netPayable,
+                'net_wage' => max(0, $netPayable),
                 'standard_deduction' => $netDeducted,
                 'withholding_tax' => $withholdingTax,
             ],

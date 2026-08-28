@@ -18,6 +18,7 @@ use MyInvoice\Service\Payroll\Garnishment\GarnishmentStatus;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyInstruction;
 use MyInvoice\Service\Payroll\Garnishment\InsolvencyMode;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
+use MyInvoice\Service\Payroll\Garnishment\SpousePensionEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -30,6 +31,7 @@ final class GarnishmentCalculatorTest extends TestCase
      *   net_minor_units:int,
      *   eligible_dependants:int,
      *   eligible_spouse:bool,
+     *   spouse_pension:string,
      *   claim_category:string,
      *   expected_protected_minor_units:int,
      *   expected_third_minor_units:int,
@@ -51,6 +53,7 @@ final class GarnishmentCalculatorTest extends TestCase
             $net = $case['net_minor_units'] ?? null;
             $dependants = $case['eligible_dependants'] ?? null;
             $spouse = $case['eligible_spouse'] ?? null;
+            $spousePension = $case['spouse_pension'] ?? null;
             $category = $case['claim_category'] ?? null;
             $protected = $case['expected_protected_minor_units'] ?? null;
             $third = $case['expected_third_minor_units'] ?? null;
@@ -60,6 +63,7 @@ final class GarnishmentCalculatorTest extends TestCase
             self::assertIsInt($net);
             self::assertIsInt($dependants);
             self::assertIsBool($spouse);
+            self::assertIsString($spousePension);
             self::assertIsString($category);
             self::assertIsInt($protected);
             self::assertIsInt($third);
@@ -71,6 +75,7 @@ final class GarnishmentCalculatorTest extends TestCase
                 'net_minor_units' => $net,
                 'eligible_dependants' => $dependants,
                 'eligible_spouse' => $spouse,
+                'spouse_pension' => $spousePension,
                 'claim_category' => $category,
                 'expected_protected_minor_units' => $protected,
                 'expected_third_minor_units' => $third,
@@ -86,6 +91,7 @@ final class GarnishmentCalculatorTest extends TestCase
      *   net_minor_units:int,
      *   eligible_dependants:int,
      *   eligible_spouse:bool,
+     *   spouse_pension:string,
      *   claim_category:string,
      *   expected_protected_minor_units:int,
      *   expected_third_minor_units:int,
@@ -107,6 +113,9 @@ final class GarnishmentCalculatorTest extends TestCase
             ],
             (int) $case['eligible_dependants'],
             (bool) $case['eligible_spouse'],
+            spousePensionEvidence: SpousePensionEvidence::from(
+                (string) $case['spouse_pension'],
+            ),
         );
 
         self::assertSame(GarnishmentStatus::Supported, $result->status);
@@ -119,6 +128,170 @@ final class GarnishmentCalculatorTest extends TestCase
             $result->employeePaymentMinorUnits,
         );
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $result->rulesetHash);
+    }
+
+    /**
+     * Nařízení vlády č. 441/2024 Sb. účinné od 1. 1. 2025: čtvrtina na manžela
+     * náleží jen při doloženém starobním, invalidním 2./3. stupně nebo
+     * sirotčím důchodu povinného nebo jeho manžela/partnera.
+     */
+    public function testSpouseWithoutDocumentedPensionDoesNotRaiseProtectedAmount(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::NotDocumented,
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame(1_410_200, $result->protectedAmountMinorUnits);
+        self::assertSame(863_200, $result->totalWithheldMinorUnits);
+    }
+
+    public function testDocumentedPensionAddsSpouseQuarter(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::Documented,
+        );
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame(1_762_700, $result->protectedAmountMinorUnits);
+        self::assertSame(745_700, $result->totalWithheldMinorUnits);
+    }
+
+    /**
+     * Nedoložený a nezjištěný stav dávají tutéž nezabavitelnou částku —
+     * zákonná podmínka není splněna ani v jednom případě. Liší se jen tím,
+     * že nezjištěný stav shodí měsíc do ručního posouzení.
+     */
+    public function testUnknownSpousePensionBlocksTheMonthInsteadOfSilentlyRecalculating(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::Unknown,
+        );
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertSame(
+            [
+                'spouse_allowance_evidence_incomplete',
+                'spouse_quarter_pension_evidence_unknown',
+            ],
+            $result->issues,
+        );
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+    }
+
+    /**
+     * Výslovné „důchod doložen není" je úplná evidence, ne chybějící podklad —
+     * blokátor se nesmí objevit.
+     */
+    public function testNotDocumentedSpousePensionIsNotAnEvidenceGap(): void
+    {
+        $result = $this->calculate(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::NotDocumented,
+        );
+
+        self::assertSame([], $result->issues);
+    }
+
+    public function testSpouseQuarterCountsAlongsideChildrenOnlyWhenDocumented(): void
+    {
+        $documented = $this->calculate(
+            6_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleDependants: 2,
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::Documented,
+        );
+        $undocumented = $this->calculate(
+            6_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleDependants: 2,
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::NotDocumented,
+        );
+
+        self::assertSame(2_467_800, $documented->protectedAmountMinorUnits);
+        self::assertSame(2_115_300, $undocumented->protectedAmountMinorUnits);
+        self::assertSame(
+            352_500,
+            $documented->protectedAmountMinorUnits
+                - $undocumented->protectedAmountMinorUnits,
+        );
+    }
+
+    /**
+     * Čtvrtiny se sčítají a teprve součet se zaokrouhluje nahoru na celé
+     * koruny. Manžel + jedno dítě proto dává 21 153 Kč, ne 21 154 Kč, které
+     * by vyšly ze dvou samostatně zaokrouhlených čtvrtin.
+     */
+    public function testSpouseQuarterRoundsUpOnlyAfterTheAllowancesAreSummed(): void
+    {
+        $result = $this->calculate(
+            6_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleDependants: 1,
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::Documented,
+        );
+
+        self::assertSame(2_115_300, $result->protectedAmountMinorUnits);
+    }
+
+    /**
+     * Při souběhu plátců určuje nezabavitelnou částku soud — doložení důchodu
+     * na ni nemá vliv a nezjištěný stav nesmí shodit běh do blokátoru.
+     */
+    public function testMultiplePayersIgnoreTheSpousePensionEvidence(): void
+    {
+        $result = (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))
+            ->calculate($this->input(
+                4_000_000,
+                [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+                eligibleSpouse: true,
+                spousePensionEvidence: SpousePensionEvidence::Unknown,
+                hasMultiplePayers: true,
+                protectedAmountOverrideMinorUnits: 1_800_000,
+            ));
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        self::assertSame(1_800_000, $result->protectedAmountMinorUnits);
+        self::assertNotContains(
+            'spouse_quarter_pension_evidence_unknown',
+            $result->issues,
+        );
+    }
+
+    /**
+     * Snímek pořízený před novelou klíč neobsahuje — načte se fail-closed jako
+     * nezjištěný stav, ne jako doložený důchod.
+     */
+    public function testLegacySnapshotWithoutSpousePensionKeyReadsAsUnknown(): void
+    {
+        $snapshot = $this->input(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleSpouse: true,
+            spousePensionEvidence: SpousePensionEvidence::Documented,
+        )->toCanonicalArray();
+        unset($snapshot['evidence']['spouse_pension']);
+
+        $restored = GarnishmentInput::fromCanonicalArray($snapshot);
+
+        self::assertSame(
+            SpousePensionEvidence::Unknown,
+            $restored->spousePensionEvidence,
+        );
     }
 
     public function testFourActiveEnforcementsUnlockSecondThirdForNonPriorityClaims(): void
@@ -873,6 +1046,8 @@ final class GarnishmentCalculatorTest extends TestCase
         bool $eligibleSpouse = false,
         PensionEvidence $pensionEvidence = PensionEvidence::None,
         ?InsolvencyInstruction $insolvency = null,
+        SpousePensionEvidence $spousePensionEvidence =
+            SpousePensionEvidence::NotDocumented,
     ): \MyInvoice\Service\Payroll\Garnishment\GarnishmentResult {
         return (new GarnishmentCalculator(CzechPayrollRulesets2026::provider()))->calculate(
             $this->input(
@@ -882,6 +1057,7 @@ final class GarnishmentCalculatorTest extends TestCase
                 eligibleSpouse: $eligibleSpouse,
                 pensionEvidence: $pensionEvidence,
                 insolvency: $insolvency,
+                spousePensionEvidence: $spousePensionEvidence,
             ),
         );
     }
@@ -896,6 +1072,8 @@ final class GarnishmentCalculatorTest extends TestCase
         bool $eligibleSpouse = false,
         PensionEvidence $pensionEvidence = PensionEvidence::None,
         ?InsolvencyInstruction $insolvency = null,
+        SpousePensionEvidence $spousePensionEvidence =
+            SpousePensionEvidence::NotDocumented,
         bool $hasMultiplePayers = false,
         ?int $protectedAmountOverrideMinorUnits = null,
         string $period = '2026-06',
@@ -925,6 +1103,7 @@ final class GarnishmentCalculatorTest extends TestCase
             $protectedAmountOverrideVerified
                 ?? ($hasMultiplePayers && $protectedAmountOverrideMinorUnits !== null),
             $claimRegisterEvidenceComplete,
+            $spousePensionEvidence,
         );
     }
 

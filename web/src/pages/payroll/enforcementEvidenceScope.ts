@@ -117,6 +117,28 @@ export function eligibleAllowances(
   return { dependants: count, spouse }
 }
 
+/**
+ * Má některý uplatněný manžel/partner NEDOPLNĚNÉ doložení důchodu?
+ *
+ * Zrcadlí `PayrollEnforcementRepository::weakerSpousePension()`: rozhoduje
+ * NEJSLABŠÍ stav napříč uplatněnými záznamy, takže jediné `unknown` stačí.
+ * `not_documented` je naopak řádný a úplný stav evidence — povinný důkazní
+ * břemeno neunesl, čtvrtina nenáleží a dokládat není co.
+ */
+export function spousePensionEvidenceUnknown(
+  dependants: EnforcementDependant[],
+  period: string,
+): boolean {
+  const window = periodWindow(period)
+
+  return dependants.some(dependant =>
+    dependant.dependant_kind === 'spouse_partner'
+    && dependant.eligibility_verified
+    && !dependant.excluded_for_maintenance
+    && (window === null || overlapsPeriod(dependant.valid_from, dependant.valid_to, window))
+    && dependant.quarter_pension_evidence === 'unknown')
+}
+
 export function evidenceScope(input: EvidenceScopeInput): EnforcementEvidenceScope {
   const arises = withholdingArises(input)
   const allowances = eligibleAllowances(input.dependants, input.period)
@@ -137,7 +159,16 @@ export function evidenceScope(input: EvidenceScopeInput): EnforcementEvidenceSco
       allowances.dependants > 0,
       input.evidence.dependants_evidence_complete,
     ),
-    spouse: allowanceScope(allowances.spouse, input.evidence.spouse_evidence_complete),
+    // Zaškrtnutá měsíční evidence sama o sobě od 1. 1. 2025 nestačí: bez
+    // doloženého (nebo výslovně nedoloženého) důchodu manžela počítá backend
+    // rozsah jako `missing` — viz `GarnishmentCalculator::evidenceScope()`.
+    // Kdyby obrazovka pořád ukazovala `declared`, tvrdila by, že je hotovo,
+    // a účetní by se o chybějícím podkladu dozvěděla až z běhu mezd.
+    spouse: allowanceScope(
+      allowances.spouse,
+      input.evidence.spouse_evidence_complete
+        && !spousePensionEvidenceUnknown(input.dependants, input.period),
+    ),
   }
 }
 

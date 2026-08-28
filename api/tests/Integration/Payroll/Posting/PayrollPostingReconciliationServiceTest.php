@@ -154,6 +154,193 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
     }
 
     /**
+     * Nepeněžní plnění BEZ vlastní předkontace (1 % vstupní ceny vozidla,
+     * přechodné ubytování) se záměrně neúčtuje — náklad je v knihách už ze
+     * zdrojového dokladu. Kontrolní součty MZ-13 ho ale do hrubého příjmu
+     * počítají, takže bez odpočtu by takové období trvale svítilo rozdílem.
+     */
+    public function testNeutralNonMonetaryComponentIsNotADifference(): void
+    {
+        $this->buildBalancedRevision(
+            month: 3,
+            deducted: 445,
+            tag: 'NON-MONETARY-NEUTRAL',
+            nonMonetaryMinor: 2_000,
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-03',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(12_345, $byKey['gross_wages']['payroll_minor']);
+        self::assertSame(12_345, $byKey['gross_wages']['journal_minor']);
+        self::assertSame(0, $byKey['gross_wages']['diff_payroll_journal_minor']);
+        self::assertSame('match', $byKey['gross_wages']['status']);
+        // Číslo nemizí — jen se nepočítá jako rozdíl.
+        self::assertSame(2_000, $byKey['non_monetary_neutral']['payroll_minor']);
+        self::assertNull($byKey['non_monetary_neutral']['journal_minor']);
+        self::assertNull(
+            $byKey['non_monetary_neutral']['diff_payroll_journal_minor'],
+        );
+        self::assertNull(
+            $byKey['non_monetary_neutral']['diff_payroll_payments_minor'],
+        );
+        self::assertSame(
+            'not_applicable',
+            $byKey['non_monetary_neutral']['status'],
+        );
+    }
+
+    /**
+     * Opačný případ: nepeněžní složka, která vlastní předkontaci MÁ, se účtuje
+     * a do porovnání patří celá. Vyloučit se smí jen to, co se neúčtuje.
+     */
+    public function testNonMonetaryComponentWithOwnAccountsStaysInComparison(): void
+    {
+        $this->buildBalancedRevision(
+            month: 4,
+            deducted: 445,
+            tag: 'NON-MONETARY-POSTED',
+            nonMonetaryMinor: 2_000,
+            nonMonetaryAccounting: [
+                'debit_code' => '528',
+                'credit_code' => '333',
+            ],
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-04',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(14_345, $byKey['gross_wages']['payroll_minor']);
+        self::assertSame(14_345, $byKey['gross_wages']['journal_minor']);
+        self::assertSame(0, $byKey['gross_wages']['diff_payroll_journal_minor']);
+        self::assertSame(0, $byKey['non_monetary_neutral']['payroll_minor']);
+        self::assertSame(
+            'not_applicable',
+            $byKey['non_monetary_neutral']['status'],
+        );
+    }
+
+    /**
+     * Rozpad 336 na analytiku ČSSZ (336.100) a zdravotních pojišťoven
+     * (336.200) nesmí kategorii rozbít — páruje se přes syntetiku.
+     */
+    public function testInsuranceAnalyticAccountsPairIntoOneCategory(): void
+    {
+        $this->buildBalancedRevision(
+            month: 2,
+            deducted: 445,
+            tag: 'INSURANCE-ANALYTICS',
+            splitInsurance: true,
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-02',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(2_400, $byKey['social_health_insurance']['payroll_minor']);
+        self::assertSame(2_400, $byKey['social_health_insurance']['journal_minor']);
+        self::assertSame(
+            0,
+            $byKey['social_health_insurance']['diff_payroll_journal_minor'],
+        );
+    }
+
+    /**
+     * Cestovní náhrada je náhrada výdaje, ne mzda — účtuje se na 512, ale
+     * z kategorie hrubých mezd vypadnout nesmí (a nesmí se do ní započítat
+     * dvakrát: jednou přes cílovou alokaci a podruhé přes prefix).
+     */
+    public function testTravelExpenseAccountCountsOnceInGrossWages(): void
+    {
+        $this->buildBalancedRevision(
+            month: 8,
+            deducted: 445,
+            tag: 'TRAVEL-EXPENSE',
+            grossAccount: '512',
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-08',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(12_345, $byKey['gross_wages']['payroll_minor']);
+        self::assertSame(12_345, $byKey['gross_wages']['journal_minor']);
+        self::assertSame(0, $byKey['gross_wages']['diff_payroll_journal_minor']);
+    }
+
+    /**
+     * Povinné spoření u rizikové práce účtuje 527 MD / 379 D BEZ analytické
+     * dimenze srážky. Sdílená 379 ho proto nesmí vtáhnout do `other_deductions`
+     * ani do `enforcement` — ty se rozlišují právě dimenzí MZ-SR-/MZ-EX-.
+     */
+    public function testRiskySavingsDoesNotLeakIntoDeductionCategories(): void
+    {
+        $this->buildBalancedRevision(
+            month: 1,
+            deducted: 445,
+            tag: 'RISKY-SAVINGS-379',
+            riskySavingsMinor: 400,
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-01',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(400, $byKey['risky_savings']['payroll_minor']);
+        self::assertSame(400, $byKey['risky_savings']['journal_minor']);
+        self::assertSame(445, $byKey['other_deductions']['payroll_minor']);
+        self::assertSame(445, $byKey['other_deductions']['journal_minor']);
+        self::assertSame(0, $byKey['enforcement']['journal_minor']);
+    }
+
+    /**
+     * Pohledávka za zaměstnancem z přeplatku čisté mzdy (335) je jiná veličina
+     * než závazek 331 — do kategorie čisté mzdy nepatří ani kladně, ani jako
+     * záporná čistá mzda. Kdyby 335 spadla mezi účty čisté mzdy, kategorie by
+     * o částku přeplatku klesla a období by svítilo rozdílem.
+     */
+    public function testEmployeeReceivableAccountStaysOutOfNetWage(): void
+    {
+        $this->buildBalancedRevision(
+            month: 6,
+            deducted: 445,
+            tag: 'EMPLOYEE-RECEIVABLE',
+            additionalLines: [
+                ['account_code' => '335', 'side' => 'debit', 'amount' => '5.00'],
+                ['account_code' => '333', 'side' => 'credit', 'amount' => '5.00'],
+            ],
+        );
+
+        $result = $this->reconciliation->forPeriod(
+            $this->supplierId,
+            self::YEAR . '-06',
+        );
+
+        $byKey = array_column($result['categories'], null, 'key');
+        self::assertSame('reconciled', $result['overall_status']);
+        self::assertSame(10_100, $byKey['net_wage']['payroll_minor']);
+        self::assertSame(10_100, $byKey['net_wage']['journal_minor']);
+        self::assertSame(0, $byKey['net_wage']['diff_payroll_journal_minor']);
+    }
+
+    /**
      * Výchozí účet dimenze je záměrně obecný analytický účet, ne jen analytika
      * syntetik 521/522/523. Reconciliation proto nesmí ztratit hrubou mzdu jen
      * proto, že zmrazená dimenze poslala její náklad například na účet 518.
@@ -647,6 +834,7 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
      */
     /**
      * @param list<array{account_code:string,side:string,amount:string,cost_center?:string}> $additionalLines
+     * @param array{debit_code:string,credit_code:string}|null $nonMonetaryAccounting
      */
     private function buildBalancedRevision(
         int $month,
@@ -654,6 +842,10 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         string $tag,
         string $grossAccount = '521',
         array $additionalLines = [],
+        int $nonMonetaryMinor = 0,
+        ?array $nonMonetaryAccounting = null,
+        bool $splitInsurance = false,
+        int $riskySavingsMinor = 0,
     ): array
     {
         $employeeId = 8_000 + crc32($tag) % 900;
@@ -662,7 +854,14 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         $runId = $this->createRun($month);
         $input = $this->buildInputSnapshot($employeeId, $employmentId);
         $inputJson = CanonicalJson::encode($input);
-        $resultData = $this->buildResultSnapshot($employeeId, $employmentId, $deducted);
+        $resultData = $this->buildResultSnapshot(
+            $employeeId,
+            $employmentId,
+            $deducted,
+            $nonMonetaryMinor,
+            $nonMonetaryAccounting,
+            $riskySavingsMinor,
+        );
         $revisionId = $this->insertRevision($runId, 1, $inputJson, $resultData['json'], true);
         $this->createRunPerson($revisionId, $employeeId);
         $this->insertStatutoryResult(
@@ -677,10 +876,17 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         );
 
         $netWage = 12_345 - 600 - 300 - 900 - $deducted;
+        // 336.100/336.200 jsou od migrace 1618 přímo ve směrné osnově.
+        $insuranceLines = $splitInsurance
+            ? [
+                ['account_code' => '336.100', 'side' => 'credit', 'amount' => '14.00'],
+                ['account_code' => '336.200', 'side' => 'credit', 'amount' => '10.00'],
+            ]
+            : [['account_code' => '336', 'side' => 'credit', 'amount' => '24.00']];
         $lines = [
             ['account_code' => $grossAccount, 'side' => 'debit', 'amount' => '123.45'],
             ['account_code' => '524', 'side' => 'debit', 'amount' => '15.00'],
-            ['account_code' => '336', 'side' => 'credit', 'amount' => '24.00'],
+            ...$insuranceLines,
             ['account_code' => '342', 'side' => 'credit', 'amount' => '9.00'],
             [
                 'account_code' => '379',
@@ -694,6 +900,32 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
                 'amount' => number_format($netWage / 100, 2, '.', ''),
             ],
         ];
+        if ($riskySavingsMinor > 0) {
+            // 527 MD / 379 D BEZ analytické dimenze srážky — nesmí spadnout
+            // do `other_deductions` ani do `enforcement`.
+            $lines[] = [
+                'account_code' => '527',
+                'side' => 'debit',
+                'amount' => number_format($riskySavingsMinor / 100, 2, '.', ''),
+            ];
+            $lines[] = [
+                'account_code' => '379',
+                'side' => 'credit',
+                'amount' => number_format($riskySavingsMinor / 100, 2, '.', ''),
+            ];
+        }
+        if ($nonMonetaryAccounting !== null && $nonMonetaryMinor > 0) {
+            $lines[] = [
+                'account_code' => $nonMonetaryAccounting['debit_code'],
+                'side' => 'debit',
+                'amount' => number_format($nonMonetaryMinor / 100, 2, '.', ''),
+            ];
+            $lines[] = [
+                'account_code' => $nonMonetaryAccounting['credit_code'],
+                'side' => 'credit',
+                'amount' => number_format($nonMonetaryMinor / 100, 2, '.', ''),
+            ];
+        }
         array_push($lines, ...$additionalLines);
         $entryDate = sprintf('%d-%02d-%02d', self::YEAR, $month, cal_days_in_month(CAL_GREGORIAN, $month, self::YEAR));
         $batchId = $this->preparePostingBatch($runId, $revisionId, $entryDate, null);
@@ -703,6 +935,14 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
             $grossAccount,
             12_345,
         );
+        if ($nonMonetaryAccounting !== null && $nonMonetaryMinor > 0) {
+            $this->insertPostingAllocation(
+                $batchId,
+                "gross:employment:{$employmentId}:input:2:debit",
+                $nonMonetaryAccounting['debit_code'],
+                $nonMonetaryMinor,
+            );
+        }
         $entryId = $this->postJournal($revisionId, $entryDate, $lines);
         $this->finalizeBatch($batchId, $entryId);
 
@@ -788,16 +1028,24 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         ];
     }
 
-    /** @return array{data:array<string,mixed>,json:string} */
+    /**
+     * @param array{debit_code:string,credit_code:string}|null $nonMonetaryAccounting
+     *        vlastní předkontace nepeněžní složky; `null` = složka ji nemá
+     *        a můstek ji záměrně neúčtuje
+     * @return array{data:array<string,mixed>,json:string}
+     */
     private function buildResultSnapshot(
         int $employeeId,
         int $employmentId,
         int $deducted,
+        int $nonMonetaryMinor = 0,
+        ?array $nonMonetaryAccounting = null,
+        int $riskySavingsMinor = 0,
     ): array {
         $input = $this->buildInputSnapshot($employeeId, $employmentId);
         $inputJson = CanonicalJson::encode($input);
         $metrics = [
-            'source_amount_minor' => 12_345,
+            'source_amount_minor' => 12_345 + $nonMonetaryMinor,
             'cash_payable_minor' => 12_345,
             'tax_base_minor' => 12_345,
             'social_base_minor' => 12_345,
@@ -808,6 +1056,44 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         ];
         $netBeforeDeductions = 12_345 - 600 - 300 - 900;
         $netPayable = $netBeforeDeductions - $deducted;
+        $inputs = [[
+            'input_id' => 1,
+            'accounting' => [
+                'debit_code' => '521',
+                'credit_code' => '331',
+                'amount_minor' => 12_345,
+            ],
+            'totals' => [
+                'source_amount_minor' => 12_345,
+                'cash_payable_minor' => 12_345,
+            ],
+        ]];
+        $accountingTotals = [[
+            'debit_code' => '521',
+            'credit_code' => '331',
+            'amount_minor' => 12_345,
+        ]];
+        if ($nonMonetaryMinor > 0) {
+            $inputs[] = [
+                'input_id' => 2,
+                'accounting' => [
+                    'debit_code' => $nonMonetaryAccounting['debit_code'] ?? null,
+                    'credit_code' => $nonMonetaryAccounting['credit_code'] ?? null,
+                    'amount_minor' => $nonMonetaryMinor,
+                ],
+                'totals' => [
+                    'source_amount_minor' => $nonMonetaryMinor,
+                    'cash_payable_minor' => 0,
+                ],
+            ];
+            if ($nonMonetaryAccounting !== null) {
+                $accountingTotals[] = [
+                    'debit_code' => $nonMonetaryAccounting['debit_code'],
+                    'credit_code' => $nonMonetaryAccounting['credit_code'],
+                    'amount_minor' => $nonMonetaryMinor,
+                ];
+            }
+        }
         $result = [
             'schema_version' => 'payroll-run-result.v2',
             'source_snapshot_hash' => hash('sha256', $inputJson),
@@ -815,14 +1101,7 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
                 'employee_id' => $employeeId,
                 'employments' => [[
                     'employment_id' => $employmentId,
-                    'inputs' => [[
-                        'input_id' => 1,
-                        'accounting' => [
-                            'debit_code' => '521',
-                            'credit_code' => '331',
-                            'amount_minor' => 12_345,
-                        ],
-                    ]],
+                    'inputs' => $inputs,
                     'totals' => $metrics,
                 ]],
                 'totals' => $metrics,
@@ -848,10 +1127,10 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
                         'relationships' => [[
                             'relationship_reference' => "employment:{$employmentId}",
                             'cash_income_minor_units' => 12_345,
-                            'non_cash_income_minor_units' => 0,
+                            'non_cash_income_minor_units' => $nonMonetaryMinor,
                         ]],
                         'cash_income_minor_units' => 12_345,
-                        'non_cash_income_minor_units' => 0,
+                        'non_cash_income_minor_units' => $nonMonetaryMinor,
                         'employee_social_minor_units' => 600,
                         'employee_health_minor_units' => 300,
                         'advance_tax_minor_units' => 900,
@@ -870,15 +1149,17 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
                 ],
             ]],
             'totals' => $metrics,
-            'accounting_totals' => [[
-                'debit_code' => '521',
-                'credit_code' => '331',
-                'amount_minor' => 12_345,
-            ]],
+            'accounting_totals' => $accountingTotals,
             'statutory' => [
                 'status' => 'calculated',
                 'employer_social_minor_units' => 800,
-            ],
+            ] + ($riskySavingsMinor > 0
+                ? ['risky_savings' => [[
+                    'employment_id' => $employmentId,
+                    'status' => 'calculated',
+                    'contribution_minor' => $riskySavingsMinor,
+                ]]]
+                : []),
         ];
 
         return ['data' => $result, 'json' => CanonicalJson::encode($result)];

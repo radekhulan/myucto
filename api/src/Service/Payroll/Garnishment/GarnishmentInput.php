@@ -29,6 +29,8 @@ final readonly class GarnishmentInput
         public InsolvencyInstruction $insolvency,
         public bool $protectedAmountOverrideVerified,
         public bool $claimRegisterEvidenceComplete,
+        public SpousePensionEvidence $spousePensionEvidence =
+            SpousePensionEvidence::Unknown,
     ) {
         if ($eligibleDependants < 0) {
             throw new InvalidArgumentException('Eligible dependant count cannot be negative.');
@@ -38,7 +40,16 @@ final readonly class GarnishmentInput
         }
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Klíč `spouse_pension` chybí, dokud doložení důchodu podle nař. vlády
+     * č. 441/2024 Sb. nikdo nezodpověděl — kanonický tvar vstupu se hashuje
+     * a bajtově porovnává (idempotence `payroll_enforcement_month_results`,
+     * potvrzený JMHZ ordinary profil), takže zmrazené záznamy pořízené před
+     * novelou musí zůstat beze změny. Chybějící klíč se čte jako
+     * {@see SpousePensionEvidence::Unknown}.
+     *
+     * @return array<string,mixed>
+     */
     public function toCanonicalArray(): array
     {
         $claims = $this->claims;
@@ -66,6 +77,9 @@ final readonly class GarnishmentInput
                 'protected_amount_override_verified' =>
                     $this->protectedAmountOverrideVerified,
                 'spouse_complete' => $this->spouseEvidenceComplete,
+                ...($this->spousePensionEvidence === SpousePensionEvidence::Unknown
+                    ? []
+                    : ['spouse_pension' => $this->spousePensionEvidence->value]),
             ],
             'income' => $this->income->jsonSerialize(),
             'insolvency' => [
@@ -142,7 +156,28 @@ final readonly class GarnishmentInput
             ),
             self::bool($evidence, 'protected_amount_override_verified'),
             self::bool($evidence, 'claim_register_complete'),
+            self::spousePension($evidence),
         );
+    }
+
+    /**
+     * Snímky pořízené před nařízením vlády č. 441/2024 Sb. klíč neobsahují.
+     * Chybějící hodnota je {@see SpousePensionEvidence::Unknown} — fail-closed,
+     * stejně jako u záznamů manželů založených před zavedením evidence.
+     *
+     * @param array<string,mixed> $evidence
+     */
+    private static function spousePension(array $evidence): SpousePensionEvidence
+    {
+        $value = $evidence['spouse_pension'] ?? null;
+        if ($value === null) {
+            return SpousePensionEvidence::Unknown;
+        }
+        if (!is_string($value)) {
+            throw new InvalidArgumentException('spouse_pension must be a string.');
+        }
+
+        return SpousePensionEvidence::from($value);
     }
 
     /** @return array<string,mixed> */

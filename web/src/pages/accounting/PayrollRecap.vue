@@ -207,11 +207,17 @@ watch(selectedEmployee, (e, previous) => {
 const showEmployeeForm = ref(false)
 const savingEmployee = ref(false)
 const editingEmployeeId = ref<number | null>(null)
+/*
+ * Rodné číslo ani adresa tady NEJSOU (W1/P-02). Tahle obrazovka jede po routě
+ * chráněné jen právem `accounting`, takže by otevřené rodné číslo zapsal
+ * i uživatel bez jediného mzdového práva — mimo šifrovanou evidenci
+ * `payroll_person_identifiers` a mimo stopu o odhalení. Backend je z legacy
+ * routy odstranil a vyplněnou hodnotu vrací jako 422; jediná legální cesta
+ * k rodnému číslu je mzdová karta osoby v novém modulu.
+ */
 const employeeForm = reactive({
   full_name: '',
   birth_date: '',
-  birth_number: '',
-  address: '',
   taxpayer_type: 'employee' as PayrollTaxpayerType,
   employment_type: 'hpp' as PayrollEmploymentType,
   tax_credit_taxpayer: true,
@@ -232,8 +238,6 @@ const employeeForm = reactive({
 function resetEmployeeForm() {
   employeeForm.full_name = ''
   employeeForm.birth_date = ''
-  employeeForm.birth_number = ''
-  employeeForm.address = ''
   employeeForm.taxpayer_type = 'employee'
   employeeForm.employment_type = 'hpp'
   employeeForm.tax_credit_taxpayer = true
@@ -313,8 +317,6 @@ function openEditEmployee(e: PayrollEmployee) {
   editingEmployeeId.value = e.id
   employeeForm.full_name = e.full_name
   employeeForm.birth_date = e.birth_date ?? ''
-  employeeForm.birth_number = e.birth_number ?? ''
-  employeeForm.address = e.address ?? ''
   employeeForm.taxpayer_type = e.taxpayer_type
   employeeForm.employment_type = e.employment_type ?? 'hpp'
   employeeForm.tax_credit_taxpayer = e.tax_credit_taxpayer
@@ -337,8 +339,6 @@ async function saveEmployee() {
     const payload: PayrollEmployeePayload = {
       full_name: employeeForm.full_name.trim(),
       birth_date: employeeForm.birth_date || null,
-      birth_number: employeeForm.birth_number.trim() || null,
-      address: employeeForm.address.trim() || null,
       taxpayer_type: employeeForm.taxpayer_type,
       employment_type: employeeForm.employment_type,
       tax_credit_taxpayer: employeeForm.tax_credit_taxpayer,
@@ -797,7 +797,7 @@ const remittanceRows = computed(() => {
             <tr v-for="e in employees" :key="e.id" class="border-t border-neutral-100" :class="{ 'opacity-50': !e.is_active }">
               <td class="px-3 py-2">
                 <div class="font-medium text-neutral-700">{{ e.full_name }}</div>
-                <div class="text-xs text-neutral-500">{{ e.birth_number || e.birth_date || '—' }}</div>
+                <div class="text-xs text-neutral-500">{{ e.birth_date || '—' }}</div>
               </td>
               <td class="px-3 py-2 text-xs text-neutral-600">
                 <div>{{ t(`accounting.payroll.type.${e.taxpayer_type}`) }}</div>
@@ -868,16 +868,8 @@ const remittanceRows = computed(() => {
           <input v-model="employeeForm.full_name" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
         <div>
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_birth_number') }}</label>
-          <input v-model="employeeForm.birth_number" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
-        </div>
-        <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_birth_date') }}</label>
           <input v-model="employeeForm.birth_date" type="date" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
-        </div>
-        <div class="sm:col-span-2">
-          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.employees.form_address') }}</label>
-          <input v-model="employeeForm.address" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.payroll.taxpayer_type') }}</label>

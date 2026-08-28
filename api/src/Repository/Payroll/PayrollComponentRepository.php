@@ -144,6 +144,7 @@ final class PayrollComponentRepository
                     previous: $e,
                 );
             }
+            self::rethrowCheckViolation($e);
             throw $e;
         } catch (\Throwable $e) {
             $this->rollbackOwned($pdo, $ownsTransaction);
@@ -210,33 +211,38 @@ final class PayrollComponentRepository
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND row_version = ?'
         );
-        $stmt->execute([
-            $data['code'],
-            $data['name'],
-            $data['component_kind'],
-            $data['value_kind'],
-            $data['frequency_kind'],
-            $data['tax_treatment'],
-            $data['social_participation_treatment'],
-            $data['social_treatment'],
-            $data['health_participation_treatment'],
-            $data['health_treatment'],
-            $data['average_earning_treatment'],
-            $data['enforcement_treatment'],
-            $data['jmhz_treatment'],
-            $data['statistics_treatment'],
-            $data['accounting_debit_code'],
-            $data['accounting_credit_code'],
-            $data['annual_limit_minor'],
-            $data['exemption_basket'],
-            $data['exemption_basis'],
-            $data['valid_from'],
-            $data['valid_to'],
-            PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
-            $supplierId,
-            $id,
-            $expectedVersion,
-        ]);
+        try {
+            $stmt->execute([
+                $data['code'],
+                $data['name'],
+                $data['component_kind'],
+                $data['value_kind'],
+                $data['frequency_kind'],
+                $data['tax_treatment'],
+                $data['social_participation_treatment'],
+                $data['social_treatment'],
+                $data['health_participation_treatment'],
+                $data['health_treatment'],
+                $data['average_earning_treatment'],
+                $data['enforcement_treatment'],
+                $data['jmhz_treatment'],
+                $data['statistics_treatment'],
+                $data['accounting_debit_code'],
+                $data['accounting_credit_code'],
+                $data['annual_limit_minor'],
+                $data['exemption_basket'],
+                $data['exemption_basis'],
+                $data['valid_from'],
+                $data['valid_to'],
+                PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
+                $supplierId,
+                $id,
+                $expectedVersion,
+            ]);
+        } catch (PDOException $e) {
+            self::rethrowCheckViolation($e);
+            throw $e;
+        }
         if ($stmt->rowCount() !== 1) {
             $latest = $this->find($supplierId, $id);
             throw new PayrollComponentConflictException(
@@ -423,6 +429,44 @@ final class PayrollComponentRepository
                 'Použitou mzdovou složku nelze měnit; založte novou účinnou verzi.'
             );
         }
+    }
+
+    /**
+     * Porušení databázového CHECKu přeloží na chybu vstupu (422), ne na 500.
+     *
+     * MariaDB hlásí CHECK jako SQLSTATE HY000 s driver kódem 3819
+     * („Constraint %s failed"), tedy MIMO třídu 23000, kterou repozitář hlídal.
+     * Neošetřená `PDOException` se propsala do HTTP 500 bez použitelné hlášky —
+     * přesně to potkalo analytickou předkontaci `521.100`, dokud ji CHECK
+     * na `payroll_component_definitions` odmítal (migrace 1613).
+     *
+     * Kontrola je záměrně obecná: kterýkoli budoucí CHECK na téhle tabulce
+     * dostane srozumitelnou hlášku sám od sebe, místo aby se to muselo
+     * doplňovat po jednom.
+     */
+    private static function rethrowCheckViolation(PDOException $e): void
+    {
+        $driverCode = $e->errorInfo[1] ?? null;
+        if ((string) $e->getCode() !== 'HY000' || (int) $driverCode !== 3819) {
+            return;
+        }
+        $constraint = null;
+        if (preg_match(
+            '/CONSTRAINT `?([A-Za-z0-9_]+)`? failed/i',
+            (string) ($e->errorInfo[2] ?? $e->getMessage()),
+            $match,
+        ) === 1) {
+            $constraint = $match[1];
+        }
+
+        throw new \InvalidArgumentException(
+            $constraint === 'chk_payroll_component_accounts'
+                ? 'Účet mzdové složky musí být třímístná syntetika, '
+                    . 'volitelně s analytikou (například 521.100).'
+                : 'Mzdová složka nesplňuje databázové omezení'
+                    . ($constraint === null ? '.' : " {$constraint}."),
+            previous: $e,
+        );
     }
 
     private function rollbackOwned(PDO $pdo, bool $ownsTransaction): void

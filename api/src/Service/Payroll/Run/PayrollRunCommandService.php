@@ -670,6 +670,33 @@ final class PayrollRunCommandService
                 if ($revision === null) {
                     throw new \DomainException('Mzdový běh nemá revizi.');
                 }
+                // Kontrola bez pravidla čtyř očí je součást schválení, ne krok
+                // před ním. Odklikávat ji zvlášť nemusí nikdo, ale STOPA po ní
+                // zůstat musí: revize dostane `reviewed_by` i `reviewed_at` a
+                // do historie běhu jde vlastní událost `review`, označená jako
+                // implicitní. Kdo krok projde ručně, sem se vůbec nedostane.
+                if (($revision['reviewed_by'] ?? null) === null) {
+                    $this->runs->markRevisionReviewed(
+                        $supplierId,
+                        (int) $revision['id'],
+                        $actorUserId,
+                    );
+                    $this->runs->insertEvent(
+                        $supplierId,
+                        $runId,
+                        (int) $revision['id'],
+                        PayrollRunCommand::REVIEW->value,
+                        $transition->from->value,
+                        PayrollRunStatus::REVIEWED->value,
+                        $actorUserId,
+                        null,
+                        ['implicit' => true, 'reason' => 'approve_without_four_eyes'],
+                    );
+                    $revision = $this->runs->revision(
+                        $supplierId,
+                        (int) $revision['id'],
+                    );
+                }
                 $resultSnapshot = self::snapshotObject(
                     $revision['result_snapshot'] ?? null,
                     'výsledný',

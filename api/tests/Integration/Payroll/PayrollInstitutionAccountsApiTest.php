@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -118,6 +119,7 @@ final class PayrollInstitutionAccountsApiTest extends TestCase
                 PayrollSensitiveField::BANK_ACCOUNT,
                 $this->supplierId,
                 (int) $account['id'],
+                PayrollRevealPurpose::PAYMENT_INSTITUTION_ACCOUNT,
             ),
         );
 

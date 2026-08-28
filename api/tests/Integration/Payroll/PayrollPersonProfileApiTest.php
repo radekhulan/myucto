@@ -168,7 +168,10 @@ final class PayrollPersonProfileApiTest extends TestCase
         self::assertArrayHasKey('address_masked', $profile['addresses'][0]);
         self::assertArrayNotHasKey('street_line', $profile['addresses'][0]);
         self::assertStringContainsString('example.invalid', $profile['contacts'][0]['value_masked']);
-        self::assertStringEndsWith('6789', $profile['identifiers'][0]['value_masked']);
+        // Maska rodného čísla ukazuje jen dvě číslice. Se čtyřmi bylo celé RČ
+        // odvoditelné z `birth_date` a `sex`, které jdou ve stejné odpovědi.
+        self::assertStringEndsWith('89', $profile['identifiers'][0]['value_masked']);
+        self::assertStringNotContainsString('6789', $profile['identifiers'][0]['value_masked']);
         self::assertStringEndsWith('5/0100', $profile['accounts'][0]['bank_account_masked']);
         self::assertArrayHasKey('verification_source', $profile['accounts'][0]);
         self::assertArrayHasKey('verified_on', $profile['accounts'][0]);

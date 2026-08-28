@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Absence\AbsenceHolidaySegments;
+use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
 use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
+use MyInvoice\Service\Payroll\Time\PayrollWorkCalendarSchedule;
 use PDO;
 
 final class PayrollAbsenceRepository
@@ -17,6 +21,7 @@ final class PayrollAbsenceRepository
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRulesetProvider $rulesets,
+        private readonly CzechHolidayCalendar $holidayCalendar = new CzechHolidayCalendar(),
     ) {
         $this->yearClose = new PayrollYearCloseGuard($db);
     }
@@ -316,10 +321,33 @@ final class PayrollAbsenceRepository
     }
 
     /**
+     * Sjednaná týdenní pracovní doba jako DECIMAL(5,2) na celé minuty;
+     * nesouměřitelné hodnoty zahodí.
+     */
+    public static function weeklyMinutesFromHours(mixed $value): ?int
+    {
+        if ((!is_string($value) && !is_int($value) && !is_float($value))
+            || preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/D', (string) $value, $parts) !== 1
+        ) {
+            return null;
+        }
+        $centihours = ((int) $parts[1] * 100) + (int) str_pad($parts[2] ?? '', 2, '0');
+        $minuteHundredths = $centihours * 60;
+        if ($centihours <= 0 || $minuteHundredths % 100 !== 0) {
+            return null;
+        }
+
+        return intdiv($minuteHundredths, 100);
+    }
+
+    /**
      * @return list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>
      */
-    public function publishedShiftSegments(array $absence, bool $firstDayFullyWorked): array
-    {
+    public function publishedShiftSegments(
+        array $absence,
+        bool $firstDayFullyWorked,
+        AbsenceHolidayTreatment $holidayTreatment = AbsenceHolidayTreatment::Ignore,
+    ): array {
         if (!$this->db->hasTable('payroll_shifts')) {
             return [];
         }
@@ -405,7 +433,32 @@ final class PayrollAbsenceRepository
                 'eligible_minutes' => $eligible,
             ];
         }
-        return $segments;
+
+        if ($holidayTreatment === AbsenceHolidayTreatment::Ignore) {
+            return $segments;
+        }
+
+        $holidays = PayrollWorkCalendarSchedule::holidaysBetween(
+            $this->holidayCalendar,
+            $windowFrom->format('Y-m-d'),
+            $windowTo->format('Y-m-d'),
+        );
+        if ($holidays === []) {
+            return $segments;
+        }
+        if ($holidayTreatment === AbsenceHolidayTreatment::ExcludeFromLeave) {
+            return AbsenceHolidaySegments::excludeFromLeave($segments, $holidays);
+        }
+
+        return AbsenceHolidaySegments::compensateSickness(
+            $segments,
+            (new PayrollWorkCalendarSchedule($this->db))->plannedMinutes(
+                (int) $absence['supplier_id'],
+                (int) $absence['employment_id'],
+                array_keys($holidays),
+            ),
+            $remainingByDate,
+        );
     }
 
     private function assertApprovedAverage(

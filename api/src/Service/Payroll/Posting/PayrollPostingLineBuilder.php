@@ -14,6 +14,20 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class PayrollPostingLineBuilder
 {
+    /**
+     * Koše osvobození, na které míří § 25 odst. 1 písm. h) ZDP — tedy plnění
+     * podle § 6 odst. 9 písm. d) ZDP. Ostatní koše uznatelné jsou.
+     *
+     * @var list<string>
+     */
+    private const NON_DEDUCTIBLE_BENEFIT_BASKETS = [
+        'non_cash_health',
+        'non_cash_leisure',
+    ];
+
+    /** Druh složky, který se účtuje jako cestovné, ne jako mzda. */
+    private const TRAVEL_COMPONENT_KIND = 'travel_reimbursement';
+
     public function __construct(
         private readonly PayrollEmploymentAccountingClassifier $classifier =
             new PayrollEmploymentAccountingClassifier(),
@@ -45,6 +59,10 @@ final class PayrollPostingLineBuilder
         array $previousTarget = [],
     ): PayrollPostingPreview {
         $this->assertSource($snapshot, $result);
+        // Surová sada se schovává PŘED doplněním výchozích účtů: podle ní se
+        // pozná, jestli zmrazený snapshot o novém dělení vůbec ví. Viz
+        // PayrollAccountingDefaults::SNAPSHOT_GATED_ACCOUNTS.
+        $configuredAccounts = $accounts;
         $accounts = $this->accounts($accounts);
         $snapshotPeople = $this->snapshotPeople($snapshot);
         $resultPeople = $this->resultPeople($result);
@@ -65,6 +83,8 @@ final class PayrollPostingLineBuilder
         $costCenterByEmployment = [];
         /** @var array<int,list<int>> $employmentsByEmployee */
         $employmentsByEmployee = [];
+        /** @var array<int,string> $liabilityAccountByEmployee */
+        $liabilityAccountByEmployee = [];
         foreach ($resultPeople as $employeeId => $personResult) {
             $personSnapshot = $snapshotPeople[$employeeId];
             $employmentResults = $this->resultEmployments($personResult);
@@ -90,6 +110,11 @@ final class PayrollPostingLineBuilder
                     $relationType,
                     $accounts,
                 );
+                // Závazkový účet vztahu s NEJNIŽŠÍM employment_id (vztahy jsou
+                // seřazené) je náhradní protiúčet osoby pro případ, že nemá
+                // žádný peněžní příjem — viz addEmployeeCharge().
+                $liabilityAccountByEmployee[$employeeId] ??=
+                    $relationAccounts['gross_credit'];
                 $dimensionDebit = $this->dimensionAccounts->resolve($employmentSnapshot);
                 $costCenter = $this->dimensionCostCenter($employmentSnapshot);
                 $costCenterByEmployment[$employmentId] = $costCenter;
@@ -165,7 +190,7 @@ final class PayrollPostingLineBuilder
                     $baseKey = "gross:employment:{$employmentId}:input:{$inputId}";
                     $description = $this->grossDescription($relationType);
                     if ($debit !== null && $credit !== null) {
-                        $this->addPair(
+                        $this->addGross(
                             $allocations,
                             $baseKey,
                             $debit,
@@ -173,7 +198,31 @@ final class PayrollPostingLineBuilder
                             $sourceMinor,
                             $description,
                             $costCenter,
+                            $inputSnapshot,
+                            $accounts,
+                            $configuredAccounts,
                         );
+                    } elseif ($this->isAccountingNeutral(
+                        $component,
+                        $sourceMinor,
+                        $cashMinor,
+                    )) {
+                        // Účetně neutrální nepeněžní plnění — ŽÁDNÝ zápis.
+                        //
+                        // Nepeněžní složka bez vlastní předkontace je jen
+                        // OCENĚNÍ příjmu pro základ daně a pojistného (1 %
+                        // vstupní ceny vozidla podle § 6 odst. 6 ZDP, hodnota
+                        // přechodného ubytování, …). Skutečný náklad se do knih
+                        // dostal už zdrojovým dokladem (faktura za ubytování,
+                        // odpis vozidla), takže vynucená dvojice MD 5xx / D 331
+                        // by ho zaúčtovala DRUHÝ RÁZ a navíc by trvale
+                        // nadhodnotila závazek vůči zaměstnanci, kterému se
+                        // nic nevyplácí.
+                        //
+                        // Kdo chce plnění přeúčtovat (třeba na 528), nastaví
+                        // složce oba účty — tu větev řeší podmínka výš. Zápis
+                        // „oba účty, nebo žádný" tím zůstává v platnosti,
+                        // jen „žádný" konečně znamená „neúčtovat", ne pád.
                     } else {
                         if ($sourceMinor !== $cashMinor) {
                             throw new \DomainException(
@@ -184,9 +233,21 @@ final class PayrollPostingLineBuilder
                         // Výchozí účet dimenze přebíjí VÝCHOZÍ předkontaci
                         // zaměstnavatele, ne explicitní předkontaci složky —
                         // ta je řešená větví výš a sem se nedostane.
-                        $debit = $dimensionDebit ?? $relationAccounts['gross_debit'];
+                        //
+                        // Cestovní náhrada přebíjí i účet dimenze: účet dimenze
+                        // je nákladový účet HRUBÉ MZDY daného střediska (521.100
+                        // a podobně) a náhrada výdaje mzdou není. Analytika
+                        // střediska se nepotratí — nese ji sloupec
+                        // `cost_center`, který se plní nezávisle na účtu.
+                        $debit = $this->travelExpenseAccount(
+                                $component,
+                                $accounts,
+                                $configuredAccounts,
+                            )
+                            ?? $dimensionDebit
+                            ?? $relationAccounts['gross_debit'];
                         $credit = $relationAccounts['gross_credit'];
-                        $this->addPair(
+                        $this->addGross(
                             $allocations,
                             $baseKey,
                             $debit,
@@ -194,6 +255,9 @@ final class PayrollPostingLineBuilder
                             $cashMinor,
                             $description,
                             $costCenter,
+                            $inputSnapshot,
+                            $accounts,
+                            $configuredAccounts,
                         );
                     }
                     if ($cashMinor > 0) {
@@ -288,7 +352,30 @@ final class PayrollPostingLineBuilder
             $costCenterByEmployment,
         );
 
+        $this->addRiskySavings(
+            $allocations,
+            $result,
+            $accounts,
+            $costCenterByEmployment,
+        );
+
         foreach ($resultPeople as $employeeId => $personResult) {
+            // Osoba bez peněžního příjmu (celý měsíc neplacené volno, jen
+            // doplatek ZP do minimálního vyměřovacího základu podle § 3 odst.
+            // 10 z. 592/1992 Sb.) nemá do čeho srážku rozpustit. Poměrové
+            // rozdělení nemá váhu, ale závazek vůči zaměstnanci existuje —
+            // účtuje se proto celý na závazkový účet jejího vztahu
+            // (331 u zaměstnance, 366 u společníka a člena orgánu).
+            $settlementBuckets = $buckets[$employeeId] !== []
+                ? $buckets[$employeeId]
+                : [[
+                    'key' => 'liability',
+                    'account_code' => $liabilityAccountByEmployee[$employeeId]
+                        ?? throw new \DomainException(
+                            "Osoba employee:{$employeeId} nemá závazkový účet vztahu.",
+                        ),
+                    'weight' => 1,
+                ]];
             $social = $sets['social_insurance']['people'][$employeeId];
             $health = $sets['health_insurance']['people'][$employeeId];
             $tax = $sets['income_tax']['people'][$employeeId];
@@ -325,7 +412,13 @@ final class PayrollPostingLineBuilder
                 $net + ['annual_settlement_minor_units' => 0],
                 'annual_settlement_minor_units',
             );
-            $netPayable = $this->nonNegativeInt(
+            // ZÁPORNÁ čistá mzda není chybou vstupu, kterou by měl můstek
+            // odmítat: měsíc bez peněžního příjmu s doplatkem ZP do
+            // minimálního vyměřovacího základu (§ 3 odst. 10 z. 592/1992 Sb.)
+            // ji vyrobí zcela legitimně a zaměstnanec pak dluží zaměstnavateli.
+            // Hodnota se nekontroluje znaménkem, ale porovnáním s vlastním
+            // účetním předpisem níž — to je přísnější než `nonNegativeInt()`.
+            $netPayable = $this->integer(
                 $net,
                 'net_payable_minor_units',
             );
@@ -346,7 +439,7 @@ final class PayrollPostingLineBuilder
                 );
                 $this->addEmployeeCharge(
                     $allocations,
-                    $buckets[$employeeId],
+                    $settlementBuckets,
                     $applied,
                     $accounts['other_deductions_credit'],
                     "employee:{$employeeId}:deduction:"
@@ -379,7 +472,7 @@ final class PayrollPostingLineBuilder
 
             $this->addEmployeeCharge(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $employeeSocial,
                 $accounts['social_insurance_credit'],
                 "employee:{$employeeId}:social-insurance",
@@ -387,7 +480,7 @@ final class PayrollPostingLineBuilder
             );
             $this->addEmployeeCharge(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $employeeHealth,
                 $accounts['health_insurance_credit'],
                 "employee:{$employeeId}:health-insurance",
@@ -395,7 +488,7 @@ final class PayrollPostingLineBuilder
             );
             $this->addEmployeeCharge(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $advanceTax,
                 $accounts['income_tax_credit'],
                 "employee:{$employeeId}:advance-tax",
@@ -403,7 +496,7 @@ final class PayrollPostingLineBuilder
             );
             $this->addEmployeeCharge(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $withholdingTax,
                 $accounts['income_tax_credit'],
                 "employee:{$employeeId}:withholding-tax",
@@ -411,7 +504,7 @@ final class PayrollPostingLineBuilder
             );
             $this->addEmployeeBonus(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $taxBonus,
                 $accounts['income_tax_credit'],
                 "employee:{$employeeId}:tax-bonus",
@@ -421,7 +514,7 @@ final class PayrollPostingLineBuilder
             // daně stejně jako měsíční bonus. Nákladem není.
             $this->addEmployeeBonus(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $annualSettlement,
                 $accounts['income_tax_credit'],
                 "employee:{$employeeId}:annual-settlement",
@@ -429,7 +522,7 @@ final class PayrollPostingLineBuilder
             );
             $this->addEmployeeCharge(
                 $allocations,
-                $buckets[$employeeId],
+                $settlementBuckets,
                 $enforcementWithheld,
                 $accounts['other_deductions_credit'],
                 "employee:{$employeeId}:enforcement",
@@ -457,13 +550,34 @@ final class PayrollPostingLineBuilder
                 $netPayable,
                 $enforcementWithheld,
             );
-            $payableAfterEnforcement = $this->nonNegativeInt(
+            $payableAfterEnforcement = $this->integer(
                 $personResult,
                 'payable_after_enforcement_minor',
             );
             if ($expectedAfterEnforcement !== $payableAfterEnforcement) {
                 throw new \DomainException(
                     "Účetní předpis employee:{$employeeId} nesouhlasí s čistou výplatou po srážkách.",
+                );
+            }
+
+            // Přeplatek: zaměstnanci se nic nevyplácí, naopak dluží
+            // zaměstnavateli. Závazkový účet mzdy by zůstal debetní, což je
+            // v rozvaze nesmysl — částka se překlopí na pohledávku za
+            // zaměstnancem (MD 335 / D 331, resp. 366 u společníka a člena
+            // orgánu). Zápis zůstává vyrovnaný a opravná revize ho odúčtuje
+            // rozdílem jako každou jinou alokaci.
+            if ($payableAfterEnforcement < 0) {
+                $overdrawn = $this->absolute($payableAfterEnforcement);
+                $this->addPair(
+                    $allocations,
+                    "employee:{$employeeId}:employee-receivable",
+                    $accounts['employee_receivable_debit'],
+                    $liabilityAccountByEmployee[$employeeId]
+                        ?? throw new \DomainException(
+                            "Osoba employee:{$employeeId} nemá závazkový účet vztahu.",
+                        ),
+                    $overdrawn,
+                    'Pohledávka za zaměstnancem z přeplatku čisté mzdy',
                 );
             }
 
@@ -475,7 +589,7 @@ final class PayrollPostingLineBuilder
             ) as $settlement) {
                 $this->addEmployeeCharge(
                     $allocations,
-                    $buckets[$employeeId],
+                    $settlementBuckets,
                     $settlement['amount_minor'],
                     $settlement['account_code'],
                     "employee:{$employeeId}:partner-settlement:"
@@ -562,6 +676,11 @@ final class PayrollPostingLineBuilder
             return [];
         }
         PayrollPartnerSettlement::assertEligible($relationTypes, $employeeId);
+        if ($payableAfterEnforcement <= 0) {
+            // Není co započíst — přeplatek se řeší pohledávkou za
+            // zaměstnancem, ne zápočtem na účet společníka.
+            return [];
+        }
 
         $result = [];
         foreach ($this->payoutAllocations->allocate(
@@ -632,6 +751,172 @@ final class PayrollPostingLineBuilder
         }
 
         return $requests;
+    }
+
+    /**
+     * Zápis hrubé složky — s rozdělením daňově neuznatelné části benefitu.
+     *
+     * Jediné místo, kde se zápis složky rozpadá na dvě dvojice. Nedělí se
+     * PROTIÚČET (ten zůstává jeden, závazek vůči zaměstnanci se nedělí), dělí
+     * se jen NÁKLAD. Součet obou dvojic je na haléř roven zdrojové částce,
+     * takže zápis zůstává vyrovnaný a kontrolní součty hrubých mezd
+     * (`gross_wages` v reconciliaci) sedí dál: obě části mají klíč `gross:…`,
+     * takže je `PayrollPostingReconciliationRepository::grossDebitAccounts()`
+     * uvidí jako nákladové účty hrubé mzdy.
+     *
+     * @param list<array{
+     *   allocation_key:string,
+     *   account_code:string,
+     *   signed_minor:int,
+     *   description:string
+     * }> $allocations
+     * @param array<string,mixed> $inputSnapshot zmrazený mzdový vstup
+     * @param array<string,string> $accounts doplněná sada předkontací
+     * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
+     */
+    private function addGross(
+        array &$allocations,
+        string $baseKey,
+        string $debit,
+        string $credit,
+        int $amount,
+        string $description,
+        ?string $costCenter,
+        array $inputSnapshot,
+        array $accounts,
+        array $configuredAccounts,
+    ): void {
+        $nonDeductible = $this->nonDeductibleBenefitAmount(
+            $inputSnapshot,
+            $amount,
+            $configuredAccounts,
+        );
+        if ($nonDeductible === null) {
+            $this->addPair(
+                $allocations,
+                $baseKey,
+                $debit,
+                $credit,
+                $amount,
+                $description,
+                $costCenter,
+            );
+
+            return;
+        }
+
+        $this->addPair(
+            $allocations,
+            "{$baseKey}:non-deductible",
+            $accounts['non_deductible_benefit_debit'],
+            $credit,
+            $nonDeductible,
+            $description . ' — osvobozená část (§ 25 odst. 1 písm. h) ZDP)',
+            $costCenter,
+        );
+        $this->addPair(
+            $allocations,
+            "{$baseKey}:taxable",
+            $debit,
+            $credit,
+            $this->subtract($amount, $nonDeductible),
+            $description . ' — nadlimitní zdanitelná část',
+            $costCenter,
+        );
+    }
+
+    /**
+     * Kolik z benefitu je pro zaměstnavatele daňově NEUZNATELNÝ náklad?
+     *
+     * `null` = nedělit (zapíše se jedna dvojice přesně jako dosud).
+     *
+     * ── Proč je nedaňová OSVOBOZENÁ, a ne nadlimitní část ───────────────────
+     * § 25 odst. 1 písm. h) ZDP ve znění od 1. 1. 2024 (zákon č. 349/2023 Sb.)
+     * vylučuje z nákladů nepeněžní plnění ve formě rekreace, zájezdu, sportu,
+     * kultury, tištěných knih, zdravotnických, vzdělávacích a rekreačních
+     * zařízení „a to v rozsahu, ve kterém je toto plnění u zaměstnance
+     * osvobozeno od daně z příjmů". Rozsah osvobození u zaměstnance a rozsah
+     * neuznatelnosti u zaměstnavatele jsou tedy TATÁŽ částka.
+     *
+     * Nadlimitní část se naopak zaměstnanci zdaní jako příjem ze závislé
+     * činnosti a zaměstnavateli je uznatelná podle § 24 odst. 2 písm. j) bodu 4
+     * — zůstává proto na dosavadním nákladovém účtu.
+     *
+     * Dělí se JEN koše § 6 odst. 9 písm. d) ZDP, protože jen na ně § 25 odst. 1
+     * písm. h) míří. Příspěvek na stravování (písm. b), na produkty spoření na
+     * stáří (písm. m) ani přechodné ubytování (písm. i) uznatelné jsou —
+     * § 24 odst. 2 písm. j) — a dělit se nesmí, jinak by se firmě z uznatelného
+     * nákladu stal neuznatelný.
+     *
+     * @param array<string,mixed> $inputSnapshot
+     * @param array<string,mixed> $configuredAccounts
+     */
+    private function nonDeductibleBenefitAmount(
+        array $inputSnapshot,
+        int $postedAmount,
+        array $configuredAccounts,
+    ): ?int {
+        if (!PayrollAccountingDefaults::snapshotAllowsSplit(
+            $configuredAccounts,
+            'non_deductible_benefit_debit',
+        )) {
+            // Snapshot zmrazený dřív, než firma o rozdělení věděla — účtuje se
+            // přesně jako dosud, aby zůstal cílový otisk byte-identický.
+            return null;
+        }
+        $basket = $inputSnapshot['benefit_basket'] ?? null;
+        if (!in_array($basket, self::NON_DEDUCTIBLE_BENEFIT_BASKETS, true)) {
+            return null;
+        }
+        $exempt = $this->integer($inputSnapshot, 'benefit_exempt_minor');
+        $taxable = $this->integer($inputSnapshot, 'benefit_taxable_minor');
+        if ($exempt < 0 || $taxable < 0) {
+            throw new \DomainException(
+                'Rozpad koše osvobození zmrazeného vstupu je záporný.',
+            );
+        }
+        if ($this->add($exempt, $taxable) !== $postedAmount) {
+            throw new \DomainException(
+                'Rozpad koše osvobození nedává účtovanou částku mzdového vstupu.',
+            );
+        }
+
+        return $exempt > 0 ? $exempt : null;
+    }
+
+    /**
+     * Nákladový účet cestovní náhrady, nebo `null`.
+     *
+     * Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne
+     * odměna za práci — do mzdových nákladů (521) nepatří ani tehdy, když se
+     * vyplácí spolu se mzdou. Seedované složky `CESTOVNI_NAHRADA*` vlastní
+     * předkontaci nemají, takže dosud propadly na výchozí účet hrubé mzdy.
+     *
+     * Platí to i pro NADLIMITNÍ náhradu: ta je sice zdanitelným příjmem
+     * zaměstnance a vstupuje do vyměřovacích základů, ale nákladovým druhem
+     * zůstává cestovné. Rozlišení daňové uznatelnosti nákladu se u cestovného
+     * neřeší účtem (§ 24 odst. 2 písm. zh) ZDP uznává náhrady do zákonné výše
+     * i nad ni, jde-li o sjednané právo zaměstnance).
+     *
+     * @param array<string,mixed> $component zmrazená složka
+     * @param array<string,string> $accounts
+     * @param array<string,mixed> $configuredAccounts
+     */
+    private function travelExpenseAccount(
+        array $component,
+        array $accounts,
+        array $configuredAccounts,
+    ): ?string {
+        if (!PayrollAccountingDefaults::snapshotAllowsSplit(
+            $configuredAccounts,
+            'travel_expense_debit',
+        )) {
+            return null;
+        }
+
+        return ($component['component_kind'] ?? null) === self::TRAVEL_COMPONENT_KIND
+            ? $accounts['travel_expense_debit']
+            : null;
     }
 
     /**
@@ -1435,18 +1720,95 @@ final class PayrollPostingLineBuilder
     }
 
     /**
+     * Povinný příspěvek zaměstnavatele na spoření u rizikové práce
+     * (z. č. 324/2025 Sb., § 5 — 4 % vyměřovacího základu od 1. 1. 2026).
+     *
+     * Zdrojem je zmrazený výsledek revize (`statutory.risky_savings`), ne
+     * databáze: je to tentýž hash-ověřený podklad, ze kterého se příspěvek
+     * zmrazuje do `payroll_risky_savings_contributions` a materializuje do
+     * platebního závazku. Účetní zápis tak nemůže tvrdit jinou částku, než
+     * jaká se skutečně platí, a opravná revize se odúčtuje rozdílem stejně
+     * jako všechno ostatní.
+     *
+     * Vědomě to NENÍ pátá zákonná sada: příspěvek není zákonným výsledkem
+     * v `payroll_statutory_results` (nemá vlastní `calculation_kind`) a
+     * vyrobit ho tam jen kvůli účtování by znamenalo druhý zdroj pravdy.
+     *
+     * Zaměstnanci se nevyplácí, takže se do žádného poměrového rozdělení
+     * srážek nedostane — je to samostatná dvojice 527 MD / 379 D. Náklad
+     * nese středisko pracovního vztahu, závazek zůstává jeden.
+     *
+     * Revize zmrazené dřív klíč nemají a chovají se přesně jako dosud, takže
+     * jejich cílový otisk zůstává byte-identický.
+     *
+     * @param list<array{
+     *   allocation_key:string,
+     *   account_code:string,
+     *   signed_minor:int,
+     *   description:string
+     * }> $allocations
+     * @param array<string,mixed> $result
+     * @param array<string,string> $accounts
+     * @param array<int,?string> $costCenters employment_id → středisko
+     */
+    private function addRiskySavings(
+        array &$allocations,
+        array $result,
+        array $accounts,
+        array $costCenters,
+    ): void {
+        $statutory = $this->object($result['statutory'] ?? null, 'result.statutory');
+        $rows = $statutory['risky_savings'] ?? null;
+        if ($rows === null) {
+            return;
+        }
+        foreach ($this->rows($rows, 'result.statutory.risky_savings') as $row) {
+            $employmentId = $this->positiveInt($row, 'employment_id');
+            if (!array_key_exists($employmentId, $costCenters)) {
+                throw new \DomainException(
+                    "Povinné spoření employment:{$employmentId} nepatří do revize.",
+                );
+            }
+            if (($row['status'] ?? null) !== 'calculated') {
+                // Nedopočítaný podklad se do schválené revize nedostane —
+                // zastaví ho PayrollRiskySavingsApprover. Tady se jen
+                // neúčtuje, aby se z účetního můstku nestala druhá brána
+                // schvalování.
+                continue;
+            }
+            $contribution = $this->nonNegativeInt($row, 'contribution_minor');
+            $this->addPair(
+                $allocations,
+                "risky-savings:employment:{$employmentId}",
+                $accounts['risky_savings_debit'],
+                $accounts['risky_savings_credit'],
+                $contribution,
+                'Povinný příspěvek na spoření u rizikové práce',
+                $costCenters[$employmentId] ?? null,
+            );
+        }
+    }
+
+    /**
      * @param array<string,string> $accounts
      * @return array<string,string>
      */
     private function accounts(array $accounts): array
     {
         $result = [];
-        foreach (PayrollAccountingDefaults::ACCOUNTS as $key => $_definition) {
+        foreach (PayrollAccountingDefaults::ACCOUNTS as $key => $definition) {
             $value = $accounts[$key] ?? null;
             if (!is_string($value)) {
-                throw new \DomainException(
-                    "Chybí firemní účetní předkontace {$key}.",
-                );
+                // Předkontace, které do sady přibyly až po zmrazení starších
+                // snapshotů, se doplní ze směrné osnovy — jinak by přidání
+                // nové předkontace shodilo opakované zaúčtování dřív
+                // schválené revize. Viz PayrollAccountingDefaults::OPTIONAL_ACCOUNTS.
+                if (!PayrollAccountingDefaults::isOptional($key)) {
+                    throw new \DomainException(
+                        "Chybí firemní účetní předkontace {$key}.",
+                    );
+                }
+                $value = $definition['code'];
             }
             $result[$key] = $this->account($value, $key);
         }
@@ -1504,6 +1866,33 @@ final class PayrollPostingLineBuilder
         }
 
         return null;
+    }
+
+    /**
+     * Je zmrazená složka účetně neutrální?
+     *
+     * Neutralita se NEUKLÁDÁ jako další sloupec — plyne přímo z klasifikace,
+     * kterou složka nese od začátku: nepeněžní plnění (`value_kind`
+     * = `non_monetary`, tedy `cash_payable_minor` = 0) BEZ vlastní dvojice
+     * účtů nemá co zaúčtovat. Účetní má obě volby dál v ruce: chce-li zápis,
+     * vyplní složce předkontaci; nechce-li, nechá ji prázdnou.
+     *
+     * Fail-closed: rozhoduje se podle zmrazené složky I podle spočtených
+     * částek. Snapshot, který tvrdí `non_monetary`, ale nese peněžní příjem,
+     * neutrální není a propadne do původní větve — jinak by se ztratil
+     * závazek vůči zaměstnanci. Starší snapshot bez `value_kind` se chová
+     * jako dřív.
+     *
+     * @param array<string,mixed> $component
+     */
+    private function isAccountingNeutral(
+        array $component,
+        int $sourceMinor,
+        int $cashMinor,
+    ): bool {
+        return ($component['value_kind'] ?? null) === 'non_monetary'
+            && $cashMinor === 0
+            && $sourceMinor >= 0;
     }
 
     private function nullableAccount(mixed $value, string $field): ?string

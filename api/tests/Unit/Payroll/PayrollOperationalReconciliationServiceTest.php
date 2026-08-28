@@ -40,6 +40,34 @@ final class PayrollOperationalReconciliationServiceTest extends TestCase
         self::assertSame(0, $axes[1]['difference_minor']);
     }
 
+    /**
+     * Informativní kategorie nepeněžních plnění bez účetního dopadu nemá
+     * deníkovou ani platební stranu ani u zaúčtovaného období. Porovnat ji
+     * s `null` a vyhlásit rozdíl by znamenalo trvale svítící provozní přehled
+     * kvůli očekávanému stavu.
+     */
+    public function testInformationalCategoryWithoutJournalSideIsNotADiff(): void
+    {
+        $axes = $this->invoke('postingAxes', [[
+            'accounting_mode' => 'double_entry',
+            'journal_state' => 'posted',
+            'payments_state' => 'materialized',
+            'revision' => ['id' => 42],
+            'categories' => [[
+                'key' => 'non_monetary_neutral',
+                'payroll_minor' => 2_000,
+                'journal_minor' => null,
+                'payments_liability_minor' => null,
+                'payments_paid_minor' => null,
+            ]],
+        ]]);
+
+        self::assertSame('posting:journal:non_monetary_neutral', $axes[0]['key']);
+        self::assertSame('not_applicable', $axes[0]['status']);
+        self::assertSame('posting:liability:non_monetary_neutral', $axes[1]['key']);
+        self::assertSame('not_applicable', $axes[1]['status']);
+    }
+
     public function testPartialOutgoingPaymentIsNotNettedByReceivedRefund(): void
     {
         $axes = $this->invoke('paymentAxes', [[

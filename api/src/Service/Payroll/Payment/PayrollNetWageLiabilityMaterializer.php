@@ -473,10 +473,28 @@ final class PayrollNetWageLiabilityMaterializer
         string $paymentDate,
     ): array {
         $payable = $personResult['payable_after_enforcement_minor'] ?? null;
-        if (!is_int($payable) || $payable < 0) {
+        if (!is_int($payable)) {
             throw new \DomainException(
-                "Výsledek osoby {$employeeId} nemá nezápornou částku po exekucích.",
+                "Výsledek osoby {$employeeId} nemá platnou částku po exekucích.",
             );
+        }
+        if ($payable < 0) {
+            // Přeplatek čisté mzdy: zaměstnanec dluží zaměstnavateli (měsíc
+            // bez peněžního příjmu s doplatkem ZP do minimálního vyměřovacího
+            // základu, § 3 odst. 10 z. č. 592/1992 Sb.). Žádný platební
+            // závazek NEVZNIKÁ — a to je jediná bezpečná odpověď: závazek se
+            // zápornou částkou by v {@see PayrollPaymentBatchBuilder} buď
+            // spadl na `amount_minor <= 0`, nebo — hůř — prošel jako platba
+            // se záporným znaménkem do odchozí dávky, tedy do bankovního
+            // příkazu. Pohledávku vede ÚČETNICTVÍ (MD 335 / D 331, viz
+            // PayrollPostingLineBuilder) a inkasuje se zápočtem v dalším
+            // měsíci nebo úhradou, ne obrácenou mzdovou platbou.
+            //
+            // Kontrolní součty MZ-13 tenhle rozdíl znají: záporná výplata
+            // jde do samostatné položky `employee_receivable` (směr
+            // `incoming`) a do `net_wage` se nezapočítá, takže součet
+            // závazků čisté mzdy dál sedí na to, co se skutečně materializuje.
+            return [];
         }
         if (!array_key_exists('payout_accounts', $personSnapshot)) {
             throw new \DomainException(

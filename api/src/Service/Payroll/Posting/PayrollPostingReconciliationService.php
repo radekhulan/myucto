@@ -23,6 +23,8 @@ use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
  * hrubé mzdy (521/522/523), zákonné náklady zaměstnavatele (524), sociální +
  * zdravotní pojištění (336), daň (342), ostatní srážky a exekuce (obě 379,
  * rozlišené analytickou dimenzí MZ-SR-/MZ-EX-) a čistá mzda (331/366).
+ * K nim přibylo povinné spoření u rizikové práce (527) a INFORMATIVNÍ řádek
+ * nepeněžních plnění bez účetního dopadu, který se záměrně s ničím neporovnává.
  *
  * Období, kde se ještě neúčtovalo (daňová evidence nebo neuzavřený/neschválený
  * měsíc), NENÍ rozdíl — vrací se stav bez kategorií a s vysvětlujícím stavem.
@@ -30,7 +32,12 @@ use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
 final class PayrollPostingReconciliationService
 {
     /**
-     * @var array<string,array{prefixes:list<string>,dimension:?string,nature:'expense'|'liability'}>
+     * @var array<string,array{
+     *   prefixes:list<string>,
+     *   dimension:?string,
+     *   nature:'expense'|'liability',
+     *   informational?:bool
+     * }>
      */
     private const CATEGORIES = [
         'gross_wages' => [
@@ -68,6 +75,38 @@ final class PayrollPostingReconciliationService
             'dimension' => null,
             'nature' => 'liability',
         ],
+        /*
+         * Povinný příspěvek na spoření u rizikové práce (z. č. 324/2025 Sb.).
+         * Sleduje se NÁKLADOVÁ strana (527), protože závazková 379 je sdílená
+         * s ostatními srážkami a rozlišuje se až analytickou dimenzí, kterou
+         * příspěvek nemá — patří zaměstnavateli, ne zaměstnanci.
+         *
+         * POZOR: 527 je běžný účet zákonných sociálních nákladů. Firma, která
+         * si na 527 zaúčtuje i jinou mzdovou složku vlastní předkontací, uvidí
+         * v této kategorii rozdíl — řešením je analytika (527.100 pro spoření),
+         * ne vypnutí kontroly. Je to odvozený read model, na samotné účtování
+         * to nemá vliv.
+         */
+        'risky_savings' => [
+            'prefixes' => PayrollPostingAccountPolicy::RISKY_SAVINGS_PREFIXES,
+            'dimension' => null,
+            'nature' => 'expense',
+        ],
+        /*
+         * INFORMATIVNÍ řádek, ne porovnání. Nepeněžní plnění bez vlastní
+         * předkontace (1 % vstupní ceny vozidla podle § 6 odst. 6 ZDP,
+         * hodnota přechodného ubytování …) se ZÁMĚRNĚ neúčtuje — náklad je
+         * v knihách už ze zdrojového dokladu, viz
+         * {@see PayrollPostingLineBuilder::isAccountingNeutral()}. Číslo se
+         * proto ukazuje, ale nemá deníkovou ani platební stranu, takže z něj
+         * nikdy nevznikne rozdíl.
+         */
+        'non_monetary_neutral' => [
+            'prefixes' => [],
+            'dimension' => null,
+            'nature' => 'expense',
+            'informational' => true,
+        ],
     ];
 
     /** @var array<string,list<string>> */
@@ -77,6 +116,7 @@ final class PayrollPostingReconciliationService
         'other_deductions' => ['deduction'],
         'enforcement' => ['enforcement', 'insolvency'],
         'net_wage' => ['net_wage'],
+        'risky_savings' => ['risky_savings'],
     ];
 
     public function __construct(
@@ -150,11 +190,13 @@ final class PayrollPostingReconciliationService
             $supplierId,
             $revision['id'],
         );
-        $enforcementTotal = $this->enforcementWithheldTotal($revision);
+        $resultSnapshot = $this->verifiedResultSnapshot($revision);
+        $enforcementTotal = $this->enforcementWithheldTotal($resultSnapshot);
         $employerContributions = $this->employerContributions(
             $supplierId,
             $revision['id'],
         );
+        $nonMonetaryNeutral = $this->neutralNonMonetaryTotal($resultSnapshot);
 
         $liabilitiesByKind = [];
         foreach ($controlTotals->liabilities as $liability) {
@@ -162,7 +204,13 @@ final class PayrollPostingReconciliationService
                 (int) $liability['amount_minor'];
         }
         $payrollByCategory = [
-            'gross_wages' => (int) $controlTotals->company['source_amount_minor'],
+            // Kontrolní součet MZ-13 je HRUBÝ příjem VČETNĚ nepeněžních
+            // složek bez předkontace, deník je ale z definice nemá — jinak by
+            // se náklad zaúčtoval podruhé. Porovnává se proto ÚČTOVATELNÁ
+            // hrubá mzda; vyloučená částka nemizí, vykazuje ji informativní
+            // kategorie `non_monetary_neutral`.
+            'gross_wages' => (int) $controlTotals->company['source_amount_minor']
+                - $nonMonetaryNeutral,
             'employer_contributions' => $employerContributions,
             'social_health_insurance' =>
                 ($liabilitiesByKind['social_insurance'] ?? 0)
@@ -173,6 +221,8 @@ final class PayrollPostingReconciliationService
             'other_deductions' => $liabilitiesByKind['standard_deduction'] ?? 0,
             'enforcement' => $enforcementTotal,
             'net_wage' => ($liabilitiesByKind['net_wage'] ?? 0) - $enforcementTotal,
+            'risky_savings' => $this->riskySavingsTotal($resultSnapshot),
+            'non_monetary_neutral' => $nonMonetaryNeutral,
         ];
 
         $revisionIds = $this->repository->revisionIdsForRun(
@@ -203,12 +253,14 @@ final class PayrollPostingReconciliationService
         $categories = [];
         $hasDiff = false;
         $hasMatch = false;
-        foreach (self::CATEGORIES as $key => $_definition) {
+        foreach (self::CATEGORIES as $key => $definition) {
+            $informational = ($definition['informational'] ?? false) === true;
             $payrollMinor = $payrollByCategory[$key];
-            $journalMinor = $journalState === 'posted'
+            $journalMinor = !$informational && $journalState === 'posted'
                 ? ($journalByCategory[$key] ?? 0)
                 : null;
-            $liabilityApplicable = isset(self::PAYMENT_LIABILITY_KINDS[$key])
+            $liabilityApplicable = !$informational
+                && isset(self::PAYMENT_LIABILITY_KINDS[$key])
                 && $paymentsMaterialized;
             $paymentsLiabilityMinor = $liabilityApplicable
                 ? ($paymentsByCategory[$key]['liability'] ?? 0)
@@ -311,22 +363,11 @@ final class PayrollPostingReconciliationService
      * (ty počítají čistou mzdu PŘED exekucí) — částka se čte přímo z už
      * hash-ověřeného výsledného snapshotu schválené revize, ne přepočítává.
      *
-     * @param array{result_snapshot_json:?string,result_snapshot_hash:?string} $revision
+     * @param array<string,mixed> $decoded ověřený výsledný snapshot revize
      */
-    private function enforcementWithheldTotal(array $revision): int
+    private function enforcementWithheldTotal(array $decoded): int
     {
-        $json = $revision['result_snapshot_json'];
-        $hash = $revision['result_snapshot_hash'];
-        if ($json === null || $hash === null
-            || preg_match('/^[0-9a-f]{64}$/D', $hash) !== 1
-            || !hash_equals($hash, hash('sha256', $json))
-        ) {
-            throw new \DomainException(
-                'Výsledný snapshot schválené revize nemá platný otisk.',
-            );
-        }
-        $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($decoded) || !is_array($decoded['people'] ?? null)) {
+        if (!is_array($decoded['people'] ?? null)) {
             throw new \UnexpectedValueException(
                 'Výsledný snapshot revize nemá seznam osob.',
             );
@@ -357,6 +398,133 @@ final class PayrollPostingReconciliationService
         }
 
         return $total;
+    }
+
+    /**
+     * @param array{result_snapshot_json:?string,result_snapshot_hash:?string} $revision
+     * @return array<string,mixed>
+     */
+    private function verifiedResultSnapshot(array $revision): array
+    {
+        $json = $revision['result_snapshot_json'];
+        $hash = $revision['result_snapshot_hash'];
+        if ($json === null || $hash === null
+            || preg_match('/^[0-9a-f]{64}$/D', $hash) !== 1
+            || !hash_equals($hash, hash('sha256', $json))
+        ) {
+            throw new \DomainException(
+                'Výsledný snapshot schválené revize nemá platný otisk.',
+            );
+        }
+        $decoded = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($decoded) || array_is_list($decoded)) {
+            throw new \UnexpectedValueException(
+                'Výsledný snapshot revize není objekt.',
+            );
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Povinný příspěvek na spoření u rizikové práce se — stejně jako exekuce —
+     * nepočítá do MZ-13 kontrolních součtů. Čte se z téhož hash-ověřeného
+     * výsledného snapshotu, ze kterého ho účtuje
+     * {@see PayrollPostingLineBuilder} i platí MZ-17, takže všechny tři sloupce
+     * obrazovky mluví o jedné a téže částce.
+     *
+     * @param array<string,mixed> $decoded ověřený výsledný snapshot revize
+     */
+    private function riskySavingsTotal(array $decoded): int
+    {
+        $statutory = $decoded['statutory'] ?? null;
+        if (!is_array($statutory) || array_is_list($statutory)) {
+            return 0;
+        }
+        $rows = $statutory['risky_savings'] ?? null;
+        if (!is_array($rows) || !array_is_list($rows)) {
+            return 0;
+        }
+        $total = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row) || ($row['status'] ?? null) !== 'calculated') {
+                continue;
+            }
+            $contribution = $row['contribution_minor'] ?? null;
+            if (!is_int($contribution) || $contribution < 0) {
+                throw new \UnexpectedValueException(
+                    'Povinné spoření revize má neplatnou částku.',
+                );
+            }
+            $total += $contribution;
+        }
+
+        return $total;
+    }
+
+    /**
+     * Kolik z hrubého příjmu se VĚDOMĚ nezaúčtovalo?
+     *
+     * {@see PayrollPostingLineBuilder} nepeněžní složku BEZ vlastní
+     * předkontace neúčtuje vůbec — náklad je v knihách už ze zdrojového
+     * dokladu (faktura za ubytování, odpis vozidla) a vynucená dvojice
+     * MD 5xx / D 331 by ho zaúčtovala podruhé. Kontrolní součty MZ-13 ale
+     * takovou složku do `source_amount_minor` počítají, protože pro daň
+     * a pojistné je to příjem. Bez tohoto odpočtu by každé období s 1 %
+     * ze soukromě užívaného vozidla trvale svítilo rozdílem.
+     *
+     * Počítá se z TÝCHŽ dat, ze kterých se rozhoduje můstek: vstup bez
+     * účetní předkontace se účtuje jen do výše peněžního plnění, zbytek
+     * (`source − cash`) se neúčtuje. Vstup s předkontací se účtuje celý,
+     * takže se sem nezapočítá — nepeněžní benefit s vlastní kontací do
+     * porovnání dál patří.
+     *
+     * Chybějící nebo neúplný rozpad znamená NULU, tedy dosavadní chování:
+     * porovnávaná mzdová strana se nikdy nesníží na základě dat, kterým
+     * nerozumíme.
+     *
+     * @param array<string,mixed> $decoded ověřený výsledný snapshot revize
+     */
+    private function neutralNonMonetaryTotal(array $decoded): int
+    {
+        $total = 0;
+        foreach ($this->objectList($decoded['people'] ?? null) as $person) {
+            foreach ($this->objectList($person['employments'] ?? null) as $employment) {
+                foreach ($this->objectList($employment['inputs'] ?? null) as $input) {
+                    $accounting = $input['accounting'] ?? null;
+                    if (is_array($accounting)
+                        && ($accounting['debit_code'] ?? null) !== null
+                    ) {
+                        continue;
+                    }
+                    $totals = $input['totals'] ?? null;
+                    if (!is_array($totals)) {
+                        continue;
+                    }
+                    $source = $totals['source_amount_minor'] ?? null;
+                    $cash = $totals['cash_payable_minor'] ?? null;
+                    if (!is_int($source) || !is_int($cash)) {
+                        continue;
+                    }
+                    $unposted = $source - $cash;
+                    if ($unposted > 0) {
+                        $total += $unposted;
+                    }
+                }
+            }
+        }
+
+        return $total;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function objectList(mixed $value): array
+    {
+        if (!is_array($value) || !array_is_list($value)) {
+            return [];
+        }
+
+        return array_values(array_filter($value, 'is_array'));
     }
 
     /**

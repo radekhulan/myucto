@@ -16,7 +16,6 @@ use MyInvoice\Service\Payroll\IncomeTax\ExternalEmployerTaxCertificate;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
-use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
@@ -52,6 +51,7 @@ final class AnnualTaxSettlementService
         private readonly PayrollRulesetProvider $rulesets,
         private readonly AnnualSettlementEligibility $eligibility,
         private readonly AnnualSettlementClaimMonths $claimMonths,
+        private readonly AnnualSettlementEvidenceMonths $evidenceMonths,
         private readonly AnnualTaxSettlementCalculator $calculator,
         private readonly AnnualSettlementSnapshotBuilder $snapshots,
         private readonly AnnualSettlementPdfRenderer $renderer,
@@ -381,22 +381,30 @@ final class AnnualTaxSettlementService
             ));
         }
 
-        // Prohlášení a rezidentství se posuzují k 31. 12. zdaňovacího období —
-        // § 38k odst. 4 mluví o prohlášení „na příslušné zdaňovací období",
-        // takže rozhodný je stav za ten rok, ne dnešek.
-        $evidence = $this->settlements->statutoryEvidenceOn(
+        // Prohlášení a rezidentství se posuzují ZA OBDOBÍ, ve kterém u plátce
+        // trval pracovní vztah — ne k jednomu dni. § 38k odst. 4 mluví o
+        // prohlášení „na příslušné zdaňovací období", takže rozhodný je stav za
+        // ten rok, ne dnešek; a § 38ch odst. 4 o úhrnu mezd za měsíce, které do
+        // zúčtování vstupují. Čtení k 31. 12. dělalo z každého, kdo v průběhu
+        // roku odešel, nedoloženého nerezidenta.
+        $statutory = $this->settlements->statutoryEvidenceForYear(
             $supplierId,
             $employeeId,
-            sprintf('%04d-12-31', $taxYear),
+            $taxYear,
         );
-        $declaration = TaxDeclarationStatus::tryFrom((string) $evidence['declaration'])
-            ?? TaxDeclarationStatus::Unverified;
-        $residence = TaxResidence::tryFrom((string) $evidence['residence'])
-            ?? TaxResidence::Unverified;
+        $evidence = $this->evidenceMonths->evaluate(
+            $statutory['declarations'],
+            $statutory['residences'],
+            $taxYear,
+            $this->settlements->employmentMonths($supplierId, $employeeId, $taxYear),
+        );
+        $declaration = $evidence['declaration'];
+        $residence = $evidence['residence'];
 
         $credits = $this->claimMonths->credits(
             $this->settlements->creditClaimsForYear($supplierId, $employeeId, $taxYear),
             $taxYear,
+            $declaration === TaxDeclarationStatus::Signed,
         );
         $children = $this->claimMonths->children(
             $this->settlements->childClaimsForYear($supplierId, $employeeId, $taxYear),

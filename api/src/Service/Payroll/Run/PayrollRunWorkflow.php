@@ -21,9 +21,16 @@ final class PayrollRunWorkflow
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::CANCEL,
             ],
+            // `APPROVE` je dostupné už z `CALCULATED`: bez pravidla čtyř očí
+            // byla kontrola jen kliknutím navíc — workflow u ní nikdy neověřilo
+            // jinou osobu, jen to, že je vyplněná. Schválení si proto kontrolu
+            // zaznamená samo ({@see PayrollRunCommandService}), stav `REVIEWED`
+            // i jeho stopa v historii zůstávají. `REVIEW` zůstává dostupný pro
+            // toho, kdo krok chce projít zvlášť.
             PayrollRunStatus::CALCULATED => [
                 PayrollRunCommand::CALCULATE,
                 PayrollRunCommand::REVIEW,
+                PayrollRunCommand::APPROVE,
                 PayrollRunCommand::CANCEL,
             ],
             PayrollRunStatus::REVIEWED => [
@@ -113,7 +120,7 @@ final class PayrollRunWorkflow
             throw new \DomainException('Kontrola a schválení vyžadují uložený výsledek.');
         }
         if ($command === PayrollRunCommand::APPROVE) {
-            if ($context->reviewedBy === null) {
+            if ($context->fourEyesRequired && $context->reviewedBy === null) {
                 throw new \DomainException('Před schválením musí být evidována odborná kontrola.');
             }
             if ($context->blockerCount > 0) {

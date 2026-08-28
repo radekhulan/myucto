@@ -26,6 +26,7 @@ use MyInvoice\Service\Payroll\Garnishment\PayrollEnforcementStoredResultIntegrit
 use MyInvoice\Service\Payroll\Garnishment\PayrollInsolvencyPaymentInstructionService;
 use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Garnishment\PensionEvidence;
+use MyInvoice\Service\Payroll\Garnishment\SpousePensionEvidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 
@@ -1172,7 +1173,10 @@ final class PayrollEnforcementRepository implements
         $this->assertEmployee($supplierId, $employeeId);
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, employee_id, dependant_kind, valid_from, valid_to,
-                    eligibility_verified, excluded_for_maintenance, row_version
+                    eligibility_verified, excluded_for_maintenance,
+                    quarter_pension_evidence, quarter_pension_holder,
+                    quarter_pension_kind, quarter_pension_documented_on,
+                    row_version
                FROM payroll_enforcement_dependants
               WHERE supplier_id = ? AND employee_id = ?
               ORDER BY valid_from DESC, id DESC'
@@ -1210,6 +1214,7 @@ final class PayrollEnforcementRepository implements
         if ($validTo !== null && $validTo < $validFrom) {
             throw new \InvalidArgumentException('Konec platnosti nesmí předcházet začátku.');
         }
+        $pension = self::quarterPensionFromInput($kind, $data);
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -1226,14 +1231,20 @@ final class PayrollEnforcementRepository implements
                 'INSERT INTO payroll_enforcement_dependants
                     (supplier_id, employee_id, dependant_key, dependant_kind,
                      valid_from, valid_to, eligibility_verified,
-                     excluded_for_maintenance)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                     excluded_for_maintenance, quarter_pension_evidence,
+                     quarter_pension_holder, quarter_pension_kind,
+                     quarter_pension_documented_on)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId, $employeeId, 'dependant_' . bin2hex(random_bytes(16)),
                 $kind, $validFrom, $validTo,
                 self::boolInt($data, 'eligibility_verified'),
                 self::boolInt($data, 'excluded_for_maintenance'),
+                $pension['evidence'],
+                $pension['holder'],
+                $pension['kind'],
+                $pension['documented_on'],
             ]);
             $id = (int) $pdo->lastInsertId();
             $evidenceColumn = $kind === 'spouse_partner'
@@ -1254,7 +1265,10 @@ final class PayrollEnforcementRepository implements
             ]);
             $find = $pdo->prepare(
                 'SELECT id, employee_id, dependant_kind, valid_from, valid_to,
-                        eligibility_verified, excluded_for_maintenance, row_version
+                        eligibility_verified, excluded_for_maintenance,
+                        quarter_pension_evidence, quarter_pension_holder,
+                        quarter_pension_kind, quarter_pension_documented_on,
+                        row_version
                    FROM payroll_enforcement_dependants
                   WHERE supplier_id = ? AND id = ?'
             );
@@ -1276,6 +1290,84 @@ final class PayrollEnforcementRepository implements
                 'id', 'employee_id', 'row_version',
             ], ['eligibility_verified', 'excluded_for_maintenance'])
             : throw new \RuntimeException('Vyživovaná osoba nebyla po vytvoření nalezena.');
+    }
+
+    /**
+     * Doložení důchodu podle nař. vlády č. 441/2024 Sb. u nového záznamu.
+     *
+     * Chybějící hodnota u manžela/partnera je záměrně `unknown`, ne
+     * `not_documented`: klient, který pole neposílá, o novém právním stavu
+     * neví a nesmí jeho jménem tvrdit, že důchod doložen není. `unknown`
+     * čtvrtinu nezaloží a zároveň měsíc se srážkou shodí do ručního posouzení,
+     * takže se stav nedá přehlédnout ani v jednom směru. U vyživovaných dětí
+     * se podmínka neuplatní vůbec.
+     *
+     * @param array<string,mixed> $data
+     * @return array{evidence:string,holder:?string,kind:?string,documented_on:?string}
+     */
+    private static function quarterPensionFromInput(string $kind, array $data): array
+    {
+        if ($kind !== 'spouse_partner') {
+            return [
+                'evidence' => SpousePensionEvidence::NotDocumented->value,
+                'holder' => null,
+                'kind' => null,
+                'documented_on' => null,
+            ];
+        }
+
+        $raw = $data['quarter_pension_evidence'] ?? null;
+        if ($raw === null) {
+            $evidence = SpousePensionEvidence::Unknown;
+        } else {
+            if (!is_string($raw)) {
+                throw new \InvalidArgumentException(
+                    'Neplatné doložení důchodu manžela/partnera.',
+                );
+            }
+            $evidence = SpousePensionEvidence::tryFrom($raw)
+                ?? throw new \InvalidArgumentException(
+                    'Neplatné doložení důchodu manžela/partnera.',
+                );
+        }
+
+        if ($evidence !== SpousePensionEvidence::Documented) {
+            return [
+                'evidence' => $evidence->value,
+                'holder' => null,
+                'kind' => null,
+                'documented_on' => null,
+            ];
+        }
+
+        $holder = self::requiredString($data, 'quarter_pension_holder');
+        if (!in_array($holder, ['debtor', 'spouse_partner'], true)) {
+            throw new \InvalidArgumentException(
+                'Důchod musí být přiznán povinnému nebo jeho manželovi/partnerovi.',
+            );
+        }
+        $pensionKind = self::requiredString($data, 'quarter_pension_kind');
+        if (!in_array($pensionKind, [
+            'old_age',
+            'invalidity_second_degree',
+            'invalidity_third_degree',
+            'orphan',
+        ], true)) {
+            throw new \InvalidArgumentException(
+                'Čtvrtinu zakládá jen starobní, invalidní 2./3. stupně nebo sirotčí důchod.',
+            );
+        }
+        $documentedOn = self::nullableDate($data, 'quarter_pension_documented_on')
+            ?? throw new \InvalidArgumentException(
+                'U doloženého důchodu chybí datum doložení.',
+            );
+
+        return [
+            'evidence' => $evidence->value,
+            'holder' => $holder,
+            'kind' => $pensionKind,
+            'documented_on' => $documentedOn,
+        ];
     }
 
     public function evidenceFor(
@@ -1353,6 +1445,7 @@ final class PayrollEnforcementRepository implements
         }
         $dependants = 0;
         $spouse = false;
+        $spousePension = SpousePensionEvidence::Documented;
         foreach ($dependantRows as $row) {
             if (
                 !PayrollTimeValue::bool(
@@ -1371,9 +1464,19 @@ final class PayrollEnforcementRepository implements
                 'dependant_kind',
             ) === 'spouse_partner') {
                 $spouse = true;
+                $spousePension = self::weakerSpousePension(
+                    $spousePension,
+                    SpousePensionEvidence::from(PayrollTimeValue::string(
+                        $row['quarter_pension_evidence'] ?? null,
+                        'quarter_pension_evidence',
+                    )),
+                );
             } else {
                 ++$dependants;
             }
+        }
+        if (!$spouse) {
+            $spousePension = SpousePensionEvidence::NotDocumented;
         }
         if ($evidence === null) {
             return new EnforcementPersonMonthEvidence(
@@ -1388,6 +1491,7 @@ final class PayrollEnforcementRepository implements
                 false,
                 false,
                 InsolvencyInstruction::none(),
+                $spousePension,
             );
         }
 
@@ -1445,7 +1549,26 @@ final class PayrollEnforcementRepository implements
                     $evidence['insolvency_employment_id'] ?? null,
                 ),
             ),
+            $spousePension,
         );
+    }
+
+    /**
+     * Souběh víc platných záznamů manžela/partnera je datová anomálie, ne
+     * legitimní stav. Fail-closed: rozhoduje ta nejslabší evidence, aby se
+     * čtvrtina nezaložila na jednom doloženém řádku vedle nedoloženého.
+     */
+    private static function weakerSpousePension(
+        SpousePensionEvidence $left,
+        SpousePensionEvidence $right,
+    ): SpousePensionEvidence {
+        $rank = [
+            SpousePensionEvidence::Unknown->value => 0,
+            SpousePensionEvidence::NotDocumented->value => 1,
+            SpousePensionEvidence::Documented->value => 2,
+        ];
+
+        return $rank[$left->value] <= $rank[$right->value] ? $left : $right;
     }
 
     /**
@@ -1568,6 +1691,7 @@ final class PayrollEnforcementRepository implements
         foreach (array_chunk($employeeIds, self::CHUNK_SIZE) as $chunk) {
             $dependantStmt = $this->db->pdo()->prepare(sprintf(
                 'SELECT dependant_kind, eligibility_verified, excluded_for_maintenance,
+                        quarter_pension_evidence,
                         employee_id AS %s
                   FROM payroll_enforcement_dependants
                   WHERE supplier_id = ? AND employee_id IN (%s)

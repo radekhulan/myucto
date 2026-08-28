@@ -157,7 +157,7 @@ final class PayrollPersonProfileRepository
             static fn (array $item): array => [
                 'id' => (int) $item['id'],
                 'identifier_type' => (string) $item['identifier_type'],
-                'value_masked' => (string) $item['value_masked'],
+                'value_masked' => self::narrowIdentifierMask((string) $item['value_masked']),
                 'row_version' => (int) $item['row_version'],
             ],
         );
@@ -1034,6 +1034,34 @@ final class PayrollPersonProfileRepository
         if ($update->rowCount() > 1) {
             throw new \UnexpectedValueException('Synchronizace legacy zaměstnance zasáhla více řádků.');
         }
+    }
+
+    /**
+     * Zkrátí uloženou masku osobního identifikátoru na dvě viditelné číslice (W1/P-06).
+     *
+     * Maska se materializuje při zapečetění hodnoty, takže záznamy zapsané dřív
+     * nesou ještě čtyřmístnou koncovku — a přepočítat ji z databáze nejde, protože
+     * by se musel dešifrovat ciphertext. Zkrácení je proto i na čtení: v téže
+     * odpovědi chodí `birth_date` a `sex`, ze kterých plyne prvních šest číslic
+     * rodného čísla, takže čtyřmístná koncovka je celé rodné číslo. Operace je
+     * idempotentní — nad už zkrácenou maskou nic nemění. Migrace 1611 dorovnává
+     * totéž v datech, tohle je pojistka pro instalace, kde ještě neproběhla.
+     */
+    private static function narrowIdentifierMask(string $masked): string
+    {
+        $length = mb_strlen($masked, 'UTF-8');
+        if ($length <= 2) {
+            return $masked;
+        }
+        $visible = 0;
+        while ($visible < $length && mb_substr($masked, -($visible + 1), 1, 'UTF-8') !== '•') {
+            $visible++;
+        }
+        if ($visible <= 2) {
+            return $masked;
+        }
+
+        return str_repeat('•', $length - 2) . mb_substr($masked, -2, null, 'UTF-8');
     }
 
     private function assertOwnedRowUpdated(\PDOStatement $statement, string $label): void

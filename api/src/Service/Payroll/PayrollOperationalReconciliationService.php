@@ -203,11 +203,18 @@ final class PayrollOperationalReconciliationService
             $payroll = $this->requiredInt($category, 'payroll_minor');
             $journal = $this->nullableInt($category, 'journal_minor');
             $journalState = $posting['journal_state'] ?? null;
+            // Zaúčtované období bez deníkové strany kategorie = INFORMATIVNÍ
+            // řádek (nepeněžní plnění bez účetního dopadu), ne rozdíl.
+            // Porovnávat mzdovou částku s `null` by ho vždy prohlásilo za
+            // rozdíl a provozní přehled by kvůli očekávanému stavu trvale
+            // svítil.
             $journalStatus = $journalState === 'not_applicable'
                 ? 'not_applicable'
                 : ($journalState !== 'posted'
                     ? 'not_materialized'
-                    : ($payroll === $journal ? 'match' : 'diff'));
+                    : ($journal === null
+                        ? 'not_applicable'
+                        : ($payroll === $journal ? 'match' : 'diff')));
             $result[] = $this->finding(
                 'posting:journal:' . $key,
                 'posting',
@@ -224,7 +231,12 @@ final class PayrollOperationalReconciliationService
 
             $liability = $this->nullableInt($category, 'payments_liability_minor');
             $paymentStatus = $liability === null
-                ? (in_array($key, ['gross_wages', 'employer_contributions'], true)
+                ? (in_array($key, [
+                    'gross_wages',
+                    'employer_contributions',
+                    // Nepeněžní plnění bez účetního dopadu se ani neplatí.
+                    'non_monetary_neutral',
+                ], true)
                     ? 'not_applicable'
                     : 'not_materialized')
                 : ($payroll === $liability ? 'match' : 'diff');

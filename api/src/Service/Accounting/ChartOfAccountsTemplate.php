@@ -119,6 +119,16 @@ final class ChartOfAccountsTemplate
         ['code' => '333', 'name' => 'Ostatní závazky vůči zaměstnancům', 'type' => 'liability', 'normal_side' => 'credit'],
         ['code' => '335', 'name' => 'Pohledávky za zaměstnanci', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '336', 'name' => 'Zúčtování s institucemi sociálního zabezpečení a zdravotního pojištění', 'type' => 'liability', 'normal_side' => 'credit'],
+        // Rozpad 336 na dvě instituce (migrace 1618). Syntetika pokrývá OBĚ, ale
+        // dluží se dvěma různým věřitelům a platí dvěma příkazy — na společném
+        // účtu se závazek vůči ČSSZ a vůči zdravotním pojišťovnám vzájemně
+        // vynetuje a saldo proti platbám nesedí.
+        //   336.100  sociální zabezpečení (ČSSZ / OSSZ)
+        //   336.200  veřejné zdravotní pojištění (zdravotní pojišťovny)
+        // Syntetika 336 v šabloně ZŮSTÁVÁ: firmy, které analytiku nechtějí, na ní
+        // účtují dál a stávající zaúčtované mzdy se nemění.
+        ['code' => '336.100', 'name' => 'Zúčtování se správou sociálního zabezpečení', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '336'],
+        ['code' => '336.200', 'name' => 'Zúčtování se zdravotními pojišťovnami', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '336'],
         ['code' => '341', 'name' => 'Daň z příjmů', 'type' => 'liability', 'normal_side' => null],
         ['code' => '342', 'name' => 'Ostatní přímé daně', 'type' => 'liability', 'normal_side' => 'credit'],
         ['code' => '343', 'name' => 'Daň z přidané hodnoty', 'type' => 'liability', 'normal_side' => null],

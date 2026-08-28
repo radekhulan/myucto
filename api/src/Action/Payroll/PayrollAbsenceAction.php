@@ -14,10 +14,12 @@ use MyInvoice\Repository\Payroll\PayrollAverageEarningDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollAverageEarningRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveEntitlementDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveLedgerDeletionRepository;
+use MyInvoice\Repository\Payroll\PayrollLeaveOverdrawException;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Absence\AbsenceHolidayTreatment;
 use MyInvoice\Service\Payroll\Absence\AverageEarningCalculator;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementConflictException;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
@@ -156,9 +158,19 @@ final class PayrollAbsenceAction
             }
             try {
                 if ($decision === 'approved' && $absence['absence_type'] === 'vacation') {
-                    $segments = $this->absences->publishedShiftSegments($absence, false);
+                    // § 219 odst. 1 ZP — svátek uvnitř dovolené se nečerpá.
+                    $segments = $this->absences->publishedShiftSegments(
+                        $absence,
+                        false,
+                        AbsenceHolidayTreatment::ExcludeFromLeave,
+                    );
                     $minutes = array_sum(array_column($segments, 'eligible_minutes'));
-                    $calculation = $this->leave->recordTaken($absence, $minutes, $this->userId($request));
+                    $calculation = $this->leave->recordTaken(
+                        $absence,
+                        $minutes,
+                        $this->userId($request),
+                        $this->boolean($body['overdraw_confirmed'] ?? false),
+                    );
                 }
                 if ($decision === 'approved'
                     && in_array($absence['absence_type'], ['dpn', 'quarantine'], true)
@@ -174,7 +186,12 @@ final class PayrollAbsenceAction
                             'Potvrď účast na pojištění a vyloučení souběžné dávky.'
                         );
                     }
-                    $segments = $this->absences->publishedShiftSegments($absence, $firstWorked);
+                    // § 192 odst. 1 ZP — za svátek v okně náhrada náleží i bez směny.
+                    $segments = $this->absences->publishedShiftSegments(
+                        $absence,
+                        $firstWorked,
+                        AbsenceHolidayTreatment::CompensateSickness,
+                    );
                     $result = $this->sicknessCalculator->calculate(
                         (string) $absence['date_from'],
                         (int) $absence['average_hourly_minor'],
@@ -217,6 +234,11 @@ final class PayrollAbsenceAction
             }
         } catch (PayrollYearClosedException $e) {
             return Json::error($response, 'payroll_year_closed', $e->getMessage(), 409);
+        } catch (PayrollLeaveOverdrawException $e) {
+            return Json::error($response, 'leave_overdraw_confirmation_required', $e->getMessage(), 409, [
+                'balance_minutes' => $e->balanceMinutes,
+                'requested_minutes' => $e->requestedMinutes,
+            ]);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollAbsenceConflictException $e) {
@@ -326,6 +348,13 @@ final class PayrollAbsenceAction
                 $data['worked_days'],
                 $data['probable_hourly_minor'],
                 $data['rationale'],
+                // Kratší STANOVENÁ týdenní pracovní doba (§ 79 odst. 2 a 3 ZP)
+                // hodinovou minimální mzdu zvyšuje, kratší SJEDNANÁ pracovní doba
+                // (§ 80 ZP, částečný úvazek) ne. `payroll_employment_terms.weekly_hours`
+                // drží jen jedno číslo a obojí nerozliší, takže se z něj nedovozuje:
+                // u dvacetihodinového úvazku by přepočet zdvojnásobil minimum.
+                // Dokud vztah stanovenou dobu neeviduje, platí sazba pro 40 hodin.
+                null,
             );
             $ruleset = $this->rulesets->forDate(
                 PayrollRulesetDomain::CompensationAverages,
@@ -423,6 +452,12 @@ final class PayrollAbsenceAction
                 $this->requiredNonZeroInt($body['minutes_delta'] ?? null, 'minutes_delta'),
                 trim((string) ($body['reason'] ?? '')),
                 $this->userId($request),
+                // § 223 odst. 1 ZP krátí dovolenou o neomluveně zameškané hodiny —
+                // vazba na absenci, kvůli které se krátí, je proto doklad položky.
+                $this->optionalPositiveInt(
+                    $body['source_absence_id'] ?? null,
+                    'source_absence_id',
+                ),
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

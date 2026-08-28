@@ -57,6 +57,62 @@ final class PayrollNetCalculatorTest extends TestCase
         );
     }
 
+    /**
+     * Ú-04/Ú-05: celý měsíc neplacené volno. Peněžní příjem nula, jediná
+     * položka je doplatek zdravotního pojištění do minimálního vyměřovacího
+     * základu podle § 3 odst. 10 z. č. 592/1992 Sb., který podle odst. 12
+     * téhož paragrafu hradí zaměstnanec prostřednictvím zaměstnavatele.
+     * Výsledkem je záporná čistá mzda — dluh zaměstnance, ne pád výpočtu.
+     */
+    public function testUnpaidLeaveWithHealthMinimumTopUpYieldsNegativeNet(): void
+    {
+        $result = (new PayrollNetCalculator())->calculate(new PayrollNetInput(
+            personReference: 'person-unpaid-leave',
+            relationships: [
+                new NetRelationshipIncome('employment-1', 0, 0),
+            ],
+            employeeSocialMinorUnits: 0,
+            employeeHealthMinorUnits: 297_000,
+            advanceTaxMinorUnits: 0,
+            withholdingTaxMinorUnits: 0,
+            taxBonusMinorUnits: 0,
+            correctionMinorUnits: 0,
+            voluntaryDeductionCapacityMinorUnits: 0,
+            deductions: [],
+        ));
+
+        self::assertSame(0, $result->cashIncomeMinorUnits);
+        self::assertSame(-297_000, $result->netBeforeDeductionsMinorUnits);
+        self::assertSame(0, $result->deductedMinorUnits);
+        self::assertSame(-297_000, $result->netPayableMinorUnits);
+    }
+
+    /**
+     * NEGATIVNÍ test — povolení není plošné. Ze záporné čisté mzdy se nedá
+     * srazit ani koruna, takže nenulová kapacita dobrovolných srážek je dál
+     * neplatný vstup.
+     */
+    public function testStillRejectsDeductionCapacityOnNegativeNet(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Kapacita dobrovolných srážek');
+
+        new PayrollNetInput(
+            personReference: 'person-unpaid-leave',
+            relationships: [
+                new NetRelationshipIncome('employment-1', 0, 0),
+            ],
+            employeeSocialMinorUnits: 0,
+            employeeHealthMinorUnits: 297_000,
+            advanceTaxMinorUnits: 0,
+            withholdingTaxMinorUnits: 0,
+            taxBonusMinorUnits: 0,
+            correctionMinorUnits: 0,
+            voluntaryDeductionCapacityMinorUnits: 1,
+            deductions: [],
+        );
+    }
+
     public function testAddsTaxBonusOnceAndAppliesDeductionsByPriorityAndCapacity(): void
     {
         $result = (new PayrollNetCalculator())->calculate(new PayrollNetInput(

@@ -71,6 +71,10 @@ const accountRows: Array<{
   { key: 'income_tax', debit: null, credit: 'income_tax_credit' },
   { key: 'other_deductions', debit: null, credit: 'other_deductions_credit' },
   { key: 'partner_settlement', debit: null, credit: 'partner_settlement_credit' },
+  { key: 'risky_savings', debit: 'risky_savings_debit', credit: 'risky_savings_credit' },
+  { key: 'employee_receivable', debit: 'employee_receivable_debit', credit: null },
+  { key: 'non_deductible_benefit', debit: 'non_deductible_benefit_debit', credit: null },
+  { key: 'travel_expense', debit: 'travel_expense_debit', credit: null },
 ]
 
 const defaultAccounts: PayrollEmployerAccounts = {
@@ -81,11 +85,20 @@ const defaultAccounts: PayrollEmployerAccounts = {
   statutory_gross_debit: '523',
   statutory_gross_credit: '366',
   employer_insurance_debit: '524',
+  // Syntetika 336, ne analytiky 336.100 / 336.200 z migrace 1618. Tohle je jen
+  // hodnota PŘED načtením nastavení firmy; firma, která analytiky v osnově
+  // nemá, musí dostat kód, který v ní existuje. Uložené nastavení (ať už se
+  // syntetikou, nebo s analytikou) tyhle hodnoty vždycky přepíše.
   social_insurance_credit: '336',
   health_insurance_credit: '336',
   income_tax_credit: '342',
   other_deductions_credit: '379',
   partner_settlement_credit: '365',
+  risky_savings_debit: '527',
+  risky_savings_credit: '379',
+  employee_receivable_debit: '335',
+  non_deductible_benefit_debit: '528',
+  travel_expense_debit: '512',
 }
 
 const form = reactive<EmployerSettingsForm>({
@@ -374,6 +387,24 @@ function officeNameError(index: number): string | null {
 
 function accountLabel(key: string): string {
   return t(`payroll.employer.accounting.${key}`)
+}
+
+/**
+ * Věta pod názvem předkontace. Popisek sám o sobě říká, ČEHO se účet týká, ale
+ * ne PROČ tam ta částka patří — a u předkontací, které přibyly později
+ * (spoření u rizikové práce, pohledávka za zaměstnancem, nedaňová část
+ * benefitu, cestovné) je právě to jediné, podle čeho se dá poznat, že je účet
+ * nastavený správně. Kde věta není, se nic nevykreslí.
+ */
+const ACCOUNT_ROW_HINTS: ReadonlySet<string> = new Set([
+  'risky_savings',
+  'employee_receivable',
+  'non_deductible_benefit',
+  'travel_expense',
+])
+
+function accountRowHint(key: string): string {
+  return ACCOUNT_ROW_HINTS.has(key) ? t(`payroll.employer.accounting_row_hint.${key}`) : ''
 }
 
 function accountAriaLabel(rowKey: string, side: 'debit' | 'credit'): string {
@@ -739,7 +770,10 @@ onMounted(load)
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="row in accountRows" :key="row.key">
-                <th class="px-3 py-3 text-left font-medium text-neutral-900">{{ accountLabel(row.key) }}<RequiredMark /></th>
+                <th class="px-3 py-3 text-left align-top font-medium text-neutral-900">
+                  {{ accountLabel(row.key) }}<RequiredMark />
+                  <span v-if="accountRowHint(row.key)" :data-account-row-hint="row.key" class="mt-1 block max-w-72 text-xs font-normal text-neutral-500">{{ accountRowHint(row.key) }}</span>
+                </th>
                 <td class="px-3 py-3">
                   <div v-if="row.debit" :data-account-key="row.debit" class="min-w-56 max-w-80">
                     <SearchableSelect
@@ -794,6 +828,7 @@ onMounted(load)
         <div class="grid grid-cols-1 gap-3 md:hidden">
           <article v-for="row in accountRows" :key="row.key" class="rounded-lg border border-neutral-200 p-4">
             <h3 class="font-medium text-neutral-900">{{ accountLabel(row.key) }}<RequiredMark /></h3>
+            <p v-if="accountRowHint(row.key)" class="mt-1 text-xs text-neutral-500">{{ accountRowHint(row.key) }}</p>
             <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div v-if="row.debit" :data-account-key="row.debit" class="min-w-0">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.debit') }}</span>

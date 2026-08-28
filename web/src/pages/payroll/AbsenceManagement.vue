@@ -402,7 +402,27 @@ async function createAbsence() {
   }
 }
 
-async function decide(item: PayrollAbsence, decision: 'approved' | 'rejected') {
+/**
+ * Přečerpání dovolené se NEPTÁ DOPŘEDU.
+ *
+ * Poskytnout dovolenou nad rámec zůstatku zaměstnavatel smí, ale je to
+ * rozhodnutí — a drtivá většina schválení žádné přečerpání neřeší. Zaškrtávátko
+ * „vím, že přečerpávám" u každé žádosti by tedy bylo pole, které při 500
+ * zaměstnancích nikdo nečte a všichni odklikávají. Proto se schvaluje normálně
+ * a teprve 409 `leave_overdraw_confirmation_required` ze serveru otevře dotaz
+ * s konkrétními čísly, na který stačí jedno kliknutí.
+ */
+const overdrawPrompt = ref<{
+  absenceId: number
+  balanceMinutes: number
+  requestedMinutes: number
+} | null>(null)
+
+async function decide(
+  item: PayrollAbsence,
+  decision: 'approved' | 'rejected',
+  overdrawConfirmed = false,
+) {
   const review = dpnReviews[item.id]
   saving.value = true
   try {
@@ -412,11 +432,25 @@ async function decide(item: PayrollAbsence, decision: 'approved' | 'rejected') {
       first_day_fully_worked: review?.firstDayFullyWorked ?? false,
       insurance_eligibility_confirmed: review?.insuranceConfirmed ?? false,
       conflicting_benefit_excluded: review?.noConflictingBenefit ?? false,
+      ...(overdrawConfirmed ? { overdraw_confirmed: true } : {}),
     })
+    overdrawPrompt.value = null
     toast.success(t(`payroll_absence.messages.${decision}`))
     await loadData()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll_absence.messages.save_failed'))
+    const payload = error?.response?.data?.error
+    if (payload?.code === 'leave_overdraw_confirmation_required'
+      && typeof payload.balance_minutes === 'number'
+      && typeof payload.requested_minutes === 'number') {
+      overdrawPrompt.value = {
+        absenceId: item.id,
+        balanceMinutes: payload.balance_minutes,
+        requestedMinutes: payload.requested_minutes,
+      }
+      return
+    }
+    overdrawPrompt.value = null
+    toast.error(payload?.message || t('payroll_absence.messages.save_failed'))
   } finally {
     saving.value = false
   }
@@ -881,6 +915,27 @@ onMounted(async () => {
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].insuranceConfirmed" type="checkbox"> {{ t('payroll_absence.dpn.insurance') }}</label>
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].noConflictingBenefit" type="checkbox"> {{ t('payroll_absence.dpn.no_conflict') }}</label>
               <label class="flex gap-2"><input v-model="dpnReviews[item.id].firstDayFullyWorked" type="checkbox"> {{ t('payroll_absence.dpn.first_day_worked') }}</label>
+            </div>
+            <div
+              v-if="overdrawPrompt && overdrawPrompt.absenceId === item.id"
+              data-test="leave-overdraw-prompt"
+              class="mt-4 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-900"
+            >
+              <p>
+                {{ t('payroll_absence.leave.overdraw_question', {
+                  balance: minutes(overdrawPrompt.balanceMinutes),
+                  requested: minutes(overdrawPrompt.requestedMinutes),
+                }) }}
+              </p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button :class="btnFilled('warning')" data-test="leave-overdraw-confirm" :disabled="saving" @click="decide(item, 'approved', true)">
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
+                  {{ t('payroll_absence.leave.overdraw_confirm') }}
+                </button>
+                <button :class="btnOutline('neutral')" data-test="leave-overdraw-cancel" :disabled="saving" @click="overdrawPrompt = null">
+                  {{ t('common.cancel') }}
+                </button>
+              </div>
             </div>
             <div v-if="canWrite && item.status === 'requested'" class="mt-4 flex flex-wrap gap-2">
               <button :class="btnFilled('success')" :disabled="saving" @click="decide(item, 'approved')">

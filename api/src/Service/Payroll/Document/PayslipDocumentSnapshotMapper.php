@@ -278,11 +278,15 @@ final class PayslipDocumentSnapshotMapper
             $net + ['annual_settlement_minor_units' => 0],
             'annual_settlement_minor_units',
         );
-        $netBeforeEnforcement = $this->nonNegativeInt(
+        // Podepsané částky: přeplatek čisté mzdy (měsíc bez peněžního příjmu
+        // s doplatkem ZP do minimálního vyměřovacího základu podle § 3 odst.
+        // 10 z. č. 592/1992 Sb.) musí být na výplatní pásce vidět. Bránou
+        // zůstává shoda obou zdrojů níž, ne znaménko.
+        $netBeforeEnforcement = $this->int(
             $net,
             'net_payable_minor_units',
         );
-        if ($netBeforeEnforcement !== $this->nonNegativeInt(
+        if ($netBeforeEnforcement !== $this->int(
             $statutory,
             'net_payable_minor_units',
         )) {
@@ -290,7 +294,7 @@ final class PayslipDocumentSnapshotMapper
                 "Čistá mzda osoby {$employeeId} nemá jednotný výsledek.",
             );
         }
-        $netPayable = $this->nonNegativeInt(
+        $netPayable = $this->int(
             $personResult,
             'payable_after_enforcement_minor',
         );

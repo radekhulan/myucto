@@ -17,7 +17,7 @@ final class PayrollEmploymentAccountingClassifierTest extends TestCase
             'gross_debit' => '521',
             'gross_credit' => '331',
             'employer_insurance_debit' => '524',
-            'employer_insurance_credit' => '336',
+            'employer_insurance_credit' => '336.100',
         ];
 
         yield 'employment' => ['employment', $employeeAccounts];
@@ -28,13 +28,13 @@ final class PayrollEmploymentAccountingClassifierTest extends TestCase
             'gross_debit' => '522',
             'gross_credit' => '366',
             'employer_insurance_debit' => '524',
-            'employer_insurance_credit' => '336',
+            'employer_insurance_credit' => '336.100',
         ]];
         yield 'statutory body' => ['statutory_body', [
             'gross_debit' => '523',
             'gross_credit' => '366',
             'employer_insurance_debit' => '524',
-            'employer_insurance_credit' => '336',
+            'employer_insurance_credit' => '336.100',
         ]];
     }
 

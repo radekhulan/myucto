@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementResult;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -625,6 +626,7 @@ final class AnnualSettlementSnapshotBuilder
                 PayrollSensitiveField::PERSONAL_IDENTIFIER,
                 $supplierId,
                 self::positiveIntValue($identifierRow['id'] ?? null, 'employee.identifier.id'),
+                PayrollRevealPurpose::DOCUMENT_ANNUAL_SETTLEMENT,
             );
         } elseif (is_string($employeeRow['birth_date'] ?? null)) {
             $label = 'Datum narození';

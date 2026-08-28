@@ -23,8 +23,17 @@ import {
   type EnforcementMonthEvidence,
   type EnforcementEvidenceScope,
   type EnforcementEvidenceSourceValue,
+  spousePensionEvidenceOptions,
+  spousePensionHolderOptions,
+  spousePensionKindOptions,
+  type SpousePensionHolder,
+  type SpousePensionKind,
 } from '@/api/payrollEnforcement'
-import { eligibleAllowances, evidenceScope } from '@/pages/payroll/enforcementEvidenceScope'
+import {
+  eligibleAllowances,
+  evidenceScope,
+  spousePensionEvidenceUnknown,
+} from '@/pages/payroll/enforcementEvidenceScope'
 import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -138,19 +147,39 @@ const dependants = ref<EnforcementDependant[]>([])
 const personCases = ref<EnforcementCaseSummary[]>([])
 const personCasesComplete = ref(false)
 const protectedOverrideCzk = ref('')
-const newDependant = ref<{
+/**
+ * Formulář nové vyživované osoby.
+ *
+ * Doložení důchodu se drží zvlášť od `EnforcementDependantPayload`, protože
+ * ve formuláři je to VŽDY vyplněná volba (výchozí „nedoloženo"), kdežto na
+ * drát odchází jen u manžela/partnera. `unknown` se ve výběru vůbec nenabízí —
+ * je to stav starších záznamů, ne odpověď, kterou by šlo zadat.
+ */
+function emptyDependantForm(): {
   dependant_kind: 'dependant' | 'spouse_partner'
   valid_from: string
   valid_to: string | null
   eligibility_verified: boolean
   excluded_for_maintenance: boolean
-}>({
-  dependant_kind: 'dependant',
-  valid_from: today,
-  valid_to: null,
-  eligibility_verified: false,
-  excluded_for_maintenance: false,
-})
+  quarter_pension_evidence: 'documented' | 'not_documented'
+  quarter_pension_holder: SpousePensionHolder
+  quarter_pension_kind: SpousePensionKind
+  quarter_pension_documented_on: string
+} {
+  return {
+    dependant_kind: 'dependant',
+    valid_from: today,
+    valid_to: null,
+    eligibility_verified: false,
+    excluded_for_maintenance: false,
+    quarter_pension_evidence: 'not_documented',
+    quarter_pension_holder: 'debtor',
+    quarter_pension_kind: 'old_age',
+    quarter_pension_documented_on: today,
+  }
+}
+const newDependant = ref(emptyDependantForm())
+const dependantError = ref('')
 const newCase = ref<{
   employee_id: number | null
   case_kind: EnforcementCaseKind
@@ -588,6 +617,15 @@ const MONTH_EVIDENCE_ROWS = [
 const monthEvidenceAllowances = computed(() =>
   eligibleAllowances(dependants.value, evidencePeriod.value))
 
+/**
+ * Uplatněný manžel/partner, u kterého doložení důchodu nikdo nedoplnil.
+ * Přesně na tomhle stavu vzniká blokátor `spouse_quarter_pension_evidence_unknown`
+ * v `GarnishmentCalculator` — ukazuje se proto TADY, u záznamu, který se dá
+ * opravit, ne až jako nesrozumitelný kód u spadlého běhu mezd.
+ */
+const spousePensionUnknown = computed(() =>
+  spousePensionEvidenceUnknown(dependants.value, evidencePeriod.value))
+
 const monthEvidenceScope = computed<EnforcementEvidenceScope | null>(() => {
   const evidence = monthEvidence.value
   if (!evidence) return null
@@ -749,23 +787,50 @@ async function saveMonthEvidence() {
   }
 }
 
+/** Ptá se formulář vůbec na důchod? Jen u manžela/partnera — u dětí se § 1 nař. 595/2006 nemění. */
+const dependantIsSpouse = computed(() => newDependant.value.dependant_kind === 'spouse_partner')
+
 async function addDependant() {
   const current = detail.value
   if (!current) return
+  const form = newDependant.value
+  const spouse = form.dependant_kind === 'spouse_partner'
+  const documented = spouse && form.quarter_pension_evidence === 'documented'
+  // Server datum u doloženého důchodu vyžaduje (CHECK v migraci 1612). Chytit
+  // to tady znamená větu u pole místo 422 z jiné obrazovky formuláře.
+  if (documented && !form.quarter_pension_documented_on) {
+    dependantError.value = t('payroll.enforcement.spouse_pension.documented_on_required')
+    return
+  }
+  dependantError.value = ''
   saving.value = true
   try {
-    await payrollEnforcementApi.addDependant(current.employee_id, newDependant.value)
+    await payrollEnforcementApi.addDependant(current.employee_id, {
+      dependant_kind: form.dependant_kind,
+      valid_from: form.valid_from,
+      valid_to: form.valid_to,
+      eligibility_verified: form.eligibility_verified,
+      excluded_for_maintenance: form.excluded_for_maintenance,
+      ...(spouse
+        ? {
+            quarter_pension_evidence: form.quarter_pension_evidence,
+            quarter_pension_holder: documented ? form.quarter_pension_holder : null,
+            quarter_pension_kind: documented ? form.quarter_pension_kind : null,
+            quarter_pension_documented_on: documented
+              ? form.quarter_pension_documented_on
+              : null,
+          }
+        : {}),
+    })
     dependants.value = await payrollEnforcementApi.dependants(current.employee_id)
-    newDependant.value = {
-      dependant_kind: 'dependant',
-      valid_from: today,
-      valid_to: null,
-      eligibility_verified: false,
-      excluded_for_maintenance: false,
-    }
+    newDependant.value = emptyDependantForm()
     toast.success(t('payroll.enforcement.dependant_created'))
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('payroll.enforcement.save_failed'))
+    // Formulář drží PŘESNÝ důvod ze serveru — toast za pár vteřin zmizí
+    // a účetní by zůstala u pole, o kterém neví, co s ním je špatně.
+    dependantError.value = error?.response?.data?.error?.message
+      || t('payroll.enforcement.save_failed')
+    toast.error(dependantError.value)
   } finally {
     saving.value = false
   }
@@ -1377,18 +1442,80 @@ onMounted(load)
             </div>
             <div v-if="showDependants" data-test="dependants-panel" class="border-t border-neutral-200 p-4">
               <p class="text-xs text-neutral-500">{{ t('payroll.enforcement.dependants_hint') }}</p>
+              <p
+                v-if="spousePensionUnknown"
+                data-test="spouse-pension-unknown"
+                class="mt-3 rounded-md border border-warning-200 bg-warning-50 p-3 text-xs text-warning-900"
+              >
+                {{ t('payroll.enforcement.blocker.spouse_quarter_pension_evidence_unknown') }}
+              </p>
               <div v-if="dependants.length" class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
                 <div v-for="dependant in dependants" :key="dependant.id" class="rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm">
                   <div class="flex flex-wrap justify-between gap-2"><span class="font-medium text-neutral-900">{{ t(`payroll.enforcement.dependant_kind.${dependant.dependant_kind}`) }}</span><span :class="dependant.eligibility_verified ? 'text-success-600' : 'text-warning-600'">{{ t(dependant.eligibility_verified ? 'payroll.enforcement.verified' : 'payroll.enforcement.incomplete') }}</span></div>
                   <p class="mt-1 text-xs text-neutral-500">{{ dependant.valid_from }} – {{ dependant.valid_to || '∞' }}</p>
+                  <p
+                    v-if="dependant.dependant_kind === 'spouse_partner'"
+                    :data-test="`dependant-pension-${dependant.id}`"
+                    class="mt-1 text-xs"
+                    :class="dependant.quarter_pension_evidence === 'unknown' ? 'text-warning-700' : 'text-neutral-500'"
+                  >
+                    {{ t(`payroll.enforcement.spouse_pension.evidence.${dependant.quarter_pension_evidence}`) }}
+                    <template v-if="dependant.quarter_pension_evidence === 'documented' && dependant.quarter_pension_kind && dependant.quarter_pension_holder">
+                      · {{ t(`payroll.enforcement.spouse_pension.kind.${dependant.quarter_pension_kind}`) }}
+                      · {{ t(`payroll.enforcement.spouse_pension.holder.${dependant.quarter_pension_holder}`) }}
+                      · {{ dependant.quarter_pension_documented_on }}
+                    </template>
+                  </p>
                 </div>
               </div>
               <form class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5" @submit.prevent="addDependant">
-                <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.dependant_type') }}<select v-model="newDependant.dependant_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="dependant">{{ t('payroll.enforcement.dependant_kind.dependant') }}</option><option value="spouse_partner">{{ t('payroll.enforcement.dependant_kind.spouse_partner') }}</option></select></label>
+                <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.dependant_type') }}<select v-model="newDependant.dependant_kind" data-test="dependant-kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option value="dependant">{{ t('payroll.enforcement.dependant_kind.dependant') }}</option><option value="spouse_partner">{{ t('payroll.enforcement.dependant_kind.spouse_partner') }}</option></select></label>
                 <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_from') }}<input v-model="newDependant.valid_from" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                 <label class="text-xs text-neutral-600">{{ t('payroll.enforcement.valid_to') }}<input v-model="newDependant.valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
                 <div class="space-y-2 pt-5 text-sm"><label class="flex items-center gap-2 text-neutral-700"><input v-model="newDependant.eligibility_verified" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.eligible_verified') }}</label><label class="flex items-center gap-2 text-neutral-700"><input v-model="newDependant.excluded_for_maintenance" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.enforcement.excluded_for_maintenance') }}</label></div>
                 <div class="flex items-end justify-end"><button type="submit" :class="btnFilled('primary')" :disabled="saving"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>{{ t('payroll.enforcement.add_dependant') }}</button></div>
+                <div
+                  v-if="dependantIsSpouse"
+                  data-test="spouse-pension-fields"
+                  class="rounded-md border border-neutral-200 bg-neutral-50 p-3 sm:col-span-2 lg:col-span-5"
+                >
+                  <p class="text-xs text-neutral-600">{{ t('payroll.enforcement.spouse_pension.why') }}</p>
+                  <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <label class="text-xs text-neutral-600">
+                      {{ t('payroll.enforcement.spouse_pension.question') }}
+                      <select v-model="newDependant.quarter_pension_evidence" data-test="spouse-pension-evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                        <option v-for="value in spousePensionEvidenceOptions" :key="value" :value="value">
+                          {{ t(`payroll.enforcement.spouse_pension.evidence.${value}`) }}
+                        </option>
+                      </select>
+                    </label>
+                    <template v-if="newDependant.quarter_pension_evidence === 'documented'">
+                      <label class="text-xs text-neutral-600">
+                        {{ t('payroll.enforcement.spouse_pension.holder_label') }}
+                        <select v-model="newDependant.quarter_pension_holder" data-test="spouse-pension-holder" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                          <option v-for="value in spousePensionHolderOptions" :key="value" :value="value">
+                            {{ t(`payroll.enforcement.spouse_pension.holder.${value}`) }}
+                          </option>
+                        </select>
+                      </label>
+                      <label class="text-xs text-neutral-600">
+                        {{ t('payroll.enforcement.spouse_pension.kind_label') }}
+                        <select v-model="newDependant.quarter_pension_kind" data-test="spouse-pension-kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                          <option v-for="value in spousePensionKindOptions" :key="value" :value="value">
+                            {{ t(`payroll.enforcement.spouse_pension.kind.${value}`) }}
+                          </option>
+                        </select>
+                      </label>
+                      <label class="text-xs text-neutral-600">
+                        {{ t('payroll.enforcement.spouse_pension.documented_on') }}
+                        <input v-model="newDependant.quarter_pension_documented_on" data-test="spouse-pension-documented-on" required type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                      </label>
+                    </template>
+                  </div>
+                </div>
+                <p v-if="dependantError" data-test="dependant-error" class="rounded-md border border-danger-200 bg-danger-50 p-3 text-xs text-danger-700 sm:col-span-2 lg:col-span-5">
+                  {{ dependantError }}
+                </p>
               </form>
             </div>
           </div>

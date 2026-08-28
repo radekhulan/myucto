@@ -40,8 +40,14 @@ final class PayrollAccountOptionsAction
 
         $options = [];
         foreach ($this->accounts->listForTenant($this->currentSupplierId($request), true) as $account) {
+            // `asset` přibyl kvůli předkontaci `employee_receivable_debit`
+            // (335, migrace 1614): přeplatek čisté mzdy je POHLEDÁVKA za
+            // zaměstnancem, ne závazek. Bez aktivních účtů se nabídka toho
+            // jediného pole vrátí prázdná a účetní si předkontaci nenastaví,
+            // přestože ji validátor vyžaduje. Ostatní typy (výnos, kapitál)
+            // se dál nepouštějí — žádná mzdová předkontace na ně nemíří.
             $type = $account['account_type'] ?? null;
-            if ($type !== 'expense' && $type !== 'liability') {
+            if ($type !== 'expense' && $type !== 'liability' && $type !== 'asset') {
                 continue;
             }
             $id = $account['id'] ?? null;

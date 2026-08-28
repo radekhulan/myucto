@@ -182,6 +182,90 @@ final class PayrollRunGarnishmentOrderTest extends TestCase
         self::assertSame([], $capacities);
     }
 
+    /**
+     * Ú-04/Ú-05: osoba celý měsíc na neplaceném volnu s doplatkem zdravotního
+     * pojištění do minimálního vyměřovacího základu (§ 3 odst. 10
+     * z. č. 592/1992 Sb.) má ZÁPORNOU čistou mzdu. Exekuce z ní nesrazí nic —
+     * § 299 OSŘ postihuje příjem, a ten tu žádný není — ale výplata po
+     * srážkách musí ten dluh nést dál. Kdyby se z ní stala nula, účetní
+     * můstek by ohlásil rozpor mezi předpisem a čistou výplatou.
+     */
+    public function testNegativeNetCarriesThroughEnforcementAsEmployeeDebt(): void
+    {
+        $result = $this->processor()->calculate(
+            $this->snapshot(),
+            $this->overdrawnBaseResult(),
+        );
+        $person = $result['people'][0];
+
+        self::assertSame(-297_000, $person['payable_after_enforcement_minor']);
+        self::assertSame(
+            0,
+            $person['enforcement']['result']['total_withheld_minor_units'],
+        );
+        // Nulový postižitelný příjem, ne „k ručnímu posouzení": situace je
+        // zákonem předvídaná a jednoznačná, blokovat kvůli ní běh nemá důvod.
+        self::assertSame(
+            0,
+            $person['enforcement']['input']['income']['garnishable_minor_units'],
+        );
+        self::assertSame(
+            -297_000,
+            $result['totals']['payable_after_enforcement_minor'],
+        );
+        self::assertSame(0, $result['totals']['enforcement_withheld_minor']);
+    }
+
+    /**
+     * NEGATIVNÍ test — záporná výplata je přípustná JEN tam, kde ji vyrobila
+     * záporná čistá mzda. Osoba s příjmem, které dobrovolná srážka sní víc,
+     * než exekuce nechala, je pořád chyba.
+     */
+    public function testStillFailsWhenVoluntaryDeductionExceedsPayableWithIncome(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Dobrovolná srážka');
+
+        $this->processor()->calculate(
+            $this->snapshot(),
+            $this->baseResult(self::NET_BEFORE_DEDUCTIONS),
+        );
+    }
+
+    /** @return array<string,mixed> */
+    private function overdrawnBaseResult(): array
+    {
+        $person = [
+            'employee_id' => self::EMPLOYEE_ID,
+            'employments' => [],
+            'totals' => [
+                'cash_payable_minor' => 0,
+                'enforcement_base_minor' => 0,
+            ],
+            'statutory' => [
+                'person_reference' => 'employee:' . self::EMPLOYEE_ID,
+                'status' => 'calculated',
+                'net_payable_minor_units' => -297_000,
+                'net_pay' => [
+                    'net_before_deductions_minor_units' => -297_000,
+                    'deducted_minor_units' => 0,
+                    'net_payable_minor_units' => -297_000,
+                    'deductions' => [],
+                ],
+            ],
+        ];
+
+        return [
+            'schema_version' => 'payroll-run-result.v1',
+            'statutory' => ['status' => 'calculated'],
+            'people' => [$person],
+            'totals' => [
+                'cash_payable_minor' => 0,
+                'enforcement_base_minor' => 0,
+            ],
+        ];
+    }
+
     private function processor(): PayrollRunGarnishmentProcessor
     {
         $port = new class implements PayrollGarnishmentPort {

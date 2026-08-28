@@ -29,7 +29,8 @@ final class PayrollPostingLineBuilderTest extends TestCase
         self::assertSame([
             '331|credit' => 100_000,
             '331|debit' => 22_333,
-            '336|credit' => 271_800,
+            '336.100|credit' => 190_800,
+            '336.200|credit' => 81_000,
             '342|credit' => 50_000,
             '366|credit' => 500_000,
             '366|debit' => 111_667,
@@ -156,6 +157,732 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Nepeněžní složka bez předkontace (1 % z vozidla, přechodné ubytování)
+     * je jen OCENĚNÍ příjmu pro základ daně a pojistného. Náklad je v knihách
+     * už ze zdrojového dokladu, takže se neúčtuje NIC — dosud se místo toho
+     * shodilo schválení celého mzdového běhu.
+     */
+    public function testAccountingNeutralNonCashComponentPostsNothing(): void
+    {
+        [$snapshot, $result] = $this->nonCashBenefitRevision();
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->nonCashBenefitStatutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        self::assertArrayNotHasKey('521|debit', $lineMap);
+        self::assertArrayNotHasKey('331|credit', $lineMap);
+        self::assertSame(
+            $preview->debitTotalMinor,
+            $preview->creditTotalMinor,
+        );
+        self::assertSame(
+            [],
+            array_values(array_filter(
+                $preview->targetAllocations,
+                static fn (array $allocation): bool =>
+                    str_starts_with(
+                        $allocation['allocation_key'],
+                        'gross:employment:101:',
+                    ),
+            )),
+        );
+    }
+
+    /** Nepeněžní složka s vlastní dvojicí účtů se účtuje dál — neutralita platí jen bez ní. */
+    public function testNonCashComponentWithExplicitPairIsStillPosted(): void
+    {
+        [$snapshot, $result] = $this->nonCashBenefitRevision();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_debit_code'
+        ] = '528';
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_credit_code'
+        ] = '331.900';
+        $result['people'][0]['employments'][0]['inputs'][0]['accounting'] = [
+            'debit_code' => '528',
+            'credit_code' => '331.900',
+            'amount_minor' => 100_000,
+        ];
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->nonCashBenefitStatutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['528|debit']);
+        self::assertSame(100_000, $lineMap['331.900|credit']);
+    }
+
+    /**
+     * Povinný příspěvek na spoření u rizikové práce (z. 324/2025 Sb.) se dosud
+     * zaplatil, ale nezaúčtoval. Náklad 527 i závazek 379 musí vzniknout.
+     */
+    public function testRiskySavingsContributionCreatesExpenseAndLiability(): void
+    {
+        $result = $this->calculatedResult();
+        $result['statutory']['risky_savings_period_start'] = '2026-06-01';
+        $result['statutory']['risky_savings'] = [
+            $this->riskySavingsRow(101, 4_000),
+        ];
+
+        $preview = $this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        self::assertSame(4_000, $lineMap['527|debit']);
+        // 10 000 srážka + 5 000 exekuce + 4 000 povinné spoření.
+        self::assertSame(19_000, $lineMap['379|credit']);
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+        self::assertSame(940_800, $preview->debitTotalMinor);
+    }
+
+    /** Nedopočítaný podklad se neúčtuje — schvalování hlídá jiná brána. */
+    public function testRiskySavingsInManualReviewIsNotPosted(): void
+    {
+        $result = $this->calculatedResult();
+        $result['statutory']['risky_savings'] = [
+            [
+                'employment_id' => 101,
+                'status' => 'manual_review',
+                'issues' => ['risky_savings_evidence_not_approved'],
+                'assessment_base_minor' => null,
+                'contribution_minor' => null,
+            ],
+        ];
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertArrayNotHasKey('527|debit', $lineMap);
+    }
+
+    /** Opravná revize příspěvku účtuje jen rozdíl, a to vyrovnaně. */
+    public function testRiskySavingsCorrectionPostsOnlyTheDelta(): void
+    {
+        $first = $this->calculatedResult();
+        $first['statutory']['risky_savings'] = [$this->riskySavingsRow(101, 4_000)];
+        $target = $this->builder->build(
+            $this->snapshot(),
+            $first,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        $corrected = $this->calculatedResult();
+        $corrected['statutory']['risky_savings'] = [
+            $this->riskySavingsRow(101, 6_500),
+        ];
+        $correction = $this->builder->build(
+            $this->snapshot(),
+            $corrected,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+            $target->targetAllocations,
+        );
+
+        self::assertSame(
+            ['379|credit' => 2_500, '527|debit' => 2_500],
+            $this->lineMap($correction->lines),
+        );
+    }
+
+    /** Náklad příspěvku patří středisku pracovního vztahu, závazek zůstává jeden. */
+    public function testRiskySavingsExpenseCarriesTheCostCentre(): void
+    {
+        $snapshot = $this->snapshotWithCostCentres();
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $result['statutory']['risky_savings'] = [$this->riskySavingsRow(101, 4_000)];
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame(
+            ['VYROBA' => 4_000],
+            $this->costCentreMap($preview->lines, '527', 'debit'),
+        );
+    }
+
+    /** Příspěvek cizího pracovního vztahu je nedůvěryhodný podklad, ne řádek zápisu. */
+    public function testRiskySavingsOfForeignEmploymentIsRejected(): void
+    {
+        $result = $this->calculatedResult();
+        $result['statutory']['risky_savings'] = [$this->riskySavingsRow(999, 4_000)];
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('nepatří do revize');
+        $this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
+    /**
+     * Zmrazené snapshoty starších revizí nové předkontace nikdy mít nebudou.
+     * Kdyby se vyžadovaly tvrdě, opakované zaúčtování dřív schválené revize
+     * by spadlo na „chybí firemní účetní předkontace".
+     */
+    public function testAccountsAddedLaterFallBackToTheChartDefaults(): void
+    {
+        $accounts = PayrollAccountingDefaults::codes();
+        unset(
+            $accounts['risky_savings_debit'],
+            $accounts['risky_savings_credit'],
+            $accounts['employee_receivable_debit'],
+        );
+        $result = $this->calculatedResult();
+        $result['statutory']['risky_savings'] = [$this->riskySavingsRow(101, 4_000)];
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            $accounts,
+        )->lines);
+
+        self::assertSame(4_000, $lineMap['527|debit']);
+    }
+
+    /** Chybějící PŮVODNÍ předkontace zůstává tvrdou chybou. */
+    public function testMissingLegacyAccountStillFailsClosed(): void
+    {
+        $accounts = PayrollAccountingDefaults::codes();
+        unset($accounts['income_tax_credit']);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Chybí firemní účetní předkontace income_tax_credit');
+        $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            $accounts,
+        );
+    }
+
+    /**
+     * Zaměstnanec celý měsíc na neplaceném volnu platí doplatek ZP do
+     * minimálního vyměřovacího základu (§ 3 odst. 10 z. 592/1992 Sb.). Nemá
+     * peněžní příjem, takže srážku není do čeho rozpustit — dosud to shodilo
+     * schválení běhu. Účtuje se proti závazkovému účtu jeho vztahu a přeplatek
+     * se překlopí na pohledávku za zaměstnancem.
+     */
+    public function testChargeWithoutCashIncomePostsAgainstTheRelationLiability(): void
+    {
+        $preview = $this->builder->build(
+            $this->unpaidLeaveSnapshot(),
+            $this->unpaidLeaveResult(),
+            $this->unpaidLeaveStatutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+
+        self::assertSame([
+            '331|credit' => 5_000,
+            '331|debit' => 5_000,
+            '335|debit' => 5_000,
+            '336.200|credit' => 5_000,
+        ], $this->lineMap($preview->lines));
+        self::assertSame(10_000, $preview->debitTotalMinor);
+        self::assertSame(10_000, $preview->creditTotalMinor);
+    }
+
+    /** Přeplatek u společníka jde proti 366, ne proti 331. */
+    public function testEmployeeReceivableUsesTheRelationLiabilityAccount(): void
+    {
+        $snapshot = $this->unpaidLeaveSnapshot();
+        $snapshot['people'][0]['employments'][0]['employment']['relation_type'] =
+            'partner_dependent';
+        $result = $this->unpaidLeaveResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->unpaidLeaveStatutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(5_000, $lineMap['366|credit']);
+        self::assertSame(5_000, $lineMap['335|debit']);
+        self::assertArrayNotHasKey('331|debit', $lineMap);
+    }
+
+    /** Opravná revize musí pohledávku za zaměstnancem umět i odúčtovat. */
+    public function testEmployeeReceivableIsReversedByACorrection(): void
+    {
+        $target = $this->builder->build(
+            $this->unpaidLeaveSnapshot(),
+            $this->unpaidLeaveResult(),
+            $this->unpaidLeaveStatutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $correction = $this->builder->build(
+            $this->unpaidLeaveSnapshot(),
+            $this->unpaidLeaveResult(0),
+            $this->unpaidLeaveStatutorySets(0),
+            PayrollAccountingDefaults::codes(),
+            $target->targetAllocations,
+        );
+
+        self::assertSame([
+            '331|credit' => 5_000,
+            '331|debit' => 5_000,
+            '335|credit' => 5_000,
+            '336.200|debit' => 5_000,
+        ], $this->lineMap($correction->lines));
+    }
+
+    /**
+     * W7/Ú-06 — nadlimitní benefit se dosud celý zaúčtoval na jeden účet.
+     *
+     * Nedaňová je podle § 25 odst. 1 písm. h) ZDP OSVOBOZENÁ část („v rozsahu,
+     * ve kterém je toto plnění u zaměstnance osvobozeno od daně"); nadlimitní
+     * část se zaměstnanci zdaní a zaměstnavateli je podle § 24 odst. 2 písm. j)
+     * bodu 4 uznatelná. Dělí se proto opačně, než by se čekalo.
+     */
+    public function testExemptBenefitPartGoesToTheNonDeductibleAccount(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(60_000, 40_000);
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        self::assertSame(60_000, $lineMap['528|debit'], 'osvobozená část je nedaňová');
+        self::assertSame(40_000, $lineMap['521|debit'], 'nadlimitní část zůstává mzdovým nákladem');
+        self::assertSame(
+            100_000,
+            $lineMap['528|debit'] + $lineMap['521|debit'],
+            'součet obou částí je zdrojová částka na korunu',
+        );
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+        self::assertSame(100_000, $lineMap['331|credit'], 'protiúčet se nedělí');
+    }
+
+    /** Celý benefit v limitu = celý nedaňový; prázdná nadlimitní dvojice nevzniká. */
+    public function testFullyExemptBenefitPostsOnlyTheNonDeductibleAccount(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(100_000, 0);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['528|debit']);
+        self::assertArrayNotHasKey('521|debit', $lineMap);
+    }
+
+    /** Benefit celý nad limitem je celý zdanitelný — a tedy celý uznatelný. */
+    public function testFullyTaxableBenefitStaysOnTheWageCostAccount(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(0, 100_000);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['521|debit']);
+        self::assertArrayNotHasKey('528|debit', $lineMap);
+    }
+
+    /**
+     * Uznatelné koše se NEDĚLÍ: příspěvek na stravování je podle § 24 odst. 2
+     * písm. j) bodu 4 daňově uznatelný celý. Rozdělit ho na 528 by firmě
+     * z uznatelného nákladu udělalo neuznatelný.
+     */
+    public function testDeductibleBenefitBasketIsNotSplit(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(
+            60_000,
+            40_000,
+            'meal_per_shift',
+        );
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['521|debit']);
+        self::assertArrayNotHasKey('528|debit', $lineMap);
+    }
+
+    /**
+     * Zmrazený snapshot bez klíče `non_deductible_benefit_debit` se musí
+     * zaúčtovat PŘESNĚ jako dřív — jinak by opakované zaúčtování dřív schválené
+     * revize spadlo na kontrolu cílového otisku v PayrollPostingAdapter.
+     */
+    public function testOlderSnapshotWithoutTheKeyPostsExactlyAsBefore(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(60_000, 40_000);
+        $legacyAccounts = PayrollAccountingDefaults::codes();
+        unset($legacyAccounts['non_deductible_benefit_debit']);
+
+        $legacy = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            $legacyAccounts,
+        );
+        $lineMap = $this->lineMap($legacy->lines);
+
+        self::assertSame(100_000, $lineMap['521|debit']);
+        self::assertArrayNotHasKey('528|debit', $lineMap);
+    }
+
+    /** Opravná revize odúčtuje rozdělený benefit rozdílem na obou účtech. */
+    public function testBenefitSplitIsReversedByACorrection(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(60_000, 40_000);
+        $target = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        [$correctedSnapshot, $correctedResult] =
+            $this->benefitBasketRevision(100_000, 0);
+
+        $correction = $this->builder->build(
+            $correctedSnapshot,
+            $correctedResult,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+            $target->targetAllocations,
+        );
+        $lineMap = $this->lineMap($correction->lines);
+
+        self::assertSame(40_000, $lineMap['528|debit']);
+        self::assertSame(40_000, $lineMap['521|credit']);
+        self::assertSame(
+            $correction->debitTotalMinor,
+            $correction->creditTotalMinor,
+        );
+    }
+
+    /** Nesouhlasný rozpad koše se nesmí zaúčtovat — částky by se rozešly. */
+    public function testInconsistentBasketSplitFailsClosed(): void
+    {
+        [$snapshot, $result] = $this->benefitBasketRevision(60_000, 30_000);
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Rozpad koše osvobození');
+        $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+    }
+
+    /**
+     * W7/Ú-07 — cestovní náhrada není mzda. Náhrada výdaje podle části sedmé
+     * zákoníku práce patří na 512 (cestovné), ne na 521.
+     */
+    public function testTravelReimbursementPostsToTravelExpenseAccount(): void
+    {
+        [$snapshot, $result] = $this->travelRevision();
+
+        $preview = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $lineMap = $this->lineMap($preview->lines);
+
+        self::assertSame(100_000, $lineMap['512|debit']);
+        self::assertArrayNotHasKey('521|debit', $lineMap);
+        self::assertSame(
+            100_000,
+            $lineMap['331|credit'],
+            'protiúčet zůstává závazek vůči zaměstnanci — náhrada se vyplácí se mzdou',
+        );
+        self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
+    }
+
+    /**
+     * 512 musí být v množině nákladových účtů hrubé mzdy, kterou reconciliace
+     * čte z klíčů alokací `gross:%:debit` — jinak by kategorie `gross_wages`
+     * hlásila rozdíl proti kontrolním součtům.
+     */
+    public function testTravelExpenseKeepsTheGrossAllocationKey(): void
+    {
+        [$snapshot, $result] = $this->travelRevision();
+
+        $travel = array_values(array_filter(
+            $this->builder->build(
+                $snapshot,
+                $result,
+                $this->statutorySets(),
+                PayrollAccountingDefaults::codes(),
+            )->targetAllocations,
+            static fn (array $allocation): bool =>
+                $allocation['account_code'] === '512',
+        ));
+
+        self::assertCount(1, $travel);
+        self::assertSame(
+            'gross:employment:101:input:1:debit',
+            $travel[0]['allocation_key'],
+        );
+    }
+
+    /** Vlastní předkontace složky přebíjí i účet cestovného. */
+    public function testExplicitComponentPairBeatsTheTravelAccount(): void
+    {
+        [$snapshot, $result] = $this->travelRevision();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_debit_code'
+        ] = '512.100';
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'accounting_credit_code'
+        ] = '331.900';
+        $result['people'][0]['employments'][0]['inputs'][0]['accounting'] = [
+            'debit_code' => '512.100',
+            'credit_code' => '331.900',
+            'amount_minor' => 100_000,
+        ];
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['512.100|debit']);
+        self::assertArrayNotHasKey('512|debit', $lineMap);
+    }
+
+    /** Zmrazený snapshot bez klíče `travel_expense_debit` účtuje jako dřív. */
+    public function testOlderSnapshotPostsTravelAsWageCost(): void
+    {
+        [$snapshot, $result] = $this->travelRevision();
+        $legacyAccounts = PayrollAccountingDefaults::codes();
+        unset($legacyAccounts['travel_expense_debit']);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySets(),
+            $legacyAccounts,
+        )->lines);
+
+        self::assertSame(100_000, $lineMap['521|debit']);
+        self::assertArrayNotHasKey('512|debit', $lineMap);
+    }
+
+    /**
+     * Zmrazený mzdový vstup v koši osvobození. Rozpad je ZMRAZENÝ (migrace
+     * 1480), takže ho účetní můstek jen čte — nepřepočítává ho.
+     *
+     * @return array{array<string,mixed>,array<string,mixed>}
+     */
+    private function benefitBasketRevision(
+        int $exemptMinor,
+        int $taxableMinor,
+        string $basket = 'non_cash_leisure',
+    ): array {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['benefit_basket'] =
+            $basket;
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['benefit_exempt_minor'] =
+            $exemptMinor;
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['benefit_taxable_minor'] =
+            $taxableMinor;
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        return [$snapshot, $result];
+    }
+
+    /**
+     * Revize s cestovní náhradou místo mzdy na prvním pracovním vztahu.
+     *
+     * @return array{array<string,mixed>,array<string,mixed>}
+     */
+    private function travelRevision(): array
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'component_kind'
+        ] = 'travel_reimbursement';
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        return [$snapshot, $result];
+    }
+
+    /** @return array<string,mixed> */
+    private function riskySavingsRow(int $employmentId, int $contributionMinor): array
+    {
+        return [
+            'employment_id' => $employmentId,
+            'status' => 'calculated',
+            'issues' => [],
+            'assessment_base_minor' => $contributionMinor * 25,
+            'contribution_minor' => $contributionMinor,
+        ];
+    }
+
+    /**
+     * Revize, kde je první vstup NEPENĚŽNÍ benefit bez předkontace.
+     *
+     * @return array{0:array<string,mixed>,1:array<string,mixed>}
+     */
+    private function nonCashBenefitRevision(): array
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][0]['inputs'][0]['component'][
+            'value_kind'
+        ] = 'non_monetary';
+        $result = $this->calculatedResult();
+        $result['people'][0]['employments'][0]['inputs'][0]['totals'] = [
+            'source_amount_minor' => 100_000,
+            'cash_payable_minor' => 0,
+        ];
+        $result['people'][0]['employments'][0]['totals']['cash_payable_minor'] = 0;
+        $result['people'][0]['totals']['cash_payable_minor'] = 500_000;
+        $result['people'][0]['payable_after_enforcement_minor'] = 366_000;
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+
+        return [$snapshot, $result];
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function nonCashBenefitStatutorySets(): array
+    {
+        $sets = $this->statutorySets();
+        $sets['net_pay']['people'][0]['result_snapshot'][
+            'net_payable_minor_units'
+        ] = 371_000;
+
+        return $sets;
+    }
+
+    /** @return array<string,mixed> */
+    private function unpaidLeaveSnapshot(): array
+    {
+        return [
+            'schema_version' => 'payroll-run-input.v2',
+            'supplier_id' => 1,
+            'period_start' => '2026-06-01',
+            'period_end' => '2026-06-30',
+            'people' => [[
+                'employee' => ['id' => 21],
+                'employments' => [[
+                    'employment' => [
+                        'id' => 201,
+                        'employee_id' => 21,
+                        'relation_type' => 'employment',
+                    ],
+                    'inputs' => [[
+                        'id' => 9,
+                        'amount_minor' => 0,
+                        'component' => [
+                            'code' => 'SLOZKA_9',
+                            'accounting_debit_code' => null,
+                            'accounting_credit_code' => null,
+                        ],
+                    ]],
+                ]],
+            ]],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function unpaidLeaveResult(int $healthMinor = 5_000): array
+    {
+        return [
+            'schema_version' => 'payroll-run-result.v2',
+            'source_snapshot_hash' => $this->snapshotHash($this->unpaidLeaveSnapshot()),
+            'statutory' => ['status' => 'calculated'],
+            'people' => [[
+                'employee_id' => 21,
+                'totals' => ['cash_payable_minor' => 0],
+                'employments' => [$this->resultEmployment(201, 9, 0)],
+                'enforcement' => [
+                    'result' => [
+                        'status' => 'supported',
+                        'total_withheld_minor_units' => 0,
+                    ],
+                ],
+                'payable_after_enforcement_minor' => -$healthMinor,
+            ]],
+        ];
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function unpaidLeaveStatutorySets(int $healthMinor = 5_000): array
+    {
+        $sets = $this->statutorySets();
+        $sets['social_insurance']['result_snapshot'][
+            'employer_contribution_minor_units'
+        ] = 0;
+        $sets['health_insurance']['result_snapshot'][
+            'employer_contribution_minor_units'
+        ] = 0;
+        foreach (['social_insurance', 'health_insurance', 'income_tax', 'net_pay'] as $kind) {
+            $sets[$kind]['people'][0]['employee_id'] = 21;
+        }
+        $sets['social_insurance']['people'][0]['result_snapshot'][
+            'employee_contribution_minor_units'
+        ] = 0;
+        $sets['health_insurance']['people'][0]['result_snapshot'][
+            'employee_contribution_minor_units'
+        ] = $healthMinor;
+        $sets['income_tax']['people'][0]['result_snapshot'] = [
+            'advance_tax' => [
+                'tax_after_credits_minor_units' => 0,
+                'tax_bonus_minor_units' => 0,
+            ],
+            'withholding_tax_minor_units' => 0,
+        ];
+        $sets['net_pay']['people'][0]['result_snapshot'] = [
+            'deducted_minor_units' => 0,
+            'net_payable_minor_units' => -$healthMinor,
+            'deductions' => [],
+        ];
+
+        return $sets;
+    }
+
     public function testCorrectionProducesOnlyBalancedDeltaAgainstPreviousTarget(): void
     {
         $first = $this->builder->build(
@@ -178,7 +905,7 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
 
         self::assertSame([
-            '336|credit' => 10_000,
+            '336.100|credit' => 10_000,
             '524|debit' => 10_000,
         ], $this->lineMap($correction->lines));
         self::assertSame(10_000, $correction->debitTotalMinor);
@@ -220,7 +947,8 @@ final class PayrollPostingLineBuilderTest extends TestCase
         self::assertSame([
             '331|credit' => 100_000,
             '331|debit' => 100_000,
-            '336|credit' => 271_800,
+            '336.100|credit' => 190_800,
+            '336.200|credit' => 81_000,
             '342|credit' => 50_000,
             '365.100|credit' => 466_000,
             '366|credit' => 500_000,
@@ -597,8 +1325,8 @@ final class PayrollPostingLineBuilderTest extends TestCase
             'Součet nákladu po střediscích = závazek vůči ČSSZ a pojišťovně.',
         );
         self::assertSame(
-            ['' => 271_800],
-            $this->costCentreMap($preview->lines, '336', 'credit'),
+            ['' => 190_800],
+            $this->costCentreMap($preview->lines, '336.100', 'credit'),
             'Závazek se na střediska nedělí — dluží se jako celek.',
         );
         self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);

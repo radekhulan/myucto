@@ -1321,7 +1321,11 @@
                 "statutory_incomplete": "Zákonný výpočet pojistného, daně nebo čisté mzdy nebyl dokončen. Opravte mzdové složky a zákonné údaje zaměstnanců a potom otevřete novou revizi běhu.",
                 "requires_attention": "Kontrola našla údaj, který je potřeba doplnit nebo ručně ověřit. Otevřete místo k opravě; technický detail zůstává uložený v auditní stopě.",
                 "and_more": "a dalších {count}",
-                "open_remediation": "Otevřít místo k opravě"
+                "open_remediation": "Otevřít místo k opravě",
+                "draft_inputs_approve_all": "Schválit vše",
+                "draft_inputs_approved": "Schváleno {count} mzdových vstupů.",
+                "draft_inputs_approve_partial": "Schváleno {approved} vstupů, {failed} ne. První důvod: {reason}",
+                "draft_inputs_approve_failed": "Mzdové vstupy se nepodařilo hromadně schválit."
             },
             "override": {
                 "awaiting": "Tohle varování čeká na rozhodnutí člověka. Dokud za něj někdo nepřevezme odpovědnost a nenapíše proč, mzdový běh schválit nejde.",
@@ -1721,7 +1725,11 @@
             "save_blocked_loading": "Počkejte, než se vstupy za zvolené období načtou.",
             "save_blocked_empty": "Za toto období není co uložit — nejsou tu žádné vztahy se mzdovým vstupem.",
             "save_blocked_invalid": "Opravte červeně označená pole. Dokud v tabulce zůstane neplatná hodnota, uložit nejde.",
-            "save_blocked_rows": "Některý řádek má blokující stav (uzamčený vstup nebo ukončený vztah). Vyřešte ho a zkuste uložit znovu."
+            "save_blocked_rows": "Některý řádek má blokující stav (uzamčený vstup nebo ukončený vztah). Vyřešte ho a zkuste uložit znovu.",
+            "save_partial_invalid": "Uloží se jen řádky bez chyby — {count} řádek zůstane neuložený, dokud ho neopravíte. | Uloží se jen řádky bez chyby — {count} řádky zůstanou neuložené, dokud je neopravíte. | Uloží se jen řádky bez chyby — {count} řádků zůstane neuložených, dokud je neopravíte.",
+            "save_partial_conflict": "U {count} řádku je částka evidovaná dvakrát; ostatní se uloží normálně. | U {count} řádků je částka evidovaná dvakrát; ostatní se uloží normálně.",
+            "save_pending_pages": "Uloží se i {count} rozepsaný řádek z jiných stránek. | Uloží se i {count} rozepsané řádky z jiných stránek. | Uloží se i {count} rozepsaných řádků z jiných stránek.",
+            "saved_partially": "Uloženo {saved} řádků, {failed} se neuložilo — důvod je u konkrétního pole."
         },
         "risky_savings": {
             "title": "Povinné spoření u rizikové práce",
@@ -1889,7 +1897,10 @@
                     "shift_schedule_missing": "Ve směnovém režimu chybí publikovaný rozvrh směn.",
                     "meal_basis_conflict": "Zvolený kalendářní režim je v rozporu s publikovanými směnami.",
                     "calendar_day_break_allocation_missing": "U intervalu přes půlnoc není doloženo, ke kterému kalendářnímu dni patří přestávka. Rozdělte interval nebo zpřesněte evidenci."
-                }
+                },
+                "approve_all": "Schválit vše ({count})",
+                "approve_all_done": "Schváleno {count} mzdových vstupů.",
+                "approve_all_partial": "Schváleno {approved} vstupů, {failed} ne. První důvod: {reason}"
             },
             "import": {
                 "title": "Import měsíčních vstupů",
@@ -2344,7 +2355,9 @@
                 "child_claim_conflict": "Nároky na děti si odporují — zkontrolujte pořadí dětí, potvrzení o společné domácnosti a vyloučení druhého poplatníka.",
                 "child_jmhz_evidence_incomplete": "Doplňte na kartě dítěte jméno a datum narození a v podkladech ročního zúčtování zodpovězte, zda dítě uplatňovala i jiná osoba ve společné domácnosti.",
                 "already_settled": "Roční zúčtování za tento rok už proběhlo. Provádí se jednou ročně.",
-                "ruleset_year_not_covered": "Pro tento rok nemáme účinná daňová pravidla na celý rok, takže roční částky nelze odvodit."
+                "ruleset_year_not_covered": "Pro tento rok nemáme účinná daňová pravidla na celý rok, takže roční částky nelze odvodit.",
+                "tax_year_not_finished": "Zdaňovací období ještě neskončilo. Roční zúčtování jde provést až od 1. ledna následujícího roku.",
+                "taxpayer_credit_evidence_missing": "Zaměstnanec má podepsané prohlášení k dani, ale v evidenci nároků mu chybí sleva na poplatníka. Doplňte ji v kartě zaměstnance — bez ní by zúčtování spočítalo daň bez roční slevy."
             }
         },
         "time": {
@@ -4884,7 +4897,8 @@
             "account_aria_label": "{item} — {side}",
             "account_type": {
                 "expense": "nákladový účet",
-                "liability": "závazkový účet"
+                "liability": "závazkový účet",
+                "asset": "účet pohledávek"
             },
             "accounting": {
                 "employment_gross": "Mzda zaměstnance mimo výkon funkce",
@@ -4895,7 +4909,11 @@
                 "health_insurance": "Závazek zdravotního pojištění",
                 "income_tax": "Záloha nebo srážka daně",
                 "other_deductions": "Ostatní srážky ze mzdy",
-                "partner_settlement": "Zápočet na účet společníka"
+                "partner_settlement": "Zápočet na účet společníka",
+                "risky_savings": "Povinné spoření u rizikové práce",
+                "employee_receivable": "Pohledávka za zaměstnancem",
+                "non_deductible_benefit": "Nedaňová část benefitu",
+                "travel_expense": "Cestovní náhrady"
             },
             "validation": {
                 "title": "Před uložením opravte označená pole.",
@@ -4970,6 +4988,12 @@
                 "delete_failed": "Dimenzi se nepodařilo smazat.",
                 "in_use_error": "Dimenze je použitá ve schválené mzdové revizi — jde jen ukončit její účinnost (nastavit konec platnosti), ne ji smazat.",
                 "terminate_hint": "Dimenzi nejde smazat, protože je použitá v historii — ukončete její účinnost nastavením konce platnosti."
+            },
+            "accounting_row_hint": {
+                "risky_savings": "Zákonný příspěvek zaměstnavatele na spoření na stáří u rizikové práce (4 % vyměřovacího základu od 1. 1. 2026). Zaměstnanci se nevyplácí, posílá se penzijní společnosti — proto zákonný sociální náklad (527) proti jinému závazku (379), ne pojistné na 336.",
+                "employee_receivable": "Kam se překlopí záporná čistá mzda — typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",
+                "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
+                "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou."
             }
         },
         "status": {
@@ -5680,7 +5704,33 @@
             "load_failed_hint": "Exekuce a insolvence se nenačetly. Prázdný seznam teď neznamená, že žádné nejsou — zkuste to prosím znovu.",
             "support_failed": "Účty příjemců se nepodařilo načíst, takže jejich výběr zůstal prázdný. Není to nastavením — zkuste načtení zopakovat.",
             "transition_blocked_document": "Vyberte doklad, o který se přechod opírá. Bez něj by v případu chyběla stopa, odkud změna vzešla.",
-            "transition_blocked_reason": "Napište důvod. U tohoto kroku se ukládá do historie případu, takže ho nelze vynechat."
+            "transition_blocked_reason": "Napište důvod. U tohoto kroku se ukládá do historie případu, takže ho nelze vynechat.",
+            "spouse_pension": {
+                "why": "Od 1. 1. 2025 (nařízení vlády č. 441/2024 Sb.) se manžel ani partner do nezabavitelné částky nezapočítává automaticky. Čtvrtina na něj náleží jen tehdy, byl-li povinnému NEBO jeho manželovi/partnerovi přiznán starobní důchod, invalidní důchod pro invaliditu 2. nebo 3. stupně, anebo sirotčí důchod. Vyživovaných dětí se změna netýká.",
+                "question": "Doložen důchod zakládající čtvrtinu na manžela/partnera?",
+                "evidence": {
+                    "unknown": "Doložení nedoplněno — záznam vznikl před změnou od 1. 1. 2025",
+                    "not_documented": "Nedoložen",
+                    "documented": "Doložen"
+                },
+                "holder_label": "Komu byl důchod přiznán",
+                "holder": {
+                    "debtor": "Povinnému",
+                    "spouse_partner": "Manželovi/partnerovi"
+                },
+                "kind_label": "Druh důchodu",
+                "kind": {
+                    "old_age": "Starobní",
+                    "invalidity_second_degree": "Invalidní pro invaliditu 2. stupně",
+                    "invalidity_third_degree": "Invalidní pro invaliditu 3. stupně",
+                    "orphan": "Sirotčí"
+                },
+                "documented_on": "Datum doložení",
+                "documented_on_required": "U doloženého důchodu vyplňte datum doložení."
+            },
+            "blocker": {
+                "spouse_quarter_pension_evidence_unknown": "Doložte důchod zakládající čtvrtinu na manžela/partnera, nebo manžela z vyživovaných osob odeberte."
+            }
         },
         "retention": {
             "title": "Retenční lhůty mzdové agendy",
@@ -7989,9 +8039,7 @@
         "credit_children": "Daňové zvýhodnění ({count})",
         "auto_post_badge": "Automaticky",
         "form_name": "Jméno a příjmení",
-        "form_birth_number": "Rodné číslo",
         "form_birth_date": "Datum narození",
-        "form_address": "Adresa (bydliště)",
         "form_employment_type": "Pracovněprávní vztah",
         "form_statutory_body_mismatch": "Odměna člena statutárního orgánu se obvykle účtuje 522/366, tedy s typem poplatníka „Jednatel/společník“. Uložit to takhle lze — jen ověřte, že je to záměr (např. jednatel, který má u firmy i pracovní poměr).",
         "form_child_count": "Počet dětí",
@@ -17496,7 +17544,9 @@
         "overdrawn": "Přečerpání",
         "payout": "Proplacení",
         "reversal": "Reverze"
-      }
+      },
+      "overdraw_question": "Zůstatek dovolené je {balance} h:mm, čerpáte {requested} h:mm. Poskytnout dovolenou nad rámec nároku?",
+      "overdraw_confirm": "Poskytnout nad rámec nároku"
     },
     "validation": {
       "number": "Zadejte platné číslo v povoleném rozsahu.",

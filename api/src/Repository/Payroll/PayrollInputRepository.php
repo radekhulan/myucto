@@ -17,6 +17,15 @@ final class PayrollInputRepository
 {
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
+    /**
+     * Strop jedné dávky hromadného schválení.
+     *
+     * Odpovídá stropu rychlého zadávání (PayrollQuickInputValidator) —
+     * jedna obrazovka mezd se tak schválí jedním požadavkem i u firmy s 500
+     * zaměstnanci, ale zámky nad `payroll_inputs` nedrží celý měsíc naráz.
+     */
+    public const APPROVE_BATCH_MAX = 500;
+    private const APPROVE_BATCH_SAVEPOINT = 'payroll_input_approve_batch';
 
     public function __construct(
         private readonly Connection $db,
@@ -345,138 +354,15 @@ final class PayrollInputRepository
                 );
             }
 
-            $definition = $this->definitionFactory->fromArray($row);
-            try {
-                $definition->impact(new \MyInvoice\Service\Payroll\Calculation\Money(
-                    PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
-                ));
-            } catch (\DomainException $e) {
-                throw new PayrollInputApprovalException(
-                    'input_requires_manual_review',
-                    $e->getMessage(),
-                );
-            }
             $employeeId = PayrollTimeValue::int($row['employee_id'] ?? null, 'employee_id');
-            $componentId = PayrollTimeValue::int($row['component_id'] ?? null, 'component_id');
-            $amountMinor = PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor');
-            $taxYear = (int) substr(
+            $plan = $this->approvalPlan(
+                $pdo,
+                $supplierId,
+                $row,
+                $employeeId,
+                PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
                 PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
-                0,
-                4,
             );
-            $split = null;
-            $entitlement = null;
-            if ($definition->annualLimitMinor !== null
-                || $definition->exemptionBasket !== null
-            ) {
-                $this->lockEmployee($pdo, $supplierId, $employeeId);
-            }
-            // Vlastní strop zaměstnavatele. NENÍ to daňová hranice: zákon
-            // poskytnutí nad limit nezakazuje, jen ho zdaňuje. Zůstává proto
-            // tvrdou zábranou schválení a hlídá se dál per složka.
-            if ($definition->annualLimitMinor !== null) {
-                $used = $this->annualBenefitTotal(
-                    $supplierId,
-                    $employeeId,
-                    $componentId,
-                    $taxYear,
-                );
-                if ($used + max(0, $amountMinor) > $definition->annualLimitMinor) {
-                    throw new PayrollInputApprovalException(
-                        'benefit_limit_exceeded',
-                        'Schválením by byl překročen roční limit benefitu.',
-                    );
-                }
-            }
-            // Zákonný koš podle § 6 odst. 9 ZDP. Neblokuje: nadlimitní část je
-            // běžný zdanitelný příjem a rozpad se zmrazí na vstupu, aby ho
-            // výpočet běhu nemusel dopočítávat z historie schvalování.
-            //
-            // Výjimka je jediná a je fail-closed: u příspěvku na stravování stojí
-            // strop na POČTU SMĚN S NÁROKEM, a ten se bez uzavřené docházky
-            // odhadovat nesmí — jinak by se osvobodila i nadlimitní část.
-            if ($definition->exemptionBasket !== null) {
-                $periodStart = PayrollTimeValue::string(
-                    $row['period_start'] ?? null,
-                    'period_start',
-                );
-                $entitlements = 0;
-                try {
-                    if ($definition->exemptionBasket->scalesWithShifts()) {
-                        $entitlement = $this->mealEvidence->forPeriod(
-                            $supplierId,
-                            $employeeId,
-                            $periodStart,
-                        );
-                        if (!$entitlement->complete) {
-                            throw new PayrollInputApprovalException(
-                                'meal_shift_evidence_incomplete',
-                                'Osvobozený příspěvek na stravování je podle § 6 odst. 9 '
-                                . 'písm. b) ZDP limitovaný za jednu směnu. Chybí podklad '
-                                . 'o odpracovaných směnách: '
-                                . implode(', ', $entitlement->missing)
-                                . '. Uzavřete docházku období a schvalte vstup znovu.',
-                            );
-                        }
-                        $entitlements = $entitlement->count();
-                    }
-                    $split = $this->baskets->split(
-                        $definition->exemptionBasket,
-                        $periodStart,
-                        $this->basketTotal(
-                            $supplierId,
-                            $employeeId,
-                            $definition->exemptionBasket,
-                            $taxYear,
-                            $periodStart,
-                        ),
-                        $amountMinor,
-                        $entitlements,
-                        $definition->exemptionBasket->scalesWithShifts()
-                            ? $this->mealBasketEntitlements(
-                                $supplierId,
-                                $employeeId,
-                                $definition->exemptionBasket,
-                                $periodStart,
-                            )
-                            : null,
-                    );
-                } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
-                    throw new PayrollInputApprovalException(
-                        'benefit_basket_limit_unavailable',
-                        'Limit koše osvobození není pro rozhodné období k dispozici, '
-                        . 'rozpad plnění proto nelze určit: ' . $e->getMessage(),
-                    );
-                }
-            }
-            $snapshot = [
-                ...$definition->snapshot(),
-                'component_id' => PayrollTimeValue::int(
-                    $row['component_id'] ?? null,
-                    'component_id',
-                ),
-                'component_row_version' => PayrollTimeValue::int(
-                    $row['component_row_version'] ?? null,
-                    'component_row_version',
-                ),
-                'valid_from' => PayrollTimeValue::string(
-                    $row['valid_from'] ?? null,
-                    'valid_from',
-                ),
-                'valid_to' => $row['valid_to'] === null
-                    ? null
-                    : PayrollTimeValue::string($row['valid_to'], 'valid_to'),
-            ];
-            $json = CanonicalJson::encode($snapshot);
-            $hash = hash('sha256', $json, true);
-            $benefitAllocation = $split?->allocation;
-            if ($benefitAllocation !== null && $entitlement !== null) {
-                $benefitAllocation = [
-                    ...$benefitAllocation,
-                    'entitlement_basis' => $entitlement->basis,
-                    'entitlement_snapshot' => $entitlement->jsonSerialize(),
-                ];
-            }
 
             $update = $pdo->prepare(
                 'UPDATE payroll_inputs
@@ -494,14 +380,7 @@ final class PayrollInputRepository
                     AND status = "draft"'
             );
             $update->execute([
-                $json,
-                $hash,
-                $split?->basket->value,
-                $split?->exemptMinor,
-                $split?->taxableMinor,
-                $benefitAllocation === null
-                    ? null
-                    : CanonicalJson::encode($benefitAllocation),
+                ...$plan['columns'],
                 $userId,
                 $supplierId,
                 $id,
@@ -510,21 +389,16 @@ final class PayrollInputRepository
             if ($update->rowCount() !== 1) {
                 throw new PayrollInputConflictException($currentVersion);
             }
-            if ($definition->kind->isBenefit()) {
-                $pdo->prepare(
-                    'INSERT IGNORE INTO payroll_benefit_accumulators
-                        (supplier_id, employee_id, component_id, input_id,
-                         tax_year, amount_minor)
-                     VALUES (?, ?, ?, ?, YEAR(?), ?)'
-                )->execute([
-                    $supplierId,
-                    $employeeId,
-                    $componentId,
-                    $id,
-                    PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
-                    $amountMinor,
-                ]);
-            }
+            $this->recordBenefitAccumulator(
+                $pdo,
+                $supplierId,
+                $id,
+                $employeeId,
+                PayrollTimeValue::int($row['component_id'] ?? null, 'component_id'),
+                PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+                PayrollTimeValue::int($row['amount_minor'] ?? null, 'amount_minor'),
+                $plan,
+            );
             if ($ownsTransaction) {
                 $pdo->commit();
             }
@@ -538,6 +412,769 @@ final class PayrollInputRepository
         }
 
         return $this->find($supplierId, $id);
+    }
+
+    /**
+     * Založí mzdový vstup rovnou schválený — JEDNÍM zápisem.
+     *
+     * ── Proč jedním ────────────────────────────────────────────────────────────
+     * Založit koncept a hned ho schválit druhým příkazem znamená DVA bumpy
+     * `row_version`. Prohlížeč přitom dostane zpátky verzi, se kterou příště
+     * přijde na uložení, takže každá druhá editace téhož pole skončila na 409
+     * „Mzdový vstup mezitím změnil jiný uživatel." — což byla nepravda, změnil
+     * ho tentýž požadavek. Při 500 zaměstnancích × 3 pole to bylo navíc 1 500
+     * zbytečných bumpů verzí na jedno uložení.
+     *
+     * Zmrazený snímek definice složky ani jeho SHA-256 se tím nemění: počítá je
+     * táž cesta jako u samostatného schválení ({@see approvalPlan()}) a
+     * odpovídají definici v okamžiku schválení. Jen se zapíšou v témže INSERTu.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public function createApproved(int $supplierId, array $data, ?int $userId): array
+    {
+        $this->assertValidReferences($supplierId, $data);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $employeeId = PayrollTimeValue::int($data['employee_id'] ?? null, 'employee_id');
+            $componentId = PayrollTimeValue::int($data['component_id'] ?? null, 'component_id');
+            $amountMinor = PayrollTimeValue::int($data['amount_minor'] ?? null, 'amount_minor');
+            $periodStart = PayrollTimeValue::string(
+                $data['period_start'] ?? null,
+                'period_start',
+            );
+            $plan = $this->approvalPlan(
+                $pdo,
+                $supplierId,
+                $this->componentDefinitionRow($pdo, $supplierId, $componentId),
+                $employeeId,
+                $amountMinor,
+                $periodStart,
+            );
+            try {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO payroll_inputs
+                        (supplier_id, employee_id, employment_id, component_id,
+                         period_start, source_period_start, amount_minor,
+                         quantity_milliunits, source_kind, external_id,
+                         source_snapshot_json, source_snapshot_hash, created_by,
+                         status, component_snapshot_json, component_snapshot_hash,
+                         benefit_basket, benefit_exempt_minor, benefit_taxable_minor,
+                         benefit_allocation_json, approved_by, approved_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                             "approved", ?, ?, ?, ?, ?, ?, ?, NOW())'
+                );
+                $stmt->execute([
+                    $supplierId,
+                    $data['employee_id'],
+                    $data['employment_id'],
+                    $data['component_id'],
+                    $data['period_start'],
+                    $data['source_period_start'],
+                    $data['amount_minor'],
+                    $data['quantity_milliunits'],
+                    $data['source_kind'],
+                    $data['external_id'],
+                    $data['source_snapshot_json'] ?? null,
+                    $data['source_snapshot_hash'] ?? null,
+                    $userId,
+                    ...$plan['columns'],
+                    $userId,
+                ]);
+            } catch (PDOException $e) {
+                if ((string) $e->getCode() === '23000') {
+                    throw new \InvalidArgumentException(
+                        'Externí mzdový vstup už byl pro tento vztah a měsíc importován.',
+                        previous: $e,
+                    );
+                }
+                throw $e;
+            }
+            $id = (int) $pdo->lastInsertId();
+            $this->recordBenefitAccumulator(
+                $pdo,
+                $supplierId,
+                $id,
+                $employeeId,
+                $componentId,
+                $periodStart,
+                $amountMinor,
+                $plan,
+            );
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->find($supplierId, $id)
+            ?? throw new \RuntimeException('Mzdový vstup se nepodařilo načíst.');
+    }
+
+    /**
+     * Přepíše mzdový vstup a schválí ho — opět JEDNÍM zápisem, jeden bump verze.
+     *
+     * Bere koncept i vlastní dosud nezamčený schválený vstup. Vracet schválený
+     * vstup nejdřív do konceptu a teprve pak ho přepsat by byly tři zápisy a
+     * tři bumpy verze; kontroly, kvůli kterým to vracení existovalo, se dělají
+     * pořád — jen dřív, jako podmínka, a bez mezistavu.
+     *
+     * Benefit se sem nepustí: schválením vznikl akumulátor čerpající roční koš
+     * § 6 odst. 9 ZDP a ten uvolňuje výhradně {@see reverseBenefit()}.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>|null
+     */
+    public function updateApproved(
+        int $supplierId,
+        int $id,
+        array $data,
+        int $expectedVersion,
+        ?int $userId,
+    ): ?array {
+        $this->assertValidReferences($supplierId, $data);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, status, row_version, period_start
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE'
+            );
+            $stmt->execute([$supplierId, $id]);
+            $raw = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($raw === false) {
+                if ($ownsTransaction) {
+                    $pdo->rollBack();
+                }
+                return null;
+            }
+            $current = PayrollTimeValue::row($raw, 'payroll_input_update_approved');
+            $status = PayrollTimeValue::string($current['status'] ?? null, 'status');
+            $currentVersion = PayrollTimeValue::int(
+                $current['row_version'] ?? null,
+                'row_version',
+            );
+            if (!in_array($status, ['draft', 'approved'], true)) {
+                throw new \DomainException(
+                    'Přepsat lze jen rozpracovaný nebo dosud nezamčený schválený mzdový vstup.',
+                );
+            }
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($status === 'approved') {
+                // Tytéž zábrany, které hlídají rušení konceptu: vstup zmrazený
+                // v revizi běhu, navázaný na vyúčtování cesty nebo na řádek
+                // importu se přepsat nesmí.
+                if ($this->hasActiveBenefit($pdo, $supplierId, $id)) {
+                    throw new \DomainException(
+                        'Schválený benefit čerpá roční koš osvobození; opravit ho lze '
+                        . 'jen stornem v měsíčních vstupech.',
+                    );
+                }
+                $this->assertNoMovement(
+                    $pdo,
+                    $supplierId,
+                    $id,
+                    PayrollTimeValue::string(
+                        $current['period_start'] ?? null,
+                        'period_start',
+                    ),
+                );
+            }
+
+            $employeeId = PayrollTimeValue::int($data['employee_id'] ?? null, 'employee_id');
+            $componentId = PayrollTimeValue::int($data['component_id'] ?? null, 'component_id');
+            $amountMinor = PayrollTimeValue::int($data['amount_minor'] ?? null, 'amount_minor');
+            $periodStart = PayrollTimeValue::string(
+                $data['period_start'] ?? null,
+                'period_start',
+            );
+            $plan = $this->approvalPlan(
+                $pdo,
+                $supplierId,
+                $this->componentDefinitionRow($pdo, $supplierId, $componentId),
+                $employeeId,
+                $amountMinor,
+                $periodStart,
+            );
+            try {
+                $update = $pdo->prepare(
+                    'UPDATE payroll_inputs
+                        SET employee_id = ?, employment_id = ?, component_id = ?,
+                            period_start = ?, source_period_start = ?, amount_minor = ?,
+                            quantity_milliunits = ?, source_kind = ?, external_id = ?,
+                            source_snapshot_json = ?, source_snapshot_hash = ?,
+                            status = "approved",
+                            component_snapshot_json = ?,
+                            component_snapshot_hash = ?,
+                            benefit_basket = ?,
+                            benefit_exempt_minor = ?,
+                            benefit_taxable_minor = ?,
+                            benefit_allocation_json = ?,
+                            approved_by = ?,
+                            approved_at = NOW(),
+                            row_version = row_version + 1
+                      WHERE supplier_id = ? AND id = ? AND row_version = ?
+                        AND status IN ("draft", "approved")'
+                );
+                $update->execute([
+                    $data['employee_id'],
+                    $data['employment_id'],
+                    $data['component_id'],
+                    $data['period_start'],
+                    $data['source_period_start'],
+                    $data['amount_minor'],
+                    $data['quantity_milliunits'],
+                    $data['source_kind'],
+                    $data['external_id'],
+                    $data['source_snapshot_json'] ?? null,
+                    $data['source_snapshot_hash'] ?? null,
+                    ...$plan['columns'],
+                    $userId,
+                    $supplierId,
+                    $id,
+                    $expectedVersion,
+                ]);
+            } catch (PDOException $e) {
+                if ((string) $e->getCode() === '23000') {
+                    throw new \InvalidArgumentException(
+                        'Externí mzdový vstup už byl pro tento vztah a měsíc importován.',
+                        previous: $e,
+                    );
+                }
+                throw $e;
+            }
+            if ($update->rowCount() !== 1) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            $this->recordBenefitAccumulator(
+                $pdo,
+                $supplierId,
+                $id,
+                $employeeId,
+                $componentId,
+                $periodStart,
+                $amountMinor,
+                $plan,
+            );
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $this->find($supplierId, $id);
+    }
+
+    /**
+     * Definice mzdové složky v podobě, ze které umí továrna sestavit snapshot.
+     *
+     * Tvar sloupců je záměrně TENTÝŽ jako v dotazu {@see approve()} — snapshot
+     * se z něj počítá stejně, ať se schvaluje samostatně, nebo rovnou při
+     * zadání. Rozejít se ty dvě cesty nesmějí: hash by přestal odpovídat.
+     *
+     * @return array<string,mixed>
+     */
+    private function componentDefinitionRow(
+        PDO $pdo,
+        int $supplierId,
+        int $componentId,
+    ): array {
+        $stmt = $pdo->prepare(
+            'SELECT id AS component_id,
+                    code,
+                    name,
+                    component_kind,
+                    value_kind,
+                    frequency_kind,
+                    tax_treatment,
+                    social_participation_treatment,
+                    social_treatment,
+                    health_participation_treatment,
+                    health_treatment,
+                    average_earning_treatment,
+                    enforcement_treatment,
+                    jmhz_treatment,
+                    statistics_treatment,
+                    accounting_debit_code,
+                    accounting_credit_code,
+                    annual_limit_minor,
+                    exemption_basket,
+                    exemption_basis,
+                    valid_from,
+                    valid_to,
+                    row_version AS component_row_version
+               FROM payroll_component_definitions
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $componentId]);
+        $raw = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            throw new \InvalidArgumentException('Mzdová složka nepatří této firmě.');
+        }
+
+        return PayrollTimeValue::row($raw, 'payroll_component_definition');
+    }
+
+    /**
+     * Vše, co schválení zapisuje do řádku — spočítané, ale ještě nezapsané.
+     *
+     * Oddělením od samotného zápisu může tytéž hodnoty použít i INSERT, který
+     * vstup rovnou zakládá schválený. `columns` jsou parametry v pořadí
+     * `component_snapshot_json, component_snapshot_hash, benefit_basket,
+     * benefit_exempt_minor, benefit_taxable_minor, benefit_allocation_json`.
+     *
+     * @param array<string,mixed> $componentRow
+     * @return array{columns:list<mixed>,is_benefit:bool}
+     */
+    private function approvalPlan(
+        PDO $pdo,
+        int $supplierId,
+        array $componentRow,
+        int $employeeId,
+        int $amountMinor,
+        string $periodStart,
+    ): array {
+        $definition = $this->definitionFactory->fromArray($componentRow);
+        try {
+            $definition->impact(new \MyInvoice\Service\Payroll\Calculation\Money(
+                $amountMinor,
+            ));
+        } catch (\DomainException $e) {
+            throw new PayrollInputApprovalException(
+                'input_requires_manual_review',
+                $e->getMessage(),
+            );
+        }
+        $componentId = PayrollTimeValue::int(
+            $componentRow['component_id'] ?? null,
+            'component_id',
+        );
+        $taxYear = (int) substr($periodStart, 0, 4);
+        $split = null;
+        $entitlement = null;
+        if ($definition->annualLimitMinor !== null
+            || $definition->exemptionBasket !== null
+        ) {
+            $this->lockEmployee($pdo, $supplierId, $employeeId);
+        }
+        // Vlastní strop zaměstnavatele. NENÍ to daňová hranice: zákon
+        // poskytnutí nad limit nezakazuje, jen ho zdaňuje. Zůstává proto
+        // tvrdou zábranou schválení a hlídá se dál per složka.
+        if ($definition->annualLimitMinor !== null) {
+            $used = $this->annualBenefitTotal(
+                $supplierId,
+                $employeeId,
+                $componentId,
+                $taxYear,
+            );
+            if ($used + max(0, $amountMinor) > $definition->annualLimitMinor) {
+                throw new PayrollInputApprovalException(
+                    'benefit_limit_exceeded',
+                    'Schválením by byl překročen roční limit benefitu.',
+                );
+            }
+        }
+        // Zákonný koš podle § 6 odst. 9 ZDP. Neblokuje: nadlimitní část je
+        // běžný zdanitelný příjem a rozpad se zmrazí na vstupu, aby ho
+        // výpočet běhu nemusel dopočítávat z historie schvalování.
+        //
+        // Výjimka je jediná a je fail-closed: u příspěvku na stravování stojí
+        // strop na POČTU SMĚN S NÁROKEM, a ten se bez uzavřené docházky
+        // odhadovat nesmí — jinak by se osvobodila i nadlimitní část.
+        if ($definition->exemptionBasket !== null) {
+            $entitlements = 0;
+            try {
+                if ($definition->exemptionBasket->scalesWithShifts()) {
+                    $entitlement = $this->mealEvidence->forPeriod(
+                        $supplierId,
+                        $employeeId,
+                        $periodStart,
+                    );
+                    if (!$entitlement->complete) {
+                        throw new PayrollInputApprovalException(
+                            'meal_shift_evidence_incomplete',
+                            'Osvobozený příspěvek na stravování je podle § 6 odst. 9 '
+                            . 'písm. b) ZDP limitovaný za jednu směnu. Chybí podklad '
+                            . 'o odpracovaných směnách: '
+                            . implode(', ', $entitlement->missing)
+                            . '. Uzavřete docházku období a schvalte vstup znovu.',
+                        );
+                    }
+                    $entitlements = $entitlement->count();
+                }
+                $split = $this->baskets->split(
+                    $definition->exemptionBasket,
+                    $periodStart,
+                    $this->basketTotal(
+                        $supplierId,
+                        $employeeId,
+                        $definition->exemptionBasket,
+                        $taxYear,
+                        $periodStart,
+                    ),
+                    $amountMinor,
+                    $entitlements,
+                    $definition->exemptionBasket->scalesWithShifts()
+                        ? $this->mealBasketEntitlements(
+                            $supplierId,
+                            $employeeId,
+                            $definition->exemptionBasket,
+                            $periodStart,
+                        )
+                        : null,
+                );
+            } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
+                throw new PayrollInputApprovalException(
+                    'benefit_basket_limit_unavailable',
+                    'Limit koše osvobození není pro rozhodné období k dispozici, '
+                    . 'rozpad plnění proto nelze určit: ' . $e->getMessage(),
+                );
+            }
+        }
+        $snapshot = [
+            ...$definition->snapshot(),
+            'component_id' => $componentId,
+            'component_row_version' => PayrollTimeValue::int(
+                $componentRow['component_row_version'] ?? null,
+                'component_row_version',
+            ),
+            'valid_from' => PayrollTimeValue::string(
+                $componentRow['valid_from'] ?? null,
+                'valid_from',
+            ),
+            'valid_to' => $componentRow['valid_to'] === null
+                ? null
+                : PayrollTimeValue::string($componentRow['valid_to'], 'valid_to'),
+        ];
+        $json = CanonicalJson::encode($snapshot);
+        $benefitAllocation = $split?->allocation;
+        if ($benefitAllocation !== null && $entitlement !== null) {
+            $benefitAllocation = [
+                ...$benefitAllocation,
+                'entitlement_basis' => $entitlement->basis,
+                'entitlement_snapshot' => $entitlement->jsonSerialize(),
+            ];
+        }
+
+        return [
+            'columns' => [
+                $json,
+                hash('sha256', $json, true),
+                $split?->basket->value,
+                $split?->exemptMinor,
+                $split?->taxableMinor,
+                $benefitAllocation === null
+                    ? null
+                    : CanonicalJson::encode($benefitAllocation),
+            ],
+            'is_benefit' => $definition->kind->isBenefit(),
+        ];
+    }
+
+    /**
+     * Roční akumulátor čerpání koše osvobození. `INSERT IGNORE` drží
+     * idempotenci: druhé schválení téhož vstupu koš nečerpá podruhé.
+     *
+     * @param array{columns:list<mixed>,is_benefit:bool} $plan
+     */
+    private function recordBenefitAccumulator(
+        PDO $pdo,
+        int $supplierId,
+        int $inputId,
+        int $employeeId,
+        int $componentId,
+        string $periodStart,
+        int $amountMinor,
+        array $plan,
+    ): void {
+        if (!$plan['is_benefit']) {
+            return;
+        }
+        $pdo->prepare(
+            'INSERT IGNORE INTO payroll_benefit_accumulators
+                (supplier_id, employee_id, component_id, input_id,
+                 tax_year, amount_minor)
+             VALUES (?, ?, ?, ?, YEAR(?), ?)'
+        )->execute([
+            $supplierId,
+            $employeeId,
+            $componentId,
+            $inputId,
+            $periodStart,
+            $amountMinor,
+        ]);
+    }
+
+    /**
+     * Hromadné schválení mzdových vstupů.
+     *
+     * Pojistka k tomu, že se vstup schvaluje rovnou při zadání
+     * ({@see \MyInvoice\Repository\Payroll\PayrollQuickInputRepository::save()}):
+     * vstupy, které vznikly dřív nebo je zadal někdo bez práva `payroll.approve`,
+     * by se jinak musely odklikat po jednom. Při 500 zaměstnancích je to tisíc
+     * kliků a mzdový běh drží blokátor `draft_inputs_present`.
+     *
+     * Verze si dávka zjišťuje sama — prohlížeč seznam verzí nemá a posílat ho
+     * jen kvůli tomu by hromadné schválení zase rozbilo na jednotlivé kusy.
+     * Optimistický zámek tím nemizí: schvaluje se přesně to, co je v tu chvíli
+     * ve stavu `draft`, a přepis cizí změny nehrozí — schválení částku nemění.
+     *
+     * Idempotentní: už schválený nebo uzamčený vstup se hlásí jako přeskočený,
+     * ne jako chyba. Opakované odeslání téže dávky tedy nic nerozbije.
+     *
+     * Transakční s výhradou: celá dávka běží v jedné transakci, ale jeden
+     * neschvalitelný vstup (překročený limit benefitu, chybějící docházka)
+     * nesmí shodit zbytek. Takový vstup se vrátí na savepoint a jde do `failed`.
+     *
+     * @param list<int> $ids
+     * @return array{
+     *   approved:list<int>,
+     *   skipped:list<array{id:int,code:string,message:string}>,
+     *   failed:list<array{id:int,code:string,message:string}>
+     * }
+     */
+    public function approveBatch(int $supplierId, array $ids, ?int $userId): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        if (count($ids) > self::APPROVE_BATCH_MAX) {
+            throw new \InvalidArgumentException(sprintf(
+                'Najednou lze schválit nejvýše %d mzdových vstupů.',
+                self::APPROVE_BATCH_MAX,
+            ));
+        }
+        $approved = [];
+        $skipped = [];
+        $failed = [];
+        if ($ids === []) {
+            return ['approved' => $approved, 'skipped' => $skipped, 'failed' => $failed];
+        }
+
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $state = $pdo->prepare(
+                'SELECT status, row_version
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE'
+            );
+            foreach ($ids as $id) {
+                if ($id <= 0) {
+                    $failed[] = [
+                        'id' => $id,
+                        'code' => 'not_found',
+                        'message' => 'Mzdový vstup nebyl nalezen.',
+                    ];
+                    continue;
+                }
+                $state->execute([$supplierId, $id]);
+                $row = $state->fetch(PDO::FETCH_ASSOC);
+                $state->closeCursor();
+                if ($row === false) {
+                    $failed[] = [
+                        'id' => $id,
+                        'code' => 'not_found',
+                        'message' => 'Mzdový vstup nebyl nalezen.',
+                    ];
+                    continue;
+                }
+                $status = (string) $row['status'];
+                if ($status === 'approved' || $status === 'locked') {
+                    $skipped[] = [
+                        'id' => $id,
+                        'code' => 'already_approved',
+                        'message' => 'Mzdový vstup už je schválený.',
+                    ];
+                    continue;
+                }
+                if ($status !== 'draft') {
+                    $skipped[] = [
+                        'id' => $id,
+                        'code' => 'input_state_conflict',
+                        'message' => 'Schválit lze jen rozpracovaný mzdový vstup.',
+                    ];
+                    continue;
+                }
+                $pdo->exec('SAVEPOINT ' . self::APPROVE_BATCH_SAVEPOINT);
+                try {
+                    $this->approve($supplierId, $id, (int) $row['row_version'], $userId);
+                    $pdo->exec('RELEASE SAVEPOINT ' . self::APPROVE_BATCH_SAVEPOINT);
+                    $approved[] = $id;
+                } catch (PayrollInputApprovalException $e) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::APPROVE_BATCH_SAVEPOINT);
+                    $failed[] = [
+                        'id' => $id,
+                        'code' => $e->errorCode,
+                        'message' => $e->getMessage(),
+                    ];
+                } catch (PayrollInputConflictException $e) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::APPROVE_BATCH_SAVEPOINT);
+                    $failed[] = [
+                        'id' => $id,
+                        'code' => 'row_version_conflict',
+                        'message' => $e->getMessage(),
+                    ];
+                }
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return ['approved' => $approved, 'skipped' => $skipped, 'failed' => $failed];
+    }
+
+    /**
+     * Identifikátory konceptů měsíce — podklad pro „Schválit vše".
+     *
+     * Vrací se přesně to, co počítá blokátor `draft_inputs_present`, tedy
+     * `status = "draft"`. Strop je tvrdý: dávka se schvaluje v jedné transakci
+     * a neomezená by držela zámky nad celou firmou.
+     *
+     * @return list<int>
+     */
+    public function draftInputIds(
+        int $supplierId,
+        string $periodStart,
+        ?int $employmentId = null,
+        int $limit = self::APPROVE_BATCH_MAX,
+    ): array {
+        $limit = max(1, min(self::APPROVE_BATCH_MAX, $limit));
+        $narrowing = $employmentId === null ? '' : ' AND employment_id = ?';
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id
+               FROM payroll_inputs
+              WHERE supplier_id = ?
+                AND period_start = ?
+                AND status = "draft"' . $narrowing
+            . ' ORDER BY id
+              LIMIT ' . $limit
+        );
+        $params = [$supplierId, $periodStart];
+        if ($employmentId !== null) {
+            $params[] = $employmentId;
+        }
+        $stmt->execute($params);
+
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Vrátí schválený vstup zpět do konceptu, aby ho šlo přepsat.
+     *
+     * Bez téhle cesty by se rychlé zadávání zaseklo hned, jak se vstup začal
+     * ukládat rovnou jako schválený: `update()` i `cancel()` berou jen koncept,
+     * takže by uživatel svoji vlastní částku už nikdy neopravil.
+     *
+     * Bezpečné je to jen do okamžiku, kdy vstup vstoupí do mzdového běhu.
+     * Uzamčený (`locked`) vstup se sem nedostane vůbec a schválený se odmítne,
+     * jakmile visí ve zmrazeném snímku revize, na vyúčtování cesty nebo na
+     * řádku importu — přesně ty kontroly, které hlídají i rušení konceptu.
+     *
+     * Benefit se nevrací nikdy: schválením vznikl akumulátor čerpající roční
+     * koš § 6 odst. 9 ZDP a ten uvolňuje výhradně {@see reverseBenefit()}.
+     */
+    public function revertToDraft(int $supplierId, int $id, int $expectedVersion): void
+    {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, status, row_version, period_start
+                   FROM payroll_inputs
+                  WHERE supplier_id = ? AND id = ?
+                  FOR UPDATE'
+            );
+            $stmt->execute([$supplierId, $id]);
+            $raw = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($raw === false) {
+                throw new \DomainException('Mzdový vstup nebyl nalezen.');
+            }
+            $row = PayrollTimeValue::row($raw, 'payroll_input_revert');
+            $status = PayrollTimeValue::string($row['status'] ?? null, 'status');
+            $currentVersion = PayrollTimeValue::int(
+                $row['row_version'] ?? null,
+                'row_version',
+            );
+            if ($status !== 'approved') {
+                throw new \DomainException(
+                    'Do konceptu lze vrátit jen schválený, dosud nezamčený mzdový vstup.',
+                );
+            }
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($this->hasActiveBenefit($pdo, $supplierId, $id)) {
+                throw new \DomainException(
+                    'Schválený benefit čerpá roční koš osvobození; opravit ho lze '
+                    . 'jen stornem v měsíčních vstupech.',
+                );
+            }
+            $this->assertNoMovement(
+                $pdo,
+                $supplierId,
+                $id,
+                PayrollTimeValue::string($row['period_start'] ?? null, 'period_start'),
+            );
+            $update = $pdo->prepare(
+                'UPDATE payroll_inputs
+                    SET status = "draft",
+                        component_snapshot_json = NULL,
+                        component_snapshot_hash = NULL,
+                        benefit_basket = NULL,
+                        benefit_exempt_minor = NULL,
+                        benefit_taxable_minor = NULL,
+                        benefit_allocation_json = NULL,
+                        approved_by = NULL,
+                        approved_at = NULL,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?
+                    AND status = "approved"'
+            );
+            $update->execute([$supplierId, $id, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollInputConflictException($currentVersion);
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
     }
 
     /**

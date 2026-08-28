@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   commandRun: vi.fn(),
   overrideValidation: vi.fn(),
   revokeOverride: vi.fn(),
+  approveInputsBatch: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock('@/api/payroll', () => ({
     commandRun: m.commandRun,
     overrideRunValidation: m.overrideValidation,
     revokeRunValidationOverride: m.revokeOverride,
+    approveInputsBatch: m.approveInputsBatch,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -579,6 +581,33 @@ describe('PayrollRuns', () => {
     expect(group.text()).toContain('Zaměstnanec 5')
     expect(group.text()).not.toContain('Zaměstnanec 6')
     expect(group.text()).toContain('payroll.runs.validation.and_more')
+  })
+
+  /*
+   * Blokátor `draft_inputs_present` dosud jen odkázal jinam, kde se schvaluje
+   * řádek po řádku. U 500 zaměstnanců to je zhruba tisíc kliknutí, takže
+   * zkratka musí být přímo tady.
+   */
+  it('approves the blocking draft inputs straight from the run screen', async () => {
+    m.approveInputsBatch.mockResolvedValue({ approved: [1, 2], skipped: [], failed: [] })
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      validations: [validation({
+        id: 100,
+        code: 'draft_inputs_present',
+        requires_override: false,
+      })],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    await wrapper.get('[data-testid="payroll-validation-100-approve-inputs"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveInputsBatch).toHaveBeenCalledWith({ period: '2026-08' })
+    expect(m.success).toHaveBeenCalledWith('payroll.runs.validation.draft_inputs_approved')
   })
 
   it('reopens a cancelled run from corrected inputs with the required reason', async () => {

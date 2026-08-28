@@ -8,6 +8,7 @@ import {
   eligibleAllowances,
   evidenceScope,
   protectedAmountIsUnattested,
+  spousePensionEvidenceUnknown,
   type EvidenceScopeInput,
 } from '@/pages/payroll/enforcementEvidenceScope'
 
@@ -48,6 +49,12 @@ function dependant(overrides: Partial<EnforcementDependant> = {}): EnforcementDe
     valid_to: null,
     eligibility_verified: true,
     excluded_for_maintenance: false,
+    // Doložení důchodu podle nař. vlády č. 441/2024 Sb. U dítěte je bez významu;
+    // testy manžela si ho přebijí přes overrides.
+    quarter_pension_evidence: 'not_documented',
+    quarter_pension_holder: null,
+    quarter_pension_kind: null,
+    quarter_pension_documented_on: null,
     row_version: 1,
     ...overrides,
   }
@@ -227,5 +234,70 @@ describe('enforcementEvidenceScope', () => {
 
     expect(scope.claim_register).toBe('missing')
     expect(scope.dependants).toBe('missing')
+  })
+
+  /*
+   * Nař. vlády č. 441/2024 Sb. — čtvrtina na manžela od 1. 1. 2025 náleží jen
+   * při doloženém důchodu. Backend proto do rozsahu bere `spouse_evidence_complete`
+   * AŽ SPOLU s doložením; kdyby obrazovka pořád hlásila `declared`, tvrdila by,
+   * že je hotovo, a účetní by se o chybějícím podkladu dozvěděla až z běhu mezd.
+   */
+  const spouse = (overrides: Partial<EnforcementDependant> = {}) => dependant({
+    id: 9,
+    dependant_kind: 'spouse_partner',
+    ...overrides,
+  })
+
+  it('keeps the spouse evidence in scope while the pension evidence is unknown', () => {
+    const scope = evidenceScope(input({
+      cases: [summary()],
+      dependants: [spouse({ quarter_pension_evidence: 'unknown' })],
+      evidence: evidence({ spouse_evidence_complete: true }),
+    }))
+
+    expect(scope.spouse).toBe('missing')
+  })
+
+  /*
+   * `not_documented` NENÍ mezera v evidenci: povinný důkazní břemeno neunesl,
+   * čtvrtina nenáleží a dokládat není co. Kdyby i tenhle stav držel rozsah
+   * otevřený, obrazovka by pobízela k doložení, které nikdy nepřijde.
+   */
+  it.each(['documented', 'not_documented'] as const)(
+    'treats a spouse with %s pension evidence as declared',
+    (quarter_pension_evidence) => {
+      const scope = evidenceScope(input({
+        cases: [summary()],
+        dependants: [spouse({ quarter_pension_evidence })],
+        evidence: evidence({ spouse_evidence_complete: true }),
+      }))
+
+      expect(scope.spouse).toBe('declared')
+    },
+  )
+
+  /*
+   * Zrcadlí `weakerSpousePension()`: rozhoduje NEJSLABŠÍ stav napříč uplatněnými
+   * záznamy, takže jediné `unknown` stačí i vedle doloženého manžela.
+   */
+  it('lets a single unknown record outweigh a documented one', () => {
+    expect(spousePensionEvidenceUnknown([
+      spouse({ quarter_pension_evidence: 'documented' }),
+      spouse({ id: 10, quarter_pension_evidence: 'unknown' }),
+    ], PERIOD)).toBe(true)
+  })
+
+  /*
+   * Záznam, který se v měsíci neuplatní, blokovat nesmí — jinak by účetní
+   * doplňovala důchod k manželovi, který do nezabavitelné částky nevstupuje.
+   */
+  it('ignores unknown evidence on records that do not claim the allowance', () => {
+    expect(spousePensionEvidenceUnknown([
+      spouse({ quarter_pension_evidence: 'unknown', eligibility_verified: false }),
+      spouse({ id: 10, quarter_pension_evidence: 'unknown', excluded_for_maintenance: true }),
+      spouse({ id: 11, quarter_pension_evidence: 'unknown', valid_to: '2026-05-31' }),
+      // Dítě podmínku nemá vůbec, i kdyby v řádku `unknown` zůstalo.
+      dependant({ id: 12, quarter_pension_evidence: 'unknown' }),
+    ], PERIOD)).toBe(false)
   })
 })

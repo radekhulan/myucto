@@ -11,6 +11,13 @@ use PDO;
 
 final class PayrollLeaveRepository
 {
+    /**
+     * Nárok na daný rok ještě nebyl určený, takže se čerpání neporovnalo s ničím.
+     * Není to chyba — položka se zapíše a zůstává v `manual_review` — ale účetní
+     * má vědět, že zůstatek pod ní zatím nic neznamená.
+     */
+    public const WARNING_ENTITLEMENT_NOT_DETERMINED = 'leave_entitlement_not_determined';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollLeaveLedgerDeletionRepository $ledgerDeletion,
@@ -124,6 +131,7 @@ final class PayrollLeaveRepository
         int $minutesDelta,
         string $reason,
         ?int $userId,
+        ?int $sourceAbsenceId = null,
     ): array {
         if (!in_array($entryType, ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout'], true)) {
             throw new \InvalidArgumentException('Typ ruční položky dovolené není platný.');
@@ -134,18 +142,141 @@ final class PayrollLeaveRepository
         if (in_array($entryType, ['shortening', 'overdrawn', 'payout'], true) && $minutesDelta > 0) {
             throw new \InvalidArgumentException('Krácení, přečerpání a proplacení musí snižovat zůstatek.');
         }
-        return $this->append(
-            $supplierId,
-            $employmentId,
-            $year,
-            $effectiveDate,
-            $entryType,
-            $minutesDelta,
-            null,
-            null,
-            $reason,
-            $userId,
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            if ($entryType === 'shortening') {
+                $this->assertShorteningAllowed($supplierId, $employmentId, $year, -$minutesDelta);
+            }
+            $entry = $this->append(
+                $supplierId,
+                $employmentId,
+                $year,
+                $effectiveDate,
+                $entryType,
+                $minutesDelta,
+                $sourceAbsenceId,
+                null,
+                $reason,
+                $userId,
+            );
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $entry;
+    }
+
+    /**
+     * Pojistka § 223 odst. 2 ZP — po krácení musí zaměstnanci, jehož pracovní
+     * poměr trval po celý kalendářní rok, zůstat dovolená aspoň v délce dvou
+     * týdnů.
+     *
+     * Základem je stanovený nárok na daný rok, ne aktuální zůstatek: zákon mluví
+     * o dovolené, která má být poskytnuta, a už vyčerpané dny na tom nic nemění.
+     * Bez stanoveného nároku se nekrátí vůbec — krátit nestanovenou výměru
+     * nejde spočítat, a mlčky povolit to znamená připustit libovolné číslo.
+     */
+    private function assertShorteningAllowed(
+        int $supplierId,
+        int $employmentId,
+        int $year,
+        int $shortenedMinutes,
+    ): void {
+        if ($shortenedMinutes <= 0) {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT
+                 COALESCE(SUM(CASE WHEN entry_type = 'entitlement' THEN minutes_delta ELSE 0 END), 0)
+                   AS entitlement_minutes,
+                 COALESCE(SUM(CASE WHEN entry_type = 'shortening' THEN -minutes_delta ELSE 0 END), 0)
+                   AS shortened_minutes
+               FROM payroll_leave_ledger
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ?"
         );
+        $stmt->execute([$supplierId, $employmentId, $year]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $entitlement = (int) ($row['entitlement_minutes'] ?? 0);
+        $alreadyShortened = (int) ($row['shortened_minutes'] ?? 0);
+        if ($entitlement <= 0) {
+            throw new \InvalidArgumentException(
+                'Krátit dovolenou lze až po stanovení nároku na daný rok.'
+            );
+        }
+        $remaining = $entitlement - $alreadyShortened - $shortenedMinutes;
+        if ($remaining < 0) {
+            throw new \InvalidArgumentException(
+                'Krácení nesmí přesáhnout stanovený nárok na dovolenou.'
+            );
+        }
+        if (!$this->employmentCoveredWholeYear($supplierId, $employmentId, $year)) {
+            return;
+        }
+        $weeklyMinutes = $this->weeklyMinutesOn($supplierId, $employmentId, sprintf('%04d-12-31', $year));
+        if ($weeklyMinutes === null) {
+            throw new \InvalidArgumentException(
+                'Krácení dovolené vyžaduje evidovanou stanovenou týdenní pracovní dobu'
+                . ' — bez ní nelze ověřit zákonné minimum dvou týdnů.'
+            );
+        }
+        $floor = 2 * $weeklyMinutes;
+        if ($remaining < $floor) {
+            throw new \InvalidArgumentException(sprintf(
+                'Po krácení musí zaměstnanci zůstat aspoň 2 týdny dovolené (%d minut),'
+                . ' zbylo by %d minut.',
+                $floor,
+                $remaining,
+            ));
+        }
+    }
+
+    private function employmentCoveredWholeYear(int $supplierId, int $employmentId, int $year): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(actual_start_date, start_date) AS started, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            throw new \InvalidArgumentException('Pracovní vztah nebyl nalezen.');
+        }
+        $started = (string) ($row['started'] ?? '');
+        $ended = $row['end_date'] === null ? null : (string) $row['end_date'];
+
+        return $started !== ''
+            && $started <= sprintf('%04d-01-01', $year)
+            && ($ended === null || $ended >= sprintf('%04d-12-31', $year));
+    }
+
+    private function weeklyMinutesOn(int $supplierId, int $employmentId, string $date): ?int
+    {
+        if (!$this->db->hasTable('payroll_employment_terms')) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT weekly_hours
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, $date, $date]);
+
+        return PayrollAbsenceRepository::weeklyMinutesFromHours($stmt->fetchColumn());
     }
 
     /** @return array<string,mixed> */
@@ -271,16 +402,51 @@ final class PayrollLeaveRepository
         ];
     }
 
-    /** @param array<string,mixed> $absence */
-    public function recordTaken(array $absence, int $minutes, ?int $userId): array
-    {
+    /**
+     * Zápis schváleného čerpání dovolené.
+     *
+     * Rozlišuje tři stavy, protože nulový zůstatek znamená pokaždé něco jiného:
+     *
+     *  1. nárok je určený a zůstatek stačí → projde,
+     *  2. nárok je určený a zůstatek nestačí → skutečné přečerpání, viz
+     *     {@see PayrollLeaveOverdrawException}; potvrzení je tu na místě, protože
+     *     přeplatek by se jinak poznal až při vypořádání a strhl by se zaměstnanci,
+     *  3. nárok pro daný rok a vztah určený není → zůstatek NENÍ nula, je neznámý,
+     *     a ptát se na potvrzení by znamenalo tvrdit uživateli nepravdu. Čerpání
+     *     projde a odpověď nese nezávazné upozornění.
+     *
+     * @param array<string,mixed> $absence
+     * @param bool $overdrawConfirmed vědomé poskytnutí dovolené nad rámec zůstatku
+     */
+    public function recordTaken(
+        array $absence,
+        int $minutes,
+        ?int $userId,
+        bool $overdrawConfirmed = false,
+    ): array {
         if ($minutes <= 0) {
             throw new \InvalidArgumentException('Čerpání dovolené vyžaduje publikované směny.');
         }
-        return $this->append(
-            (int) $absence['supplier_id'],
-            (int) $absence['employment_id'],
-            (int) substr((string) $absence['date_from'], 0, 4),
+        $supplierId = (int) $absence['supplier_id'];
+        $employmentId = (int) $absence['employment_id'];
+        $year = (int) substr((string) $absence['date_from'], 0, 4);
+
+        $entitlementDetermined = $this->hasDeterminedEntitlement($supplierId, $employmentId, $year);
+        if ($entitlementDetermined && !$overdrawConfirmed) {
+            // Zámek vztahu drží až append; zůstatek se tu čte jen jako brána,
+            // takže souběžné schválení dvou dovolených může minus stejně vyrobit.
+            // Proti tichému přečerpání to ale stačí a zamykat kvůli čtení dřív
+            // by prodloužilo transakci schvalování o celý výpočet segmentů.
+            $balance = $this->balance($supplierId, $employmentId, $year);
+            if ($minutes > $balance) {
+                throw new PayrollLeaveOverdrawException($balance, $minutes);
+            }
+        }
+
+        $entry = $this->append(
+            $supplierId,
+            $employmentId,
+            $year,
             (string) $absence['date_from'],
             'taken',
             -$minutes,
@@ -289,6 +455,32 @@ final class PayrollLeaveRepository
             'Schválené čerpání dovolené.',
             $userId,
         );
+        $entry['warnings'] = $entitlementDetermined
+            ? []
+            : [self::WARNING_ENTITLEMENT_NOT_DETERMINED];
+
+        return $entry;
+    }
+
+    /**
+     * Existuje pro daný rok a vztah stanovený nárok?
+     *
+     * Rozhoduje výhradně položka `entitlement`. Převod z minulého roku ani ruční
+     * úprava nárok nestanoví — jsou to pohyby nad výměrou, která pořád chybí, a
+     * brát je jako doklad nároku by z neurčeného stavu udělalo tvrzený zůstatek.
+     */
+    private function hasDeterminedEntitlement(int $supplierId, int $employmentId, int $year): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1
+               FROM payroll_leave_ledger
+              WHERE supplier_id = ? AND employment_id = ? AND leave_year = ?
+                AND entry_type = 'entitlement'
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $employmentId, $year]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /** @param array<string,mixed> $absence */

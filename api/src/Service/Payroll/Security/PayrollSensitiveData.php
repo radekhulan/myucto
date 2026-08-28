@@ -31,11 +31,25 @@ final class PayrollSensitiveData
         );
     }
 
+    /**
+     * Dešifruje citlivou mzdovou hodnotu.
+     *
+     * `$purpose` je POVINNÝ a je to vědomé rozhodnutí (W1/P-03). Tahle metoda je
+     * kryptografická primitiva — nekontroluje práva a sama nezapisuje do auditu,
+     * protože je volaná i uvnitř sestavování zákonných dokumentů, kde na
+     * interaktivní důvod od uživatele není kde se zeptat. Bez deklarovaného účelu
+     * ale nešlo z kódu poznat, které volání odhaluje rodné číslo do dokumentu,
+     * který ho mít MUSÍ, a které do náhledu, kde nemá co dělat. Účel je proto
+     * součástí podpisu: nové volání bez něj neprojde ani typovou kontrolou.
+     * Autorizační brána s právem, textovým důvodem a zápisem do auditu zůstává
+     * {@see PayrollPersonSensitiveRevealService}.
+     */
     public function reveal(
         string $ciphertext,
         PayrollSensitiveField $field,
         int $supplierId,
         int $entityId,
+        PayrollRevealPurpose $purpose,
     ): string {
         if (!str_starts_with($ciphertext, 'enc:v2:')) {
             throw new \RuntimeException('Mzdová hodnota není kontextově šifrovaná.');
@@ -205,6 +219,18 @@ final class PayrollSensitiveData
         $maximumVisible = match ($field) {
             PayrollSensitiveField::BANK_ACCOUNT => min(6, $length),
             PayrollSensitiveField::CONTACT_PHONE => min(4, $length),
+            // ── Proč u rodného čísla jen DVĚ číslice (W1/P-06) ─────────────────
+            // Maska se zobrazuje v téže odpovědi jako `birth_date` a `sex`
+            // (PayrollPersonProfileRepository), a to jen za právo `payroll` READ.
+            // České rodné číslo je RRMMDD/XXXC: prvních šest číslic plyne z data
+            // narození, u ženy se k měsíci přičítá 50 — z data a pohlaví jsou
+            // tedy známé. Se čtyřmi viditelnými číslicemi koncovky je celé rodné
+            // číslo známé rovněž a maska nechrání vůbec nic. Dvě viditelné
+            // číslice nechávají neznámé dvě, a protože je koncovka svázaná
+            // podmínkou dělitelnosti jedenácti, zůstává řádově deset kandidátů —
+            // pořád dost na rozlišení karty, málo na rekonstrukci.
+            PayrollSensitiveField::PERSONAL_IDENTIFIER,
+            PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER => min(2, $length),
             default => min(4, $length),
         };
         $visible = min($maximumVisible, max(0, $length - 4));

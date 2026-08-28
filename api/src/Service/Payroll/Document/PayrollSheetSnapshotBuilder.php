@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -572,8 +573,13 @@ final class PayrollSheetSnapshotBuilder
                 $net + ['annual_settlement_minor_units' => 0],
                 'annual_settlement_minor_units',
             ),
+            // Záporná čistá výplata je legitimní (přeplatek u měsíce bez
+            // peněžního příjmu s doplatkem ZP do minimálního vyměřovacího
+            // základu, § 3 odst. 10 z. č. 592/1992 Sb.). Znaménko hlídá až
+            // {@see PayrollSheetMonth}, který zároveň ověří, že sedí na
+            // příjem, odvody, daň, bonus a srážky.
             'net_payable_minor_units' =>
-                $this->nonNegativeInt($person, 'payable_after_enforcement_minor'),
+                $this->integer($person, 'payable_after_enforcement_minor'),
         ];
     }
 
@@ -655,6 +661,7 @@ final class PayrollSheetSnapshotBuilder
                 PayrollSensitiveField::PERSONAL_IDENTIFIER,
                 $supplierId,
                 (int) $identifierRow['id'],
+                PayrollRevealPurpose::DOCUMENT_PAYROLL_SHEET,
             );
         } elseif (is_string($employeeRow['birth_date'] ?? null)) {
             $identifierLabel = 'Datum narození';
@@ -784,7 +791,8 @@ final class PayrollSheetSnapshotBuilder
                 $this->nonNegativeInt($row, 'tax_bonus_minor_units'),
                 $this->nonNegativeInt($row, 'withholding_tax_minor_units'),
                 $this->nonNegativeInt($row, 'other_deductions_minor_units'),
-                $this->nonNegativeInt($row, 'net_payable_minor_units'),
+                // Jediná podepsaná položka mzdového listu — viz PayrollSheetMonth.
+                $this->integer($row, 'net_payable_minor_units'),
                 // Starší zmrazené mzdové listy klíč nemají — vznikly dřív, než
                 // se doplatek ze zúčtování vyplácel.
                 $this->nonNegativeInt(

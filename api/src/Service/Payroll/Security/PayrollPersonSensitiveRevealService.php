@@ -179,6 +179,7 @@ final class PayrollPersonSensitiveRevealService
             $field,
             $supplierId,
             $entityId,
+            PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
         );
         $actualHash = $this->sensitiveData->lookupHash(
             $plaintext,

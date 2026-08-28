@@ -734,8 +734,13 @@ export interface PayrollEmployee {
   supplier_id: number
   full_name: string
   birth_date: string | null
-  birth_number: string | null
-  address: string | null
+  /*
+   * `birth_number` ani `address` tu ZÁMĚRNĚ nejsou (W1/P-02). Legacy routa je
+   * nečte ani nezapisuje — je chráněná jen právem `accounting`, takže by
+   * otevřené rodné číslo obešlo šifrovanou evidenci `payroll_person_identifiers`
+   * i stopu o odhalení. Vyplněná hodnota v požadavku vrací 422. Rodné číslo
+   * v maskovaném tvaru vydává jen mzdová karta osoby.
+   */
   taxpayer_type: PayrollTaxpayerType
   tax_credit_taxpayer: boolean
   /**

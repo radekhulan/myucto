@@ -433,13 +433,14 @@ final class PayrollEmployeeAction
         if ($err !== null) {
             return null;
         }
+        if (!$this->rejectPlaintextIdentity($body, $response, $err)) {
+            return null;
+        }
 
         $err = null;
         return [
             'full_name'           => $fullName,
             'birth_date'          => $birthDate,
-            'birth_number'        => $this->nullableString($body['birth_number'] ?? null),
-            'address'             => $this->nullableString($body['address'] ?? null),
             'taxpayer_type'       => $type,
             'tax_credit_taxpayer' => array_key_exists('tax_credit_taxpayer', $body)
                 ? (bool) filter_var($body['tax_credit_taxpayer'], FILTER_VALIDATE_BOOLEAN)
@@ -472,6 +473,9 @@ final class PayrollEmployeeAction
     private function normalizePartial(int $supplierId, array $body, Response $response, ?Response &$err): ?array
     {
         $fields = [];
+        if (!$this->rejectPlaintextIdentity($body, $response, $err)) {
+            return null;
+        }
         if (array_key_exists('full_name', $body)) {
             $fullName = trim((string) $body['full_name']);
             if ($fullName === '') {
@@ -495,12 +499,6 @@ final class PayrollEmployeeAction
                 return null;
             }
             $fields['birth_date'] = $birthDate;
-        }
-        if (array_key_exists('birth_number', $body)) {
-            $fields['birth_number'] = $this->nullableString($body['birth_number']);
-        }
-        if (array_key_exists('address', $body)) {
-            $fields['address'] = $this->nullableString($body['address']);
         }
         if (array_key_exists('tax_credit_taxpayer', $body)) {
             $fields['tax_credit_taxpayer'] = (bool) filter_var($body['tax_credit_taxpayer'], FILTER_VALIDATE_BOOLEAN);
@@ -550,6 +548,43 @@ final class PayrollEmployeeAction
         }
         $err = null;
         return $fields;
+    }
+
+    /**
+     * Rodné číslo ani adresa tudy dovnitř NESMÍ (W1/P-02).
+     *
+     * Tahle routa je chráněná jen právem `accounting`, takže by otevřené rodné
+     * číslo zapsal i uživatel bez jediného mzdového práva — mimo šifrovanou
+     * evidenci `payroll_person_identifiers` a mimo stopu o odhalení. Zápis proto
+     * nekončí zápisem, ale odmítnutím.
+     *
+     * PRÁZDNÁ hodnota se ale toleruje: legacy formulář (`PayrollRecap.vue`) posílá
+     * `birth_number` i `address` v KAŽDÉM uložení, u nevyplněného pole jako `null`.
+     * Tvrdé 422 na pouhou přítomnost klíče by rozbilo úplně běžné uložení karty,
+     * kdežto odmítnout se má jen skutečný pokus uložit osobní údaj. Vyplněné pole
+     * proto vrací 422 s důvodem — tiché zahození by uživateli tvrdilo, že se
+     * rodné číslo uložilo, a on by ho v novém modulu nikdy nenašel.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function rejectPlaintextIdentity(array $body, Response $response, ?Response &$err): bool
+    {
+        foreach (['birth_number' => 'Rodné číslo', 'address' => 'Adresa'] as $key => $label) {
+            if (!array_key_exists($key, $body)) {
+                continue;
+            }
+            if (trim((string) ($body[$key] ?? '')) === '') {
+                continue;
+            }
+            $err = Json::error($response, 'validation_failed', sprintf(
+                '%s se přes tuto routu ukládat nesmí — patří do mzdové karty osoby,'
+                . ' kde se ukládá šifrovaně a se stopou o nahlédnutí.',
+                $label,
+            ), 422);
+            return false;
+        }
+        $err = null;
+        return true;
     }
 
     /**
@@ -667,13 +702,6 @@ final class PayrollEmployeeAction
         }
         $gross = (int) $v;
         return ($gross < 0 || $gross > self::MAX_MONTHLY_GROSS) ? false : $gross;
-    }
-
-    private function nullableString(mixed $v): ?string
-    {
-        if ($v === null) return null;
-        $s = trim((string) $v);
-        return $s === '' ? null : $s;
     }
 
     /** @return string|null|false false = neplatný formát */

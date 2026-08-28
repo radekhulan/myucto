@@ -105,7 +105,9 @@ final class PayrollAccountOptionsApiTest extends TestCase
         self::assertNotEmpty($accounts);
         $accountTypes = array_values(array_unique(array_column($accounts, 'account_type')));
         sort($accountTypes);
-        self::assertSame(['expense', 'liability'], $accountTypes);
+        // Aktiva přibyla s pohledávkou za zaměstnancem (335) — vzniká při záporné
+        // čisté mzdě, typicky když v měsíci bez příjmu doplácí pojistné do minima.
+        self::assertSame(['asset', 'expense', 'liability'], $accountTypes);
 
         $byCode = array_column($accounts, null, 'account_code');
         self::assertSame('Mzdové náklady tenanta A', $byCode['521']['name']);

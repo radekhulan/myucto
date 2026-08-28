@@ -64,10 +64,19 @@ final readonly class PayrollNetInput
             ->subtract(new Money($advanceTaxMinorUnits))
             ->subtract(new Money($withholdingTaxMinorUnits))
             ->add(new Money($taxBonusMinorUnits));
-        if ($net->minorUnits < 0) {
-            throw new \DomainException('Čistá peněžní mzda před srážkami nesmí být záporná.');
-        }
-        if ($voluntaryDeductionCapacityMinorUnits > $net->minorUnits) {
+        // Záporná čistá peněžní mzda NENÍ chyba vstupu. Zaměstnanec celý měsíc
+        // na neplaceném volnu nemá peněžní příjem, ale zaměstnavatel za něj
+        // odvádí doplatek zdravotního pojištění do minimálního vyměřovacího
+        // základu (§ 3 odst. 10 z. č. 592/1992 Sb.) a podle § 3 odst. 12 téhož
+        // zákona ho platí ZAMĚSTNANEC prostřednictvím zaměstnavatele. Výsledek
+        // je legitimní dluh zaměstnance vůči zaměstnavateli, který se účtuje
+        // jako pohledávka (MD 335), ne důvod k pádu výpočtu.
+        //
+        // Fail-closed zůstává v tom, co z toho smí vyplynout: srážet se
+        // z takové mzdy nedá nic. Kapacita dobrovolných srážek se proto
+        // porovnává s nulou, ne se zápornou částkou — jinak by nulová kapacita
+        // sama shodila výpočet a nenulová by se tvářila jako přípustná.
+        if ($voluntaryDeductionCapacityMinorUnits > max(0, $net->minorUnits)) {
             throw new \InvalidArgumentException(
                 'Kapacita dobrovolných srážek nesmí překročit čistou mzdu.',
             );

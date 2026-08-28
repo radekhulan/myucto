@@ -77,8 +77,19 @@ final class PayrollPostingAccountResolver
                 $candidates[] = $analytic;
             }
             $candidates[] = $defaults[$key];
+            // Poslední záchrana je SYNTETIKA výchozího účtu. Od W7/Ú-08 je
+            // výchozí kontace pojistného analytická (336.100 / 336.200) a firma,
+            // která analytiku v osnově nemá, by jinak dostala účet, na který
+            // PostingService zápis odmítne (`unknown_account`) — místo drobného
+            // rozdílu v kontaci by jí spadlo celé zaúčtování mzdy.
+            $fallback = $defaults[$key];
+            $synthetic = substr($fallback, 0, 3);
+            if ($synthetic !== $fallback) {
+                $candidates[] = $synthetic;
+                $fallback = $synthetic;
+            }
 
-            $resolved[$key] = $defaults[$key];
+            $resolved[$key] = $fallback;
             foreach ($candidates as $candidate) {
                 if (isset($postable[$candidate])) {
                     $resolved[$key] = $candidate;

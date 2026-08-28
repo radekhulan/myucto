@@ -42,6 +42,7 @@ final readonly class RepositoryPayrollGarnishmentPort implements PayrollGarnishm
             $evidence->insolvency,
             $evidence->protectedAmountOverrideVerified,
             $evidence->claimRegisterEvidenceComplete,
+            $evidence->spousePensionEvidence,
         );
 
         return new PayrollGarnishmentCalculation(

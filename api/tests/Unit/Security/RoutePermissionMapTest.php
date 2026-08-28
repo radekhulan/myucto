@@ -158,6 +158,9 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/payroll/year-close/2026/close', 'payroll.approve', AccessLevel::WRITE],
             ['POST', '/api/payroll/year-close/2026/reopen', 'payroll.reopen', AccessLevel::WRITE],
             ['POST', '/api/payroll/inputs/42/approve', 'payroll.approve', AccessLevel::WRITE],
+            // Hromadné schválení nesmí spadnout do obecného
+            // `payroll.inputs.write` — schvaluje se jím tisíc řádků naráz.
+            ['POST', '/api/payroll/inputs/approve-batch', 'payroll.approve', AccessLevel::WRITE],
             ['DELETE', '/api/payroll/runs/42', 'payroll.inputs.write', AccessLevel::WRITE],
             ['GET', '/api/payroll/documents', 'payroll.documents', AccessLevel::READ],
             ['GET', '/api/payroll/documents/annual', 'payroll.documents', AccessLevel::READ],

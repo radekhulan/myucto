@@ -740,7 +740,114 @@ final class PayrollAnnualSettlementRepository
     }
 
     /**
+     * Intervaly prohlášení k dani a rezidentství zasahující do roku.
+     *
+     * Vrací ŘÁDKY, ne vyhodnocený stav: co z nich plyne, rozhoduje
+     * {@see \MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementEvidenceMonths}.
+     * Posouzení po měsících je pravidlo, ne dotaz — v SQL by se nedalo otestovat
+     * bez databáze, stejně jako u nároků na slevy.
+     *
+     * @return array{
+     *   declarations:list<array<string,mixed>>,
+     *   residences:list<array<string,mixed>>
+     * }
+     */
+    public function statutoryEvidenceForYear(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $yearStart = sprintf('%04d-01-01', $taxYear);
+        $yearEnd = sprintf('%04d-12-31', $taxYear);
+
+        $declarations = $this->db->pdo()->prepare(
+            'SELECT status, effective_from, effective_to
+               FROM payroll_person_tax_declarations
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from, id'
+        );
+        $declarations->execute([$supplierId, $employeeId, $yearEnd, $yearStart]);
+
+        $residences = $this->db->pdo()->prepare(
+            'SELECT residence, effective_from, effective_to
+               FROM payroll_person_tax_residences
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from, id'
+        );
+        $residences->execute([$supplierId, $employeeId, $yearEnd, $yearStart]);
+
+        return [
+            'declarations' => array_values($declarations->fetchAll(PDO::FETCH_ASSOC)),
+            'residences' => array_values($residences->fetchAll(PDO::FETCH_ASSOC)),
+        ];
+    }
+
+    /**
+     * Měsíce roku, ve kterých u plátce trval pracovní vztah.
+     *
+     * Bere se PŘEKRYV s měsícem, ne jeho počátek: kdo nastoupil 15. ledna, má
+     * leden ve mzdách i v zúčtování. (Počátek měsíce je test nároku na slevu
+     * podle § 35ba odst. 3, což je jiná otázka než „za které měsíce se vůbec
+     * zúčtovává".)
+     *
+     * Rozpracované a stornované vztahy se nepočítají — mzda z nich nevznikla.
+     * Souběh více vztahů u téhož plátce se slévá do jedné množiny měsíců;
+     * prohlášení k dani se v modulu vede na zaměstnance, ne na vztah.
+     *
+     * @return list<int>
+     */
+    public function employmentMonths(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT start_date, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ?
+                AND status IN (\'active\', \'ended\')
+                AND (start_date IS NULL OR start_date <= ?)
+                AND (end_date IS NULL OR end_date >= ?)'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            sprintf('%04d-12-31', $taxYear),
+            sprintf('%04d-01-01', $taxYear),
+        ]);
+
+        $months = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $start = is_string($row['start_date'] ?? null) && $row['start_date'] !== ''
+                ? $row['start_date']
+                : sprintf('%04d-01-01', $taxYear);
+            $end = is_string($row['end_date'] ?? null) && $row['end_date'] !== ''
+                ? $row['end_date']
+                : sprintf('%04d-12-31', $taxYear);
+            for ($month = 1; $month <= 12; $month++) {
+                $monthStart = sprintf('%04d-%02d-01', $taxYear, $month);
+                $monthEnd = date('Y-m-t', (int) strtotime($monthStart));
+                if ($start <= $monthEnd && $end >= $monthStart) {
+                    $months[$month] = true;
+                }
+            }
+        }
+        ksort($months);
+
+        return array_map('intval', array_keys($months));
+    }
+
+    /**
      * Prohlášení k dani a rezidentství účinné k danému dni.
+     *
+     * ⚠️ Pro roční zúčtování se NEPOUŽÍVÁ. Čtení k jedinému dni (typicky
+     * k 31. 12.) dělá z každého, kdo v průběhu roku odešel, nedoloženého
+     * nerezidenta. Roční větev proto jde přes {@see statutoryEvidenceForYear()}
+     * a posouzení po měsících.
      *
      * @return array{declaration:?string,residence:?string}
      */

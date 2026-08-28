@@ -9,12 +9,16 @@ use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Repository\Payroll\PayrollLeaveRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
+use MyInvoice\Service\Payroll\Time\PayrollWorkCalendarSchedule;
 use PDO;
 
 final class AutomaticLeaveEntitlementService
 {
     public const DEFAULT_LIMIT = 50;
     public const MAX_LIMIT = 100;
+
+    private readonly PayrollWorkCalendarSchedule $schedule;
 
     public function __construct(
         private readonly Connection $db,
@@ -23,7 +27,10 @@ final class AutomaticLeaveEntitlementService
         private readonly LeaveEntitlementCalculator $calculator,
         private readonly PayrollLeaveRepository $leave,
         private readonly PayrollAbsenceRepository $absences,
-    ) {}
+        private readonly CzechHolidayCalendar $holidayCalendar = new CzechHolidayCalendar(),
+    ) {
+        $this->schedule = new PayrollWorkCalendarSchedule($db);
+    }
 
     /** @return array{items:list<array<string,mixed>>,total:int,limit:int,offset:int} */
     public function page(
@@ -236,7 +243,14 @@ final class AutomaticLeaveEntitlementService
                 $blockers['absence_time_month_missing'] = true;
                 continue;
             }
-            $segments = $this->absences->publishedShiftSegments($absence, false);
+            // § 219 odst. 1 ZP — svátek uvnitř dovolené se nečerpá, takže ho
+            // dovolená do odpracované doby nepřináší. Přinese ho svátek sám
+            // podle § 348 odst. 1 písm. d) níž, jednou a v plné délce.
+            $segments = $this->absences->publishedShiftSegments(
+                $absence,
+                false,
+                AbsenceHolidayTreatment::ExcludeFromLeave,
+            );
             $minutes = array_sum(array_column($segments, 'eligible_minutes'));
             $substituteMinutes += $minutes;
             $absenceSources[] = [
@@ -246,7 +260,19 @@ final class AutomaticLeaveEntitlementService
                 'segments' => $segments,
             ];
         }
-        $workedEquivalent = $workedMinutes + $substituteMinutes;
+        // § 348 odst. 1 písm. d) ZP — doba, kdy zaměstnanec nepracoval proto,
+        // že byl svátek, se považuje za výkon práce. Bez ní by nárok krátil
+        // každý svátek, který padl na jeho pracovní den.
+        $holidayCredit = $this->holidayWorkEquivalent(
+            $supplierId,
+            (int) $employment['id'],
+            $start,
+            $end,
+            $approvedPeriods,
+            $timeEntries,
+        );
+        $holidayMinutes = $holidayCredit['minutes'];
+        $workedEquivalent = $workedMinutes + $substituteMinutes + $holidayMinutes;
         if ($workedEquivalent <= 0) {
             $blockers['worked_equivalent_time_missing'] = true;
         }
@@ -274,6 +300,7 @@ final class AutomaticLeaveEntitlementService
             'time_months' => $months,
             'time_entries' => $timeEntries,
             'approved_vacations' => $absenceSources,
+            'holidays' => $holidayCredit['days'],
             'existing_entitlement' => $existingEntitlement,
         ];
         $inputVersion = hash('sha256', CanonicalJson::encode($sources));
@@ -368,12 +395,16 @@ final class AutomaticLeaveEntitlementService
     private function approvedTimeEntries(int $supplierId, int $employmentId, string $from, string $to): array
     {
         $stmt = $this->db->pdo()->prepare(
+            // Přesčas se nezapočítává. Nárok na dovolenou se podle § 213 ZP
+            // odvozuje od STANOVENÉ týdenní pracovní doby, ne od skutečně
+            // odpracovaných hodin — hodinou navíc si zaměstnanec nárok
+            // nezvyšuje a v násobcích stanovené doby by ho posouval nahoru.
             "SELECT id, revision_no, category, starts_at_utc, ends_at_utc,
-                    break_minutes, row_version,
+                    timezone_name, break_minutes, row_version,
                     TIMESTAMPDIFF(MINUTE, starts_at_utc, ends_at_utc) - break_minutes AS minutes
                FROM payroll_time_entries
               WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'
-                AND category IN ('regular','overtime')
+                AND category = 'regular'
                 AND starts_at_utc >= ? AND starts_at_utc < DATE_ADD(?, INTERVAL 1 DAY)
               ORDER BY starts_at_utc, id",
         );
@@ -384,6 +415,69 @@ final class AutomaticLeaveEntitlementService
         }
         unset($row);
         return $rows;
+    }
+
+    /**
+     * Svátek jako výkon práce podle § 348 odst. 1 písm. d) ZP.
+     *
+     * Započítá se jen svátek, který padl na den, kdy by zaměstnanec podle
+     * rozvrhu jinak pracoval, a jen v měsíci se schválenou docházkou — stejná
+     * podmínka jako u odpracované doby, jinak by nárok stál na neschválených
+     * podkladech. Odpracované minuty téhož dne, které už jsou v odpracované
+     * době, se odečtou, aby se den nezapočítal dvakrát.
+     *
+     * @param array<string,bool> $approvedPeriods
+     * @param list<array<string,mixed>> $timeEntries už započtená odpracovaná doba
+     * @return array{minutes:int,days:list<array{date:string,code:string,planned_minutes:int,credited_minutes:int}>}
+     */
+    private function holidayWorkEquivalent(
+        int $supplierId,
+        int $employmentId,
+        string $from,
+        string $to,
+        array $approvedPeriods,
+        array $timeEntries,
+    ): array {
+        $holidays = PayrollWorkCalendarSchedule::holidaysBetween($this->holidayCalendar, $from, $to);
+        $dates = [];
+        foreach (array_keys($holidays) as $date) {
+            if (isset($approvedPeriods[substr((string) $date, 0, 7) . '-01'])) {
+                $dates[] = (string) $date;
+            }
+        }
+        if ($dates === []) {
+            return ['minutes' => 0, 'days' => []];
+        }
+
+        $workedByDate = [];
+        foreach ($timeEntries as $entry) {
+            $timezone = new \DateTimeZone((string) ($entry['timezone_name'] ?? 'UTC'));
+            $localDate = (new \DateTimeImmutable(
+                (string) $entry['starts_at_utc'],
+                new \DateTimeZone('UTC'),
+            ))->setTimezone($timezone)->format('Y-m-d');
+            $workedByDate[$localDate] = ($workedByDate[$localDate] ?? 0) + (int) $entry['minutes'];
+        }
+
+        $planned = $this->schedule->plannedMinutes($supplierId, $employmentId, $dates);
+        $total = 0;
+        $days = [];
+        foreach ($dates as $date) {
+            $plannedMinutes = $planned[$date] ?? 0;
+            $credited = max(0, $plannedMinutes - ($workedByDate[$date] ?? 0));
+            if ($credited <= 0) {
+                continue;
+            }
+            $total += $credited;
+            $days[] = [
+                'date' => $date,
+                'code' => (string) ($holidays[$date]['code'] ?? ''),
+                'planned_minutes' => $plannedMinutes,
+                'credited_minutes' => $credited,
+            ];
+        }
+
+        return ['minutes' => $total, 'days' => $days];
     }
 
     /** @return list<array<string,mixed>> */

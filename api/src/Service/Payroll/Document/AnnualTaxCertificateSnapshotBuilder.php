@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\IncomeTax\EuropeanEconomicAreaCountries;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -685,7 +686,12 @@ class AnnualTaxCertificateSnapshotBuilder
                 }
             }
         }
-        $expectedNet = $this->nonNegativeInt(
+        // Podepsaná částka: měsíc bez zdanitelného příjmu, ve kterém se odvedl
+        // doplatek zdravotního pojištění do minimálního vyměřovacího základu
+        // (§ 3 odst. 10 z. č. 592/1992 Sb.), skončí zápornou výplatou. Věcná
+        // brána je podmínka níž — doložit VYPLACENÝ zdanitelný příjem nulovou
+        // nebo zápornou výplatou pořád nejde — a ta zůstává beze změny.
+        $expectedNet = $this->int(
             $person,
             'payable_after_enforcement_minor',
         );
@@ -1097,6 +1103,7 @@ class AnnualTaxCertificateSnapshotBuilder
                 PayrollSensitiveField::PERSONAL_IDENTIFIER,
                 $supplierId,
                 $this->positiveInt($identifierRow, 'id'),
+                PayrollRevealPurpose::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
             );
         } else {
             $birth = $this->db->pdo()->prepare(
@@ -1175,6 +1182,7 @@ class AnnualTaxCertificateSnapshotBuilder
                     PayrollSensitiveField::PERSONAL_IDENTIFIER,
                     $supplierId,
                     $dependantId,
+                    PayrollRevealPurpose::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
                 );
             $orders = [1 => [], 2 => [], 3 => []];
             $ztpP = [];

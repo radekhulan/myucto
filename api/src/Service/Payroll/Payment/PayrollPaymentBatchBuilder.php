@@ -10,6 +10,7 @@ use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use Psr\Clock\ClockInterface;
@@ -917,6 +918,7 @@ final class PayrollPaymentBatchBuilder
             PayrollSensitiveField::BANK_ACCOUNT,
             $supplierId,
             $accountId,
+            PayrollRevealPurpose::PAYMENT_BATCH,
         );
         $lookupHash = bin2hex($this->sensitiveData->lookupHash(
             $plaintext,
@@ -1320,6 +1322,7 @@ final class PayrollPaymentBatchBuilder
             PayrollSensitiveField::BANK_ACCOUNT,
             $supplierId,
             $accountId,
+            PayrollRevealPurpose::PAYMENT_BATCH,
         );
         $actualHash = bin2hex($this->sensitiveData->lookupHash(
             $plaintext,

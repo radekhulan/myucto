@@ -46,9 +46,24 @@ final class PayrollPostingAccountsTest extends TestCase
         $defaults = PayrollPostingAccounts::defaults();
 
         self::assertSame(PayrollAccountingDefaults::codes()['employment_gross_debit'], $defaults->employmentExpense);
-        self::assertSame('336', $defaults->socialPayable);
-        self::assertSame('336', $defaults->healthPayable);
-        self::assertTrue($defaults->insuranceIsPooled(), 'syntetika 336 pokrývá obě instituce');
+        // Od W7/Ú-08 je výchozí kontace ROZDĚLENÁ: závazek vůči ČSSZ a vůči
+        // zdravotním pojišťovnám se na společné 336 vzájemně vynetoval a saldo
+        // proti dvěma platbám nesedělo. Platí to jen pro NOVĚ zakládanou firmu —
+        // kdo má uloženou 336, účtuje na ni dál (viz migrace 1618).
+        self::assertSame('336.100', $defaults->socialPayable);
+        self::assertSame('336.200', $defaults->healthPayable);
+        self::assertFalse($defaults->insuranceIsPooled(), 'obě instituce mají svou analytiku');
+    }
+
+    /** Kdo si 336 nechá společnou, dostane pořád jeden slitý řádek. */
+    public function testPooledInsuranceStaysAvailableAsAnExplicitChoice(): void
+    {
+        $pooled = PayrollPostingAccounts::fromMap([
+            PayrollPostingAccounts::KEY_SOCIAL_PAYABLE => '336',
+            PayrollPostingAccounts::KEY_HEALTH_PAYABLE => '336',
+        ]);
+
+        self::assertTrue($pooled->insuranceIsPooled());
     }
 
     public function testForTypeFollowsTaxpayerType(): void
@@ -115,22 +130,35 @@ final class PayrollPostingAccountsTest extends TestCase
     public function testPooledInsuranceKeepsLegacyLines(): void
     {
         $b = PayrollCalculator::compute(4500.0, TaxConstants::forYear(2025));
+        $pooled = PayrollPostingAccounts::fromMap([
+            PayrollPostingAccounts::KEY_SOCIAL_PAYABLE => '336',
+            PayrollPostingAccounts::KEY_HEALTH_PAYABLE => '336',
+        ]);
 
-        self::assertSame(
-            self::fingerprint(PayrollCalculator::lines($b, PayrollCalculator::TYPE_MANAGING_PARTNER)),
-            self::fingerprint(PayrollCalculator::lines(
-                $b,
-                PayrollCalculator::TYPE_MANAGING_PARTNER,
-                null,
-                PayrollPostingAccounts::defaults(),
-            )),
+        $lines = PayrollCalculator::lines(
+            $b,
+            PayrollCalculator::TYPE_MANAGING_PARTNER,
+            null,
+            $pooled,
         );
-
-        $codes = array_column(PayrollCalculator::lines($b, PayrollCalculator::TYPE_MANAGING_PARTNER), 'account_code');
+        $codes = array_column($lines, 'account_code');
         self::assertCount(
             2,
             array_filter($codes, static fn (string $c): bool => $c === '336'),
             'se společnou 336 jsou právě dva řádky (zaměstnavatel + zaměstnanec), ne čtyři'
+        );
+
+        // Slítá 336 a rozdělené analytiky musí dát TÝŽ závazek — rozpad je jen
+        // jiný řez též částky, ne jiné číslo.
+        $split = self::fingerprint(PayrollCalculator::lines(
+            $b,
+            PayrollCalculator::TYPE_MANAGING_PARTNER,
+            null,
+            PayrollPostingAccounts::defaults(),
+        ));
+        self::assertSame(
+            self::fingerprint($lines)['336|credit'],
+            $split['336.100|credit'] + $split['336.200|credit'],
         );
     }
 

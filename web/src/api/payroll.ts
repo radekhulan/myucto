@@ -1553,6 +1553,33 @@ export interface PayrollEmployeeCardMonth {
   }
 }
 
+/**
+ * Co se z dávky neuložilo a proč — pole po poli.
+ *
+ * Jeden vadný řádek nesmí shodit uložení celé stránky, takže server ukládá,
+ * co jde, a zbytek vrací sem. `field` míří na konkrétní políčko formuláře;
+ * `row` znamená, že selhal celý řádek (typicky konflikt verze vztahu).
+ */
+export interface PayrollQuickInputFailure {
+  employment_id: number
+  field: 'row' | 'base' | 'overtime' | 'bonus'
+  code: string
+  message: string
+  current_row_version: number | null
+}
+
+export interface PayrollQuickInputSaveResult {
+  month: PayrollQuickInputMonth
+  failures: PayrollQuickInputFailure[]
+}
+
+/** Výsledek hromadného schválení mzdových vstupů. */
+export interface PayrollInputApproveBatchResult {
+  approved: number[]
+  skipped: Array<{ id: number, code: string, message: string }>
+  failed: Array<{ id: number, code: string, message: string }>
+}
+
 export interface PayrollQuickInputSavePayload {
   period: string
   rows: Array<{
@@ -1685,13 +1712,37 @@ export interface PayrollEmployerAccounts {
   income_tax_credit: string
   other_deductions_credit: string
   partner_settlement_credit: string
+  /**
+   * Povinný příspěvek zaměstnavatele na spoření u rizikové práce
+   * (z. č. 324/2025 Sb.). Zákonný sociální náklad, ne mzda — 527 MD / 379 D.
+   */
+  risky_savings_debit: string
+  risky_savings_credit: string
+  /**
+   * Záporná čistá mzda: zaměstnanec dluží zaměstnavateli (typicky doplatek ZP
+   * do minimálního vyměřovacího základu v měsíci bez peněžního příjmu).
+   * Závazkový účet mzdy se překlopí na pohledávku — 335, tedy AKTIVNÍ účet.
+   */
+  employee_receivable_debit: string
+  /**
+   * Daňově NEuznatelná část benefitu podle § 25 odst. 1 písm. h) ZDP —
+   * nedaňová je právě ta část, která je u zaměstnance OSVOBOZENÁ.
+   */
+  non_deductible_benefit_debit: string
+  /** Cestovní náhrada je náhrada výdaje podle části sedmé ZP, ne mzda. */
+  travel_expense_debit: string
 }
 
 export interface PayrollAccountOption {
   id: number
   account_code: string
   name: string
-  account_type: 'expense' | 'liability'
+  /**
+   * `asset` je tu kvůli `employee_receivable_debit` (335). Nabídka účtů ho
+   * posílá až od chvíle, kdy tuhle předkontaci šlo nastavit — bez něj by
+   * jediné pole s pohledávkou nemělo z čeho vybírat.
+   */
+  account_type: 'expense' | 'liability' | 'asset'
   is_synthetic: boolean
   parent_id: number | null
   is_active: boolean
@@ -3203,6 +3254,8 @@ export type PayrollAnnualSettlementBlocker =
   | 'accumulator_missing'
   | 'no_approved_months'
   | 'settlement_deadline_passed'
+  | 'tax_year_not_finished'
+  | 'taxpayer_credit_evidence_missing'
   | 'non_resident'
   | 'credit_evidence_unverified'
   | 'child_evidence_unverified'
@@ -5577,12 +5630,19 @@ export const payrollApi = {
     page?: PayrollPageParams,
     employmentId?: number,
   ) =>
-    api.put<{ month: PayrollQuickInputMonth }>('/payroll/quick-inputs', payload, {
-      params: {
-        ...pageParams(page),
-        ...(employmentId ? { employment_id: employmentId } : {}),
+    api.put<{ month: PayrollQuickInputMonth, failures?: PayrollQuickInputFailure[] }>(
+      '/payroll/quick-inputs',
+      payload,
+      {
+        params: {
+          ...pageParams(page),
+          ...(employmentId ? { employment_id: employmentId } : {}),
+        },
       },
-    }).then(response => response.data.month),
+    ).then(response => ({
+      month: response.data.month,
+      failures: response.data.failures ?? [],
+    })),
   previewInput: (payload: PayrollInputPayload) =>
     api.post<{ preview: PayrollInputPreview }>('/payroll/inputs/preview', payload)
       .then(response => response.data.preview),
@@ -5598,6 +5658,19 @@ export const payrollApi = {
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/approve`, {
       row_version: rowVersion,
     }).then(response => response.data.input),
+  /**
+   * Hromadné schválení mzdových vstupů.
+   *
+   * Bez `ids` si dávku poskládá server ze všech konceptů období — právě z těch,
+   * kvůli kterým mzdový běh drží blokátor `draft_inputs_present`.
+   */
+  approveInputsBatch: (payload: {
+    ids?: number[]
+    period?: string
+    employment_id?: number
+  }) =>
+    api.post<PayrollInputApproveBatchResult>('/payroll/inputs/approve-batch', payload)
+      .then(response => response.data),
   cancelInput: (id: number, rowVersion: number) =>
     api.post<{ input: PayrollInput }>(`/payroll/inputs/${id}/cancel`, {
       row_version: rowVersion,

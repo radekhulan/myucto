@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
+  type PayrollQuickInputFailure,
   type PayrollQuickInputRef,
   type PayrollQuickInputRow,
   type PayrollQuickInputSavePayload,
@@ -67,6 +68,23 @@ const saveError = ref<string | null>(null)
 const saveConflict = ref(false)
 let loadGeneration = 0
 
+/*
+ * Rozepsané řádky napříč stránkami.
+ *
+ * `rows` drží jen zobrazenou stránku, takže „Uložit vše" ukládalo dvacetinu
+ * práce a u 500 lidí to bylo dvacet uložení a dvacet šancí na konflikt verzí.
+ * Editované řádky proto přežívají přelistování tady a odcházejí spolu s tou
+ * stránkou, na které uživatel právě stojí.
+ *
+ * Posílají se JEN skutečně změněné řádky (plus aktuální stránka) — nasypat
+ * serveru všech 500 vztahů při každém uložení by z toho udělalo jiný problém.
+ */
+const pending = ref(new Map<number, UiRow>())
+/** Co server odmítl uložit, klíč `employment_id:pole`. */
+const fieldErrors = ref<Record<string, string>>({})
+/** Strop jedné dávky na serveru (PayrollQuickInputValidator). */
+const SAVE_CHUNK = 500
+
 const COLUMNS: ColumnDef[] = [
   { key: 'person', labelKey: 'payroll.quick_inputs.person', required: true },
   { key: 'income_amount', labelKey: 'payroll.quick_inputs.income_amount', required: true },
@@ -126,9 +144,55 @@ function reload(): void {
   void load()
 }
 
+/*
+ * Jiný měsíc = jiná data. Rozepsané řádky se zahazují spolu s ním, jinak by se
+ * do nového období přelilo, co uživatel psal do starého.
+ */
+function changePeriod(): void {
+  pending.value.clear()
+  fieldErrors.value = {}
+  reload()
+}
+
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
-const hasBlockingRows = computed(() => rows.value.some(row =>
-  row.base_conflict || row.overtime_conflict || row.bonus_conflict))
+/*
+ * Právo schvalovat mění to, co uložení znamená: server takovému uživateli
+ * uloží vstup rovnou jako schválený, takže mzdový běh nedrží blokátor
+ * `draft_inputs_present` a schvalovat na jiné obrazovce se nemusí nic.
+ */
+const canApprove = computed(() => auth.canWrite('payroll.approve'))
+/*
+ * Konflikt s jiným vstupem NEBLOKUJE uložení celé stránky.
+ *
+ * Jeden zaměstnanec s duplicitně zadaným základem dřív zamkl tlačítko a s ním
+ * i dalších 24 vyplněných řádků. Server dnes ukládá po polích a vrací, co
+ * neuložil a proč — vadné pole se obarví, zbytek se uloží.
+ */
+const conflictRowCount = computed(() => rows.value.filter(row =>
+  row.base_conflict || row.overtime_conflict || row.bonus_conflict).length)
+
+function fieldErrorKey(employmentId: number, field: string): string {
+  return `${employmentId}:${field}`
+}
+
+function serverError(row: UiRow, field: 'row' | 'base' | 'overtime' | 'bonus'): string | null {
+  return fieldErrors.value[fieldErrorKey(row.employment_id, field)] ?? null
+}
+
+/** Zapamatuje si rozepsaný řádek, ať přežije přelistování na jinou stránku. */
+function markDirty(row: UiRow): void {
+  pending.value.set(row.employment_id, row)
+  clearSaveError()
+  for (const field of ['row', 'base', 'overtime', 'bonus']) {
+    delete fieldErrors.value[fieldErrorKey(row.employment_id, field)]
+  }
+}
+
+/** Rozepsané řádky mimo právě zobrazenou stránku. */
+const pendingElsewhere = computed(() => {
+  const onPage = new Set(rows.value.map(row => row.employment_id))
+  return Array.from(pending.value.values()).filter(row => !onPage.has(row.employment_id))
+})
 
 function toUi(row: PayrollQuickInputRow): UiRow {
   return {
@@ -147,8 +211,17 @@ function formatMoney(value: number): string {
   return formatMoneyMinor(value)
 }
 
+/*
+ * Kdo smí schvalovat, ukládá rovnou schválené vstupy — a musel by si tím
+ * první uloženou částkou zabetonovat vlastní řádek, kdyby schválené pole
+ * zůstalo zamčené. Dokud vstup nepohltil mzdový běh (`locked`), jde ho
+ * opravit; server ho na tu dobu vrátí do konceptu a schválí znovu.
+ *
+ * Bez práva schvalovat platí původní pravidlo: upravit jde jen koncept.
+ */
 function editable(input: PayrollQuickInputRef | null): boolean {
-  return input === null || input.status === 'draft'
+  if (input === null || input.status === 'draft') return true
+  return input.status === 'approved' && canApprove.value
 }
 
 function relationLabel(row: UiRow): string {
@@ -272,17 +345,43 @@ function rowInvalid(row: UiRow): boolean {
 const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
 
 /*
+ * Co se pošle na server: celá zobrazená stránka plus rozepsané řádky odjinud.
+ *
+ * Řádek, který je vadný už v prohlížeči (nepřečitatelná částka), se neposílá —
+ * server by kvůli němu odmítl celý požadavek. Zůstane červený na místě a
+ * ostatní se uloží.
+ */
+const savableRows = computed(() => [...rows.value, ...pendingElsewhere.value]
+  .filter(row => !rowInvalid(row)))
+
+/*
  * Proč nejde „Uložit vše". Blokací je několik a liší se tím, co má uživatel
  * udělat, takže obecné „akce není dostupná" by mu nepomohlo ani jednou.
  * Pořadí odpovídá tomu, co musí vyřešit dřív.
+ *
+ * Vadný ani konfliktní řádek už tlačítko nezamyká — jen se neuloží on. Věta
+ * pod tlačítkem proto říká, kolik řádků zůstane stranou, ne „nejde uložit".
  */
 const saveBlockedReason = computed<string | null>(() => {
   if (loading.value || loadedPeriod.value !== period.value) {
     return t('payroll.quick_inputs.save_blocked_loading')
   }
   if (rows.value.length === 0) return t('payroll.quick_inputs.save_blocked_empty')
-  if (hasInvalidRows.value) return t('payroll.quick_inputs.save_blocked_invalid')
-  if (hasBlockingRows.value) return t('payroll.quick_inputs.save_blocked_rows')
+  if (savableRows.value.length === 0) return t('payroll.quick_inputs.save_blocked_invalid')
+  return null
+})
+
+/** Poznámka pod tlačítkem: co se tímhle uložením NEuloží a proč. */
+const savePartialNote = computed<string | null>(() => {
+  if (saveBlockedReason.value !== null) return null
+  const skipped = rows.value.filter(rowInvalid).length
+  if (skipped > 0) return t('payroll.quick_inputs.save_partial_invalid', { count: skipped })
+  if (conflictRowCount.value > 0) {
+    return t('payroll.quick_inputs.save_partial_conflict', { count: conflictRowCount.value })
+  }
+  if (pendingElsewhere.value.length > 0) {
+    return t('payroll.quick_inputs.save_pending_pages', { count: pendingElsewhere.value.length })
+  }
   return null
 })
 const invalidFieldCount = computed(() => rows.value.reduce(
@@ -341,6 +440,27 @@ function grossPreview(row: UiRow): number {
     + row.other_amount_minor
 }
 
+/**
+ * Čerstvý řádek ze serveru, přes který se přetáhne rozepsaná hodnota.
+ *
+ * Verze (a příznaky „spravuje jinde") se berou ze serveru, ne z paměti: jsou
+ * to právě ta data, na kterých stojí optimistický zámek. Zapamatovaná zůstává
+ * jen ta část, kterou napsal uživatel.
+ */
+function applyPending(row: PayrollQuickInputRow): UiRow {
+  const ui = toUi(row)
+  const kept = pending.value.get(row.employment_id)
+  if (kept) {
+    ui.baseAmount = kept.baseAmount
+    ui.overtimeHours = kept.overtimeHours
+    ui.overtimeAmount = kept.overtimeAmount
+    ui.bonusAmount = kept.bonusAmount
+    ui.overtime_mode = kept.overtime_mode
+    pending.value.set(row.employment_id, ui)
+  }
+  return ui
+}
+
 async function load(): Promise<void> {
   const requestedPeriod = period.value
   const generation = ++loadGeneration
@@ -358,7 +478,7 @@ async function load(): Promise<void> {
     )
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
-    rows.value = month.items.map(toUi)
+    rows.value = month.items.map(applyPending)
     // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
     total.value = month.total
     loadedPeriod.value = requestedPeriod
@@ -375,10 +495,10 @@ async function load(): Promise<void> {
   }
 }
 
-function payload(): PayrollQuickInputSavePayload {
+function payload(batch: UiRow[]): PayrollQuickInputSavePayload {
   return {
     period: period.value,
-    rows: rows.value.map(row => ({
+    rows: batch.map(row => ({
       employment_id: row.employment_id,
       employment_row_version: row.employment_row_version,
       base_amount_minor: baseIsBlank(row) ? null : parsedAmount(row.baseAmount),
@@ -407,7 +527,8 @@ async function save(): Promise<void> {
   if (loadedPeriod.value !== period.value || rows.value.length === 0) {
     return
   }
-  if (hasInvalidRows.value) {
+  const batch = savableRows.value
+  if (batch.length === 0) {
     toast.error(t('payroll.quick_inputs.validation_failed'))
     return
   }
@@ -416,19 +537,51 @@ async function save(): Promise<void> {
   saving.value = true
   saveError.value = null
   saveConflict.value = false
+  fieldErrors.value = {}
   try {
-    const month = await payrollApi.saveQuickInputs(
-      payload(),
-      { limit: pageSize, offset: offset.value },
-      focusEmploymentId.value ?? undefined,
-    )
+    // Server bere nejvýše 500 vztahů na požadavek. U větší firmy se dávka
+    // rozdělí, ale zůstává to JEDNO uložení z pohledu uživatele — ne dvacet
+    // ručních uložení stránku po stránce, kvůli kterým to celé vzniklo.
+    const failures: PayrollQuickInputFailure[] = []
+    let last: Awaited<ReturnType<typeof payrollApi.saveQuickInputs>> | null = null
+    for (let from = 0; from < batch.length; from += SAVE_CHUNK) {
+      const chunk = batch.slice(from, from + SAVE_CHUNK)
+      last = await payrollApi.saveQuickInputs(
+        payload(chunk),
+        { limit: pageSize, offset: offset.value },
+        focusEmploymentId.value ?? undefined,
+      )
+      failures.push(...last.failures)
+    }
+    if (last === null) return
     if (generation !== loadGeneration || period.value !== requestedPeriod
-      || month.period !== requestedPeriod) return
+      || last.month.period !== requestedPeriod) return
+
+    const failed = new Set(failures.map(failure => failure.employment_id))
+    for (const row of batch) {
+      if (!failed.has(row.employment_id)) pending.value.delete(row.employment_id)
+    }
+    fieldErrors.value = Object.fromEntries(failures.map(failure =>
+      [fieldErrorKey(failure.employment_id, failure.field), failure.message]))
+
     // Uložení dostalo v query tentýž limit/offset, takže vrací TU stránku,
     // kterou měl uživatel před sebou — jinak by mu tabulka skočila na začátek.
-    rows.value = month.items.map(toUi)
-    total.value = month.total
-    toast.success(t('payroll.quick_inputs.saved'))
+    rows.value = last.month.items.map(applyPending)
+    total.value = last.month.total
+    if (failures.length === 0) {
+      toast.success(t('payroll.quick_inputs.saved'))
+      return
+    }
+    // Částečný výsledek se nesmí tvářit ani jako úspěch, ani jako selhání:
+    // uživatel musí vědět, kolik řádků prošlo a kolik na něj ještě čeká.
+    saveError.value = t('payroll.quick_inputs.saved_partially', {
+      saved: batch.length - failed.size,
+      failed: failed.size,
+    })
+    saveConflict.value = failures.some(failure =>
+      failure.code === 'employment_row_version_conflict'
+      || failure.code === 'row_version_conflict')
+    toast.error(saveError.value)
   } catch (error) {
     saveError.value = apiErrorMessage(error, t('payroll.quick_inputs.save_failed'))
     saveConflict.value = errorCode(error) === 'employment_row_version_conflict'
@@ -443,7 +596,7 @@ function setOvertimeMode(row: UiRow, mode: 'hours' | 'amount'): void {
   if (mode === 'hours'
     && (!row.overtime_hours_relation_supported || !row.overtime_hours_available)) return
   row.overtime_mode = mode
-  saveError.value = null
+  markDirty(row)
 }
 
 function clearSaveError(): void {
@@ -475,7 +628,7 @@ onMounted(load)
             type="month"
             class="h-10 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             :disabled="loading || saving"
-            @change="reload"
+            @change="changePeriod"
           >
         </label>
         <button :class="btnOutline('neutral')" :disabled="loading || saving" @click="load">
@@ -614,7 +767,7 @@ onMounted(load)
                     :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
                     :class="[fieldClass(baseError(row), true), 'w-36']"
                     :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
-                    @input="clearSaveError"
+                    @input="markDirty(row)"
                   >
                   <p
                     v-if="baseError(row)"
@@ -622,6 +775,13 @@ onMounted(load)
                     class="mt-1 max-w-40 text-xs text-danger-700"
                   >
                     {{ validationMessage(baseError(row)) }}
+                  </p>
+                  <p
+                    v-if="serverError(row, 'base') || serverError(row, 'row')"
+                    :data-testid="`quick-base-server-error-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs font-medium text-danger-700"
+                  >
+                    {{ serverError(row, 'base') ?? serverError(row, 'row') }}
                   </p>
                   <p
                     v-if="fieldState(row, 'base')"
@@ -666,7 +826,7 @@ onMounted(load)
                     :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
                     :class="[fieldClass(overtimeError(row), true), 'mt-2 w-36']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                    @input="clearSaveError"
+                    @input="markDirty(row)"
                   >
                   <input
                     v-else
@@ -679,7 +839,7 @@ onMounted(load)
                     :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
                     :class="[fieldClass(overtimeError(row), true), 'mt-2 w-36']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                    @input="clearSaveError"
+                    @input="markDirty(row)"
                   >
                   <p
                     v-if="overtimeError(row)"
@@ -696,6 +856,13 @@ onMounted(load)
                   </p>
                   <p v-else-if="!row.overtime_hours_relation_supported" class="mt-1 max-w-xs text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.amount_only_relation_hint') }}
+                  </p>
+                  <p
+                    v-if="serverError(row, 'overtime')"
+                    :data-testid="`quick-overtime-server-error-${row.employment_id}`"
+                    class="mt-1 max-w-56 text-xs font-medium text-danger-700"
+                  >
+                    {{ serverError(row, 'overtime') }}
                   </p>
                   <p
                     v-if="fieldState(row, 'overtime')"
@@ -717,7 +884,7 @@ onMounted(load)
                     :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
                     :class="[fieldClass(bonusError(row), true), 'w-36']"
                     :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
-                    @input="clearSaveError"
+                    @input="markDirty(row)"
                   >
                   <p
                     v-if="bonusError(row)"
@@ -725,6 +892,13 @@ onMounted(load)
                     class="mt-1 max-w-40 text-xs text-danger-700"
                   >
                     {{ validationMessage(bonusError(row)) }}
+                  </p>
+                  <p
+                    v-if="serverError(row, 'bonus')"
+                    :data-testid="`quick-bonus-server-error-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs font-medium text-danger-700"
+                  >
+                    {{ serverError(row, 'bonus') }}
                   </p>
                   <p
                     v-if="fieldState(row, 'bonus')"
@@ -805,10 +979,13 @@ onMounted(load)
                   :aria-invalid="baseError(row) !== null"
                   :class="[fieldClass(baseError(row)), 'w-full']"
                   :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
-                  @input="clearSaveError"
+                  @input="markDirty(row)"
                 >
                 <span v-if="baseError(row)" class="mt-1 block text-xs text-danger-700">
                   {{ validationMessage(baseError(row)) }}
+                </span>
+                <span v-if="serverError(row, 'base') || serverError(row, 'row')" class="mt-1 block text-xs font-medium text-danger-700">
+                  {{ serverError(row, 'base') ?? serverError(row, 'row') }}
                 </span>
                 <span
                   v-if="fieldState(row, 'base')"
@@ -827,10 +1004,13 @@ onMounted(load)
                   :aria-invalid="bonusError(row) !== null"
                   :class="[fieldClass(bonusError(row)), 'w-full']"
                   :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
-                  @input="clearSaveError"
+                  @input="markDirty(row)"
                 >
                 <span v-if="bonusError(row)" class="mt-1 block text-xs text-danger-700">
                   {{ validationMessage(bonusError(row)) }}
+                </span>
+                <span v-if="serverError(row, 'bonus')" class="mt-1 block text-xs font-medium text-danger-700">
+                  {{ serverError(row, 'bonus') }}
                 </span>
                 <span
                   v-if="fieldState(row, 'bonus')"
@@ -856,7 +1036,7 @@ onMounted(load)
                     :aria-invalid="overtimeError(row) !== null"
                     :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                    @input="clearSaveError"
+                    @input="markDirty(row)"
                   >
                   <input
                     v-else
@@ -868,11 +1048,14 @@ onMounted(load)
                     :aria-invalid="overtimeError(row) !== null"
                     :class="[fieldClass(overtimeError(row)), 'min-w-0 flex-1']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
-                    @input="clearSaveError"
+                    @input="markDirty(row)"
                   >
                 </div>
                 <p v-if="overtimeError(row)" class="mt-1 text-xs text-danger-700">
                   {{ validationMessage(overtimeError(row)) }}
+                </p>
+                <p v-if="serverError(row, 'overtime')" class="mt-1 text-xs font-medium text-danger-700">
+                  {{ serverError(row, 'overtime') }}
                 </p>
                 <p v-else-if="row.overtime_mode === 'hours' && row.overtime_hourly_rate_minor" class="mt-1 text-xs text-neutral-500">
                   {{ t('payroll.quick_inputs.rate_hint', { rate: formatMoney(row.overtime_hourly_rate_minor) }) }}
@@ -918,7 +1101,14 @@ onMounted(load)
       <p v-if="canWrite && saveBlockedReason" :class="[BTN_DISABLED_NOTE, 'order-first basis-full sm:text-right']" data-testid="quick-payroll-save-blocked">
         {{ saveBlockedReason }}
       </p>
-      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || hasBlockingRows || hasInvalidRows" :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)" @click="save">
+      <!--
+        Ne blokace, ale upozornění: uloží se to, co jde, a tohle je zbytek.
+        Bez téhle věty by uživatel čekal, že „Uložit vše" uloží úplně všechno.
+      -->
+      <p v-else-if="canWrite && savePartialNote" :class="[BTN_DISABLED_NOTE, 'order-first basis-full sm:text-right']" data-testid="quick-payroll-save-partial">
+        {{ savePartialNote }}
+      </p>
+      <button v-if="canWrite" data-testid="quick-payroll-save" :class="[btnFilled('primary'), 'w-full sm:w-auto']" :disabled="saving || loading || loadedPeriod !== period || rows.length === 0 || savableRows.length === 0" :title="disabledTitle(saveBlockedReason !== null, saveBlockedReason)" @click="save">
         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>
         {{ t('payroll.quick_inputs.save_all') }}
       </button>

@@ -53,16 +53,29 @@ final class PayrollRunGarnishmentProcessor
                 'input' => $input->toCanonicalArray(),
                 'result' => $result->jsonSerialize(),
             ];
+            // Osoba se zápornou čistou mzdou (celý měsíc neplacené volno
+            // a doplatek ZP do minimálního vyměřovacího základu podle § 3
+            // odst. 10 z. č. 592/1992 Sb.) nemá postižitelný příjem — exekuce
+            // z ní nesrazí nic a `evaluate()` jí proto dá nulový výsledek.
+            // Základem výplaty pak není „co exekuce nechala", ale sama záporná
+            // čistá mzda: jinak by se dluh zaměstnance tiše ztratil a účetní
+            // můstek by ohlásil rozpor mezi předpisem a čistou výplatou.
+            $netOverdrawn = $netCashPayable !== null && $netCashPayable < 0;
             // Doplatek ze zúčtování se přičítá až za exekučními srážkami —
             // není mzdou ani jiným postižitelným příjmem podle § 299 OSŘ.
             $payable = self::add(
-                self::add(
-                    $result->employeePaymentMinorUnits,
-                    $income->excludedMinorUnits,
-                ),
+                $netOverdrawn
+                    ? $netCashPayable
+                    : self::add(
+                        $result->employeePaymentMinorUnits,
+                        $income->excludedMinorUnits,
+                    ),
                 $annualSettlement,
             ) - $voluntaryDeducted;
-            if ($payable < 0) {
+            // Záporná výplata je přípustná JEN u záporné čisté mzdy. Tam, kde
+            // příjem byl, znamená záporný zůstatek pořád jediné: dobrovolná
+            // srážka snědla víc, než exekuce nechala.
+            if (!$netOverdrawn && $payable < 0) {
                 throw new \DomainException(
                     'Dobrovolná srážka přesáhla výplatu po exekučních srážkách.',
                 );
@@ -227,6 +240,16 @@ final class PayrollRunGarnishmentProcessor
         if ($context['requires_net_pay']) {
             if ($netCashPayable === null) {
                 $statutoryUnavailable = true;
+            } elseif ($netCashPayable < 0) {
+                // Není z čeho srážet: § 299 OSŘ postihuje mzdu a jiné příjmy,
+                // a osoba, jejíž čistá mzda je záporná (neplacené volno
+                // + doplatek ZP do minimálního vyměřovacího základu), žádný
+                // nemá. Je to REGULÉRNÍ nulový výsledek, ne rozpor podkladů —
+                // kdyby propadl níž do větve `cash_payable < 0`, dostal by
+                // stav „k ručnímu posouzení" a zablokoval by celý běh kvůli
+                // situaci, která je zákonem předvídaná a jednoznačná.
+                $cashPayable = 0;
+                $enforcementBase = 0;
             } else {
                 $excluded = $grossCashPayable - $grossEnforcementBase;
                 $cashPayable = $netCashPayable;
@@ -286,6 +309,7 @@ final class PayrollRunGarnishmentProcessor
             $evidence->insolvency,
             $evidence->protectedAmountOverrideVerified,
             $evidence->claimRegisterEvidenceComplete,
+            $evidence->spousePensionEvidence,
         );
 
         return [$input, $this->calculator->calculate($input), $income];

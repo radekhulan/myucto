@@ -109,11 +109,16 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'statutory_gross_debit' => '523',
             'statutory_gross_credit' => '366',
             'employer_insurance_debit' => '524',
-            'social_insurance_credit' => '336',
-            'health_insurance_credit' => '336',
+            'social_insurance_credit' => '336.100',
+            'health_insurance_credit' => '336.200',
             'income_tax_credit' => '342',
             'other_deductions_credit' => '379',
             'partner_settlement_credit' => '365',
+            'risky_savings_debit' => '527',
+            'risky_savings_credit' => '379',
+            'employee_receivable_debit' => '335',
+            'non_deductible_benefit_debit' => '528',
+            'travel_expense_debit' => '512',
         ], $settings['accounts']);
     }
 
