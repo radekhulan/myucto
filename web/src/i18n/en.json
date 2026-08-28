@@ -3566,6 +3566,18 @@
                 "hide_xml": "Hide XML",
                 "copy_xml": "Copy XML",
                 "failed": "The registration could not be prepared.",
+                "a1": {
+                    "title": "Authoritative REGZEC A1 profile",
+                    "description": "The complete, versioned source for the initial full registration. Stored versions are encrypted and a later save never overwrites them.",
+                    "show": "Complete profile",
+                    "hide": "Close profile",
+                    "warning": "Enter only verified personnel evidence. The server safely rejects an empty or incomplete profile; values are never inferred or guessed.",
+                    "save": "Save verified version",
+                    "saved": "Version {version} was stored and is ready for a new A1 preview.",
+                    "load_failed": "The REGZEC A1 profile could not be loaded.",
+                    "save_failed": "The REGZEC A1 profile could not be saved.",
+                    "invalid_json": "The profile must be a valid JSON object."
+                },
                 "agenda": {
                     "PREZEC26": "Partial pre-start registration",
                     "REGZEC25": "Full employee registration"
@@ -5059,6 +5071,12 @@
                 "archive_capacity_hint": "Original content size of permanently archived documents, exports, and filings.",
                 "archive_measurement_failed": "Size could not be measured",
                 "archive_objects": "{count} archived items",
+                "reconciliation": "Operational reconciliation",
+                "reconciliation_open": "Open findings",
+                "reconciliation_diff": "Differences",
+                "reconciliation_blocked": "Blockers",
+                "reconciliation_not_materialized": "Missing evidence",
+                "reconciliation_periods": "Affected periods",
                 "liabilities": "Payroll liabilities",
                 "overdue_unpaid": "Overdue and not fully paid"
             },
@@ -5171,9 +5189,9 @@
             }
         },
         "capabilities": {
-            "title": "Module scope",
-            "description": "The matrix separates target-supported scenarios from features that are already safe to use.",
-            "diagnostics": "Technical information and supported scenarios",
+            "title": "Available features",
+            "description": "The table contains only features that are safe to use in the module.",
+            "diagnostics": "Technical information and available features",
             "feature": "Feature",
             "status": "Product status",
             "availability": "Availability",
@@ -5934,6 +5952,7 @@
             "health_insurer_export": "Health insurer submissions",
             "health_insurer_submission": "Health insurer report submission",
             "eldp_control_export": "ELDP control XML",
+            "eldp_manual_completion": "Manual ELDP completion with acceptance evidence",
             "eldp_submission": "Standalone electronic ELDP submission",
             "direct_submission": "Generic automatic submission of any agenda"
         },

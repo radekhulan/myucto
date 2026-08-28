@@ -48,6 +48,8 @@ final class PayrollOperationalHealthActionTest extends TestCase
             'payroll_payment_liabilities',
             'payroll_payment_allocations',
             'payroll_payment_matches',
+            'payroll_operational_reconciliation_issues',
+            'payroll_operational_reconciliation_issue_events',
         ] as $table) {
             if (!$this->db->hasTable($table)) {
                 $this->markTestSkipped("Chybí tabulka {$table}.");
@@ -220,6 +222,14 @@ final class PayrollOperationalHealthActionTest extends TestCase
                         'object_count' => 0,
                     ],
                 ],
+            ],
+            'reconciliation' => [
+                'open' => 0,
+                'diff' => 0,
+                'blocked' => 0,
+                'not_materialized' => 0,
+                'periods' => 0,
+                'oldest_first_seen_at' => null,
             ],
             'overdue_unpaid_liabilities' => 3,
         ], $body);

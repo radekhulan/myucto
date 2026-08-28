@@ -94,16 +94,7 @@ final class PayrollRegistrationInteractionResolver
                     'REGZEC A1 vyžaduje úplnou a samostatně ověřenou datovou sadu.',
                 );
             }
-            PayrollRegistrationBusinessMatrix::requireActionVariant(
-                1,
-                is_string($context['activity_code'] ?? null)
-                    ? $context['activity_code']
-                    : null,
-                is_string($context['relationship_detail_code'] ?? null)
-                    ? $context['relationship_detail_code']
-                    : null,
-                ($context['regzec_variant_data_complete'] ?? false) === true,
-            );
+            $this->assertA1Snapshot($snapshot);
 
             return $this->forSnapshot(
                 $snapshot,
@@ -236,6 +227,23 @@ final class PayrollRegistrationInteractionResolver
                 'Registrační interakce není v podporovaném katalogu.',
             );
         }
+        if ($documentType === 'REGZEC25'
+            && $interaction->actionCode === 1
+        ) {
+            $this->assertA1Snapshot($snapshot);
+        }
+    }
+
+    private function assertA1Snapshot(
+        PayrollRegistrationIdentitySnapshot $snapshot,
+    ): void {
+        $a1 = $snapshot->regzecA1;
+        PayrollRegistrationBusinessMatrix::requireActionVariant(
+            1,
+            $a1?->employment['activity_code'] ?? null,
+            $a1?->employment['relationship_detail_code'] ?? null,
+            $a1 !== null,
+        );
     }
 
     private function invalid(string $code, string $message): never

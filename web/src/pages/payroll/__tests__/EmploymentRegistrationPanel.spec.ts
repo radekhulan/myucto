@@ -10,6 +10,8 @@ const m = vi.hoisted(() => ({
   close: vi.fn(),
   events: vi.fn(),
   approveEvent: vi.fn(),
+  a1Profile: vi.fn(),
+  saveA1Profile: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -22,6 +24,8 @@ vi.mock('@/api/payroll', () => ({
     closeEmploymentRegistrationTransportAttempt: m.close,
     employmentRegistrationEvents: m.events,
     approveEmploymentRegistrationEvent: m.approveEvent,
+    employmentRegistrationA1Profile: m.a1Profile,
+    saveEmploymentRegistrationA1Profile: m.saveA1Profile,
   },
 }))
 
@@ -81,6 +85,68 @@ describe('EmploymentRegistrationPanel', () => {
       attempt: null,
     })
     m.events.mockResolvedValue([])
+    m.a1Profile.mockResolvedValue(null)
+  })
+
+  it('saves the authoritative A1 profile before preview and prepare', async () => {
+    m.saveA1Profile.mockResolvedValue({
+      effective_on: '2026-08-14',
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+      permanent_address: {},
+    })
+    m.preview.mockResolvedValue({
+      ...preview,
+      agenda_code: 'REGZEC25',
+      interaction: 'hire',
+      action_code: 1,
+    })
+    m.prepare.mockResolvedValue({
+      submission_id: 14,
+      obligation_id: 15,
+      part_id: 16,
+      artifact_id: 17,
+      status: 'ready',
+      row_version: 1,
+      environment: 'test',
+      agenda_code: 'REGZEC25',
+      interaction: 'hire',
+      artifact_sha256: 'c'.repeat(64),
+      created: true,
+      deadline,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+    const input = wrapper.get('[data-test="registration-a1-json"]')
+    await input.setValue(JSON.stringify({
+      effective_on: '2026-08-14',
+      row_version: 0,
+      permanent_address: {},
+    }))
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      effective_on: '2026-08-14',
+      row_version: 0,
+    }))
+    expect(wrapper.get('[data-test="registration-a1-saved"]').text()).toContain('version')
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(m.preview).toHaveBeenCalledWith(5, 'test')
+    expect(m.prepare).toHaveBeenCalledWith(5, 'test')
+    expect(m.saveA1Profile.mock.invocationCallOrder[0])
+      .toBeLessThan(m.preview.mock.invocationCallOrder[0])
+    expect(m.preview.mock.invocationCallOrder[0])
+      .toBeLessThan(m.prepare.mock.invocationCallOrder[0])
+    expect(wrapper.find('[data-test="registration-prepared"]').exists()).toBe(true)
   })
 
   it('shows the deadline window and which form will be filed', async () => {

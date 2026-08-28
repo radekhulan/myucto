@@ -218,7 +218,9 @@ final class PayrollEmployeeDeletionRepository
         'payroll_employment_exit_revisions',
         'payroll_employment_external_ids',
         'payroll_identity_resolution_tasks',
+        'payroll_registration_a1_profiles',
         'payroll_registration_identity_snapshots',
+        'payroll_registration_event_snapshots',
     ];
 
     public function __construct(

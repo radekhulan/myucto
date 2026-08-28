@@ -90,6 +90,35 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             $normalizedScope['agenda_code'],
             $identity,
         );
+        $regzecA1 = null;
+        if ($normalizedScope['agenda_code'] === 'REGZEC25'
+            && array_key_exists('regzec_a1', $source)
+        ) {
+            $regzecA1 = (new PayrollRegistrationA1SnapshotBuilder())->build(
+                $this->object($source['regzec_a1'], 'regzec_a1'),
+                $identity,
+                $normalizedScope,
+            );
+        }
+
+        $sourceVersions = [
+            'identity' => [
+                'id' => $identity['source_identity_id'],
+                'row_version' => $identity['source_row_version'],
+            ],
+            'identifiers' => $identifierSources,
+            'employment_external_identifier' => $external === null
+                ? null
+                : [
+                    'id' => $external['source_external_id'],
+                    'row_version' => $external['source_row_version'],
+                    'source_reference_hash' =>
+                        $external['source_reference_hash'],
+                ],
+        ];
+        if ($regzecA1 !== null) {
+            $sourceVersions['regzec_a1'] = $regzecA1->source;
+        }
 
         return new PayrollRegistrationIdentitySnapshot(
             $normalizedScope,
@@ -97,21 +126,8 @@ final class PayrollRegistrationIdentitySnapshotBuilder
             $identifiers,
             $external,
             $registrationEligibility,
-            [
-                'identity' => [
-                    'id' => $identity['source_identity_id'],
-                    'row_version' => $identity['source_row_version'],
-                ],
-                'identifiers' => $identifierSources,
-                'employment_external_identifier' => $external === null
-                    ? null
-                    : [
-                        'id' => $external['source_external_id'],
-                        'row_version' => $external['source_row_version'],
-                        'source_reference_hash' =>
-                            $external['source_reference_hash'],
-                    ],
-            ],
+            $sourceVersions,
+            $regzecA1,
         );
     }
 

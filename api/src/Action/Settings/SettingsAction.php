@@ -13,6 +13,7 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicenseCompanyLimitExceeded;
@@ -389,6 +390,16 @@ final class SettingsAction
                         $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
                         $fkSuspended = false;
                     }
+
+                    // 4. Historie účetního režimu a registr vlastních účtů — stejný důvod
+                    //    jako v SetupAction::insertSupplier(): seed migrace 1066 ani backfill
+                    //    migrace 1053 se na firmu založenou později nevztahují, takže by
+                    //    zůstala bez záznamu o režimu a bez vlastního účtu v registru.
+                    $newMode = (string) $pdo->query(
+                        'SELECT accounting_mode FROM supplier WHERE id = ' . (int) $newSupplierId
+                    )->fetchColumn();
+                    $this->accountingModes->record($newSupplierId, '1900-01-01', $newMode);
+                    OwnBankAccountRegistrar::syncSupplier($pdo, $newSupplierId);
                     if ($ownsTransaction) {
                         $pdo->commit();
                     } else {
@@ -1305,6 +1316,11 @@ final class SettingsAction
         $invalidated = 0;
         if (!empty($changedBankFields)) {
             $invalidated = $this->pdf->invalidateByCurrency($id);
+            // Účet zadaný na měně musí vidět i registr vlastních účtů — jinak se do
+            // něj dostane až prvním importem výpisu a do té doby nemá účtování banky
+            // na co mapovat analytiku 221. Původní řádek registru se ZÁMĚRNĚ neruší:
+            // váže se na něj naimportovaná historie (viz OwnBankAccountRegistrar).
+            OwnBankAccountRegistrar::syncFromCurrency($pdo, $sid, $id);
         }
 
         $this->log($request, 'currency.updated', $id, [
@@ -1570,6 +1586,9 @@ final class SettingsAction
             ($b['bic'] ?? '') !== '' ? (string) $b['bic'] : null,
         ]);
         $newId = (int) $pdo->lastInsertId();
+        // Nová měna může rovnou nést vlastní účet (typicky EUR účet vedle CZK) —
+        // ať se do registru dostane hned, ne až prvním importem výpisu.
+        OwnBankAccountRegistrar::syncFromCurrency($pdo, $sid, $newId);
         $this->log($request, 'currency.created', $newId, ['supplier_id' => $sid, 'code' => $code, 'label' => $label]);
         return Json::ok($response, ['id' => $newId, 'code' => $code], 201);
     }

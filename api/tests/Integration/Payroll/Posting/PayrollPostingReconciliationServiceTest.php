@@ -394,6 +394,74 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         self::assertSame('reconciled', $result['overall_status']);
     }
 
+    public function testCorrectionLiabilityDeltasReconstructCurrentPayrollAmount(): void
+    {
+        $fixture = $this->buildBalancedRevision(
+            month: 5,
+            deducted: 445,
+            tag: 'LIABILITY-CORRECTION',
+        );
+        $this->materializeLiabilities(
+            $fixture['revisionId'],
+            $fixture['employeeId'],
+            ['net_wage' => 10_100],
+        );
+        $originalLiabilityId = (int) $this->db->pdo()->query(
+            'SELECT id FROM payroll_payment_liabilities
+              WHERE supplier_id = ' . $this->supplierId
+            . ' AND revision_id = ' . $fixture['revisionId']
+            . ' AND liability_kind = "net_wage"',
+        )->fetchColumn();
+        self::assertGreaterThan(0, $originalLiabilityId);
+
+        $correctionResult = $this->buildResultSnapshot(
+            $fixture['employeeId'],
+            $fixture['employmentId'],
+            deducted: 545,
+        );
+        $correctionRevisionId = $this->insertRevision(
+            $fixture['runId'],
+            2,
+            $fixture['inputJson'],
+            $correctionResult['json'],
+            approved: true,
+            previousRevisionId: $fixture['revisionId'],
+            revisionKind: 'correction',
+        );
+        $this->createRunPerson($correctionRevisionId, $fixture['employeeId']);
+        $snapshot = CanonicalJson::encode(['kind' => 'net_wage', 'delta' => -100]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, employee_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, previous_liability_id,
+                 source_snapshot_json, source_snapshot_hash,
+                 idempotency_key_hash, created_by)
+             VALUES (?, ?, ?, ?, "net_wage", "incoming", "test-recipient",
+                     ?, "CZK", 100, ?, ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $correctionRevisionId,
+            $fixture['employeeId'],
+            'test-net_wage-' . $fixture['revisionId'],
+            self::YEAR . '-06-15',
+            $originalLiabilityId,
+            $snapshot,
+            hash('sha256', $snapshot),
+            random_bytes(32),
+            $this->userId,
+        ]);
+
+        self::assertSame([[
+            'liability_kind' => 'net_wage',
+            'liability_minor' => 10_000,
+            'paid_minor' => 0,
+        ]], $this->reconciliationRepository->liabilityTotals(
+            $this->supplierId,
+            [$fixture['revisionId'], $correctionRevisionId],
+        ));
+    }
+
     public function testUnapprovedMonthIsUnpostedNotADiff(): void
     {
         $employeeId = 9_001;
@@ -822,6 +890,8 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         string $inputJson,
         string $resultJson,
         bool $approved,
+        ?int $previousRevisionId = null,
+        string $revisionKind = 'regular',
     ): int {
         return $this->insertRevisionFor(
             $this->supplierId,
@@ -830,6 +900,8 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
             $inputJson,
             $resultJson,
             $approved,
+            $previousRevisionId,
+            $revisionKind,
         );
     }
 
@@ -840,20 +912,26 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         string $inputJson,
         string $resultJson,
         bool $approved,
+        ?int $previousRevisionId = null,
+        string $revisionKind = 'regular',
     ): int {
         $pdo = $this->db->pdo();
         $statement = $pdo->prepare(
             'INSERT INTO payroll_run_revisions
-                (supplier_id, run_id, revision_no, status, schema_version,
+                (supplier_id, run_id, revision_no, previous_revision_id,
+                 revision_kind, status, schema_version,
                  ruleset_manifest_hash, input_snapshot_json,
                  input_snapshot_hash, result_snapshot_json,
                  result_snapshot_hash, idempotency_key_hash, approved_by, approved_at)
-             VALUES (?, ?, ?, ?, "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, ?, ?)',
+             VALUES (?, ?, ?, ?, ?, ?, "payroll-run-input.v2",
+                     ?, ?, ?, ?, ?, ?, ?, ?)',
         );
         $statement->execute([
             $supplierId,
             $runId,
             $revisionNo,
+            $previousRevisionId,
+            $revisionKind,
             $approved ? 'approved' : 'reviewed',
             str_repeat('a', 64),
             $inputJson,

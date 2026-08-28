@@ -4,12 +4,14 @@ import type { PayrollRegistrationEventInput } from '@/api/payroll'
 const m = vi.hoisted(() => ({
   get: vi.fn(),
   post: vi.fn(),
+  put: vi.fn(),
 }))
 
 vi.mock('@/api/client', () => ({
   api: {
     get: m.get,
     post: m.post,
+    put: m.put,
   },
 }))
 
@@ -57,6 +59,24 @@ describe('payroll REGZEC event API', () => {
     expect(m.post).toHaveBeenCalledWith(
       '/payroll/submissions/registration/5',
       { environment: 'test', event_id: 91 },
+    )
+  })
+
+  it('loads and version-saves the authoritative A1 profile', async () => {
+    m.get.mockResolvedValueOnce({ data: { profile: { row_version: 2 } } })
+    await expect(payrollApi.employmentRegistrationA1Profile(5))
+      .resolves.toEqual({ row_version: 2 })
+    expect(m.get).toHaveBeenCalledWith(
+      '/payroll/submissions/registration/5/a1-profile',
+    )
+
+    const payload = { effective_on: '2026-08-14', row_version: 2 }
+    m.put.mockResolvedValueOnce({ data: { profile: { row_version: 3 } } })
+    await expect(payrollApi.saveEmploymentRegistrationA1Profile(5, payload))
+      .resolves.toEqual({ row_version: 3 })
+    expect(m.put).toHaveBeenCalledWith(
+      '/payroll/submissions/registration/5/a1-profile',
+      payload,
     )
   })
 })

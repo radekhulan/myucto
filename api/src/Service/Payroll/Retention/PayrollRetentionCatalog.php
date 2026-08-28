@@ -312,8 +312,12 @@ final class PayrollRetentionCatalog
                 'payroll_person_foreign_permits',
                 'payroll_person_external_ids',
                 'payroll_employment_external_ids',
+                'payroll_registration_a1_profiles',
             ],
-            'employment_tables' => [],
+            'employment_tables' => [
+                'payroll_registration_event_snapshots',
+                'payroll_registration_a2_evidence_ledger',
+            ],
             'note' => 'Jde o TUTÉŽ větu jako u mzdových listů („mzdové listy nebo účetní '
                 . 'záznamy o údajích potřebných pro účely důchodového pojištění"), takže '
                 . 'sdílejí i číslo: 45 kalendářních roků. Identifikátor pracovněprávního '
@@ -322,7 +326,9 @@ final class PayrollRetentionCatalog
                 . 'podle § 37 odst. 1 zákona č. 582/1991 Sb. nedá k ničemu přiřadit. '
                 . 'Idempotenční zámek nad evidencí JMHZ vlastní lhůtu nemá, ale vazba na '
                 . 'vzniklý snapshot je nullovatelná — viz tatáž úvaha u stejnopisů '
-                . 'evidenčních listů.',
+                . 'evidenčních listů. Autoritativní profil REGZEC A1 nese také údaje '
+                . 'potřebné pro důchodové pojištění a neměnnou vazbu na zaměstnance a '
+                . 'pracovní vztah, proto bezpečně sdílí delší 45letou lhůtu této kategorie.',
         ],
         self::SOCIAL_CONTRIBUTIONS => [
             'label' => 'Záznamy pro stanovení a odvod pojistného na sociální zabezpečení',

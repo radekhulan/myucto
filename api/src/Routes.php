@@ -91,6 +91,7 @@ use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
 use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
+use MyInvoice\Action\Payroll\PayrollOperationalReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
@@ -1188,6 +1189,18 @@ final class Routes
             );
             $g->get('/operational-health', PayrollOperationalHealthAction::class);
             $g->get(
+                '/operational-reconciliation',
+                [PayrollOperationalReconciliationAction::class, 'get'],
+            );
+            $g->post(
+                '/operational-reconciliation/sweep',
+                [PayrollOperationalReconciliationAction::class, 'sweep'],
+            );
+            $g->get(
+                '/operational-reconciliation/issues/{issueId:[0-9]+}',
+                [PayrollOperationalReconciliationAction::class, 'detail'],
+            );
+            $g->get(
                 '/submissions/statutory-obligations',
                 [PayrollStatutoryObligationAction::class, 'overview'],
             );
@@ -1273,8 +1286,20 @@ final class Routes
                 [PayrollRegistrationAction::class, 'prepare'],
             );
             $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/a1-profile',
+                [PayrollRegistrationAction::class, 'a1Profile'],
+            );
+            $g->put(
+                '/submissions/registration/{employmentId:[0-9]+}/a1-profile',
+                [PayrollRegistrationAction::class, 'saveA1Profile'],
+            );
+            $g->get(
                 '/submissions/registration/{employmentId:[0-9]+}/events',
                 [PayrollRegistrationAction::class, 'events'],
+            );
+            $g->get(
+                '/submissions/registration/{employmentId:[0-9]+}/a2-evidence-candidates',
+                [PayrollRegistrationAction::class, 'a2EvidenceCandidates'],
             );
             $g->post(
                 '/submissions/registration/{employmentId:[0-9]+}/events',

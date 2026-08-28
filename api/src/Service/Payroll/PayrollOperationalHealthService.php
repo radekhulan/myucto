@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollOperationalReconciliationRepository;
 use PDO;
 
 /** Read-only, tenant-scoped operational counts for the payroll dashboard. */
@@ -15,6 +16,7 @@ final class PayrollOperationalHealthService
 
     public function __construct(
         private readonly Connection $db,
+        private readonly PayrollOperationalReconciliationRepository $reconciliation,
         Config $config,
     ) {
         $timezone = (string) $config->get('app.timezone', 'Europe/Prague');
@@ -41,6 +43,10 @@ final class PayrollOperationalHealthService
      *     measured:bool,content_bytes:?int,object_count:?int,
      *     components:array<string,array{measured:bool,content_bytes:?int,object_count:?int}>
      *   },
+     *   reconciliation:array{
+     *     open:int,diff:int,blocked:int,not_materialized:int,periods:int,
+     *     oldest_first_seen_at:?string
+     *   },
      *   overdue_unpaid_liabilities:int
      * }
      */
@@ -52,6 +58,7 @@ final class PayrollOperationalHealthService
             'submissions' => $this->submissions($supplierId),
             'isds_outbox' => $this->isdsOutbox($supplierId),
             'archive_capacity' => $this->archiveCapacity($supplierId),
+            'reconciliation' => $this->reconciliation->summary($supplierId),
             'overdue_unpaid_liabilities' => $this->overdueUnpaidLiabilities($supplierId),
         ];
     }

@@ -205,9 +205,10 @@ final class PayrollPostingReconciliationRepository
     }
 
     /**
-     * Platební závazky (jen aktuální hlava opravného řetězce, tj. bez
-     * dřívějších `previous_liability_id` verzí) a jejich čisté vypořádání
-     * (matched − reversed) napříč revizemi běhu.
+     * Platební závazky a jejich čisté vypořádání napříč revizemi běhu.
+     * Opravné řádky jsou podepsané delty: odchozí částku přičítají, příchozí
+     * vratku odečítají. Aktuální stav proto vzniká součtem celého řetězce,
+     * nikoli výběrem jeho posledního řádku.
      *
      * @param list<int> $revisionIds
      * @return list<array{liability_kind:string,liability_minor:int,paid_minor:int}>
@@ -220,29 +221,29 @@ final class PayrollPostingReconciliationRepository
         $placeholders = implode(',', array_fill(0, count($revisionIds), '?'));
         $statement = $this->db->pdo()->prepare(
             "SELECT liability.liability_kind AS liability_kind,
-                    SUM(liability.amount_minor) AS liability_minor,
-                    COALESCE(SUM(settled.settled_minor), 0) AS paid_minor
+                    SUM(CASE liability.direction
+                          WHEN 'outgoing' THEN liability.amount_minor
+                          ELSE -liability.amount_minor
+                        END) AS liability_minor,
+                    COALESCE(SUM(CASE liability.direction
+                          WHEN 'outgoing' THEN settled.settled_minor
+                          ELSE -settled.settled_minor
+                        END), 0) AS paid_minor
                FROM payroll_payment_liabilities liability
                LEFT JOIN (
-                 SELECT allocation.supplier_id AS supplier_id,
-                        allocation.liability_id AS liability_id,
+                 SELECT payment_match.supplier_id AS supplier_id,
+                        payment_match.liability_id AS liability_id,
                         SUM(payment_match.amount_minor) AS settled_minor
-                   FROM payroll_payment_allocations allocation
-                   JOIN payroll_payment_matches payment_match
-                     ON payment_match.supplier_id = allocation.supplier_id
-                    AND payment_match.allocation_id = allocation.id
-                  WHERE allocation.supplier_id = ?
-                  GROUP BY allocation.supplier_id, allocation.liability_id
+                   FROM payroll_payment_matches payment_match
+                  WHERE payment_match.supplier_id = ?
+                    AND payment_match.liability_id IS NOT NULL
+                  GROUP BY payment_match.supplier_id,
+                           payment_match.liability_id
                ) settled
                  ON settled.supplier_id = liability.supplier_id
                 AND settled.liability_id = liability.id
               WHERE liability.supplier_id = ?
                 AND liability.revision_id IN ({$placeholders})
-                AND NOT EXISTS (
-                  SELECT 1 FROM payroll_payment_liabilities newer
-                   WHERE newer.supplier_id = liability.supplier_id
-                     AND newer.previous_liability_id = liability.id
-                )
               GROUP BY liability.liability_kind"
         );
         $statement->execute([$supplierId, $supplierId, ...$revisionIds]);

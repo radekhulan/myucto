@@ -128,11 +128,12 @@ final readonly class PayrollRegistrationXmlValidator
                 'REGZEC nemá úplná povinná metadata zaměstnavatele.',
             );
         } elseif ($payload->interaction->actionCode === 1) {
+            $a1 = $payload->identity->regzecA1;
             PayrollRegistrationBusinessMatrix::requireActionVariant(
                 1,
-                null,
-                null,
-                false,
+                $a1?->employment['activity_code'] ?? null,
+                $a1?->employment['relationship_detail_code'] ?? null,
+                $a1 !== null,
             );
         } elseif ($payload->interaction->actionCode >= 2) {
             $this->validateEventSnapshot($payload);

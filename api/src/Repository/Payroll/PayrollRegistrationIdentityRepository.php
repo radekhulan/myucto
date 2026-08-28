@@ -168,7 +168,7 @@ final class PayrollRegistrationIdentityRepository
 
     /**
      * @return array{
-     *   employee_id:int,start_date:?string,end_date:?string
+     *   employee_id:int,start_date:?string,actual_start_date:?string,end_date:?string
      * }|null
      */
     public function employment(
@@ -176,7 +176,7 @@ final class PayrollRegistrationIdentityRepository
         int $employmentId,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT employee_id, start_date, end_date
+            'SELECT employee_id, start_date, actual_start_date, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?'
         );
@@ -190,13 +190,14 @@ final class PayrollRegistrationIdentityRepository
         return [
             'employee_id' => $this->positiveInt($row, 'employee_id'),
             'start_date' => $this->nullableString($row, 'start_date'),
+            'actual_start_date' => $this->nullableString($row, 'actual_start_date'),
             'end_date' => $this->nullableString($row, 'end_date'),
         ];
     }
 
     /**
      * @return array{
-     *   employee_id:int,start_date:?string,end_date:?string
+     *   employee_id:int,start_date:?string,actual_start_date:?string,end_date:?string
      * }|null
      */
     public function lockEmployment(
@@ -204,7 +205,7 @@ final class PayrollRegistrationIdentityRepository
         int $employmentId,
     ): ?array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT employee_id, start_date, end_date
+            'SELECT employee_id, start_date, actual_start_date, end_date
                FROM payroll_employments
               WHERE supplier_id = ? AND id = ?
               FOR UPDATE'
@@ -219,6 +220,7 @@ final class PayrollRegistrationIdentityRepository
         return [
             'employee_id' => $this->positiveInt($row, 'employee_id'),
             'start_date' => $this->nullableString($row, 'start_date'),
+            'actual_start_date' => $this->nullableString($row, 'actual_start_date'),
             'end_date' => $this->nullableString($row, 'end_date'),
         ];
     }
@@ -234,6 +236,79 @@ final class PayrollRegistrationIdentityRepository
         $statement->execute([$supplierId, $employeeId]);
 
         return $statement->fetchColumn() !== false;
+    }
+
+    /** @return array<string,mixed>|null */
+    public function latestA1Profile(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        bool $forUpdate = false,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, supplier_id, employee_id, employment_id, effective_on,
+                    profile_ciphertext, profile_hash, reference_hash,
+                    row_version, created_at
+               FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND employment_id = ?
+              ORDER BY row_version DESC, id DESC
+              LIMIT 1'
+            . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $statement->execute([$supplierId, $employeeId, $employmentId]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'id' => $this->positiveInt($row, 'id'),
+            'supplier_id' => $this->positiveInt($row, 'supplier_id'),
+            'employee_id' => $this->positiveInt($row, 'employee_id'),
+            'employment_id' => $this->positiveInt($row, 'employment_id'),
+            'effective_on' => $this->string($row, 'effective_on'),
+            'profile_ciphertext' => $this->string($row, 'profile_ciphertext'),
+            'profile_hash' => $this->string($row, 'profile_hash'),
+            'reference_hash' => $this->string($row, 'reference_hash'),
+            'row_version' => $this->positiveInt($row, 'row_version'),
+            'created_at' => $this->string($row, 'created_at'),
+        ];
+    }
+
+    public function insertA1Profile(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $effectiveOn,
+        string $ciphertext,
+        string $profileHash,
+        string $referenceHash,
+        int $rowVersion,
+        ?int $createdBy,
+    ): int {
+        $statement = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_registration_a1_profiles
+                (supplier_id, employee_id, employment_id, effective_on,
+                 profile_ciphertext, profile_hash, reference_hash,
+                 row_version, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $employmentId,
+            $effectiveOn,
+            $ciphertext,
+            $profileHash,
+            $referenceHash,
+            $rowVersion,
+            $createdBy,
+        ]);
+
+        return (int) $this->db->pdo()->lastInsertId();
     }
 
     public function hasTrustedReceipt(

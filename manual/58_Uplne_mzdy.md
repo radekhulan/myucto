@@ -174,7 +174,11 @@ Některé události nečekají na konec měsíce:
   úloh, ale také stáří nejstarší aktivní položky a čas posledního úspěšného
   dokončení. Dlouhé stáří při nulovém pokroku je důvod zkontrolovat plánované
   úlohy; údaj „Zatím nikdy“ po prvním očekávaném běhu znamená, že úspěšné
-  dokončení zatím není doložené;
+  dokončení zatím není doložené. Karta **Provozní shoda** souhrnně ukazuje
+  otevřené rozdíly, blokátory a období s chybějícím podkladem mezi schválenou
+  mzdou, deníkem, platbami, zdravotními přehledy a JMHZ. Nulový počet znamená,
+  že poslední uložená kontrola nemá otevřený nález, nikoli náhradu věcné
+  kontroly mzdové účetní;
 - u větší firmy pracujte s filtry, hledáním a hromadnými měsíčními vstupy.
   Neprocházejte stovky zaměstnanců jen proto, abyste znovu potvrzovali stav,
   který se od minulého období nezměnil.
@@ -207,6 +211,12 @@ kontrolu. Neobvyklé souběhy a odvodové režimy, nepokryté registrace,
 nepodporované roční odpočty nebo výstupní potvrzení závislé na chybějícím
 ověřeném přepočtu zpracujte ručně nebo s mzdovým specialistou. Chybějící
 právní skutečnost nenahrazujte podobným polem.
+
+Tabulka **Rozsah modulu** na přehledu uvádí pouze funkce, které jsou v dané
+verzi bezpečně dostupné, a proto mají všechny zobrazené řádky zelený stav.
+Neznamená to, že aplikace automatizuje libovolný hypotetický scénář. Funkce,
+pro které chybí oficiální formát, transport nebo úplné kontroly, zůstávají
+fail-closed a v seznamu dostupných funkcí se nezobrazí.
 
 JMHZ podporuje řízené storno celého podání i obsahovou opravu vybraných
 formulářů z nové úplné přípravy. Přijatý formulář se opravuje se zachovanou

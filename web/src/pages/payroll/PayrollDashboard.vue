@@ -40,9 +40,6 @@ const needsProductionQualification = computed(() => state.value?.status === 'qua
 const availableFeatures = computed(() =>
   capabilities.value?.support_matrix.features.filter(feature => feature.available) ?? [],
 )
-const plannedFeatures = computed(() =>
-  capabilities.value?.support_matrix.features.filter(feature => !feature.available) ?? [],
-)
 const companyCapabilityBlockers = computed(() => capabilities.value?.company_capability.blockers ?? [])
 const setupBlockers = computed(() =>
   setupCheck.value !== null && !setupCheck.value.ready
@@ -412,11 +409,10 @@ onMounted(load)
       </div>
 
       <!--
-        Matice podporovaných scénářů je diagnostika pro podporu, ne informace
-        pro zaměstnavatele: jsou v ní interní identifikátory epiců a verze
-        support matrix. Na stránce, kterou uživatel používá k práci, jen
-        budí dojem nehotového produktu. Zůstává dostupná superadminovi
-        a přes API; běžný uživatel ji nevidí.
+        Přehled dostupných funkcí je diagnostika pro podporu, ne informace
+        pro zaměstnavatele: jsou v něm interní identifikátory epiců a verze
+        support matrix. Zůstává dostupný superadminovi; úplná matice včetně
+        fail-closed omezení je dál dostupná přes API.
       -->
       <details
         v-if="auth.isSuperadmin"
@@ -459,7 +455,7 @@ onMounted(load)
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="feature in capabilities.support_matrix.features" :key="feature.key">
+              <tr v-for="feature in availableFeatures" :key="feature.key">
                 <td class="px-3 py-3 font-medium text-neutral-900">
                   {{ t(`payroll.features.${feature.key}`) }}
                 </td>
@@ -468,10 +464,9 @@ onMounted(load)
                 </td>
                 <td class="px-3 py-3">
                   <span
-                    class="rounded-full px-2 py-1 text-xs font-medium"
-                    :class="feature.available ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'"
+                    class="rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-600"
                   >
-                    {{ t(feature.available ? 'payroll.capabilities.available' : 'payroll.capabilities.planned') }}
+                    {{ t('payroll.capabilities.available') }}
                   </span>
                 </td>
                 <td class="px-3 py-3 text-neutral-500">{{ feature.min_epic }}</td>
@@ -482,17 +477,16 @@ onMounted(load)
 
           <div class="mt-4 grid grid-cols-1 gap-3 md:hidden">
           <article
-            v-for="feature in capabilities.support_matrix.features"
+            v-for="feature in availableFeatures"
             :key="feature.key"
             class="rounded-lg border border-neutral-200 p-3"
           >
             <div class="flex items-start justify-between gap-3">
               <h3 class="font-medium text-neutral-900">{{ t(`payroll.features.${feature.key}`) }}</h3>
               <span
-                class="shrink-0 rounded-full px-2 py-1 text-xs font-medium"
-                :class="feature.available ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'"
+                class="shrink-0 rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-600"
               >
-                {{ t(feature.available ? 'payroll.capabilities.available' : 'payroll.capabilities.planned') }}
+                {{ t('payroll.capabilities.available') }}
               </span>
             </div>
             <dl class="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -507,10 +501,6 @@ onMounted(load)
             </dl>
           </article>
           </div>
-
-          <p v-if="plannedFeatures.length" class="mt-4 text-xs text-neutral-500">
-            {{ t('payroll.capabilities.planned_hint') }}
-          </p>
         </section>
       </details>
     </template>

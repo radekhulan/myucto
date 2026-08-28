@@ -3566,6 +3566,18 @@
                 "hide_xml": "Skrýt XML",
                 "copy_xml": "Kopírovat XML",
                 "failed": "Přihlášku se nepodařilo připravit.",
+                "a1": {
+                    "title": "Autoritativní profil REGZEC A1",
+                    "description": "Úplný, verzovaný podklad pro prvotní plnou registraci. Uložená verze je šifrovaná a nové uložení ji nepřepisuje.",
+                    "show": "Doplnit profil",
+                    "hide": "Zavřít profil",
+                    "warning": "Vyplňte pouze ověřené údaje z personálních podkladů. Prázdný nebo neúplný profil server bezpečně odmítne; hodnoty se nikdy nedopočítávají ani nedoplňují odhadem.",
+                    "save": "Uložit ověřenou verzi",
+                    "saved": "Verze {version} byla uložena a je připravena pro nový náhled A1.",
+                    "load_failed": "Profil REGZEC A1 se nepodařilo načíst.",
+                    "save_failed": "Profil REGZEC A1 se nepodařilo uložit.",
+                    "invalid_json": "Profil musí být platný JSON objekt."
+                },
                 "agenda": {
                     "PREZEC26": "Částečné přihlášení před nástupem",
                     "REGZEC25": "Plná registrace zaměstnance"
@@ -5059,6 +5071,12 @@
                 "archive_capacity_hint": "Velikost původního obsahu trvale archivovaných dokumentů, exportů a podání.",
                 "archive_measurement_failed": "Velikost se nepodařilo zjistit",
                 "archive_objects": "{count} archivovaných položek",
+                "reconciliation": "Provozní shoda",
+                "reconciliation_open": "Otevřené nálezy",
+                "reconciliation_diff": "Rozdíly",
+                "reconciliation_blocked": "Blokátory",
+                "reconciliation_not_materialized": "Chybí podklad",
+                "reconciliation_periods": "Dotčená období",
                 "liabilities": "Mzdové závazky",
                 "overdue_unpaid": "Po splatnosti a ne zcela uhrazené"
             },
@@ -5171,9 +5189,9 @@
             }
         },
         "capabilities": {
-            "title": "Rozsah modulu",
-            "description": "Matice odděluje cílově podporované scénáře od funkcí, které už jsou bezpečně dostupné.",
-            "diagnostics": "Technické informace a podporované scénáře",
+            "title": "Dostupné funkce",
+            "description": "Tabulka obsahuje pouze funkce, které jsou v modulu bezpečně dostupné.",
+            "diagnostics": "Technické informace a dostupné funkce",
             "feature": "Funkce",
             "status": "Produktový stav",
             "availability": "Dostupnost",
@@ -5934,6 +5952,7 @@
             "health_insurer_export": "Podání zdravotním pojišťovnám",
             "health_insurer_submission": "Odeslání přehledů zdravotním pojišťovnám",
             "eldp_control_export": "Kontrolní XML ELDP",
+            "eldp_manual_completion": "Ruční dokončení ELDP s dokladem přijetí",
             "eldp_submission": "Samostatné elektronické podání ELDP",
             "direct_submission": "Obecné automatické podání libovolné agendy"
         },

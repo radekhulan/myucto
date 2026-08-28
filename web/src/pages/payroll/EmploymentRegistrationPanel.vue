@@ -12,6 +12,8 @@ import {
   type PayrollRegistrationEventInput,
   type PayrollRegistrationEventInteraction,
   type PayrollRegistrationSubmission,
+  type PayrollRegistrationA1Profile,
+  type PayrollRegistrationA1ProfilePayload,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -79,6 +81,130 @@ const paidInFull = ref<'yes' | 'no'>('no')
 const settlementAmountKind = ref('replacement')
 const settlementAmount = ref('')
 const notStartedConfirmed = ref(false)
+const a1ProfileOpen = ref(false)
+const a1ProfileLoading = ref(false)
+const a1ProfileSaving = ref(false)
+const a1ProfileError = ref('')
+const a1ProfileMessage = ref('')
+const a1ProfileJson = ref('')
+
+function emptyA1Profile(): PayrollRegistrationA1ProfilePayload {
+  return {
+    effective_on: '',
+    row_version: 0,
+    permanent_address: {
+      street: null,
+      house_number: '',
+      orientation_number: null,
+      city: '',
+      postal_code: '',
+      country_code: '',
+      ruian_point: null,
+    },
+    tax_residency: {
+      country_code: '',
+      identifier_type: null,
+      identifier: null,
+      residence_address: null,
+    },
+    employment: {
+      activity_code: '',
+      relationship_detail_code: null,
+      actual_start_on: '',
+      contract_start_on: null,
+      small_scale: null,
+      employment_status_code: null,
+      work_mode_code: null,
+      continuous_operation: null,
+      prevailing_workplace_code: null,
+      expected_workplaces: null,
+      contract_workplace: null,
+      workplace_city: null,
+      workplace_municipality_code: null,
+      profession_code: null,
+      required_education_code: null,
+      position_name: null,
+      leadership: null,
+    },
+    pension: {
+      type_code: null,
+      received_from: null,
+      early_retirement: false,
+      reduced_retirement_age: false,
+    },
+    health_insurance_code: null,
+    facts: {
+      highest_education_code: null,
+      disability_card: false,
+      health_restrictions: [],
+    },
+    foreign_legislation: { applies: false, country_code: null },
+    proof_identity: null,
+    foreign_worker: null,
+    czech_residence_address: null,
+    contact_address: null,
+    attachments: [],
+  }
+}
+
+function editableA1Profile(profile: PayrollRegistrationA1Profile): PayrollRegistrationA1ProfilePayload {
+  const {
+    reference_hash: _referenceHash,
+    created_at: _createdAt,
+    created: _created,
+    ...editable
+  } = profile
+  return editable as PayrollRegistrationA1ProfilePayload
+}
+
+async function loadA1Profile(): Promise<void> {
+  a1ProfileLoading.value = true
+  a1ProfileError.value = ''
+  try {
+    const profile = await payrollApi.employmentRegistrationA1Profile(props.employmentId)
+    a1ProfileJson.value = JSON.stringify(
+      profile === null ? emptyA1Profile() : editableA1Profile(profile),
+      null,
+      2,
+    )
+  } catch (exception) {
+    a1ProfileError.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.a1.load_failed'),
+    )
+  } finally {
+    a1ProfileLoading.value = false
+  }
+}
+
+async function saveA1Profile(): Promise<void> {
+  if (!props.canWrite || a1ProfileSaving.value) return
+  a1ProfileSaving.value = true
+  a1ProfileError.value = ''
+  a1ProfileMessage.value = ''
+  try {
+    const parsed: unknown = JSON.parse(a1ProfileJson.value)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(t('payroll.people.registration.a1.invalid_json'))
+    }
+    const profile = await payrollApi.saveEmploymentRegistrationA1Profile(
+      props.employmentId,
+      parsed as PayrollRegistrationA1ProfilePayload,
+    )
+    a1ProfileJson.value = JSON.stringify(editableA1Profile(profile), null, 2)
+    a1ProfileMessage.value = t('payroll.people.registration.a1.saved', {
+      version: profile.row_version,
+    })
+    resetPreparedFiling()
+  } catch (exception) {
+    a1ProfileError.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.a1.save_failed'),
+    )
+  } finally {
+    a1ProfileSaving.value = false
+  }
+}
 
 const deltaFieldOptions = computed(() => eventInteraction.value === 'correction'
   ? ['title_prefix', 'tax_residency', 'relationship_detail_code', 'highest_education_code']
@@ -483,7 +609,7 @@ watch(environment, async () => {
   resetPreparedFiling()
   await loadEvents()
 })
-onMounted(loadEvents)
+onMounted(() => Promise.all([loadEvents(), loadA1Profile()]))
 
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true
@@ -675,6 +801,68 @@ async function copyXml(): Promise<void> {
             ? t('common.loading')
             : t(`payroll.people.registration.action_${primaryAction}`) }}
         </button>
+      </div>
+    </div>
+
+    <div class="mt-4 rounded-lg border border-neutral-200 bg-surface p-3" data-test="registration-a1-profile">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h5 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.title') }}
+          </h5>
+          <p class="mt-1 text-xs text-neutral-500">
+            {{ t('payroll.people.registration.a1.description') }}
+          </p>
+        </div>
+        <button
+          type="button"
+          :class="btnOutline('neutral')"
+          :disabled="a1ProfileLoading"
+          data-test="registration-a1-toggle"
+          @click="a1ProfileOpen = !a1ProfileOpen"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="a1ProfileOpen ? ICONS.x : ICONS.eye" />
+          </svg>
+          {{ t(a1ProfileOpen
+            ? 'payroll.people.registration.a1.hide'
+            : 'payroll.people.registration.a1.show') }}
+        </button>
+      </div>
+      <div v-if="a1ProfileOpen" class="mt-3">
+        <p class="mb-2 text-xs text-warning-700">
+          {{ t('payroll.people.registration.a1.warning') }}
+        </p>
+        <textarea
+          v-model="a1ProfileJson"
+          rows="24"
+          spellcheck="false"
+          class="w-full rounded-md border border-neutral-300 bg-neutral-950 p-3 font-mono text-xs text-neutral-100 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+          :disabled="a1ProfileLoading || a1ProfileSaving || !canWrite"
+          data-test="registration-a1-json"
+        />
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            :class="btnFilled('success')"
+            :disabled="!canWrite || a1ProfileLoading || a1ProfileSaving"
+            data-test="registration-a1-save"
+            @click="saveA1Profile"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.check" />
+            </svg>
+            {{ a1ProfileSaving
+              ? t('common.loading')
+              : t('payroll.people.registration.a1.save') }}
+          </button>
+          <span v-if="a1ProfileMessage" class="text-xs text-success-700" data-test="registration-a1-saved">
+            {{ a1ProfileMessage }}
+          </span>
+        </div>
+        <p v-if="a1ProfileError" class="mt-2 text-xs text-danger-700" data-test="registration-a1-error">
+          {{ a1ProfileError }}
+        </p>
       </div>
     </div>
 

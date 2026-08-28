@@ -137,6 +137,23 @@ final readonly class PayrollRegistrationSubmissionService
         return $this->events->list($supplierId, $environment, $employmentId);
     }
 
+    /** @return array<string,mixed> */
+    public function a2EvidenceCandidates(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $effectiveOn,
+    ): array {
+        $this->requireContext($supplierId, $employmentId);
+
+        return $this->events->a2EvidenceCandidates(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $effectiveOn,
+        );
+    }
+
     /** @param array<string,mixed> $input @return array<string,mixed> */
     public function approveEvent(
         int $supplierId,
@@ -215,6 +232,14 @@ final readonly class PayrollRegistrationSubmissionService
                 throw new PayrollRegistrationXmlException(
                     'registration_supplier_missing',
                     'Firma registračního podání nebyla nalezena.',
+                );
+            }
+            if ($eventId !== null) {
+                $this->events->assertA2EvidenceCurrent(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $eventId,
                 );
             }
             $sourceHash = $probe['source_hash'];

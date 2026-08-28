@@ -120,6 +120,24 @@ nemá zmrazený povinný druh činnosti a úplnou datovou sadu odpovídající v
 OST, 10 nebo SPEC. Navazující akce A5 až A8 jsou dostupné pouze pro variantu
 OST; u variant 10 a SPEC je aplikace odmítne ještě před schválením události.
 
+Úplný podklad zadáte na kartě pracovního vztahu v části **Registrace vztahu na
+ČSSZ → Autoritativní profil REGZEC A1**. Profil obsahuje rozhodné datum a druh
+činnosti, trvalou adresu, variantní údaje pracovního místa a podle situace také
+daňovou rezidenci, zdravotní pojišťovnu, vzdělání, důchodové skutečnosti a údaje
+cizince. Vyplňujte pouze údaje doložené personálními podklady. Server před
+uložením zkontroluje variantu OST, 10 nebo SPEC a všechny její povinné vazby;
+neúplný profil neuloží. Každé úspěšné uložení vytvoří novou šifrovanou verzi,
+starší verzi nepřepisuje. Náhled a podání pak zmrazí přesné ID verze i její
+otisk, takže pozdější oprava profilu už hotové podání nezmění.
+
+Při ukončovací akci REGZEC A2 aplikace prověří také všechna dotčená období od
+ledna 2026 do měsíce skončení. Pokud byla mzda za některý měsíc opravena,
+vyžaduje aktuální schválenou opravnou revizi, skutečně dokončený přenos jejího
+JMHZ, shodnou korelaci důvěryhodné doručenky a přijatý výsledek daného vztahu.
+Chybějící, čekající nebo odmítnutý měsíc přípravu A2 zablokuje a uvede konkrétní
+období. Při přípravě se celý plán pod zámkem znovu ověří a uloží se jeho
+neměnný otisk; pozdější historie se nepřepisuje.
+
 Samostatná záložka **ZP — oznámení** řeší oznamovací povinnost vůči zdravotní
 pojišťovně, tedy hlášení nástupů, skončení a dalších skutečností v osmidenní
 lhůtě. Je to jiná povinnost než měsíční přehled o platbě pojistného, a proto

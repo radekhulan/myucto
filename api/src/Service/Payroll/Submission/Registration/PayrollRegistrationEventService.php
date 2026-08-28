@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 use DOMDocument;
 use DOMElement;
 use DOMXPath;
+use MyInvoice\Repository\Payroll\PayrollRegistrationA2EvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationEventRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Codebook\HealthInsurers;
@@ -37,11 +38,40 @@ final readonly class PayrollRegistrationEventService
         private SecretEncryption $encryption,
         private PayrollSubmissionService $submissions,
         private PayrollEmploymentJmhzEvidenceCatalog $jmhzEvidence,
+        private PayrollRegistrationA2EvidenceRepository $a2Evidence,
         private ClockInterface $clock,
     ) {}
 
     /** @param array<string,mixed> $input @return array<string,mixed> */
     public function approve(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        array $input,
+        int $approvedBy,
+    ): array {
+        return $this->a2Evidence->transaction(function () use (
+            $supplierId,
+            $environment,
+            $employmentId,
+            $input,
+            $approvedBy,
+        ): array {
+            if (!$this->a2Evidence->lockSupplier($supplierId)) {
+                throw new \OutOfBoundsException('Firma REGZEC nebyla nalezena.');
+            }
+            return $this->approveLocked(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $input,
+                $approvedBy,
+            );
+        });
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    private function approveLocked(
         int $supplierId,
         string $environment,
         int $employmentId,
@@ -213,6 +243,26 @@ final readonly class PayrollRegistrationEventService
             'snapshot_fingerprint' => $fingerprint,
             'approved_by' => $approvedBy,
         ]);
+        if ($interaction === 'termination') {
+            $evidence = is_array($data['jmhz_correction_evidence'] ?? null)
+                ? $data['jmhz_correction_evidence']
+                : [];
+            $plan = PayrollRegistrationA2EvidencePlan::create(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $effectiveOn,
+                is_array($evidence['months'] ?? null) ? $evidence['months'] : [],
+            );
+            $this->a2Evidence->append(
+                $supplierId,
+                $environment,
+                $employmentId,
+                (int) $result['row']['id'],
+                $plan,
+                $approvedBy,
+            );
+        }
 
         $public = $this->publicRow($result['row'], false);
         $public['created'] = $result['created'];
@@ -272,6 +322,100 @@ final readonly class PayrollRegistrationEventService
         );
     }
 
+    /** @return array<string,mixed> */
+    public function a2EvidenceCandidates(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $effectiveOn,
+    ): array {
+        $effectiveOn = $this->date($effectiveOn, 'Datum skončení');
+        $context = $this->events->employmentSourceAt($supplierId, $employmentId, $effectiveOn);
+        if ($context === null) {
+            throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen ve stejné firmě.');
+        }
+        if (!in_array($context['status'] ?? null, ['ended', 'archived'], true)
+            || ($context['end_date'] ?? null) !== $effectiveOn
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_end_source_mismatch',
+                'REGZEC A2 vyžaduje skutečně ukončený vztah se shodným datem skončení.',
+            );
+        }
+        $identity = $this->identities->sensitiveJmhzIdentityAt(
+            $supplierId,
+            (int) ($context['employee_id'] ?? 0),
+            $employmentId,
+            $environment,
+            $effectiveOn,
+            true,
+        );
+        $external = $this->object(
+            $identity['employment_external_identifier'] ?? null,
+            'ID PPV',
+        );
+        $value = $this->requiredText($external['value'] ?? null, 'ID PPV', 128);
+
+        return $this->a2Plan(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $effectiveOn,
+            $value,
+            false,
+        )->toArray();
+    }
+
+    public function assertA2EvidenceCurrent(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $eventId,
+    ): void {
+        $event = $this->load($supplierId, $environment, $employmentId, $eventId);
+        if (($event['action_code'] ?? null) !== 2) {
+            return;
+        }
+        $stored = is_array($event['data']['jmhz_correction_evidence'] ?? null)
+            ? $event['data']['jmhz_correction_evidence']
+            : null;
+        $external = is_array($event['employment_external_identifier'] ?? null)
+            ? ($event['employment_external_identifier']['value'] ?? null)
+            : null;
+        if ($stored === null || !is_string($external) || $external === '') {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_jmhz_evidence_missing',
+                'Neměnná událost REGZEC A2 nemá úplný důkaz opravného JMHZ.',
+            );
+        }
+        $current = $this->a2Plan(
+            $supplierId,
+            $environment,
+            $employmentId,
+            (string) $event['effective_on'],
+            $external,
+            true,
+        );
+        if ($current->decision() !== 'accepted'
+            || !is_string($stored['fingerprint'] ?? null)
+            || !hash_equals($stored['fingerprint'], $current->fingerprint())
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_jmhz_evidence_changed',
+                'Důkazy opravných JMHZ se od schválení REGZEC A2 změnily; načtěte kandidáty a schvalte novou událost.',
+            );
+        }
+        $ledger = $this->a2Evidence->findForEvent($supplierId, $environment, $eventId);
+        if ($ledger === null
+            || !hash_equals((string) ($ledger['plan_sha256'] ?? ''), $current->fingerprint())
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_jmhz_evidence_missing',
+                'K události REGZEC A2 chybí neměnný evidenční ledger opravných JMHZ.',
+            );
+        }
+    }
+
     /** @param array<string,mixed> $context @param array<string,mixed> $input @return array<string,mixed> */
     private function data(
         int $supplierId,
@@ -284,13 +428,22 @@ final readonly class PayrollRegistrationEventService
         string $employmentExternalIdentifier,
     ): array {
         $data = match ($interaction) {
-            'termination' => $this->termination($effectiveOn, $context, $input),
-            'change' => $this->delta($input, false),
+            'termination' => $this->termination(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $effectiveOn,
+                $context,
+                $input,
+                $employmentExternalIdentifier,
+            ),
+            'change' => $this->change($effectiveOn, $input),
             'correction' => $this->correction(
                 $supplierId,
                 $environment,
                 $employmentId,
                 $effectiveOn,
+                $context,
                 $input,
                 $employmentExternalIdentifier,
             ),
@@ -324,9 +477,13 @@ final readonly class PayrollRegistrationEventService
 
     /** @param array<string,mixed> $context @param array<string,mixed> $input @return array<string,mixed> */
     private function termination(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
         string $effectiveOn,
         array $context,
         array $input,
+        string $employmentExternalIdentifier,
     ): array {
         if (!in_array($context['status'] ?? null, ['ended', 'archived'], true)
             || ($context['end_date'] ?? null) !== $effectiveOn
@@ -369,6 +526,22 @@ final readonly class PayrollRegistrationEventService
             );
         }
 
+        $evidence = $this->a2Plan(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $effectiveOn,
+            $employmentExternalIdentifier,
+            true,
+        );
+        if ($evidence->decision() !== 'accepted') {
+            throw new PayrollRegistrationXmlException(
+                'registration_a2_jmhz_corrections_incomplete',
+                'REGZEC A2 blokují neuzavřená opravná JMHZ za období '
+                    . implode(', ', $evidence->blockedPeriods()) . '.',
+            );
+        }
+
         return [
             'end_on' => $effectiveOn,
             'activity_code' => $activityCode,
@@ -382,7 +555,32 @@ final readonly class PayrollRegistrationEventService
                 $endedByDeath,
                 $context,
             ),
+            'jmhz_correction_evidence' => $evidence->toArray(),
         ];
+    }
+
+    private function a2Plan(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        string $effectiveOn,
+        string $employmentExternalIdentifier,
+        bool $forUpdate,
+    ): PayrollRegistrationA2EvidencePlan {
+        return PayrollRegistrationA2EvidencePlan::create(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $effectiveOn,
+            $this->a2Evidence->correctiveMonths(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $effectiveOn,
+                $employmentExternalIdentifier,
+                $forUpdate,
+            ),
+        );
     }
 
     /** @param array<string,mixed> $context @return array<string,mixed>|null */
@@ -562,6 +760,29 @@ final readonly class PayrollRegistrationEventService
     }
 
     /** @param array<string,mixed> $input @return array<string,mixed> */
+    private function change(string $effectiveOn, array $input): array
+    {
+        $data = $this->delta($input, false);
+        if (array_key_exists('relationship_detail_code', $data['delta'])) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a3_activity_explanation_attachment_required',
+                'Změna druhu činnosti vyžaduje elektronickou přílohu s vysvětlením; bez ní zůstává podání uzavřené.',
+            );
+        }
+        $taxResidency = $data['delta']['tax_residency'] ?? null;
+        if (is_array($taxResidency)
+            && ($taxResidency['changed_on'] ?? null) !== $effectiveOn
+        ) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a3_effective_date_mismatch',
+                'Všechny údaje REGZEC A3 v jednom podání musí mít stejné datum účinnosti.',
+            );
+        }
+
+        return $data;
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
     private function delta(array $input, bool $correction): array
     {
         $raw = $this->object(
@@ -603,6 +824,7 @@ final readonly class PayrollRegistrationEventService
         string $environment,
         int $employmentId,
         string $effectiveOn,
+        array $context,
         array $input,
         string $employmentExternalIdentifier,
     ): array {
@@ -625,7 +847,33 @@ final readonly class PayrollRegistrationEventService
             $effectiveOn,
             $employmentExternalIdentifier,
         );
-        return $this->delta($input, true) + [
+        $data = $this->delta($input, true);
+        $delta = $data['delta'];
+        if (array_key_exists('relationship_detail_code', $delta)) {
+            $sourceActivity = $frozenSource['activity_code'];
+            if (!is_string($sourceActivity) || $sourceActivity === '') {
+                throw new PayrollRegistrationXmlException(
+                    'registration_a4_source_activity_missing',
+                    'Původní přijaté podání neobsahuje druh činnosti nutný pro ověření opravy.',
+                );
+            }
+            PayrollRegistrationBusinessMatrix::requireActivityCorrectionTransition(
+                $sourceActivity,
+                $frozenSource['relationship_detail_code'],
+                $this->requiredCodeValue(
+                    $context['activity_code'] ?? null,
+                    'Druh činnosti',
+                    2,
+                ),
+                (string) $delta['relationship_detail_code'],
+            );
+            throw new PayrollRegistrationXmlException(
+                'registration_a4_activity_explanation_attachment_required',
+                'Oprava druhu činnosti vyžaduje elektronickou přílohu s vysvětlením; bez ní zůstává podání uzavřené.',
+            );
+        }
+
+        return $data + [
             'source_submission_id' => $submissionId,
             'source_snapshot_hash' => (string) $source['source_snapshot_hash'],
             'source_part_id' => (int) $source['part_id'],
@@ -638,7 +886,7 @@ final readonly class PayrollRegistrationEventService
         ];
     }
 
-    /** @param array<string,mixed> $source @return array{action_code:int,filing_on:string,employment_external_identifier:?string} */
+    /** @param array<string,mixed> $source @return array{action_code:int,filing_on:string,employment_external_identifier:?string,activity_code:?string,relationship_detail_code:?string} */
     private function acceptedSourceArtifact(
         int $supplierId,
         array $source,
@@ -712,6 +960,12 @@ final readonly class PayrollRegistrationEventService
                 'ID PPV v původním přijatém podání neodpovídá opravovanému pracovnímu vztahu.',
             );
         }
+        $sourceActivity = $job instanceof DOMElement
+            ? trim($job->getAttribute('rel'))
+            : '';
+        $sourceRelationshipDetail = $job instanceof DOMElement
+            ? trim($job->getAttribute('relDetail'))
+            : '';
 
         return [
             'action_code' => (int) $action,
@@ -719,6 +973,10 @@ final readonly class PayrollRegistrationEventService
             'employment_external_identifier' => $sourceIdentifier === ''
                 ? null
                 : $sourceIdentifier,
+            'activity_code' => $sourceActivity === '' ? null : $sourceActivity,
+            'relationship_detail_code' => $sourceRelationshipDetail === ''
+                ? null
+                : $sourceRelationshipDetail,
         ];
     }
 

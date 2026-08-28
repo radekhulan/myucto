@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   capabilities: vi.fn(),
   runs: vi.fn(),
   payrollSetupCheck: vi.fn(),
+  isSuperadmin: { value: false },
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -18,6 +19,7 @@ vi.mock('@/api/payroll', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canWrite: () => true,
+    get isSuperadmin() { return m.isSuperadmin.value },
   }),
 }))
 
@@ -76,6 +78,7 @@ function mountDashboard() {
 
 describe('PayrollDashboard monthly workspace', () => {
   beforeEach(() => {
+    m.isSuperadmin.value = false
     m.capabilities.mockResolvedValue({
       state: {
         supplier_id: 1,
@@ -130,6 +133,44 @@ describe('PayrollDashboard monthly workspace', () => {
     // support matrix. Zaměstnavateli neříká nic a budí dojem nehotového
     // produktu — proto ji vidí jen superadmin.
     expect(wrapper.find('[data-test="support-diagnostics"]').exists()).toBe(false)
+  })
+
+  it('zobrazuje v diagnostické matici jen skutečně dostupné funkce', async () => {
+    m.isSuperadmin.value = true
+    m.capabilities.mockResolvedValue({
+      state: {
+        supplier_id: 1,
+        status: 'active',
+        start_period: '2026-01',
+        row_version: 1,
+        activated_at: null,
+        suspended_at: null,
+        created_at: null,
+        updated_at: null,
+      },
+      support_matrix: {
+        version: '2026-08',
+        supported_years: [2026],
+        employment_types: [],
+        features: [
+          { key: 'ready_feature', status: 'supported', available: true, min_epic: 'MZ-01' },
+          { key: 'planned_feature', status: 'not_supported', available: false, min_epic: 'MZ-99' },
+        ],
+      },
+      company_capability: {
+        production_ready: true,
+        assessed_from: '2026-01-01',
+        blockers: [],
+      },
+    })
+
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    const diagnostics = wrapper.get('[data-test="support-diagnostics"]')
+    expect(diagnostics.text()).toContain('payroll.features.ready_feature')
+    expect(diagnostics.text()).not.toContain('payroll.features.planned_feature')
+    expect(diagnostics.text()).not.toContain('payroll.capabilities.planned')
   })
 
   it('shows the guide and employee cards for the current period', async () => {

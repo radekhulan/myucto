@@ -209,6 +209,19 @@ final class PayrollInstanceExportCoverageTest extends TestCase
         self::assertTrue(TenantScopeResolver::isSecretColumn('private_key_ciphertext'));
     }
 
+    public function testAuthoritativeA1ProfilesAreIncludedInRestorableTenantData(): void
+    {
+        $scope = $this->scopes->resolveAll($this->supplierId)['payroll_registration_a1_profiles'] ?? null;
+        self::assertNotNull($scope, 'Autoritativní profily REGZEC A1 musí být v obnovitelném exportu firmy.');
+        self::assertSame('supplier_id = ?', $scope->where);
+        foreach ([
+            'supplier_id', 'employee_id', 'employment_id', 'effective_on',
+            'profile_ciphertext', 'profile_hash', 'reference_hash', 'row_version',
+        ] as $column) {
+            self::assertContains($column, $scope->columns, "Export REGZEC A1 postrádá {$column}.");
+        }
+    }
+
     public function testNoRestoredPayrollRowRequiresAnOmittedCredential(): void
     {
         $scopes = $this->scopes->resolveAll($this->supplierId);

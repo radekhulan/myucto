@@ -45,7 +45,10 @@ final class PayrollEmploymentDeletionRepository
     private const BLOCKERS = [
         'registration' => [
             'tables' => [
+                'payroll_registration_a1_profiles',
                 'payroll_registration_identity_snapshots',
+                'payroll_registration_event_snapshots',
+                'payroll_registration_a2_evidence_ledger',
                 'payroll_employment_external_ids',
                 'payroll_identity_resolution_tasks',
             ],

@@ -1897,6 +1897,14 @@ export interface PayrollOperationalHealth {
       { measured: boolean; content_bytes: number | null; object_count: number | null }
     >
   }
+  reconciliation: {
+    open: number
+    diff: number
+    blocked: number
+    not_materialized: number
+    periods: number
+    oldest_first_seen_at: string | null
+  }
   overdue_unpaid_liabilities: number
 }
 
@@ -2520,6 +2528,19 @@ export interface PayrollRegistrationSubmission {
   artifact_sha256: string
   created: boolean
   deadline: PayrollRegistrationDeadline
+}
+
+export interface PayrollRegistrationA1Profile extends Record<string, unknown> {
+  effective_on: string
+  row_version: number
+  reference_hash: string
+  created_at: string
+  created: boolean
+}
+
+export interface PayrollRegistrationA1ProfilePayload extends Record<string, unknown> {
+  effective_on: string
+  row_version: number
 }
 
 export type PayrollRegistrationEventInteraction =
@@ -4773,6 +4794,18 @@ export const payrollApi = {
     `/payroll/submissions/registration/${employmentId}`,
     { environment, ...(eventId == null ? {} : { event_id: eventId }) },
   ).then(response => response.data),
+  employmentRegistrationA1Profile: (
+    employmentId: number,
+  ) => api.get<{ profile: PayrollRegistrationA1Profile | null }>(
+    `/payroll/submissions/registration/${employmentId}/a1-profile`,
+  ).then(response => response.data.profile),
+  saveEmploymentRegistrationA1Profile: (
+    employmentId: number,
+    payload: PayrollRegistrationA1ProfilePayload,
+  ) => api.put<{ profile: PayrollRegistrationA1Profile }>(
+    `/payroll/submissions/registration/${employmentId}/a1-profile`,
+    payload,
+  ).then(response => response.data.profile),
   employmentRegistrationEvents: (
     employmentId: number,
     environment: PayrollJmhzTransportEnvironment = 'test',

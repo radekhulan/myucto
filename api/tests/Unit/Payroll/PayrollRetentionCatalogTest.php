@@ -316,5 +316,9 @@ final class PayrollRetentionCatalogTest extends TestCase
             'payroll_statutory_obligation_evidence',
             PayrollRetentionCatalog::rule(PayrollRetentionCatalog::SICKNESS_INSURANCE)->employeeTables,
         );
+        self::assertContains(
+            'payroll_registration_a1_profiles',
+            PayrollRetentionCatalog::rule(PayrollRetentionCatalog::PENSION_EVIDENCE)->employeeTables,
+        );
     }
 }

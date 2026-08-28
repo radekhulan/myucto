@@ -8,6 +8,7 @@ use DomainException;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
+use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationQueryService;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService;
@@ -235,6 +236,182 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
                     AND allocation_id = {$this->allocationId}",
             )->fetchColumn(),
         );
+    }
+
+    public function testPeriodTotalsKeepPartialOutgoingAndReceivedRefundSeparate(): void
+    {
+        $outgoingTransactionId = $this->insertBankTransaction(
+            '2099-01-20',
+            '-600.00',
+            'period-totals-outgoing-partial',
+        );
+        $this->service->match(new PayrollPaymentReconciliationCommand(
+            $this->supplierId,
+            $this->allocationId,
+            60_000,
+            PayrollPaymentEvidenceReference::bank(
+                $this->statementId,
+                $outgoingTransactionId,
+            ),
+            'period-totals-outgoing-partial',
+            null,
+        ));
+        $revisionId = (int) $this->query(
+            'SELECT liability.revision_id
+               FROM payroll_payment_allocations allocation
+               JOIN payroll_payment_liabilities liability
+                 ON liability.supplier_id = allocation.supplier_id
+                AND liability.id = allocation.liability_id
+              WHERE allocation.supplier_id = ' . $this->supplierId
+            . ' AND allocation.id = ' . $this->allocationId,
+        )->fetchColumn();
+        $snapshot = '{"schema":"synthetic-incoming-refund.v1"}';
+        $this->pdo->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, source_snapshot_json,
+                 source_snapshot_hash, idempotency_key_hash)
+             VALUES (?, ?, "other.period-totals-refund", "other", "incoming",
+                     "recipient:synthetic", "2099-01-10", "CZK", 20000,
+                     ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $snapshot,
+            hash('sha256', $snapshot),
+            hash('sha256', 'period-totals-refund-' . $this->supplierId, true),
+        ]);
+        $incomingLiabilityId = (int) $this->pdo->lastInsertId();
+        $incomingTransactionId = $this->insertBankTransaction(
+            '2099-01-21',
+            '200.00',
+            'period-totals-incoming-refund',
+        );
+        $this->service->matchIncomingRefund(
+            new PayrollIncomingRefundReconciliationCommand(
+                $this->supplierId,
+                $incomingLiabilityId,
+                20_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $this->statementId,
+                    $incomingTransactionId,
+                ),
+                'period-totals-incoming-refund',
+                null,
+            ),
+        );
+
+        self::assertSame([
+            'outgoing' => [
+                'liability_count' => 1,
+                'required_minor' => 100_000,
+                'settled_minor' => 60_000,
+                'remaining_minor' => 40_000,
+            ],
+            'incoming' => [
+                'liability_count' => 1,
+                'required_minor' => 20_000,
+                'settled_minor' => 20_000,
+                'remaining_minor' => 0,
+            ],
+        ], $this->queries->periodTotals($this->supplierId, '2099-01'));
+    }
+
+    public function testPeriodTotalsKeepOriginalPaymentAndCorrectionRefundSeparate(): void
+    {
+        $originalLiability = $this->query(
+            'SELECT liability.id, liability.revision_id, liability.employee_id,
+                    revision.run_id
+               FROM payroll_payment_liabilities liability
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = liability.supplier_id
+                AND revision.id = liability.revision_id
+              WHERE liability.supplier_id = ' . $this->supplierId
+            . ' AND liability.id = (
+                    SELECT allocation.liability_id
+                      FROM payroll_payment_allocations allocation
+                     WHERE allocation.supplier_id = ' . $this->supplierId
+            . ' AND allocation.id = ' . $this->allocationId . '
+                  )',
+        )->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($originalLiability);
+        $snapshot = '{"schema":"synthetic-payroll-correction.v1"}';
+        $snapshotHash = hash('sha256', $snapshot);
+        $this->pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, previous_revision_id,
+                 revision_kind, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, 2, ?, "correction", "approved",
+                     "synthetic-payment.v1", ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            (int) $originalLiability['run_id'],
+            (int) $originalLiability['revision_id'],
+            str_repeat('a', 64),
+            $snapshot,
+            $snapshotHash,
+            $snapshot,
+            $snapshotHash,
+            hash('sha256', 'synthetic-correction-' . $this->supplierId, true),
+        ]);
+        $correctionRevisionId = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare(
+            'INSERT INTO payroll_run_persons
+                (supplier_id, revision_id, employee_id, result_json,
+                 result_hash, status)
+             VALUES (?, ?, ?, ?, ?, "calculated")',
+        )->execute([
+            $this->supplierId,
+            $correctionRevisionId,
+            (int) $originalLiability['employee_id'],
+            $snapshot,
+            $snapshotHash,
+        ]);
+        $this->pdo->prepare(
+            'UPDATE payroll_runs SET current_revision_no = 2
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([
+            $this->supplierId,
+            (int) $originalLiability['run_id'],
+        ]);
+        $this->pdo->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, employee_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, previous_liability_id,
+                 source_snapshot_json, source_snapshot_hash,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, "net-wage.synthetic", "net_wage", "incoming",
+                     "recipient:synthetic", "2099-01-10", "CZK", 20000,
+                     ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $correctionRevisionId,
+            (int) $originalLiability['employee_id'],
+            (int) $originalLiability['id'],
+            $snapshot,
+            $snapshotHash,
+            hash('sha256', 'corrected-liability-' . $this->supplierId, true),
+        ]);
+
+        self::assertSame([
+            'outgoing' => [
+                'liability_count' => 1,
+                'required_minor' => 100_000,
+                'settled_minor' => 0,
+                'remaining_minor' => 100_000,
+            ],
+            'incoming' => [
+                'liability_count' => 1,
+                'required_minor' => 20_000,
+                'settled_minor' => 0,
+                'remaining_minor' => 20_000,
+            ],
+        ], $this->queries->periodTotals($this->supplierId, '2099-01'));
     }
 
     public function testQueriesPayrollPeriodAcrossNextMonthBatchAndLateEvidence(): void

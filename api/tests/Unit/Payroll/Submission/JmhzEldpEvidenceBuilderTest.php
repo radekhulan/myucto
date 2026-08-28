@@ -269,6 +269,58 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         (new JmhzEldpEvidenceBuilder())->build(7, 101, $source, $this->confirmation());
     }
 
+    public function testAllowsConfirmedVacationWithoutEldpExcludedOrDeductedDays(): void
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $entry = &$input['people'][0]['employments'][0];
+        $entry['absences'] = [[
+            'id' => 901,
+            'absence_type' => 'vacation',
+            'date_from' => '2026-07-13',
+            'date_to' => '2026-07-14',
+        ]];
+        $summary = &$entry['time_month']['jmhz_work_summary'];
+        $summary['interactions']['IN07'] = true;
+        $summary['values']['unworked_total_millihours'] = 16_000;
+        $summary['values']['unworked_paid_millihours'] = 16_000;
+        $summary['values']['vacation_millihours'] = 16_000;
+        unset($summary, $entry);
+        $source = $this->withInput($source, $input);
+        $builder = new JmhzEldpEvidenceBuilder();
+
+        $snapshot = $builder->build(
+            7,
+            101,
+            $source,
+            $builder->deriveOrdinaryConfirmation(7, 101, $source),
+        );
+
+        self::assertNull($snapshot->payload['eldp_sections'][0]['excluded_days']);
+        self::assertNull($snapshot->payload['eldp_sections'][0]['deducted_days']);
+        self::assertFalse($snapshot->payload['confirmation']['in03_active']);
+        self::assertFalse($snapshot->payload['confirmation']['in04_active']);
+    }
+
+    public function testKeepsUnpaidLeaveFailClosedWithoutEldpInteractionEvidence(): void
+    {
+        $source = $this->source();
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['absences'] = [[
+            'id' => 902,
+            'absence_type' => 'unpaid_leave',
+            'date_from' => '2026-07-13',
+            'date_to' => '2026-07-14',
+        ]];
+        $source = $this->withInput($source, $input);
+
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('placenou dovolenou');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
     public function testRejectsIntervalShorterThanFrozenEmploymentMonth(): void
     {
         $source = $this->source();

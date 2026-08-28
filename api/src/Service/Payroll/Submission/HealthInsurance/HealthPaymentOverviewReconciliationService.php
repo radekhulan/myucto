@@ -22,25 +22,72 @@ final class HealthPaymentOverviewReconciliationService
      */
     public function forOverview(HealthPaymentOverview $overview): array
     {
-        $reference = 'health-insurance:i' . $overview->insurerCode;
+        return $this->forOverviews([$overview])[0];
+    }
+
+    /**
+     * Hromadná varianta pro provozní sweep: jedna kontrola revize a jeden
+     * ledger dotaz bez N+1 podle počtu zdravotních pojišťoven.
+     *
+     * @param list<HealthPaymentOverview> $overviews
+     * @return list<array{
+     *   liability_ids:list<int>,expected_minor:int,liability_minor:int,
+     *   liability_difference_minor:int,bank_settled_minor:int,
+     *   outgoing_remaining_minor:int,incoming_remaining_minor:int,
+     *   bank_remaining_minor:int,state:string,closing_blocked:bool,
+     *   blockers:list<string>
+     * }>
+     */
+    public function forOverviews(array $overviews): array
+    {
+        if ($overviews === []) {
+            return [];
+        }
+        $first = $overviews[0];
+        if (!$first instanceof HealthPaymentOverview) {
+            throw new \InvalidArgumentException('PPZ sweep obsahuje neplatný přehled.');
+        }
+        $references = [];
+        foreach ($overviews as $overview) {
+            if (!$overview instanceof HealthPaymentOverview
+                || $overview->supplierId !== $first->supplierId
+                || $overview->runId !== $first->runId
+                || $overview->revisionId !== $first->revisionId
+                || $overview->revisionNo !== $first->revisionNo
+            ) {
+                throw new \InvalidArgumentException(
+                    'PPZ sweep smí obsahovat jen jednu tenantovou revizi.',
+                );
+            }
+            $reference = 'health-insurance:i' . $overview->insurerCode;
+            if (isset($references[$reference])) {
+                throw new \InvalidArgumentException(
+                    'PPZ sweep obsahuje duplicitní pojišťovnu.',
+                );
+            }
+            $references[$reference] = true;
+        }
+
         $revision = $this->db->pdo()->prepare(
             'SELECT run_id, revision_no
                FROM payroll_run_revisions
               WHERE supplier_id = ? AND id = ?',
         );
-        $revision->execute([$overview->supplierId, $overview->revisionId]);
+        $revision->execute([$first->supplierId, $first->revisionId]);
         $run = $revision->fetch(PDO::FETCH_ASSOC);
         if (!is_array($run) || array_is_list($run)
-            || (int) ($run['run_id'] ?? 0) !== $overview->runId
-            || (int) ($run['revision_no'] ?? 0) !== $overview->revisionNo
+            || (int) ($run['run_id'] ?? 0) !== $first->runId
+            || (int) ($run['revision_no'] ?? 0) !== $first->revisionNo
         ) {
             throw new \OutOfBoundsException(
                 'Mzdová revize PPZ nebyla nalezena v aktuální firmě.',
             );
         }
 
+        $placeholders = implode(', ', array_fill(0, count($references), '?'));
         $statement = $this->db->pdo()->prepare(
-            'SELECT liability.id, liability.direction, liability.amount_minor,
+            'SELECT liability.liability_reference, liability.id,
+                    liability.direction, liability.amount_minor,
                     COALESCE((
                       SELECT SUM(payment_match.amount_minor)
                         FROM payroll_payment_matches payment_match
@@ -55,17 +102,58 @@ final class HealthPaymentOverviewReconciliationService
                 AND liability_revision.run_id = ?
                 AND liability_revision.revision_no <= ?
                 AND liability.liability_kind = "health_insurance"
-                AND liability.liability_reference = ?
+                AND liability.liability_reference IN (' . $placeholders . ')
                 AND liability.currency_code = "CZK"
-              ORDER BY liability_revision.revision_no, liability.id',
+              ORDER BY liability.liability_reference,
+                       liability_revision.revision_no, liability.id',
         );
-        $statement->execute([
-            $overview->supplierId,
+        $statement->execute(array_merge([
+            $first->supplierId,
             (int) $run['run_id'],
             (int) $run['revision_no'],
-            $reference,
-        ]);
+        ], array_keys($references)));
 
+        $byReference = array_fill_keys(array_keys($references), []);
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (!is_array($row) || array_is_list($row)) {
+                throw new \UnexpectedValueException(
+                    'Platební ledger PPZ vrátil neplatný řádek.',
+                );
+            }
+            $reference = (string) ($row['liability_reference'] ?? '');
+            if (!array_key_exists($reference, $byReference)) {
+                throw new \UnexpectedValueException(
+                    'Platební ledger PPZ vrátil neznámou pojišťovnu.',
+                );
+            }
+            $byReference[$reference][] = $row;
+        }
+
+        $result = [];
+        foreach ($overviews as $overview) {
+            $result[] = $this->reconcileRows(
+                $overview,
+                $byReference['health-insurance:i' . $overview->insurerCode],
+            );
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @return array{
+     *   liability_ids:list<int>,expected_minor:int,liability_minor:int,
+     *   liability_difference_minor:int,bank_settled_minor:int,
+     *   outgoing_remaining_minor:int,incoming_remaining_minor:int,
+     *   bank_remaining_minor:int,state:string,closing_blocked:bool,
+     *   blockers:list<string>
+     * }
+     */
+    private function reconcileRows(
+        HealthPaymentOverview $overview,
+        array $rows,
+    ): array {
         $liabilityIds = [];
         $liabilityMinor = 0;
         $bankSettledMinor = 0;
@@ -73,12 +161,7 @@ final class HealthPaymentOverviewReconciliationService
         $outgoingSettled = 0;
         $incomingRequired = 0;
         $incomingSettled = 0;
-        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if (!is_array($row) || array_is_list($row)) {
-                throw new \UnexpectedValueException(
-                    'Platební ledger PPZ vrátil neplatný řádek.',
-                );
-            }
+        foreach ($rows as $row) {
             $id = (int) ($row['id'] ?? 0);
             $amount = (int) ($row['amount_minor'] ?? 0);
             $settled = (int) ($row['settled_minor'] ?? 0);

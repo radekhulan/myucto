@@ -20,6 +20,16 @@ final class PayrollRegistrationBusinessMatrix
 
     private const SPEC_ACTIVITY_CODES = ['11', '12', '13', '14', 'M'];
 
+    private const CORRECTION_STANDARD = 'standard';
+    private const CORRECTION_NONSTANDARD_1 = 'nonstandard_1';
+    private const CORRECTION_NONSTANDARD_2 = 'nonstandard_2';
+    private const CORRECTION_SPECIAL = 'special';
+
+    private const NONSTANDARD_1_ACTIVITY_CODES = ['K', 'N', 'O', 'P', 'Q', 'R', 'S'];
+    private const SPECIAL_CORRECTION_ACTIVITY_CODES = [
+        '10', '11', '12', '13', '14', '15', '16', 'M',
+    ];
+
     private const ALLOWED_VARIANTS = [
         1 => [self::VARIANT_OST, self::VARIANT_10, self::VARIANT_SPEC],
         2 => [self::VARIANT_OST, self::VARIANT_10, self::VARIANT_SPEC],
@@ -86,6 +96,72 @@ final class PayrollRegistrationBusinessMatrix
         }
 
         return $variant;
+    }
+
+    public static function requireActivityCorrectionTransition(
+        string $sourceActivityCode,
+        ?string $sourceRelationshipDetailCode,
+        string $correctedActivityCode,
+        ?string $correctedRelationshipDetailCode,
+    ): void {
+        self::requireActionVariant(
+            4,
+            $sourceActivityCode,
+            $sourceRelationshipDetailCode,
+        );
+        self::requireActionVariant(
+            4,
+            $correctedActivityCode,
+            $correctedRelationshipDetailCode,
+        );
+
+        $sourceCategory = self::activityCorrectionCategory(
+            $sourceActivityCode,
+            $sourceRelationshipDetailCode,
+        );
+        $correctedCategory = self::activityCorrectionCategory(
+            $correctedActivityCode,
+            $correctedRelationshipDetailCode,
+        );
+        $allowed = match ($sourceCategory) {
+            self::CORRECTION_STANDARD => in_array(
+                $correctedCategory,
+                [self::CORRECTION_STANDARD, self::CORRECTION_NONSTANDARD_2],
+                true,
+            ),
+            self::CORRECTION_NONSTANDARD_1,
+            self::CORRECTION_NONSTANDARD_2 => $sourceCategory === $correctedCategory,
+            self::CORRECTION_SPECIAL => false,
+            default => throw new \LogicException('Neznámá kategorie opravy druhu činnosti.'),
+        };
+        if (!$allowed) {
+            throw new PayrollRegistrationXmlException(
+                'registration_a4_activity_correction_unsupported',
+                'Tuto změnu druhu činnosti nelze podle autoritativní matice REGZEC opravit elektronickou akcí A4; použijte storno A8 a nové přihlášení A1.',
+            );
+        }
+    }
+
+    private static function activityCorrectionCategory(
+        string $activityCode,
+        ?string $relationshipDetailCode,
+    ): string {
+        if (in_array($activityCode, self::SPECIAL_CORRECTION_ACTIVITY_CODES, true)
+            || (preg_match('/^[1-9]$/D', $activityCode) === 1
+                && $relationshipDetailCode === '2')
+        ) {
+            return self::CORRECTION_SPECIAL;
+        }
+        if (in_array($activityCode, self::NONSTANDARD_1_ACTIVITY_CODES, true)) {
+            return self::CORRECTION_NONSTANDARD_1;
+        }
+        if (preg_match('/^[1-9]$/D', $activityCode) === 1
+            && $relationshipDetailCode === '3'
+        ) {
+            return self::CORRECTION_NONSTANDARD_2;
+        }
+
+        return self::CORRECTION_STANDARD;
     }
 
     private static function variantFor(

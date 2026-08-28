@@ -207,6 +207,8 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/runs/[0-9]+/history$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/operational-health$#', 'payroll', AccessLevel::READ],
+        ['GET', '#^/api/payroll/operational-reconciliation(?:/issues/[0-9]+)?$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/operational-reconciliation/sweep$#', 'payroll', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs/[0-9]+$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/runs$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/runs/[0-9]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
@@ -263,9 +265,12 @@ final class RoutePermissionMap
         // jako zbytek `/submissions/*`: náhled READ, zmrazení WRITE. Vlastní
         // právo by rozdělilo jednu roli („kdo podává za firmu") na dvě, které
         // by se v praxi vždy přidělovaly společně.
+        ['GET', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile$#', 'payroll.submissions', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/submissions/registration/[0-9]+/a1-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/registration/[0-9]+/a2-evidence-candidates$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],

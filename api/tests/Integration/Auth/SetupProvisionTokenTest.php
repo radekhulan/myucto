@@ -238,6 +238,7 @@ final class SetupProvisionTokenTest extends TestCase
             new PasswordSetupLinkIssuer(),
             $this->container->get(ManagedModeGuard::class),
             $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class),
+            $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class),
         );
     }
 

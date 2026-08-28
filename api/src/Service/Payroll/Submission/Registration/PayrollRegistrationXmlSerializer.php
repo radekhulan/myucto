@@ -20,11 +20,12 @@ final class PayrollRegistrationXmlSerializer
         if ($payload->interaction->documentType === 'REGZEC25'
             && $payload->interaction->actionCode === 1
         ) {
+            $a1 = $payload->identity->regzecA1;
             PayrollRegistrationBusinessMatrix::requireActionVariant(
                 1,
-                null,
-                null,
-                false,
+                $a1?->employment['activity_code'] ?? null,
+                $a1?->employment['relationship_detail_code'] ?? null,
+                $a1 !== null,
             );
         }
         $eventData = $payload->eventSnapshot['data'] ?? null;
@@ -84,6 +85,13 @@ final class PayrollRegistrationXmlSerializer
             return $this->regzecEvent($payload);
         }
         $namespace = 'http://schemas.cssz.cz/REGZEC/2025';
+        $a1 = $payload->identity->regzecA1;
+        if ($a1 === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_regzec_a1_variant_data_incomplete',
+                'REGZEC A1 nemá zmrazenou autoritativní datovou sadu.',
+            );
+        }
         $document = $this->document();
         $root = $document->createElementNS($namespace, 'REGZEC');
         $document->appendChild($root);
@@ -101,18 +109,232 @@ final class PayrollRegistrationXmlSerializer
             );
         }
         $this->identityElements($document, $namespace, $client, $payload);
+        $this->appendA1Address(
+            $document,
+            $namespace,
+            $client,
+            'adr',
+            $a1->permanentAddress,
+            true,
+        );
+        if ($a1->czechResidenceAddress !== null) {
+            $this->appendA1Address(
+                $document,
+                $namespace,
+                $client,
+                'fdr',
+                $a1->czechResidenceAddress,
+                false,
+            );
+        }
+        if ($a1->contactAddress !== null) {
+            $this->appendA1Address(
+                $document,
+                $namespace,
+                $client,
+                'cdr',
+                $a1->contactAddress,
+                true,
+            );
+        }
+        if ($a1->taxResidency !== null
+            && is_array($a1->taxResidency['residence_address'])
+        ) {
+            $this->appendA1Address(
+                $document,
+                $namespace,
+                $client,
+                'rdr',
+                $a1->taxResidency['residence_address'],
+                true,
+            );
+        }
+        if ($a1->taxResidency !== null) {
+            $tax = $this->element($document, $namespace, 'taxidrezid');
+            $this->setMappedAttributes($tax, $a1->taxResidency, [
+                'identifier_type' => 'type',
+                'identifier' => 'num',
+                'country_code' => 'stat',
+            ]);
+            $client->appendChild($tax);
+        }
+        if ($a1->proofIdentity !== null) {
+            $proof = $this->element($document, $namespace, 'proofid');
+            $this->setMappedAttributes($proof, $a1->proofIdentity, [
+                'type_code' => 'type',
+                'number' => 'num',
+                'foreign_issuer' => 'foreigninst',
+                'country_code' => 'stat',
+            ]);
+            $client->appendChild($proof);
+        }
         $employee->appendChild($client);
         $comp = $this->element($document, $namespace, 'comp');
         $comp->setAttribute('vs', $payload->employerVariableSymbol);
         $comp->setAttribute('nam', (string) $payload->employerName);
         $employee->appendChild($comp);
         $job = $this->element($document, $namespace, 'job');
-        $job->setAttribute('fro', (string) $payload->actualStartOn);
+        $this->setMappedAttributes($job, $a1->employment, [
+            'actual_start_on' => 'fro',
+            'activity_code' => 'rel',
+            'relationship_detail_code' => 'relDetail',
+        ]);
+        if ($a1->variant === PayrollRegistrationBusinessMatrix::VARIANT_OST) {
+            $this->setMappedAttributes($job, $a1->employment, [
+                'small_scale' => 'sme',
+                'contract_start_on' => 'contractfro',
+                'employment_status_code' => 'relat',
+                'work_mode_code' => 'workmode',
+                'continuous_operation' => 'cont',
+                'prevailing_workplace_code' => 'place',
+                'expected_workplaces' => 'preplace',
+                'contract_workplace' => 'contractplace',
+                'workplace_city' => 'cit',
+                'workplace_municipality_code' => 'municode',
+            ]);
+            $profession = $this->element($document, $namespace, 'prof');
+            $this->setMappedAttributes($profession, $a1->employment, [
+                'profession_code' => 'clas',
+                'required_education_code' => 'edu',
+            ]);
+            $job->appendChild($profession);
+            $position = $this->element($document, $namespace, 'position');
+            $this->setMappedAttributes($position, $a1->employment, [
+                'position_name' => 'name',
+                'leadership' => 'lead',
+            ]);
+            $job->appendChild($position);
+        } elseif ($a1->variant === PayrollRegistrationBusinessMatrix::VARIANT_SPEC) {
+            $this->setMappedAttributes($job, $a1->employment, [
+                'expected_workplaces' => 'preplace',
+                'contract_workplace' => 'contractplace',
+                'workplace_city' => 'cit',
+                'workplace_municipality_code' => 'municode',
+            ]);
+        }
         $employee->appendChild($job);
+        $this->appendA1EmployeeData($document, $namespace, $employee, $a1);
         $employees->appendChild($employee);
         $root->appendChild($employees);
 
         return $this->save($document);
+    }
+
+    /** @param array<string,mixed> $address */
+    private function appendA1Address(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $client,
+        string $name,
+        array $address,
+        bool $includeCountry,
+    ): void {
+        $node = $this->element($document, $namespace, $name);
+        $mapping = [
+            'street' => 'str',
+            'house_number' => 'num',
+            'orientation_number' => 'onum',
+            'postal_code' => 'pnu',
+            'city' => 'cit',
+            'ruian_point' => 'ruianpoint',
+        ];
+        if ($includeCountry) {
+            $mapping['country_code'] = 'cnt';
+        }
+        $this->setMappedAttributes($node, $address, $mapping);
+        $client->appendChild($node);
+    }
+
+    private function appendA1EmployeeData(
+        DOMDocument $document,
+        string $namespace,
+        DOMElement $employee,
+        PayrollRegistrationA1Snapshot $a1,
+    ): void {
+        if ($a1->pension !== null) {
+            $pension = $this->element($document, $namespace, 'pens');
+            $this->setMappedAttributes($pension, $a1->pension, [
+                'type_code' => 'typ',
+                'received_from' => 'tak',
+                'early_retirement' => 'early',
+                'reduced_retirement_age' => 'reducedAge',
+            ]);
+            $employee->appendChild($pension);
+        }
+        if ($a1->healthInsuranceCode !== null) {
+            $insurance = $this->element($document, $namespace, 'insh');
+            $insurance->setAttribute('cnr', $a1->healthInsuranceCode);
+            $employee->appendChild($insurance);
+        }
+        if ($a1->facts !== null) {
+            $fact = $this->element($document, $namespace, 'fact');
+            foreach ($a1->facts['health_restrictions'] as $restriction) {
+                $health = $this->element($document, $namespace, 'healtrest');
+                $this->setMappedAttributes($health, $restriction, [
+                    'type_code' => 'type', 'from' => 'fro', 'to' => 'to',
+                ]);
+                $fact->appendChild($health);
+            }
+            $this->setMappedAttributes($fact, $a1->facts, [
+                'disability_card' => 'ztp',
+                'highest_education_code' => 'highedu',
+            ]);
+            $employee->appendChild($fact);
+        }
+        if ($a1->foreignWorker !== null) {
+            $foreign = $this->element($document, $namespace, 'nocitizen');
+            $this->setMappedAttributes($foreign, $a1->foreignWorker, [
+                'free_access' => 'freeacc',
+                'free_access_reason_code' => 'perm',
+                'permit_type_code' => 'permtype',
+                'issuing_labour_office_code' => 'issue',
+                'permit_identifier' => 'permid',
+                'permit_from' => 'permfro',
+                'permit_to' => 'permto',
+            ]);
+            $employee->appendChild($foreign);
+        }
+        if ($a1->foreignLegislation !== null) {
+            $legislation = $this->element($document, $namespace, 'forinreg');
+            $this->setMappedAttributes($legislation, $a1->foreignLegislation, [
+                'applies' => 'juris', 'country_code' => 'state',
+            ]);
+            $employee->appendChild($legislation);
+        }
+        if ($a1->attachments !== []) {
+            $attachments = $this->element($document, $namespace, 'attachs');
+            foreach ($a1->attachments as $attachment) {
+                $node = $this->element($document, $namespace, 'attach');
+                $this->setMappedAttributes($node, $attachment, [
+                    'name' => 'name',
+                    'description' => 'desc',
+                    'data_base64' => 'data',
+                ]);
+                $attachments->appendChild($node);
+            }
+            $employee->appendChild($attachments);
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $source
+     * @param array<string,string> $mapping
+     */
+    private function setMappedAttributes(
+        DOMElement $element,
+        array $source,
+        array $mapping,
+    ): void {
+        foreach ($mapping as $key => $attribute) {
+            $value = $source[$key] ?? null;
+            if ($value === null) {
+                continue;
+            }
+            if (is_bool($value)) {
+                $value = $value ? 'A' : 'N';
+            }
+            $element->setAttribute($attribute, (string) $value);
+        }
     }
 
     private function regzecEvent(PayrollRegistrationXmlPayload $payload): string
@@ -422,6 +644,17 @@ final class PayrollRegistrationXmlSerializer
         }
         $client->appendChild($birth);
         $stat = $this->element($document, $namespace, 'stat');
+        if ($payload->interaction->documentType === 'REGZEC25') {
+            $sex = $this->requiredIdentityString($identity, 'sex');
+            $stat->setAttribute('mal', match ($sex) {
+                'male' => 'M',
+                'female' => 'Ž',
+                default => throw new PayrollRegistrationXmlException(
+                    'registration_identity_invalid',
+                    'Registrační identita nemá platný kód pohlaví.',
+                ),
+            });
+        }
         $stat->setAttribute(
             'cnt',
             $this->requiredIdentityString(

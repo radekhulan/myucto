@@ -74,7 +74,7 @@ onMounted(load)
       </p>
     </div>
 
-    <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+    <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-7">
       <div class="rounded-lg bg-neutral-50 p-3">
         <h3 class="text-sm font-medium text-neutral-800">
           {{ t('payroll.dashboard.operational_health.document_batches') }}
@@ -160,6 +160,38 @@ onMounted(load)
           <dd class="text-right font-semibold text-warning-700" data-test="outbox-uncertain">{{ health.isds_outbox.send_uncertain }}</dd>
           <dt>{{ t('payroll.dashboard.operational_health.rejected') }}</dt>
           <dd class="text-right font-semibold text-danger-700">{{ health.isds_outbox.rejected }}</dd>
+        </dl>
+      </div>
+
+      <div
+        class="rounded-lg p-3"
+        :class="health.reconciliation.open > 0 ? 'bg-warning-50' : 'bg-success-50'"
+        data-test="reconciliation-card"
+      >
+        <h3 class="text-sm font-medium text-neutral-800">
+          {{ t('payroll.dashboard.operational_health.reconciliation') }}
+        </h3>
+        <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+          <dt>{{ t('payroll.dashboard.operational_health.reconciliation_open') }}</dt>
+          <dd
+            class="text-right font-semibold"
+            :class="health.reconciliation.open > 0 ? 'text-warning-800' : 'text-success-800'"
+            data-test="reconciliation-open"
+          >
+            {{ health.reconciliation.open }}
+          </dd>
+          <dt>{{ t('payroll.dashboard.operational_health.reconciliation_diff') }}</dt>
+          <dd class="text-right font-semibold text-warning-800" data-test="reconciliation-diff">
+            {{ health.reconciliation.diff }}
+          </dd>
+          <dt>{{ t('payroll.dashboard.operational_health.reconciliation_blocked') }}</dt>
+          <dd class="text-right font-semibold text-danger-700" data-test="reconciliation-blocked">
+            {{ health.reconciliation.blocked }}
+          </dd>
+          <dt>{{ t('payroll.dashboard.operational_health.reconciliation_not_materialized') }}</dt>
+          <dd class="text-right font-semibold">{{ health.reconciliation.not_materialized }}</dd>
+          <dt>{{ t('payroll.dashboard.operational_health.reconciliation_periods') }}</dt>
+          <dd class="text-right font-semibold">{{ health.reconciliation.periods }}</dd>
         </dl>
       </div>
 

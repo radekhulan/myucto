@@ -75,6 +75,7 @@ final class PayrollRegistrationActionTest extends TestCase
         if (!$db->hasTable('payroll_obligations')
             || !$db->hasTable('payroll_identity_resolution_tasks')
             || !$db->hasTable('payroll_registration_event_snapshots')
+            || !$db->hasTable('payroll_registration_a1_profiles')
         ) {
             $this->markTestSkipped('Migrace podání/identit neproběhly.');
         }
@@ -265,6 +266,21 @@ final class PayrollRegistrationActionTest extends TestCase
             '/^[a-f0-9]{64}$/D',
             (string) ($snapshot['jmhz_codebook']['manifest_sha256'] ?? ''),
         );
+        self::assertSame(
+            'accepted',
+            $snapshot['data']['jmhz_correction_evidence']['decision'] ?? null,
+        );
+        self::assertSame([], $snapshot['data']['jmhz_correction_evidence']['months'] ?? null);
+        $ledger = $this->db->pdo()->prepare(
+            'SELECT plan_sha256 FROM payroll_registration_a2_evidence_ledger
+              WHERE supplier_id = ? AND environment = "test"
+                AND event_snapshot_id = ?',
+        );
+        $ledger->execute([$this->supplierId, (int) $event['id']]);
+        self::assertSame(
+            $snapshot['data']['jmhz_correction_evidence']['fingerprint'] ?? null,
+            $ledger->fetchColumn(),
+        );
 
         $prepared = ($this->action)->prepare(
             $this->request('POST')->withParsedBody([
@@ -285,6 +301,113 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertStringNotContainsString(' fro=', $xml);
         self::assertStringNotContainsString('endbydeath=', $xml);
         self::assertStringNotContainsString('<unemplcomp', $xml);
+    }
+
+    public function testA2PrepareRechecksCorrectionEvidenceUnderSupplierLock(): void
+    {
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25", status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites(
+            '10',
+            null,
+            self::START_ON,
+            null,
+            null,
+            true,
+        );
+        $approved = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(201, $approved->getStatusCode(), (string) $approved->getBody());
+        $event = $this->json($approved);
+
+        $this->seedCorrectiveMonth('2026-07-01');
+
+        $prepared = ($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $event['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(422, $prepared->getStatusCode(), (string) $prepared->getBody());
+        self::assertSame(
+            'registration_a2_jmhz_evidence_changed',
+            $this->json($prepared)['error']['code'],
+        );
+    }
+
+    public function testA2BlocksEveryCorrectiveMonthWithoutAcceptedJmhzEvidence(): void
+    {
+        if (!$this->db->hasTable('payroll_registration_a2_evidence_ledger')) {
+            $this->markTestSkipped('Migrace důkazního ledgeru REGZEC A2 neproběhla.');
+        }
+        $this->seedTrustedReceipt();
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET actual_start_date = ?, end_date = "2026-08-25",
+                    status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites(
+            '10',
+            null,
+            self::START_ON,
+            null,
+            null,
+            true,
+        );
+        $this->seedCorrectiveMonth('2026-06-01');
+        $this->seedCorrectiveMonth('2026-07-01');
+
+        $candidateResponse = ($this->action)->a2EvidenceCandidates(
+            $this->request('GET')->withQueryParams([
+                'environment' => 'test',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(200, $candidateResponse->getStatusCode(), (string) $candidateResponse->getBody());
+        $candidate = $this->json($candidateResponse);
+        self::assertSame('blocked', $candidate['decision']);
+        self::assertSame(
+            ['2026-06-01', '2026-07-01'],
+            array_column($candidate['months'], 'period_start'),
+        );
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'termination',
+                'effective_on' => '2026-08-25',
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a2_jmhz_corrections_incomplete',
+            $this->json($response)['error']['code'],
+        );
+        $ledger = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_registration_a2_evidence_ledger
+              WHERE supplier_id = ?',
+        );
+        $ledger->execute([$this->supplierId]);
+        self::assertSame(0, (int) $ledger->fetchColumn());
     }
 
     public function testA2RejectsManualOicProvenance(): void
@@ -1091,6 +1214,69 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    public function testA3ChangeRejectsTaxResidenceWithAnotherEffectiveDate(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-03-01", actual_start_date = "2026-03-01",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('10', null, '2026-03-01');
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => '2026-03-30',
+                'source_reference' => 'synthetic-tax-residence-wrong-date',
+                'changes' => [
+                    'tax_residency' => [
+                        'country_code' => 'SK',
+                        'changed_on' => '2026-03-29',
+                    ],
+                ],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a3_effective_date_mismatch',
+            $this->json($response)['error']['code'],
+        );
+    }
+
+    public function testA3RelationshipChangeFailsClosedWithoutExplanationAttachment(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-03-01", actual_start_date = "2026-03-01",
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-03-01');
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => '2026-03-30',
+                'source_reference' => 'synthetic-activity-change-without-attachment',
+                'changes' => ['relationship_detail_code' => '3'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a3_activity_explanation_attachment_required',
+            $this->json($response)['error']['code'],
+        );
+    }
+
     public function testA5ToA8RejectActivity10BeforeEventFreeze(): void
     {
         $this->assertA5ToA8RejectVariant('10', null);
@@ -1275,6 +1461,58 @@ final class PayrollRegistrationActionTest extends TestCase
         );
 
         self::assertSame(201, $accepted->getStatusCode(), (string) $accepted->getBody());
+    }
+
+    public function testA4RelationshipCorrectionFailsClosedWithoutExplanationAttachment(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2026-08-16", actual_start_date = ?,
+                    status = "active"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
+        $this->seedRegistrationEventPrerequisites('1', '1', '2026-08-16');
+
+        $sourceEvent = $this->json(($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'change',
+                'effective_on' => self::TODAY,
+                'source_reference' => 'synthetic-a4-activity-source',
+                'changes' => ['title_prefix' => 'Bc.'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $source = $this->json(($this->action)->prepare(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'event_id' => $sourceEvent['id'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        ));
+        $this->markRegistrationAccepted((int) $source['submission_id']);
+
+        $response = ($this->action)->approveEvent(
+            $this->request('POST')->withParsedBody([
+                'environment' => 'test',
+                'interaction' => 'correction',
+                'effective_on' => self::TODAY,
+                'discovered_on' => self::TODAY,
+                'source_reference' => 'synthetic-a4-activity-correction',
+                'source_submission_id' => $source['submission_id'],
+                'corrections' => ['relationship_detail_code' => '3'],
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(
+            'registration_a4_activity_explanation_attachment_required',
+            $this->json($response)['error']['code'],
+        );
     }
 
     public function testAcceptedA5ReceiptRotatesIdPpvAndKeepsFrozenReplay(): void
@@ -1563,17 +1801,24 @@ final class PayrollRegistrationActionTest extends TestCase
     /** Úřední podání se z tokenu neposílá. */
     public function testBearerTokenIsRejected(): void
     {
-        $response = ($this->action)->prepare(
-            $this->request('POST', 'bearer'),
-            new Response(),
-            ['employmentId' => (string) $this->employmentId],
-        );
+        foreach ([
+            ['prepare', 'POST'],
+            ['a1Profile', 'GET'],
+            ['saveA1Profile', 'PUT'],
+        ] as [$method, $httpMethod]) {
+            $response = ($this->action)->{$method}(
+                $this->request($httpMethod, 'bearer'),
+                new Response(),
+                ['employmentId' => (string) $this->employmentId],
+            );
 
-        self::assertSame(403, $response->getStatusCode());
-        self::assertSame(
-            'session_required',
-            $this->json($response)['error']['code'],
-        );
+            self::assertSame(403, $response->getStatusCode(), $method);
+            self::assertSame(
+                'session_required',
+                $this->json($response)['error']['code'],
+                $method,
+            );
+        }
     }
 
     /** Cizí firma nesmí vidět ani připravit registraci. */
@@ -1588,6 +1833,56 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame(404, $response->getStatusCode());
         self::assertSame(
             'not_found',
+            $this->json($response)['error']['code'],
+        );
+
+        $profile = ($this->action)->a1Profile(
+            $this->request('GET', 'session', $this->otherSupplierId),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+        self::assertSame(404, $profile->getStatusCode());
+        self::assertSame(
+            'not_found',
+            $this->json($profile)['error']['code'],
+        );
+    }
+
+    public function testA1ProfileRejectsStaleOptimisticVersion(): void
+    {
+        $sealed = $this->sensitive->seal(
+            '{}',
+            PayrollSensitiveField::REGISTRATION_A1_PROFILE,
+            $this->supplierId,
+            $this->employmentId,
+        );
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_registration_a1_profiles
+                (supplier_id, employee_id, employment_id, effective_on,
+                 profile_ciphertext, profile_hash, reference_hash, row_version)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1)'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            self::START_ON,
+            $sealed->ciphertext,
+            $sealed->lookupHash,
+            str_repeat('a', 64),
+        ]);
+
+        $response = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody([
+                'effective_on' => self::START_ON,
+                'row_version' => 0,
+            ]),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertSame(
+            'registration_regzec_a1_profile_conflict',
             $this->json($response)['error']['code'],
         );
     }
@@ -1650,7 +1945,7 @@ final class PayrollRegistrationActionTest extends TestCase
             $clock,
         );
 
-        return new PayrollRegistrationAction($service, $access);
+        return new PayrollRegistrationAction($service, $this->identities, $access);
     }
 
     public static function todayAtNoon(): string
@@ -1849,6 +2144,54 @@ final class PayrollRegistrationActionTest extends TestCase
             $idPpvReceiptId,
             $this->userId,
         );
+    }
+
+    private function seedCorrectiveMonth(string $periodStart): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, office_id, period_start, payment_date,
+                 status, current_revision_no)
+             VALUES (?, ?, ?, DATE_ADD(?, INTERVAL 40 DAY), "approved", 1)',
+        )->execute([$this->supplierId, $this->officeId, $periodStart, $periodStart]);
+        $runId = (int) $pdo->lastInsertId();
+        $empty = '{}';
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, revision_kind, status,
+                 schema_version, ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json, result_snapshot_hash,
+                 idempotency_key_hash, approved_by, approved_at)
+             VALUES (?, ?, 1, "correction", "approved", "payroll-run-input.v2",
+                     ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP())',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            str_repeat('a', 64),
+            $empty,
+            hash('sha256', $empty),
+            $empty,
+            hash('sha256', $empty),
+            hash('sha256', "regzec-a2-correction:{$this->supplierId}:{$periodStart}", true),
+            $this->userId,
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_run_employments
+                (supplier_id, revision_id, employee_id, employment_id,
+                 input_json, input_hash, result_json, result_hash, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, "calculated")',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $this->employeeId,
+            $this->employmentId,
+            $empty,
+            hash('sha256', $empty),
+            $empty,
+            hash('sha256', $empty),
+        ]);
     }
 
     private function assertA5ToA8RejectVariant(
