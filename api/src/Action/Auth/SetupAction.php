@@ -143,6 +143,56 @@ final class SetupAction
         }
     }
 
+    /**
+     * Dorovná profil firmy podle toho, co o ní zjistily veřejné registry.
+     *
+     * ⚠️ Musí běžet AŽ ZA obohacením. `insertSupplier()` vidí jen to, co přišlo
+     * ve zřizovacím požadavku, a ten nese pouze název, adresu, IČ a DIČ. Právní
+     * formu, plátcovství DPH i číslo účtu doplní teprve ARES a registr plátců —
+     * takže tři věci zapsané při vkládání firmy jsou v tu chvíli ještě odvozené
+     * ze špatného obrazu:
+     *
+     *   - historie účetního režimu nesla `tax_evidence`, i když
+     *     {@see self::alignAccountingModeWithLegalForm()} firmu vzápětí převedl
+     *     na `double_entry` — historie pak protiřečila `supplier` a `forYear()`
+     *     hlásil pro rok založení daňovou evidenci,
+     *   - `vat_period` zůstalo prázdné, protože v tu chvíli firma ještě nebyla
+     *     plátce; DPH i kontrolní hlášení pak nemají podle čeho podávat,
+     *   - účet z registru plátců se do `currencies` zapsal až po registraci
+     *     vlastních účtů, takže registr `supplier_bank_accounts` zůstal prázdný.
+     *
+     * Tady je obraz firmy hotový, tak se všechny tři dorovnají.
+     *
+     * Best-effort jako zbytek obohacení: neúplný profil se dá spravit
+     * v Nastavení, zahozený setup ne.
+     */
+    private function finalizeSupplierProfile(int $supplierId): void
+    {
+        try {
+            $pdo = $this->db->pdo();
+            $stmt = $pdo->prepare('SELECT accounting_mode, is_vat_payer, vat_period FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                return;
+            }
+
+            // Upsert přes UNIQUE (supplier_id, effective_from) — přepíše řádek
+            // z insertSupplier(), pokud se režim mezitím změnil.
+            $this->accountingModes->record($supplierId, date('Y-01-01'), (string) $row['accounting_mode']);
+
+            if ((int) $row['is_vat_payer'] === 1 && ($row['vat_period'] ?? null) === null) {
+                $pdo->prepare("UPDATE supplier SET vat_period = 'monthly' WHERE id = ? AND vat_period IS NULL")
+                    ->execute([$supplierId]);
+                $this->log->info('setup: plátci DPH doplněno měsíční zdaňovací období (§ 99 ZDPH)', ['supplier_id' => $supplierId]);
+            }
+
+            OwnBankAccountRegistrar::syncSupplier($pdo, $supplierId, $this->bankOwnership);
+        } catch (\Throwable $e) {
+            $this->log->warning('setup: profil firmy se nepodařilo dorovnat', ['error' => $e->getMessage()]);
+        }
+    }
+
     private function applyVatRegistryData(int $supplierId, array $supplier): void
     {
         $ownAccount = isset($supplier['bank_account']) && is_array($supplier['bank_account'])
@@ -446,6 +496,7 @@ final class SetupAction
             $this->enricher->enrich($createdSupplierId, $supplier['ic'] ?? null, $supplier['dic'] ?? null);
             $this->applyVatRegistryData($createdSupplierId, $supplier ?? []);
             $this->alignAccountingModeWithLegalForm($createdSupplierId, $supplier ?? []);
+            $this->finalizeSupplierProfile($createdSupplierId);
         }
 
         // Spravovaná instalace aktivuje licenci sama, hned při zřízení.
