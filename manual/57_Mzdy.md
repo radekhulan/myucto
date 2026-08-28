@@ -26,9 +26,11 @@ Obě cesty jsou alternativní; tentýž měsíc nezaúčtovávej dvakrát.
 
 ## 57.2 Zaměstnanci a podklady
 
-Ve spodní části stránky lze založit zaměstnance a uložit identifikační údaje, typ
+Ve spodní části stránky lze založit zaměstnance a uložit jeho jméno, typ
 poplatníka, pracovněprávní vztah, příznak základní slevy na poplatníka, počet dětí,
-pravidelnou měsíční hrubou mzdu a aktivní stav. Tyto údaje slouží ročnímu mzdovému
+pravidelnou měsíční hrubou mzdu a aktivní stav. **Rodné číslo ani adresa se zde
+už nezadávají** — patří do chráněné evidence osoby v
+[Zaměstnancích](69_Zamestnanci.md), kde se ukládají šifrovaně. Tyto údaje slouží ročnímu mzdovému
 listu; samy nedokládají podepsané prohlášení poplatníka ani nárok na slevu.
 
 **Pracovněprávní vztah** nabízí pracovní poměr, dohodu o provedení práce, dohodu

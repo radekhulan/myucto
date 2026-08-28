@@ -50,10 +50,29 @@ Výchozí složky používají české kódy bez diakritiky, aby byly bezpečné
 CSV a jiné strojové zpracování. Patří mezi ně například `MZDA_MESICNI`,
 `MZDA_HODINOVA`, `ODMENA`, `NAHRADA_MZDY`, `NEPENEZNI_PRIJEM`,
 `PRISPEVEK_STRAVOVANI` a `CESTOVNI_NAHRADA`. Stejné kódy používej také ve
-sloupci `component_code` importovaného souboru. U nové vlastní složky zadej
+sloupci `component_code` importovaného souboru.
+
+Zákonné příplatky podle § 114 až § 118 mají vlastní složky
+`PRIPLATEK_PRESCAS`, `PRIPLATEK_SVATEK`, `PRIPLATEK_NOCNI`,
+`PRIPLATEK_VIKEND` a `PRIPLATEK_ZTIZENE_PROSTREDI`. **Nezadávají se ručně ani
+importem** — vznikají samy při schválení měsíce
+[docházky](60_Dochazka_a_smeny.md#6093-zakonne-priplatky-ke-mzde-114-az-118)
+z evidovaných hodin a jejich příznaků, aby šel nárok doložit z mzdového listu
+(§ 142 odst. 5 zákoníku práce). Výjimkou je přesčas zadaný hodinami v
+[rychlém měsíčním vstupu](62_Rychly_mesicni_vstup.md), který příplatkovou
+složku založí také. Sazbu berou z legislativní sady, případně ze sjednané
+zásady pracovního vztahu; ručně se u nich sazba nepřepisuje. U nové vlastní složky zadej
 nejprve název; kód se z něj automaticky vytvoří bez diakritiky. Dokud jej ručně
 neupravíš, sleduje změny názvu. Po uložení už kód ani začátek platnosti změnit
 nelze; další účinnost se zakládá jako nová verze.
+
+Jednorázový měsíční vstup vzniká jako **koncept** — teprve tak jde ještě
+upravit i zrušit. Schválení je to, co vstup zmrazí. Schvalovat po jednom ale
+nemusíte: tlačítko **Schválit vše (N)** schválí najednou až pět set konceptů
+zvoleného měsíce a už schválený vstup jen přeskočí. Totéž tlačítko nabízí
+mzdový běh přímo u blokace, když do něj nějaký koncept zbyl. Hromadné zadání
+přes [rychlý měsíční vstup](62_Rychly_mesicni_vstup.md) uloží řádky rovnou
+jako schválené, má-li k tomu uživatel oprávnění.
 
 Každá složka samostatně určuje dopad do daně, sociálního a zdravotního
 pojištění, průměrného výdělku, exekučního základu, JMHZ, statistiky a
@@ -103,6 +122,13 @@ vyměřovacího základu a výsledek zaokrouhlí nahoru na celé koruny. Chybí-
 u historického běhu tento podklad nebo je poškozený, aplikace přepočet zablokuje
 pro ruční posouzení; nikdy místo něj nedosadí dnešní parametry. Uhrazení potvrďte
 až podle skutečného bankovního pohybu.
+V podvojném účetnictví se příspěvek účtuje jako zákonný sociální náklad
+zaměstnavatele proti závazku vůči penzijní společnosti (výchozí kontace
+527 / 379). Zaměstnanci se nevyplácí, takže nejde na účet čistých mezd, a
+penzijní společnost není institucí sociálního ani zdravotního pojištění, takže
+nejde ani na 336. Předkontaci lze změnit v
+[Nastavení mezd](73_Nastaveni_mezd.md#7381-predkontace-pro-zvlastni-mzdove-situace).
+
 Po schválení mzdové revize aplikace vytvoří samostatný závazek **Povinné
 spoření u rizikové práce** v Mzdových příkazech. Odtud jej zařaďte do ABO
 nebo SEPA dávky stejně jako ostatní mzdové odvody. Za uhrazený se považuje až

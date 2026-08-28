@@ -54,6 +54,11 @@ Pokud ISDS výsledek nepotvrdí jednoznačně, podání zůstane v neurčitém s
 
 ## 94.5 Co brána neřeší
 
+- **Neumí číst schránku — ani ručně.** Rozhraní brány vkládá pouze koncept a
+  jeho odeslání schvaluje člověk; ke stažení zpráv by bylo potřeba přihlášení,
+  které vzniká jen přesměrováním prohlížeče uživatele. Doručenka odeslaného
+  podání proto zůstává neověřená, dokud ji uživatel nenačte nebo nenahraje
+  z datové schránky.
 - Nezajišťuje automatické načítání doručené pošty.
 - Neobchází přihlášení ani potvrzení uživatele na oficiální stránce ISDS.
 - Nezaručuje, že cílová instituce obsah formuláře věcně přijala.

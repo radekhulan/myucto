@@ -30,6 +30,17 @@ s bezpečnostním klíčem eGovernmentu, Mobilní klíč eGovernmentu, SMS,
 uživatelský certifikát nebo Identitu občana. MyÚčto údaje z této přihlašovací
 stránky nevidí a zpráva odejde až po výslovném schválení konceptu uživatelem.
 
+**Brána je jednosměrná.** Umí vložit koncept k odeslání, ale schránku číst
+neumí — ke stažení zpráv by potřebovala přihlášení, které vzniká jen tím, že se
+uživatel sám přihlásí v perimetru ISDS. Doručenku odeslaného podání proto
+stáhněte v datové schránce a nahrajte ji k podání ručně; do té doby zůstane
+u podání jako neověřená.
+
+Datovou schránkou z mezd chodí přehledy a hlášení zdravotním pojišťovnám,
+měsíční hlášení zaměstnavatele ČSSZ a součinnost exekutorům. **Daňová podání
+jdou přes EPO**, ne datovkou; podání odeslané datovkou nedostane potvrzení
+s podacím číslem, jen dodejku.
+
 Ruční načtení inboxu v **Firma → Datová schránka** má v aplikaci čtyři volby:
 
 - **Mobilní klíč eGovernmentu** — jméno, komunikační kód (heslo aplikace)
@@ -229,6 +240,19 @@ prostředí lze použít k bezpečnému testu celého toku.
 - **Odeslat přes VREP** předá stejné zmrazené podání bráně ČSSZ. Výsledek,
   protokol a případné chyby se sledují na záložce **Stav odeslání**. Převzetí
   transportem ještě není přijetí podání.
+
+Před každým odesláním aplikace znovu ověří, že odesílat vůbec lze: podání musí
+být ve stavu **připraveno**, musí souhlasit prostředí i kanál a **druh podání
+musí odpovídat agendě**, do které míří. Neodpovídající kombinaci odmítne ještě
+před tím, než cokoli opustí aplikaci. Zopakované odeslání téhož podání se
+stejným klíčem projde i tehdy, když už je odeslané — nevznikne z něj druhá
+datová věta. Odesílá se vždy přesně to XML, které bylo zmrazeno; jinou podobu
+podání do transportu vložit nelze.
+
+Podaří-li se odeslání, ale nepovede se zapsat jeho evidence, aplikace to
+**nehlásí jako nepodáno**. Odeslání proběhlo, a tvrdit opak by účetní svedlo
+k druhému podání; místo toho vznikne provozní nález, který je vidět
+v provozním přehledu mezd.
 
 Odpovědi ani doručenky z datové schránky se nikdy nestahují automaticky.
 Načtení příchozích zpráv vyvolá uživatel samostatným tlačítkem v

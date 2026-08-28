@@ -111,12 +111,45 @@ dokument; u odkladu a zastavení je navíc povinný důvod.
 
 Výpočet používá celé haléře a uchovává neměnný měsíční vstup, použitou verzi
 pravidel, mezikroky zaokrouhlení, přidělení částek pohledávkám a pohyby
-**sraženo / deponováno**. Odeslané peníze eviduje samostatně platební vrstva,
+**sraženo / deponováno**.
+
+> [!IMPORTANT]
+> **Rok 2025 se počítá jinou formulí než rok 2026** — nejen jinými čísly.
+> V roce 2025 se z rozhodné části srážely na povinného dvě třetiny a hranice
+> plně zabavitelného zbytku byla jedenapůlnásobek základní částky; od roku 2026
+> je poměr 85/100, hranice 1,9násobek a k částce na bydlení přibyl samostatný
+> paušál na energie. Opravujete-li měsíc roku 2025, aplikace použije pravidla
+> tehdy účinná — výsledek se proto od dnešního zadání téhož případu liší
+> správně. Podrobnosti jsou v
+> [Legislativních pravidlech mezd](75_Legislativni_pravidla_mezd.md#7581-ktere-roky-jsou-pokryte). Odeslané peníze eviduje samostatně platební vrstva,
 aby výpočet nemohl předstírat skutečnou úhradu. Kontroluje zejména nezabavitelnou částku,
 třetiny, plně zabavitelný zbytek, pořadí přednostních pohledávek, běžné a dlužné
 výživné, více exekučních příkazů, více plátců, oddlužení a paušální náhradu
 nákladů zaměstnavatele. Chybějící měsíční podklady nezastoupí odhadem — výsledek
 označí pro ruční kontrolu.
+
+### 71.9.1 Manžel a nezabavitelná částka — doložený důchod
+
+Od 1. 1. 2025 se čtvrtina nezabavitelné částky na manžela nebo partnera
+započítá jen tehdy, je-li doloženo, že **pobírá důchod z důchodového
+pojištění**. Samotné manželství už nestačí.
+
+V seznamu vyživovaných osob proto u osoby vedené jako manžel nebo partner
+zvolte jeden ze tří stavů:
+
+- **doloženo** — čtvrtina se započítá. Doplňte, komu je důchod přiznán, o jaký
+  druh důchodu jde a k jakému datu je doložen. Tato trojice se vyžaduje jen
+  u tohoto stavu;
+- **nedoloženo** — čtvrtina se nezapočítá. Výpočet přesto proběhne: povinný
+  neunesl důkazní břemeno a výsledek je tím dán;
+- **neověřeno** — nikdo se dosud neptal. Čtvrtina se nezapočítá a měsíc, ve
+  kterém se skutečně sráží, spadne do ruční kontroly, aby se stav nedal
+  přehlédnout. Měsíc bez srážky mzdový běh neblokuje.
+
+Stav **neověřeno** nelze vybrat ručně; je to jen výchozí hodnota u záznamů
+založených dřív, než se na důchod začalo ptát. Těm proto čtvrtina zmizí — ale
+s ruční kontrolou, ne tiše. Uzavřená období se nepřepočítávají; případný
+rozdíl vypořádejte podle vlastního posouzení.
 
 Měsíční podklady se ale vyžadují jen tam, kde mají co doložit. Zaměstnanec bez
 jediné aktivní pohledávky a bez oddlužení nic zadávat nemusí: rozdělovat není
@@ -135,7 +168,7 @@ ověřené rozhodnutí a důvod. Ukončený případ nelze zkratkou znovu otevř
 Označení případu za uhrazený projde teprve tehdy, když potvrzené úhrady pokryjí
 celý zůstatek pohledávek — samotné sražení ze mzdy k tomu nestačí.
 
-### 71.9.1 Odeslání sražených částek příjemci
+### 71.9.2 Odeslání sražených částek příjemci
 
 Aby aplikace sražené peníze skutečně odeslala, založte v bloku **Platební
 instrukce příjemce** novou instrukci ze zdrojové listiny. Vyberte aktuálního

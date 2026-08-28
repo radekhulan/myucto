@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Payroll;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollTimeConflictException;
 use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
@@ -16,6 +17,8 @@ use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Time\PayrollTimeCsvImportService;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkSummaryConflictException;
 use MyInvoice\Service\Payroll\Time\PayrollTimeService;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeInputMaterializer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -29,6 +32,8 @@ final class PayrollTimeAction
         private readonly PayrollModuleAccess $access,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly Connection $db,
+        private readonly PayrollSurchargeInputMaterializer $surchargeInputs,
     ) {}
 
     public function month(Request $request, Response $response): Response
@@ -518,14 +523,51 @@ final class PayrollTimeAction
             return $error;
         }
         try {
-            $month = $this->time->approve(
-                $this->currentSupplierId($request),
-                $this->routePeriod($args),
-                $this->input($request),
-                $this->userId($request),
-            );
+            $supplierId = $this->currentSupplierId($request);
+            $pdo = $this->db->pdo();
+            $ownsTransaction = !$pdo->inTransaction();
+            if ($ownsTransaction) {
+                $pdo->beginTransaction();
+            }
+            try {
+                $month = $this->time->approve(
+                    $supplierId,
+                    $this->routePeriod($args),
+                    $this->input($request),
+                    $this->userId($request),
+                );
+                // Zákonné příplatky § 114 až § 118 se do mzdy promítají PRÁVĚ
+                // TEĎ, ve stejné transakci jako schválení docházky, a ze stejného
+                // důvodu jako náhrada mzdy při DPN v `PayrollAbsenceAction`:
+                // schválení evidence je okamžik, kdy se ze skutkového stavu stává
+                // nárok. Vázat to na `lock_inputs` by znamenalo, že příplatek
+                // vznikne až tehdy, když už se vstupy nesmějí měnit; vázat to na
+                // tlačítko v UI by znamenalo, že se na něj dá zapomenout — a to
+                // je u zákonného nároku nedoplatek, který nikdo neuvidí.
+                //
+                // Chybějící podklad shodí i schválení docházky. Je to záměr:
+                // měsíc s prací ve svátek bez sjednané zásady nebo s prací ve
+                // ztíženém prostředí bez počtu vlivů NENÍ schválitelná evidence,
+                // protože se z ní nedá spočítat mzda.
+                $surcharges = $this->surchargeInputs->materialize(
+                    $supplierId,
+                    PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
+                    PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
+                    $this->userId($request),
+                );
+                if ($ownsTransaction) {
+                    $pdo->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownsTransaction && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
             $this->auditMonth($request, 'payroll.time.month_approved', $month);
-            return Json::ok($response, ['month' => $month]);
+            return Json::ok($response, ['month' => $month, 'surcharges' => $surcharges]);
+        } catch (PayrollSurchargeException $e) {
+            return Json::error($response, $e->reason, $e->getMessage(), 409);
         } catch (PayrollTimeLockedException $e) {
             return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
         } catch (PayrollJmhzWorkSummaryConflictException $e) {

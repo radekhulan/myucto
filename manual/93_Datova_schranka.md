@@ -17,7 +17,20 @@ MyÚčto rozlišuje odesílání a načítání doručené pošty:
 1. **Odeslání přes bránu ISDS** přesměruje uživatele na oficiální přihlašovací stránku ISDS. Přihlašovací údaje se zadávají tam a MyÚčto je nepřijímá ani neukládá. Dostupné metody určuje ISDS podle účtu a aktuálního nastavení služby.
 2. **Ruční načtení doručené pošty** používá přímé přihlášení z této stránky. MyÚčto načte zprávy jen po výslovném pokynu uživatele a podle zvolené metody.
 
+Obě cesty jsou oddělené proto, že **brána doručenou poštu číst neumí**. Umí jen
+vložit koncept, který uživatel po přihlášení v ISDS odešle; ke čtení schránky
+by potřebovala přihlašovací údaje uživatele, a ty perimetr ISDS ani nesmí
+opustit. Doručenku i odpověď proto vždy načtete nebo nahrajete zvlášť.
+
 Globální registraci odesílací brány spravuje provozovatel systému v kapitole [Odesílací brána ISDS](94_Odesilaci_brana_ISDS.md). Firma její certifikát ani tajné údaje nevidí.
+
+> [!NOTE]
+> Datovou schránkou z MyÚčta chodí **mzdová podání** — přehledy a hlášení
+> zdravotním pojišťovnám, měsíční hlášení zaměstnavatele ČSSZ (JMHZ) a
+> součinnost exekutorům. **Daňová podání jdou přes EPO**, ne datovkou. Přiznání
+> k DPH, kontrolní hlášení, souhrnné hlášení ani přiznání k dani z příjmů se
+> odsud neodesílají. Odešlete-li daňové podání datovkou vlastní cestou,
+> nedostanete potvrzení s podacím číslem, jen dodejku.
 
 ## 93.2 Přístup pro ruční načtení doručené pošty
 

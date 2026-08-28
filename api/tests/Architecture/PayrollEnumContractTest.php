@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Architecture;
 
 use MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -71,6 +72,11 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Zákonné příplatky § 114 až § 118 ZP
+        'payroll.ts::PayrollSurchargeKind'
+            => 'enum:MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind',
+        'payroll.ts::PayrollSurchargeCompensationMode'
+            => 'enum:MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeCompensationMode',
         // Mzdový běh
         'payroll.ts::PayrollPeriodExportScope'
             => 'enum:MyInvoice\Service\Payroll\Export\PayrollPeriodExportScope',
@@ -369,6 +375,13 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const CLIENT_ONLY_UNIONS = [
+        'payroll.ts::PayrollQuickSurchargeKind' =>
+            'Vědomá PODMNOŽINA PayrollSurchargeKind: druhy, které jde zadat ručně '
+            . 'v rychlém měsíčním vstupu. Přesčas (§ 114) v ní chybí schválně — má '
+            . 'tam vlastní pole s rozpadem na dosaženou mzdu a příplatek, takže druhé '
+            . 'pole na týž nárok by byl další způsob, jak ho vyplatit dvakrát. '
+            . 'Zdrojem pravdy zůstává PayrollSurchargeKind::quickManualEntry(); shodu '
+            . 'hlídá testQuickManualSurchargeKindsMatchTheClientUnion().',
         'payroll.ts::PayrollRunHistoryTotalKey' =>
             'Bezpečný read model historie zpřístupňuje jen tři výslovně vybrané součty '
             . 'z JSON výsledku; nejde o uložený stav ani samostatný backendový číselník.',
@@ -600,6 +613,9 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\IncomeTax\TaxResidence::class,
         \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain::class,
         \MyInvoice\Service\Payroll\Security\PayrollRevealPurpose::class,
+        \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeBasis::class,
+        \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeCompensationMode::class,
+        \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind::class,
         \MyInvoice\Service\Payroll\Security\PayrollSensitiveField::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialCalculationStatus::class,
         \MyInvoice\Service\Payroll\SocialInsurance\SocialComponentTreatment::class,
@@ -782,6 +798,34 @@ final class PayrollEnumContractTest extends TestCase
             $column,
             $enum,
             'Společný enum pracovních vztahů se rozešel s databázovým sloupcem.',
+        );
+    }
+
+    /**
+     * `PayrollQuickSurchargeKind` je vědomá podmnožina, takže z registru párování
+     * vypadl. Nehlídaný ale zůstat nesmí: kdyby se rozešel s
+     * {@see PayrollSurchargeKind::quickManualEntry()}, formulář by buď nabízel
+     * druh, který server odmítne, nebo naopak zamlčel zákonný nárok, který zadat
+     * jde. Obojí se pozná až na výplatní pásce.
+     */
+    public function testQuickManualSurchargeKindsMatchTheClientUnion(): void
+    {
+        $union = $this->typeScriptUnions()['payroll.ts::PayrollQuickSurchargeKind'] ?? null;
+        self::assertIsArray($union, 'Union PayrollQuickSurchargeKind v payroll.ts chybí.');
+
+        $backend = array_map(
+            static fn (PayrollSurchargeKind $kind): string => $kind->value,
+            PayrollSurchargeKind::quickManualEntry(),
+        );
+        sort($union, SORT_STRING);
+        sort($backend, SORT_STRING);
+
+        self::assertSame($backend, $union);
+        self::assertNotContains(
+            PayrollSurchargeKind::Overtime->value,
+            $backend,
+            'Přesčas má v rychlém zadání vlastní pole; druhé pole na týž nárok '
+            . 'by byl další způsob, jak ho vyplatit dvakrát.',
         );
     }
 

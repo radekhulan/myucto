@@ -104,6 +104,48 @@ mzdového běhu. Je-li pro dané období vypnutý, schválení automatický úč
 nevytvoří. Pozdější změna politiky už uzamčený běh nezmění; chybějící nebo
 neplatná politika automatické účtování bezpečně zastaví.
 
+### 73.8.1 Předkontace pro zvláštní mzdové situace
+
+Vedle běžných účtů mzdy, pojistného, daně a srážek se nastavují také
+předkontace, které se použijí jen v konkrétní situaci. Není-li předkontace
+vyplněná, aplikace použije bezpečnou výchozí hodnotu; vyplňte ji podle vlastní
+osnovy tam, kde se od výchozí liší:
+
+| Předkontace | Kdy se použije | Výchozí účty |
+|---|---|---|
+| **Povinné spoření u rizikové práce** | zákonný příspěvek zaměstnavatele a závazek vůči penzijní společnosti | 527 / 379 |
+| **Pohledávka za zaměstnancem** | záporná čistá mzda | 335 proti 331 nebo 366 |
+| **Nedaňová část benefitu** | osvobozená část nepeněžního benefitu | 528 |
+| **Cestovní náhrady** | vyúčtování pracovní cesty promítnuté do mzdy | 512 proti 331 nebo 366 |
+
+Zákonný příspěvek na spoření u rizikové práce se zaměstnanci nevyplácí a
+penzijní společnost není institucí sociálního ani zdravotního pojištění, proto
+nejde ani na 331, ani na 336.
+
+Nedaňová část benefitu je ta, která je **u zaměstnance osvobozená od daně** —
+§ 25 odst. 1 písm. h) zákona o daních z příjmů ve znění od 1. 1. 2024 ji
+vylučuje z daňově uznatelných nákladů. Nadlimitní část se naopak zaměstnanci
+zdaní a zaměstnavateli uznatelná zůstává (§ 24 odst. 2 písm. j) bod 4). Dělení
+se týká **jen** košů **zdravotní plnění** a **rekreace, sport a kultura** podle
+§ 6 odst. 9 písm. d); stravování, spoření na stáří a přechodné ubytování jsou
+uznatelné celé a nedělí se.
+
+Cestovní náhrady se účtují proti závazkovému účtu pracovního vztahu, ne na
+samostatný účet jiných závazků. Zaměstnanci se vyplácí přesně totéž co dřív;
+mění se jen zápis v deníku.
+
+**Analytika pojistného.** Pole účtu přijme i analytiku, například `336.100` pro
+sociální a `336.200` pro zdravotní pojištění. Založíte-li tyto účty ve své
+osnově, můstek je použije a saldo 336 se rozdělí. Firmám, které je nemají,
+aplikace tyto účty **sama nedoplní** a předvyplněná hodnota zůstává na
+syntetickém `336` — doplnění uprostřed roku by rozdělilo saldo, které do té
+doby bylo jedno. Rozhodnutí je na účetní; udělejte je k začátku účetního
+období.
+
+Nové předkontace se do už zaúčtovaných revizí nepromítají. Zmrazený snapshot
+nese vlastní sadu účtů, takže opakované zaúčtování staršího období vypadá
+přesně jako poprvé.
+
 V záložce **Politiky a připravenost** se vede časová historie výplatního dne,
 pravidla posunu na pracovní den, zaokrouhlení doplatku, oprávnění účetní,
 automatických kroků a bezpečného doručení. Jedna oprávněná účetní může celý

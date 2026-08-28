@@ -27,6 +27,8 @@ Ověřte úplnost roku, souběhy plátců, podepsané dokumenty a platná pravid
 ## 67.6 Časté chyby
 
 - Zúčtování zaměstnance, který nesplňuje podmínky.
+- Pokus o zúčtování roku, který ještě neskončil.
+- Podepsané prohlášení bez evidovaného nároku na slevu na poplatníka.
 - Chybějící příjem od jiného plátce.
 - Použití pravidel jiného roku.
 - Nahrazení nepodporovaného odpočtu obecnou částkou.
@@ -44,6 +46,12 @@ se stavem žádosti a výsledkem, vpravo evidence podkladů a výpočet vybrané
 Rok, který ještě neskončil, se nezúčtovává — stránka proto po otevření nabízí
 uplynulé období.
 
+Zúčtovat lze i **rok 2025**: aplikace pro něj má ověřenou legislativní sadu,
+takže se použijí slevy, zvýhodnění a sazby platné tehdy, ne dnešní. Několik
+hodnot roku 2025 ale zůstává nepotvrzených, a výpočet, který je potřebuje, se
+proto bezpečně zastaví — viz
+[Legislativní pravidla mezd](75_Legislativni_pravidla_mezd.md#7581-ktere-roky-jsou-pokryte).
+
 Seznam se stránkuje na serveru a jde zúžit hledáním jména nebo stavem
 (**Požádali, nezúčtováno** / **Bez zúčtování** / **Zúčtováno**). Zúžení hledá
 v celém roce, ne jen na zobrazené straně, a dá se uložit jako pohled. Sloupce
@@ -55,10 +63,22 @@ ne dopočet. Aplikace ho proto provede jen tehdy, když je zodpovězené všechn
 následující. Nezodpovězená otázka má stejný účinek jako záporná odpověď: dokud
 platí „nevíme", zúčtování se neprovádí.
 
+- **Zdaňovací období už skončilo.** Před 1. lednem následujícího roku je
+  zúčtování zablokované; roční daň se nedá vyčíslit z neúplného roku. Blokace
+  je symetrická k opačné hraně — po uplynutí lhůty pro provedení zúčtování se
+  nabídne také. Obě lhůty se posuzují po celých dnech, takže 31. březen je celý
+  ještě včas.
 - **Zaměstnanec o zúčtování požádal**, a to nejpozději 15. února po skončení
   zdaňovacího období. Povinné je datum žádosti; odkaz na podklad je volitelný.
-- **Prohlášení poplatníka je u vás na daný rok podepsané.** Bere se stav
-  z karty zaměstnance k 31. prosinci zúčtovávaného roku.
+- **Prohlášení poplatníka je u vás na daný rok podepsané.** Neposuzuje se stav
+  k 31. prosinci, ale **měsíc po měsíci za dobu trvání pracovního vztahu**.
+  Výslovně neověřené prohlášení nebo nerezidence kdekoli v tomto rozsahu
+  zúčtování zastaví; měsíc, ke kterému není žádný záznam, se přeskočí. U
+  starších převzatých dat bez evidence vztahu se posuzuje celý rok.
+- **Podepsané prohlášení má doložený nárok na slevu na poplatníka.** Je-li
+  prohlášení podepsané, ale za celý rok není ani jeden měsíc nároku na základní
+  slevu, zúčtování se zastaví. Dřív by se v takovém případě spočítala vyšší daň,
+  než na jakou má zaměstnanec nárok; doplňte evidenci nároku a spusťte znovu.
 - **Doklady od předchozích zaměstnavatelů** za tentýž rok jsou doložené,
   nebo zaměstnanec jiného zaměstnavatele neměl. Pozdější doručení než
   15. února zúčtování zastaví. Samotné údaje z těch potvrzení se zadávají
@@ -144,6 +164,12 @@ Zúčtování se provádí jednou za rok. Opakované spuštění nevytvoří dru
 vrátí ten původní. Výsledkem je neměnný doklad **Roční zúčtování záloh**, který
 najdeš i mezi ročními dokumenty a který se váže na konkrétní schválené mzdové
 revize, ze kterých vznikl.
+
+> [!IMPORTANT]
+> **Provedené zúčtování nelze v aplikaci zrušit.** Jakmile jednou proběhne,
+> další pokus vrátí původní výsledek a jinou částku už z něj nedostanete.
+> Podklady proto zkontrolujte před spuštěním, ne po něm. Zjistíte-li chybu,
+> vypořádejte ji mimo aplikaci a rozdíl doložte.
 
 > [!WARNING]
 > Vyúčtování daně z příjmů ze závislé činnosti vůči finančnímu úřadu

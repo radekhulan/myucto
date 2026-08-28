@@ -65,3 +65,55 @@ Ke každé verzi je vidět rozdíl proti ověřené sadě (co přibylo, co zmize
 se změnila hodnota) a historie změn: kdo, kdy, co a proč změnil. Historii nelze
 mazat ani přepisovat. Pokud verzi schválí tentýž člověk, který ji upravil,
 změna projde, ale obrazovka na to upozorní.
+
+### 75.8.1 Které roky jsou pokryté
+
+Ověřená sada je v aplikaci pro rok **2025** a **2026**. Rok 2025 je v ní proto,
+aby šlo provést zpětnou opravu staršího měsíce a roční zúčtování za rok 2025
+skutečnými pravidly toho roku, ne dnešními.
+
+> [!IMPORTANT]
+> **Exekuční srážky se v roce 2025 počítaly jinou formulí než v roce 2026.**
+> V roce 2025 se z části základu srážela na povinného **dvě třetiny** a hranice
+> plně zabavitelného zbytku byla **jedenapůlnásobek** základní částky. Od roku
+> 2026 se poměr změnil na **85/100**, hranice na **1,9násobek** a k částce na
+> bydlení přibyl samostatný paušál na energie. Opravujete-li rok 2025, vyjde
+> jiné číslo než při stejném zadání v roce 2026 — a je to správně. Aplikace
+> podíly bere z legislativní sady účinné pro dané období, takže je nepřepočítá
+> dnešními pravidly.
+
+Několik hodnot roku 2025 zůstává **nepotvrzených**, protože se dostupné zdroje
+navzájem rozcházejí — jde o slevu pro pracujícího poplatníka v důchodu, slevu
+u zemědělské dohody o provedení práce a zvláštní sazby pojistného
+zaměstnavatele podle § 7 odst. 1 zákona č. 589/1992 Sb. (záchranné sbory,
+riziková práce). Aplikace pro ně nedosadí odhad — výpočet, který je potřebuje,
+se bezpečně zastaví a označí k ruční kontrole. Chcete-li je použít, doplňte je
+v této agendě podle ověřeného právního zdroje. Běžné sazby sociálního
+a zdravotního pojištění doložené jsou a počítají se normálně.
+
+Rok 2025 záměrně neobsahuje termíny podání, číselníky a datové věty JMHZ ani
+parametry povinného spoření u rizikové práce — obojí je účinné až od roku 2026.
+JMHZ zavedl zákon č. 323/2025 Sb. až od 1. 1. 2026, takže se za rok 2025
+nepodává a aplikace jeho přípravu za tento rok bezpečně odmítne. Rok 2025 je
+v aplikaci pro **výpočet a opravu mezd**, ne pro podání.
+
+### 75.8.2 Příští rok bez sady
+
+Sada pro **rok 2027 zatím neexistuje a existovat nemůže**: odvíjí se od
+průměrné mzdy, kterou vláda vyhlašuje nařízením až na podzim předchozího roku.
+Nařízení musí vyjít **do 30. září**, takže od 1. října je sada sestavitelná
+a je nejvyšší čas ji doplnit — bez ní mzdový modul od 1. ledna nespočítá ani
+jednu výplatu.
+
+Prázdná kostra sady se záměrně nezakládá. Rok s prázdnou sadou by se v přehledu
+podporovaných období tvářil jako pokrytý, zatímco výpočet by na něm selhal.
+Za pokrytý se počítá jen **účinná** sada; rozpracovaná verze rok nerozsvítí.
+
+> [!IMPORTANT]
+> Na chybějící sadu příštího roku vás obrazovka sama neupozorní. **Před prvním
+> výpočtem nového roku si tedy v této agendě sami ověřte, že pro něj existuje
+> účinná sada** — a to raději už na podzim, ne v lednu.
+
+Doplnit sadu lze v této agendě bez zásahu do programu — hodnoty se zadávají
+tak jako u kterékoli jiné verze. Tlačítko pro založení sady na nový rok zatím
+v obrazovce chybí; do té doby o její založení požádejte provozovatele.

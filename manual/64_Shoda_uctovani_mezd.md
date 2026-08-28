@@ -56,3 +56,33 @@ Do hrubých mezd se při porovnání započítají také nákladové účty pře
 zmrazené dimenze nebo z výslovné předkontace mzdové složky. Nemusí proto jít
 jen o syntetiky 521, 522 a 523. Opravná revize zachová v klasifikaci i původní
 účet, aby jeho storno a přesun na nový účet skončily ve stejné mzdové kategorii.
+
+### 64.8.1 Účetně neutrální nepeněžní plnění
+
+Nepeněžní složka, která nemá vlastní dvojici účtů, se do mzdového deníku
+nezaúčtuje — náklad je v knihách už ze zdrojového dokladu (faktura za ubytování,
+za vzdělávání, leasing vozidla) a mzdový zápis by ho zaúčtoval podruhé. Pro daň
+a pojistné je to ale zdanitelný příjem, takže do hrubé mzdy patří.
+
+Dřív z toho vznikal trvale svítící rozdíl: kontrolní součty počítaly takové
+plnění do hrubé mzdy, deník ne. Nově se hrubá mzda porovnává jako
+**účtovatelná** část a neutrální nepeněžní plnění se z porovnání vyčleňuje —
+deník ani platby k němu nemají co přiřadit, takže se z něj rozdíl nedělá.
+Firma, která poskytuje například 1 % z ceny vozidla nebo přechodné ubytování,
+tedy na této stránce už nevidí rozdíl, který ve skutečnosti žádný rozdíl nebyl.
+
+Hrubá mzda na této stránce proto **není** totéž co hrubá mzda na mzdovém listu:
+neutrální nepeněžní plnění v ní chybí. Pro kontrolu proti mzdovému listu
+použijte mzdový list a výplatní pásku, ne kategorii hrubých mezd z porovnání.
+
+### 64.8.2 Kdy je rozdíl v dani legitimní
+
+Kategorie daně může vykázat rozdíl i tehdy, když je vše správně: převýší-li
+vyplacené daňové bonusy sražené zálohy, kontrolní součty odvod podlahují nulou,
+zatímco deník ne — účet 342 zůstane debetní. Je to skutečná **pohledávka za
+finančním úřadem** podle § 35d odst. 5 zákona o daních z příjmů, kterou má
+účetní vidět. Nepřekrývejte ji ručním zápisem; vypořádejte ji standardní cestou.
+
+Pohledávka za zaměstnancem ze záporné čisté mzdy (účet 335) se do porovnání
+záměrně nezapočítává jako záporná čistá mzda — obě strany rozvahy se nesčítají
+do jednoho čísla se znaménkem.

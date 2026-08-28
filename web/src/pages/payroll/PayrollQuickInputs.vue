@@ -8,7 +8,10 @@ import {
   type PayrollQuickInputRef,
   type PayrollQuickInputRow,
   type PayrollQuickInputSavePayload,
+  type PayrollQuickSurchargeKind,
+  type PayrollQuickSurchargeState,
 } from '@/api/payroll'
+import { preferencesApi } from '@/api/preferences'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -34,7 +37,33 @@ interface UiRow extends PayrollQuickInputRow {
   overtimeHours: string
   overtimeAmount: string
   bonusAmount: string
+  /** Rozepsané hodiny a počty vlivů příplatků, klíč = druh. */
+  surchargeHours: Record<PayrollQuickSurchargeKind, string>
+  surchargeFactors: Record<PayrollQuickSurchargeKind, string>
 }
+
+/**
+ * Pořadí sloupců příplatků. Věcné, ne podle čísla paragrafu: noční a víkend
+ * vyplňuje směnný provoz každý měsíc, svátek přijde párkrát do roka a ztížené
+ * prostředí se týká menšiny pracovišť. Musí odpovídat serveru
+ * (`PayrollSurchargeKind::quickManualEntry()`).
+ */
+const SURCHARGE_KINDS: PayrollQuickSurchargeKind[] = [
+  'night',
+  'weekend',
+  'holiday',
+  'difficult_environment',
+]
+
+/**
+ * Přepínač příplatkových sloupců si pamatujeme na uživateli.
+ *
+ * Směnný provoz ho má trvale zapnutý, běžná kancelář ho nikdy neuvidí. Kdyby se
+ * stav neukládal, mzdová účetní by ho odklikávala každý měsíc znovu — a to je
+ * přesně ten druh drobného tření, kvůli kterému se pak příplatky „radši" zadají
+ * jako volná odměna a zákonný rozpad se ztratí.
+ */
+const SURCHARGE_PREF_KEY = 'payroll.quick_inputs.surcharges'
 
 type ValidationCode =
   | 'amount_required'
@@ -45,9 +74,18 @@ type ValidationCode =
   | 'hours_format'
   | 'hours_non_negative'
   | 'hours_limit'
+  | 'surcharge_hours_limit'
+  | 'factors_required'
+  | 'factors_range'
 
 const MAX_AMOUNT_MINOR = 1_000_000_000_000
 const MAX_OVERTIME_HOURS_MILLI = 1_000_000
+/**
+ * Strop hodin jednoho příplatku za měsíc — 744 h je nejdelší kalendářní měsíc.
+ * Shodný s `PayrollQuickSurchargeCalculator::MAX_HOURS_MILLI`; větší číslo je
+ * vždycky překlep, ne směna.
+ */
+const MAX_SURCHARGE_HOURS_MILLI = 744_000
 const { t } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
@@ -175,7 +213,7 @@ function fieldErrorKey(employmentId: number, field: string): string {
   return `${employmentId}:${field}`
 }
 
-function serverError(row: UiRow, field: 'row' | 'base' | 'overtime' | 'bonus'): string | null {
+function serverError(row: UiRow, field: string): string | null {
   return fieldErrors.value[fieldErrorKey(row.employment_id, field)] ?? null
 }
 
@@ -183,7 +221,13 @@ function serverError(row: UiRow, field: 'row' | 'base' | 'overtime' | 'bonus'): 
 function markDirty(row: UiRow): void {
   pending.value.set(row.employment_id, row)
   clearSaveError()
-  for (const field of ['row', 'base', 'overtime', 'bonus']) {
+  for (const field of [
+    'row',
+    'base',
+    'overtime',
+    'bonus',
+    ...SURCHARGE_KINDS.map(kind => `surcharge_${kind}`),
+  ]) {
     delete fieldErrors.value[fieldErrorKey(row.employment_id, field)]
   }
 }
@@ -194,7 +238,18 @@ const pendingElsewhere = computed(() => {
   return Array.from(pending.value.values()).filter(row => !onPage.has(row.employment_id))
 })
 
+function emptyByKind(): Record<PayrollQuickSurchargeKind, string> {
+  return { night: '', weekend: '', holiday: '', difficult_environment: '' }
+}
+
 function toUi(row: PayrollQuickInputRow): UiRow {
+  const surchargeHours = emptyByKind()
+  const surchargeFactors = emptyByKind()
+  for (const kind of SURCHARGE_KINDS) {
+    const state = row.surcharges?.[kind]
+    surchargeHours[kind] = state?.hours_milli == null ? '' : String(state.hours_milli / 1000)
+    surchargeFactors[kind] = state?.factors == null ? '' : String(state.factors)
+  }
   return {
     ...row,
     overtime_mode: row.overtime_hours_relation_supported ? row.overtime_mode : 'amount',
@@ -204,7 +259,83 @@ function toUi(row: PayrollQuickInputRow): UiRow {
       : String(row.overtime_hours_milli / 1000),
     overtimeAmount: payrollMinorToInput(row.overtime_amount_minor),
     bonusAmount: payrollMinorToInput(row.bonus_amount_minor),
+    surchargeHours,
+    surchargeFactors,
   }
+}
+
+function surchargeState(row: UiRow, kind: PayrollQuickSurchargeKind): PayrollQuickSurchargeState | null {
+  return row.surcharges?.[kind] ?? null
+}
+
+/** Editovatelné je pole jen tehdy, když to dovolí SERVER. Neodvozujeme to tu. */
+function surchargeEditable(row: UiRow, kind: PayrollQuickSurchargeKind): boolean {
+  const state = surchargeState(row, kind)
+  if (state === null || !state.entry_available) return false
+  return state.status === null || state.status === 'draft'
+    || (state.status === 'approved' && canApprove.value)
+}
+
+function surchargeHoursError(row: UiRow, kind: PayrollQuickSurchargeKind): ValidationCode | null {
+  if (!surchargeEditable(row, kind)) return null
+  const value = row.surchargeHours[kind].trim()
+  // Prázdné pole je legitimní stav („tenhle příplatek neřeším"), ne chyba.
+  if (value === '') return null
+  if (value.startsWith('-')) return 'hours_non_negative'
+  const parsed = parsePayrollHoursToMilli(value)
+  if (parsed === null) return 'hours_format'
+  if (parsed > MAX_SURCHARGE_HOURS_MILLI) return 'surcharge_hours_limit'
+  return null
+}
+
+function surchargeFactorsError(row: UiRow, kind: PayrollQuickSurchargeKind): ValidationCode | null {
+  const state = surchargeState(row, kind)
+  if (state === null || !state.requires_factors || !surchargeEditable(row, kind)) return null
+  const hours = row.surchargeHours[kind].trim()
+  if (hours === '' || hours === '0') return null
+  const value = row.surchargeFactors[kind].trim()
+  // § 117 přiznává příplatek ZA KAŽDÝ ztěžující vliv, takže bez jejich počtu
+  // není co počítat. Odhadnout jedničku by byl tichý nedoplatek.
+  if (value === '') return 'factors_required'
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 255) return 'factors_range'
+  return null
+}
+
+/**
+ * Dopočtená částka vedle pole — účetní musí vidět, co z hodin vyjde, ještě než
+ * uloží. Počítá se TÝMŽ zlomkem jako server (jeden podíl, žádné mezikroky):
+ * `základ × sazba × milihodiny × vlivy / (10 000 × 1 000)`.
+ */
+function surchargePreview(row: UiRow, kind: PayrollQuickSurchargeKind): number {
+  const state = surchargeState(row, kind)
+  if (state === null) return 0
+  const hours = parsePayrollHoursToMilli(row.surchargeHours[kind].trim())
+  if (hours === null || hours <= 0 || hours > MAX_SURCHARGE_HOURS_MILLI) {
+    return state.hours_milli === null ? 0 : state.amount_minor
+  }
+  // Beze změny hodin i vlivů ukazujeme ULOŽENOU částku, ne přepočet: server ji
+  // taky nepřepočítává, aby se už zadaná mzda neměnila podle toho, co se
+  // mezitím stalo s průměrným výdělkem.
+  const factors = state.requires_factors
+    ? Number(row.surchargeFactors[kind].trim() || state.default_factors || 0)
+    : 1
+  if (state.hours_milli === hours
+    && (!state.requires_factors || state.factors === factors)) {
+    return state.amount_minor
+  }
+  if (!state.basis_hourly_minor || !state.rate_basis_points || factors < 1) return 0
+  return Math.round(
+    (state.basis_hourly_minor * state.rate_basis_points * hours * factors) / 10_000_000,
+  )
+}
+
+function surchargeTotal(row: UiRow): number {
+  return SURCHARGE_KINDS.reduce(
+    (sum, kind) => sum + surchargePreview(row, kind)
+      + (surchargeState(row, kind)?.managed_amount_minor ?? 0),
+    0,
+  )
 }
 
 function formatMoney(value: number): string {
@@ -340,6 +471,56 @@ function rowInvalid(row: UiRow): boolean {
   return baseError(row) !== null
     || overtimeError(row) !== null
     || bonusError(row) !== null
+    || SURCHARGE_KINDS.some(kind => surchargeHoursError(row, kind) !== null
+      || surchargeFactorsError(row, kind) !== null)
+}
+
+/*
+ * Příplatkové sloupce se odkrývají pro CELOU TABULKU jedním přepínačem, ne
+ * rozbalováním u řádku.
+ *
+ * Rozbalovací sekce u jednotlivce vypadá úsporně, ale při 500 zaměstnancích je
+ * to 500 rozkliknutí — přesně ten vzorec, kvůli kterému rychlý měsíční vstup
+ * vznikl. Sloupec navíc dovolí vyplňovat sloupcově a tabulátorem, což je jak
+ * mzdová účetní doopravdy pracuje.
+ */
+const surchargesVisible = ref(false)
+/** Dokud se preference nenačte, přepínač se neukládá — přepsal by uloženou. */
+const surchargePrefLoaded = ref(false)
+
+/** Řádek, který příplatek už drží (zadaný ručně i promítnutý z docházky). */
+function rowHasSurcharge(row: PayrollQuickInputRow): boolean {
+  return SURCHARGE_KINDS.some((kind) => {
+    const state = row.surcharges?.[kind]
+    return state != null
+      && (state.hours_milli !== null || state.amount_minor !== 0
+        || state.managed_amount_minor !== 0)
+  })
+}
+
+async function loadSurchargePref(): Promise<void> {
+  try {
+    const saved = await preferencesApi.getPreferenceKey<{ visible?: boolean }>(
+      SURCHARGE_PREF_KEY,
+    )
+    if (typeof saved?.visible === 'boolean') surchargesVisible.value = saved.visible
+  } catch {
+    // Nedostupná preference není důvod nepustit uživatele k tabulce; sekce
+    // zůstane skrytá a otevře se sama, jakmile nějaký řádek příplatek má.
+  } finally {
+    surchargePrefLoaded.value = true
+  }
+}
+
+function toggleSurcharges(): void {
+  surchargesVisible.value = !surchargesVisible.value
+  if (!surchargePrefLoaded.value) return
+  // Přes Promise.resolve, protože uložení preference nesmí shodit přepínač ani
+  // tehdy, když volání nevrátí promise. Neuložená preference je kosmetická vada,
+  // přepínač v téhle relaci platí tak jako tak.
+  void Promise.resolve(
+    preferencesApi.putPreferenceKey(SURCHARGE_PREF_KEY, { visible: surchargesVisible.value }),
+  ).catch(() => {})
 }
 
 const hasInvalidRows = computed(() => rows.value.some(rowInvalid))
@@ -388,7 +569,13 @@ const invalidFieldCount = computed(() => rows.value.reduce(
   (count, row) => count
     + Number(baseError(row) !== null)
     + Number(overtimeError(row) !== null)
-    + Number(bonusError(row) !== null),
+    + Number(bonusError(row) !== null)
+    + SURCHARGE_KINDS.reduce(
+      (sum, kind) => sum
+        + Number(surchargeHoursError(row, kind) !== null)
+        + Number(surchargeFactorsError(row, kind) !== null),
+      0,
+    ),
   0,
 ))
 
@@ -437,6 +624,7 @@ function grossPreview(row: UiRow): number {
   return validAmount(row.baseAmount)
     + overtimePreview(row)
     + validAmount(row.bonusAmount)
+    + surchargeTotal(row)
     + row.other_amount_minor
 }
 
@@ -456,6 +644,8 @@ function applyPending(row: PayrollQuickInputRow): UiRow {
     ui.overtimeAmount = kept.overtimeAmount
     ui.bonusAmount = kept.bonusAmount
     ui.overtime_mode = kept.overtime_mode
+    ui.surchargeHours = { ...kept.surchargeHours }
+    ui.surchargeFactors = { ...kept.surchargeFactors }
     pending.value.set(row.employment_id, ui)
   }
   return ui
@@ -482,6 +672,10 @@ async function load(): Promise<void> {
     // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
     total.value = month.total
     loadedPeriod.value = requestedPeriod
+    // Skrytá sekce se otevře sama, drží-li nějaký řádek příplatek. Data, která
+    // v měsíci jsou, se nesmí uživateli ztratit z očí jen proto, že přepínač
+    // zůstal z minula vypnutý.
+    if (month.items.some(rowHasSurcharge)) surchargesVisible.value = true
   } catch (error) {
     if (generation === loadGeneration) {
       // Řádky se tady vyčistily už PŘED požadavkem (kvůli přepnutí období),
@@ -514,13 +708,44 @@ function payload(batch: UiRow[]): PayrollQuickInputSavePayload {
         ? row.overtime_average_snapshot_version
         : null,
       bonus_amount_minor: parsedAmount(row.bonusAmount) as number,
+      ...surchargePayload(row),
       versions: {
         base: row.inputs.base?.row_version ?? null,
         overtime: row.inputs.overtime?.row_version ?? null,
         bonus: row.inputs.bonus?.row_version ?? null,
+        surcharges: Object.fromEntries(SURCHARGE_KINDS
+          .filter(kind => surchargeEditable(row, kind))
+          .map(kind => [kind, surchargeState(row, kind)?.row_version ?? null])),
       },
     })),
   }
+}
+
+/**
+ * Posílají se JEN druhy, které uživatel opravdu smí měnit.
+ *
+ * Druh, který v požadavku není, server nechá být. Kdyby se posílaly všechny,
+ * uložení z obrazovky se skrytou sekcí by zrušilo příplatky, o kterých
+ * uživatel ani nevěděl — a ztráta zákonného nároku bez jediné hlášky je to
+ * nejhorší, co tenhle formulář může udělat.
+ */
+function surchargePayload(row: UiRow): Pick<
+  PayrollQuickInputSavePayload['rows'][number], 'surcharges'
+> {
+  const surcharges: NonNullable<PayrollQuickInputSavePayload['rows'][number]['surcharges']> = {}
+  for (const kind of SURCHARGE_KINDS) {
+    if (!surchargeEditable(row, kind)) continue
+    const raw = row.surchargeHours[kind].trim()
+    const hours = raw === '' ? null : parsePayrollHoursToMilli(raw)
+    const factors = row.surchargeFactors[kind].trim()
+    surcharges[kind] = {
+      hours_milli: hours,
+      factors: surchargeState(row, kind)?.requires_factors && factors !== ''
+        ? Number(factors)
+        : null,
+    }
+  }
+  return { surcharges }
 }
 
 async function save(): Promise<void> {
@@ -609,7 +834,10 @@ function errorCode(error: unknown): string {
     ?.response?.data?.error?.code ?? ''
 }
 
-onMounted(load)
+onMounted(() => {
+  void loadSurchargePref()
+  void load()
+})
 </script>
 
 <template>
@@ -711,11 +939,35 @@ onMounted(load)
         <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.quick_inputs.empty_hint') }}</p>
       </div>
       <template v-else>
-        <div class="hidden flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2 lg:flex">
-          <ColumnPicker :ctrl="tbl" />
-          <DensityToggle :ctrl="tbl" />
+        <!--
+          Jeden přepínač nad tabulkou odkryje příplatkové sloupce pro VŠECHNY
+          řádky naráz. Rozbalování u jednotlivce by při 500 lidech znamenalo 500
+          kliknutí — přesně to, co tenhle formulář odstraňuje.
+        -->
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-2">
+          <button
+            type="button"
+            data-testid="quick-surcharges-toggle"
+            :class="modeButtonClass(surchargesVisible)"
+            :aria-pressed="surchargesVisible"
+            aria-controls="quick-surcharge-columns"
+            @click="toggleSurcharges"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
+            {{ t('payroll.quick_inputs.surcharges.toggle') }}
+          </button>
+          <div class="hidden flex-wrap items-center gap-2 lg:flex">
+            <ColumnPicker :ctrl="tbl" />
+            <DensityToggle :ctrl="tbl" />
+          </div>
         </div>
-        <div data-layout="desktop" class="hidden overflow-x-auto lg:block">
+        <p
+          v-if="surchargesVisible"
+          class="border-b border-neutral-200 bg-payroll-50/60 px-4 py-2 text-xs text-neutral-600"
+        >
+          {{ t('payroll.quick_inputs.surcharges.hint') }}
+        </p>
+        <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
           <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
@@ -723,6 +975,17 @@ onMounted(load)
                 <th v-if="tbl.isVisible('income_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
                 <th v-if="tbl.isVisible('overtime')" class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
                 <th v-if="tbl.isVisible('bonus_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
+                <th
+                  v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
+                  :key="kind"
+                  class="px-4 py-3"
+                  :data-testid="`quick-surcharge-head-${kind}`"
+                >
+                  {{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}
+                  <span class="block font-normal normal-case text-neutral-400">
+                    {{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }}
+                  </span>
+                </th>
                 <th v-if="tbl.isVisible('gross_preview')" class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
               </tr>
             </thead>
@@ -908,6 +1171,78 @@ onMounted(load)
                     {{ fieldStateMessage(row, 'bonus') }}
                   </p>
                 </td>
+                <td
+                  v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
+                  :key="kind"
+                  class="px-4 py-4"
+                >
+                  <input
+                    :data-testid="`quick-surcharge-${kind}-${row.employment_id}`"
+                    v-model="row.surchargeHours[kind]"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    :aria-label="t('payroll.quick_inputs.surcharges.hours_label', {
+                      kind: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
+                    })"
+                    :aria-invalid="surchargeHoursError(row, kind) !== null"
+                    :class="[fieldClass(surchargeHoursError(row, kind), true), 'w-24']"
+                    :placeholder="t('payroll.quick_inputs.surcharges.hours_placeholder')"
+                    :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
+                    @input="markDirty(row)"
+                  >
+                  <!--
+                    § 117 přiznává příplatek ZA KAŽDÝ ztěžující vliv, takže
+                    počet vlivů je součást zadání, ne detail.
+                  -->
+                  <label
+                    v-if="surchargeState(row, kind)?.requires_factors"
+                    class="mt-1 flex items-center gap-1 text-xs text-neutral-500"
+                  >
+                    {{ t('payroll.quick_inputs.surcharges.factors') }}
+                    <input
+                      :data-testid="`quick-surcharge-factors-${kind}-${row.employment_id}`"
+                      v-model="row.surchargeFactors[kind]"
+                      type="text"
+                      inputmode="numeric"
+                      autocomplete="off"
+                      :aria-invalid="surchargeFactorsError(row, kind) !== null"
+                      :class="[fieldClass(surchargeFactorsError(row, kind), true), 'h-8 w-14']"
+                      :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
+                      @input="markDirty(row)"
+                    >
+                  </label>
+                  <p
+                    v-if="surchargeHoursError(row, kind) || surchargeFactorsError(row, kind)"
+                    class="mt-1 max-w-40 text-xs text-danger-700"
+                  >
+                    {{ validationMessage(surchargeHoursError(row, kind)
+                      ?? surchargeFactorsError(row, kind)) }}
+                  </p>
+                  <!-- Dopočtená částka u pole: účetní musí vidět, co z hodin vyjde. -->
+                  <p
+                    v-else-if="surchargePreview(row, kind)"
+                    :data-testid="`quick-surcharge-preview-${kind}-${row.employment_id}`"
+                    class="mt-1 text-xs font-medium text-payroll-700 tabular-nums"
+                  >
+                    {{ formatMoney(surchargePreview(row, kind)) }}
+                  </p>
+                  <p
+                    v-if="serverError(row, `surcharge_${kind}`)"
+                    :data-testid="`quick-surcharge-server-error-${kind}-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs font-medium text-danger-700"
+                  >
+                    {{ serverError(row, `surcharge_${kind}`) }}
+                  </p>
+                  <p
+                    v-else-if="!surchargeState(row, kind)?.entry_available || surchargeState(row, kind)?.clear_only"
+                    :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
+                    class="mt-1 max-w-48 text-xs text-warning-700"
+                  >
+                    {{ t(`payroll.quick_inputs.surcharges.unavailable.${
+                      surchargeState(row, kind)?.clear_only ? 'clear_only' : (surchargeState(row, kind)?.unavailable_reason ?? 'basis_missing')}`) }}
+                  </p>
+                </td>
                 <td v-if="tbl.isVisible('gross_preview')" class="px-4 py-4 text-right">
                   <p class="text-base font-semibold text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
@@ -1069,6 +1404,87 @@ onMounted(load)
                   {{ fieldStateMessage(row, 'overtime') }}
                 </p>
               </div>
+              <!--
+                Na mobilu jsou příplatky PODSEKCÍ karty, ne dalšími sloupci.
+                Čtyři sloupce navíc by tabulku poslaly do vodorovného scrollu
+                a v něm se vyplňují mzdy mizerně; svislý seznam v kartě je
+                stejná informace bez posouvání.
+              -->
+              <fieldset
+                v-if="surchargesVisible"
+                class="sm:col-span-2 rounded-lg border border-neutral-200 p-3"
+                data-testid="quick-surcharges-mobile"
+              >
+                <legend class="px-1 text-xs font-medium text-neutral-600">
+                  {{ t('payroll.quick_inputs.surcharges.toggle') }}
+                </legend>
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label v-for="kind in SURCHARGE_KINDS" :key="kind" class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}
+                      <span class="text-neutral-400">{{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }}</span>
+                    </span>
+                    <input
+                      :data-testid="`quick-surcharge-mobile-${kind}-${row.employment_id}`"
+                      v-model="row.surchargeHours[kind]"
+                      type="text"
+                      inputmode="decimal"
+                      autocomplete="off"
+                      :aria-label="t('payroll.quick_inputs.surcharges.hours_label', {
+                        kind: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
+                      })"
+                      :aria-invalid="surchargeHoursError(row, kind) !== null"
+                      :class="[fieldClass(surchargeHoursError(row, kind)), 'w-full']"
+                      :placeholder="t('payroll.quick_inputs.surcharges.hours_placeholder')"
+                      :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
+                      @input="markDirty(row)"
+                    >
+                    <span
+                      v-if="surchargeState(row, kind)?.requires_factors"
+                      class="mt-1 flex items-center gap-1 text-xs text-neutral-500"
+                    >
+                      {{ t('payroll.quick_inputs.surcharges.factors') }}
+                      <input
+                        v-model="row.surchargeFactors[kind]"
+                        type="text"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        :aria-label="t('payroll.quick_inputs.surcharges.factors')"
+                        :aria-invalid="surchargeFactorsError(row, kind) !== null"
+                        :class="[fieldClass(surchargeFactorsError(row, kind), true), 'h-8 w-16']"
+                        :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
+                        @input="markDirty(row)"
+                      >
+                    </span>
+                    <span
+                      v-if="surchargeHoursError(row, kind) || surchargeFactorsError(row, kind)"
+                      class="mt-1 block text-xs text-danger-700"
+                    >
+                      {{ validationMessage(surchargeHoursError(row, kind)
+                        ?? surchargeFactorsError(row, kind)) }}
+                    </span>
+                    <span
+                      v-else-if="surchargePreview(row, kind)"
+                      class="mt-1 block text-xs font-medium text-payroll-700"
+                    >
+                      {{ formatMoney(surchargePreview(row, kind)) }}
+                    </span>
+                    <span
+                      v-if="serverError(row, `surcharge_${kind}`)"
+                      class="mt-1 block text-xs font-medium text-danger-700"
+                    >
+                      {{ serverError(row, `surcharge_${kind}`) }}
+                    </span>
+                    <span
+                      v-else-if="!surchargeState(row, kind)?.entry_available || surchargeState(row, kind)?.clear_only"
+                      class="mt-1 block text-xs text-warning-700"
+                    >
+                      {{ t(`payroll.quick_inputs.surcharges.unavailable.${
+                        surchargeState(row, kind)?.clear_only ? 'clear_only' : (surchargeState(row, kind)?.unavailable_reason ?? 'basis_missing')}`) }}
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
             </div>
           </article>
         </div>

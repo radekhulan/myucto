@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import type { PayrollEmployeeCardMonth, PayrollQuickInputRow } from '@/api/payroll'
+import type {
+  PayrollEmployeeCardMonth,
+  PayrollQuickInputRow,
+  PayrollQuickSurchargeKind,
+  PayrollQuickSurchargeState,
+} from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   employeeCards: vi.fn(),
@@ -23,6 +28,54 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 }))
 
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
+
+/**
+ * Výchozí stav zákonných příplatků: druh je dostupný, ale nic zadaného nemá.
+ * Server ho posílá u každého řádku, takže fixtura ho posílat musí taky —
+ * jinak by testy běžely nad tvarem, který v odpovědi nikdy nenastane.
+ */
+function surchargeStates(
+  overrides: Partial<Record<PayrollQuickSurchargeKind, Partial<PayrollQuickSurchargeState>>> = {},
+): Record<PayrollQuickSurchargeKind, PayrollQuickSurchargeState> {
+  const sections: Record<PayrollQuickSurchargeKind, string> = {
+    night: '§ 116',
+    weekend: '§ 118',
+    holiday: '§ 115',
+    difficult_environment: '§ 117',
+  }
+  const kinds: PayrollQuickSurchargeKind[] = [
+    'night', 'weekend', 'holiday', 'difficult_environment',
+  ]
+  return Object.fromEntries(kinds.map(kind => [kind, {
+    kind,
+    label: kind,
+    section: sections[kind],
+    component_code: `PRIPLATEK_${kind.toUpperCase()}`,
+    basis: kind === 'difficult_environment' ? 'minimum_wage_hourly' : 'average_earning',
+    basis_hourly_minor: 20_000,
+    average_hourly_minor: 20_000,
+    average_snapshot_id: 41,
+    average_snapshot_version: 1,
+    rate_basis_points: kind === 'holiday' ? 10_000 : 1_000,
+    rate_is_agreed: false,
+    requires_factors: kind === 'difficult_environment',
+    default_factors: null,
+    hours_milli: null,
+    factors: null,
+    amount_minor: 0,
+    managed_amount_minor: 0,
+    row_version: null,
+    status: null,
+    managed_elsewhere: false,
+    from_attendance: false,
+    conflict: false,
+    available: true,
+    entry_available: true,
+    clear_only: false,
+    unavailable_reason: null,
+    ...overrides[kind],
+  }])) as Record<PayrollQuickSurchargeKind, PayrollQuickSurchargeState>
+}
 
 function row(overrides: Partial<PayrollQuickInputRow> = {}): PayrollQuickInputRow {
   return {
@@ -58,6 +111,8 @@ function row(overrides: Partial<PayrollQuickInputRow> = {}): PayrollQuickInputRo
     excluded_from_gross_amount_minor: 0,
     gross_preview_minor: 4_500_000,
     inputs: { base: null, overtime: null, bonus: null },
+    surcharges: surchargeStates(),
+    surcharge_amount_minor: 0,
     blockers: [],
     ...overrides,
   }

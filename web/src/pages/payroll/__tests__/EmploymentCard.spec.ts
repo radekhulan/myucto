@@ -10,6 +10,19 @@ vi.mock('@/api/payroll', () => ({
     addEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
     deleteEmployment: vi.fn(),
+    // Panel zásad příplatků se na kartě montuje taky — bez tovární funkce by
+    // spadl do chybové větve a test by měřil něco jiného, než chce měřit.
+    employmentSurchargePolicies: vi.fn().mockResolvedValue({
+      policies: [],
+      statutory_default: {
+        overtime_mode: 'surcharge',
+        holiday_mode: 'compensatory_time_off',
+        difficult_environment_factors: null,
+      },
+      kinds: [],
+      ruleset_id: 'synthetic',
+    }),
+    createEmploymentSurchargePolicy: vi.fn(),
     employmentJmhzEvidenceOptions: vi.fn().mockResolvedValue({
       package_key: 'synthetic',
       manifest_sha256: 'a'.repeat(64),

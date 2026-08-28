@@ -66,6 +66,17 @@ final class VendorRulesetApprover
      */
     public const APPROVED_ON = '2026-08-17';
 
+    /**
+     * Datum podpisu ročníku 2025, doplněného zpětně.
+     *
+     * Vlastní konstanta, protože {@see APPROVED_ON} je starší než den, kdy se
+     * zdroje pro rok 2025 stahovaly — a {@see RulesetApproval} (správně) trvá na
+     * tom, že schválení nesmí předcházet technické kontrole. Přepsat společné
+     * datum nešlo: je součástí plného snapshotu ročníku 2026 a jeho posunutí by
+     * změnilo `canonical_hash` každé jeho verze.
+     */
+    public const APPROVED_ON_2025 = '2026-08-28';
+
     private static ?string $configured = null;
 
     /**
@@ -102,8 +113,10 @@ final class VendorRulesetApprover
      * hodnoty ručí. {@see RulesetApproval} trvá na tom, aby to byly RŮZNÉ
      * identity — kontrolovat a schvalovat sám sebe nemá důkazní hodnotu.
      */
-    public static function approval(RulesetTechnicalReview $technicalReview): RulesetApproval
-    {
+    public static function approval(
+        RulesetTechnicalReview $technicalReview,
+        string $approvedOn = self::APPROVED_ON,
+    ): RulesetApproval {
         $approver = self::name();
         if ($approver === $technicalReview->checkedBy) {
             throw new InvalidArgumentException(
@@ -115,7 +128,7 @@ final class VendorRulesetApprover
             $technicalReview->checkedBy,
             $technicalReview->checkedOn,
             $approver,
-            self::APPROVED_ON,
+            $approvedOn,
             'Provozovatel instalace přebírá odpovědnost za odbornou správnost dodaných '
             . 'legislativních sad. Doklad je manifest oficiálních zdrojů u každé verze '
             . '(odkaz a datum stažení) a technická kontrola přesných hodnot; jednotlivé '

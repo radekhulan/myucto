@@ -1660,6 +1660,35 @@
             "overtime_mode": "Overtime input mode",
             "overtime_hours": "Overtime (hours)",
             "overtime_amount": "Overtime total (CZK)",
+            "surcharges": {
+                "toggle": "Surcharges — night, weekend, public holiday, difficult environment",
+                "hint": "Enter the hours worked in the month. The amount is derived from the approved average earnings (from the basic minimum wage rate for Section 117) and the agreed rate. Surcharges tracked through attendance are not entered here — they arise when the month is approved.",
+                "kinds": {
+                    "night": "Night work",
+                    "weekend": "Saturday and Sunday",
+                    "holiday": "Work on a public holiday",
+                    "difficult_environment": "Difficult environment"
+                },
+                "sections": {
+                    "night": "Section 116",
+                    "weekend": "Section 118",
+                    "holiday": "Section 115",
+                    "difficult_environment": "Section 117"
+                },
+                "hours_label": "{kind} — hours",
+                "hours_placeholder": "hours",
+                "factors": "Aggravating factors",
+                "unavailable": {
+                    "clear_only": "The calculation basis is no longer available, so a new value cannot be entered. You can clear what is there, or restore the missing basis.",
+                    "claimed_by_attendance": "This surcharge already arose from approved attendance for this period. It cannot be entered manually — it would be paid twice.",
+                    "managed_elsewhere": "Another payroll or recurring input manages this surcharge for the month.",
+                    "holiday_arrangement_missing": "Work on a public holiday earns compensatory time off under Section 115(1); a surcharge only if one was agreed. None is agreed for this employment — add a surcharge policy on the employment card.",
+                    "holiday_compensatory_time_off": "This employment has compensatory time off agreed for public holidays, not a surcharge.",
+                    "wage_includes_surcharge": "This employment has wages agreed with this work already taken into account (Section 114(3)), so no surcharge is due.",
+                    "basis_missing": "The calculation basis is missing — Sections 115, 116 and 118 need approved average hourly earnings. Determine it and come back.",
+                    "kind_not_manually_enterable": "This surcharge is not entered in the quick monthly input."
+                }
+            },
             "bonus": "Bonus / reward",
             "bonus_amount": "Bonus / reward (CZK)",
             "gross_preview": "Gross income preview",
@@ -1701,7 +1730,10 @@
                 "hours_required": "Enter the hours; enter 0 when there were none.",
                 "hours_format": "Enter hours with no more than three decimal places.",
                 "hours_non_negative": "The number of hours cannot be negative.",
-                "hours_limit": "Overtime hours cannot exceed 1,000."
+                "hours_limit": "Overtime hours cannot exceed 1,000.",
+                "surcharge_hours_limit": "Surcharge hours cannot exceed 744 (the longest calendar month).",
+                "factors_required": "Enter the number of aggravating factors — the Section 117 surcharge is due for each one separately.",
+                "factors_range": "The number of aggravating factors must be a whole number from 1 to 255."
             },
             "empty": "There are no effective employments in this month",
             "empty_hint": "Create an employee and employment first.",
@@ -1717,6 +1749,9 @@
                 "bonus_recurring_manual_review": "The recurring reward assignment requires manual review.",
                 "other_component_manual_review": "Another component has no closed tax classification and requires manual review.",
                 "other_recurring_manual_review": "Another recurring component requires a manually determined amount.",
+                "surcharge_conflict": "A statutory surcharge is entered twice — by the quick input and by another input.",
+                "surcharge_attendance_conflict": "A statutory surcharge is recorded both by quick entry and by attendance for this period. Keep only one source.",
+                "surcharge_managed_elsewhere": "Another monthly or recurring input manages the statutory surcharge.",
                 "partial_month_base_required": "The employment covers only part of the month. Enter the confirmed base pay manually.",
                 "suspended_month_base_required": "The employment was suspended during the month. Enter the confirmed base or income manually.",
                 "employment_state_base_required": "The employment status requires a manually confirmed base or income."
@@ -3721,6 +3756,53 @@
                 "reload_current": "Reload current state",
                 "new_title": "New dimension assignment",
                 "edit_title": "Edit dimension assignment"
+            },
+            "surcharge_policy": {
+                "title": "Statutory surcharge policy (Sections 114–118)",
+                "hint": "What is agreed for this employment relation beyond the statutory minimum. Without an agreement the statutory default applies — and a month with work on a public holiday or in a difficult environment cannot be approved.",
+                "add": "New policy version",
+                "no_permission": "Only a user allowed to write employment relations can change the surcharge policy. Ask your company administrator for the permission.",
+                "empty": "This relation has no agreed surcharge policy yet — the statutory default applies.",
+                "load_failed": "Failed to load the surcharge policy.",
+                "statutory_title": "What applies without an agreed policy",
+                "statutory_holiday_hint": "For a public holiday the law grants compensatory time off (Section 115(1)) unless agreed otherwise, not a surcharge. Until something else is agreed, a month with holiday work does not pass attendance approval.",
+                "current_title": "Effective policy",
+                "history_title": "Older versions",
+                "open_ended": "open-ended",
+                "new_title": "New policy version",
+                "new_hint": "A policy is never rewritten — a new version is created next to the old one and the history stays readable.",
+                "valid_from": "Valid from",
+                "valid_from_required": "Fill in the date from which the new policy version applies.",
+                "overtime_mode": "Overtime (Section 114)",
+                "holiday_mode": "Public holiday (Section 115)",
+                "holiday_mode_hint": "A wage agreed with regard to holiday work does not exist — Section 114(3) covers overtime only.",
+                "factors": "Number of aggravating factors (Section 117)",
+                "factors_hint": "1 to 255. Without a documented count the difficult environment surcharge is not calculated and the month does not pass approval.",
+                "factors_invalid": "Enter the number of aggravating factors between 1 and 255, or leave the field empty.",
+                "rates_title": "Agreed rates",
+                "rates_hint": "Enter percentages. An empty field means the statutory minimum is used.",
+                "rate_statutory_used": "statutory minimum",
+                "statutory_minimum": "Statutory minimum {rate} %",
+                "lower_allowed": "a lower rate may be agreed",
+                "lower_forbidden": "a lower rate cannot be agreed",
+                "below_statutory_warning": "The rate is below the statutory minimum for a kind where the law does not allow it — the server will reject such a record:",
+                "agreement_reference": "Agreement reference (contract, collective agreement)",
+                "note": "Note",
+                "saved": "Surcharge policy saved.",
+                "save_failed": "Failed to save the surcharge policy.",
+                "exists_error": "A surcharge policy already exists for this date. Choose a different validity date.",
+                "modes": {
+                    "surcharge": "Surcharge",
+                    "compensatory_time_off": "Compensatory time off",
+                    "included_in_wage": "Included in the wage (Section 114(3))"
+                },
+                "kinds": {
+                    "overtime": "Overtime",
+                    "holiday": "Public holiday",
+                    "night": "Night work",
+                    "weekend": "Saturday and Sunday",
+                    "difficult_environment": "Difficult working environment"
+                }
             },
             "load_failed_hint": "The employee list did not load, so we do not know who the company has. Please try again.",
             "office_label": "Payroll office",
@@ -13166,6 +13248,10 @@
         "databox": {
           "title": "Data box",
           "text": "The connection for payroll filings sent through the data box: health insurer overviews and notifications and the employer's monthly report to the social security administration (JMHZ). Tax returns and statements go through EPO instead."
+        },
+        "ai_extraction": {
+          "title": "AI document extraction",
+          "text": "Your own Anthropic Claude key, which the application uses to read line items out of a received PDF invoice when there is no ISDOC. You pay the provider directly per use; without a key, documents are entered by hand."
         },
         "users": {
           "title": "Users and roles",

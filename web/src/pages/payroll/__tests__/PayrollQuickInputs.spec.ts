@@ -4,12 +4,16 @@ import { ref } from 'vue'
 import type {
   PayrollQuickInputRef,
   PayrollQuickInputRow,
+  PayrollQuickSurchargeKind,
+  PayrollQuickSurchargeState,
 } from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   load: vi.fn(),
+  getPref: vi.fn(),
+  putPref: vi.fn(),
   save: vi.fn(),
   canWrite: vi.fn(),
   success: vi.fn(),
@@ -28,6 +32,12 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     quickInputs: m.load,
     saveQuickInputs: m.save,
+  },
+}))
+vi.mock('@/api/preferences', () => ({
+  preferencesApi: {
+    getPreferenceKey: m.getPref,
+    putPreferenceKey: m.putPref,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -71,6 +81,54 @@ function inputRef(
   }
 }
 
+/**
+ * Výchozí stav zákonných příplatků: druh je dostupný, ale nic zadaného nemá.
+ * Server ho posílá u každého řádku, takže fixtura ho posílat musí taky —
+ * jinak by testy běžely nad tvarem, který v odpovědi nikdy nenastane.
+ */
+function surchargeStates(
+  overrides: Partial<Record<PayrollQuickSurchargeKind, Partial<PayrollQuickSurchargeState>>> = {},
+): Record<PayrollQuickSurchargeKind, PayrollQuickSurchargeState> {
+  const sections: Record<PayrollQuickSurchargeKind, string> = {
+    night: '§ 116',
+    weekend: '§ 118',
+    holiday: '§ 115',
+    difficult_environment: '§ 117',
+  }
+  const kinds: PayrollQuickSurchargeKind[] = [
+    'night', 'weekend', 'holiday', 'difficult_environment',
+  ]
+  return Object.fromEntries(kinds.map(kind => [kind, {
+    kind,
+    label: kind,
+    section: sections[kind],
+    component_code: `PRIPLATEK_${kind.toUpperCase()}`,
+    basis: kind === 'difficult_environment' ? 'minimum_wage_hourly' : 'average_earning',
+    basis_hourly_minor: 20_000,
+    average_hourly_minor: 20_000,
+    average_snapshot_id: 41,
+    average_snapshot_version: 1,
+    rate_basis_points: kind === 'holiday' ? 10_000 : 1_000,
+    rate_is_agreed: false,
+    requires_factors: kind === 'difficult_environment',
+    default_factors: null,
+    hours_milli: null,
+    factors: null,
+    amount_minor: 0,
+    managed_amount_minor: 0,
+    row_version: null,
+    status: null,
+    managed_elsewhere: false,
+    from_attendance: false,
+    conflict: false,
+    available: true,
+    entry_available: true,
+    clear_only: false,
+    unavailable_reason: null,
+    ...overrides[kind],
+  }])) as Record<PayrollQuickSurchargeKind, PayrollQuickSurchargeState>
+}
+
 function fixture(overrides: Partial<PayrollQuickInputRow> = {}): PayrollQuickInputRow {
   return {
     employee_id: 8,
@@ -105,6 +163,8 @@ function fixture(overrides: Partial<PayrollQuickInputRow> = {}): PayrollQuickInp
     excluded_from_gross_amount_minor: 0,
     gross_preview_minor: 4_275_000,
     inputs: { base: null, overtime: null, bonus: null },
+    surcharges: surchargeStates(),
+    surcharge_amount_minor: 0,
     blockers: [],
     ...overrides,
   }
@@ -593,4 +653,188 @@ describe('PayrollQuickInputs', () => {
     expect(m.save.mock.calls[0][0].rows.map((row: { bonus_amount_minor: number }) =>
       row.bonus_amount_minor)).toEqual([50_000])
   })
+/*
+   * Příplatkové sloupce odkrývá JEDEN přepínač nad tabulkou.
+   *
+   * Kdyby se rozbalovaly u řádku, bylo by to při 500 zaměstnancích 500
+   * kliknutí — přesně ten vzorec, který rychlý měsíční vstup odstraňuje.
+   * Tenhle test hlídá, že se sloupce objeví u VŠECH řádků naráz.
+   */
+  it('reveals surcharge columns for every row from a single toggle', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 2,
+      items: [fixture(), fixture({ employment_id: 13, employee_id: 9 })],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-surcharge-night-12"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="quick-surcharges-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-surcharge-night-12"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="quick-surcharge-night-13"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="quick-surcharge-weekend-13"]').exists()).toBe(true)
+    // Stav přepínače si směnný provoz nesmí nastavovat každý měsíc znovu.
+    expect(m.putPref).toHaveBeenCalledWith(
+      'payroll.quick_inputs.surcharges',
+      { visible: true },
+    )
+  })
+
+  /** Uložená preference přepínač zapne ještě před prvním kliknutím. */
+  it('restores the remembered toggle state', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-surcharge-night-12"]').exists()).toBe(true)
+  })
+
+  /*
+   * Řádek s příplatkem sekci otevře sám. Skrytá data by se jinak uživateli
+   * ztratila z očí jen proto, že přepínač zůstal z minula vypnutý — a to je
+   * u zákonného nároku horší než sloupec navíc.
+   */
+  it('opens the section on its own when a row already carries a surcharge', async () => {
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 1,
+      items: [fixture({
+        surcharges: surchargeStates({
+          night: { hours_milli: 10_000, amount_minor: 20_000, row_version: 2, status: 'draft' },
+        }),
+        surcharge_amount_minor: 20_000,
+      })],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-surcharge-night-12"]').exists()).toBe(true)
+    expect((wrapper.get('[data-testid="quick-surcharge-night-12"]')
+      .element as HTMLInputElement).value).toBe('10')
+  })
+
+  /** Zadané hodiny odcházejí na server po druzích, i s verzí řádku. */
+  it('sends entered hours per surcharge kind', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="quick-surcharge-night-12"]').setValue('12,5')
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+
+    const row = m.save.mock.calls[0][0].rows[0]
+    expect(row.surcharges.night).toEqual({ hours_milli: 12_500, factors: null })
+    // Druh, který uživatel nevyplnil, se posílá jako `null` — smí ho měnit,
+    // takže mlčet o něm by znamenalo nemoci ho vyprázdnit.
+    expect(row.surcharges.weekend).toEqual({ hours_milli: null, factors: null })
+    expect(row.versions.surcharges.night).toBeNull()
+  })
+
+  /*
+   * Druh, který uživatel měnit NESMÍ (drží ho docházka), se do požadavku
+   * nesmí dostat vůbec. Kdyby se posílal jako prázdný, uložení by zrušilo
+   * zákonný nárok, o kterém uživatel ani nevěděl.
+   */
+  it('never sends kinds the user is not allowed to change', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 1,
+      items: [fixture({
+        surcharges: surchargeStates({
+          night: {
+            from_attendance: true,
+            entry_available: false,
+            unavailable_reason: 'claimed_by_attendance',
+            amount_minor: 20_000,
+            managed_amount_minor: 20_000,
+            managed_elsewhere: true,
+          },
+        }),
+      })],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-surcharge-night-12"]').attributes('disabled'))
+      .toBeDefined()
+    expect(wrapper.get('[data-testid="quick-surcharge-blocked-night-12"]').text())
+      .toContain('claimed_by_attendance')
+
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[0][0].rows[0].surcharges.night).toBeUndefined()
+  })
+
+  /*
+   * § 117 náleží ZA KAŽDÝ ztěžující vliv. Bez jejich počtu se nedá počítat —
+   * odhadnout jedničku by byl tichý nedoplatek, tak se řádek radši neuloží.
+   */
+  it('requires the aggravating factor count for Section 117', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="quick-surcharge-difficult_environment-12"]').setValue('8')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-payroll-save"]').attributes('disabled'))
+      .toBeDefined()
+
+    await wrapper.get('[data-testid="quick-surcharge-factors-difficult_environment-12"]')
+      .setValue('3')
+    await flushPromises()
+
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[0][0].rows[0].surcharges.difficult_environment)
+      .toEqual({ hours_milli: 8_000, factors: 3 })
+  })
+
+  /*
+   * Dopočtená částka u pole. Účetní musí vidět, co z hodin vyjde, ještě než
+   * uloží — stejně jako u náhledu hrubé mzdy.
+   */
+  it('previews the amount next to the entered hours', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // 200,00 Kč/h × 10 % × 10 h = 200,00 Kč.
+    await wrapper.get('[data-testid="quick-surcharge-night-12"]').setValue('10')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-surcharge-preview-night-12"]').text())
+      .toContain('200')
+  })
+
+  /** Chyba serveru se ukáže u KONKRÉTNÍHO příplatkového pole, ne jen v toastu. */
+  it('shows a server failure at the surcharge field it belongs to', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    m.save.mockImplementation(async payload => ({
+      month: { period: payload.period, total: 1, items: [fixture()] },
+      failures: [{
+        employment_id: 12,
+        field: 'surcharge_holiday',
+        code: 'input_state_conflict',
+        message: 'Zasada svatku neni sjednana.',
+        current_row_version: null,
+      }],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="quick-surcharge-holiday-12"]').setValue('8')
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-surcharge-server-error-holiday-12"]').text())
+      .toContain('Zasada svatku neni sjednana.')
+  })
+
 })

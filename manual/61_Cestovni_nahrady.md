@@ -67,6 +67,12 @@ nelze schválit.
 
 Schválené vyúčtování promítneš tlačítkem **Promítnout do mzdy**; založí mzdové
 vstupy na složkách `CESTOVNI_NAHRADA_LIMIT` a `CESTOVNI_NAHRADA_NADLIMIT`
-v období vyúčtování. Opakované promítnutí nevytvoří duplicitu. Zakládat a
+v období vyúčtování. Opakované promítnutí nevytvoří duplicitu.
+
+V podvojném účetnictví se náhrada účtuje na nákladový účet cestovného (výchozí
+kontace 512) proti závazkovému účtu pracovního vztahu, tedy proti témuž účtu,
+ze kterého se zaměstnanci vyplácí mzda. Účet lze změnit v
+[Nastavení mezd](73_Nastaveni_mezd.md#7381-predkontace-pro-zvlastni-mzdove-situace).
+Na výplatu to nemá vliv — zaměstnanec dostane přesně tutéž částku. Zakládat a
 upravovat cesty smí role s oprávněním pro mzdové vstupy, schválení a promítnutí
 vyžaduje oprávnění pro schvalování.

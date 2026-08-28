@@ -55,12 +55,59 @@ Při méně než 21 odpracovaných dnech je povinný pravděpodobný hodinový v
 a jeho odůvodnění. Snapshot musí projít ruční kontrolou a schválením; teprve
 potom jej lze připojit k absenci s náhradou.
 
+Průměrný výdělek má zákonnou spodní hranici. Je-li vypočtený průměr nižší než
+minimální mzda, použije se podle § 357 odst. 1 zákoníku práce **minimální mzda**;
+hranice se uplatní na skutečný i na pravděpodobný výdělek a její výše se bere
+z legislativního rulesetu účinného pro rozhodné období. Ve stopě výpočtu je
+vidět, že se hranice uplatnila a z jaké hodnoty.
+
+> [!NOTE]
+> Aplikace zatím nerozlišuje **stanovenou** kratší týdenní pracovní dobu
+> (§ 79 odst. 2 a 3 zákoníku práce), která hodinové minimum zvyšuje, od
+> **sjednané** kratší doby podle § 80, která je nezvyšuje. U provozu s kratší
+> stanovenou týdenní dobou proto hodinovou hranici ověřte a případný rozdíl
+> vypořádejte mimo automatický výpočet.
+
 Nárok dovolené se vede v minutách. U DPP a DPČ výpočet používá zákonnou
 fiktivní týdenní pracovní dobu 20 hodin. Započitatelné a náhradní doby,
 změny úvazku, krácení a další právní okolnosti před uložením vždy ověř.
 Schválení čerpání zapíše zápornou položku podle publikovaných směn. Zrušení
 schváleného čerpání ji nemaže, ale vytvoří kladnou reverzi a označí absenci
 pro kontrolu případné opravy mzdy.
+
+**Svátek v době dovolené se nečerpá.** Připadne-li svátek na den, na který je
+rozvržená směna a zároveň schválená dovolená, směna se z čerpání vypustí —
+týden dovolené kolem vánočních svátků tedy nespotřebuje celých pět směn, ale
+jen ty, které svátkem nejsou. Hodiny svátku se přitom dostanou do odpracované
+doby právě jednou. Zrušení dovolené je symetrické: reverze neguje přesně to,
+co bylo zapsáno, nepřepočítává se znovu.
+
+Do nároku na dovolenou se počítá odpracovaná doba bez přesčasu; svátek
+připadající na plánovaný pracovní den se do ní naopak započítá, a to jen
+v rozsahu, který za týž den nebyl započten už jiným titulem.
+
+Přečerpání dovolené aplikace hlídá ve třech stavech:
+
+1. **nárok je určený a zůstatek stačí** — čerpání projde bez dotazu;
+2. **nárok je určený a zůstatek nestačí** — uložení se zastaví a je nutné
+   přečerpání výslovně potvrdit u té jedné karty, které se to týká. Ve
+   formuláři se přitom ukážou skutečná čísla nároku a zůstatku. Potvrzení není
+   formalita: nevyčerpaný přeplatek se jinak pozná až při vypořádání a strhne
+   se zaměstnanci ze mzdy;
+3. **nárok vůbec není určený** — aplikace se neptá a čerpání pustí, jen
+   u něj zobrazí upozornění, že nárok dosud nebyl určen. Zůstatek totiž není
+   nula, je neznámý.
+
+Za určený nárok se počítá jen záznam typu **nárok**. Převod z minulého roku ani
+ruční úprava nároku samy nestačí — jsou to pohyby nad číslem, které dosud
+neexistuje. Nárok určíte hromadným výpočtem popsaným níže.
+
+Krácení dovolené se řídí § 223 zákoníku práce: aplikace vynutí zákonné minimum
+podle odst. 2, odmítne krácení dřív, než je nárok určen, i krácení nad rámec
+nároku. Podmínku dvoutýdenního zbytku hlídá jen u vztahu, který trval celý
+kalendářní rok, protože zákon ji váže právě na to. Krácení jen o neomluveně
+zameškané hodiny podle § 223 odst. 1 aplikace zatím sama nevyhodnotí — evidence
+absencí druh „neomluvená" nezná, takže rozsah určete z vlastních podkladů.
 
 ### 59.8.1 Hromadný výpočet nároku
 
@@ -83,9 +130,11 @@ automat nepřepíše. Při uložení znovu ověří otisk podkladů; mezitím zm
 vyžadují obnovení přehledu. Uložená revize uchová použitou politiku, smluvní
 podmínky, schválenou docházku i výpočetní stopu.
 
-Náhrada při DPN se počítá pouze z publikovaných směn v prvních 14 kalendářních
-dnech. Před schválením potvrď účast na nemocenském pojištění a vyloučení
-souběžné dávky. Pokud zaměstnanec první plánovanou směnu celou odpracoval,
+Náhrada při DPN se počítá z publikovaných směn v prvních 14 kalendářních dnech.
+**Svátek uvnitř tohoto okna se proplácí i tehdy, když na něj není publikovaná
+směna** — aplikace pro něj dopočítá směnu podle rozvrhu. Je-li směna na svátek
+publikovaná, nechá ji být, takže k dvojímu proplacení nedojde. Před schválením
+potvrď účast na nemocenském pojištění a vyloučení souběžné dávky. Pokud zaměstnanec první plánovanou směnu celou odpracoval,
 označ tuto skutečnost; čtrnáctidenní okno pak začíná následujícím dnem.
 Výsledek uchovává použitý průměr, redukční hranice, pravidla, zaokrouhlení
 a rozpad po směnách. Diagnóza se v agendě absence neeviduje.
@@ -113,8 +162,16 @@ souhlasí s publikovanými směnami a potvrzený pracovní souhrn ji vykazuje ce
 jako placené neodpracované hodiny. Neplacené volno a ostatní nestandardní
 absence zůstávají bez doložených údajů pro ELDP bezpečně zablokované.
 
+> [!IMPORTANT]
+> Nové zacházení se svátkem a spodní hranice průměrného výdělku platí od
+> okamžiku aktualizace **dopředu**; aplikace zpětně nic nepřepočítává. Dovolená
+> dříve čerpaná přes svátek byla nadspotřebovaná a náhrada při DPN se svátkem
+> uvnitř 14denního okna podplacená. Dotčené případy projděte a vypořádejte
+> ručně, po jednotlivých zaměstnancích.
+
 > [!WARNING]
 > Agenda je označena **Vyžaduje ruční kontrolu**. Bez schváleného průměru,
 > publikovaného rozvrhu nebo potvrzených zákonných podmínek výpočet bezpečně
 > selže; systém chybějící údaj neodhaduje. Výpočty náhrad a dovolené jsou
-> aktuálně dostupné pouze pro legislativní ruleset roku 2026.
+> dostupné pro legislativní sady roku **2025 a 2026**. Pro rok 2027 sada zatím
+> neexistuje — viz [Legislativní pravidla mezd](75_Legislativni_pravidla_mezd.md#7581-ktere-roky-jsou-pokryte).

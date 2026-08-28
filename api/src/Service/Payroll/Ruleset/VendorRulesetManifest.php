@@ -47,10 +47,24 @@ final class VendorRulesetManifest
         '52b5f1f0d2580e659e300874f0b0591129640cf38bc67714afb2b4728339d582',
         // cz-jmhz-deadlines-2026.transition.v1
         '9e30371cd82fcf6005bee2954c79b8e13b84f0b487b24df12272d4ba9951e999',
+        // cz-payroll-2025.compensation-averages.v1
+        'b0c09a90621601e6b6d24912620da0e96a83c1ea55ac3884196ef25235c9bfe2',
+        // cz-payroll-2025.employment-thresholds.v1
+        '7fad6a3b89402e0ee1bf1768cf638004b9675a3cbf5f7d47ff067b70e3dc92de',
+        // cz-payroll-2025.enforcement-deductions.v1
+        '09eac16226e8a87aaae14b5728556f1b911968a7613c7de41c8d7b15e193114c',
+        // cz-payroll-2025.health-insurance.v1
+        '94fdbad0e0dff36defb18c66a25d7f0d01631630ac55e477e80ba3f73bde9676',
+        // cz-payroll-2025.income-tax.v1
+        '23c920442b0cce0631e6bda85033572161295c44997485c1b973fe4a9e482921',
+        // cz-payroll-2025.social-insurance.v1
+        'a6df4db1b94c62cd95b8c2f87db9478b4e942263a4f3fe65aa0d840f76628cbb',
+        // cz-payroll-2025.travel-allowances.v1
+        'be22b1d7a6e9f2b827decc72595b95aed8d2a27c86c65f104ed99fce214bad04',
         // cz-payroll-2026.codebooks.v1
         'e40864b10491901b346096ebb39b70027a0fc111ea1f0b2208138e7594e2f87c',
         // cz-payroll-2026.compensation-averages.v1
-        'd7cb73262099457f36ccf8431d7f7fac48a137f845619341cf69d3405db8b71b',
+        '4996aa06651e6bc5c02355794c199cd3e3800d0ef5a5e45f38f63f2d26e22458',
         // cz-payroll-2026.employment-thresholds.v1
         '22905fba61e6204c0d615971e80b19fdf5e38327e97a2903b61e7255fb454add',
         // cz-payroll-2026.enforcement-deductions.v1

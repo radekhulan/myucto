@@ -6,8 +6,19 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringAmountCalculator;
+use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Time\PayrollMonthlyFundService;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollAchievedWage;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollQuickSurchargeCalculator;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeCompensationMode;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargePolicy;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeRuleset;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeService;
 use PDO;
 
 final class PayrollQuickInputRepository
@@ -26,17 +37,79 @@ final class PayrollQuickInputRepository
     public const CARD_STATUS_FILTERS = ['active', 'away', 'attention', 'all'];
 
     private const BASE_CODE = 'MZDA_MESICNI';
+
+    /**
+     * Dosažená mzda za hodiny práce přesčas (§ 114 odst. 1, první polovina nároku).
+     *
+     * Ne `MZDA_MESICNI`: měsíční mzda pokrývá fond pracovní doby, kdežto přesčas
+     * je práce NAD fond a platí se navíc. Vlastní řádek navíc drží počet hodin
+     * v `quantity_milliunits`, takže z mzdového listu je vidět sazba i rozsah.
+     */
+    private const HOURLY_CODE = 'MZDA_HODINOVA';
+
+    /**
+     * Volná sběrná složka. Zůstává pro režim „celková částka", kde uživatel
+     * zadává jedno číslo a rozpad na zákonné nároky netvrdí. Pro přesčas zadaný
+     * HODINAMI se od W19 nepoužívá — viz {@see self::PREMIUM_CODE}.
+     */
     private const OVERTIME_CODE = 'PREMIE_PRIPLATKY';
+
+    /**
+     * Příplatková polovina nároku podle § 114 odst. 1.
+     *
+     * Dokud padala do `PREMIE_PRIPLATKY`, nešlo z mzdového listu doložit, KTERÝ
+     * zákonný nárok byl uspokojen a v jaké výši — a přesně to po zaměstnavateli
+     * chce § 142 odst. 5 ZP.
+     */
+    private const PREMIUM_CODE = 'PRIPLATEK_PRESCAS';
+
     private const BONUS_CODE = 'ODMENA';
     private const EXTERNAL_PREFIX = 'quick-monthly:';
     private const SAVE_SAVEPOINT = 'payroll_quick_input_field';
+
+    /**
+     * Prefix `external_id` mzdového vstupu, který vznikl materializací příplatku
+     * ze schválené docházky. Shodný s
+     * {@see \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeInputMaterializer::EXTERNAL_PREFIX}
+     * — duplikovat se musí, protože repozitář na materializátoru nezávisí
+     * a závislost opačným směrem už existuje.
+     */
+    private const TIME_SURCHARGE_PREFIX = 'surcharge:';
+
+    /** Předpona pole rychlého zadání, které nese jeden druh příplatku. */
+    public const SURCHARGE_FIELD_PREFIX = 'surcharge_';
 
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollRecurringAmountCalculator $recurringAmounts,
+        private readonly PayrollMonthlyFundService $fund,
+        private readonly PayrollSurchargeService $surcharges,
+        private readonly PayrollRulesetProvider $rulesets,
+        private readonly PayrollQuickSurchargeCalculator $quickSurcharges,
+        private readonly PayrollSurchargeClaimRepository $surchargeClaims,
     ) {}
+
+    /**
+     * Mzdové složky, které rychlé zadání spravuje — včetně těch příplatkových.
+     *
+     * @return list<string>
+     */
+    private static function managedCodes(): array
+    {
+        return [
+            self::BASE_CODE,
+            self::HOURLY_CODE,
+            self::OVERTIME_CODE,
+            self::PREMIUM_CODE,
+            self::BONUS_CODE,
+            ...array_map(
+                static fn (PayrollSurchargeKind $kind): string => $kind->componentCode(),
+                PayrollSurchargeKind::quickManualEntry(),
+            ),
+        ];
+    }
 
     /**
      * Jeden měsíc rychlého zadání, stránkovaně.
@@ -465,6 +538,23 @@ final class PayrollQuickInputRepository
             $recurringByEmployment[(int) $recurring['employment_id']][] = $recurring;
         }
 
+        // Podklad příplatků se čte JEDNOU pro celou stránku, ne po řádcích: sada
+        // pravidel je pro měsíc jedna a sjednané zásady se dají dotáhnout jedním
+        // dotazem. Dotaz na zásadu u každého z 200 řádků by z jedné obrazovky
+        // udělal 200 dotazů navíc.
+        $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $periodStart);
+        $policies = $this->surchargePolicies(
+            $supplierId,
+            $periodStart,
+            $employmentIdsOnPage,
+            $ruleset,
+        );
+        $claims = $this->surchargeClaims->sourcesForPeriod(
+            $supplierId,
+            $periodStart,
+            $employmentIdsOnPage,
+        );
+
         $items = [];
         foreach ($rows as $row) {
             $employmentId = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
@@ -474,9 +564,98 @@ final class PayrollQuickInputRepository
                 $recurringByEmployment[$employmentId] ?? [],
                 $periodStart,
                 $periodEnd,
+                $ruleset,
+                $policies[$employmentId] ?? PayrollSurchargePolicy::statutoryDefault(),
+                $claims[$employmentId] ?? [],
             );
         }
         return ['period' => $period, 'items' => $items, 'total' => $total];
+    }
+
+    /**
+     * Sjednané zásady příplatků pro celou stránku jedním dotazem.
+     *
+     * Vadná zásada (neznámý režim, sazba pod kogentním minimem) NESMÍ shodit
+     * celý seznam — jinak by jeden špatný řádek v databázi zavřel rychlé zadání
+     * celé firmě. Takový vztah dostane výchozí zákonnou zásadu a příplatky u něj
+     * vyjdou jako nedostupné; opravit ji jde na kartě vztahu.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,PayrollSurchargePolicy>
+     */
+    private function surchargePolicies(
+        int $supplierId,
+        string $periodStart,
+        array $employmentIds,
+        PayrollSurchargeRuleset $ruleset,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT policy.*
+               FROM payroll_employment_surcharge_policies policy
+               JOIN (
+                     SELECT employment_id, MAX(valid_from) AS valid_from
+                       FROM payroll_employment_surcharge_policies
+                      WHERE supplier_id = ? AND valid_from <= ?
+                        AND (valid_to IS NULL OR valid_to >= ?)
+                        AND employment_id IN ('
+            . implode(',', array_fill(0, count($employmentIds), '?'))
+            . ')
+                      GROUP BY employment_id
+                    ) newest
+                 ON newest.employment_id = policy.employment_id
+                AND newest.valid_from = policy.valid_from
+              WHERE policy.supplier_id = ?'
+        );
+        $stmt->execute([
+            $supplierId,
+            $periodStart,
+            $periodStart,
+            ...$employmentIds,
+            $supplierId,
+        ]);
+
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            try {
+                $result[$employmentId] = PayrollSurchargePolicy::agreed(
+                    PayrollSurchargeCompensationMode::from((string) $row['overtime_mode']),
+                    PayrollSurchargeCompensationMode::from((string) $row['holiday_mode']),
+                    self::nullableColumn($row, 'difficult_environment_factors'),
+                    [
+                        PayrollSurchargeKind::Overtime->value =>
+                            self::nullableColumn($row, 'overtime_rate_bp'),
+                        PayrollSurchargeKind::Holiday->value =>
+                            self::nullableColumn($row, 'holiday_rate_bp'),
+                        PayrollSurchargeKind::Night->value =>
+                            self::nullableColumn($row, 'night_rate_bp'),
+                        PayrollSurchargeKind::Weekend->value =>
+                            self::nullableColumn($row, 'weekend_rate_bp'),
+                        PayrollSurchargeKind::DifficultEnvironment->value =>
+                            self::nullableColumn($row, 'difficult_environment_rate_bp'),
+                    ],
+                    $ruleset,
+                );
+            } catch (\ValueError | \InvalidArgumentException) {
+                // Zásada je v databázi vadná. Výchozí zákonná zásada je tu
+                // bezpečná volba: u svátku vede na „nelze zadat", ne na tichou
+                // výplatu podle rozbitého řádku.
+                $result[$employmentId] = PayrollSurchargePolicy::statutoryDefault();
+            }
+        }
+
+        return $result;
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function nullableColumn(array $row, string $key): ?int
+    {
+        $value = $row[$key] ?? null;
+
+        return $value === null || $value === '' ? null : (int) $value;
     }
 
     /**
@@ -528,7 +707,8 @@ final class PayrollQuickInputRepository
      *   employment_id:int,employment_row_version:int,base_amount_minor:?int,overtime_mode:string,
      *   overtime_hours_milli:?int,overtime_amount_minor:?int,bonus_amount_minor:int,
      *   overtime_average_snapshot_id:?int,overtime_average_snapshot_version:?int,
-     *   versions:array{base:?int,overtime:?int,bonus:?int}
+     *   surcharges:array<string,array{hours_milli:?int,factors:?int}>,
+     *   versions:array{base:?int,overtime:?int,bonus:?int,surcharges:array<string,?int>}
      * }> $rows
      * @param bool $autoApprove Zadal to někdo s právem `payroll.approve`?
      *        Pak vstup nemá proč čekat na druhý klik na jiné obrazovce: uloží se
@@ -666,7 +846,6 @@ final class PayrollQuickInputRepository
                     }
                     $overtimeAmount = $row['overtime_amount_minor'];
                     $hours = $row['overtime_hours_milli'];
-                    $overtimeSource = null;
                     if ((bool) $item['overtime_managed_elsewhere']) {
                         if ($row['overtime_mode'] !== 'amount'
                             || (int) $overtimeAmount !== (int) $item['overtime_amount_minor']) {
@@ -676,64 +855,66 @@ final class PayrollQuickInputRepository
                         }
                         return;
                     }
-                    if ($row['overtime_mode'] === 'hours') {
-                        if (!(bool) $item['overtime_hours_relation_supported']) {
-                            throw new \DomainException(
-                                'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
-                            );
-                        }
-                        $existing = $item['inputs']['overtime'];
-                        $unchanged = is_array($existing)
-                            && $existing['quantity_milliunits'] === $hours;
-                        if ($unchanged) {
-                            $overtimeAmount = (int) $existing['amount_minor'];
-                            $overtimeSource = $existing['source_snapshot'] ?? null;
-                        } else {
-                            $rate = $item['overtime_hourly_rate_minor'];
-                            if (!is_int($rate) || $rate <= 0
-                                || $row['overtime_average_snapshot_id']
-                                    !== $item['overtime_average_snapshot_id']
-                                || $row['overtime_average_snapshot_version']
-                                    !== $item['overtime_average_snapshot_version']) {
-                                throw new \InvalidArgumentException(
-                                    'Schválený průměrný výdělek se změnil. Obnovte formulář a výpočet zkontrolujte.'
-                                );
-                            }
-                            if ((int) $hours !== 0 && $rate > intdiv(PHP_INT_MAX, (int) $hours)) {
-                                throw new \InvalidArgumentException(
-                                    'Výpočet přesčasu překračuje podporovaný rozsah.'
-                                );
-                            }
-                            $overtimeAmount = RoundingMode::HalfUp->roundFraction(
-                                $rate * (int) $hours,
-                                800,
-                            );
-                            $overtimeSource = [
-                                'schema_version' => 'payroll-quick-overtime-source.v1',
-                                'average_snapshot_id' => $row['overtime_average_snapshot_id'],
-                                'average_snapshot_row_version' =>
-                                    $row['overtime_average_snapshot_version'],
-                                'average_hourly_minor' => $rate,
-                                'overtime_hours_milli' => $hours,
-                                'premium_basis_points' => 2_500,
-                                'rounding' => 'half-up-minor-unit',
-                            ];
-                        }
+                    // Optimistické zamykání zůstává na JEDNÉ verzi, protože pole
+                    // je ve formuláři jedno. Kontroluje se proti verzi nosného
+                    // řádku, kterou formulář dostal; ostatní dva řádky se hýbou
+                    // s ním a svou verzi si repozitář dohledá sám.
+                    if ($row['versions']['overtime'] !== $item['overtime_row_version']) {
+                        throw new PayrollInputConflictException(
+                            is_int($item['overtime_row_version'])
+                                ? $item['overtime_row_version']
+                                : 0,
+                        );
                     }
-                    $this->upsert(
+                    if ($row['overtime_mode'] !== 'hours') {
+                        // Celková částka: rozpad na zákonné nároky se netvrdí,
+                        // proto dál sběrná složka. Řádky hodinového rozpadu se
+                        // ruší, aby po přepnutí režimu nezůstal viset přesčas
+                        // ze staré varianty.
+                        $this->upsertOvertimeParts(
+                            $supplierId,
+                            (int) $item['employee_id'],
+                            $employmentId,
+                            $componentIds,
+                            $period,
+                            $userId,
+                            $autoApprove,
+                            legacyAmount: $overtimeAmount === null ? null : (int) $overtimeAmount,
+                            wageAmount: null,
+                            premiumAmount: null,
+                            hours: null,
+                            wageSource: null,
+                            premiumSource: null,
+                        );
+                        return;
+                    }
+                    if (!(bool) $item['overtime_hours_relation_supported']) {
+                        throw new \DomainException(
+                            'U tohoto typu vztahu nelze přesčas zadat podle hodin. Použijte celkovou částku nebo odměnu.'
+                        );
+                    }
+                    $split = $this->overtimeSplit(
+                        $supplierId,
+                        $employmentId,
+                        $period,
+                        $item,
+                        $row,
+                        (int) $hours,
+                    );
+                    $this->upsertOvertimeParts(
                         $supplierId,
                         (int) $item['employee_id'],
                         $employmentId,
-                        $componentIds[self::OVERTIME_CODE],
+                        $componentIds,
                         $period,
-                        self::OVERTIME_CODE,
-                        (int) $overtimeAmount,
-                        $hours,
-                        $row['versions']['overtime'],
                         $userId,
-                        is_array($overtimeSource) ? $overtimeSource : null,
-                        false,
                         $autoApprove,
+                        legacyAmount: null,
+                        wageAmount: $split['wage_minor'],
+                        premiumAmount: $split['premium_minor'],
+                        hours: (int) $hours,
+                        wageSource: $split['wage_source'],
+                        premiumSource: $split['premium_source'],
                     );
                 });
 
@@ -776,6 +957,41 @@ final class PayrollQuickInputRepository
                         $autoApprove,
                     );
                 });
+
+                // Zákonné příplatky § 115 až § 118. Každý druh má vlastní
+                // savepoint: nedoložený počet ztěžujících vlivů u § 117 nesmí
+                // shodit uložení noční práce, která je v pořádku.
+                foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+                    $this->guard(
+                        $pdo,
+                        $collected,
+                        $employmentId,
+                        self::SURCHARGE_FIELD_PREFIX . $kind->value,
+                        function () use (
+                            $supplierId,
+                            $employmentId,
+                            $item,
+                            $row,
+                            $componentIds,
+                            $period,
+                            $userId,
+                            $autoApprove,
+                            $kind,
+                        ): void {
+                            $this->saveSurcharge(
+                                $supplierId,
+                                $employmentId,
+                                $item,
+                                $row,
+                                $componentIds,
+                                $period,
+                                $userId,
+                                $autoApprove,
+                                $kind,
+                            );
+                        },
+                    );
+                }
             }
             if ($ownsTransaction) {
                 $pdo->commit();
@@ -806,11 +1022,35 @@ final class PayrollQuickInputRepository
         array $recurring,
         string $periodStart,
         string $periodEnd,
+        PayrollSurchargeRuleset $ruleset,
+        PayrollSurchargePolicy $policy,
+        array $claimSources,
     ): array {
-        $quick = ['base' => null, 'overtime' => null, 'bonus' => null];
+        // Přesčas má od W19 TŘI možné vlastní řádky, protože § 114 odst. 1 přiznává
+        // dvě různé věci vedle sebe (dosaženou mzdu a příplatek) a čtvrtý stav je
+        // starý režim „celková částka" do sběrné složky. Ve formuláři je to dál
+        // JEDNO pole; rozpad je věc mzdového listu, ne obrazovky.
+        $quick = [
+            'base' => null,
+            'overtime' => null,
+            'overtime_wage' => null,
+            'overtime_premium' => null,
+            'bonus' => null,
+        ];
         $managed = ['base' => false, 'overtime' => false, 'bonus' => false];
         $managedAmounts = ['base' => 0, 'overtime' => 0, 'bonus' => 0];
+        // Ručně zadávané příplatky § 115 až § 118 mají každý VLASTNÍ slot.
+        // Dokud padaly do slotu přesčasu (jsou to složky druhu `premium`),
+        // materializovaný noční příplatek tvrdil, že přesčas spravuje jiný
+        // vstup, a přesčas pak nešlo zadat vůbec.
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            $quick[$kind->value] = null;
+            $managed[$kind->value] = false;
+            $managedAmounts[$kind->value] = 0;
+        }
         $blockers = [];
+        /** @var array<string,bool> $fromAttendance */
+        $fromAttendance = [];
         $other = 0;
         $nonMonetary = 0;
         $excludedFromGross = 0;
@@ -823,28 +1063,32 @@ final class PayrollQuickInputRepository
             $externalId = $input['external_id'] === null
                 ? null
                 : PayrollTimeValue::string($input['external_id'], 'external_id');
-            $quickSlot = match ($code) {
-                self::BASE_CODE => 'base',
-                self::OVERTIME_CODE => 'overtime',
-                self::BONUS_CODE => 'bonus',
-                default => null,
-            };
+            $quickSlot = self::quickSlot($code);
             $isQuick = $quickSlot !== null
                 && $externalId === self::EXTERNAL_PREFIX . $code;
             if ($isQuick) {
                 $quick[$quickSlot] = $this->inputView($input);
                 continue;
             }
-            $managedSlot = $quickSlot ?? match ($kind) {
-                'base_wage' => 'base',
-                'premium' => 'overtime',
-                'bonus', 'commission' => 'bonus',
-                default => null,
-            };
+            // Cizí vstup se zařazuje podle KÓDU, ne podle rychlého slotu:
+            // `MZDA_HODINOVA` je u hodinově odměňovaného zaměstnance jeho ZÁKLAD,
+            // kdežto jako rychlý řádek je to dosažená mzda za přesčas. Kdyby se
+            // mapoval přes `$quickSlot`, spadl by cizí hodinový základ do
+            // přesčasu a formulář by tvrdil, že přesčas spravuje jiný vstup.
+            $managedSlot = self::managedSlot($code, $kind);
             $amount = PayrollTimeValue::int($input['amount_minor'] ?? null, 'amount_minor');
             if ($managedSlot !== null) {
                 $managed[$managedSlot] = true;
                 $managedAmounts[$managedSlot] += $amount;
+                if ($externalId !== null
+                    && str_starts_with($externalId, self::TIME_SURCHARGE_PREFIX)
+                ) {
+                    // Vstup z materializace schválené docházky. Musí se poznat
+                    // od jakéhokoli jiného cizího vstupu, protože hláška „už to
+                    // přišlo z docházky" je něco jiného než „spravuje to jiný
+                    // vstup" a uživatel na ni reaguje jinak.
+                    $fromAttendance[$managedSlot] = true;
+                }
             } else {
                 $taxTreatment = PayrollTimeValue::string(
                     $input['tax_treatment'] ?? null,
@@ -880,17 +1124,7 @@ final class PayrollQuickInputRepository
                 $assignment['component_kind'] ?? null,
                 'component_kind',
             );
-            $slot = match ($code) {
-                self::BASE_CODE => 'base',
-                self::OVERTIME_CODE => 'overtime',
-                self::BONUS_CODE => 'bonus',
-                default => match ($kind) {
-                    'base_wage' => 'base',
-                    'premium' => 'overtime',
-                    'bonus', 'commission' => 'bonus',
-                    default => null,
-                },
-            };
+            $slot = self::managedSlot($code, $kind);
             $calculation = $this->recurringAmounts->calculate($assignment, $periodStart);
             if ($calculation['status'] === 'supported'
                 && is_int($calculation['amount_minor'])) {
@@ -930,13 +1164,43 @@ final class PayrollQuickInputRepository
             }
         }
 
+        // Přesčas je „rychle zadaný", drží-li aspoň jeden ze tří vlastních řádků.
+        $quickOvertimeRows = array_values(array_filter([
+            $quick['overtime'],
+            $quick['overtime_wage'],
+            $quick['overtime_premium'],
+        ]));
+        $quickPresence = [
+            'base' => $quick['base'] !== null,
+            'overtime' => $quickOvertimeRows !== [],
+            'bonus' => $quick['bonus'] !== null,
+        ];
+
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            $quickPresence[$kind->value] = $quick[$kind->value] !== null;
+        }
+
         $conflicts = [];
         foreach (['base', 'overtime', 'bonus'] as $slot) {
-            $conflicts[$slot] = $managed[$slot] && $quick[$slot] !== null;
+            $conflicts[$slot] = $managed[$slot] && $quickPresence[$slot];
             if ($conflicts[$slot]) {
                 $blockers[] = "{$slot}_conflict";
             } elseif ($managed[$slot]) {
                 $blockers[] = "{$slot}_managed_elsewhere";
+            }
+        }
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            $slot = $kind->value;
+            $conflicts[$slot] = $managed[$slot] && $quickPresence[$slot];
+            if ($conflicts[$slot]) {
+                $blockers[] = ($fromAttendance[$slot] ?? false)
+                    ? 'surcharge_attendance_conflict'
+                    : 'surcharge_conflict';
+            } elseif ($managed[$slot] && !($fromAttendance[$slot] ?? false)) {
+                // Vstup z docházky NENÍ blokátor: je to normální, správný stav
+                // měsíce, kde se příplatky vedou docházkou. Blokátorem je jen
+                // cizí ruční nebo pravidelný vstup na téže složce.
+                $blockers[] = 'surcharge_managed_elsewhere';
             }
         }
 
@@ -974,9 +1238,14 @@ final class PayrollQuickInputRepository
                         'monthly_gross_minor',
                     )
             ));
+        $overtimeWage = $quick['overtime_wage']['amount_minor'] ?? 0;
+        $overtimePremium = $quick['overtime_premium']['amount_minor'] ?? 0;
+        $quickOvertime = ($quick['overtime']['amount_minor'] ?? 0)
+            + $overtimeWage
+            + $overtimePremium;
         $overtime = $managed['overtime']
-            ? $managedAmounts['overtime'] + ($quick['overtime']['amount_minor'] ?? 0)
-            : ($quick['overtime']['amount_minor'] ?? 0);
+            ? $managedAmounts['overtime'] + $quickOvertime
+            : $quickOvertime;
         $bonus = $managed['bonus']
             ? $managedAmounts['bonus'] + ($quick['bonus']['amount_minor'] ?? 0)
             : ($quick['bonus']['amount_minor'] ?? 0);
@@ -998,9 +1267,14 @@ final class PayrollQuickInputRepository
                 $employment['overtime_average_snapshot_version'],
                 'overtime_average_snapshot_version',
             );
-        $storedOvertimeSource = $quick['overtime']['source_snapshot'] ?? null;
-        $usesStoredAverage = $quick['overtime'] !== null
-            && $quick['overtime']['quantity_milliunits'] !== null
+        // Řádek, který nese hodiny a auditní stopu výpočtu: nově příplatková
+        // část (§ 114 odst. 1), u dosud neuložených měsíců ještě starý sběrný
+        // řádek. Starý tvar se čte dál — přepočítat ho zpětně by změnilo částku
+        // už schváleného měsíce.
+        $overtimeCarrier = $quick['overtime_premium'] ?? $quick['overtime'];
+        $storedOvertimeSource = $overtimeCarrier['source_snapshot'] ?? null;
+        $usesStoredAverage = $overtimeCarrier !== null
+            && $overtimeCarrier['quantity_milliunits'] !== null
             && is_array($storedOvertimeSource);
         $rate = $usesStoredAverage
             ? ($storedOvertimeSource['average_hourly_minor'] ?? null)
@@ -1020,6 +1294,79 @@ final class PayrollQuickInputRepository
             ['employment', 'small_scale_employment'],
             true,
         );
+
+        $surcharges = [];
+        $surchargeTotal = 0;
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            $slot = $kind->value;
+            $stored = $quick[$slot];
+            $storedSource = is_array($stored['source_snapshot'] ?? null)
+                ? $stored['source_snapshot']
+                : null;
+            $availability = $this->quickSurcharges->availability(
+                $kind,
+                $periodStart,
+                $policy,
+                $ruleset,
+                $currentRate ?? 0,
+            );
+            $claimedBy = $claimSources[$slot] ?? null;
+            $takenByAttendance = ($fromAttendance[$slot] ?? false)
+                || $claimedBy === PayrollSurchargeClaimRepository::SOURCE_TIME;
+            $surchargeTotal += $managedAmounts[$slot]
+                + ($stored['amount_minor'] ?? 0);
+            $surcharges[$slot] = [
+                ...$availability,
+                'kind' => $slot,
+                'label' => $kind->label(),
+                // Průměrný výdělek pro příplatky je VŽDY ten aktuálně schválený,
+                // ne ten zmrazený u přesčasu. `overtime_hourly_rate_minor` se
+                // totiž u hodinově zadaného přesčasu přepíná na historickou
+                // hodnotu ze snímku — a základ příplatku za noční práci nesmí
+                // záviset na tom, jestli si někdo v témže měsíci zadal přesčas
+                // hodinami, nebo částkou.
+                'average_hourly_minor' => $currentRate,
+                'average_snapshot_id' => $currentAverageId,
+                'average_snapshot_version' => $currentAverageVersion,
+                // Ručně zadané hodiny nesou vlastní řádek, takže verze je jeho
+                // vlastní — na rozdíl od přesčasu, kde se tři řádky hýbou spolu
+                // a formuláři stačí verze toho nosného.
+                'hours_milli' => $stored['quantity_milliunits'] ?? null,
+                'factors' => $kind === PayrollSurchargeKind::DifficultEnvironment
+                    ? (is_int($storedSource['difficulty_factors'] ?? null)
+                        ? $storedSource['difficulty_factors']
+                        : $availability['default_factors'])
+                    : null,
+                'amount_minor' => $stored['amount_minor'] ?? 0,
+                'row_version' => $stored['row_version'] ?? null,
+                'status' => $stored['status'] ?? null,
+                'managed_amount_minor' => $managedAmounts[$slot],
+                'managed_elsewhere' => $managed[$slot],
+                'from_attendance' => $takenByAttendance,
+                'conflict' => $conflicts[$slot],
+                // Zadat jde, jen když to dovolí zákon i sjednaná zásada A ZÁROVEŇ
+                // si nárok za tenhle měsíc nezabrala docházka.
+                //
+                // Vlastní ULOŽENÝ řádek zůstává editovatelný i tehdy, když
+                // podklad mezitím zmizel (třeba se zrušilo schválení průměrného
+                // výdělku). Jinak by omylem zadanou hodinu nešlo vzít zpátky
+                // a jediným východiskem by byl zásah do databáze.
+                'entry_available' => ($availability['available'] || $stored !== null)
+                    && !$takenByAttendance
+                    && !$managed[$slot],
+                // Zadat novou hodnotu nejde, vymazat ano.
+                'clear_only' => !$availability['available'] && $stored !== null,
+                // Pořadí je pořadím toho, co uživatele skutečně zastavilo:
+                // zabraný nárok je silnější důvod než chybějící podklad, protože
+                // doplnit podklad by tu stejně nepomohlo.
+                'unavailable_reason' => match (true) {
+                    $takenByAttendance => 'claimed_by_attendance',
+                    $managed[$slot] => 'managed_elsewhere',
+                    default => $availability['reason'],
+                },
+            ];
+        }
+
         return [
             'employee_id' => PayrollTimeValue::int($employment['employee_id'] ?? null, 'employee_id'),
             'employment_id' => PayrollTimeValue::int($employment['employment_id'] ?? null, 'employment_id'),
@@ -1044,9 +1391,19 @@ final class PayrollQuickInputRepository
             'base_conflict' => $conflicts['base'],
             'partial_month' => $partialMonth,
             'base_requires_entry' => $baseRequiresEntry,
-            'overtime_mode' => ($quick['overtime']['quantity_milliunits'] ?? null) === null ? 'amount' : 'hours',
-            'overtime_hours_milli' => $quick['overtime']['quantity_milliunits'] ?? null,
+            'overtime_mode' => ($overtimeCarrier['quantity_milliunits'] ?? null) === null
+                ? 'amount'
+                : 'hours',
+            'overtime_hours_milli' => $overtimeCarrier['quantity_milliunits'] ?? null,
             'overtime_amount_minor' => $overtime,
+            // Rozpad § 114 odst. 1 pro mzdový list. Ve formuláři je pole jedno,
+            // ale doložit se musí obě poloviny nároku zvlášť (§ 142 odst. 5 ZP).
+            'overtime_wage_minor' => $overtimeWage,
+            'overtime_premium_minor' => $overtimePremium,
+            // Verze, se kterou prohlížeč přijde na uložení. Tři řádky přesčasu
+            // se hýbou VŽDY spolu, takže formuláři stačí jedna a je to verze
+            // nosného řádku; ostatní si repozitář dohledá sám.
+            'overtime_row_version' => $overtimeCarrier['row_version'] ?? null,
             'overtime_hourly_rate_minor' => is_int($rate) ? $rate : null,
             'overtime_average_snapshot_id' => is_int($averageId) ? $averageId : null,
             'overtime_average_snapshot_version' =>
@@ -1059,13 +1416,503 @@ final class PayrollQuickInputRepository
             'bonus_amount_minor' => $bonus,
             'bonus_managed_elsewhere' => $managed['bonus'],
             'bonus_conflict' => $conflicts['bonus'],
+            // Zákonné příplatky § 115 až § 118 zadané ručně, po druzích.
+            // Přesčas (§ 114) tu není: má vlastní pole s vlastním rozpadem.
+            'surcharges' => $surcharges,
+            'surcharge_amount_minor' => $surchargeTotal,
             'other_amount_minor' => $other,
             'non_monetary_amount_minor' => $nonMonetary,
             'excluded_from_gross_amount_minor' => $excludedFromGross,
-            'gross_preview_minor' => $base + $overtime + $bonus + $other,
+            // Příplatky se do náhledu ZAPOČÍTÁVAJÍ. Dřív padaly do slotu
+            // přesčasu a v součtu byly taky; teď mají vlastní sloupec, ale
+            // hrubý příjem se tím měnit nesmí.
+            'gross_preview_minor' => $base + $overtime + $bonus + $other + $surchargeTotal,
             'inputs' => $quick,
             'blockers' => array_values(array_unique($blockers)),
         ];
+    }
+
+    /**
+     * Rozpad přesčasu zadaného hodinami na obě poloviny nároku podle
+     * § 114 odst. 1 ZP.
+     *
+     * ── Proč to nebylo správně ──────────────────────────────────────────────
+     *
+     * Do W19 tady stál jediný vzorec `průměrný výdělek × hodiny × 1,25`, a to
+     * s konstantami `800` (= 1000 / 1,25) a `premium_basis_points => 2500`
+     * natvrdo v kódu. Byly na tom tři vady najednou:
+     *
+     *  1. ZÁKLAD. § 114 odst. 1 přiznává „dosaženou mzdu" a K NÍ „příplatek
+     *     nejméně 25 % průměrného výdělku". To jsou dvě čísla z různých období
+     *     (§ 353 zjišťuje průměr z PŘEDCHOZÍHO čtvrtletí), ne jedno vynásobené
+     *     1,25. U zaměstnance, kterému mzda vzrostla, se tak systematicky
+     *     podpláceli přesčasy — a na pásce to vypadalo v pořádku.
+     *  2. SAZBA MIMO SADU. Změna sazby v administraci rulesetů ani sjednaná
+     *     vyšší sazba v kolektivní smlouvě se do rychlého zadání nepropsaly.
+     *  3. SBĚRNÁ SLOŽKA. Celá částka padala do `PREMIE_PRIPLATKY`, takže
+     *     z mzdového listu nešlo doložit, který zákonný nárok byl uspokojen
+     *     (§ 142 odst. 5 ZP).
+     *
+     * @param array<string,mixed> $item
+     * @param array<string,mixed> $row
+     * @return array{
+     *   wage_minor:int,premium_minor:int,
+     *   wage_source:array<string,mixed>,premium_source:array<string,mixed>
+     * }
+     */
+    private function overtimeSplit(
+        int $supplierId,
+        int $employmentId,
+        string $period,
+        array $item,
+        array $row,
+        int $hours,
+    ): array {
+        $storedWage = $item['inputs']['overtime_wage'] ?? null;
+        $storedPremium = $item['inputs']['overtime_premium'] ?? null;
+        if (is_array($storedWage)
+            && is_array($storedPremium)
+            && $storedWage['quantity_milliunits'] === $hours
+            && $storedPremium['quantity_milliunits'] === $hours
+            && is_array($storedWage['source_snapshot'] ?? null)
+            && is_array($storedPremium['source_snapshot'] ?? null)
+        ) {
+            // Beze změny počtu hodin se NEPŘEPOČÍTÁVÁ. Uložená částka je
+            // výsledek podkladu platného v okamžiku zadání; přepočet při každém
+            // uložení by měnil už zadanou mzdu podle toho, co se mezitím stalo
+            // s průměrným výdělkem nebo s kalendářem.
+            return [
+                'wage_minor' => (int) $storedWage['amount_minor'],
+                'premium_minor' => (int) $storedPremium['amount_minor'],
+                'wage_source' => $storedWage['source_snapshot'],
+                'premium_source' => $storedPremium['source_snapshot'],
+            ];
+        }
+
+        $rate = $item['overtime_hourly_rate_minor'];
+        if (!is_int($rate) || $rate <= 0
+            || $row['overtime_average_snapshot_id'] !== $item['overtime_average_snapshot_id']
+            || $row['overtime_average_snapshot_version']
+                !== $item['overtime_average_snapshot_version']
+        ) {
+            throw new \InvalidArgumentException(
+                'Schválený průměrný výdělek se změnil. Obnovte formulář a výpočet zkontrolujte.'
+            );
+        }
+        if ($hours < 0) {
+            throw new \InvalidArgumentException('Počet hodin přesčasu nesmí být záporný.');
+        }
+
+        $periodStart = $period . '-01';
+        $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $periodStart);
+        $policy = $this->surcharges->policyFor(
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $ruleset,
+        );
+        $mode = $policy->mode(PayrollSurchargeKind::Overtime);
+        if ($mode === PayrollSurchargeCompensationMode::IncludedInWage) {
+            // § 114 odst. 3 — mzda sjednaná už s přihlédnutím k práci přesčas.
+            // Vyplácet cokoli navíc by odporovalo sjednanému; zapsat nulu by
+            // vypadalo jako výpočet. Fail-closed.
+            throw new \DomainException(
+                'U tohoto vztahu je mzda sjednána s přihlédnutím k práci přesčas '
+                . '(§ 114 odst. 3), takže příplatek ani náhradní volno nepřísluší. '
+                . 'Přesčas hodinami tu zadat nelze.'
+            );
+        }
+        $effective = $policy->effectiveRate(PayrollSurchargeKind::Overtime, $ruleset);
+
+        // Příplatková polovina: `PV × čitatel × hodiny / (jmenovatel × 1000)`.
+        // Jedním zlomkem, aby se nezaokrouhlovalo dvakrát — stejně jako
+        // {@see \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeLine}.
+        $premium = $mode === PayrollSurchargeCompensationMode::CompensatoryTimeOff
+            ? 0
+            : RoundingMode::HalfUp->roundFraction(
+                self::multiplyExactly(
+                    self::multiplyExactly($rate, $effective['rate']->numerator),
+                    $hours,
+                ),
+                self::multiplyExactly($effective['rate']->denominator, 1_000),
+            );
+
+        $fundMinutes = $this->fund->minutes($supplierId, $employmentId, $period);
+        if ($fundMinutes === null) {
+            throw new \DomainException(
+                'Dosaženou mzdu za práci přesčas nelze určit: pracovní vztah nemá '
+                . 'pro tento měsíc pracovní kalendář. Přiřaďte kalendář, nebo přesčas '
+                . 'zadejte celkovou částkou.'
+            );
+        }
+        $baseMinor = PayrollTimeValue::int($item['base_amount_minor'] ?? null, 'base_amount_minor');
+        $wage = PayrollAchievedWage::forMilliHours($baseMinor, $fundMinutes, $hours);
+
+        $common = [
+            'schema_version' => 'payroll-quick-overtime-source.v2',
+            'average_snapshot_id' => $row['overtime_average_snapshot_id'],
+            'average_snapshot_row_version' => $row['overtime_average_snapshot_version'],
+            'average_hourly_minor' => $rate,
+            'overtime_hours_milli' => $hours,
+            'compensation_mode' => $mode->value,
+            'premium_basis_points' => self::basisPoints($effective['rate']),
+            'premium_rate_is_agreed' => $effective['agreed'],
+            'ruleset_id' => $ruleset->version->id,
+            'ruleset_content_hash' => $ruleset->version->contentHash,
+            'rounding' => 'half-up-minor-unit',
+        ];
+
+        return [
+            'wage_minor' => $wage,
+            'premium_minor' => $premium,
+            'wage_source' => $common + [
+                'part' => 'achieved_wage',
+                'section' => '§ 114 odst. 1',
+                'monthly_base_minor' => $baseMinor,
+                'fund_minutes' => $fundMinutes,
+                'achieved_hourly_minor' => PayrollAchievedWage::hourlyMinor(
+                    $baseMinor,
+                    $fundMinutes,
+                ),
+                'amount_minor' => $wage,
+            ],
+            'premium_source' => $common + [
+                'part' => 'surcharge',
+                'section' => '§ 114 odst. 1',
+                'amount_minor' => $premium,
+            ],
+        ];
+    }
+
+    /**
+     * Uloží jeden druh ručně zadaného zákonného příplatku § 115 až § 118.
+     *
+     * ── Co se tu hlídá, než se něco zapíše ──────────────────────────────────
+     *
+     *  1. NÁROK NESMÍ DRŽET DOCHÁZKA. Materializace ze schválené docházky
+     *     a ruční zadání jsou dva podklady pro TÝŽ nárok; kdyby prošly oba,
+     *     zaměstnanec dostane příplatek dvakrát. Zábrana je dvojí: čitelná
+     *     hláška podle stavu měsíce a pod ní zápis nároku
+     *     ({@see PayrollSurchargeClaimRepository}), který ho pojistí i proti
+     *     souběhu dvou transakcí.
+     *  2. ZÁKONNÉ PODMÍNKY. Svátek bez sjednané zásady (§ 115 odst. 1),
+     *     ztížené prostředí bez počtu vlivů (§ 117), chybějící průměrný výdělek
+     *     — všechno fail-closed, nikdy tichá nula.
+     *  3. OPTIMISTICKÝ ZÁMEK. Každý druh je jeden řádek a nese vlastní verzi.
+     *
+     * @param array<string,mixed> $item
+     * @param array<string,mixed> $row
+     * @param array<string,int> $componentIds
+     */
+    private function saveSurcharge(
+        int $supplierId,
+        int $employmentId,
+        array $item,
+        array $row,
+        array $componentIds,
+        string $period,
+        ?int $userId,
+        bool $autoApprove,
+        PayrollSurchargeKind $kind,
+    ): void {
+        $slot = $kind->value;
+        /** @var array<string,mixed> $state */
+        $state = $item['surcharges'][$slot];
+        $entry = $row['surcharges'][$slot] ?? null;
+        if (!is_array($entry)) {
+            // Druh v požadavku vůbec nebyl. To NENÍ vyprázdnění: klient, který
+            // o příplatcích neví (nebo má sekci schovanou), by jinak každým
+            // uložením zrušil, co zadal někdo jiný.
+            return;
+        }
+        $hours = $entry['hours_milli'];
+        $factors = $entry['factors'];
+        $wantsEntry = is_int($hours) && $hours > 0;
+        $hasStored = $state['row_version'] !== null;
+        $periodStart = $period . '-01';
+
+        if (!$wantsEntry && !$hasStored) {
+            // Prázdné pole u druhu, který nikdy zadaný nebyl. Nedělá se nic —
+            // ani se nesahá na nárok, ani nevzniká nulový koncept.
+            return;
+        }
+
+        if ((bool) $state['conflict']) {
+            throw new \DomainException(sprintf(
+                '%s (%s) je v měsíci evidován rychlým i jiným vstupem. '
+                . 'Duplicitní podklady nejprve opravte v měsíčních vstupech.',
+                $kind->label(),
+                $kind->section(),
+            ));
+        }
+
+        if (!$wantsEntry) {
+            // Vyprázdnění. Nárok se pouští, aby ho směla převzít docházka;
+            // kdyby zůstal zabraný, měsíc by už z docházky nešlo doplnit.
+            if ($state['row_version'] !== $row['versions']['surcharges'][$slot]) {
+                throw new PayrollInputConflictException(
+                    is_int($state['row_version']) ? $state['row_version'] : 0,
+                );
+            }
+            $this->upsert(
+                $supplierId,
+                (int) $item['employee_id'],
+                $employmentId,
+                $componentIds[$kind->componentCode()],
+                $period,
+                $kind->componentCode(),
+                null,
+                null,
+                $row['versions']['surcharges'][$slot],
+                $userId,
+                null,
+                false,
+                $autoApprove,
+            );
+            $this->surchargeClaims->release(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $kind,
+                PayrollSurchargeClaimRepository::SOURCE_MANUAL,
+            );
+
+            return;
+        }
+
+        if ((bool) $state['from_attendance']) {
+            throw new \DomainException(sprintf(
+                '%s (%s) už za toto období vznikl ze schválené docházky. Ručně ho '
+                . 'zadat nelze — příplatek by se vyplatil dvakrát. Buď opravte '
+                . 'docházku, nebo příplatek z docházky nejdřív zrušte.',
+                $kind->label(),
+                $kind->section(),
+            ));
+        }
+        if ((bool) $state['managed_elsewhere']) {
+            throw new \DomainException(sprintf(
+                '%s (%s) v tomto měsíci spravuje jiný mzdový nebo pravidelný vstup.',
+                $kind->label(),
+                $kind->section(),
+            ));
+        }
+        if ($state['row_version'] !== $row['versions']['surcharges'][$slot]) {
+            throw new PayrollInputConflictException(
+                is_int($state['row_version']) ? $state['row_version'] : 0,
+            );
+        }
+
+        $stored = $item['inputs'][$slot] ?? null;
+        $storedSource = is_array($stored['source_snapshot'] ?? null)
+            ? $stored['source_snapshot']
+            : null;
+        $storedFactors = is_int($storedSource['difficulty_factors'] ?? null)
+            ? $storedSource['difficulty_factors']
+            : null;
+        $requestedFactors = $kind === PayrollSurchargeKind::DifficultEnvironment
+            ? $factors
+            : null;
+        $unchanged = $storedSource !== null
+            && ($stored['quantity_milliunits'] ?? null) === $hours
+            && ($requestedFactors === null || $storedFactors === $requestedFactors);
+        if ($unchanged) {
+            // Beze změny hodin a počtu vlivů se NEPŘEPOČÍTÁVÁ — stejně jako
+            // u přesčasu. Uložená částka je výsledek podkladu platného
+            // v okamžiku zadání; přepočet při každém uložení by měnil už zadanou
+            // mzdu podle toho, co se mezitím stalo s průměrným výdělkem.
+            $amount = PayrollTimeValue::int($stored['amount_minor'] ?? null, 'amount_minor');
+            $source = $storedSource;
+        } else {
+            $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $periodStart);
+            $policy = $this->surcharges->policyFor(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $ruleset,
+            );
+            try {
+                $computed = $this->quickSurcharges->calculate(
+                    $kind,
+                    $periodStart,
+                    $policy,
+                    $ruleset,
+                    is_int($state['average_hourly_minor'] ?? null)
+                        ? $state['average_hourly_minor']
+                        : 0,
+                    $hours,
+                    $factors,
+                    [
+                        'id' => $state['average_snapshot_id'],
+                        'row_version' => $state['average_snapshot_version'],
+                    ],
+                );
+            } catch (PayrollSurchargeException $exception) {
+                // Chybějící podklad je vstupní stav uživatele, ne vada kódu:
+                // musí se vrátit u konkrétního pole, ne shodit celou dávku.
+                throw new \DomainException($exception->getMessage(), 0, $exception);
+            }
+            $amount = $computed['amount_minor'];
+            $source = $computed['source'];
+        }
+
+        // Nárok se zabírá PŘED zápisem vstupu. Kdyby se zabíral až po něm,
+        // souběžná materializace z docházky by mezitím stihla zapsat svůj —
+        // a zabrání by pak jen oznámilo škodu, místo aby jí zabránilo.
+        $this->surchargeClaims->claim(
+            $supplierId,
+            $employmentId,
+            $periodStart,
+            $kind,
+            PayrollSurchargeClaimRepository::SOURCE_MANUAL,
+            $userId,
+        );
+        $this->upsert(
+            $supplierId,
+            (int) $item['employee_id'],
+            $employmentId,
+            $componentIds[$kind->componentCode()],
+            $period,
+            $kind->componentCode(),
+            $amount,
+            $hours,
+            $row['versions']['surcharges'][$slot],
+            $userId,
+            $source,
+            // Nula hodin sem nedojde (odbavuje ji větev vyprázdnění), ale nulová
+            // ČÁSTKA při kladných hodinách ano — u sjednané sazby 0 by to byl
+            // legitimní záznam „hodiny byly, příplatek se nesjednal". Řádek
+            // proto vzniknout musí, jinak by se hodiny ztratily.
+            true,
+            $autoApprove,
+        );
+    }
+
+    /**
+     * Uloží všechny tři možné řádky přesčasu najednou.
+     *
+     * Nevyplněná část znamená ZRUŠENÍ svého řádku, ne nulu. Bez toho by po
+     * přepnutí režimu z hodin na celkovou částku (a naopak) zůstal viset řádek
+     * z předchozí varianty a přesčas by se vyplatil dvakrát.
+     *
+     * @param array<string,int> $componentIds
+     * @param array<string,mixed>|null $wageSource
+     * @param array<string,mixed>|null $premiumSource
+     */
+    private function upsertOvertimeParts(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        array $componentIds,
+        string $period,
+        ?int $userId,
+        bool $autoApprove,
+        ?int $legacyAmount,
+        ?int $wageAmount,
+        ?int $premiumAmount,
+        ?int $hours,
+        ?array $wageSource,
+        ?array $premiumSource,
+    ): void {
+        foreach ([
+            [self::OVERTIME_CODE, $legacyAmount, null, null],
+            [self::HOURLY_CODE, $wageAmount, $hours, $wageSource],
+            [self::PREMIUM_CODE, $premiumAmount, $hours, $premiumSource],
+        ] as [$code, $amount, $quantity, $source]) {
+            $this->upsert(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+                $componentIds[$code],
+                $period,
+                $code,
+                $amount,
+                $amount === null ? null : $quantity,
+                null,
+                $userId,
+                $amount === null ? null : $source,
+                false,
+                $autoApprove,
+                versionFromDatabase: true,
+            );
+        }
+    }
+
+    private static function basisPoints(DecimalRate $rate): int
+    {
+        return RoundingMode::HalfUp->roundFraction(
+            self::multiplyExactly($rate->numerator, 10_000),
+            $rate->denominator,
+        );
+    }
+
+    private static function multiplyExactly(int $left, int $right): int
+    {
+        if ($left < 0 || $right < 0) {
+            throw new \InvalidArgumentException(
+                'Výpočet přesčasu nepracuje se zápornými činiteli.'
+            );
+        }
+        if ($left !== 0 && $right > intdiv(PHP_INT_MAX, $left)) {
+            throw new \InvalidArgumentException(
+                'Výpočet přesčasu překračuje podporovaný rozsah.'
+            );
+        }
+
+        return $left * $right;
+    }
+
+    /** Který slot rychlého zadání kód obsluhuje, spravuje-li ho tenhle formulář. */
+    private static function quickSlot(string $code): ?string
+    {
+        return match ($code) {
+            self::BASE_CODE => 'base',
+            self::HOURLY_CODE => 'overtime_wage',
+            self::OVERTIME_CODE => 'overtime',
+            self::PREMIUM_CODE => 'overtime_premium',
+            self::BONUS_CODE => 'bonus',
+            default => self::surchargeKindForCode($code)?->value,
+        };
+    }
+
+    /**
+     * Které pole rychlého zadání by CIZÍ vstup (nebo pravidelná složka) zabral.
+     *
+     * Rozhoduje se podle KÓDU, ne podle druhu složky: `MZDA_HODINOVA` je
+     * u hodinově odměňovaného zaměstnance jeho ZÁKLAD, kdežto jako rychlý řádek
+     * je to dosažená mzda za přesčas. Příplatkové kódy mají od W20 vlastní
+     * slot — jako složky druhu `premium` by jinak spadly do přesčasu a rychlé
+     * zadání by tvrdilo, že přesčas spravuje jiný vstup.
+     */
+    private static function managedSlot(string $code, string $componentKind): ?string
+    {
+        $surcharge = self::surchargeKindForCode($code);
+        if ($surcharge !== null) {
+            return $surcharge->value;
+        }
+
+        return match ($code) {
+            self::BASE_CODE, self::HOURLY_CODE => 'base',
+            self::OVERTIME_CODE, self::PREMIUM_CODE => 'overtime',
+            self::BONUS_CODE => 'bonus',
+            default => match ($componentKind) {
+                'base_wage', 'hourly_wage' => 'base',
+                'premium' => 'overtime',
+                'bonus', 'commission' => 'bonus',
+                default => null,
+            },
+        };
+    }
+
+    /** Druh příplatku, který se v rychlém zadání schovává za mzdovou složku. */
+    private static function surchargeKindForCode(string $code): ?PayrollSurchargeKind
+    {
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            if ($kind->componentCode() === $code) {
+                return $kind;
+            }
+        }
+
+        return null;
     }
 
     /** @param array<string,mixed> $item */
@@ -1289,21 +2136,22 @@ final class PayrollQuickInputRepository
     /** @return array<string,int> */
     private function componentIds(int $supplierId, string $effectiveOn): array
     {
+        $codes = self::managedCodes();
         $stmt = $this->db->pdo()->prepare(
             'SELECT code, id
                FROM payroll_component_definitions
               WHERE supplier_id = ?
-                AND code IN ("MZDA_MESICNI", "PREMIE_PRIPLATKY", "ODMENA")
+                AND code IN (' . implode(',', array_fill(0, count($codes), '?')) . ')
                 AND is_active = 1
                 AND valid_from <= ?
                 AND (valid_to IS NULL OR valid_to >= ?)'
         );
-        $stmt->execute([$supplierId, $effectiveOn, $effectiveOn]);
+        $stmt->execute([$supplierId, ...$codes, $effectiveOn, $effectiveOn]);
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $result[(string) $row['code']] = (int) $row['id'];
         }
-        foreach ([self::BASE_CODE, self::OVERTIME_CODE, self::BONUS_CODE] as $code) {
+        foreach ($codes as $code) {
             if (!isset($result[$code])) {
                 throw new \InvalidArgumentException("Chybí účinná mzdová složka {$code}.");
             }
@@ -1354,6 +2202,7 @@ final class PayrollQuickInputRepository
         ?array $sourceSnapshot,
         bool $zeroIsAnEntry = false,
         bool $autoApprove = false,
+        bool $versionFromDatabase = false,
     ): void {
         $periodStart = $period . '-01';
         $externalId = self::EXTERNAL_PREFIX . $componentCode;
@@ -1367,6 +2216,13 @@ final class PayrollQuickInputRepository
         );
         $find->execute([$supplierId, $employmentId, $periodStart, $externalId]);
         $row = $find->fetch(PDO::FETCH_ASSOC);
+        if ($versionFromDatabase) {
+            // Řádek, který uživatel nevidí jako vlastní pole (druhá polovina
+            // rozpadu přesčasu). Jeho verzi formulář nezná a znát nemá; souběh
+            // hlídá verze nosného řádku a zámek na pracovním vztahu, které se
+            // ověřují dřív, než se sem dojde.
+            $expectedVersion = $row === false ? null : (int) $row['row_version'];
+        }
         $isEmpty = $amountMinor === null
             || (!$zeroIsAnEntry
                 && $amountMinor === 0

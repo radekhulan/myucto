@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax;
 
-use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 
 /**
@@ -121,8 +121,13 @@ final class TaxConstants
     }
 
     /**
-     * Rozhodná částka v haléřích, nebo `null` pro roky bez mzdového rulesetu
-     * (2024 a 2025 — registry začíná rokem 2026, ty roky si hodnotu drží samy).
+     * Rozhodná částka v haléřích, nebo `null` pro roky bez mzdového rulesetu.
+     *
+     * Ročníky, které registry drží, se čtou z něj — jinak by táž hranice žila
+     * na dvou místech a rozešla by se. Rok 2024 ruleset nemá (a mít nebude:
+     * do 31. 12. 2024 zněl § 6 odst. 4 ZDP „nepřesáhne 10 000 Kč“, tedy pevná
+     * částka s NEOSTRÝM operátorem, kterou dnešní klíč `*.threshold` neumí
+     * vyjádřit) a hodnotu si drží sám v {@see self::TABLE}.
      */
     private static function rulesetDppWithholdingThresholdMinor(int $year): ?int
     {
@@ -133,8 +138,8 @@ final class TaxConstants
         }
 
         $cache[$year] = null;
-        if ($year === 2026) {
-            $ruleset = CzechPayrollRulesets2026::provider()->forDate(
+        if (in_array($year, [2025, 2026], true)) {
+            $ruleset = CzechPayrollRulesets::provider()->forDate(
                 PayrollRulesetDomain::IncomeTax,
                 sprintf('%04d-01-01', $year),
             );

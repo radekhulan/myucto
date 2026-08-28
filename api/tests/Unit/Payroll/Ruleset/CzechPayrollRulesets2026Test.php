@@ -59,7 +59,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '2434aa72ec9ba9e7f153c254624d6832aba04a085f28aba87f406006a2b35c52';
+    private const EXPECTED_MANIFEST_SHA256 = '3e92110d94b53a18f28c984cdbcf8ebfe2152ebe92b4ec9c7eabdb312e3057e9';
 
     protected function setUp(): void
     {
@@ -220,14 +220,22 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 => $left->id <=> $right->id,
         );
 
+        // Rovnost s celým manifestem tu být NEMŮŽE: od doplnění ročníku 2025
+        // ({@see CzechPayrollRulesets2025}) drží manifest víc ročníků najednou.
+        // Že v něm naopak nezůstal otisk navíc, hlídá `CzechPayrollRulesets2025Test`
+        // nad složenou sadou.
         $actual = [];
+        $pinned = [];
         foreach ($versions as $version) {
             $actual[] = $version->contentHash;
+            $pinned[] = VendorRulesetManifest::contains($version->contentHash)
+                ? $version->contentHash
+                : 'CHYBÍ V MANIFESTU: ' . $version->id;
         }
 
         self::assertSame(
-            VendorRulesetManifest::CONTENT_HASHES,
             $actual,
+            $pinned,
             "Dodaná sada se změnila. Aktualizujte VendorRulesetManifest::CONTENT_HASHES na:\n"
             . implode("\n", array_map(
                 static fn (PayrollRulesetVersion $version): string

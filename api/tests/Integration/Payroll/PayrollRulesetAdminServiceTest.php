@@ -202,6 +202,31 @@ final class PayrollRulesetAdminServiceTest extends TestCase
      * Zákazník po instalaci nic neodklikává. Dodaná sada je účinná a domény, které
      * NEJSOU vedené jako ruční posouzení, počítají hned.
      */
+    /**
+     * Chybějící sada na příští rok je jediná porucha téhle obrazovky, kterou
+     * nejde odhalit pohledem na existující verze — ty jsou všechny v pořádku,
+     * jen žádná nepokrývá leden. Přehled o ní proto musí mluvit sám.
+     */
+    public function testOverviewWarnsAboutTheYearsThatHaveNoRulesetYet(): void
+    {
+        $overview = $this->service->overview();
+
+        /** @var list<array<string, mixed>> $outlook */
+        $outlook = $overview['year_outlook'];
+        self::assertCount(2, $outlook);
+        self::assertContains($overview['year_outlook_severity'], ['ok', 'info', 'warning', 'critical']);
+        foreach ($outlook as $entry) {
+            self::assertIsInt($entry['year']);
+            self::assertIsBool($entry['covered']);
+            self::assertIsArray($entry['missing_domains']);
+            self::assertNotSame('', $entry['message']);
+            self::assertSame(
+                $entry['covered'] ? 'year_covered' : 'year_ruleset_missing',
+                $entry['code'],
+            );
+        }
+    }
+
     public function testDeliveredSetIsCalculationReadyWithoutAnySetup(): void
     {
         $overview = $this->service->overview();
@@ -222,17 +247,20 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         }
 
         // Doložení místo odklikávání: zdroj je v PŘEHLEDU, ne až v detailu.
+        // Doména jich veze víc ročníků (2025 přibyl zpětně), takže se vybírá
+        // podle ID — „první ve výpisu" by jinak tiše přeskočilo na starší rok.
         /** @var list<array<string, mixed>> $versions */
         $versions = $byDomain['social_insurance']['versions'];
-        self::assertSame('vendor', $versions[0]['origin']);
+        $current = array_column($versions, null, 'ruleset_id')['cz-payroll-2026.social-insurance.v1'];
+        self::assertSame('vendor', $current['origin']);
         /** @var list<array<string, mixed>> $sources */
-        $sources = $versions[0]['sources'];
+        $sources = $current['sources'];
         self::assertNotSame([], $sources);
         self::assertStringStartsWith('https://', (string) $sources[0]['url']);
         self::assertSame(CzechPayrollRulesets2026::RETRIEVED_ON, $sources[0]['retrieved_on']);
 
         // Nad účinnou dodanou sadou se nenabízí žádný další krok — ani „vyřadit".
-        self::assertNull($versions[0]['next_command']);
+        self::assertNull($current['next_command']);
     }
 
     /**
@@ -541,9 +569,12 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
         // Sociální pojištění ruční posouzení MÁ, ale jen u části parametrů —
         // doména jako celek zůstává použitelná.
+        // Počty jsou přes VŠECHNY účinné ročníky domény: k zemědělské dohodě
+        // (2025 i 2026) přibyly tři parametry, které se pro rok 2025 nepodařilo
+        // doložit a jsou proto vedené jako ruční posouzení místo čísla.
         $social = $byDomain['social_insurance'];
         self::assertFalse($social['manual_review_by_design']);
-        self::assertSame(1, $social['manual_review_parameter_count']);
+        self::assertSame(4, $social['manual_review_parameter_count']);
         self::assertSame(21, $social['parameter_count']);
         self::assertNotSame('manual_review', $social['status']);
     }

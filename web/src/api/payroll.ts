@@ -1490,6 +1490,120 @@ export interface PayrollQuickInputRef {
   source_snapshot: Record<string, unknown> | null
 }
 
+/** Všech pět zákonných příplatků § 114 až § 118 ZP. */
+export type PayrollSurchargeKind = 'overtime' | 'holiday' | 'night' | 'weekend'
+  | 'difficult_environment'
+
+export type PayrollSurchargeCompensationMode =
+  | 'surcharge'
+  | 'compensatory_time_off'
+  | 'included_in_wage'
+
+/** Jedna verze sjednané zásady příplatků na pracovním vztahu (migrace 1624). */
+export interface PayrollEmploymentSurchargePolicy extends Record<string, unknown> {
+  id: number
+  employment_id: number
+  valid_from: string
+  valid_to: string | null
+  overtime_mode: PayrollSurchargeCompensationMode
+  holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
+  difficult_environment_factors: number | null
+  overtime_rate_bp: number | null
+  holiday_rate_bp: number | null
+  night_rate_bp: number | null
+  weekend_rate_bp: number | null
+  difficult_environment_rate_bp: number | null
+  agreement_reference: string | null
+  note: string | null
+  row_version: number
+}
+
+export interface PayrollEmploymentSurchargePolicyPayload extends Record<string, unknown> {
+  valid_from: string
+  overtime_mode: PayrollSurchargeCompensationMode
+  holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
+  difficult_environment_factors: number | null
+  overtime_rate_bp: number | null
+  holiday_rate_bp: number | null
+  night_rate_bp: number | null
+  weekend_rate_bp: number | null
+  difficult_environment_rate_bp: number | null
+  agreement_reference: string | null
+  note: string | null
+}
+
+/** Co o druhu příplatku říká ZÁKON — proti tomu se sjednané odchylky měří. */
+export interface PayrollSurchargeKindInfo {
+  kind: PayrollSurchargeKind
+  section: string
+  label: string
+  component_code: string
+  basis: 'average_earning' | 'minimum_wage_hourly'
+  statutory_rate_basis_points: number
+  /** Jen § 116 a § 118 dovolují sjednat NIŽŠÍ sazbu, než je zákonné minimum. */
+  allows_lower_agreed_rate: boolean
+  allows_compensatory_time_off: boolean
+  allows_quick_manual_entry: boolean
+}
+
+export interface PayrollEmploymentSurchargePolicies {
+  policies: PayrollEmploymentSurchargePolicy[]
+  statutory_default: {
+    overtime_mode: PayrollSurchargeCompensationMode
+    holiday_mode: PayrollSurchargeCompensationMode
+    difficult_environment_factors: number | null
+  }
+  kinds: PayrollSurchargeKindInfo[]
+  ruleset_id: string
+}
+
+/** Druhy zákonných příplatků, které jde zadat ručně v rychlém měsíčním vstupu. */
+export type PayrollQuickSurchargeKind =
+  | 'night'
+  | 'weekend'
+  | 'holiday'
+  | 'difficult_environment'
+
+/**
+ * Stav jednoho druhu příplatku u jednoho pracovního vztahu a měsíce.
+ *
+ * `entry_available` je jediná pravda o tom, jestli pole jde vyplnit; prohlížeč
+ * ji NEODVOZUJE. Podmínky jsou zákonné (§ 115 bez sjednané zásady, § 117 bez
+ * počtu vlivů, chybějící průměrný výdělek) a musí je posoudit server — jinak by
+ * se dvě obrazovky téže firmy mohly rozejít.
+ */
+export interface PayrollQuickSurchargeState {
+  kind: PayrollQuickSurchargeKind
+  label: string
+  section: string
+  component_code: string
+  basis: 'average_earning' | 'minimum_wage_hourly'
+  basis_hourly_minor: number | null
+  /** Vždy AKTUÁLNĚ schválený průměr, ne ten zmrazený u přesčasu. */
+  average_hourly_minor: number | null
+  average_snapshot_id: number | null
+  average_snapshot_version: number | null
+  rate_basis_points: number | null
+  rate_is_agreed: boolean
+  requires_factors: boolean
+  default_factors: number | null
+  hours_milli: number | null
+  factors: number | null
+  amount_minor: number
+  managed_amount_minor: number
+  row_version: number | null
+  status: PayrollInputStatus | null
+  managed_elsewhere: boolean
+  /** Nárok za tenhle měsíc už drží docházka — ručně ho zadat nelze. */
+  from_attendance: boolean
+  conflict: boolean
+  available: boolean
+  entry_available: boolean
+  /** Podklad chybí, ale vlastní uložený řádek jde aspoň vymazat. */
+  clear_only: boolean
+  unavailable_reason: string | null
+}
+
 export interface PayrollQuickInputRow {
   employee_id: number
   employment_id: number
@@ -1520,6 +1634,9 @@ export interface PayrollQuickInputRow {
   bonus_amount_minor: number
   bonus_managed_elsewhere: boolean
   bonus_conflict: boolean
+  /** Zákonné příplatky § 115 až § 118 po druzích. Přesčas má vlastní pole. */
+  surcharges: Record<PayrollQuickSurchargeKind, PayrollQuickSurchargeState>
+  surcharge_amount_minor: number
   other_amount_minor: number
   non_monetary_amount_minor: number
   excluded_from_gross_amount_minor: number
@@ -1579,7 +1696,8 @@ export interface PayrollEmployeeCardMonth {
  */
 export interface PayrollQuickInputFailure {
   employment_id: number
-  field: 'row' | 'base' | 'overtime' | 'bonus'
+  /** `surcharge_<druh>` míří na pole konkrétního zákonného příplatku. */
+  field: 'row' | 'base' | 'overtime' | 'bonus' | `surcharge_${PayrollQuickSurchargeKind}`
   code: string
   message: string
   current_row_version: number | null
@@ -1610,10 +1728,20 @@ export interface PayrollQuickInputSavePayload {
     overtime_average_snapshot_id: number | null
     overtime_average_snapshot_version: number | null
     bonus_amount_minor: number
+    /**
+     * Druh, který v požadavku NENÍ, se nemění. Vyprázdnění se posílá výslovným
+     * `hours_milli: null` — jinak by klient se schovanou sekcí každým uložením
+     * zrušil, co zadal někdo jiný.
+     */
+    surcharges?: Partial<Record<PayrollQuickSurchargeKind, {
+      hours_milli: number | null
+      factors?: number | null
+    }>>
     versions: {
       base: number | null
       overtime: number | null
       bonus: number | null
+      surcharges?: Partial<Record<PayrollQuickSurchargeKind, number | null>>
     }
   }>
 }
@@ -5099,6 +5227,19 @@ export const payrollApi = {
     api.get<{ summary: PayrollEmploymentAgendaSummary }>(
       `/payroll/employments/${employmentId}/agenda-summary`,
     ).then(response => response.data.summary),
+  employmentSurchargePolicies: (employmentId: number, effectiveOn?: string) =>
+    api.get<PayrollEmploymentSurchargePolicies>(
+      `/payroll/employments/${employmentId}/surcharge-policies`,
+      { params: effectiveOn ? { effective_on: effectiveOn } : {} },
+    ).then(response => response.data),
+  createEmploymentSurchargePolicy: (
+    employmentId: number,
+    payload: PayrollEmploymentSurchargePolicyPayload,
+  ) => api.post<{ policy: PayrollEmploymentSurchargePolicy }>(
+    `/payroll/employments/${employmentId}/surcharge-policies`,
+    payload,
+  ).then(response => response.data.policy),
+
   employmentDimensions: (employmentId: number) =>
     api.get<{ dimensions: PayrollEmploymentDimension[] }>(`/payroll/employments/${employmentId}/dimensions`)
       .then(response => response.data.dimensions),

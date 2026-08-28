@@ -78,6 +78,39 @@ final class PayrollComponentDefaults
                 ['MZDA_UKOLOVA', 'Úkolová mzda', 'task_wage', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['ODMENA', 'Odměna', 'bonus', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PREMIE_PRIPLATKY', 'Prémie a příplatky', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                // ── Zákonné příplatky § 114 až § 118 zákoníku práce ──────────────
+                //
+                // Vlastní kód pro každé ustanovení, ne jediná volná částka. Dokud
+                // se všechno lilo do `PREMIE_PRIPLATKY`, nešlo z mzdového listu
+                // doložit, KTERÝ zákonný nárok byl uspokojen a v jaké výši —
+                // a přesně to po zaměstnavateli chce kontrola i sám zaměstnanec
+                // (§ 142 odst. 5 ZP, písemný doklad o jednotlivých složkách mzdy).
+                // Vlastní kód navíc dovoluje vlastní účetní předkontaci a vlastní
+                // sloupec v přehledech, což u společné složky nešlo.
+                //
+                // Druh složky je `premium`, ne nový druh: příplatek JE mzda podle
+                // § 109 odst. 2 a v číselníku druhů je `premium` právě to místo,
+                // kde už `PREMIE_PRIPLATKY` sedí. Nový druh by znamenal `MODIFY
+                // COLUMN` na `payroll_component_definitions.component_kind`,
+                // a rozšiřovat databázový výčet kvůli tomu, co se od stávající
+                // hodnoty ničím neliší, je zbytečné riziko.
+                //
+                // Klasifikace je u všech pěti shodná s běžnou mzdou: příplatek se
+                // zdaňuje, je vyměřovacím základem obou pojistných, podléhá
+                // exekučním srážkám a vstupuje do JMHZ.
+                //
+                // `average_earning` je `included` ZÁMĚRNĚ, ačkoli to vypadá jako
+                // kruh (příplatek se z průměrného výdělku počítá a zároveň do něj
+                // vstupuje). Kruh to není: § 353 zjišťuje průměrný výdělek
+                // z hrubé mzdy ZA PŘEDCHOZÍ rozhodné období, tedy z jiného
+                // čtvrtletí, než ve kterém se příplatek vyplácí. Vyloučit ho by
+                // naopak znamenalo systematicky podhodnocovat průměr zaměstnanců
+                // ve směnném provozu.
+                ['PRIPLATEK_PRESCAS', 'Příplatek za práci přesčas', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['PRIPLATEK_SVATEK', 'Příplatek za práci ve svátek', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['PRIPLATEK_NOCNI', 'Příplatek za noční práci', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['PRIPLATEK_VIKEND', 'Příplatek za práci v sobotu a v neděli', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['PRIPLATEK_ZTIZENE_PROSTREDI', 'Příplatek za práci ve ztíženém pracovním prostředí', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PROVIZE', 'Provize', 'commission', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY', 'Náhrada mzdy', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Náhrada mzdy při DPN je zákonem osvobozená a není vyměřovacím

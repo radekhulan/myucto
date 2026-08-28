@@ -62,8 +62,34 @@ samostatná zdanitelná složka, která se započítá do daně i do vyměřovac
 základů sociálního a zdravotního pojištění. Částka přesně na limitu je ještě
 celá osvobozená.
 
+**Schválený benefitní vstup už nejde přepsat.** Jakmile se čerpání zapíše do
+ročního koše, běžná úprava se odmítne — jinak by hrozilo, že se totéž plnění
+započítá do limitu dvakrát a osvobození vyjde chybně. Opravu proto provedete
+opačným zápisem a teprve potom zadáte správnou částku.
+
 Pole **Roční limit** u složky je něco jiného — je to **vlastní strop
 zaměstnavatele** a schválení vstupu nad něj neprojde.
+
+#### Účetní dopad u zaměstnavatele
+
+Pozor na směr: daňově neuznatelná je **osvobozená** část, ne nadlimitní.
+§ 25 odst. 1 písm. h) zákona o daních z příjmů ve znění od 1. 1. 2024 vylučuje
+z nákladů nepeněžní plnění „v rozsahu, ve kterém je u zaměstnance osvobozeno od
+daně". Nadlimitní část se zaměstnanci zdaní, a zaměstnavateli proto uznatelná
+zůstává podle § 24 odst. 2 písm. j) bodu 4.
+
+Mzdový můstek proto osvobozenou část účtuje na samostatný účet nedaňových
+nákladů (výchozí 528). Dělí se **jen** u košů **zdravotní plnění** a
+**rekreace, sport a kultura** podle § 6 odst. 9 písm. d); příspěvek na
+stravování, spoření na stáří a přechodné ubytování jsou uznatelné celé a
+nedělí se. Předkontaci nastavíte v
+[Nastavení mezd](73_Nastaveni_mezd.md#7381-predkontace-pro-zvlastni-mzdove-situace).
+
+Nepeněžní plnění, které nemá vlastní dvojici účtů, se do mzdového deníku
+nezaúčtuje vůbec — náklad je v knihách už ze zdrojového dokladu a mzdový zápis
+by ho zaúčtoval podruhé. Do daně a pojistného přitom vstupuje normálně; jak se
+to projeví v porovnání, popisuje
+[Shoda účtování mezd](64_Shoda_uctovani_mezd.md#6481-ucetne-neutralni-nepenezni-plneni).
 
 #### Přehled čerpání košů za firmu
 

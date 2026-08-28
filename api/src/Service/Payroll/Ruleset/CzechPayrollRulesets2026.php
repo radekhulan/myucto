@@ -383,6 +383,44 @@ final class CzechPayrollRulesets2026
                 'leave.minimum_continuous_calendar_days' => PayrollRuleValue::integer(28),
                 'leave.minimum_worked_week_multiples' => PayrollRuleValue::integer(4),
                 'leave.weeks_per_year' => PayrollRuleValue::integer(52),
+                // ── Zákonné příplatky ke mzdě, § 114 až § 118 zákoníku práce ──────
+                //
+                // Sazba i ZÁKLAD jsou parametry, ne konstanty v kalkulátoru: § 117
+                // jako jediný počítá z minimální mzdy, ostatní z průměrného výdělku,
+                // a kdyby to bylo napsané v kódu, změna základu by znamenala
+                // nasazení. Základ je proto text (`average_earning` /
+                // `minimum_wage_hourly`), který čte
+                // {@see \MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeBasis}.
+                //
+                // Všechny sazby jsou ZÁKONNÉ MINIMUM. Vyšší sjednaná sazba je
+                // vlastnost pracovního vztahu, ne legislativy, a bydlí
+                // v `payroll_employment_surcharge_policies` (migrace 1624).
+                //
+                // § 117 odst. 2 říká „nejméně 10 % základní sazby minimální mzdy",
+                // tedy sazby pro čtyřicetihodinový týden. NEPŘEPOČÍTÁVÁ se na kratší
+                // úvazek — na rozdíl od minima průměrného výdělku podle § 357, kde
+                // přepočet dělá {@see \MyInvoice\Service\Payroll\Absence\MinimumWageFloor}.
+                'surcharge.difficult_environment.basis' => PayrollRuleValue::text('minimum_wage_hourly'),
+                'surcharge.difficult_environment.rate' => PayrollRuleValue::rate('0.10'),
+                // § 115 odst. 2 — příplatek NEJMÉNĚ ve výši průměrného výdělku,
+                // tedy 100 %, a jen tehdy, byl-li sjednán MÍSTO náhradního volna.
+                'surcharge.holiday.basis' => PayrollRuleValue::text('average_earning'),
+                'surcharge.holiday.rate' => PayrollRuleValue::rate('1.00'),
+                // § 115 odst. 1 a § 114 odst. 2 — náhradní volno do konce třetího
+                // kalendářního měsíce následujícího po výkonu práce.
+                'surcharge.holiday.time_off_months' => PayrollRuleValue::integer(3),
+                'surcharge.night.basis' => PayrollRuleValue::text('average_earning'),
+                'surcharge.night.rate' => PayrollRuleValue::rate('0.10'),
+                // § 78 odst. 1 písm. j) a k) — noční doba je doba mezi 22:00 a 6:00.
+                // Nepoužívá se k výpočtu, ale k tomu, aby se do příplatku nedostal
+                // interval, který noční prací být nemůže.
+                'surcharge.night.window_end_hour' => PayrollRuleValue::integer(6),
+                'surcharge.night.window_start_hour' => PayrollRuleValue::integer(22),
+                'surcharge.overtime.basis' => PayrollRuleValue::text('average_earning'),
+                'surcharge.overtime.rate' => PayrollRuleValue::rate('0.25'),
+                'surcharge.overtime.time_off_months' => PayrollRuleValue::integer(3),
+                'surcharge.weekend.basis' => PayrollRuleValue::text('average_earning'),
+                'surcharge.weekend.rate' => PayrollRuleValue::rate('0.10'),
                 'wage_compensation.compensation_rate' => PayrollRuleValue::rate('0.60'),
                 'wage_compensation.hourly_boundary_1_minor' => PayrollRuleValue::moneyMinor(28_578),
                 'wage_compensation.hourly_boundary_2_minor' => PayrollRuleValue::moneyMinor(42_858),

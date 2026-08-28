@@ -16,6 +16,30 @@ use InvalidArgumentException;
  */
 final class PayrollRulesetYearCoverage
 {
+    /**
+     * Domény, bez kterých se mzdový rok nedá spočítat.
+     *
+     * Bydlí tady, a ne ve {@see \MyInvoice\Service\Payroll\SupportMatrix}, kde
+     * dřív stály: ptá se na ně i výhled pokrytí příštích let
+     * ({@see PayrollRulesetYearOutlook}) a dvě kopie téhož seznamu by se
+     * rozešly přesně v okamžiku, kdy by na pokrytí začala záviset nová doména —
+     * matice by rok přestala hlásit jako podporovaný, ale výhled by na jeho
+     * chybějící sadu neupozornil.
+     *
+     * Cestovní náhrady, exekuční srážky, lhůty, číselníky ani podání v seznamu
+     * NEJSOU: jejich chybějící sada zablokuje jen svou vlastní agendu, ne výpočet
+     * mzdy jako takový.
+     *
+     * @var non-empty-list<PayrollRulesetDomain>
+     */
+    public const CALCULATION_CRITICAL_DOMAINS = [
+        PayrollRulesetDomain::IncomeTax,
+        PayrollRulesetDomain::SocialInsurance,
+        PayrollRulesetDomain::HealthInsurance,
+        PayrollRulesetDomain::EmploymentThresholds,
+        PayrollRulesetDomain::CompensationAverages,
+    ];
+
     public static function coversDate(
         PayrollRulesetProvider $rulesets,
         PayrollRulesetDomain $domain,
@@ -140,8 +164,15 @@ final class PayrollRulesetYearCoverage
     }
 
     /**
-     * Účinné intervaly domény, seřazené a bez překryvů (překryv zakazuje už
+     * ÚČINNÉ intervaly domény, seřazené a bez překryvů (překryv zakazuje už
      * {@see PayrollRulesetProvider}).
+     *
+     * Účinná je jen verze ve stavu `active`. Do 8/2026 se sem počítalo cokoli
+     * kromě `superseded`, což je fail-open: rozpracovaná sada na příští rok
+     * (`draft`/`reviewed`, tedy přesně to, co v administraci vznikne jako první)
+     * by rok rozsvítila v {@see \MyInvoice\Service\Payroll\SupportMatrix} jako
+     * podporovaný, ačkoli by `forCalculation()` na témže roce fail-closed
+     * selhalo. Pokrytí a spočitatelnost si musí odpovídat, jinak matice lže.
      *
      * @return list<array{from:string,to:string}>
      */
@@ -153,7 +184,7 @@ final class PayrollRulesetYearCoverage
         foreach ($rulesets->versions() as $version) {
             if (
                 $version->domain !== $domain
-                || $version->lifecycle === PayrollRulesetLifecycle::Superseded
+                || $version->lifecycle !== PayrollRulesetLifecycle::Active
             ) {
                 continue;
             }

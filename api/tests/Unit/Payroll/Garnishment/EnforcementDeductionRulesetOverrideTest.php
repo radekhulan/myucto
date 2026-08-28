@@ -222,8 +222,14 @@ final class EnforcementDeductionRulesetOverrideTest extends TestCase
 
     private function defaultVersion(): PayrollRulesetVersion
     {
+        // Podle ID, ne podle domény: od doplnění ročníku 2025 drží výchozí registry
+        // exekučních srážek DVĚ verze a „první v doméně“ by vrátilo tu starší,
+        // takže by se test o roku 2026 tiše počítal hodnotami roku 2025.
         foreach (PayrollRulesetRegistry::defaults()->versions() as $version) {
-            if ($version->domain === PayrollRulesetDomain::EnforcementDeductions) {
+            if (
+                $version->domain === PayrollRulesetDomain::EnforcementDeductions
+                && $version->id === self::RULESET_ID
+            ) {
                 return $version;
             }
         }

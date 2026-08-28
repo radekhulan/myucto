@@ -69,7 +69,10 @@ bez ní. Neznámý kód pojišťovny proto celé založení odmítne a nic se ne
 Zaměstnance bez českého rodného čísla lze založit bez náhradní hodnoty.
 EČP, VČP a zahraniční identifikátor se vedou samostatně a lze je doplnit
 přímo v běžné editaci; úplná osobní evidence dál uchovává jejich 1:N historii.
-Rodné číslo se v seznamu nezobrazuje. Tlačítko zůstává viditelné
+Rodné číslo se v seznamu nezobrazuje. Kde se maskované rodné číslo zobrazuje
+jinde, jsou z něj vidět už jen **poslední dvě číslice**: se čtyřmi šlo celé
+rodné číslo dopočítat z data narození a pohlaví. Otevřít celou hodnotu lze jen
+samostatnou oprávněnou akcí, která se zaznamenává. Tlačítko zůstává viditelné
 i uživateli bez práva zápisu, ale je neaktivní a vysvětlí chybějící oprávnění.
 
 Hvězdička u popisku znamená, že bez toho pole uložení neprojde. Při zakládání
@@ -299,6 +302,16 @@ kroku nebo návrat ze skončeného vztahu aplikace odmítne.
 Skončení vztah nemaže. Zůstává dostupný pro pozdější doplatek, opravu, podání a
 dohledání tehdy platných údajů. Archivace jej pouze odklidí z aktivního workflow.
 
+Oznamovací povinnosti vůči zdravotní pojišťovně se odvozují od **skutečného**
+nástupu, je-li vyplněný; teprve když není, použije se plánovaný. Vztah označený
+jako **Nenastoupil** ani archivovaný vztah už žádnou oznamovací povinnost
+nevytváří.
+
+> [!WARNING]
+> Vztah proto vždy nejdřív **ukončete** a teprve potom případně archivujte.
+> Archivací neukončeného vztahu by z přehledu zmizela odhláška ze zdravotního
+> pojištění, kterou je stále nutné podat.
+
 ## 69.11 Historie smluvních podmínek a souběhy
 
 Tlačítko **Nová verze podmínek** založí další účinný interval. Předchozí verzi
@@ -412,6 +425,36 @@ dohoda, registrace a změny pro zdravotní pojišťovnu a ČSSZ/JMHZ, daňové
 prohlášení, výstupní doklady, kontrola exekucí či insolvence a kontrola
 pozdějšího doplatku. U každé položky je termín a stav **Nesplněno**,
 **Splněno** nebo **Netýká se**.
+
+Ve výstupní části jsou navíc **Evidenční list důchodového pojištění (ELDP)**
+a **Potvrzení o zdanitelných příjmech**. Položka, která na konkrétní vztah
+nedopadá, se vůbec nezaloží — ELDP se u vztahů skončených **od 1. 4. 2026**
+nezakládá, protože jej podle pravidel JMHZ sestavuje ČSSZ z měsíčního hlášení.
+Potvrzení o zdanitelných příjmech termín nemá záměrně: § 38j odst. 3 zákona
+o daních z příjmů počítá lhůtu od žádosti zaměstnance, a tu aplikace neeviduje.
+
+Termíny u položek checklistu se neodvozují ode dne události, ale z pravidel,
+která už aplikace používá jinde, takže se s nimi nemohou rozejít. U několika
+lhůt aplikace přiznává, že je nemá doložené z ověřeného zdroje — u prohlášení
+poplatníka (§ 38k odst. 4 ZDP), pracovní smlouvy ke dni nástupu (§ 34 odst. 2
+zákoníku práce) a zápočtového listu ke dni skončení (§ 313 odst. 1 zákoníku
+práce, jehož rozsah novela pro rok 2025 zúžila). U těchto položek si termín
+ověřte podle platného znění předpisu.
+
+### 69.12.1 Upozornění na chybějící přihlášku zaměstnance
+
+Není-li zaměstnanec přihlášen na ČSSZ nebo u zdravotní pojišťovny, mzdový běh
+to ohlásí jako **varování**, ne jako blokaci — mzda za odpracovanou práci
+náleží bez ohledu na to, jestli přihláška odešla. Varování je nutné vzít na
+vědomí, aby šel běh schválit.
+
+Aby nevznikal planý poplach, ozve se jen tehdy, když platí všechno naráz:
+příslušná položka nástupního checklistu je nesplněná, k vztahu není evidovaná
+žádná odpovídající povinnost podání, vztah není označen jako **Nenastoupil**
+ani archivovaný, nástup už nastal a vztah zakládá účast na pojištění. Dohoda
+s automatickým posouzením účasti, vztah bez účasti i cizinec s formulářem A1
+tedy mlčí. Podali-li jste přihlášku mimo aplikaci, odškrtněte položku
+checklistu — tím varování umlčíte.
 
 Časová osa zachovává stavové přechody, změny checklistu i rozdíl každé smluvní
 verze. Pokud jiný uživatel mezitím vztah změnil, starší formulář se neuloží a je

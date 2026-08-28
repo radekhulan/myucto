@@ -40,7 +40,7 @@ final class PayrollRulesetRegistry
 
     public static function defaults(): PayrollRulesetProvider
     {
-        return CzechPayrollRulesets2026::provider();
+        return CzechPayrollRulesets::provider();
     }
 
     /**

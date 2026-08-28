@@ -25,6 +25,7 @@ import { loadPayrollOffices } from '@/composables/usePayrollOffices'
 import { useToast } from '@/composables/useToast'
 import EmploymentAgendaPanel from './EmploymentAgendaPanel.vue'
 import EmploymentDimensionsPanel from './EmploymentDimensionsPanel.vue'
+import EmploymentSurchargePolicyPanel from './EmploymentSurchargePolicyPanel.vue'
 import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentJmhzIdentityPanel from './EmploymentJmhzIdentityPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
@@ -1039,6 +1040,11 @@ const actions = computed<ActionItem[]>(() => [
     />
 
     <EmploymentDimensionsPanel
+      :employment-id="employment.id"
+      :can-write="canWrite"
+    />
+
+    <EmploymentSurchargePolicyPanel
       :employment-id="employment.id"
       :can-write="canWrite"
     />

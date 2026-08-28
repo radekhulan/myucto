@@ -98,6 +98,7 @@ use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
+use MyInvoice\Action\Payroll\PayrollEmploymentSurchargePolicyAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
 use MyInvoice\Action\Payroll\PayrollHealthNotificationAction;
@@ -1552,6 +1553,18 @@ final class Routes
             $g->get(
                 '/employments/{id:[0-9]+}/agenda-summary',
                 [PayrollEmploymentAgendaSummaryAction::class, 'show'],
+            );
+            // Sjednané zásady zákonných příplatků § 114 až § 118 ZP. Bez nich
+            // nešel schválit měsíc s prací o svátku ani ve ztíženém prostředí:
+            // materializace příplatků je fail-closed a sjednat se to dosud
+            // nedalo nikde.
+            $g->get(
+                '/employments/{id:[0-9]+}/surcharge-policies',
+                [PayrollEmploymentSurchargePolicyAction::class, 'list'],
+            );
+            $g->post(
+                '/employments/{id:[0-9]+}/surcharge-policies',
+                [PayrollEmploymentSurchargePolicyAction::class, 'create'],
             );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);

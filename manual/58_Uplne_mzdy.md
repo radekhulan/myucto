@@ -33,6 +33,30 @@ Nastavení proveďte v tomto pořadí. Údaje z předchozího kroku se používa
 následujících obrazovkách, takže přeskočení obvykle skončí až blokací při
 výpočtu nebo podání.
 
+Na přehledu mezd vás tímto pořadím provede **Průvodce prvním nastavením mezd**
+(nadpis **Rozjezd mezd krok za krokem**). Má jedenáct kroků ve třech skupinách:
+
+1. **Nastavení zaměstnavatele** — údaje, bez kterých nejde spočítat ani odvést
+   mzdu: zaměstnavatel a mzdové účtárny, registrace u ČSSZ a pojišťoven,
+   platební účty institucí, předkontace mezd, mzdová politika a připravenost
+   a odesílání podání datovou schránkou.
+2. **Lidé** — první zaměstnanec, jeho pracovní vztah a odměna, zákonná evidence
+   a mzdové složky.
+3. **První mzdový měsíc** — jediný krok, kterým průvodce předá štafetu běžnému
+   měsíčnímu zpracování.
+
+Každý krok vede přímo na obrazovku, kde se údaj vyplňuje, a dá se odškrtnout.
+Kroky, na které nemáte oprávnění, se nenabízejí; prázdná skupina se skryje.
+Odškrtnuté kroky a případné skrytí průvodce se ukládají k vašemu uživatelskému
+účtu, takže vám zůstanou i na jiném počítači nebo v jiném prohlížeči.
+
+Průvodce zmizí sám, jakmile má firma první vypořádaný mzdový běh. Firma, která
+mzdy dávno zpracovává, ho tedy neuvidí vůbec.
+
+**Nezaměňujte ho s průvodcem měsíčním tokem.** Průvodce **Jak to funguje**
+zůstává beze změny a popisuje **opakovaný měsíční postup**; průvodce prvním
+nastavením řeší **jednorázové rozjetí modulu** a stojí nad ním.
+
 ### 58.2.1 1. Aktivujte mzdy a určete první období
 
 V **Firma → Nastavení** zapněte **Vést mzdy** a zvolte první měsíc, od kterého
@@ -71,11 +95,20 @@ jméno a heslo, jméno, heslo a SMS kód nebo uložený firemní certifikát.
 Zapamatované jméno a komunikační kód Mobilního klíče se vážou na kombinaci
 firma + přihlášený uživatel + prostředí; nejde o společné firemní heslo.
 
+Datovou schránkou z mezd chodí **přehledy a hlášení zdravotním pojišťovnám**
+(HOZ, PPZ), **měsíční hlášení zaměstnavatele ČSSZ (JMHZ)** jako alternativa
+k přímému kanálu VREP a **součinnost exekutorům**. Daňová podání — přiznání
+k DPH, kontrolní a souhrnné hlášení, přiznání k dani z příjmů — datovkou
+z aplikace **nechodí**; ta jdou přes EPO. Poslat je datovkou lze, ale takové
+podání nedostane potvrzení s podacím číslem, jen dodejku.
+
 Inbox se nikdy nevybírá automaticky. Nové zprávy se načtou až po otevření
 **Příchozích zpráv**, volbě přihlášení, potvrzení právního významu vyzvednutí a
-stisknutí akce uživatelem. Stejně tak se žádné podání neodešle jen tím, že bylo
-vytvořeno XML nebo vloženo do odchozí fronty. Podrobný postup je v
-[Podáních a hlášeních](68_Podani_a_hlaseni.md).
+stisknutí akce uživatelem. Odesílací brána zprávy číst neumí vůbec: dokáže jen
+vložit koncept, který uživatel po přihlášení v ISDS odešle. **Doručenku proto
+stáhněte v datové schránce a nahrajte ji k podání ručně.** Stejně tak se žádné
+podání neodešle jen tím, že bylo vytvořeno XML nebo vloženo do odchozí fronty.
+Podrobný postup je v [Podáních a hlášeních](68_Podani_a_hlaseni.md).
 
 ### 58.2.4 4. Zkontrolujte legislativní sady
 
@@ -130,13 +163,22 @@ kontroly úplnosti nastavení a jednotlivých podání zůstanou zachované.
 | 1 | Otevře správnou firmu a měsíc, zkontroluje nástupy, výstupy a změny podmínek. | [Zaměstnanci](69_Zamestnanci.md) |
 | 2 | Doplní směny, odpracovanou dobu, absence, dovolenou a pracovní cesty. | [Docházka a směny](60_Dochazka_a_smeny.md), [Absence a dovolená](59_Absence_a_dovolena.md), [Cestovní náhrady](61_Cestovni_nahrady.md) |
 | 3 | Zadá odměny, náhrady, srážky a ostatní měsíční změny; pro větší počet lidí použije rychlý hromadný vstup a vyhledávání. | [Rychlý měsíční vstup](62_Rychly_mesicni_vstup.md), [Mzdové složky a vstupy](74_Mzdove_slozky_a_vstupy.md) |
-| 4 | Schválí vstupy, spustí výpočet a projde blokace i varování. | [Mzdové běhy](63_Mzdove_behy.md) |
+| 4 | Uzamkne vstupy (zbylé koncepty schválí jedním tlačítkem přímo u blokace), spustí výpočet a projde blokace i varování. | [Mzdové běhy](63_Mzdove_behy.md) |
 | 5 | Zkontroluje čisté mzdy, odvody, daně, součty podle zaměstnanců a případné srážky nebo exekuce. | [Mzdové běhy](63_Mzdove_behy.md), [Srážky a exekuce](71_Srazky_a_exekuce.md) |
 | 6 | Schválí výslednou revizi. Při nalezené chybě opraví zdrojový údaj a vytvoří novou revizi; nepřepisuje schválený otisk. | [Mzdové běhy](63_Mzdove_behy.md) |
 | 7 | Vygeneruje výplatní pásky a povinné dokumenty a zkontroluje stav po jednotlivých osobách. | [Dokumenty a výstupy](66_Dokumenty_a_vystupy.md) |
 | 8 | Připraví a provede výplaty, odvody a ostatní platby; následně je spáruje s bankou. | [Mzdové příkazy a úhrady](65_Platby_a_uhrady.md) |
 | 9 | Připraví JMHZ a hlášení zdravotním pojišťovnám, zkontroluje XML/PDF, zvolí kanál a každé odeslání výslovně potvrdí. | [Podání a hlášení](68_Podani_a_hlaseni.md) |
 | 10 | Zaúčtuje mzdy a porovná mzdovou revizi, platby, účetní zápisy a podání. | [Shoda účtování mezd](64_Shoda_uctovani_mezd.md) |
+
+**Příplatky za práci v noci, o víkendu, ve svátek a ve ztíženém prostředí
+vznikají ze schválené docházky** — jinou cestou je zadat nelze, a docházku je
+proto potřeba schválit dřív, než se u běhu uzamknou vstupy. Firma, která
+docházku nevede, tyto příplatky z aplikace nedostane a musí je řešit vlastními
+vstupy. Příplatky za svátek (§ 115) a za ztížené prostředí (§ 117) zatím nelze
+dokončit vůbec, protože chybí obrazovka pro sjednanou zásadu a pro počet
+ztěžujících vlivů. Podrobnosti a omezení jsou v
+[Docházce a směnách](60_Dochazka_a_smeny.md#6093-zakonne-priplatky-ke-mzde-114-az-118).
 
 Zelený výpočet ještě neznamená dokončený měsíc. Měsíc je prakticky hotový až
 tehdy, když souhlasí schválená revize, dokumenty, skutečně provedené platby,
@@ -256,6 +298,7 @@ nevratné kroky jsou oddělené:
 | Nastavení zaměstnavatele | `payroll.settings` |
 | Změna osoby a ověření výplatního účtu | `payroll.person.write` |
 | Vztahy, podmínky a životní cyklus | `payroll.employment.write` |
+| Schválení mzdových vstupů a běhu | `payroll.approve` |
 | Platby, dávky a párování | `payroll.payments` |
 | Dokumenty a měsíční balíček | `payroll.documents` |
 | Podání a hlášení | `payroll.submissions` |

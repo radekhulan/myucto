@@ -83,6 +83,18 @@ například odvody za 05/2026 nevyjdou na sobotu 20. 6. 2026, ale na pondělí
 22. 6. 2026. Posunuté datum je i to, co uvidíš v seznamu závazků a co se použije
 pro platební dávku; výplatní termín se neposouvá, ten se řídí mzdovým během.
 
+Zákonná lhůta je ale splněná až **připsáním** částky na účet instituce (§ 9
+odst. 2 zákona č. 589/1992 Sb.), ne odesláním příkazu. Dávka složená výhradně
+ze zákonných odvodů proto dostane datum příkazu o **jeden pracovní den dříve**,
+než je zákonný termín — poskytovatel platebních služeb musí částku připsat
+nejpozději do konce následujícího pracovního dne (§ 109 odst. 1 zákona
+č. 370/2017 Sb. o platebním styku). U takového závazku je vidět obojí:
+zákonný termín i předsunuté datum příkazu, včetně označení, že k předsunutí
+došlo. Delší rezervu aplikace nedělá, aby zbytečně nevázala peníze.
+
+Předsouvá se **jen** dávka složená výhradně z odvodů. Závazek čisté mzdy má
+splatnost rovnou datu výplaty ze mzdového běhu a to se neposouvá.
+
 Opakované stisknutí **Připravit závazky** je bezpečné a nevytvoří duplicity.
 Opravná revize nezapisuje znovu celou mzdu, ale jen rozdíl proti předchozím
 závazkům. Seznam ukazuje příjemce, druh závazku, způsob úhrady, splatnost,
@@ -98,11 +110,27 @@ firmě skutečně připsány nebo přijaty do pokladny. Změna závazku, dokladu
 reverze přidá samostatnou neměnnou událost s vlastním bankovním důkazem nebo
 naváže na stornovaný původní pokladní doklad.
 
+**Variabilní symbol u instituce je povinný.** Bez něj by odvod nebylo možné
+spárovat s předpisem, takže prázdný symbol už aplikace tiše nenahradí nulou —
+zastaví přípravu i export a napíše, kde symbol doplnit: u sociálního pojistného
+je to variabilní symbol **mzdové účtárny**, u ostatních institucí **platební
+účet instituce** v **Mzdy → Nastavení mezd → Účty institucí**, a to i s názvem
+konkrétní instituce. Kontrola běží dvakrát — při sestavení závazku a znovu před
+exportem — protože dávky připravené dříve mají symbol zmrazený uvnitř platební
+instrukce. Nulu zapíše aplikace jen tehdy, když ji účetní výslovně povolí; je
+to vědomé rozhodnutí, ne výchozí stav. Závazek čisté mzdy zaměstnance
+variabilní symbol mít nemusí.
+
 Na kartě **Co zaplatit** vybereš připravené závazky; karta **Mzdové příkazy**
 ukazuje už vytvořené dávky. Aplikace podle
 výplatních cílů nabídne účet plátce a formát ABO nebo SEPA, znovu ověří
 nezměněné účty příjemců a vytvoří dávku. U zdravotní pojišťovny, ČSSZ i
-finančního úřadu použije přesné zmrazené VS, SS a KS. Export se ukládá
+finančního úřadu použije přesné zmrazené VS, SS a KS. V SEPA formátu, který
+samostatná pole pro české symboly nemá, jdou symboly do zprávy pro příjemce
+v ustáleném tvaru `/VS/…/SS/…/KS/…` a stojí na jejím začátku, aby přežily
+zkrácení. Jak je konkrétní banka převede zpět, si ověřte u ní.
+
+Export se ukládá
 šifrovaně přesně
 v těch bajtech, které se stáhnou do banky. Opakování se stejným klíčem vrátí
 tentýž export a nevytvoří další ekonomický závazek. Stažení vyžaduje právo
@@ -112,7 +140,11 @@ Na kartě **Spárování úhrad** vybereš konkrétní alokaci závazku a kompat
 bankovní pohyb nebo zaúčtovaný pokladní doklad. Lze zapsat i částečnou úhradu.
 Historie je neměnná: vratka nebo storno nevynuluje původní záznam, ale přidá
 samostatnou reverzní událost s vlastním důkazem. Jeden bankovní nebo pokladní
-důkaz nesmí současně převzít fakturace ani jiné párování.
+důkaz nesmí současně převzít fakturace ani jiné párování: bankovní pohyb, který
+už spotřebovala mzda, aplikace v bance nenabídne k automatickému spárování
+s fakturou ani nedovolí přijmout návrh na jeho spárování. **Ruční** označení
+faktury jako uhrazené touto kontrolou zatím neprochází, proto u pohybu
+patřícího ke mzdám ruční párování nepoužívejte.
 
 Filtr období patří mzdové revizi, ne datu vytvoření dávky. V nabídce důkazů
 proto zůstane i předčasná nebo opožděná platba vztahující se k otevřenému

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Component;
 
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollQuickSurchargeCalculator;
+use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
+
 final class PayrollQuickInputValidator
 {
     /**
@@ -20,7 +23,8 @@ final class PayrollQuickInputValidator
      *     overtime_average_snapshot_id:?int,
      *     overtime_average_snapshot_version:?int,
      *     bonus_amount_minor:int,
-     *     versions:array{base:?int,overtime:?int,bonus:?int}
+     *     surcharges:array<string,array{hours_milli:?int,factors:?int}>,
+     *     versions:array{base:?int,overtime:?int,bonus:?int,surcharges:array<string,?int>}
      *   }>
      * }
      */
@@ -100,15 +104,101 @@ final class PayrollQuickInputValidator
                     $raw['bonus_amount_minor'] ?? null,
                     'bonus_amount_minor',
                 ),
+                'surcharges' => $this->surcharges($raw),
                 'versions' => [
                     'base' => $this->nullablePositiveInt($versions['base'] ?? null, 'versions.base'),
                     'overtime' => $this->nullablePositiveInt($versions['overtime'] ?? null, 'versions.overtime'),
                     'bonus' => $this->nullablePositiveInt($versions['bonus'] ?? null, 'versions.bonus'),
+                    'surcharges' => $this->surchargeVersions($versions),
                 ],
             ];
         }
 
         return ['period' => $period, 'rows' => $rows];
+    }
+
+    /**
+     * Ručně zadané hodiny zákonných příplatků § 115 až § 118.
+     *
+     * Klíč, který v požadavku není, znamená „tenhle druh neřeším" — ne
+     * „vyprázdnit". Rozdíl je podstatný: starší klient, který o příplatcích neví,
+     * by jinak každým uložením zrušil, co zadal někdo jiný v novějším.
+     * Vyprázdnění se posílá výslovným `null`.
+     *
+     * @param array<string,mixed> $raw
+     * @return array<string,array{hours_milli:?int,factors:?int}>
+     */
+    private function surcharges(array $raw): array
+    {
+        $input = $raw['surcharges'] ?? null;
+        if ($input === null) {
+            return [];
+        }
+        if (!is_array($input)) {
+            throw new \InvalidArgumentException('surcharges musí být objekt podle druhu příplatku.');
+        }
+
+        $result = [];
+        foreach ($input as $key => $value) {
+            $kind = PayrollSurchargeKind::tryFrom((string) $key);
+            if ($kind === null || !$kind->allowsQuickManualEntry()) {
+                throw new \InvalidArgumentException(
+                    "Druh příplatku {$key} nelze v rychlém měsíčním vstupu zadat."
+                );
+            }
+            if (!is_array($value)) {
+                throw new \InvalidArgumentException(
+                    "surcharges.{$key} musí být objekt s počtem hodin."
+                );
+            }
+            $factors = $this->nullablePositiveInt(
+                $value['factors'] ?? null,
+                "surcharges.{$key}.factors",
+            );
+            if ($factors !== null && $factors > 255) {
+                throw new \InvalidArgumentException(
+                    'Počet ztěžujících vlivů podle § 117 musí být 1 až 255.'
+                );
+            }
+            if ($factors !== null && $kind !== PayrollSurchargeKind::DifficultEnvironment) {
+                // Násobit noční nebo víkendový příplatek počtem vlivů zákon
+                // nedovoluje. Kdyby to prošlo, byl by to nenápadný přeplatek.
+                throw new \InvalidArgumentException(
+                    'Počet ztěžujících vlivů má smysl jen u příplatku § 117.'
+                );
+            }
+            $result[$kind->value] = [
+                'hours_milli' => $this->nullableNonNegativeInt(
+                    $value['hours_milli'] ?? null,
+                    "surcharges.{$key}.hours_milli",
+                    PayrollQuickSurchargeCalculator::MAX_HOURS_MILLI,
+                ),
+                'factors' => $factors,
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<array-key,mixed> $versions
+     * @return array<string,?int>
+     */
+    private function surchargeVersions(array $versions): array
+    {
+        $raw = $versions['surcharges'] ?? null;
+        if ($raw !== null && !is_array($raw)) {
+            throw new \InvalidArgumentException('versions.surcharges musí být objekt.');
+        }
+        $result = [];
+        foreach (PayrollSurchargeKind::quickManualEntry() as $kind) {
+            $result[$kind->value] = $this->nullablePositiveInt(
+                is_array($raw) ? ($raw[$kind->value] ?? null) : null,
+                "versions.surcharges.{$kind->value}",
+            );
+        }
+
+        return $result;
     }
 
     public function period(mixed $value): string

@@ -271,6 +271,13 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'ODSTUPNE',
             'PRECHODNE_UBYTOVANI',
             'PREMIE_PRIPLATKY',
+            // Zákonné příplatky § 114 až § 118 ZP mají od W16 vlastní kód každý,
+            // aby šlo z mzdového listu doložit, který nárok byl uspokojen.
+            'PRIPLATEK_NOCNI',
+            'PRIPLATEK_PRESCAS',
+            'PRIPLATEK_SVATEK',
+            'PRIPLATEK_VIKEND',
+            'PRIPLATEK_ZTIZENE_PROSTREDI',
             'PRISPEVEK_DLOUHODOBA_PECE',
             'PRISPEVEK_PENZE_ZIVOTNI',
             'PRISPEVEK_RIZIKOVE_SPORENI',

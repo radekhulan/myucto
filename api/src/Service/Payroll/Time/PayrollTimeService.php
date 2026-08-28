@@ -525,7 +525,38 @@ final class PayrollTimeService
             $this->nonNegativeInt($input, 'row_version'),
             $this->nonNegativeInt($input, 'month_row_version'),
             $userId,
+            // § 117 — počet ztěžujících vlivů PRÁVĚ TOHOTO zápisu. Sloupec na to
+            // je od migrace 1625, ale zapsat ho dosud nešlo, takže se výpočet
+            // příplatku opíral výhradně o obvyklý počet na zásadě vztahu.
+            // Prázdno není nula: znamená „u tohoto zápisu se od obvyklého stavu
+            // pracoviště nic neliší".
+            $this->difficultyFactorCount($input, $category),
         );
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     */
+    private function difficultyFactorCount(array $input, string $category): ?int
+    {
+        $value = $this->nullablePositiveInt($input, 'difficulty_factor_count');
+        if ($value === null) {
+            return null;
+        }
+        if ($value > 255) {
+            throw new \InvalidArgumentException(
+                'Počet ztěžujících vlivů podle § 117 musí být 1 až 255.'
+            );
+        }
+        if ($category !== 'difficult_environment') {
+            // Násobit noční nebo víkendový příplatek počtem vlivů zákon
+            // nedovoluje; tichý přeplatek by se poznal až při kontrole.
+            throw new \InvalidArgumentException(
+                'Počet ztěžujících vlivů lze zadat jen u zápisu ve ztíženém pracovním prostředí.'
+            );
+        }
+
+        return $value;
     }
 
     /**

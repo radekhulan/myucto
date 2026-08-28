@@ -104,8 +104,17 @@ final class PayrollRulesetAdminService
             ];
         }
 
+        // Výhled na příští roky. Chybějící sada na PŘÍŠTÍ rok je jediná porucha
+        // téhle obrazovky, kterou nejde odhalit pohledem na existující verze —
+        // ty jsou všechny v pořádku, jen žádná nepokrývá leden. Bez výhledu by
+        // se na to přišlo až prvním lednovým výpočtem.
+        $provider = $this->registry->provider();
+        $outlook = PayrollRulesetYearOutlook::forProvider($provider);
+
         return [
             'domains' => $domains,
+            'year_outlook' => $outlook,
+            'year_outlook_severity' => PayrollRulesetYearOutlook::worstSeverity($provider),
             'override_storage_available' => $this->overrides->isAvailable(),
             'degraded_reason' => $this->registry->degradedReason(),
             'generated_at' => (new DateTimeImmutable('now'))->format('Y-m-d H:i:s'),

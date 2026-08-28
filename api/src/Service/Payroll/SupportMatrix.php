@@ -10,7 +10,7 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 final class SupportMatrix
 {
-    public const VERSION = '2026-08-27-v10';
+    public const VERSION = '2026-08-28-v11';
 
     /**
      * Mzdový rok je podporovaný jen tehdy, když ho pokrývají VŠECHNY výpočtově
@@ -18,15 +18,15 @@ final class SupportMatrix
      * z registry a rok navíc se zpřístupní přidáním rulesetu, ne novou verzí
      * aplikace. Rok bez rulesetu tu nikdy nesmí svítit jako podporovaný.
      *
+     * Seznam samotný bydlí v {@see PayrollRulesetYearCoverage}, protože se na něj
+     * ptá i výhled pokrytí příštích let
+     * ({@see \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook}) — dvě
+     * kopie by se rozešly a rok by pak buď tiše vypadl z podpory, nebo by na jeho
+     * chybějící sadu nikdo neupozornil.
+     *
      * @var non-empty-list<PayrollRulesetDomain>
      */
-    private const REQUIRED_DOMAINS = [
-        PayrollRulesetDomain::IncomeTax,
-        PayrollRulesetDomain::SocialInsurance,
-        PayrollRulesetDomain::HealthInsurance,
-        PayrollRulesetDomain::EmploymentThresholds,
-        PayrollRulesetDomain::CompensationAverages,
-    ];
+    private const REQUIRED_DOMAINS = PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS;
 
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 

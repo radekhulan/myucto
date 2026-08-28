@@ -11,10 +11,16 @@ Musí být dokončeno nastavení zaměstnavatele, zaměstnanců, vztahů, kalend
 ## 63.3 Krokový postup
 
 1. Otevřete **Mzdy → Mzdové běhy**, zvolte rok a měsíc a vytvořte návrh.
-2. Spusťte výpočet a projděte chyby, varování i výsledky jednotlivých zaměstnanců.
-3. Porovnejte souhrny s docházkou, vstupy, srážkami a očekávanými odvody.
-4. Po opravě zdroje spusťte nový výpočet; neupravujte vypočtený výsledek bez podkladu.
-5. Uzavřete pouze schválený běh a následné činnosti provádějte z této uzavřené revize.
+   Předtím schvalte měsíc docházky — zákonné příplatky vznikají jeho schválením
+   a po uzamčení vstupů už se do běhu nedostanou.
+2. Uzamkněte vstupy. Zůstal-li některý vstup v konceptu, běh to ohlásí jako
+   blokaci a přímo u ní nabídne **Schválit vše (N)**; nemusíte kvůli tomu
+   odcházet na jinou obrazovku.
+3. Spusťte výpočet a projděte chyby, varování i výsledky jednotlivých zaměstnanců.
+4. Porovnejte souhrny s docházkou, vstupy, srážkami a očekávanými odvody.
+5. Po opravě zdroje spusťte nový výpočet; neupravujte vypočtený výsledek bez podkladu.
+6. Schvalte běh. Samostatný krok **Zkontrolovat** už není povinný — schválení
+   ho provede za vás. Následné činnosti provádějte z této schválené revize.
 
 ## 63.4 Stavy
 
@@ -41,11 +47,30 @@ Po uzavření zkontrolujte [shodu účtování](64_Shoda_uctovani_mezd.md), při
 
 V **Mzdy → Mzdové běhy** založíš zpracování konkrétního měsíce. K období se
 zadává také skutečné datum výplaty; podle něj se vybírají účinná pravidla
-srážek. Jeden běh prochází řízenými kroky **Uzamknout vstupy → Vypočítat →
-Zkontrolovat → Schválit**. Všechny kroky může provést jedna účetní, pokud má
-mzdové oprávnění. Jednotlivé změny a potvrzení zůstávají v auditní stopě, takže
-firma může dobrovolně zapojit další kontrolu bez toho, aby byl běžný tok
-blokován pravidlem čtyř očí.
+srážek. Datum výplaty nesmí být později než poslední den měsíce následujícího
+po měsíci, za který mzda přísluší (§ 141 odst. 1 zákoníku práce); pozdější
+datum aplikace odmítne jako chybu, protože je to kotva, ze které se odvozují
+všechny navazující termíny odvodů.
+
+Běžný běh má tři kroky: **Uzamknout vstupy → Vypočítat → Schválit**. Krok
+**Zkontrolovat** zůstává jako samostatný příkaz pro firmu, která chce mít
+kontrolu vidět jako vlastní událost, ale povinný není — **schválení ji provede
+implicitně** a do historie běhu se zapíše jako kontrola provedená spolu se
+schválením. Všechny kroky může provést jedna účetní, pokud má mzdové oprávnění;
+pravidlo čtyř očí modul nezavádí. Jednotlivé změny a potvrzení zůstávají
+v auditní stopě, takže firma může dobrovolně zapojit další kontrolu bez toho,
+aby byl běžný tok blokován.
+
+Vstupy do běhu se nemusí schvalovat po jednom. **Rychlý měsíční vstup** uloží
+řádky rovnou jako schválené, má-li přihlášený uživatel právo mzdové vstupy
+schvalovat; bez toho práva vznikají koncepty a schválí je někdo jiný.
+Jednotlivé mzdové vstupy zadané v **Mzdy → Mzdové složky a vstupy** vznikají
+vždy jako koncept, protože je nutné je umět ještě upravit i zrušit.
+
+Koncepty, které v běhu zbyly, schválíte hromadně tlačítkem **Schválit vše (N)**
+— buď v mzdových vstupech, nebo přímo u blokace v kartě běhu. Schvaluje se
+najednou až 500 vstupů; už schválený se jen přeskočí, takže je bezpečné
+tlačítko použít znovu. Dvoustupňový režim tedy zůstává možný, jen není povinný.
 
 Skutečně prázdný technický běh lze tlačítkem **Smazat prázdný běh** odstranit
 i po jeho zrušení. Tlačítko se zobrazí pouze tehdy, když běh nemá žádnou revizi,
@@ -57,6 +82,22 @@ Uzamknutí vytvoří neměnný snapshot zaměstnanců, vztahů, složek, data v�
 a měsíčních podkladů srážek. Pozdější změna živé karty už rozpracovanou revizi
 nepřepíše. Oprava schváleného měsíce vytváří novou revizi; původní zůstává
 dohledatelná.
+
+Schválením opravné revize se předchozí schválená revize označí jako
+**nahrazená**. Za jeden běh je tedy vždy právě jedna platná schválená revize
+a nemůže se stát, že by dvě revize současně tvrdily výsledek téhož měsíce.
+Dokumenty vydané z původní revize zůstávají platné a čitelné — každý se váže
+na svou vlastní revizi. Archivní export nese celý řetěz, tedy platnou revizi
+i všechny nahrazené.
+
+Čistá mzda jedné osoby může vyjít **záporně** — typicky když se v měsíci bez
+peněžního příjmu doplácí zdravotní pojištění. Výpočet to nezaokrouhlí na nulu
+ani nezastaví: jde o legitimní stav, ze kterého vzniká **pohledávka za
+zaměstnancem**. Ta se vykazuje samostatně, nesčítá se do čistých mezd a
+nevytvoří platební závazek, takže se nikdy nemůže dostat do odchozí bankovní
+dávky s obráceným znaménkem. Zápočet takové pohledávky v dalším měsíci je
+ruční úkon účetní — § 147 zákoníku práce omezuje, co lze srazit bez souhlasu
+zaměstnance.
 
 Po výpočtu je u běhu dostupný **Rozpad daně ze závislé činnosti**. Pro každého
 zaměstnance ukazuje zdanitelný a zákonně zaokrouhlený základ, základ a sazbu
@@ -107,7 +148,8 @@ V podvojném účetnictví je pro schválenou revizi dostupná stránka
 skutečně zaúčtovaný deník a platební závazky po kategoriích (hrubé mzdy,
 pojistné hrazené zaměstnavatelem, sociální a zdravotní pojištění, daň,
 ostatní srážky, exekuční srážky a čistá mzda) a u každé ukáže, na které
-straně případný rozdíl vznikl. Oprava schváleného měsíce se do porovnání
+straně případný rozdíl vznikl. Účetně neutrální nepeněžní plnění se z hrubých
+mezd vyčleňuje, takže z něj rozdíl nevzniká. Oprava schváleného měsíce se do porovnání
 promítne správně — deník se sčítá napříč všemi revizemi běhu, protože
 rozdílová revize účtuje jen rozdíl proti poslední zaúčtované revizi. Měsíc,
 který ještě nebyl zaúčtován (vypnuté automatické zaúčtování, čekající krok,

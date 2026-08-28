@@ -147,6 +147,24 @@ final class PayrollRuleParameterCatalog
             'leave.minimum_continuous_calendar_days' => 'Nejkratší souvislá část dovolené v kalendářních dnech',
             'leave.minimum_worked_week_multiples' => 'Nejmenší počet odpracovaných násobků týdenní doby pro nárok',
             'leave.weeks_per_year' => 'Počet týdnů v roce pro poměrný nárok na dovolenou',
+            'surcharge.difficult_environment.basis' =>
+                'Základ příplatku za práci ve ztíženém pracovním prostředí',
+            'surcharge.difficult_environment.rate' =>
+                'Sazba příplatku za práci ve ztíženém pracovním prostředí za každý ztěžující vliv',
+            'surcharge.holiday.basis' => 'Základ příplatku za práci ve svátek',
+            'surcharge.holiday.rate' => 'Sazba příplatku za práci ve svátek místo náhradního volna',
+            'surcharge.holiday.time_off_months' =>
+                'Lhůta pro poskytnutí náhradního volna za práci ve svátek v kalendářních měsících',
+            'surcharge.night.basis' => 'Základ příplatku za noční práci',
+            'surcharge.night.rate' => 'Sazba příplatku za noční práci',
+            'surcharge.night.window_end_hour' => 'Konec noční doby',
+            'surcharge.night.window_start_hour' => 'Začátek noční doby',
+            'surcharge.overtime.basis' => 'Základ příplatku za práci přesčas',
+            'surcharge.overtime.rate' => 'Sazba příplatku za práci přesčas',
+            'surcharge.overtime.time_off_months' =>
+                'Lhůta pro poskytnutí náhradního volna za práci přesčas v kalendářních měsících',
+            'surcharge.weekend.basis' => 'Základ příplatku za práci v sobotu a v neděli',
+            'surcharge.weekend.rate' => 'Sazba příplatku za práci v sobotu a v neděli',
             'wage_compensation.compensation_rate' => 'Sazba náhrady mzdy z redukovaného průměrného výdělku',
             'wage_compensation.hourly_boundary_1_minor' => 'První hodinová redukční hranice',
             'wage_compensation.hourly_boundary_2_minor' => 'Druhá hodinová redukční hranice',
@@ -282,6 +300,34 @@ final class PayrollRuleParameterCatalog
                 'action' => 'Běžného zaměstnavatele se to netýká a nic nevyplňujte. Zaměstnáváte-li '
                     . 'sezónní pracovníky v zemědělství na dohodu o provedení práce, uplatněte '
                     . 'slevu ručně a splnění podmínek doložte.',
+            ],
+            // Tři parametry NÍŽE jsou ruční posouzení jen v ročníku 2025, kam se
+            // doplnily zpětně. Ročník 2026 je má jako sazby — vysvětlení se proto
+            // uživateli ukáže jedině u sady, které hodnota opravdu chybí.
+            'employee.discount.working_pensioner' => [
+                'why' => 'Sazbu slevy pracujícího starobního důchodce se pro rok 2025 nepodařilo '
+                    . 'doložit z primárního zdroje se stejnou jistotou jako zbytek dodané sady. '
+                    . 'Sazba, která by se lišila jen o desetinu procenta, by se propsala do každé '
+                    . 'výplaty důchodce, a proto aplikace radši nedosadí nic.',
+                'action' => 'Zaměstnáváte-li pracujícího starobního důchodce a počítáte mu mzdu '
+                    . 'zpětně za rok 2025, doplňte sazbu podle znění § 7 z. č. 589/1992 Sb. '
+                    . 'účinného pro rok 2025. Pro rok 2026 je hodnota dodaná a nic dělat nemusíte.',
+            ],
+            'employer.rate.rescue_and_company_fire_service' => [
+                'why' => 'Zvláštní sazba zaměstnavatele za zdravotnické záchranáře a členy HZS '
+                    . 'podniku se pro rok 2025 nepodařilo doložit z primárního zdroje — sekundární '
+                    . 'zdroje si navíc protiřečí v tom, která sazba patří které kategorii.',
+                'action' => 'Běžného zaměstnavatele se to netýká a nic nevyplňujte. Zaměstnáváte-li '
+                    . 'zdravotnické záchranáře nebo členy HZS podniku a počítáte mzdu zpětně za rok '
+                    . '2025, doplňte sazbu podle § 7 odst. 1 z. č. 589/1992 Sb. ve znění pro rok 2025.',
+            ],
+            'employer.rate.risk_employment' => [
+                'why' => 'Zvýšené pojistné za rizikové zaměstnání je v dodané sadě doložené až pro '
+                    . 'rok 2026. Pro rok 2025 není doloženo ani to, zda tahle kategorie tehdy '
+                    . 'existovala, a hádat se to nebude.',
+                'action' => 'Běžného zaměstnavatele se to netýká a nic nevyplňujte. Pokud za rok '
+                    . '2025 počítáte mzdu zaměstnanci v rizikovém zaměstnání, ověřte znění '
+                    . '§ 7 odst. 1 z. č. 589/1992 Sb. pro rok 2025 a sazbu doplňte.',
             ],
         ],
         'compensation_averages' => [

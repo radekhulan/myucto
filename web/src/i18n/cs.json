@@ -1660,6 +1660,35 @@
             "overtime_mode": "Způsob zadání přesčasu",
             "overtime_hours": "Přesčas (hodiny)",
             "overtime_amount": "Přesčas celkem (Kč)",
+            "surcharges": {
+                "toggle": "Příplatky — noční, víkend, svátek, ztížené prostředí",
+                "hint": "Zadejte počet odpracovaných hodin za měsíc. Částku dopočte aplikace ze schváleného průměrného výdělku (u § 117 ze základní sazby minimální mzdy) a sjednané sazby. Příplatky vedené docházkou se sem nezadávají — vznikají při schválení měsíce.",
+                "kinds": {
+                    "night": "Noční práce",
+                    "weekend": "Sobota a neděle",
+                    "holiday": "Práce ve svátek",
+                    "difficult_environment": "Ztížené prostředí"
+                },
+                "sections": {
+                    "night": "§ 116",
+                    "weekend": "§ 118",
+                    "holiday": "§ 115",
+                    "difficult_environment": "§ 117"
+                },
+                "hours_label": "{kind} — počet hodin",
+                "hours_placeholder": "hodiny",
+                "factors": "Ztěžujících vlivů",
+                "unavailable": {
+                    "clear_only": "Podklad výpočtu už není k dispozici, takže novou hodnotu zadat nelze. Zadanou hodinu jde vymazat, nebo doplňte chybějící podklad.",
+                    "claimed_by_attendance": "Příplatek za toto období už vznikl ze schválené docházky. Ručně ho zadat nelze — vyplatil by se dvakrát.",
+                    "managed_elsewhere": "Příplatek v tomto měsíci spravuje jiný mzdový nebo pravidelný vstup.",
+                    "holiday_arrangement_missing": "Za práci ve svátek náleží podle § 115 odst. 1 náhradní volno; příplatek jen tehdy, byl-li sjednán. U tohoto vztahu sjednán není — doplňte zásadu příplatků na kartě pracovního vztahu.",
+                    "holiday_compensatory_time_off": "U tohoto vztahu je za svátek sjednáno náhradní volno, ne příplatek.",
+                    "wage_includes_surcharge": "U tohoto vztahu je mzda sjednána s přihlédnutím k této práci (§ 114 odst. 3), příplatek tedy nenáleží.",
+                    "basis_missing": "Chybí podklad výpočtu — u § 115, § 116 a § 118 schválený průměrný hodinový výdělek. Zjistěte ho a vraťte se sem.",
+                    "kind_not_manually_enterable": "Tenhle druh příplatku se v rychlém měsíčním vstupu nezadává."
+                }
+            },
             "bonus": "Bonus / odměna",
             "bonus_amount": "Bonus / odměna (Kč)",
             "gross_preview": "Náhled hrubého příjmu",
@@ -1701,7 +1730,10 @@
                 "hours_required": "Vyplňte počet hodin; pokud nebyly žádné, zadejte 0.",
                 "hours_format": "Zadejte hodiny s nejvýše třemi desetinnými místy.",
                 "hours_non_negative": "Počet hodin nesmí být záporný.",
-                "hours_limit": "Počet přesčasových hodin nesmí překročit 1 000."
+                "hours_limit": "Počet přesčasových hodin nesmí překročit 1 000.",
+                "surcharge_hours_limit": "Počet hodin příplatku nesmí překročit 744 (nejdelší kalendářní měsíc).",
+                "factors_required": "Doplňte počet ztěžujících vlivů — příplatek § 117 náleží za každý z nich zvlášť.",
+                "factors_range": "Počet ztěžujících vlivů musí být celé číslo 1 až 255."
             },
             "empty": "V tomto měsíci nejsou účinné pracovní vztahy",
             "empty_hint": "Nejdřív založte zaměstnance a jeho pracovní vztah.",
@@ -1717,6 +1749,9 @@
                 "bonus_recurring_manual_review": "Pravidelný předpis odměny vyžaduje ruční kontrolu.",
                 "other_component_manual_review": "Další složka nemá uzavřené daňové zařazení a vyžaduje ruční kontrolu.",
                 "other_recurring_manual_review": "Další pravidelná složka vyžaduje ruční určení částky.",
+                "surcharge_conflict": "Zákonný příplatek je zadán duplicitně rychlým i jiným vstupem.",
+                "surcharge_attendance_conflict": "Zákonný příplatek je za období evidován rychlým zadáním i docházkou. Ponechte jen jeden podklad.",
+                "surcharge_managed_elsewhere": "Zákonný příplatek spravuje jiný měsíční či pravidelný vstup.",
                 "partial_month_base_required": "Pracovní vztah trvá jen část měsíce. Zadejte potvrzenou základní mzdu ručně.",
                 "suspended_month_base_required": "Pracovní vztah byl v měsíci přerušen. Zadejte potvrzený základ nebo příjem ručně.",
                 "employment_state_base_required": "Stav pracovního vztahu vyžaduje ruční potvrzení základu nebo příjmu."
@@ -3721,6 +3756,53 @@
                 "reload_current": "Načíst aktuální stav",
                 "new_title": "Nové přiřazení dimenze",
                 "edit_title": "Upravit přiřazení dimenze"
+            },
+            "surcharge_policy": {
+                "title": "Zásady zákonných příplatků (§ 114–118)",
+                "hint": "Co je u tohoto pracovního vztahu sjednáno nad rámec zákonného minima. Bez sjednání platí zákonný výchozí stav — a měsíc s prací o svátku nebo ve ztíženém prostředí se pak nedá schválit.",
+                "add": "Nová verze zásady",
+                "no_permission": "Zásady příplatků může měnit jen uživatel s právem zapisovat do pracovních vztahů. Požádejte o ně správce firmy.",
+                "empty": "Vztah zatím nemá sjednanou žádnou zásadu příplatků — platí zákonný výchozí stav.",
+                "load_failed": "Zásady příplatků se nepodařilo načíst.",
+                "statutory_title": "Co platí bez sjednané zásady",
+                "statutory_holiday_hint": "U svátku zákon bez dohody přiznává náhradní volno (§ 115 odst. 1), ne příplatek. Dokud není sjednáno jinak, měsíc s prací o svátku neprochází schválením docházky.",
+                "current_title": "Platná zásada",
+                "history_title": "Starší verze",
+                "open_ended": "bez omezení",
+                "new_title": "Nová verze zásady",
+                "new_hint": "Zásada se nepřepisuje — nová verze vzniká vedle té staré a historie zůstává čitelná.",
+                "valid_from": "Platí od",
+                "valid_from_required": "Vyplňte datum, od kterého nová verze zásady platí.",
+                "overtime_mode": "Přesčas (§ 114)",
+                "holiday_mode": "Svátek (§ 115)",
+                "holiday_mode_hint": "Mzda sjednaná s přihlédnutím k práci ve svátek neexistuje — § 114 odst. 3 se týká jen práce přesčas.",
+                "factors": "Počet ztěžujících vlivů (§ 117)",
+                "factors_hint": "1 až 255. Bez doloženého počtu se příplatek za ztížené prostředí nepočítá a měsíc neprochází schválením.",
+                "factors_invalid": "Zadejte počet ztěžujících vlivů od 1 do 255, nebo pole nechte prázdné.",
+                "rates_title": "Sjednané sazby",
+                "rates_hint": "Zadávejte v procentech. Prázdné pole znamená, že se použije zákonné minimum.",
+                "rate_statutory_used": "zákonné minimum",
+                "statutory_minimum": "Zákonné minimum {rate} %",
+                "lower_allowed": "nižší sazbu lze sjednat",
+                "lower_forbidden": "nižší sazbu sjednat nelze",
+                "below_statutory_warning": "Sazba je pod zákonným minimem u druhu, kde to zákon nedovoluje — server takový zápis odmítne:",
+                "agreement_reference": "Odkaz na sjednání (smlouva, kolektivní smlouva)",
+                "note": "Poznámka",
+                "saved": "Zásada příplatků byla uložena.",
+                "save_failed": "Zásadu příplatků se nepodařilo uložit.",
+                "exists_error": "K tomuto dni už zásada příplatků existuje. Zvolte jiné datum platnosti.",
+                "modes": {
+                    "surcharge": "Příplatek",
+                    "compensatory_time_off": "Náhradní volno",
+                    "included_in_wage": "Zahrnuto ve mzdě (§ 114 odst. 3)"
+                },
+                "kinds": {
+                    "overtime": "Přesčas",
+                    "holiday": "Svátek",
+                    "night": "Noční práce",
+                    "weekend": "Sobota a neděle",
+                    "difficult_environment": "Ztížené pracovní prostředí"
+                }
             },
             "load_failed_hint": "Seznam zaměstnanců se nenačetl, takže nevíme, koho firma má. Zkuste to prosím znovu.",
             "office_label": "Mzdová účtárna",
@@ -13166,6 +13248,10 @@
         "databox": {
           "title": "Datová schránka",
           "text": "Propojení pro mzdová podání odesílaná datovou schránkou: přehledy a hlášení zdravotním pojišťovnám a měsíční hlášení ČSSZ (JMHZ). Daňová přiznání a hlášení odcházejí přes EPO, ne tudy."
+        },
+        "ai_extraction": {
+          "title": "AI extrakce dokladů",
+          "text": "Vlastní klíč k Anthropic Claude, kterým aplikace vytáhne položky z přijaté faktury v PDF, když nemá ISDOC. Platíte přímo poskytovateli podle spotřeby; bez klíče se doklady zadávají ručně."
         },
         "users": {
           "title": "Uživatelé a role",

@@ -33,6 +33,7 @@
         </include>
     </source>
     <php>
-        <ini name="memory_limit" value="512M"/>
+        <!-- Sada roste; při 512M padal plný běh fatálem v PayrollEnumContractTest. -->
+        <ini name="memory_limit" value="1G"/>
     </php>
 </phpunit>

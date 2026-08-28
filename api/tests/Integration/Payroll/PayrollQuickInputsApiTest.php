@@ -214,8 +214,18 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(409, $approved->getStatusCode());
     }
 
-    public function testCalculatesHoursOnlyFromApprovedAverage(): void
+    /**
+     * § 114 odst. 1 ZP — přesčas zadaný hodinami se rozpadá na DOSAŽENOU MZDU
+     * a PŘÍPLATEK, každé do vlastní složky.
+     *
+     * Do W19 tady stálo jediné číslo 50 000 = průměrný výdělek × 1,25 × 2 hodiny
+     * ve sběrné složce `PREMIE_PRIPLATKY`. Bylo špatně hned dvakrát: dosažená
+     * mzda není průměrný výdělek (ten se podle § 353 zjišťuje z předchozího
+     * čtvrtletí) a ze sběrné složky nešlo doložit, který nárok byl uspokojen.
+     */
+    public function testSplitsHourlyOvertimeIntoAchievedWageAndSurcharge(): void
     {
+        $this->workCalendar('2026-06-01');
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_average_earning_snapshots
                 (supplier_id, employment_id, applicable_year, applicable_quarter,
@@ -255,22 +265,235 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertIsArray($items);
         self::assertTrue($items[0]['overtime_hours_available']);
         self::assertSame(2_000, $items[0]['overtime_hours_milli']);
-        self::assertSame(50_000, $items[0]['overtime_amount_minor']);
+        // Červen 2026: 22 pracovních dnů × 8 hodin = 10 560 minut fondu.
+        // Dosažená mzda 42 000 Kč / 176 h × 2 h = 477,27 Kč.
+        self::assertSame(47_727, $items[0]['overtime_wage_minor']);
+        // Příplatek 25 % z průměrného výdělku 200 Kč/h × 2 h = 100 Kč.
+        self::assertSame(10_000, $items[0]['overtime_premium_minor']);
+        self::assertSame(57_727, $items[0]['overtime_amount_minor']);
         self::assertSame($averageSnapshotId, $items[0]['overtime_average_snapshot_id']);
         self::assertSame(1, $items[0]['overtime_average_snapshot_version']);
 
-        $trace = $this->db->pdo()->prepare(
-            'SELECT source_snapshot_json
-               FROM payroll_inputs
-              WHERE supplier_id = ? AND employment_id = ?
-                AND period_start = "2026-06-01"
-                AND external_id = "quick-monthly:PREMIE_PRIPLATKY"'
+        // Sběrná složka se u hodinového režimu už NEPOUŽÍVÁ.
+        self::assertNull($this->quickInput('PREMIE_PRIPLATKY'));
+
+        $premium = $this->quickInput('PRIPLATEK_PRESCAS');
+        self::assertIsArray($premium);
+        self::assertSame(10_000, (int) $premium['amount_minor']);
+        self::assertSame(2_000, (int) $premium['quantity_milliunits']);
+        $snapshot = json_decode(
+            (string) $premium['source_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
         );
-        $trace->execute([$this->supplierId, $this->employmentId]);
-        $snapshot = json_decode((string) $trace->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
         self::assertSame($averageSnapshotId, $snapshot['average_snapshot_id']);
         self::assertSame(20_000, $snapshot['average_hourly_minor']);
         self::assertSame(2_000, $snapshot['overtime_hours_milli']);
+        // Sazba se čte ze sady pravidel, ne z konstanty v kódu.
+        self::assertSame(2_500, $snapshot['premium_basis_points']);
+        self::assertFalse($snapshot['premium_rate_is_agreed']);
+
+        $wage = $this->quickInput('MZDA_HODINOVA');
+        self::assertIsArray($wage);
+        self::assertSame(47_727, (int) $wage['amount_minor']);
+        $wageSnapshot = json_decode(
+            (string) $wage['source_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+        self::assertSame(10_560, $wageSnapshot['fund_minutes']);
+        self::assertSame(4_200_000, $wageSnapshot['monthly_base_minor']);
+    }
+
+    /** Sjednaná vyšší sazba se musí propsat i do rychlého zadání. */
+    public function testHourlyOvertimeUsesAgreedSurchargeRate(): void
+    {
+        $this->workCalendar('2026-06-01');
+        $averageSnapshotId = $this->approvedAverage(20_000);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_surcharge_policies
+                (supplier_id, employment_id, valid_from, overtime_mode, holiday_mode,
+                 overtime_rate_bp)
+             VALUES (?, ?, "2020-01-01", "surcharge", "compensatory_time_off", 4000)'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $saved = $this->saveHourlyOvertime($averageSnapshotId, 2_000);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $items = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'];
+        // 40 % z 200 Kč/h × 2 h = 160 Kč.
+        self::assertSame(16_000, $items[0]['overtime_premium_minor']);
+        self::assertSame(47_727, $items[0]['overtime_wage_minor']);
+    }
+
+    /**
+     * § 114 odst. 2 — je-li sjednáno náhradní volno, příplatek NENÁLEŽÍ.
+     * Dosažená mzda za odpracované hodiny ale ano.
+     */
+    public function testCompensatoryTimeOffPaysAchievedWageWithoutSurcharge(): void
+    {
+        $this->workCalendar('2026-06-01');
+        $averageSnapshotId = $this->approvedAverage(20_000);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_surcharge_policies
+                (supplier_id, employment_id, valid_from, overtime_mode, holiday_mode)
+             VALUES (?, ?, "2020-01-01", "compensatory_time_off", "compensatory_time_off")'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $saved = $this->saveHourlyOvertime($averageSnapshotId, 2_000);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $items = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'];
+        self::assertSame(0, $items[0]['overtime_premium_minor']);
+        self::assertSame(47_727, $items[0]['overtime_wage_minor']);
+    }
+
+    /**
+     * § 114 odst. 3 — mzda sjednaná s přihlédnutím k práci přesčas. Ani
+     * příplatek, ani náhradní volno; tichá nula by ale vypadala jako výpočet.
+     */
+    public function testWageIncludingOvertimeRefusesHourlyEntry(): void
+    {
+        $this->workCalendar('2026-06-01');
+        $averageSnapshotId = $this->approvedAverage(20_000);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_surcharge_policies
+                (supplier_id, employment_id, valid_from, overtime_mode, holiday_mode)
+             VALUES (?, ?, "2020-01-01", "included_in_wage", "compensatory_time_off")'
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $saved = $this->saveHourlyOvertime($averageSnapshotId, 2_000);
+        self::assertSame(409, $saved->getStatusCode());
+        self::assertStringContainsString(
+            '§ 114 odst. 3',
+            (string) $saved->getBody(),
+        );
+    }
+
+    /** Bez kalendáře nejde určit fond, a tedy ani dosažená mzda. Fail-closed. */
+    public function testHourlyOvertimeWithoutWorkCalendarFailsClosed(): void
+    {
+        $averageSnapshotId = $this->approvedAverage(20_000);
+        $saved = $this->saveHourlyOvertime($averageSnapshotId, 2_000);
+        self::assertSame(409, $saved->getStatusCode());
+        self::assertStringContainsString('pracovní kalendář', (string) $saved->getBody());
+    }
+
+    /** Přepnutí z hodin na celkovou částku nesmí nechat viset řádky rozpadu. */
+    public function testSwitchingBackToAmountClearsSplitRows(): void
+    {
+        $this->workCalendar('2026-06-01');
+        $averageSnapshotId = $this->approvedAverage(20_000);
+        self::assertSame(200, $this->saveHourlyOvertime($averageSnapshotId, 2_000)->getStatusCode());
+        $premium = $this->quickInput('PRIPLATEK_PRESCAS');
+        self::assertIsArray($premium);
+
+        $saved = $this->action->save(
+            $this->request('PUT')->withParsedBody([
+                'period' => '2026-06',
+                'rows' => [[
+                    'employment_id' => $this->employmentId,
+                    'employment_row_version' => 1,
+                    'base_amount_minor' => 4_200_000,
+                    'overtime_mode' => 'amount',
+                    'overtime_hours_milli' => null,
+                    'overtime_amount_minor' => 35_000,
+                    'bonus_amount_minor' => 0,
+                    'versions' => [
+                        'base' => 1,
+                        'overtime' => (int) $premium['row_version'],
+                        'bonus' => null,
+                    ],
+                ]],
+            ]),
+            new Response(),
+        );
+
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertNull($this->quickInput('PRIPLATEK_PRESCAS'));
+        self::assertNull($this->quickInput('MZDA_HODINOVA'));
+        $legacy = $this->quickInput('PREMIE_PRIPLATKY');
+        self::assertIsArray($legacy);
+        self::assertSame(35_000, (int) $legacy['amount_minor']);
+    }
+
+    private function saveHourlyOvertime(int $averageSnapshotId, int $hours): ResponseInterface
+    {
+        return $this->action->save(
+            $this->request('PUT')->withParsedBody([
+                'period' => '2026-06',
+                'rows' => [[
+                    'employment_id' => $this->employmentId,
+                    'employment_row_version' => 1,
+                    'base_amount_minor' => 4_200_000,
+                    'overtime_mode' => 'hours',
+                    'overtime_hours_milli' => $hours,
+                    'overtime_amount_minor' => null,
+                    'overtime_average_snapshot_id' => $averageSnapshotId,
+                    'overtime_average_snapshot_version' => 1,
+                    'bonus_amount_minor' => 0,
+                    'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+                ]],
+            ]),
+            new Response(),
+        );
+    }
+
+    private function approvedAverage(int $hourlyMinor): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_average_earning_snapshots
+                (supplier_id, employment_id, applicable_year, applicable_quarter,
+                 revision_no, source_kind, decisive_from, decisive_to,
+                 gross_earnings_minor, longer_period_allocated_minor,
+                 worked_minutes, worked_days, average_hourly_minor,
+                 support_status, status, ruleset_id, ruleset_hash,
+                 input_hash, input_trace)
+             VALUES (?, ?, 2026, 2, 1, "actual", "2026-01-01", "2026-03-31",
+                     1000000, 0, 6000, 21, ?,
+                     "supported", "approved", "synthetic-2026",
+                     REPEAT("a", 64), UNHEX(SHA2("synthetic", 256)), "{}")'
+        )->execute([$this->supplierId, $this->employmentId, $hourlyMinor]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function workCalendar(string $validFrom): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_work_calendars
+                (supplier_id, employment_id, name, week_pattern, weekly_minutes, valid_from)
+             VALUES (?, ?, "Pondělí až pátek", ?, 2400, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            json_encode([1 => 480, 2 => 480, 3 => 480, 4 => 480, 5 => 480, 6 => 0, 7 => 0]),
+            $validFrom,
+        ]);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function quickInput(string $code): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT input.*
+               FROM payroll_inputs input
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = input.supplier_id
+                AND component.id = input.component_id
+              WHERE input.supplier_id = ? AND input.employment_id = ?
+                AND input.period_start = "2026-06-01"
+                AND input.status <> "cancelled"
+                AND input.external_id = ?
+                AND component.code = ?'
+        );
+        $stmt->execute([
+            $this->supplierId,
+            $this->employmentId,
+            'quick-monthly:' . $code,
+            $code,
+        ]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
     }
 
     public function testEffectiveRecurringBaseIsManagedElsewhereBeforeMaterialization(): void

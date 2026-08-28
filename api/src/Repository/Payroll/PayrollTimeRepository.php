@@ -615,6 +615,11 @@ final class PayrollTimeRepository
         int $expectedVersion,
         int $monthVersion,
         ?int $userId,
+        /**
+         * § 117 — počet ztěžujících vlivů tohoto zápisu (migrace 1625).
+         * `null` = platí obvyklý počet ze sjednané zásady pracovního vztahu.
+         */
+        ?int $difficultyFactorCount = null,
     ): array {
         $pdo = $this->db->pdo();
         $scope = $this->beginTransactionScope();
@@ -657,8 +662,9 @@ final class PayrollTimeRepository
                 'INSERT INTO payroll_time_entries
                     (supplier_id, employment_id, series_key, revision_no, supersedes_id,
                      category, starts_at_utc, ends_at_utc, timezone_name, break_minutes,
-                     source_kind, source_reference, source_hash, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     source_kind, source_reference, source_hash, created_by,
+                     difficulty_factor_count)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
                 $supplierId,
@@ -675,6 +681,7 @@ final class PayrollTimeRepository
                 $sourceReference,
                 $sourceHash,
                 $userId,
+                $difficultyFactorCount,
             ]);
             $id = (int) $pdo->lastInsertId();
             $month = $this->touchMonth($month, $userId);

@@ -98,7 +98,10 @@ potvrzení a důvod v příloze; původní PDF zůstává beze změny. Opakován
 opravné žádosti bezpečně vrátí již archivovanou revizi.
 
 U ukončeného pracovního vztahu otevři v **Mzdy → Zaměstnanci** jeho detail
-a část **Dokumenty při skončení vztahu**. Potvrzení o zaměstnání lze vytvořit
+a část **Dokumenty při skončení vztahu**. Výstupní checklist vztahu hlídá
+vedle zápočtového listu také **evidenční list důchodového pojištění** a
+**potvrzení o zdanitelných příjmech**; položka, která na daný vztah nedopadá,
+se v něm vůbec nezaloží. Potvrzení o zaměstnání lze vytvořit
 jen po kontrole přesné identity, adresy a smluvních podmínek účinných ke dni
 skončení. Ve formuláři potvrď druh práce, kvalifikaci, pracovní expozici,
 pokračující srážky a případné důchodové kategorie před rokem 1993. Částky
