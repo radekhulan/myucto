@@ -3386,7 +3386,9 @@
                 "health_insurance_deregistration": "Health insurer deregistration",
                 "social_jmhz_deregistration": "Social security / JMHZ deregistration",
                 "enforcement_insolvency_review": "Enforcement and insolvency review",
-                "later_income_review": "Later-payment review"
+                "later_income_review": "Later-payment review",
+                "eldp_submission": "Pension insurance record (ELDP)",
+                "taxable_income_confirmation": "Confirmation of taxable income"
             },
             "event": {
                 "created": "Relationship created",
@@ -3435,7 +3437,9 @@
                 "health_insurance_deregistration": "Health deregistration",
                 "social_jmhz_deregistration": "Social security / JMHZ deregistration",
                 "enforcement_insolvency_review": "Deductions review",
-                "later_income_review": "Later payment"
+                "later_income_review": "Later payment",
+                "eldp_submission": "ELDP",
+                "taxable_income_confirmation": "Taxable income confirmation"
             },
             "exit_documents": {
                 "title": "Employment exit documents",
@@ -5082,6 +5086,85 @@
                 "payments_hint": "Prepare net pay, tax and insurance payments.",
                 "documents": "Documents and filings",
                 "documents_hint": "Download payslips, the monthly package and review outputs."
+            }
+        },
+        "setup_guide": {
+            "eyebrow": "Payroll first-time setup guide",
+            "title": "Getting payroll running, step by step",
+            "intro": "Before you can run the first payroll you need the employer setup done and your people on file. Open each step from the link and tick it off yourself; the guide can be hidden at any time.",
+            "manual": "Open the manual",
+            "hide": "Hide the guide",
+            "show": "Show the guide",
+            "hidden_note": "The payroll first-time setup guide is hidden.",
+            "progress": "{done} of {total} done",
+            "progress_hint": "You tick the steps off yourself as you get through them.",
+            "progress_all_done": "All done — you can start the first payroll month.",
+            "step_n": "Step {n}",
+            "open": "Open",
+            "mark_done": "Mark as done",
+            "marked_done": "Done",
+            "footnote": "The guide is shown until you have your first approved payroll run. Ticking a step off is your own note — the application neither changes nor checks anything based on it.",
+            "groups": {
+                "employer": {
+                    "title": "Employer setup",
+                    "hint": "details without which payroll cannot be calculated or paid"
+                },
+                "people": {
+                    "title": "People",
+                    "hint": "employees, their employments and statutory records"
+                },
+                "start": {
+                    "title": "First payroll month",
+                    "hint": "once the setup is complete"
+                }
+            },
+            "steps": {
+                "employer": {
+                    "title": "Employer and payroll offices",
+                    "text": "Social security registration number, the payroll contact and at least one active payroll office with its variable symbol. Without an office you cannot create an employment."
+                },
+                "registrations": {
+                    "title": "Social security and health insurer registrations",
+                    "text": "Documented registration history of the office with the social security administration and the default health insurer. Monthly overviews and filings are built from them."
+                },
+                "institutions": {
+                    "title": "Institution payment accounts",
+                    "text": "Accounts of the social security administration, the tax office and the health insurers, including variable symbols. Payment orders for the levies are built from them."
+                },
+                "posting": {
+                    "title": "Payroll posting rules",
+                    "text": "Accounts for gross pay, insurance, tax advance and deductions. Without them an approved run cannot be posted to the journal."
+                },
+                "policies": {
+                    "title": "Payroll policy and readiness",
+                    "text": "Pay date, rounding rules and the readiness check that lists whatever is still missing before you can calculate."
+                },
+                "databox": {
+                    "title": "Sending filings through the data box",
+                    "text": "Payroll filings — health insurer overviews and notifications and the employer's monthly report to the social security administration (JMHZ) — leave through the company's data box. Connect it before the first deadline arrives."
+                },
+                "people": {
+                    "title": "Add your first employee",
+                    "text": "Personal details, birth number and address. The person is separate from the employment — one person can hold several employments with you.",
+                    "cta": "New employee"
+                },
+                "employment": {
+                    "title": "Employment and pay",
+                    "text": "Relation type (employment, DPP, DPČ, executive), start date, working time and agreed pay. The type drives both insurance and the way tax is withheld."
+                },
+                "evidence": {
+                    "title": "Statutory records of the employee",
+                    "text": "Taxpayer declaration, allowances and children, health insurer and registrations with the authorities. Without these the very first payroll comes out wrong."
+                },
+                "components": {
+                    "title": "Pay components",
+                    "text": "The catalogue of components beyond base pay — premiums, bonuses, benefits and deductions. You set them up once and then only enter the amount."
+                },
+                "first_run": {
+                    "title": "Start the first payroll month",
+                    "text": "The setup is complete: fill in the payroll inputs and start the run. The “How it works” guide on this overview walks you through the order of the month.",
+                    "cta": "Payroll runs"
+                }
             }
         },
         "guide": {
@@ -13082,7 +13165,7 @@
         },
         "databox": {
           "title": "Data box",
-          "text": "The connection for filing to the tax authority straight from the application: VAT returns, control statements and other forms."
+          "text": "The connection for payroll filings sent through the data box: health insurer overviews and notifications and the employer's monthly report to the social security administration (JMHZ). Tax returns and statements go through EPO instead."
         },
         "users": {
           "title": "Users and roles",
@@ -17812,7 +17895,10 @@
   },
   "databox": {
         "title": "Data box",
-        "subtitle": "Filing through the Czech data box — VAT return, control and recapitulative statements, corporate income tax and health insurer overviews.",
+        "subtitle": "This company's data box: sending payroll filings and reading incoming messages. What the application sends this way: health insurer overviews and notifications (HOZ, PPZ), the employer's monthly report to the social security administration (JMHZ) as an alternative to the direct VREP channel, and enforcement cooperation replies.",
+        "taxNote": "VAT returns, control and recapitulative statements and income tax returns do not leave the application through the data box — they go through EPO. You can file them through the data box manually as a fallback, but then no confirmation with a filing number arrives, only a delivery note.",
+        "gatewayLink": "The sending gateway the messages physically leave through is registered by the service operator and there is one for the whole installation.",
+        "gatewayLinkAction": "Sending gateway settings",
         "companyScope": "This data box and its messages belong to the company: {company}",
         "saved": "Saved.",
         "env": {
@@ -17821,7 +17907,10 @@
         },
         "gateway": {
             "settingsTitle": "ISDS sending gateway",
-            "settingsSubtitle": "Global technical registration of the service operator. Company data boxes are configured separately under Company.",
+            "settingsSubtitle": "Global technical registration of the service operator — one for the whole installation. Payroll filings leave through this gateway: health insurer overviews and notifications (HOZ, PPZ), the employer's monthly report to the social security administration (JMHZ) as an alternative to the direct VREP channel, and enforcement cooperation replies.",
+            "settingsReadOnly": "The gateway can only send, not read. That is a property of the chosen setup, not an omission: the filing is prepared as a draft in your data box and the final click — the approval — is made by a person, so the customer needs no system certificate of their own. The price is that the delivery note of a sent message has to be uploaded manually.",
+            "settingsCompanyLink": "A particular company's data box, including reading incoming messages, lives on its own page.",
+            "settingsCompanyLinkAction": "Company data box",
             "prepare": "Prepare in the data box",
             "preflightTitle": "Sign-in and approval take place in ISDS",
             "credentialsStayInIsds": "You enter credentials only on the Czech Data Box Information System page. MyÚčto neither sees nor stores them.",

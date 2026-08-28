@@ -1975,6 +1975,103 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertSame('Doplatek syntetické prémie.', $correctionEvent['reason']);
     }
 
+    /**
+     * W13/P-12. Po schválení opravné revize NESMÍ zůstat dvě revize ve stavu
+     * `approved`: generátor dokumentů si mohl vybrat kteroukoli a zaměstnanec
+     * dostal předkorekční výplatní pásku, přestože účetnictví i JMHZ už jely
+     * z nové revize. Původní revize se proto odsune (`superseded`) a nová
+     * dokumentová dávka se z ní už nezaloží — už vydané dokumenty na ní ale
+     * dál visí a platí jako historie.
+     */
+    public function testApprovedCorrectionSupersedesThePreviousApprovedRevision(): void
+    {
+        $approved = $this->approveInitialRun();
+        $runId = (int) $approved->run['id'];
+        $originalRevisionId = (int) $approved->revision['id'];
+
+        $this->approvedInput(10_000, 'SUPERSEDE', 'correction');
+        $requested = $this->service->requestCorrection(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'supersede-request-correction',
+            $this->actors[2],
+            'Doplatek syntetické prémie.',
+        );
+        $reopened = $this->service->reopen(
+            $this->supplierId,
+            $runId,
+            (int) $requested->run['row_version'],
+            'supersede-reopen-correction',
+            $this->actors[1],
+            'Doplatek syntetické prémie.',
+        );
+        $calculated = $this->service->calculate(
+            $this->supplierId,
+            $runId,
+            (int) $reopened->run['row_version'],
+            'supersede-calculate-correction',
+            $this->actors[0],
+        );
+        $reviewed = $this->service->review(
+            $this->supplierId,
+            $runId,
+            (int) $calculated->run['row_version'],
+            'supersede-review-correction',
+            $this->actors[1],
+        );
+
+        // Dokud běží oprava, platná je pořád ta PŮVODNÍ schválená revize.
+        $documents = $this->container->get(
+            \MyInvoice\Repository\Payroll\PayrollDocumentRepository::class,
+        );
+        self::assertIsArray($documents->approvedRevision(
+            $this->supplierId,
+            $runId,
+            $originalRevisionId,
+        ));
+
+        $correction = $this->service->approve(
+            $this->supplierId,
+            $runId,
+            (int) $reviewed->run['row_version'],
+            'supersede-approve-correction',
+            $this->actors[2],
+        );
+        $correctionRevisionId = (int) $correction->revision['id'];
+        self::assertNotSame($originalRevisionId, $correctionRevisionId);
+
+        $original = $this->runs->revision($this->supplierId, $originalRevisionId);
+        self::assertSame('superseded', $original['status']);
+        self::assertNotNull($original['superseded_at']);
+        self::assertSame(
+            $correctionRevisionId,
+            (int) $original['superseded_by_revision_id'],
+        );
+        self::assertSame(
+            'approved',
+            $this->runs->revision($this->supplierId, $correctionRevisionId)['status'],
+        );
+
+        // Zdrojem NOVÝCH dokumentů je od téhle chvíle jen opravná revize.
+        self::assertNull($documents->approvedRevision(
+            $this->supplierId,
+            $runId,
+            $originalRevisionId,
+        ));
+        self::assertIsArray($documents->approvedRevision(
+            $this->supplierId,
+            $runId,
+            $correctionRevisionId,
+        ));
+
+        // Odsunutá revize je konečná: přepsat ji nejde ani po řádcích.
+        $this->expectException(\PDOException::class);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_run_revisions SET status = "approved" WHERE id = ?'
+        )->execute([$originalRevisionId]);
+    }
+
     public function testRevisionSummariesOmitSnapshotsButKeepMetadataAndHashes(): void
     {
         $approved = $this->approveInitialRun();
@@ -2202,6 +2299,49 @@ final class PayrollRunPersistenceTest extends TestCase
             'UPDATE payroll_run_events SET reason = "tamper"
               WHERE supplier_id = ? AND id = ?'
         )->execute([$this->supplierId, $eventId]);
+    }
+
+    /**
+     * C-10 — datum výplaty nemělo horní mez, takže překlep „2027" prošel a
+     * navěsil na sebe celý řetěz odvozených zákonných termínů. § 141 odst. 1
+     * zákoníku práce: mzda je splatná nejpozději v měsíci NÁSLEDUJÍCÍM po
+     * měsíci, ve kterém vzniklo právo na mzdu.
+     */
+    public function testRejectsPaymentDateBeyondTheFollowingMonth(): void
+    {
+        // Poslední přípustný den pro období 06/2026 je 31. 7. 2026.
+        $run = $this->service->createRun(
+            $this->supplierId,
+            '2026-06-01',
+            '2026-07-31',
+            null,
+            $this->actors[0],
+        );
+        self::assertSame('2026-07-31', (string) $run['payment_date']);
+
+        foreach (['2026-08-01', '2027-07-15'] as $tooLate) {
+            try {
+                $this->service->createRun(
+                    $this->supplierId,
+                    '2026-06-01',
+                    $tooLate,
+                    null,
+                    $this->actors[0],
+                );
+                self::fail(
+                    "Datum výplaty {$tooLate} mimo § 141 mělo být odmítnuto.",
+                );
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString(
+                    '§ 141 odst. 1',
+                    $exception->getMessage(),
+                );
+                self::assertStringContainsString(
+                    '31. 7. 2026',
+                    $exception->getMessage(),
+                );
+            }
+        }
     }
 
     private function createRun(): array

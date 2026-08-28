@@ -78,6 +78,7 @@ use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
 use MyInvoice\Action\Payroll\PayrollCzIscoAction;
+use MyInvoice\Action\Payroll\PayrollDeadlineOverviewAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDiscountIntentAction;
@@ -1204,6 +1205,7 @@ final class Routes
                 '/submissions/overview',
                 PayrollSubmissionOverviewAction::class,
             );
+            $g->get('/deadlines', PayrollDeadlineOverviewAction::class);
             $g->get('/operational-health', PayrollOperationalHealthAction::class);
             $g->get(
                 '/operational-reconciliation',

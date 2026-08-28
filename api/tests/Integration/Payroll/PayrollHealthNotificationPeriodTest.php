@@ -356,6 +356,72 @@ final class PayrollHealthNotificationPeriodTest extends TestCase
         }
     }
 
+    /**
+     * Zrušený nástup není pojištěnec. Vztah ve stavu `no_show` do práce nikdy
+     * nenastoupil, takže přihlašovat ho k pojištění by znamenalo oznámit
+     * pojišťovně člověka, který u firmy nikdy nepracoval.
+     */
+    public function testCancelledStartProducesNoDuty(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employments SET status = "no_show"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $page = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-06',
+        );
+
+        self::assertSame(0, $page['total']);
+        self::assertSame([], $page['items']);
+    }
+
+    /** Archivovaný vztah je vyřazený z evidence a povinnosti nevyrábí. */
+    public function testArchivedEmploymentProducesNoDuty(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employments SET status = "archived"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $page = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-06',
+        );
+
+        self::assertSame(0, $page['total']);
+        self::assertSame([], $page['items']);
+    }
+
+    /**
+     * Oznamuje se SKUTEČNÝ den nástupu. Dokud se bral plánovaný, dostala
+     * pojišťovna datum, které se nestalo, kdykoli se nástup posunul — a s ním
+     * i lhůtu počítanou od nesprávného dne.
+     */
+    public function testActualStartDateWinsOverThePlannedOne(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'UPDATE payroll_employments SET actual_start_date = "2026-06-15"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        $page = $this->service->dutiesForPeriod(
+            $this->supplierId,
+            'production',
+            '2026-06',
+        );
+
+        self::assertSame(1, $page['total']);
+        self::assertSame('2026-06-15', $page['items'][0]['occurred_on']);
+        self::assertSame('2026-06-23', $page['items'][0]['deadline']['due_on']);
+    }
+
     // --- fixtures --------------------------------------------------------
 
     private function employee(PDO $pdo, string $name): int

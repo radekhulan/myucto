@@ -12,6 +12,7 @@ use GuzzleHttp\Psr7\Response;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzGovTalkEnvelope;
@@ -567,6 +568,234 @@ final class JmhzDispatchServiceTest extends TestCase
     }
 
     /**
+     * W13/P-04. Datová věta z requestu se na VREP NESMÍ dostat. Dřív se
+     * posílalo přesně to, co přišlo — bez XSD, bez katalogu kontrol — a do
+     * ledgeru se zapsal otisk TOHO, co přišlo, takže archiv pak tvrdil, že
+     * odesláno bylo zmrazené XML, i když odesláno bylo něco jiného.
+     */
+    public function testSendRefusesAPayloadThatDoesNotMatchTheFrozenArtifact(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->expects(self::never())->method('open');
+        $attempts->expects(self::never())->method('markFailed');
+
+        $service = $this->service(
+            $attempts,
+            [],
+            null,
+            $this->platform(),
+            $this->frozen(JmhzTransportSample::payload()),
+        );
+
+        try {
+            $service->send(
+                self::SUPPLIER,
+                'test',
+                self::SUBMISSION,
+                '<jmhz>podvržená datová věta</jmhz>',
+                JmhzTransportSample::VARIABLE_SYMBOL,
+                'jmhz-2026-04-11',
+                3,
+            );
+            self::fail('Podvržená datová věta neměla projít.');
+        } catch (JmhzTransportException $exception) {
+            self::assertSame('jmhz_dispatch_payload_not_frozen', $exception->errorCode);
+        }
+        self::assertSame([], $this->history);
+    }
+
+    /**
+     * Odesílá se zmrazený artefakt a do ledgeru jde JEHO otisk — i když
+     * volající žádnou datovou větu nepředal.
+     */
+    public function testSendTakesThePayloadFromTheFrozenArchive(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('nextAttemptNo')->willReturn(1);
+        $attempts->expects(self::once())->method('open')->with(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            JmhzDispatchService::CHANNEL,
+            1,
+            'jmhz-2026-04-11',
+            hash('sha256', JmhzTransportSample::payload()),
+            3,
+        )->willReturn(self::attemptRow());
+        $attempts->expects(self::once())->method('markSent')->willReturn(
+            self::attemptRow([
+                'status' => 'awaiting_protocol',
+                'correlation_reference' => self::CORRELATION,
+                'row_version' => 1,
+            ]),
+        );
+
+        $service = $this->service(
+            $attempts,
+            [new Response(200, ['Content-Type' => 'text/xml'], self::acknowledgement())],
+            null,
+            $this->platform(),
+            $this->frozen(JmhzTransportSample::payload()),
+        );
+
+        $outcome = $service->send(
+            self::SUPPLIER,
+            'test',
+            self::SUBMISSION,
+            null,
+            JmhzTransportSample::VARIABLE_SYMBOL,
+            'jmhz-2026-04-11',
+            3,
+        );
+
+        self::assertNotNull($outcome->acknowledgement);
+    }
+
+    /**
+     * W13/P-05. Podání jiné agendy (OZUSPOJ) se pod hlavičkou
+     * `Class=CSSZ_JMHZ` odeslat NESMÍ. Kanál `vrep_apep` je společný, takže
+     * bez kontroly agendy stačilo poslat cizí ID podání a ČSSZ dostala
+     * dokument, který k deklarovanému druhu podání nepatří.
+     */
+    public function testSendRefusesASubmissionOfAnotherAgenda(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->expects(self::never())->method('open');
+
+        $service = $this->service(
+            $attempts,
+            [],
+            null,
+            $this->platform(agendaCode: 'OZUSPOJ23'),
+            $this->frozen(JmhzTransportSample::payload()),
+        );
+
+        $this->expectException(\DomainException::class);
+        try {
+            $this->send($service);
+        } finally {
+            self::assertSame([], $this->history);
+        }
+    }
+
+    /** Kanál mimo VREP/APEP touhle cestou neodchází. */
+    public function testSendRefusesASubmissionFromAnotherChannel(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->expects(self::never())->method('open');
+
+        $service = $this->service(
+            $attempts,
+            [],
+            null,
+            $this->platform(channel: 'isds'),
+            $this->frozen(JmhzTransportSample::payload()),
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->send($service);
+    }
+
+    /**
+     * Stav se kontroluje PŘED odesláním, ne až v evidenci po něm. Podání,
+     * které už bylo odesláno, se pod novým idempotenčním klíčem neodešle
+     * podruhé — ČSSZ by druhé podání odmítla jako duplicitu.
+     */
+    public function testSendRefusesASubmissionThatIsNotReady(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('findByIdempotencyKey')->willReturn(null);
+        $attempts->expects(self::never())->method('open');
+
+        $service = $this->service(
+            $attempts,
+            [],
+            null,
+            $this->platform(status: 'submitted'),
+            $this->frozen(JmhzTransportSample::payload()),
+        );
+
+        $this->expectException(\DomainException::class);
+        $this->send($service);
+    }
+
+    /**
+     * Opakované volání s TÝMŽ klíčem musí projít i u odeslaného podání: není
+     * to nové odeslání, ale vrácení původního pokusu.
+     */
+    public function testSendReplaysTheOriginalAttemptOfAnAlreadySubmittedSubmission(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('findByIdempotencyKey')->willReturn(self::attemptRow([
+            'status' => 'awaiting_protocol',
+            'correlation_reference' => self::CORRELATION,
+        ]));
+        $attempts->method('nextAttemptNo')->willReturn(1);
+        $attempts->expects(self::once())->method('open')->willReturn(self::attemptRow([
+            'status' => 'awaiting_protocol',
+            'correlation_reference' => self::CORRELATION,
+        ]));
+
+        $outcome = $this->send($this->service(
+            $attempts,
+            [],
+            null,
+            $this->platform(status: 'submitted'),
+            $this->frozen(JmhzTransportSample::payload()),
+        ));
+
+        self::assertSame('awaiting_protocol', $outcome->attempt['status']);
+        self::assertSame([], $this->history);
+    }
+
+    /**
+     * W13/C-12. Když po ÚSPĚŠNÉM odeslání selže evidence, nesmí to zmizet:
+     * podání by zůstalo `ready`, obsluha by odeslala znovu a ČSSZ by druhé
+     * podání odmítla jako duplicitu. Selhání proto musí být dohledatelné
+     * jako pojmenovaný provozní nález.
+     */
+    public function testFailedBookkeepingAfterASuccessfulSendIsRecordedAsAnIssue(): void
+    {
+        $attempts = $this->attempts();
+        $attempts->method('nextAttemptNo')->willReturn(1);
+        $attempts->expects(self::once())->method('open')
+            ->willReturn(self::attemptRow());
+        $attempts->expects(self::once())->method('markSent')->willReturn(
+            self::attemptRow([
+                'status' => 'awaiting_protocol',
+                'correlation_reference' => self::CORRELATION,
+                'row_version' => 1,
+            ]),
+        );
+
+        $submissions = $this->platform();
+        $submissions->method('transition')->willThrowException(
+            new \RuntimeException('Optimistický zámek podání selhal.'),
+        );
+        $recorded = null;
+        $submissions->expects(self::once())->method('recordIssue')
+            ->willReturnCallback(function (...$arguments) use (&$recorded): array {
+                $recorded = $arguments;
+
+                return ['submission_status' => 'ready', 'submission_row_version' => 8];
+            });
+
+        $outcome = $this->send($this->service(
+            $attempts,
+            [new Response(200, ['Content-Type' => 'text/xml'], self::acknowledgement())],
+            null,
+            $submissions,
+            $this->frozen(JmhzTransportSample::payload()),
+        ));
+
+        // Odeslání proběhlo a chybou evidence se shodit nesmí.
+        self::assertNotNull($outcome->acknowledgement);
+        self::assertIsArray($recorded);
+        self::assertSame('error', $recorded[4]);
+        self::assertSame('jmhz_dispatch_submitted_not_recorded', $recorded[6]);
+    }
+
+    /**
      * Odeslání, u kterého se čeká pád. Vrací chycenou výjimku, ať se dá dál
      * zkoumat; když nespadne nic, je to samo o sobě selhání testu.
      *
@@ -656,6 +885,7 @@ final class JmhzDispatchServiceTest extends TestCase
         array $queue,
         ?PayrollSigningProfileRepository $profiles = null,
         ?PayrollSubmissionService $submissions = null,
+        ?JmhzFrozenPayloadReader $frozen = null,
     ): JmhzDispatchService {
         $material = self::certificate();
 
@@ -690,8 +920,52 @@ final class JmhzDispatchServiceTest extends TestCase
             $secrets,
             new JmhzSoftwareIdentification('MyUcto', '1.0'),
             $this->vrep($queue),
+            frozen: $frozen,
             submissions: $submissions,
         );
+    }
+
+    /** Archiv zmrazených artefaktů, který vrací dané bajty. */
+    private function frozen(string $bytes): JmhzFrozenPayloadReader
+    {
+        $frozen = $this->createStub(JmhzFrozenPayloadReader::class);
+        $frozen->method('bytes')->willReturn($bytes);
+
+        return $frozen;
+    }
+
+    /**
+     * Platforma podání s daným stavem a agendou.
+     *
+     * @return MockObject&PayrollSubmissionService
+     */
+    private function platform(
+        string $status = 'ready',
+        string $agendaCode = 'JMHZ25',
+        string $channel = JmhzDispatchService::CHANNEL,
+    ): MockObject {
+        $submissions = $this->createMock(PayrollSubmissionService::class);
+        // Brána MUSÍ podání přečíst — bez toho by se agenda, kanál ani stav
+        // neověřily a odesílalo by se naslepo.
+        $submissions->expects(self::atLeastOnce())->method('get')->willReturn([
+            'id' => self::SUBMISSION,
+            'status' => $status,
+            'row_version' => 7,
+            'channel' => $channel,
+            'environment' => 'test',
+        ]);
+        $submissions->method('obligationOf')->willReturn([
+            'id' => 900,
+            'status' => 'open',
+            'row_version' => 1,
+            'agenda_code' => $agendaCode,
+            'subject_type' => 'employer',
+            'subject_reference' => '1',
+            'period_start' => '2026-04-01',
+            'period_end' => '2026-04-30',
+        ]);
+
+        return $submissions;
     }
 
     /** @param list<mixed> $queue */

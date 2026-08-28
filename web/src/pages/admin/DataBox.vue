@@ -994,7 +994,19 @@ onUnmounted(clearMobileStatusTimer)
     <header class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <h1 class="text-xl font-semibold text-neutral-900">{{ t('databox.title') }}</h1>
-        <p class="text-sm text-neutral-500">{{ t('databox.subtitle') }}</p>
+        <p class="max-w-4xl text-sm text-neutral-500">{{ t('databox.subtitle') }}</p>
+        <!--
+          Daňová podání z aplikace odcházejí přes EPO, ne datovkou — podtitul to
+          dřív tvrdil obráceně. Datovka je u nich ruční záložní cesta a rozdíl je
+          praktický: přes ni nepřijde potvrzení s podacím číslem, jen dodejka.
+        -->
+        <p class="mt-1 max-w-4xl text-sm text-neutral-500">{{ t('databox.taxNote') }}</p>
+        <p class="mt-1 max-w-4xl text-sm text-neutral-500">
+          {{ t('databox.gatewayLink') }}
+          <RouterLink to="/admin/isds-gateway" class="font-medium text-primary-700 underline">
+            {{ t('databox.gatewayLinkAction') }}
+          </RouterLink>
+        </p>
         <p class="mt-1 text-sm font-medium text-primary-700">
           {{ t('databox.companyScope', { company: supplierStore.currentSupplier?.company_name ?? '—' }) }}
         </p>

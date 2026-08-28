@@ -22,7 +22,23 @@ final class PayrollDocumentRepository
 
     public function __construct(private readonly Connection $db) {}
 
-    /** @return array<string,mixed>|null */
+    /**
+     * Revize, ze které se smí VYSTAVIT nový dokument.
+     *
+     * Musí to být AKTUÁLNÍ schválená revize běhu, ne jen „nějaká schválená".
+     * Dokud stačilo `status IN ("approved","superseded")`, existovaly po
+     * opravné revizi dvě schválené a dávka mohla vystavit předkorekční
+     * výplatní pásku, přestože účetnictví i JMHZ už jely z nové revize.
+     *
+     * Podmínka je dvojitá schválně: `status = "approved"` funguje díky tomu,
+     * že schválení opravné revize předchozí odsune, a `NOT EXISTS` novější
+     * schválené revize drží i pro běhy z doby, kdy se ještě neodsouvalo.
+     *
+     * Už vydané dokumenty tím nezanikají — čtou se z archivu vygenerovaných
+     * dokumentů přes vlastní `revision_id`, ne přes tuhle bránu.
+     *
+     * @return array<string,mixed>|null
+     */
     public function approvedRevision(
         int $supplierId,
         int $runId,
@@ -37,8 +53,17 @@ final class PayrollDocumentRepository
               WHERE revision.supplier_id = ?
                 AND revision.run_id = ?
                 AND revision.id = ?
-                AND revision.status IN ("approved", "superseded")
-                AND revision.result_snapshot_hash IS NOT NULL'
+                AND revision.status = "approved"
+                AND revision.result_snapshot_hash IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_run_revisions newer
+                     WHERE newer.supplier_id = revision.supplier_id
+                       AND newer.run_id = revision.run_id
+                       AND newer.revision_no > revision.revision_no
+                       AND newer.status = "approved"
+                       AND newer.result_snapshot_hash IS NOT NULL
+                )'
         );
         $stmt->execute([$supplierId, $runId, $revisionId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

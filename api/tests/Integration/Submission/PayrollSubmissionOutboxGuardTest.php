@@ -351,7 +351,11 @@ final class PayrollSubmissionOutboxGuardTest extends TestCase
             'outbound',
             'application/xml',
             '<synthetic agenda="' . $agendaCode . '"/>',
-            null,
+            // Verze XSD, proti kterému se datová věta ověřila při mrazení.
+            // Produkční cesty ji zapisují vždycky a fronta ji nově VYŽADUJE:
+            // bez ní není doložené, že podklad prošel schématem, a poslední
+            // brána před datovou schránkou by ho pustila mlčky.
+            'synthetic-' . strtolower($agendaCode) . '.v1',
             null,
             $submissionChannel,
             'artifact:' . $tag,

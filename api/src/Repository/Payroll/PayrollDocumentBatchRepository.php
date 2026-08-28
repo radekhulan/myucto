@@ -55,17 +55,31 @@ final class PayrollDocumentBatchRepository
     ): array {
         $pdo = $this->db->pdo();
         $revision = $pdo->prepare(
+            // `superseded` tu být NESMÍ: z revize, kterou nahradila opravná,
+            // se nové výplatní pásky negenerují. Už vydané dokumenty na ní
+            // dál visí a platí, ale zdroj nové dávky je vždycky ta AKTUÁLNÍ
+            // schválená revize — proto i pojistka, že novější schválená
+            // revize téhož běhu neexistuje.
             'SELECT result_snapshot_hash
-               FROM payroll_run_revisions
+               FROM payroll_run_revisions revision
               WHERE supplier_id = ? AND run_id = ? AND id = ?
-                AND status IN ("approved", "superseded")
-                AND result_snapshot_hash IS NOT NULL'
+                AND status = "approved"
+                AND result_snapshot_hash IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_run_revisions newer
+                     WHERE newer.supplier_id = revision.supplier_id
+                       AND newer.run_id = revision.run_id
+                       AND newer.revision_no > revision.revision_no
+                       AND newer.status = "approved"
+                       AND newer.result_snapshot_hash IS NOT NULL
+                )'
         );
         $revision->execute([$supplierId, $runId, $revisionId]);
         $sourceHash = $revision->fetchColumn();
         if (!is_string($sourceHash) || preg_match('/^[a-f0-9]{64}$/D', $sourceHash) !== 1) {
             throw new \DomainException(
-                'Frontu dokumentů lze založit jen nad schválenou mzdovou revizí.',
+                'Frontu dokumentů lze založit jen nad aktuální schválenou mzdovou revizí.',
             );
         }
 
@@ -178,6 +192,69 @@ final class PayrollDocumentBatchRepository
         return $this->detail($supplierId, (int) $row['id']);
     }
 
+    /**
+     * Zastavení rozpracované dávky nad revizí, kterou právě odsunula opravná.
+     *
+     * Bez toho by fronta dál renderovala PŘEDKOREKČNÍ výplatní pásky, přestože
+     * platná je už nová revize — a `claimNext()` odsunuté revize přeskakuje,
+     * takže by položky navíc zůstaly viset ve frontě navždy. Zbylé čekající
+     * položky se proto uzavřou jako neúspěšné s pojmenovaným důvodem; už
+     * vyrobené dokumenty zůstávají a platí jako historie.
+     *
+     * Položka, kterou má právě v ruce worker (`processing`), se nechává
+     * doběhnout — přerušit cizí pronájem zvenčí by rozbilo optimistický zámek.
+     *
+     * @return int počet zastavených položek
+     */
+    public function cancelSupersededRevisionsOfRun(
+        int $supplierId,
+        int $runId,
+    ): int {
+        $batches = $this->db->pdo()->prepare(
+            'SELECT batch.id
+               FROM payroll_document_batches batch
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = batch.supplier_id
+                AND revision.id = batch.revision_id
+                AND revision.run_id = batch.run_id
+              WHERE batch.supplier_id = ? AND batch.run_id = ?
+                AND batch.status <> "completed"
+                AND revision.status = "superseded"'
+        );
+        $batches->execute([$supplierId, $runId]);
+        $ids = $batches->fetchAll(PDO::FETCH_COLUMN);
+        if ($ids === []) {
+            return 0;
+        }
+
+        $cancel = $this->db->pdo()->prepare(
+            'UPDATE payroll_document_batch_items
+                SET status = "failed", available_at = UTC_TIMESTAMP(),
+                    lease_token = NULL, locked_at = NULL,
+                    last_error_code = "payroll_revision_superseded",
+                    last_error_message = ?
+              WHERE supplier_id = ? AND batch_id = ?
+                AND status IN ("queued", "retry_wait")'
+        );
+        $cancelled = 0;
+        foreach ($ids as $id) {
+            $batchId = (int) $id;
+            $cancel->execute([
+                'Revizi mzdového běhu nahradila opravná, z odsunuté revize se'
+                    . ' nové dokumenty negenerují.',
+                $supplierId,
+                $batchId,
+            ]);
+            $affected = $cancel->rowCount();
+            if ($affected > 0) {
+                $cancelled += $affected;
+                $this->refreshBatch($supplierId, $batchId);
+            }
+        }
+
+        return $cancelled;
+    }
+
     /** @return array{items:list<array<string,mixed>>,total:int} */
     public function items(
         int $supplierId,
@@ -262,7 +339,12 @@ final class PayrollDocumentBatchRepository
                   WHERE item.status IN ("queued", "retry_wait")
                     AND item.available_at <= UTC_TIMESTAMP()
                     AND batch.status <> "completed"
-                    AND revision.status IN ("approved", "superseded")
+                    -- Odsunutá revize se nerenderuje: kdyby dávka založená
+                    -- před opravou dál běžela, zaměstnanec by dostal
+                    -- předkorekční pásku. Čekající položky takové dávky
+                    -- uzavírá cancelForSupersededRevision(), takže tady
+                    -- nezůstane nic viset.
+                    AND revision.status = "approved"
                     AND revision.result_snapshot_hash = batch.source_snapshot_hash
                   ORDER BY item.available_at, item.id
                   LIMIT 1 FOR UPDATE SKIP LOCKED'

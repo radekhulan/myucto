@@ -86,6 +86,7 @@ const CHECKLIST_ITEM_KEYS = new Set([
   'health_insurance_change', 'social_jmhz_change', 'termination_document',
   'health_insurance_deregistration', 'social_jmhz_deregistration',
   'enforcement_insolvency_review', 'later_income_review',
+  'eldp_submission', 'taxable_income_confirmation',
 ])
 
 const DATE_FIELDS = new Set([

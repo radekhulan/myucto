@@ -103,6 +103,8 @@ final class PayrollPaymentBatchQueryService
      *   channel:string,
      *   export_format:string,
      *   planned_payment_date:string,
+     *   statutory_due_on:?string,
+     *   is_shifted:bool,
      *   currency_code:string,
      *   declared_total_minor:int,
      *   declared_item_count:int,
@@ -147,7 +149,20 @@ final class PayrollPaymentBatchQueryService
                          AND payment_match.allocation_id = allocation.id
                        WHERE payment_item.supplier_id = batch.supplier_id
                          AND payment_item.batch_id = batch.id
-                    ), 0) AS settled_minor
+                    ), 0) AS settled_minor,
+                    (
+                      SELECT MAX(liability.due_on)
+                        FROM payroll_payment_items payment_item
+                        JOIN payroll_payment_allocations allocation
+                          ON allocation.supplier_id =
+                             payment_item.supplier_id
+                         AND allocation.item_id = payment_item.id
+                        JOIN payroll_payment_liabilities liability
+                          ON liability.supplier_id = allocation.supplier_id
+                         AND liability.id = allocation.liability_id
+                       WHERE payment_item.supplier_id = batch.supplier_id
+                         AND payment_item.batch_id = batch.id
+                    ) AS statutory_due_on
               FROM payroll_payment_batches batch
               WHERE batch.supplier_id = ?
                 AND EXISTS (
@@ -188,6 +203,7 @@ final class PayrollPaymentBatchQueryService
                 );
             }
             $batchIds[] = $id;
+            $statutoryDueOn = self::nullableText($row, 'statutory_due_on');
             $batches[$id] = [
                 'id' => $id,
                 'batch_reference' => self::text(
@@ -200,6 +216,20 @@ final class PayrollPaymentBatchQueryService
                     $row,
                     'planned_payment_date',
                 ),
+                /*
+                 * `planned_payment_date` je datum PŘÍKAZU, `statutory_due_on`
+                 * zákonný termín ze splatnosti závazků v dávce (všechny mají
+                 * z konstrukce dávky stejný). U odvodů je příkaz o rezervu na
+                 * mezibankovní převod dřív, aby částka stihla být PŘIPSÁNÁ —
+                 * viz PayrollLevyPaymentDate. `is_shifted` říká, že se ta dvě
+                 * data liší, ať to UI umí vysvětlit.
+                 */
+                'statutory_due_on' => $statutoryDueOn,
+                'is_shifted' => $statutoryDueOn !== null
+                    && $statutoryDueOn !== self::text(
+                        $row,
+                        'planned_payment_date',
+                    ),
                 'currency_code' => self::text($row, 'currency_code'),
                 'declared_total_minor' => $declared,
                 'declared_item_count' => self::integer(

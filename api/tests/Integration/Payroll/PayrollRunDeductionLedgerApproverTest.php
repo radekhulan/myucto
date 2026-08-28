@@ -628,9 +628,13 @@ final class PayrollRunDeductionLedgerApproverTest extends TestCase
                  revision_kind, status, schema_version, ruleset_manifest_hash,
                  input_snapshot_json, input_snapshot_hash,
                  result_snapshot_json, result_snapshot_hash,
-                 idempotency_key_hash)
+                 idempotency_key_hash, superseded_at)
              VALUES (?, ?, ?, ?, ?, ?, "payroll-run-input.v2", ?,
-                     ?, ?, ?, ?, ?)'
+                     ?, ?, ?, ?, ?,
+                     -- Odsunutá revize musí nést razítko odsunutí (migrace
+                     -- 1621). Bez něj by to nebyla revize, jaká v provozu
+                     -- vzniká, ale nedoložený stav.
+                     IF(? = "superseded", NOW(), NULL))'
         )->execute([
             $this->supplierId,
             $this->runId,
@@ -644,6 +648,7 @@ final class PayrollRunDeductionLedgerApproverTest extends TestCase
             $resultJson,
             hash('sha256', $resultJson),
             hash('sha256', "synthetic-revision-{$revisionNo}", true),
+            $status,
         ]);
 
         return (int) $this->db->pdo()->lastInsertId();

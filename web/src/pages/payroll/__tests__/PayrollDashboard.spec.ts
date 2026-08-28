@@ -60,6 +60,7 @@ function mountDashboard() {
         ActionBar: actionBarStub,
         PayrollEmployeeCards: { props: ['period'], template: '<div data-test="employee-cards-stub" :data-period="period" />' },
         PayrollGuide: { template: '<div data-test="guide-stub" />' },
+        PayrollSetupGuide: { template: '<div data-test="setup-guide-stub" />' },
         PayrollAnnualReportPanel: {
           props: ['initialYear'],
           template: '<div data-test="annual-report-panel-stub" :data-year="initialYear" />',
@@ -179,6 +180,31 @@ describe('PayrollDashboard monthly workspace', () => {
     expect(wrapper.find('[data-test="guide-stub"]').exists()).toBe(true)
     const cards = wrapper.get('[data-test="employee-cards-stub"]')
     expect(cards.attributes('data-period')).toMatch(/^\d{4}-\d{2}$/)
+  })
+
+  /**
+   * Průvodce prvním nastavením mezd patří na přehled jen do prvního schváleného
+   * běhu. Rozhoduje `capabilities.onboarding` — chybějící klíč znamená
+   * nezobrazit, ať ho nedostane firma, která mzdy dávno jede.
+   */
+  it('shows the first-time setup guide only until payroll has settled data', async () => {
+    const base = await m.capabilities()
+
+    const withoutFlag = mountDashboard()
+    await flushPromises()
+    expect(withoutFlag.find('[data-test="setup-guide-stub"]').exists()).toBe(false)
+
+    m.capabilities.mockResolvedValue({ ...base, onboarding: { has_settled_payroll: true } })
+    const withData = mountDashboard()
+    await flushPromises()
+    expect(withData.find('[data-test="setup-guide-stub"]').exists()).toBe(false)
+
+    m.capabilities.mockResolvedValue({ ...base, onboarding: { has_settled_payroll: false } })
+    const fresh = mountDashboard()
+    await flushPromises()
+    expect(fresh.find('[data-test="setup-guide-stub"]').exists()).toBe(true)
+    // Měsíční návod „Jak to funguje" zůstává vedle — jsou to dva různé průvodci.
+    expect(fresh.find('[data-test="guide-stub"]').exists()).toBe(true)
   })
 
   it('reports the payroll run state of the current month', async () => {

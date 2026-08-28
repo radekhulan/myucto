@@ -499,6 +499,23 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\ActivityLogger::class),
                 $c->get(\MyInvoice\Repository\ClientBankAccountRepository::class),
                 $c->get(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class),
+                // C-09 — bankovní pohyb spotřebovaný mzdovou platbou se nesmí
+                // nabídnout znovu k fakturačnímu párování.
+                $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
+            ),
+
+            // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable
+            // class-param) — bez explicitní vazby by stráž zůstala null a
+            // schválení staršího návrhu by mzdovou platbu přepsalo.
+            \MyInvoice\Service\Bank\Match\MatchSuggestionService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\Match\MatchSuggestionService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Bank\Match\MatchCandidateProvider::class),
+                $c->get(\MyInvoice\Service\Bank\Match\MatchScorer::class),
+                $c->get(\MyInvoice\Service\Bank\Match\CounterpartyMapService::class),
+                $c->get(\MyInvoice\Service\Invoice\InvoicePaymentService::class),
+                $c->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class),
+                $c->get(\MyInvoice\Service\Invoice\PaymentTaxDocumentCreator::class),
+                $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
             ),
 
             \MyInvoice\Service\Accounting\Bank\TransferAutoPolicyInterface::class => fn (ContainerInterface $c) =>

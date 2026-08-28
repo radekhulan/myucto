@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Payment;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyPaymentDate;
 use PDO;
 
 final class PayrollPaymentQueryService
@@ -32,10 +34,13 @@ final class PayrollPaymentQueryService
 
     private readonly PayrollPaymentBatchQueryService $batchQueries;
 
+    private readonly PayrollLevyDeadlinePolicy $deadlines;
+
     public function __construct(
         private readonly Connection $db,
         ?PayrollPaymentBatchQueryService $batchQueries = null,
     ) {
+        $this->deadlines = new PayrollLevyDeadlinePolicy();
         $this->batchQueries = $batchQueries
             ?? new PayrollPaymentBatchQueryService(
                 $db,
@@ -81,6 +86,9 @@ final class PayrollPaymentQueryService
      *   batch_block_reason:?string,
      *   revision_kind:string,
      *   due_on:string,
+     *   statutory_due_on:?string,
+     *   is_shifted:?bool,
+     *   payment_on:string,
      *   currency_code:string,
      *   amount_minor:int,
      *   allocated_minor:int,
@@ -111,6 +119,7 @@ final class PayrollPaymentQueryService
         $statement = $this->db->pdo()->prepare(
             'SELECT liability.id, revision.run_id, liability.revision_id,
                     revision.revision_no, revision.revision_kind,
+                    run.period_start,
                     liability.employee_id,
                     employee.full_name AS employee_name,
                     COALESCE(
@@ -310,6 +319,11 @@ final class PayrollPaymentQueryService
                     'revision_kind',
                 ),
                 'due_on' => self::text($row, 'due_on'),
+                ...$this->deadlineFields(
+                    self::text($row, 'liability_kind'),
+                    self::text($row, 'period_start'),
+                    self::text($row, 'due_on'),
+                ),
                 'currency_code' => self::text($row, 'currency_code'),
                 'amount_minor' => $amount,
                 'allocated_minor' => $allocated,
@@ -320,6 +334,59 @@ final class PayrollPaymentQueryService
         }
 
         return ['items' => $result, 'total' => $total, 'totals' => $totals];
+    }
+
+    /**
+     * Zákonný termín vs. datum příkazu.
+     *
+     * `due_on` je poslední ZÁKONNÝ den. Lhůta u pojistného i u zálohové a
+     * srážkové daně je ale splněna až PŘIPSÁNÍM na účet instituce, takže
+     * příkaz musí odejít dřív — `payment_on`. Aby uživatel v UI viděl obojí a
+     * pochopil, proč se datum příkazu liší od termínu, prostupujeme sem
+     * i `statutory_due_on` (termín PŘED posunem na pracovní den) a `is_shifted`
+     * z {@see PayrollLevyDeadlinePolicy}.
+     *
+     * U závazků bez modelované lhůty (čistá mzda, exekuce, insolvence,
+     * povinné spoření) i u období před účinností rulesetu zůstává datum
+     * příkazu rovné `due_on` a zákonná pole jsou `null` — dohadovat se tady
+     * o termínu by bylo horší než ho nezobrazit.
+     *
+     * @return array{
+     *   statutory_due_on:?string,is_shifted:?bool,payment_on:string
+     * }
+     */
+    private function deadlineFields(
+        string $liabilityKind,
+        string $periodStart,
+        string $dueOn,
+    ): array {
+        $levy = PayrollLevyPaymentDate::levyForLiabilityKind($liabilityKind);
+        if ($levy === null) {
+            return [
+                'statutory_due_on' => null,
+                'is_shifted' => null,
+                'payment_on' => $dueOn,
+            ];
+        }
+        try {
+            $window = $this->deadlines->forPeriod($levy, $periodStart);
+            $statutoryDueOn = $window->statutoryDueOn;
+            $isShifted = $window->isShifted;
+        } catch (\Throwable) {
+            $statutoryDueOn = null;
+            $isShifted = null;
+        }
+        try {
+            $paymentOn = PayrollLevyPaymentDate::forDueOn($dueOn);
+        } catch (\InvalidArgumentException) {
+            $paymentOn = $dueOn;
+        }
+
+        return [
+            'statutory_due_on' => $statutoryDueOn,
+            'is_shifted' => $isShifted,
+            'payment_on' => $paymentOn,
+        ];
     }
 
     /** @return array<string,mixed> */

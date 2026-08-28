@@ -570,14 +570,18 @@ final class PayrollPaymentExportService
      *   variable_symbol:?string,
      *   constant_symbol:?string,
      *   specific_symbol:?string,
-     *   message:string
+     *   message:string,
+     *   allow_missing_variable_symbol:bool
      * }>
      */
     private function aboWriterItems(array $instructions): array
     {
         $items = [];
         foreach ($instructions as $instruction) {
+            $institutional = $this->isInstitutionalInstruction($instruction);
+            $this->assertVariableSymbol($instruction, $institutional);
             $items[] = [
+                'allow_missing_variable_symbol' => !$institutional,
                 'account_number' => $this->requiredString(
                     $instruction,
                     'account_number',
@@ -619,6 +623,8 @@ final class PayrollPaymentExportService
      *   bic:?string,
      *   amount_minor:int,
      *   variable_symbol:?string,
+     *   specific_symbol:?string,
+     *   constant_symbol:?string,
      *   message:string
      * }>
      */
@@ -626,6 +632,10 @@ final class PayrollPaymentExportService
     {
         $items = [];
         foreach ($instructions as $instruction) {
+            $this->assertVariableSymbol(
+                $instruction,
+                $this->isInstitutionalInstruction($instruction),
+            );
             $items[] = [
                 'payee_name' => $this->requiredString(
                     $instruction,
@@ -642,6 +652,17 @@ final class PayrollPaymentExportService
                 'variable_symbol' => $this->nullableString(
                     $instruction,
                     'variable_symbol',
+                ),
+                // SEPA nemá pole pro české symboly — nesou se ve strukturované
+                // části zprávy pro příjemce (viz SepaPaymentOrderWriter).
+                // Bez nich odcházela eurová platba bez jakékoliv identifikace.
+                'specific_symbol' => $this->nullableString(
+                    $instruction,
+                    'specific_symbol',
+                ),
+                'constant_symbol' => $this->nullableString(
+                    $instruction,
+                    'constant_symbol',
                 ),
                 'end_to_end_id' => 'MYUCTO-' . substr(
                     hash(
@@ -663,6 +684,47 @@ final class PayrollPaymentExportService
         }
 
         return $items;
+    }
+
+    /**
+     * Instrukce mířící na instituci (ČSSZ, zdravotní pojišťovna, finanční
+     * úřad, exekutor, insolvenční správce, penzijní společnost) — poznáme ji
+     * podle reference příjemce, kterou sestavuje
+     * {@see PayrollPaymentBatchBuilder::institutionReference()}.
+     *
+     * @param array<string,mixed> $instruction
+     */
+    private function isInstitutionalInstruction(array $instruction): bool
+    {
+        $reference = $instruction['recipient_reference'] ?? null;
+
+        return is_string($reference)
+            && str_starts_with($reference, 'institution:');
+    }
+
+    /**
+     * Poslední brána před exportem dávky: institucionální platba bez VS ven
+     * neodejde. Dávky sestavené před opravou P-07 mají symbol zmrazený ve
+     * zašifrované instrukci, takže je kontrola v builderu už nezachytí —
+     * tady se zastaví.
+     *
+     * @param array<string,mixed> $instruction
+     */
+    private function assertVariableSymbol(
+        array $instruction,
+        bool $institutional,
+    ): void {
+        if (!$institutional) {
+            return;
+        }
+        $symbol = $this->nullableString($instruction, 'variable_symbol');
+        if ($symbol === null) {
+            throw new \DomainException(
+                'Platba instituci v dávce nemá variabilní symbol; doplňte jej'
+                . ' u příjemce (účet instituce, u ČSSZ mzdová účtárna)'
+                . ' a sestavte dávku znovu.',
+            );
+        }
     }
 
     /** @param array<string,mixed> $instruction */

@@ -42,6 +42,27 @@ readonly class JmhzDispatchService
     public const CHANNEL = 'vrep_apep';
     public const SUBMISSION_CLASS = 'CSSZ_JMHZ';
 
+    /**
+     * Agenda povinnosti → druh podání v hlavičce GovTalk.
+     *
+     * Kanálem `vrep_apep` chodí i OZUSPOJ a registrace, takže samotný kanál
+     * nic nerozhoduje. Bez téhle mapy stačilo poslat ID podání jiné agendy
+     * a odešlo se pod hlavičkou `Class=CSSZ_JMHZ` — ČSSZ dostane dokument,
+     * který k deklarovanému druhu podání nepatří, a vzít se to zpět nedá.
+     */
+    private const AGENDA_SUBMISSION_CLASSES = [
+        'JMHZ' => self::SUBMISSION_CLASS,
+        'JMHZ25' => self::SUBMISSION_CLASS,
+        'PREZEC26' => 'CSSZ_PREZEC',
+        'REGZEC25' => 'CSSZ_REGZEC',
+    ];
+
+    /**
+     * Stav podání, ze kterého se smí odesílat. Kontrola stavu až v
+     * `markSubmitted()` přicházela PO odeslání, tedy k ničemu.
+     */
+    private const SENDABLE_STATUS = 'ready';
+
     public function __construct(
         private PayrollSubmissionTransportAttemptRepository $attempts,
         private PayrollSigningProfileRepository $profiles,
@@ -80,17 +101,40 @@ readonly class JmhzDispatchService
         ?int $actorUserId,
         string $submissionClass = self::SUBMISSION_CLASS,
     ): JmhzDispatchOutcome {
-        // Bez předané datové věty se bere ta ZMRAZENÁ. Je to jediný dokument,
-        // který se pod tímhle podáním smí odeslat — postavit XML znovu by
-        // znamenalo nové GUIDy a tedy jiný dokument pod týmž podáním.
-        if ($payloadXml === null || trim($payloadXml) === '') {
-            if ($this->frozen === null) {
+        $this->assertSendable(
+            $supplierId,
+            $environment,
+            $submissionId,
+            $submissionClass,
+            $idempotencyKey,
+        );
+        // Odesílá se VÝHRADNĚ zmrazený artefakt. Dřív se bral payload tak, jak
+        // dorazil, takže na VREP šlo cokoli — bez XSD, bez katalogu kontrol —
+        // a do ledgeru se zapsal otisk TOHO, co přišlo. Archiv pak tvrdil
+        // „odesláno bylo zmrazené XML", i když odesláno bylo něco jiného.
+        //
+        // Předaný payload zůstává jen jako KONTROLNÍ OTISK: registrační
+        // adaptér si zmrazené bajty načítá sám a předává je dál, takže se
+        // musí shodovat. Cokoli jiného je záměna dokumentu a odeslání padá.
+        if ($this->frozen !== null) {
+            $frozenXml = $this->frozen->bytes($supplierId, $environment, $submissionId);
+            if ($payloadXml !== null
+                && trim($payloadXml) !== ''
+                && !hash_equals(hash('sha256', $frozenXml), hash('sha256', $payloadXml))
+            ) {
                 throw new JmhzTransportException(
-                    'jmhz_dispatch_payload_missing',
-                    'Chybí datová věta zmrazeného podání.',
+                    'jmhz_dispatch_payload_not_frozen',
+                    'Předaná datová věta neodpovídá zmrazenému artefaktu podání.',
                 );
             }
-            $payloadXml = $this->frozen->bytes($supplierId, $environment, $submissionId);
+            $payloadXml = $frozenXml;
+        } elseif ($payloadXml === null || trim($payloadXml) === '') {
+            // Bez navázané platformy (jen testovací dvojníci; v produkci je
+            // `frozen` v Bootstrap svázaný) není odkud zmrazené XML vzít.
+            throw new JmhzTransportException(
+                'jmhz_dispatch_payload_missing',
+                'Chybí datová věta zmrazeného podání.',
+            );
         }
         $signer = $this->signer($supplierId, $environment);
         $material = $signer->unlock();
@@ -195,6 +239,93 @@ readonly class JmhzDispatchService
         return new JmhzDispatchOutcome($attempt, $acknowledgement);
     }
 
+    /**
+     * Tvrdá brána PŘED odesláním: agenda, kanál, prostředí a stav.
+     *
+     * Kanálem `vrep_apep` chodí i OZUSPOJ a registrace, takže bez kontroly
+     * agendy stačilo poslat ID podání jiné agendy a odešlo se pod hlavičkou
+     * deklarující JMHZ. Kontrola stavu byla až v `markSubmitted()`, tedy až
+     * po odeslání — v okamžiku, kdy se s tím už nedalo nic dělat.
+     *
+     * Opakované volání s TÝMŽ idempotenčním klíčem musí projít i u podání,
+     * které už je `submitted`: to není nové odeslání, ale vrácení původního
+     * pokusu. Vlastní přehrání pak atomicky řeší `attempts->open()`.
+     */
+    private function assertSendable(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+        string $submissionClass,
+        string $idempotencyKey,
+    ): void {
+        if ($this->submissions === null) {
+            return;
+        }
+        if (!in_array($submissionClass, self::AGENDA_SUBMISSION_CLASSES, true)) {
+            throw new JmhzTransportException(
+                'jmhz_dispatch_class_unsupported',
+                'Transport nepodporuje tenhle druh podání ČSSZ.',
+            );
+        }
+        $submission = $this->submissions->get($supplierId, $submissionId);
+        if ($submission['environment'] !== $environment) {
+            throw new \DomainException('Podání patří jinému prostředí.');
+        }
+        if ($submission['channel'] !== self::CHANNEL) {
+            throw new \DomainException(
+                'Podání není vedené na kanálu VREP/APEP, odeslat touhle cestou nejde.',
+            );
+        }
+        $obligation = $this->submissions->obligationOf(
+            $supplierId,
+            $environment,
+            $submissionId,
+        );
+        $expectedClass = $obligation === null
+            ? null
+            : (self::AGENDA_SUBMISSION_CLASSES[$obligation['agenda_code']] ?? null);
+        if ($expectedClass === null || $expectedClass !== $submissionClass) {
+            throw new \DomainException(
+                'Agenda podání neodpovídá druhu podání, pod kterým se má odeslat.',
+            );
+        }
+        if ($submission['status'] === self::SENDABLE_STATUS) {
+            return;
+        }
+        $existing = $this->attempts->findByIdempotencyKey($idempotencyKey);
+        if ($existing !== null
+            && (int) ($existing['supplier_id'] ?? 0) === $supplierId
+            && (string) ($existing['environment'] ?? '') === $environment
+            && (int) ($existing['submission_id'] ?? 0) === $submissionId
+            && (string) ($existing['channel'] ?? '') === self::CHANNEL
+        ) {
+            return;
+        }
+
+        throw new \DomainException(
+            'Podání není ve stavu připraveno k odeslání; pokračujte dotazem na'
+                . ' výsledek původního pokusu.',
+        );
+    }
+
+    /**
+     * Evidence úspěšného odeslání v platformě podání.
+     *
+     * Dřív se tu polykalo úplně všechno, takže po ÚSPĚŠNÉM odeslání mohlo
+     * podání zůstat ve stavu `ready` — a to je nejhorší možný výsledek:
+     * obsluha vidí nepodané hlášení, odešle znovu a ČSSZ druhé podání odmítne
+     * jako duplicitu. Selhání evidence proto MUSÍ být dohledatelné.
+     *
+     * Zvolená cesta je zápis do provozních nálezů podání (`recordIssue`), ne
+     * nový stav: stavový automat podání je sdílený všemi agendami a přidat do
+     * něj stav „odesláno, evidence selhala" by znamenalo měnit ENUM i všechny
+     * přechody kvůli situaci, která se řeší ručně. Nález nese kód
+     * `jmhz_dispatch_submitted_not_recorded` a je vidět v inboxu; důkaz o
+     * odeslání je vedle toho v ledgeru pokusů, který je závaznější.
+     *
+     * Výjimku ven nepouštíme ani teď: odeslání PROBĚHLO a shodit ho chybou
+     * evidence by uživateli řeklo „nepodáno", což je přesně naopak.
+     */
     private function markSubmitted(
         int $supplierId,
         int $submissionId,
@@ -205,7 +336,7 @@ readonly class JmhzDispatchService
         }
         try {
             $submission = $this->submissions->get($supplierId, $submissionId);
-            if ($submission['status'] !== 'ready') {
+            if ($submission['status'] !== self::SENDABLE_STATUS) {
                 return;
             }
             $this->submissions->transition(
@@ -215,7 +346,46 @@ readonly class JmhzDispatchService
                 'submitted',
                 $correlationReference,
             );
+        } catch (\Throwable $exception) {
+            $this->recordUnrecordedSubmission(
+                $supplierId,
+                $submissionId,
+                $correlationReference,
+                $exception,
+            );
+        }
+    }
+
+    private function recordUnrecordedSubmission(
+        int $supplierId,
+        int $submissionId,
+        string $correlationReference,
+        \Throwable $cause,
+    ): void {
+        $submissions = $this->submissions;
+        if ($submissions === null) {
+            return;
+        }
+        try {
+            $submissions->recordIssue(
+                $supplierId,
+                $submissionId,
+                (int) $submissions->get($supplierId, $submissionId)['row_version'],
+                null,
+                'error',
+                'remote',
+                'jmhz_dispatch_submitted_not_recorded',
+                'payroll_submission',
+                (string) $submissionId,
+                [
+                    'correlation_reference' => $correlationReference,
+                    'message' => $cause->getMessage(),
+                ],
+            );
         } catch (\Throwable) {
+            // Poslední záchytná síť. Ledger pokusů zápis o odeslání i tak má
+            // a `PayrollSubmissionTransportAttemptRepository::listReadyJmhzSubmissions()`
+            // ukáže podání, které je `ready` a přitom má odeslaný pokus.
             return;
         }
     }

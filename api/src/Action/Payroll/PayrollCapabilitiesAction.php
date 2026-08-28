@@ -10,6 +10,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollCompanyCapabilityService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
+use MyInvoice\Service\Payroll\PayrollOnboardingStatusService;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\SupportMatrix;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -26,6 +27,7 @@ final class PayrollCapabilitiesAction
         private readonly PayrollModuleActivationService $activation,
         private readonly PayrollCompanyCapabilityService $companyCapability,
         private readonly PayrollProductionGate $productionGate,
+        private readonly PayrollOnboardingStatusService $onboarding,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -55,6 +57,12 @@ final class PayrollCapabilitiesAction
                 $state['start_period'],
             ),
             'production_release' => $this->productionGate->status(),
+            // Průvodce prvním nastavením mezd se ukazuje jen do prvního
+            // schváleného běhu. Odpověď o modulu se na přehledu načítá tak jako
+            // tak, takže příznak jede s ní a nestojí další request.
+            'onboarding' => [
+                'has_settled_payroll' => $this->onboarding->hasSettledPayroll($supplierId),
+            ],
         ]);
     }
 }

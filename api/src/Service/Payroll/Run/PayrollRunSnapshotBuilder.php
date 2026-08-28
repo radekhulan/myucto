@@ -142,6 +142,11 @@ final class PayrollRunSnapshotBuilder
             $validations[] = $validation;
         }
 
+        $personRegistrationGaps = $this->personRegistrationGaps(
+            $supplierId,
+            $employmentIds,
+        );
+
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -256,6 +261,19 @@ final class PayrollRunSnapshotBuilder
                     'Mzdová účtárna nemá pro období doloženou účinnou registraci ČSSZ.',
                     '/payroll/settings',
                 );
+            }
+            // Registrace ÚČTÁRNY (výše) není registrace OSOBY. Doteď se
+            // kontrolovala jen ta první, takže mzda zaměstnankyně, za kterou
+            // nikdo nepodal přihlášku, spočítala pojistné, zaúčtovala ho
+            // i zaplatila — a aplikace mlčela až do kontroly z ČSSZ.
+            foreach ($this->personRegistrationValidations(
+                $row,
+                $employmentId,
+                $employeeId,
+                $personRegistrationGaps[$employmentId] ?? null,
+                $periodEnd,
+            ) as $validation) {
+                $validations[] = $validation;
             }
             $timeMonth = isset($timeMonthRows[$employmentId])
                 ? $this->timeMonth($timeMonthRows[$employmentId])
@@ -979,6 +997,191 @@ final class PayrollRunSnapshotBuilder
             ...($officeId === null ? [] : [$officeId]),
         ]);
         return array_values($stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Chybějící registrace OSOBY u ČSSZ a u zdravotní pojišťovny.
+     *
+     * Mezera se pozná ze DVOU nezávislých pramenů a hlásí se, jen když mlčí
+     * oba: položka nástupního checklistu je pořád „nevyřízeno" **a** k vztahu
+     * neexistuje evidovaná povinnost podání. Přihláška se totiž mohla podat
+     * mimo aplikaci — pak ji obsluha odklikne v checklistu a varování zmizí.
+     *
+     * Vztah, který položku checklistu vůbec nemá (převzatá legacy projekce,
+     * data z doby před životním cyklem), se ZÁMĚRNĚ nehlásí. O takovém vztahu
+     * aplikace neví, jestli přihláška existuje, a varovat „nevím" u každého
+     * převzatého zaměstnance je přesně ten planý poplach, kvůli kterému si
+     * účetní na hlášku zvykne a přestane ji číst.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array{social:bool,health:bool}>
+     */
+    private function personRegistrationGaps(
+        int $supplierId,
+        array $employmentIds,
+    ): array {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
+        $statement = $this->db->pdo()->prepare(
+            'SELECT employment.id AS employment_id,
+                    EXISTS (
+                      SELECT 1 FROM payroll_employment_checklist_items item
+                       WHERE item.supplier_id = employment.supplier_id
+                         AND item.employment_id = employment.id
+                         AND item.phase = \'onboarding\'
+                         AND item.item_key = \'social_jmhz_registration\'
+                         AND item.status = \'pending\'
+                    ) AS social_pending,
+                    EXISTS (
+                      SELECT 1 FROM payroll_employment_checklist_items item
+                       WHERE item.supplier_id = employment.supplier_id
+                         AND item.employment_id = employment.id
+                         AND item.phase = \'onboarding\'
+                         AND item.item_key = \'health_insurance_registration\'
+                         AND item.status = \'pending\'
+                    ) AS health_pending,
+                    EXISTS (
+                      SELECT 1 FROM payroll_obligations obligation
+                       WHERE obligation.supplier_id = employment.supplier_id
+                         AND obligation.source_event_type
+                               = \'payroll_employment_registration\'
+                         AND obligation.source_event_reference
+                               = CONCAT(\'payroll_employment:\', employment.id)
+                         AND obligation.status <> \'cancelled\'
+                    ) AS social_submitted,
+                    EXISTS (
+                      SELECT 1 FROM payroll_obligations obligation
+                       WHERE obligation.supplier_id = employment.supplier_id
+                         AND obligation.source_event_type
+                               = \'payroll_health_notification\'
+                         AND obligation.source_event_reference LIKE CONCAT(
+                               \'payroll_health_notification:\',
+                               employment.id,
+                               \':employment_start:%\'
+                             )
+                         AND obligation.status <> \'cancelled\'
+                    ) AS health_submitted
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ?
+                AND employment.is_legacy_projection = 0
+                AND employment.id IN (' . $placeholders . ')'
+        );
+        $statement->execute([$supplierId, ...$employmentIds]);
+        $gaps = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $gaps[(int) $row['employment_id']] = [
+                'social' => (bool) $row['social_pending']
+                    && !(bool) $row['social_submitted'],
+                'health' => (bool) $row['health_pending']
+                    && !(bool) $row['health_submitted'],
+            ];
+        }
+
+        return $gaps;
+    }
+
+    /**
+     * Varování o chybějící přihlášce osoby — vědomě VAROVÁNÍ s overridem,
+     * ne blokátor. Přihláška se mohla podat mimo aplikaci a mzda se musí dát
+     * spočítat i tak; jen ne mlčky.
+     *
+     * Koho se to týká, rozhoduje ÚČAST NA POJIŠTĚNÍ, ne druh vztahu sám:
+     * `included` se hlásí vždy, `excluded` a `foreign` (cizinec pod cizí
+     * legislativou s A1) nikdy. `automatic` znamená „rozhodne výpočet podle
+     * prahu příjmu" — u dohod se proto mlčí, protože DPP pod rozhodným
+     * příjmem se u ČSSZ nehlásí a hlásit ji „pro jistotu" by bylo varování
+     * u každé brigády. Totéž pravidlo drží
+     * {@see \MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository}.
+     *
+     * @param array<string,mixed> $row
+     * @param array{social:bool,health:bool}|null $gap
+     * @return list<PayrollRunValidation>
+     */
+    private function personRegistrationValidations(
+        array $row,
+        int $employmentId,
+        int $employeeId,
+        ?array $gap,
+        string $periodEnd,
+    ): array {
+        if ($gap === null || (!$gap['social'] && !$gap['health'])) {
+            return [];
+        }
+        if (in_array(
+            (string) $row['employment_status'],
+            ['no_show', 'archived'],
+            true,
+        )) {
+            return [];
+        }
+        // Vztah, který v období ještě nezačal, přihlášku dlužit nemůže.
+        $startedOn = $row['actual_start_date'] ?? $row['start_date'];
+        if ($startedOn === null || (string) $startedOn > $periodEnd) {
+            return [];
+        }
+        $relationType = (string) $row['relation_type'];
+        $validations = [];
+        if ($gap['social'] && $this->participatesInLevy(
+            $row['social_insurance_participation'],
+            $relationType,
+        )) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'employment_social_registration_missing',
+                'employment',
+                $employmentId,
+                sprintf(
+                    '%s: k pracovnímu vztahu chybí přihláška u ČSSZ '
+                    . '(nemocenské pojištění). Podejte ji v Mzdy → Podání → '
+                    . 'Registrace zaměstnance, nebo — byla-li podána mimo '
+                    . 'aplikaci — odškrtněte v checklistu vztahu položku '
+                    . '„Registrace ČSSZ / JMHZ".',
+                    (string) $row['full_name'],
+                ),
+                "/payroll/employees/{$employeeId}",
+                true,
+            );
+        }
+        if ($gap['health'] && $this->participatesInLevy(
+            $row['health_insurance_participation'],
+            $relationType,
+        )) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'employment_health_registration_missing',
+                'employment',
+                $employmentId,
+                sprintf(
+                    '%s: k pracovnímu vztahu chybí oznámení nástupu zdravotní '
+                    . 'pojišťovně. Podejte je v Mzdy → Podání → Zdravotní '
+                    . 'pojišťovny, nebo — bylo-li podáno mimo aplikaci — '
+                    . 'odškrtněte v checklistu vztahu položku „Registrace '
+                    . 'zdravotní pojišťovny".',
+                    (string) $row['full_name'],
+                ),
+                "/payroll/employees/{$employeeId}",
+                true,
+            );
+        }
+
+        return $validations;
+    }
+
+    private function participatesInLevy(
+        mixed $participation,
+        string $relationType,
+    ): bool {
+        $value = is_string($participation) ? $participation : 'automatic';
+        if ($value === 'included') {
+            return true;
+        }
+        if ($value === 'excluded' || $value === 'foreign') {
+            return false;
+        }
+
+        return $relationType === 'employment';
     }
 
     /** @return array<string,mixed>|null */

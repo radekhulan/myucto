@@ -270,6 +270,59 @@ final class AboPaymentOrderWriterTest extends TestCase
      * @param array<string,mixed> $item
      * @return array<string,mixed>
      */
+    /**
+     * P-07 — chybějící variabilní symbol se dřív tiše nahradil nulou. Odvod
+     * bez VS zdravotní pojišťovna nespáruje s IČ a firmu vede jako dlužníka,
+     * exekutor platbu nepřiřadí ke spisu. Teď je to tvrdá chyba.
+     */
+    public function testThrowsWhenVariableSymbolIsMissing(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nemá variabilní symbol');
+        $this->writer->build($this->orderWith([
+            'account_number' => '2000145399', 'bank_code' => '0800',
+            'amount' => 100.00, 'variable_symbol' => null,
+        ]));
+    }
+
+    public function testThrowsWhenVariableSymbolHasNoDigits(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('nemá variabilní symbol');
+        $this->writer->build($this->orderWith([
+            'account_number' => '2000145399', 'bank_code' => '0800',
+            'amount' => 100.00, 'variable_symbol' => '---',
+        ]));
+    }
+
+    /**
+     * Čistá mzda na účet zaměstnance VS legitimně nemá — volající to ale musí
+     * potvrdit vědomě, ne mlčením.
+     */
+    public function testWritesZeroVariableSymbolOnlyWhenExplicitlyAllowed(): void
+    {
+        $result = $this->writer->build($this->orderWith([
+            'account_number' => '2000145399', 'bank_code' => '0800',
+            'amount' => 100.00, 'variable_symbol' => null,
+            'allow_missing_variable_symbol' => true,
+        ]));
+
+        self::assertStringContainsString(
+            '000000-2000145399 000000010000 0 08000000 0000000000',
+            $result,
+        );
+    }
+
+    public function testRejectsNonBooleanMissingSymbolFlag(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->writer->build($this->orderWith([
+            'account_number' => '2000145399', 'bank_code' => '0800',
+            'amount' => 100.00, 'variable_symbol' => null,
+            'allow_missing_variable_symbol' => 'ano',
+        ]));
+    }
+
     private function orderWith(array $item): array
     {
         return [

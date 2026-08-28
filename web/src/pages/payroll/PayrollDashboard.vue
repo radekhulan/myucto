@@ -15,6 +15,7 @@ import { formatPeriod } from '@/composables/useFormat'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
+import PayrollSetupGuide from '@/pages/payroll/PayrollSetupGuide.vue'
 import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.vue'
 import PayrollOperationalHealthPanel from '@/pages/payroll/PayrollOperationalHealthPanel.vue'
 import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'
@@ -39,6 +40,19 @@ const productionReleasePending = computed(() =>
 )
 const availableFeatures = computed(() =>
   capabilities.value?.support_matrix.features.filter(feature => feature.available) ?? [],
+)
+/**
+ * Průvodce prvním nastavením mezd (obdoba `OnboardingGuide` na Přehledu) patří
+ * na stránku jen do prvního schváleného běhu — pak už firma mzdy umí a
+ * rozcestník po nastavení je jen šum. Signál nese `capabilities.onboarding`,
+ * který se načítá spolu se stavem modulu, takže to nestojí další request.
+ *
+ * Chybějící klíč (starší API, testovací fixture) záměrně znamená NEZOBRAZIT:
+ * ukázat průvodce prvním nastavením firmě, která mzdy dávno jede, je horší
+ * chyba než ho neukázat té, která začíná.
+ */
+const showSetupGuide = computed(() =>
+  capabilities.value?.onboarding?.has_settled_payroll === false,
 )
 const setupBlockers = computed(() =>
   setupCheck.value !== null && !setupCheck.value.ready
@@ -284,6 +298,11 @@ onMounted(load)
             </li>
           </ul>
         </section>
+
+        <!-- Jednorázové prvotní nastavení (mizí po prvním schváleném běhu) jde
+             nad opakovaný měsíční návod: dokud není hotové, měsíční tok stejně
+             nejde projet. -->
+        <PayrollSetupGuide v-if="showSetupGuide" />
 
         <PayrollGuide ref="guide" />
 

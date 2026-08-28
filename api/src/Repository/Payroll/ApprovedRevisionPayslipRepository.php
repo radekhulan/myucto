@@ -58,9 +58,16 @@ final class ApprovedRevisionPayslipRepository
         bool $forUpdate,
     ): ?array {
         $lock = $forUpdate ? ' FOR UPDATE' : '';
+        // Odsunutá (`superseded`) revize tu být NESMÍ ani v náhledu: z revize,
+        // kterou nahradila opravná, se výplatní páska už netiskne. Novější
+        // schválená revize proto zdroj rovnou vyřazuje — pojistka pro běhy
+        // z doby, kdy se předchozí schválená revize ještě neodsouvala.
+        //
+        // `reviewed` je jen pro NÁHLED před schválením; zamčené čtení, ze
+        // kterého se opravdu vystavuje, ho nepřijme.
         $statuses = $forUpdate
-            ? '("approved", "superseded")'
-            : '("reviewed", "approved", "superseded")';
+            ? '("approved")'
+            : '("reviewed", "approved")';
         $revision = $this->db->pdo()->prepare(
             'SELECT run.period_start,
                     revision.result_snapshot_json,
@@ -74,7 +81,16 @@ final class ApprovedRevisionPayslipRepository
                 AND revision.id = ?
                 AND revision.status IN ' . $statuses . '
                 AND revision.result_snapshot_json IS NOT NULL
-                AND revision.result_snapshot_hash IS NOT NULL'
+                AND revision.result_snapshot_hash IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_run_revisions newer
+                     WHERE newer.supplier_id = revision.supplier_id
+                       AND newer.run_id = revision.run_id
+                       AND newer.revision_no > revision.revision_no
+                       AND newer.status = "approved"
+                       AND newer.result_snapshot_hash IS NOT NULL
+                )'
             . $lock
         );
         $revision->execute([$supplierId, $runId, $revisionId]);

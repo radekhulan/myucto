@@ -41,7 +41,8 @@ final class SepaPaymentOrderWriter
      *     items: list<array{
      *         payee_name?: ?string, iban: ?string, bic?: ?string,
      *         amount?: int|float, amount_minor?: int,
-     *         variable_symbol?: ?string, end_to_end_id?: ?string,
+     *         variable_symbol?: ?string, specific_symbol?: ?string,
+     *         constant_symbol?: ?string, end_to_end_id?: ?string,
      *         message?: ?string,
      *     }>
      * } $order
@@ -230,17 +231,66 @@ final class SepaPaymentOrderWriter
         $cdtrAcct->appendChild($cdtrAcctId);
         $this->el($dom, $cdtrAcctId, 'IBAN', $iban);
 
-        $message = $this->text(
-            $this->optionalText($item, 'message', $vs),
+        $remittance = $this->text(
+            $this->remittanceInformation(
+                $vs,
+                $this->optionalText($item, 'specific_symbol'),
+                $this->optionalText($item, 'constant_symbol'),
+                $this->optionalText($item, 'message', $vs),
+            ),
             140,
         );
-        if ($message !== '') {
+        if ($remittance !== '') {
             $rmtInf = $dom->createElementNS(self::NS, 'RmtInf');
             $tx->appendChild($rmtInf);
-            $this->el($dom, $rmtInf, 'Ustrd', $message);
+            $this->el($dom, $rmtInf, 'Ustrd', $remittance);
         }
 
         return $tx;
+    }
+
+    /**
+     * Zpráva pro příjemce (`RmtInf/Ustrd`) včetně českých platebních symbolů.
+     *
+     * SEPA scheme české symboly nezná — `pain.001.001.03` má jen strukturovanou
+     * referenci `RmtInf/Strd/CdtrRefInf` (jedna hodnota, typicky ISO 11649 RF),
+     * do které se tři samostatná čísla nevejdou. Tuzemské banky proto symboly
+     * přenášejí v NEstrukturované zprávě v ustáleném tvaru `/VS/…/SS/…/KS/…`
+     * (stejná konvence jako u SWIFT pole 70 a u přeshraničních příkazů) a při
+     * konverzi na tuzemský formát si je z ní zpátky vytáhnou.
+     *
+     * Bez toho odcházela eurová platba úplně bez identifikace — odvod bez VS
+     * příjemce nespáruje. Symboly proto stojí na ZAČÁTKU zprávy: `Ustrd` má
+     * jen 140 znaků a při ořezu musí přežít identifikace, ne popisný text.
+     */
+    private function remittanceInformation(
+        string $variableSymbol,
+        string $specificSymbol,
+        string $constantSymbol,
+        string $message,
+    ): string {
+        $reference = '';
+        foreach ([
+            'VS' => $variableSymbol,
+            'SS' => $specificSymbol,
+            'KS' => $constantSymbol,
+        ] as $tag => $value) {
+            $digits = (string) preg_replace('/\D+/', '', $value);
+            if ($digits !== '') {
+                $reference .= '/' . $tag . '/' . $digits;
+            }
+        }
+        if ($reference === '') {
+            return $message;
+        }
+        // Zprávu neduplikujeme, když je to jen opsaný variabilní symbol —
+        // v referenci už je.
+        $message = trim($message);
+        if ($message === '' || $message === trim($variableSymbol)) {
+            return $reference;
+        }
+
+        return $reference . ' ' . $message;
     }
 
     private function el(\DOMDocument $dom, \DOMElement $parent, string $name, string $value): \DOMElement

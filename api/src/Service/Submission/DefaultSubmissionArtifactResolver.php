@@ -88,6 +88,7 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         $stmt = $this->db->pdo()->prepare(
             'SELECT artifact.artifact_kind, artifact.direction,
                     artifact.mime_type, artifact.submission_id,
+                    artifact.xsd_version,
                     submission.environment, submission.status,
                     submission.channel, obligation.agenda_code
                FROM payroll_submission_artifacts artifact
@@ -139,6 +140,12 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
                 'channel' => (string) $row['channel'],
                 'artifact_kind' => (string) $row['artifact_kind'],
                 'direction' => (string) $row['direction'],
+                // Verze XSD, proti kterému se artefakt ověřil při MRAZENÍ.
+                // Nese ji {@see SubmissionArtifactValidator::assertTransportAuthority()}
+                // jako důkaz, že podklad prošel schématem dřív, než se zmrazil.
+                'xsd_version' => $row['xsd_version'] === null
+                    ? null
+                    : (string) $row['xsd_version'],
             ],
         ];
     }

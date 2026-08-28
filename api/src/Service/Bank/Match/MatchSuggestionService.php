@@ -10,6 +10,7 @@ use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use PDO;
 
 final class MatchSuggestionService
@@ -30,6 +31,9 @@ final class MatchSuggestionService
         private readonly InvoicePaymentService $payments,
         private readonly FinalFromProformaCreator $finalCreator,
         private readonly PaymentTaxDocumentCreator $taxDocCreator,
+        // Návrh mohl vzniknout dřív, než pohyb spotřebovaly mzdy — `match_status`
+        // zůstane 'unmatched', takže samotný zámek níž to nezachytí.
+        private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
     ) {}
 
     /** @param array<string,mixed> $matchResult @return array<string,mixed> */
@@ -158,6 +162,12 @@ final class MatchSuggestionService
                     ->execute([$suggestionId]);
                 $pdo->commit();
                 throw new MatchSuggestionException('already_reviewed', 'Transakce už byla spárována jiným způsobem.', 409);
+            }
+            if ($this->payrollEvidence?->isUsedByPayrollSafely((int) $suggestion['bank_transaction_id']) === true) {
+                $pdo->prepare("UPDATE bank_match_suggestions SET status = 'superseded', updated_at = NOW() WHERE id = ?")
+                    ->execute([$suggestionId]);
+                $pdo->commit();
+                throw new MatchSuggestionException('already_reviewed', 'Bankovní pohyb už použila mzdová platba.', 409);
             }
             $candidate = $candidates[$candidateIndex];
             $result = $this->applyCandidate($supplierId, $tx, $candidate, $userId, true);

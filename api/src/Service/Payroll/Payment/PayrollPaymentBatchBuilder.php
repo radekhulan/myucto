@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollPaymentBatchRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyPaymentDate;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
@@ -158,6 +159,7 @@ final class PayrollPaymentBatchBuilder
             $channel = null;
             $declaredTotal = 0;
             $groups = [];
+            $onlyLevies = true;
             foreach ($liabilities as $liability) {
                 $amount = $requestByLiability[$liability['id']] ?? null;
                 if ($amount === null) {
@@ -166,6 +168,10 @@ final class PayrollPaymentBatchBuilder
                     );
                 }
                 $this->assertLiability($liability, $amount);
+                $onlyLevies = $onlyLevies
+                    && PayrollLevyPaymentDate::isLevyLiabilityKind(
+                        $liability['liability_kind'],
+                    );
                 $plannedDate ??= $liability['due_on'];
                 $currencyCode ??= $liability['currency_code'];
                 if ($plannedDate !== $liability['due_on']
@@ -239,6 +245,22 @@ final class PayrollPaymentBatchBuilder
             ksort($groups, SORT_STRING);
             unset($recipient, $source, $groupKey);
 
+            /*
+             * `due_on` závazku je ZÁKONNÝ TERMÍN. Lhůta u pojistného i u daně
+             * se ale plní připsáním na účet instituce, ne podáním příkazu —
+             * příkaz proto datujeme o rezervu na mezibankovní převod dřív.
+             * Viz PayrollLevyPaymentDate (§ 9 odst. 2 zák. 589/1992 Sb.).
+             *
+             * Předsouvá se jen dávka složená VÝHRADNĚ z odvodů. Čistá mzda má
+             * v `due_on` datum výplaty a to se posouvat nesmí; smíšenou dávku
+             * proto necháváme na zákonném datu (a takový výběr stejně vzniká
+             * jen tehdy, když se datum splatnosti obou druhů shoduje).
+             */
+            $statutoryDueOn = $plannedDate;
+            if ($onlyLevies) {
+                $plannedDate = PayrollLevyPaymentDate::forDueOn($plannedDate);
+            }
+
             $payerInstruction = $this->payerInstruction(
                 $supplierId,
                 $channel,
@@ -296,6 +318,8 @@ final class PayrollPaymentBatchBuilder
                 'export_format' => $exportFormat,
                 'direction' => 'outgoing',
                 'planned_payment_date' => $plannedDate,
+                'statutory_due_on' => $statutoryDueOn,
+                'is_shifted' => $plannedDate !== $statutoryDueOn,
                 'creation_datetime' => $creationDateTime,
                 'currency_code' => $currencyCode,
                 'payer_reference' => $payerReference,
@@ -1127,6 +1151,45 @@ final class PayrollPaymentBatchBuilder
         ];
     }
 
+    /**
+     * Institucionální platba BEZ variabilního symbolu je fail-closed.
+     *
+     * Odvod, který dorazí na účet zdravotní pojišťovny nebo OSSZ bez VS, se
+     * nespáruje s IČ plátce a firma zůstane vedená jako dlužník i po zaplacení;
+     * u exekuční srážky ho exekutor nepřiřadí ke spisu. Dřív se prázdný symbol
+     * potichu nahradil nulou až v ABO writeru — chyba tak byla vidět teprve na
+     * výpisu z účtu. Odmítáme ji už při sestavení dávky a rovnou říkáme, kde se
+     * symbol doplňuje: u ČSSZ je na mzdové účtárně, u ostatních institucí na
+     * jejich platebním účtu, u povinného spoření na srážce samotné.
+     */
+    private function assertInstitutionVariableSymbol(
+        string $liabilityKind,
+        string $institutionType,
+        mixed $institutionName,
+        ?string $variableSymbol,
+    ): void {
+        if ($variableSymbol !== null) {
+            return;
+        }
+        $name = is_string($institutionName) && trim($institutionName) !== ''
+            ? trim($institutionName)
+            : 'příjemce odvodu';
+        $where = match (true) {
+            $liabilityKind === 'risky_savings' =>
+                'doplňte jej u srážky povinného spoření na rizikovou práci',
+            $institutionType === 'social_security' =>
+                'doplňte jej v nastavení mzdové účtárny (variabilní symbol'
+                . ' zaměstnavatele u ČSSZ)',
+            default => "doplňte jej v nastavení platebního účtu instituce"
+                . " „{$name}“",
+        };
+
+        throw new \DomainException(
+            'Institucionální platba nemá variabilní symbol — ' . $where
+            . '. Bez symbolu příjemce platbu nespáruje.',
+        );
+    }
+
     private function nullableTextValue(
         mixed $value,
         string $context,
@@ -1297,6 +1360,12 @@ final class PayrollPaymentBatchBuilder
             $institutionCode,
             $account,
             $source,
+        );
+        $this->assertInstitutionVariableSymbol(
+            $group['liability_kind'],
+            $institutionType,
+            $account['institution_name'],
+            $symbols['variable_symbol'],
         );
         $verificationHash = $this->institutionVerificationHash(
             $institutionType,

@@ -56,6 +56,12 @@ final readonly class PayrollHealthNotificationRepository
      * Pojišťovna se čte z časové řady krytí, ne z „aktuálního" údaje: oznámení
      * se váže ke dni skutečnosti a k pojišťovně, která toho dne platila.
      *
+     * `start_date` je SKUTEČNÝ den nástupu, plánovaný jen jako záloha. Den
+     * nástupu je obsahem oznámení, ne jen filtrem: dokud se bral plánovaný,
+     * dostala pojišťovna datum, které se nestalo, kdykoli se nástup posunul.
+     * Sloupec si drží název `start_date`, aby se doména nemusela ptát,
+     * které z obou dat dostala.
+     *
      * @return array{
      *   employment_id:int,employee_id:int,relation_type:string,status:string,
      *   participates:bool,insurer_code:?string,start_date:?string,
@@ -75,7 +81,8 @@ final readonly class PayrollHealthNotificationRepository
                     employment.employee_id,
                     employment.relation_type,
                     employment.status,
-                    employment.start_date,
+                    COALESCE(employment.actual_start_date, employment.start_date)
+                        AS start_date,
                     employment.end_date,
                     employee.full_name,
                     terms.health_insurance_participation,
@@ -220,7 +227,8 @@ final readonly class PayrollHealthNotificationRepository
                     employment.employee_id,
                     employment.relation_type,
                     employment.status,
-                    employment.start_date,
+                    COALESCE(employment.actual_start_date, employment.start_date)
+                        AS start_date,
                     employment.end_date,
                     employee.full_name,
                     (SELECT terms.health_insurance_participation
@@ -246,7 +254,8 @@ final readonly class PayrollHealthNotificationRepository
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
               WHERE employment.supplier_id = ?
-                AND employment.start_date <= ?
+                AND employment.status NOT IN (\'no_show\', \'archived\')
+                AND COALESCE(employment.actual_start_date, employment.start_date) <= ?
                 AND (employment.end_date IS NULL OR employment.end_date >= ?)
               ORDER BY employee.full_name, employment.id'
         );
@@ -254,6 +263,14 @@ final readonly class PayrollHealthNotificationRepository
         // (nástup, skončení, nástup na mateřskou) se filtruje až v doméně —
         // kdyby se filtrovala tady, vypadl by vztah, který v období skončil,
         // ale nastoupil dřív, a jeho odhláška by se nikde neukázala.
+        //
+        // Dvě výjimky se ale filtrují UŽ TADY, protože o nich nerozhoduje
+        // doména, ale životní cyklus vztahu: `no_show` je zrušený nástup —
+        // člověk do práce nikdy nenastoupil, takže není koho k pojištění
+        // přihlásit, a přihláška fiktivního pojištěnce je vada, ne opomenutí.
+        // `archived` je vztah vyřazený z evidence (oprava omylu); dokud se
+        // nevrátí zpět do `ended`, nemá vyrábět povinnosti. Doména je
+        // rozlišit neumí — `HealthNotificationFacts` stav vztahu vůbec nenese.
         $statement->execute([
             $to, $to, $to, $to, $supplierId, $to, $from,
         ]);

@@ -5,6 +5,7 @@ import {
   payrollApi,
   type PayrollChecklistStatus,
   type PayrollEmployment,
+  type PayrollEmploymentChecklistItem,
   type PayrollEmploymentStatus,
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollMealEntitlementBasis,
@@ -156,8 +157,17 @@ const advancedTermsPrefilled = computed(() => {
 const needsOtherWithholdingStatement = computed(
   () => ['dpc', 'partner_dependent', 'statutory_body'].includes(props.employment.relation_type),
 )
+/**
+ * Stav, který se ukazuje: položka doložená dokladem je splněná, i když ji nikdo
+ * ručně neodklepl (`effective_status`). Ruční evidence (`status`) zůstává tím,
+ * podle čeho se zapisuje — proto se tlačítka řídí dál jí.
+ */
+function checklistStatus(item: PayrollEmploymentChecklistItem): PayrollChecklistStatus {
+  return item.effective_status ?? item.status
+}
+
 const openChecklist = computed(() =>
-  props.employment.checklist.filter(item => item.status === 'pending'),
+  props.employment.checklist.filter(item => checklistStatus(item) === 'pending'),
 )
 
 /**
@@ -166,7 +176,7 @@ const openChecklist = computed(() =>
  */
 const sortedChecklist = computed(() =>
   [...props.employment.checklist].sort(
-    (a, b) => Number(a.status !== 'pending') - Number(b.status !== 'pending'),
+    (a, b) => Number(checklistStatus(a) !== 'pending') - Number(checklistStatus(b) !== 'pending'),
   ),
 )
 
@@ -937,7 +947,10 @@ const actions = computed<ActionItem[]>(() => [
           <div v-for="item in sortedChecklist" :key="item.id" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-neutral-50 px-3 py-2 text-xs">
             <div>
               <p class="font-medium text-neutral-800">{{ t(`payroll.people.checklist.${item.item_key}`) }}</p>
-              <p class="text-neutral-500">{{ formatDate(item.due_date) }} · {{ t(`payroll.people.checklist_status.${item.status}`) }}</p>
+              <!-- Povinnost bez zákonné lhůty (interní kontrola, potvrzení na
+                   žádost) nemá `due_date` — pak se datum vůbec nepíše, ať tam
+                   nesvítí pomlčka bez významu. -->
+              <p class="text-neutral-500"><template v-if="item.due_date">{{ formatDate(item.due_date) }} · </template>{{ t(`payroll.people.checklist_status.${checklistStatus(item)}`) }}</p>
             </div>
             <!--
               „Netýká se" model uměl od začátku, ale karta nabízela jen splnit

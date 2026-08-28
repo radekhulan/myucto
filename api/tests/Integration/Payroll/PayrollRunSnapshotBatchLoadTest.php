@@ -194,11 +194,19 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
         // toho, že řádek nastavení chybí, a bez něj by snapshot zmrazil účet,
         // který firma nemá. Je to jeden dotaz na běh, ne na osobu.
         //
+        // Od W14 je v rozpočtu i jedna dávka navíc: kontrola, jestli je osoba
+        // přihlášená u ČSSZ a u zdravotní pojišťovny
+        // (PayrollRunSnapshotBuilder::personRegistrationGaps()). Doteď se
+        // hlídala jen registrace ÚČTÁRNY, takže mzda člověka bez přihlášky
+        // prošla mlčky. Je to jeden množinový dotaz na běh, ne na osobu —
+        // proto rozpočet roste o dva round-tripy (prepare + execute), ne
+        // s počtem zaměstnanců.
+        //
         // Číslo je vědomě těsné — má spadnout, když někdo přidá dotaz navíc.
         self::assertLessThanOrEqual(
-            78,
+            80,
             $counts[500],
-            'Snapshot pěti set osob se musí vejít do 78 round-tripů.',
+            'Snapshot pěti set osob se musí vejít do 80 round-tripů.',
         );
     }
 

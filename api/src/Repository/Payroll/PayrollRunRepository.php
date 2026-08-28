@@ -1060,8 +1060,15 @@ final class PayrollRunRepository
             $params[] = $beforeRevisionNo;
         }
         $stmt = $this->db->pdo()->prepare(
+            // `superseded` se počítá taky: je to revize, která JEDNOU schválená
+            // byla, jen ji později nahradila opravná. Bez ní by pojistka
+            // „běžná revize nesmí měnit dříve schválené srážky" přestala
+            // platit ve chvíli, kdy se předchozí schválená revize odsune.
+            // Odsunout jde vždy jen STARŠÍ revizi, takže nejvyšší revision_no
+            // je pořád ta aktuálně schválená — pořadí zůstává správné.
             'SELECT * FROM payroll_run_revisions
-              WHERE supplier_id = ? AND run_id = ? AND status = "approved"'
+              WHERE supplier_id = ? AND run_id = ?
+                AND status IN ("approved", "superseded")'
                 . $beforeSql . '
               ORDER BY revision_no DESC
               LIMIT 1'
@@ -1699,6 +1706,46 @@ final class PayrollRunRepository
         if ($stmt->rowCount() !== 1) {
             throw new \DomainException('Revizi nelze schválit.');
         }
+    }
+
+    /**
+     * Starší schválené revize téhož běhu se schválením nové ODSUNOU.
+     *
+     * Bez toho existovaly po opravné revizi DVĚ revize ve stavu `approved`
+     * a generátor dokumentů si mohl vybrat kteroukoli — zaměstnanec pak dostal
+     * předkorekční výplatní pásku, přestože účetnictví i JMHZ už jely z nové.
+     * Stav `superseded` byl v ENUM od začátku, jen ho nikdo nenastavoval.
+     *
+     * Už vydané dokumenty tím platit nepřestávají: visí na `revision_id`
+     * a čtou se z archivu vygenerovaných dokumentů, ne přes tenhle stav.
+     * Odsunutá revize je jen zdroj, ze kterého se nesmí generovat NOVÉ.
+     *
+     * @return int počet odsunutých revizí
+     */
+    public function supersedePreviousApprovedRevisions(
+        int $supplierId,
+        int $runId,
+        int $approvedRevisionId,
+    ): int {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_run_revisions previous
+               JOIN payroll_run_revisions approved
+                 ON approved.supplier_id = previous.supplier_id
+                AND approved.run_id = previous.run_id
+                AND approved.id = ?
+                AND approved.status = "approved"
+                SET previous.status = "superseded",
+                    previous.superseded_at = NOW(),
+                    previous.superseded_by_revision_id = approved.id
+              WHERE previous.supplier_id = ?
+                AND previous.run_id = ?
+                AND previous.id <> approved.id
+                AND previous.revision_no < approved.revision_no
+                AND previous.status = "approved"'
+        );
+        $stmt->execute([$approvedRevisionId, $supplierId, $runId]);
+
+        return $stmt->rowCount();
     }
 
     /** @return array<string,mixed> */

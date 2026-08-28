@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use DomainException;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationCommand;
@@ -1253,6 +1254,81 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
         ]);
 
         return (int) $this->pdo->lastInsertId();
+    }
+
+    /**
+     * C-09 — mzdy spotřebují bankovní pohyb, aniž by přepsaly `match_status`
+     * (ten je vyhrazený fakturačnímu párování). Bez stráže by týž pohyb
+     * bankovní matcher podruhé přiřadil k přijaté faktuře a rozpadlo by se
+     * saldo. Storno se vždy opírá o vlastní pohyb opačného směru, takže
+     * obsazené zůstávají oba.
+     */
+    public function testBankMovementUsedByPayrollIsReportedAsTakenToTheBankModule(): void
+    {
+        $guard = new PayrollBankEvidenceGuard($this->connection);
+
+        $paymentTransactionId = $this->insertBankTransaction(
+            '2099-01-20',
+            '-600.00',
+            'guard-payment',
+        );
+        self::assertFalse(
+            $guard->isUsedByPayroll($paymentTransactionId),
+            'Nepoužitý pohyb musí zůstat volný pro fakturační párování.',
+        );
+
+        $match = $this->service->match(
+            new PayrollPaymentReconciliationCommand(
+                $this->supplierId,
+                $this->allocationId,
+                60_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $this->statementId,
+                    $paymentTransactionId,
+                ),
+                'guard-payment-match',
+                null,
+            ),
+        );
+        self::assertSame(60_000, $match->amountMinor);
+        self::assertTrue($guard->isUsedByPayroll($paymentTransactionId));
+        // Mzdy `match_status` záměrně nepřepisují — právě proto tahle stráž
+        // existuje a proto se na ni bankovní strana musí ptát.
+        self::assertSame(
+            'unmatched',
+            (string) $this->query(
+                'SELECT match_status FROM bank_transactions'
+                . " WHERE id = {$paymentTransactionId}",
+            )->fetchColumn(),
+        );
+
+        $refundTransactionId = $this->insertBankTransaction(
+            '2099-01-27',
+            '600.00',
+            'guard-refund',
+        );
+        $this->service->reverse(
+            new PayrollPaymentReversalCommand(
+                $this->supplierId,
+                $match->id,
+                60_000,
+                PayrollPaymentEvidenceReference::bank(
+                    $this->statementId,
+                    $refundTransactionId,
+                ),
+                'guard-payment-reversal',
+                null,
+            ),
+        );
+        self::assertTrue(
+            $guard->isUsedByPayroll($paymentTransactionId),
+            'Původní odchozí pohyb zůstává spotřebovaný i po stornu.',
+        );
+        self::assertTrue(
+            $guard->isUsedByPayroll($refundTransactionId),
+            'Vratka posloužila jako důkaz storna, volná také není.',
+        );
+        self::assertFalse($guard->isUsedByPayroll(0));
     }
 
     private function insertBankTransaction(

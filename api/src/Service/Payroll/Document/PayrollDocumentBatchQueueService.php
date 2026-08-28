@@ -41,6 +41,24 @@ final class PayrollDocumentBatchQueueService
         );
     }
 
+    /**
+     * Zastaví rozpracované dávky nad revizemi běhu, které už jsou odsunuté.
+     *
+     * Volá se po schválení opravné revize: z revize, kterou nahradila, se nové
+     * výplatní pásky negenerují, a `claimNext()` ji přeskakuje — bez tohohle
+     * kroku by čekající položky zůstaly ve frontě viset navždy.
+     *
+     * @return int počet zastavených položek
+     */
+    public function cancelSupersededRevisions(int $supplierId, int $runId): int
+    {
+        if ($supplierId <= 0 || $runId <= 0) {
+            throw new \InvalidArgumentException('Identita mzdového běhu není platná.');
+        }
+
+        return $this->batches->cancelSupersededRevisionsOfRun($supplierId, $runId);
+    }
+
     /** @return array<string,mixed>|null */
     public function detail(int $supplierId, int $batchId): ?array
     {

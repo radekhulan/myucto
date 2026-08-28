@@ -198,6 +198,96 @@ final class PayrollRunValidationOverrideTest extends TestCase
         );
     }
 
+    /**
+     * Mzda se nesmí spočítat MLČKY za člověka, kterého nikdo nepřihlásil.
+     *
+     * Doteď se ve snapshotu ověřovala jen registrace ÚČTÁRNY u ČSSZ.
+     * Zaměstnankyně, za kterou nikdo nepodal přihlášku k nemocenskému
+     * pojištění ani oznámení zdravotní pojišťovně, tak prošla celým během —
+     * pojistné se spočítalo, zaúčtovalo i zaplatilo — a aplikace mlčela až
+     * do kontroly z ČSSZ.
+     *
+     * Je to VAROVÁNÍ s overridem, ne blokátor: přihláška se mohla podat mimo
+     * aplikaci, mzda se pak spočítat musí, ale s vědomým odůvodněním.
+     */
+    public function testMissingPersonRegistrationWarnsWithOverride(): void
+    {
+        [, $employmentId] = $this->employment('SYN-NOREG');
+        $this->pendingOnboardingChecklist($employmentId);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            $this->requiresOverrideValidations((int) $locked['revision_id']),
+            'code',
+        );
+
+        self::assertContains('employment_social_registration_missing', $codes);
+        self::assertContains('employment_health_registration_missing', $codes);
+    }
+
+    /**
+     * Odklepnutá položka checklistu varování umlčí — přihláška se mohla podat
+     * mimo aplikaci a hlídač, který se ozývá i potom, se přestane číst.
+     */
+    public function testCompletedChecklistItemSilencesTheRegistrationWarning(): void
+    {
+        [, $employmentId] = $this->employment('SYN-REGOK');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_checklist_items
+                SET status = "completed"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            $this->requiresOverrideValidations((int) $locked['revision_id']),
+            'code',
+        );
+
+        self::assertNotContains('employment_social_registration_missing', $codes);
+        self::assertNotContains('employment_health_registration_missing', $codes);
+    }
+
+    /**
+     * Dohoda s automatickou účastí se NEHLÁSÍ. U DPP pod rozhodným příjmem
+     * účast nevzniká, přihláška se nepodává a varování by bylo planým
+     * poplachem u každé brigády.
+     */
+    public function testAgreementWithAutomaticParticipationIsNotWarnedAbout(): void
+    {
+        [, $employmentId] = $this->employment('SYN-DPP');
+        $this->pendingOnboardingChecklist($employmentId);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET relation_type = "dpp"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+        $locked = $this->lockedRun();
+
+        $codes = array_column(
+            $this->requiresOverrideValidations((int) $locked['revision_id']),
+            'code',
+        );
+
+        self::assertNotContains('employment_social_registration_missing', $codes);
+        self::assertNotContains('employment_health_registration_missing', $codes);
+    }
+
+    private function pendingOnboardingChecklist(int $employmentId): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            'INSERT IGNORE INTO payroll_employment_checklist_items
+                (supplier_id, employment_id, phase, item_key, status)
+             VALUES (?, ?, "onboarding", ?, "pending")',
+        );
+        foreach ([
+            'social_jmhz_registration',
+            'health_insurance_registration',
+        ] as $itemKey) {
+            $insert->execute([$this->supplierId, $employmentId, $itemKey]);
+        }
+    }
+
     /** Bez výjimky běh schválit nejde; s výjimkou ano. */
     public function testOverrideUnblocksApprovalAndWithoutItApprovalIsRefused(): void
     {

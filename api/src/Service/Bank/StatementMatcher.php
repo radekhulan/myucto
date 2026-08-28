@@ -13,6 +13,7 @@ use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
+use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use PDO;
 
 /**
@@ -73,6 +74,12 @@ final class StatementMatcher
         private readonly ?ActivityLogger $activityLogger = null,
         private readonly ?ClientBankAccountRepository $clientBankAccounts = null,
         private readonly ?MatchSuggestionService $matchV2 = null,
+        // Mzdy spotřebují bankovní pohyb, aniž by přepsaly `match_status` —
+        // ten je vyhrazený fakturačnímu párování. Bez téhle stráže by matcher
+        // odchozí platbu odvodu podruhé přiřadil k přijaté faktuře a rozpadlo
+        // by se saldo. Nullable kvůli izolovaným konstrukcím v testech;
+        // Bootstrap injektuje vždy.
+        private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
     ) {}
 
     /**
@@ -232,6 +239,13 @@ final class StatementMatcher
         $row = $tx->fetch(PDO::FETCH_ASSOC);
         if (!$row) {
             return ['status' => 'unmatched', 'reason' => 'transaction_not_found'];
+        }
+        // Pohyb, který už spotřebovala mzdová platba, není volný — druhé
+        // přiřazení k faktuře by tutéž korunu použilo dvakrát. Důvod
+        // `payroll_settled` záměrně NENÍ v MatchSuggestionService::ALLOWED_REASONS,
+        // takže se ani nenavrhne ke schválení.
+        if ($this->payrollEvidence?->isUsedByPayrollSafely($transactionId) === true) {
+            return ['status' => 'unmatched', 'reason' => 'payroll_settled'];
         }
         $vs = $row['variable_symbol'];
         $amount = (float) $row['amount'];

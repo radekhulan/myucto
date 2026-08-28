@@ -463,6 +463,11 @@ final class PaymentOrderService
                 'constant_symbol' => $it['constant_symbol'],
                 'specific_symbol' => $it['specific_symbol'],
                 'message'         => $it['message'],
+                // Dodavatelský příkaz smí jít i bez VS (dobropis, platba na
+                // základě smlouvy) — writer je od té doby fail-closed, takže
+                // se to musí povolit výslovně. Mzdové odvody tuhle výjimku
+                // NEMAJÍ, tam je symbol povinný.
+                'allow_missing_variable_symbol' => true,
             ];
         }
 

@@ -3386,7 +3386,9 @@
                 "health_insurance_deregistration": "Odhlášení zdravotní pojišťovny",
                 "social_jmhz_deregistration": "Odhlášení ČSSZ / JMHZ",
                 "enforcement_insolvency_review": "Kontrola exekucí a insolvence",
-                "later_income_review": "Kontrola pozdějšího doplatku"
+                "later_income_review": "Kontrola pozdějšího doplatku",
+                "eldp_submission": "Evidenční list důchodového pojištění (ELDP)",
+                "taxable_income_confirmation": "Potvrzení o zdanitelných příjmech"
             },
             "event": {
                 "created": "Vztah založen",
@@ -3435,7 +3437,9 @@
                 "health_insurance_deregistration": "Odhlášení ZP",
                 "social_jmhz_deregistration": "Odhlášení ČSSZ / JMHZ",
                 "enforcement_insolvency_review": "Kontrola srážek",
-                "later_income_review": "Pozdější doplatek"
+                "later_income_review": "Pozdější doplatek",
+                "eldp_submission": "ELDP",
+                "taxable_income_confirmation": "Potvrzení o příjmech"
             },
             "exit_documents": {
                 "title": "Dokumenty při skončení vztahu",
@@ -5082,6 +5086,85 @@
                 "payments_hint": "Připravit čisté mzdy, daň a pojistné k úhradě.",
                 "documents": "Dokumenty a podání",
                 "documents_hint": "Stáhnout pásky, měsíční balíček a zkontrolovat výstupy."
+            }
+        },
+        "setup_guide": {
+            "eyebrow": "Průvodce prvním nastavením mezd",
+            "title": "Rozjezd mezd krok za krokem",
+            "intro": "Než spočítáte první mzdu, musí být hotové nastavení zaměstnavatele a založení lidí. Každý krok otevřete odkazem a ručně si ho odškrtnete; průvodce jde kdykoliv skrýt.",
+            "manual": "Otevřít manuál",
+            "hide": "Skrýt průvodce",
+            "show": "Zobrazit průvodce",
+            "hidden_note": "Průvodce prvním nastavením mezd je skrytý.",
+            "progress": "{done} z {total} hotovo",
+            "progress_hint": "Kroky si odškrtáváte sami, jak je budete mít za sebou.",
+            "progress_all_done": "Máte hotovo — můžete spustit první mzdový měsíc.",
+            "step_n": "Krok {n}",
+            "open": "Otevřít",
+            "mark_done": "Označit jako hotové",
+            "marked_done": "Hotovo",
+            "footnote": "Průvodce se ukazuje, dokud nemáte první schválený mzdový běh. Odškrtnutí je vaše poznámka — aplikace podle něj nic nemění ani nekontroluje.",
+            "groups": {
+                "employer": {
+                    "title": "Nastavení zaměstnavatele",
+                    "hint": "údaje, bez kterých nejde spočítat ani odvést mzdu"
+                },
+                "people": {
+                    "title": "Lidé",
+                    "hint": "zaměstnanci, jejich vztahy a zákonná evidence"
+                },
+                "start": {
+                    "title": "První mzdový měsíc",
+                    "hint": "když je nastavení hotové"
+                }
+            },
+            "steps": {
+                "employer": {
+                    "title": "Zaměstnavatel a mzdové účtárny",
+                    "text": "Registrační číslo u ČSSZ, kontakt pro mzdy a alespoň jedna aktivní mzdová účtárna s variabilním symbolem. Bez účtárny nejde založit pracovní vztah."
+                },
+                "registrations": {
+                    "title": "Registrace u ČSSZ a pojišťoven",
+                    "text": "Doložená historie registrace účtárny u správy sociálního zabezpečení a výchozí zdravotní pojišťovna. Podle nich se sestavují měsíční přehledy a podání."
+                },
+                "institutions": {
+                    "title": "Platební účty institucí",
+                    "text": "Účty ČSSZ, finančního úřadu a zdravotních pojišťoven i s variabilními symboly. Z nich se skládají platební příkazy za odvody."
+                },
+                "posting": {
+                    "title": "Předkontace mezd",
+                    "text": "Účty pro hrubou mzdu, pojistné, zálohu na daň a srážky. Bez nich schválený běh nejde zaúčtovat do deníku."
+                },
+                "policies": {
+                    "title": "Mzdová politika a připravenost",
+                    "text": "Termín výplaty, pravidla zaokrouhlení a kontrola připravenosti, která vypíše, co ještě chybí, než se dá počítat."
+                },
+                "databox": {
+                    "title": "Odesílání podání datovou schránkou",
+                    "text": "Mzdová podání — přehledy a hlášení zdravotním pojišťovnám a měsíční hlášení ČSSZ (JMHZ) — odcházejí datovou schránkou firmy. Propojte ji dřív, než přijde první termín."
+                },
+                "people": {
+                    "title": "Založte prvního zaměstnance",
+                    "text": "Osobní údaje, rodné číslo a adresa. Osoba je zvlášť od pracovního vztahu — jeden člověk u vás může mít víc vztahů.",
+                    "cta": "Nový zaměstnanec"
+                },
+                "employment": {
+                    "title": "Pracovní vztah a odměna",
+                    "text": "Druh vztahu (pracovní poměr, DPP, DPČ, jednatel), nástup, úvazek a sjednaná mzda. Podle druhu se řídí pojistné i způsob zdanění."
+                },
+                "evidence": {
+                    "title": "Zákonná evidence zaměstnance",
+                    "text": "Prohlášení poplatníka k dani, slevy a děti, zdravotní pojišťovna a přihlášky na úřady. Bez toho vyjde mzda špatně už první měsíc."
+                },
+                "components": {
+                    "title": "Mzdové složky",
+                    "text": "Katalog složek nad rámec základní mzdy — příplatky, odměny, benefity a srážky. Zakládají se jednou a pak se jen zadává částka."
+                },
+                "first_run": {
+                    "title": "Spusťte první mzdový měsíc",
+                    "text": "Nastavení je hotové: doplňte mzdové vstupy a spusťte běh. Pořadím měsíce vás dál provede návod „Jak to funguje“ na tomto přehledu.",
+                    "cta": "Mzdové běhy"
+                }
             }
         },
         "guide": {
@@ -13082,7 +13165,7 @@
         },
         "databox": {
           "title": "Datová schránka",
-          "text": "Propojení pro podání na finanční správu přímo z aplikace: přiznání k DPH, kontrolní hlášení i další formuláře."
+          "text": "Propojení pro mzdová podání odesílaná datovou schránkou: přehledy a hlášení zdravotním pojišťovnám a měsíční hlášení ČSSZ (JMHZ). Daňová přiznání a hlášení odcházejí přes EPO, ne tudy."
         },
         "users": {
           "title": "Uživatelé a role",
@@ -17812,7 +17895,10 @@
   },
   "databox": {
         "title": "Datová schránka",
-        "subtitle": "Odesílání podání datovou schránkou — přiznání k DPH, kontrolní a souhrnné hlášení, DPPO i přehledy zdravotním pojišťovnám.",
+        "subtitle": "Datová schránka této firmy: odesílání mzdových podání a čtení doručených zpráv. Z aplikace tudy chodí přehledy a hlášení zdravotním pojišťovnám (HOZ, PPZ), měsíční hlášení zaměstnavatele ČSSZ (JMHZ) jako alternativa k přímému kanálu VREP a součinnost exekutorům.",
+        "taxNote": "Přiznání k DPH, kontrolní a souhrnné hlášení ani přiznání k dani z příjmů datovou schránkou z aplikace nechodí — jdou přes EPO. Datovkou je lze podat ručně jako záložní cestu, pak ale nepřijde potvrzení s podacím číslem, jen dodejka.",
+        "gatewayLink": "Odesílací brána, přes kterou zprávy fyzicky odcházejí, je registrovaná za provozovatele služby a je jedna pro celou instalaci.",
+        "gatewayLinkAction": "Nastavení odesílací brány",
         "companyScope": "Datová schránka a její zprávy jsou vedené pro firmu: {company}",
         "saved": "Uloženo.",
         "env": {
@@ -17821,7 +17907,10 @@
         },
         "gateway": {
             "settingsTitle": "Odesílací brána ISDS",
-            "settingsSubtitle": "Globální technická registrace provozovatele služby. Firemní datové schránky se nastavují samostatně v sekci Firma.",
+            "settingsSubtitle": "Globální technická registrace provozovatele služby — jedna pro celou instalaci. Přes bránu odcházejí mzdová podání: přehledy a hlášení zdravotním pojišťovnám (HOZ, PPZ), měsíční hlášení zaměstnavatele ČSSZ (JMHZ) jako alternativa k přímému kanálu VREP a součinnost exekutorům.",
+            "settingsReadOnly": "Brána umí jen odesílat, ne číst. Je to vlastnost zvolené varianty, ne nedodělek: podání se připraví jako koncept ve vaší datové schránce a poslední klik — schválení — dělá člověk, takže zákazník nepotřebuje vlastní systémový certifikát. Daň za to je, že doručenku k odeslané zprávě je potřeba nahrát ručně.",
+            "settingsCompanyLink": "Schránku konkrétní firmy, včetně čtení doručených zpráv, najdete na její vlastní stránce.",
+            "settingsCompanyLinkAction": "Datová schránka firmy",
             "prepare": "Připravit v datové schránce",
             "preflightTitle": "Přihlášení a schválení proběhne v ISDS",
             "credentialsStayInIsds": "Přihlašovací údaje zadáváte pouze na stránce Informačního systému datových schránek. MyÚčto je nevidí ani neukládá.",

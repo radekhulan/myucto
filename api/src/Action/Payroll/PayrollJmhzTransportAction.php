@@ -60,15 +60,12 @@ final class PayrollJmhzTransportAction
         if ($idempotencyKey === '') {
             return $this->invalid($response, 'Hlavička Idempotency-Key je povinná.');
         }
-        // Datová věta je nepovinná: bez ní se vezme ta ZMRAZENÁ z archivu
-        // artefaktů. Storno ani opravné podání totiž klient v ruce nemá — vzniká
-        // na serveru — a nutit ho stahovat si vlastní XML jen proto, aby ho
-        // poslal zpátky, by byla zbytečná cesta, na které se dá dokument zaměnit.
-        $payload = $body['payload_xml'] ?? null;
+        // Datovou větu klient NEPOSÍLÁ. Odesílá se výhradně ZMRAZENÝ artefakt
+        // z archivu — jediný dokument, který prošel XSD i katalogem kontrol a
+        // na jehož otisk se odvolává ledger. Dokud se sem `payload_xml` bralo
+        // z těla requestu, dalo se pod evidovaným podáním odeslat na VREP
+        // libovolné XML a archiv pak tvrdil, že odešlo to zmrazené.
         $variableSymbol = $body['variable_symbol'] ?? null;
-        if ($payload !== null && (!is_string($payload) || trim($payload) === '')) {
-            return $this->invalid($response, 'Datová věta podání je prázdná.');
-        }
         if (!is_string($variableSymbol) || preg_match('/^[0-9]{1,10}$/D', $variableSymbol) !== 1) {
             return $this->invalid(
                 $response,
@@ -79,7 +76,6 @@ final class PayrollJmhzTransportAction
         return $this->run($request, $response, function (string $environment) use (
             $request,
             $args,
-            $payload,
             $variableSymbol,
             $idempotencyKey,
         ): JmhzDispatchOutcome {
@@ -93,7 +89,7 @@ final class PayrollJmhzTransportAction
                 $supplierId,
                 $environment,
                 $this->id($args, 'submissionId'),
-                is_string($payload) ? $payload : null,
+                null,
                 $variableSymbol,
                 $idempotencyKey,
                 $this->userId($request),

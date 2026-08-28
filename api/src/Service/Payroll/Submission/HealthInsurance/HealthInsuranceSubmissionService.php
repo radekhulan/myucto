@@ -1548,6 +1548,18 @@ final readonly class HealthInsuranceSubmissionService
                 'Pracovní vztah pro zdravotní oznámení nebyl nalezen.',
             );
         }
+        // Zrušený nástup a archivovaný vztah oznamovací povinnost nevyrábějí.
+        // U `no_show` člověk do práce nikdy nenastoupil — přihlásit ho by
+        // znamenalo oznámit pojišťovně pojištěnce, který nevznikl; `archived`
+        // je vztah vyřazený z evidence. Doména to nepozná: stav vztahu
+        // `HealthNotificationFacts` vůbec nenese, proto se to musí zastavit tady.
+        if (in_array($row['status'], ['no_show', 'archived'], true)) {
+            throw new HealthNotificationException(
+                'zp_employment_not_notifiable',
+                'Zrušený nástup ani archivovaný pracovní vztah oznamovací '
+                . 'povinnost vůči zdravotní pojišťovně nezakládá.',
+            );
+        }
 
         return $this->factsFromRow($row);
     }

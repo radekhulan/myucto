@@ -55,10 +55,12 @@ final class AboPaymentOrderWriter
      *     items: list<array{account_number?:?string, bank_code?:?string, amount?:int|float,
      *                        amount_minor?:int,
      *                        variable_symbol?:?string, constant_symbol?:?string,
-     *                        specific_symbol?:?string, message?:?string}>
+     *                        specific_symbol?:?string, message?:?string,
+     *                        allow_missing_variable_symbol?:bool}>
      * } $order
      *
-     * @throws \InvalidArgumentException při prázdné dávce nebo příjemci bez českého účtu
+     * @throws \InvalidArgumentException při prázdné dávce, příjemci bez českého účtu
+     *         nebo položce bez variabilního symbolu, která ho nemá výslovně povolený
      */
     public function build(array $order): string
     {
@@ -171,12 +173,30 @@ final class AboPaymentOrderWriter
             );
         }
 
+        /*
+         * Variabilní symbol je POVINNÝ, pokud si ho volající výslovně nevypne
+         * přes `allow_missing_variable_symbol`. Dřív se prázdný symbol tiše
+         * nahradil nulou — u odvodu zdravotní pojišťovně nebo u exekuční
+         * srážky to znamená platbu, kterou příjemce nespáruje (firma vedená
+         * jako dlužník, exekutor platbu nepřiřadí ke spisu). Nula je legitimní
+         * jen tam, kde platba žádnou identifikaci nést nemá (čistá mzda na účet
+         * zaměstnance) — a tam ji volající musí potvrdit vědomě.
+         */
         $vs = $this->boundedDigits(
             $this->optionalText($item, 'variable_symbol'),
             10,
             'Variabilní symbol',
         );
-        $vs = $vs === '' ? '0' : $vs;
+        if ($vs === '') {
+            if ($this->flag($item, 'allow_missing_variable_symbol') !== true) {
+                throw new \InvalidArgumentException(
+                    'Položka #' . ($index + 1)
+                    . ' nemá variabilní symbol — doplňte jej u příjemce platby,'
+                    . ' nebo platbu výslovně označte jako platbu bez symbolu.',
+                );
+            }
+            $vs = '0';
+        }
 
         // KS pole (8 míst) = směrový kód banky příjemce (4) + konstantní symbol (4).
         $ks = $this->boundedDigits(
@@ -270,6 +290,22 @@ final class AboPaymentOrderWriter
         }
 
         return $this->toHaler($amount);
+    }
+
+    /** @param array<string,mixed> $item */
+    private function flag(array $item, string $field): ?bool
+    {
+        $value = $item[$field] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_bool($value)) {
+            throw new \InvalidArgumentException(
+                "Pole {$field} platební položky musí být true/false.",
+            );
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed> $item */

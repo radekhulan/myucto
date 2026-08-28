@@ -154,7 +154,22 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
 
         $ended = $this->transition($updated, 'ended', '2026-12-31');
         self::assertFalse($ended['is_primary']);
-        self::assertCount(12, $ended['checklist']);
+        self::assertCount(13, $ended['checklist']);
+        $offboardingKeys = array_column(
+            array_filter(
+                $ended['checklist'],
+                static fn (array $item): bool => $item['phase'] === 'offboarding',
+            ),
+            'item_key',
+        );
+        // Potvrzení o zdanitelných příjmech se vydává komukoli, kdo o ně
+        // požádá, takže položka vzniká vždy — bez termínu, protože deset dnů
+        // podle § 38j odst. 3 ZDP běží od žádosti, kterou aplikace neeviduje.
+        self::assertContains('taxable_income_confirmation', $offboardingKeys);
+        // Evidenční list se u skončení 31. 12. 2026 NEZAKLÁDÁ: od roku 2026
+        // ho sestavuje ČSSZ z měsíčního hlášení a zaměstnavatel ho vede jen
+        // při skončení účasti před 1. 4. 2026 nebo na výzvu.
+        self::assertNotContains('eldp_submission', $offboardingKeys);
         $archived = $this->transition($ended, 'archived', '2027-01-02');
         self::assertSame('archived', $archived['status']);
         self::assertNotNull($archived['archived_at']);

@@ -311,6 +311,32 @@ final class PayrollSubmissionService
     }
 
     /**
+     * Povinnost, ke které podání patří — kvůli agendě.
+     *
+     * Bez ní se z podání nedá zjistit, JAKÉ podání to vlastně je: `channel`
+     * ani `submission_kind` agendu nenesou a kanálem `vrep_apep` chodí JMHZ,
+     * OZUSPOJ i registrace pracovních vztahů. Transport si na to nesmí sahat
+     * do repozitáře po svém, jinak se výklad „co je tohle za podání" rozejde.
+     *
+     * @return array{
+     *   id:int,status:string,row_version:int,agenda_code:string,
+     *   subject_type:string,subject_reference:string,
+     *   period_start:string,period_end:string
+     * }|null
+     */
+    public function obligationOf(
+        int $supplierId,
+        string $environment,
+        int $submissionId,
+    ): ?array {
+        return $this->repository->findObligationOfSubmission(
+            $supplierId,
+            $environment,
+            $submissionId,
+        );
+    }
+
+    /**
      * @return array{id:int,submission_row_version:int}
      */
     public function addPart(

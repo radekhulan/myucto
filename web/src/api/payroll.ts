@@ -72,6 +72,15 @@ export interface PayrollCapabilitiesResponse {
   production_release: {
     released: boolean
   }
+  /**
+   * Stav rozjezdu mezd pro průvodce prvním nastavením. `has_settled_payroll`
+   * = existuje aspoň jeden schválený (a dál zaúčtovaný/vyplacený) mzdový běh,
+   * tedy firma už mzdy reálně jede. Volitelné schválně: starší odpověď bez
+   * klíče průvodce nespustí, místo aby ho ukázala firmě, která mzdy dávno jede.
+   */
+  onboarding?: {
+    has_settled_payroll: boolean
+  }
 }
 
 export type PayrollRelationType = 'employment' | 'small_scale_employment' | 'dpp' | 'dpc' | 'partner_dependent' | 'statutory_body'
@@ -229,6 +238,14 @@ export interface PayrollEmploymentChecklistItem {
   phase: 'onboarding' | 'change' | 'offboarding'
   item_key: string
   status: PayrollChecklistStatus
+  /**
+   * Stav včetně toho, co je doložené dokladem — položka může být splněná, aniž
+   * ji někdo ručně odklepl. `status` zůstává ruční evidencí, proto se podle něj
+   * dál řídí zápis; pro zobrazení a počítání otevřených povinností platí tenhle.
+   * Volitelné kvůli starší odpovědi bez klíče (pak platí `status`).
+   */
+  effective_status?: PayrollChecklistStatus
+  /** `null` u povinností bez zákonné lhůty (interní kontroly, potvrzení na žádost). */
   due_date: string | null
   completed_at: string | null
   note: string | null

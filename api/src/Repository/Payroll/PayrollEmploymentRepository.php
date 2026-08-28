@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
+use MyInvoice\Service\Payroll\Deadline\PayrollChecklistDeadlinePolicy;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use PDO;
 
@@ -34,9 +35,34 @@ final class PayrollEmploymentRepository
             'termination_document',
             'health_insurance_deregistration',
             'social_jmhz_deregistration',
+            // Evidenční list a potvrzení o zdanitelných příjmech tu dřív
+            // chyběly, takže checklist hlásil „hotovo" u vztahu, u kterého
+            // se ELDP vůbec nepodal. `eldp_submission` se přitom NEZAKLÁDÁ
+            // vždy — od roku 2026 ho sestavuje ČSSZ z měsíčního hlášení
+            // a rozhoduje o tom PayrollChecklistDeadlinePolicy.
+            'eldp_submission',
+            'taxable_income_confirmation',
             'enforcement_insolvency_review',
             'later_income_review',
         ],
+    ];
+
+    /**
+     * Doklady, jejichž existence položku odškrtne sama.
+     *
+     * Odškrtnutí se NEZAPISUJE — stavem dál zůstává to, co nastavil člověk.
+     * Odvozuje se až při čtení jako `effective_status`, protože doklad může
+     * vzniknout i zaniknout (storno revize, smazaný výkaz) a přepsaný stav
+     * by pak tvrdil hotovo nad něčím, co už neexistuje.
+     *
+     * @var array<string,string>
+     */
+    private const CHECKLIST_EVIDENCE = [
+        'eldp_submission' => 'eldp_statement',
+        'taxable_income_confirmation' => 'taxable_income_document',
+        'social_jmhz_registration' => 'registration_obligation',
+        'health_insurance_registration' => 'health_start_obligation',
+        'health_insurance_deregistration' => 'health_end_obligation',
     ];
 
     /**
@@ -870,21 +896,96 @@ final class PayrollEmploymentRepository
         return $result;
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Checklist vztahu i s DOKLADEM, který položku odškrtává sám.
+     *
+     * `effective_status` je to, co se má ukázat: uložený stav, dokud
+     * o položce nikdo nerozhodl, jinak `completed`, existuje-li doklad.
+     * Uložený stav se nepřepisuje — kdyby se doklad ztratil (storno revize,
+     * smazaný výkaz), tvrdil by checklist hotovo nad něčím, co neexistuje.
+     *
+     * @return list<array<string,mixed>>
+     */
     private function checklist(int $supplierId, int $employmentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, phase, item_key, status, due_date, completed_at,
-                    note, row_version, created_at, updated_at
-               FROM payroll_employment_checklist_items
-              WHERE supplier_id = ? AND employment_id = ?
-              ORDER BY FIELD(phase, \'onboarding\', \'change\', \'offboarding\'),
-                       due_date ASC, item_key ASC'
+            'SELECT item.id, item.phase, item.item_key, item.status,
+                    item.due_date, item.deadline_ruleset_id,
+                    item.deadline_source, item.deadline_source_status,
+                    item.completed_at, item.note, item.row_version,
+                    item.created_at, item.updated_at,
+                    CASE item.item_key
+                      WHEN \'eldp_submission\' THEN EXISTS (
+                        SELECT 1 FROM payroll_eldp_statements statement
+                         WHERE statement.supplier_id = item.supplier_id
+                           AND statement.employment_id = item.employment_id
+                      )
+                      WHEN \'taxable_income_confirmation\' THEN EXISTS (
+                        SELECT 1
+                          FROM payroll_generated_documents document
+                          JOIN payroll_employments employment
+                            ON employment.supplier_id = item.supplier_id
+                           AND employment.id = item.employment_id
+                         WHERE document.supplier_id = item.supplier_id
+                           AND document.employee_id = employment.employee_id
+                           AND document.document_kind IN (
+                                 \'taxable_income_advance_certificate\',
+                                 \'taxable_income_withholding_certificate\'
+                               )
+                      )
+                      WHEN \'social_jmhz_registration\' THEN EXISTS (
+                        SELECT 1 FROM payroll_obligations obligation
+                         WHERE obligation.supplier_id = item.supplier_id
+                           AND obligation.source_event_type
+                                 = \'payroll_employment_registration\'
+                           AND obligation.source_event_reference
+                                 = CONCAT(\'payroll_employment:\', item.employment_id)
+                           AND obligation.status <> \'cancelled\'
+                      )
+                      WHEN \'health_insurance_registration\' THEN EXISTS (
+                        SELECT 1 FROM payroll_obligations obligation
+                         WHERE obligation.supplier_id = item.supplier_id
+                           AND obligation.source_event_type
+                                 = \'payroll_health_notification\'
+                           AND obligation.source_event_reference LIKE CONCAT(
+                                 \'payroll_health_notification:\',
+                                 item.employment_id,
+                                 \':employment_start:%\'
+                               )
+                           AND obligation.status <> \'cancelled\'
+                      )
+                      WHEN \'health_insurance_deregistration\' THEN EXISTS (
+                        SELECT 1 FROM payroll_obligations obligation
+                         WHERE obligation.supplier_id = item.supplier_id
+                           AND obligation.source_event_type
+                                 = \'payroll_health_notification\'
+                           AND obligation.source_event_reference LIKE CONCAT(
+                                 \'payroll_health_notification:\',
+                                 item.employment_id,
+                                 \':employment_end:%\'
+                               )
+                           AND obligation.status <> \'cancelled\'
+                      )
+                      ELSE 0
+                    END AS evidence_present
+               FROM payroll_employment_checklist_items item
+              WHERE item.supplier_id = ? AND item.employment_id = ?
+              ORDER BY FIELD(item.phase, \'onboarding\', \'change\', \'offboarding\'),
+                       item.due_date IS NULL, item.due_date ASC, item.item_key ASC'
         );
         $stmt->execute([$supplierId, $employmentId]);
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $result[] = $this->cast($this->row($row));
+            $item = $this->cast($this->row($row));
+            $evidence = (bool) $item['evidence_present'];
+            $item['evidence_present'] = $evidence;
+            $item['evidence_kind'] = $evidence
+                ? (self::CHECKLIST_EVIDENCE[$item['item_key']] ?? null)
+                : null;
+            $item['effective_status'] = $item['status'] === 'pending' && $evidence
+                ? 'completed'
+                : $item['status'];
+            $result[] = $item;
         }
         return $result;
     }
@@ -1160,24 +1261,47 @@ final class PayrollEmploymentRepository
         return is_string($value) && $value !== '' ? $value : null;
     }
 
+    /**
+     * @param string $eventOn den události fáze — nástup, účinnost změny,
+     *                        skončení. NENÍ to termín: ten se z něj teprve
+     *                        odvodí podle zákonné lhůty jednotlivé položky.
+     */
     private function ensureChecklist(
         int $supplierId,
         int $employmentId,
         string $phase,
-        string $dueDate,
+        string $eventOn,
         string $relationType,
     ): void {
         $insert = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO payroll_employment_checklist_items
-                (supplier_id, employment_id, phase, item_key, due_date)
-             VALUES (?, ?, ?, ?, ?)'
+                (supplier_id, employment_id, phase, item_key, due_date,
+                 deadline_ruleset_id, deadline_source, deadline_source_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $skipped = self::CHECKLIST_EXCEPTIONS[$relationType] ?? [];
+        $policy = new PayrollChecklistDeadlinePolicy();
         foreach (self::CHECKLISTS[$phase] as $itemKey) {
             if (in_array($itemKey, $skipped, true)) {
                 continue;
             }
-            $insert->execute([$supplierId, $employmentId, $phase, $itemKey, $dueDate]);
+            $deadline = $policy->forItem($itemKey, $eventOn, $relationType);
+            // null = povinnost na tenhle vztah nedopadá (evidenční list od
+            // roku 2026). Založit ji a nechat obsluhu, ať ji odklikne jako
+            // „netýká se", by byl planý poplach u každého skončení.
+            if ($deadline === null) {
+                continue;
+            }
+            $insert->execute([
+                $supplierId,
+                $employmentId,
+                $phase,
+                $itemKey,
+                $deadline->dueOn,
+                $deadline->rulesetId,
+                $deadline->source,
+                $deadline->sourceStatus,
+            ]);
         }
     }
 

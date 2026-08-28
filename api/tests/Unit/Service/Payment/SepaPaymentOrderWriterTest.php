@@ -336,6 +336,58 @@ final class SepaPaymentOrderWriterTest extends TestCase
      * @param list<array<string,mixed>> $items
      * @return array<string,mixed>
      */
+    /**
+     * C-08 — SEPA dřív VS, SS i KS zahodilo a eurová platba odešla bez
+     * jakékoliv identifikace. Symboly se přenášejí v nestrukturované zprávě
+     * v tuzemsky obvyklém tvaru `/VS/…/SS/…/KS/…`.
+     */
+    public function testCarriesCzechPaymentSymbolsInRemittanceInformation(): void
+    {
+        $xml = $this->writer->build($this->orderWith([
+            [
+                'payee_name' => 'Zdravotni pojistovna', 'iban' => self::DE_IBAN, 'bic' => null,
+                'amount' => 100.0, 'variable_symbol' => '1234567890',
+                'specific_symbol' => '0123456789', 'constant_symbol' => '0308',
+                'message' => 'Zdravotni pojisteni 111',
+            ],
+        ]));
+
+        self::assertStringContainsString(
+            '<Ustrd>/VS/1234567890/SS/0123456789/KS/0308 Zdravotni pojisteni 111</Ustrd>',
+            $xml,
+        );
+    }
+
+    public function testOmitsSymbolTagsThatHaveNoValue(): void
+    {
+        $xml = $this->writer->build($this->orderWith([
+            [
+                'payee_name' => 'Dodavatel', 'iban' => self::DE_IBAN, 'bic' => null,
+                'amount' => 100.0, 'variable_symbol' => '2026001',
+                'specific_symbol' => null, 'constant_symbol' => null,
+                'message' => null,
+            ],
+        ]));
+
+        // Zpráva je jen opsaný VS → v referenci už je, neduplikuje se.
+        self::assertStringContainsString('<Ustrd>/VS/2026001</Ustrd>', $xml);
+        self::assertStringNotContainsString('/SS/', $xml);
+        self::assertStringNotContainsString('/KS/', $xml);
+    }
+
+    public function testKeepsPlainMessageWhenNoSymbolIsGiven(): void
+    {
+        $xml = $this->writer->build($this->orderWith([
+            [
+                'payee_name' => 'Dodavatel', 'iban' => self::DE_IBAN, 'bic' => null,
+                'amount' => 100.0, 'variable_symbol' => null,
+                'message' => 'Facture B',
+            ],
+        ]));
+
+        self::assertStringContainsString('<Ustrd>Facture B</Ustrd>', $xml);
+    }
+
     private function orderWith(array $items): array
     {
         return [

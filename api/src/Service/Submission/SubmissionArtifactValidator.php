@@ -33,6 +33,29 @@ final readonly class SubmissionArtifactValidator
      * Kód agendy → `form_code` v {@see XmlSchemaValidator}.
      *
      * Mapa je úmyslně neúplná: doplňuje se jen tam, kde schéma opravdu máme.
+     *
+     * ── Proč tu NEJSOU mzdové agendy (JMHZ25, PREZEC26, REGZEC25, OZUSPOJ23,
+     * REGZELDOPL25, ELDP, HOZ/PPZ) ─────────────────────────────────────────
+     * Není to díra, je to vědomé — a nepřidávat je sem je BEZPEČNĚJŠÍ než
+     * přidat. Mzdový podklad se do fronty nikdy nedostane jako „nějaké bajty":
+     *
+     *  1. Ověří se proti PŘIPNUTÉMU XSD své agendy už při MRAZENÍ, v době, kdy
+     *     ještě existuje kontext (kdo, které období, který běh) a kdy se dá
+     *     hlásit srozumitelná chyba. Podání, které schématem neprošlo, se
+     *     nedostane do stavu `ready` — u zdravotních pojišťoven zůstane
+     *     v `draft` s blokující výhradou ve fázi `xsd`.
+     *  2. Zmrazený artefakt je hash-pinned: `artifactBytes()` ověřuje délku
+     *     i SHA-256 proti archivu, takže odsud nevyjde nic jiného než přesně
+     *     to, co se ověřilo.
+     *  3. `assertTransportAuthority()` níž váže zařazený artefakt na
+     *     autoritativní záznam podání (agenda, prostředí, směr, stav `ready`)
+     *     a vyžaduje ZAPSANOU verzi XSD — tedy důkaz z bodu 1.
+     *
+     * Druhá validace tady by kontrolovala tytéž bajty proti témuž schématu
+     * podruhé, ale s horší chybovou hláškou a s vlastní kopií mapy
+     * agenda→schéma, která by se s katalogy v `Service\Payroll\Submission`
+     * dřív nebo později rozešla. Tichý `skipped` byl ten skutečný problém —
+     * proto ho `assertTransportAuthority()` nahrazuje ověřenou podmínkou.
      */
     private const AGENDA_SCHEMAS = [
         'DPHDP3' => 'dphdp3',
@@ -159,6 +182,21 @@ final readonly class SubmissionArtifactValidator
             throw new SubmissionChannelException(
                 'payroll_artifact_not_outbound',
                 'Do fronty lze zařadit jen zmrazený odchozí artefakt mzdového podání.',
+                409,
+            );
+        }
+        // Náhrada za XSD kontrolu, která se tady záměrně nedělá (viz komentář
+        // u AGENDA_SCHEMAS): datová věta musí NÉST verzi schématu, proti
+        // kterému se ověřila při mrazení. Bez ní je to nezkontrolovaný soubor
+        // a poslední brána před datovou schránkou by ho pustila mlčky.
+        // PDF a ZIP přílohy schéma nemají a mít nemohou.
+        if (($authority['artifact_kind'] ?? null) === 'outbound_xml'
+            && !is_string($authority['xsd_version'] ?? null)
+        ) {
+            throw new SubmissionChannelException(
+                'payroll_artifact_schema_unrecorded',
+                'Zmrazená datová věta mzdového podání nemá zapsanou verzi XSD,'
+                    . ' takže není doložené, že prošla schématem. Zmrazte podání znovu.',
                 409,
             );
         }

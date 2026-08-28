@@ -743,6 +743,36 @@ final class PayrollRunCommandService
                     (int) $revision['id'],
                     $actorUserId,
                 );
+                // Teprve TEĎ se předchozí schválená revize odsune. Dřív to
+                // nejde: srážky, akumulátory i účetní můstek si předchozí
+                // revizi čtou a vyžadují ji ve stavu `approved` — odsunout ji
+                // před nimi by shodilo celé schválení.
+                //
+                // Bez tohohle kroku zůstaly po opravné revizi DVĚ revize ve
+                // stavu `approved` a generátor dokumentů si mohl vybrat
+                // kteroukoli: zaměstnanec dostal předkorekční výplatní pásku,
+                // přestože účetnictví i JMHZ už jely z nové revize. Stav
+                // `superseded` byl v ENUM od začátku, jen ho nikdo
+                // nenastavoval; migrace 1621 pro něj povoluje jediný přechod
+                // a nic jiného u revize změnit nedovolí.
+                //
+                // Už vydané dokumenty zůstávají v platnosti — visí na svém
+                // `revision_id` a čtou se z archivu, ne přes tenhle stav.
+                $superseded = $this->runs->supersedePreviousApprovedRevisions(
+                    $supplierId,
+                    $runId,
+                    (int) $revision['id'],
+                );
+                if ($superseded > 0) {
+                    // Rozpracovaná dávka nad odsunutou revizí by dál tiskla
+                    // předkorekční pásky, a `claimNext()` ji nově přeskakuje,
+                    // takže by položky ve frontě zůstaly viset. Uzavírá se to
+                    // v téže transakci jako odsunutí.
+                    $this->documentQueue?->cancelSupersededRevisions(
+                        $supplierId,
+                        $runId,
+                    );
+                }
                 // Druhá spoušť aktivace modulu: schválený mzdový běh je důkaz,
                 // že nastavení je fakticky hotové. Idempotentní — druhé
                 // schválení už stav nemění.
@@ -1107,6 +1137,29 @@ final class PayrollRunCommandService
         if ($date < $period) {
             throw new \InvalidArgumentException(
                 'Datum výplaty nesmí předcházet mzdovému období.',
+            );
+        }
+        /*
+         * Horní mez podle § 141 odst. 1 zákoníku práce: mzda je splatná
+         * nejpozději v kalendářním měsíci NÁSLEDUJÍCÍM po měsíci, ve kterém
+         * vzniklo právo na mzdu. Bez ní projde překlep v roce („2027") a
+         * s ním i celý řetěz odvozených zákonných termínů — odvody, hlášení
+         * i zálohy se navěsí na datum, které nikdy nenastalo.
+         *
+         * Je to TVRDÁ chyba, ne varování. Pozdější výplata není okrajová
+         * zvláštnost, kterou by šlo odklepnout: je to porušení zákona a datum
+         * výplaty je tu zároveň kotva pro lhůty odvodů. Doplatek po skončení
+         * pracovního poměru se řeší opravným během k původnímu období, jehož
+         * splatnost § 141 posuzuje ke stejnému měsíci — mez tedy neomezuje
+         * ani ten.
+         */
+        $latest = $period->modify('last day of next month');
+        if ($date > $latest) {
+            throw new \InvalidArgumentException(
+                'Datum výplaty nesmí být pozdější než '
+                . $latest->format('j. n. Y')
+                . ' — mzda je splatná nejpozději v měsíci následujícím po'
+                . ' mzdovém období (§ 141 odst. 1 zákoníku práce).',
             );
         }
         return $date;
