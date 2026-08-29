@@ -1500,6 +1500,46 @@ final class CrmAggregationService
             $items[] = $licenseItem;
         }
 
+        // Připravené měsíční hlášení, které nikdo neodeslal.
+        //
+        // Odeslání zůstává ručním potvrzením záměrně: je to právní úkon
+        // přičitatelný zaměstnavateli a poslední okamžik, kdy si člověk může
+        // všimnout, že je něco špatně. Zapomenout na něj ale znamená propásnout
+        // zákonnou lhůtu (20. den následujícího měsíce), takže dokud podání
+        // není odeslané, patří mezi úkoly.
+        //
+        // Jen `vrep_apep`: podání na portál zdravotní pojišťovny aplikace
+        // odeslat neumí — žádná ze sedmi nemá zveřejněné strojové rozhraní —
+        // a vyzývat k úkonu, který se odsud udělat nedá, je horší než mlčet.
+        // Jen `production`: testovací podání nikdo podávat nemusí.
+        $stmt = $pdo->prepare(
+            "SELECT s.id
+               FROM payroll_submissions s
+               JOIN payroll_obligations o
+                 ON o.id = s.obligation_id AND o.supplier_id = s.supplier_id
+              WHERE s.supplier_id = ?
+                AND s.status = 'ready'
+                AND s.channel = 'vrep_apep'
+                AND s.environment = 'production'
+                AND o.agenda_code LIKE 'JMHZ%'"
+        );
+        $stmt->execute([$supplierId]);
+        $unsentIds = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        $unsentIds = $this->filterByDismissal($unsentIds, $dismissals, 'jmhz_unsent');
+        if ($unsentIds !== []) {
+            $items[] = [
+                'type'     => 'jmhz_unsent',
+                'severity' => 'high',
+                'title'    => 'Odešli měsíční hlášení',
+                'hint'     => sprintf(
+                    '%d připraveno k odeslání na ČSSZ',
+                    count($unsentIds),
+                ),
+                'link'     => '/payroll/submissions',
+                'count'    => count($unsentIds),
+            ];
+        }
+
         return [
             'items' => $items,
             'total' => count($items),
