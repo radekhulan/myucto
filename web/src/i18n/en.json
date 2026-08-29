@@ -3875,12 +3875,102 @@
                     "description": "The complete, versioned source for the initial full registration. Stored versions are encrypted and a later save never overwrites them.",
                     "show": "Complete profile",
                     "hide": "Close profile",
-                    "warning": "Enter only verified personnel evidence. The server safely rejects an empty or incomplete profile; values are never inferred or guessed.",
+                    "warning": "Prefilled values come from the person's and the employment's master data; each one states its source. Saving creates a new version of the snapshot and never changes the person or employment record.",
                     "save": "Save verified version",
                     "saved": "Version {version} was stored and is ready for a new A1 preview.",
                     "load_failed": "The REGZEC A1 profile could not be loaded.",
                     "save_failed": "The REGZEC A1 profile could not be saved.",
-                    "invalid_json": "The profile must be a valid JSON object."
+                    "variant": "Variant A1-{variant} per the ČSSZ business matrix.",
+                    "missing_title": "What the application does not track",
+                    "diverged_title": "The snapshot has drifted from master data",
+                    "diverged_hint": "The snapshot never updates itself — it evidences the state as of the registration date. Save a new version only when it should replace that evidence.",
+                    "diverged_pair": "snapshot {stored}, master data {suggested}",
+                    "unset": "— not set —",
+                    "reset": "Restore the master-data suggestion",
+                    "stored_version": "Stored version {version}.",
+                    "payload_show": "Show what we send",
+                    "payload_hide": "Hide what we send",
+                    "attachment_description": "Attachment description",
+                    "section": {
+                        "permanent_address": "Permanent address",
+                        "czech_residence_address": "Residence address in Czechia",
+                        "contact_address": "Contact address",
+                        "tax_residency": "Tax residency",
+                        "employment": "Employment",
+                        "health_and_facts": "Health insurance and facts",
+                        "pension": "Pension",
+                        "foreign_legislation": "Foreign legislation",
+                        "proof_identity": "Identity document",
+                        "foreign_worker": "Labour market access",
+                        "attachments": "Attachments"
+                    },
+                    "address": {
+                        "street": "Street",
+                        "house_number": "House number",
+                        "orientation_number": "Orientation number",
+                        "city": "City",
+                        "postal_code": "Postal code",
+                        "country_code": "Country (ISO)",
+                        "ruian_point": "RÚIAN address point code"
+                    },
+                    "tax_residency": {
+                        "country_code": "Country of tax residency",
+                        "identifier_type": "Tax identifier type",
+                        "identifier": "Tax identifier",
+                        "residence_address": "Provide the residence address in the country of residency"
+                    },
+                    "employment": {
+                        "activity_code": "Activity type",
+                        "relationship_detail_code": "Relationship detail",
+                        "actual_start_on": "Start date",
+                        "contract_start_on": "Contractual start date",
+                        "small_scale": "Small-scale employment",
+                        "employment_status_code": "Employee status",
+                        "work_mode_code": "Work mode",
+                        "continuous_operation": "Continuous operation",
+                        "prevailing_workplace_code": "Prevailing workplace",
+                        "expected_workplaces": "Expected workplaces",
+                        "contract_workplace": "Contractual place of work",
+                        "workplace_city": "Workplace city",
+                        "workplace_municipality_code": "Workplace municipality code",
+                        "profession_code": "Profession (CZ-ISCO)",
+                        "required_education_code": "Required education",
+                        "position_name": "Position name",
+                        "leadership": "Leadership position"
+                    },
+                    "health_insurance_code": "Health insurer code",
+                    "facts": {
+                        "highest_education_code": "Highest education attained",
+                        "disability_card": "Disability card",
+                        "health_restrictions": "Health restrictions",
+                        "restriction_type": "Restriction code",
+                        "add_restriction": "Add a health restriction"
+                    },
+                    "pension": {
+                        "type_code": "Pension type",
+                        "received_from": "Received from",
+                        "early_retirement": "Early old-age pension",
+                        "reduced_retirement_age": "Reduced retirement age"
+                    },
+                    "foreign_legislation": {
+                        "applies": "Subject to foreign legislation",
+                        "country_code": "Legislation country"
+                    },
+                    "proof_identity": {
+                        "type_code": "Document type",
+                        "number": "Document number",
+                        "foreign_issuer": "Foreign issuer",
+                        "country_code": "Document country"
+                    },
+                    "foreign_worker": {
+                        "free_access": "Free access to the labour market",
+                        "free_access_reason_code": "Free access reason",
+                        "permit_type_code": "Permit type",
+                        "issuing_labour_office_code": "Issuing labour office",
+                        "permit_identifier": "Decision number",
+                        "permit_from": "Permit from",
+                        "permit_to": "Permit to"
+                    }
                 },
                 "agenda": {
                     "PREZEC26": "Partial pre-start registration",

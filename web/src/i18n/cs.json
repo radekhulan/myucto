@@ -3875,12 +3875,102 @@
                     "description": "Úplný, verzovaný podklad pro prvotní plnou registraci. Uložená verze je šifrovaná a nové uložení ji nepřepisuje.",
                     "show": "Doplnit profil",
                     "hide": "Zavřít profil",
-                    "warning": "Vyplňte pouze ověřené údaje z personálních podkladů. Prázdný nebo neúplný profil server bezpečně odmítne; hodnoty se nikdy nedopočítávají ani nedoplňují odhadem.",
+                    "warning": "Předvyplněné hodnoty pocházejí z kmenových dat osoby a pracovního vztahu; u každé je uvedeno, odkud. Uložení zakládá novou verzi snímku a kartu osoby ani pracovního vztahu nemění.",
                     "save": "Uložit ověřenou verzi",
                     "saved": "Verze {version} byla uložena a je připravena pro nový náhled A1.",
                     "load_failed": "Profil REGZEC A1 se nepodařilo načíst.",
                     "save_failed": "Profil REGZEC A1 se nepodařilo uložit.",
-                    "invalid_json": "Profil musí být platný JSON objekt."
+                    "variant": "Varianta A1-{variant} podle business matice ČSSZ.",
+                    "missing_title": "Co aplikace o osobě nevede",
+                    "diverged_title": "Snímek se rozešel s kmenovými daty",
+                    "diverged_hint": "Snímek se sám neaktualizuje — je dokladem stavu k datu registrace. Novou verzi založte jen tehdy, když má nahradit podklad.",
+                    "diverged_pair": "ve snímku {stored}, v kmenových datech {suggested}",
+                    "unset": "— nevyplněno —",
+                    "reset": "Vrátit návrh z kmenových dat",
+                    "stored_version": "Uložená verze {version}.",
+                    "payload_show": "Zobrazit, co odesíláme",
+                    "payload_hide": "Skrýt, co odesíláme",
+                    "attachment_description": "Popis přílohy",
+                    "section": {
+                        "permanent_address": "Trvalý pobyt",
+                        "czech_residence_address": "Adresa pobytu v ČR",
+                        "contact_address": "Kontaktní adresa",
+                        "tax_residency": "Daňová rezidence",
+                        "employment": "Pracovní vztah",
+                        "health_and_facts": "Zdravotní pojištění a skutečnosti",
+                        "pension": "Důchod",
+                        "foreign_legislation": "Zahraniční legislativa",
+                        "proof_identity": "Doklad totožnosti",
+                        "foreign_worker": "Přístup na trh práce",
+                        "attachments": "Přílohy"
+                    },
+                    "address": {
+                        "street": "Ulice",
+                        "house_number": "Číslo popisné",
+                        "orientation_number": "Číslo orientační",
+                        "city": "Obec",
+                        "postal_code": "PSČ",
+                        "country_code": "Stát (ISO)",
+                        "ruian_point": "Kód adresního místa RÚIAN"
+                    },
+                    "tax_residency": {
+                        "country_code": "Stát daňové rezidence",
+                        "identifier_type": "Typ daňového identifikátoru",
+                        "identifier": "Daňový identifikátor",
+                        "residence_address": "Uvést adresu bydliště ve státě rezidence"
+                    },
+                    "employment": {
+                        "activity_code": "Druh činnosti",
+                        "relationship_detail_code": "Bližší určení PPV",
+                        "actual_start_on": "Datum nástupu",
+                        "contract_start_on": "Sjednaný den nástupu",
+                        "small_scale": "Zaměstnání malého rozsahu",
+                        "employment_status_code": "Postavení zaměstnance",
+                        "work_mode_code": "Režim práce",
+                        "continuous_operation": "Nepřetržitý provoz",
+                        "prevailing_workplace_code": "Převažující pracoviště",
+                        "expected_workplaces": "Předpokládaná pracoviště",
+                        "contract_workplace": "Místo výkonu práce dle smlouvy",
+                        "workplace_city": "Obec pracoviště",
+                        "workplace_municipality_code": "Kód obce pracoviště",
+                        "profession_code": "Profese (CZ-ISCO)",
+                        "required_education_code": "Požadované vzdělání",
+                        "position_name": "Název pozice",
+                        "leadership": "Vedoucí pozice"
+                    },
+                    "health_insurance_code": "Kód zdravotní pojišťovny",
+                    "facts": {
+                        "highest_education_code": "Nejvyšší dosažené vzdělání",
+                        "disability_card": "Průkaz osoby se zdravotním postižením",
+                        "health_restrictions": "Zdravotní omezení",
+                        "restriction_type": "Kód omezení",
+                        "add_restriction": "Přidat zdravotní omezení"
+                    },
+                    "pension": {
+                        "type_code": "Druh důchodu",
+                        "received_from": "Pobírán od",
+                        "early_retirement": "Předčasný starobní důchod",
+                        "reduced_retirement_age": "Snížený důchodový věk"
+                    },
+                    "foreign_legislation": {
+                        "applies": "Podléhá zahraniční legislativě",
+                        "country_code": "Stát legislativy"
+                    },
+                    "proof_identity": {
+                        "type_code": "Typ dokladu",
+                        "number": "Číslo dokladu",
+                        "foreign_issuer": "Zahraniční vydavatel",
+                        "country_code": "Stát dokladu"
+                    },
+                    "foreign_worker": {
+                        "free_access": "Volný přístup na trh práce",
+                        "free_access_reason_code": "Důvod volného přístupu",
+                        "permit_type_code": "Typ povolení",
+                        "issuing_labour_office_code": "Úřad práce, který vydal",
+                        "permit_identifier": "Číslo rozhodnutí",
+                        "permit_from": "Povolení od",
+                        "permit_to": "Povolení do"
+                    }
                 },
                 "agenda": {
                     "PREZEC26": "Částečné přihlášení před nástupem",

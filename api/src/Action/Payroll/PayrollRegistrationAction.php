@@ -252,12 +252,11 @@ final class PayrollRegistrationAction
             return $denied;
         }
 
-        return $this->run($response, fn (): array => [
-            'profile' => $this->identities->a1Profile(
+        return $this->run($response, fn (): array =>
+            $this->identities->a1ProfileView(
                 $this->currentSupplierId($request),
                 $this->employmentId($args),
-            ),
-        ]);
+            ));
     }
 
     /** @param array<string,string> $args */

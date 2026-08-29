@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { PayrollRegistrationEventInput } from '@/api/payroll'
+import type {
+  PayrollRegistrationA1ProfilePayload,
+  PayrollRegistrationEventInput,
+} from '@/api/payroll'
 
 const m = vi.hoisted(() => ({
   get: vi.fn(),
@@ -63,14 +66,18 @@ describe('payroll REGZEC event API', () => {
   })
 
   it('loads and version-saves the authoritative A1 profile', async () => {
-    m.get.mockResolvedValueOnce({ data: { profile: { row_version: 2 } } })
+    const draft = { row_version: 2, missing: [], sources: {}, diverged: [] }
+    m.get.mockResolvedValueOnce({ data: { profile: { row_version: 2 }, draft } })
     await expect(payrollApi.employmentRegistrationA1Profile(5))
-      .resolves.toEqual({ row_version: 2 })
+      .resolves.toEqual({ profile: { row_version: 2 }, draft })
     expect(m.get).toHaveBeenCalledWith(
       '/payroll/submissions/registration/5/a1-profile',
     )
 
-    const payload = { effective_on: '2026-08-14', row_version: 2 }
+    const payload = {
+      effective_on: '2026-08-14',
+      row_version: 2,
+    } as unknown as PayrollRegistrationA1ProfilePayload
     m.put.mockResolvedValueOnce({ data: { profile: { row_version: 3 } } })
     await expect(payrollApi.saveEmploymentRegistrationA1Profile(5, payload))
       .resolves.toEqual({ row_version: 3 })

@@ -66,6 +66,92 @@ const preview = {
   official_submission: { supported: false, reason: 'Test.' },
 }
 
+function a1Suggested() {
+  return {
+    effective_on: '2026-08-14',
+    row_version: 0,
+    permanent_address: {
+      street: 'Dlouhá',
+      house_number: null,
+      orientation_number: null,
+      city: 'Praha',
+      postal_code: '11000',
+      country_code: 'CZ',
+      ruian_point: null,
+    },
+    tax_residency: {
+      country_code: 'CZ',
+      identifier_type: null,
+      identifier: null,
+      residence_address: null,
+    },
+    employment: {
+      activity_code: '1',
+      relationship_detail_code: '1',
+      actual_start_on: '2026-08-14',
+      contract_start_on: '2026-08-14',
+      small_scale: false,
+      employment_status_code: null,
+      work_mode_code: null,
+      continuous_operation: null,
+      prevailing_workplace_code: null,
+      expected_workplaces: null,
+      contract_workplace: 'Praha',
+      workplace_city: null,
+      workplace_municipality_code: '554782',
+      profession_code: '2411',
+      required_education_code: null,
+      position_name: null,
+      leadership: null,
+    },
+    pension: {
+      type_code: null,
+      received_from: null,
+      early_retirement: false,
+      reduced_retirement_age: false,
+    },
+    health_insurance_code: '111',
+    facts: {
+      highest_education_code: null,
+      disability_card: false,
+      health_restrictions: [],
+    },
+    foreign_legislation: { applies: false, country_code: null },
+    proof_identity: null,
+    foreign_worker: null,
+    czech_residence_address: null,
+    contact_address: null,
+    attachments: [],
+  }
+}
+
+function a1View(overrides: Record<string, unknown> = {}) {
+  return {
+    profile: null,
+    draft: {
+      effective_on: '2026-08-14',
+      row_version: 0,
+      citizenship_country_code: 'CZ',
+      foreigner: false,
+      variant: 'OST',
+      variant_error: null,
+      suggested: a1Suggested(),
+      sources: {
+        'permanent_address.city': 'Adresa trvalého pobytu osoby.',
+        'health_insurance_code': 'Ověřená zdravotní pojišťovna osoby.',
+      },
+      missing: [
+        {
+          field: 'permanent_address.house_number',
+          message: 'Aplikace vede adresu jedním řádkem včetně čísla.',
+        },
+      ],
+      diverged: [],
+      ...overrides,
+    },
+  }
+}
+
 function mountPanel(canWrite = true) {
   return mount(EmploymentRegistrationPanel, {
     props: { employmentId: 5, canWrite },
@@ -85,17 +171,16 @@ describe('EmploymentRegistrationPanel', () => {
       attempt: null,
     })
     m.events.mockResolvedValue([])
-    m.a1Profile.mockResolvedValue(null)
+    m.a1Profile.mockResolvedValue(a1View())
   })
 
   it('saves the authoritative A1 profile before preview and prepare', async () => {
     m.saveA1Profile.mockResolvedValue({
-      effective_on: '2026-08-14',
+      ...a1Suggested(),
       row_version: 1,
       reference_hash: 'a'.repeat(64),
       created_at: '2026-08-14 10:00:00',
       created: true,
-      permanent_address: {},
     })
     m.preview.mockResolvedValue({
       ...preview,
@@ -120,18 +205,17 @@ describe('EmploymentRegistrationPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
     await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
-    const input = wrapper.get('[data-test="registration-a1-json"]')
-    await input.setValue(JSON.stringify({
-      effective_on: '2026-08-14',
-      row_version: 0,
-      permanent_address: {},
-    }))
+    await wrapper.get('[data-test="a1-permanent-house_number"]').setValue('12')
     await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
     await flushPromises()
 
     expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
       effective_on: '2026-08-14',
       row_version: 0,
+      permanent_address: expect.objectContaining({
+        house_number: '12',
+        city: 'Praha',
+      }),
     }))
     expect(wrapper.get('[data-test="registration-a1-saved"]').text()).toContain('version')
 
@@ -147,6 +231,54 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.preview.mock.invocationCallOrder[0])
       .toBeLessThan(m.prepare.mock.invocationCallOrder[0])
     expect(wrapper.find('[data-test="registration-prepared"]').exists()).toBe(true)
+  })
+
+  /**
+   * Formulář místo syrového JSONu: hodnoty přijdou předvyplněné ze serveru,
+   * u každé je vidět zdroj a co aplikace nevede, se hlásí konkrétně.
+   */
+  it('prefills the A1 form from the server draft and names the gaps', async () => {
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    expect(wrapper.find('[data-test="registration-a1-json"]').exists()).toBe(false)
+    expect((wrapper.get('[data-test="a1-permanent-city"]').element as HTMLInputElement).value)
+      .toBe('Praha')
+    expect((wrapper.get('[data-test="a1-health-insurance-code"]').element as HTMLInputElement).value)
+      .toBe('111')
+    const missing = wrapper.get('[data-test="registration-a1-missing"]').text()
+    expect(missing).toContain('permanent_address.house_number')
+    expect(missing).toContain('Aplikace vede adresu jedním řádkem včetně čísla.')
+  })
+
+  it('reports that a stored snapshot drifted from master data', async () => {
+    m.a1Profile.mockResolvedValue({
+      ...a1View(),
+      profile: {
+        ...a1Suggested(),
+        health_insurance_code: '201',
+        row_version: 3,
+        reference_hash: 'b'.repeat(64),
+        created_at: '2026-08-14 10:00:00',
+        created: false,
+      },
+      draft: {
+        ...a1View().draft,
+        row_version: 3,
+        diverged: [
+          { field: 'health_insurance_code', stored: '201', suggested: '111' },
+        ],
+      },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    const diverged = wrapper.get('[data-test="registration-a1-diverged"]').text()
+    expect(diverged).toContain('health_insurance_code')
+    expect((wrapper.get('[data-test="a1-health-insurance-code"]').element as HTMLInputElement).value)
+      .toBe('201')
   })
 
   it('shows the deadline window and which form will be filed', async () => {

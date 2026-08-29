@@ -1895,6 +1895,220 @@ final class PayrollRegistrationActionTest extends TestCase
         );
     }
 
+    /**
+     * Profil je snímek k datu registrace, ne editor karty osoby. Uložení proto
+     * smí sáhnout jedině do payroll_registration_a1_profiles — kdyby zapsalo
+     * zpátky do kmenových dat, ztratila by se doložitelnost stavu, ke kterému
+     * se registrace hlásila.
+     */
+    public function testSavingA1ProfileNeverWritesIntoPersonMasterData(): void
+    {
+        $this->seedA1MasterData();
+        $before = $this->masterDataFingerprint();
+
+        $response = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($this->completeA1Payload()),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $profile = $this->json($response)['profile'];
+        self::assertSame(1, $profile['row_version']);
+        self::assertTrue($profile['created']);
+        self::assertSame($before, $this->masterDataFingerprint());
+
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM payroll_registration_a1_profiles
+              WHERE supplier_id = ? AND employment_id = ?'
+        );
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(1, (int) $statement->fetchColumn());
+
+        // Druhé uložení zakládá další verzi a kmenová data zůstávají netknutá.
+        $second = $this->completeA1Payload();
+        $second['row_version'] = 1;
+        $second['employment']['position_name'] = 'Vedoucí účtárny';
+        $response = ($this->action)->saveA1Profile(
+            $this->request('PUT')->withParsedBody($second),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(2, $this->json($response)['profile']['row_version']);
+        self::assertSame($before, $this->masterDataFingerprint());
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(2, (int) $statement->fetchColumn());
+    }
+
+    public function testA1DraftPrefillsFromMasterDataAndNamesTheGaps(): void
+    {
+        $this->seedA1MasterData();
+
+        $response = ($this->action)->a1Profile(
+            $this->request('GET'),
+            new Response(),
+            ['employmentId' => (string) $this->employmentId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->json($response);
+        self::assertNull($body['profile']);
+        $draft = $body['draft'];
+        self::assertSame('OST', $draft['variant']);
+        self::assertSame(self::START_ON, $draft['effective_on']);
+        self::assertSame('Praha', $draft['suggested']['permanent_address']['city']);
+        self::assertSame('111', $draft['suggested']['health_insurance_code']);
+        self::assertSame('CZ', $draft['suggested']['tax_residency']['country_code']);
+        self::assertSame('1', $draft['suggested']['employment']['activity_code']);
+        self::assertArrayHasKey('permanent_address.city', $draft['sources']);
+
+        $missing = array_column($draft['missing'], 'field');
+        self::assertContains('permanent_address.house_number', $missing);
+        self::assertContains('employment.position_name', $missing);
+        foreach ($draft['missing'] as $gap) {
+            self::assertNotSame('', trim((string) $gap['message']));
+        }
+    }
+
+    /** Kmenové tabulky osoby a pracovního vztahu, do kterých se nesmí zapsat. */
+    private const MASTER_DATA_TABLES = [
+        'payroll_employees',
+        'payroll_employments',
+        'payroll_employment_terms',
+        'payroll_person_identity_history',
+        'payroll_person_identifiers',
+        'payroll_person_addresses',
+        'payroll_person_contacts',
+        'payroll_person_tax_residences',
+        'payroll_person_health_coverage_history',
+        'payroll_person_foreign_permits',
+    ];
+
+    private function masterDataFingerprint(): string
+    {
+        $pdo = $this->db->pdo();
+        $dump = [];
+        foreach (self::MASTER_DATA_TABLES as $table) {
+            // Tabulka je v pevném výčtu konstanty, ne z requestu.
+            $statement = $pdo->prepare(
+                "SELECT * FROM {$table} WHERE supplier_id = ? ORDER BY id"
+            );
+            $statement->execute([$this->supplierId]);
+            $dump[$table] = $statement->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        return hash('sha256', (string) json_encode($dump));
+    }
+
+    private function seedA1MasterData(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_person_addresses
+                (supplier_id, employee_id, address_type, street_line, city,
+                 postal_code, country_code, effective_from)
+             VALUES (?, ?, "residence", "Dlouhá 12", "Praha", "11000",
+                     "CZ", "2026-01-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_tax_residences
+                (supplier_id, employee_id, residence, country_code,
+                 effective_from, evidence_reference)
+             VALUES (?, ?, "czech-resident", "CZ", "2026-01-01",
+                     "prohlaseni-2026")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, insurer_status,
+                 insurer_code, insurer_evidence_reference, effective_from)
+             VALUES (?, ?, "czech_regime_verified", "verified", "111",
+                     "karta-pojistence", "2026-01-01")',
+        )->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, office_id, effective_from,
+                 planned_start_on, actual_start_on, activity_code,
+                 jmhz_relationship_detail_code, work_place,
+                 jmhz_workplace_municipality_code, jmhz_workplace_country_code,
+                 cz_isco_code)
+             VALUES (?, ?, ?, ?, ?, ?, "1", "1", "Praha 1, Dlouhá 1",
+                     "554782", "CZ", "2411")',
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $this->officeId,
+            self::START_ON,
+            self::START_ON,
+            self::START_ON,
+        ]);
+    }
+
+    /** @return array<string,mixed> */
+    private function completeA1Payload(): array
+    {
+        return [
+            'effective_on' => self::START_ON,
+            'row_version' => 0,
+            'permanent_address' => [
+                'street' => 'Dlouhá',
+                'house_number' => '12',
+                'orientation_number' => null,
+                'city' => 'Praha',
+                'postal_code' => '11000',
+                'country_code' => 'CZ',
+                'ruian_point' => null,
+            ],
+            'tax_residency' => [
+                'country_code' => 'CZ',
+                'identifier_type' => null,
+                'identifier' => null,
+                'residence_address' => null,
+            ],
+            'employment' => [
+                'activity_code' => '1',
+                'relationship_detail_code' => '1',
+                'actual_start_on' => self::START_ON,
+                'contract_start_on' => self::START_ON,
+                'small_scale' => false,
+                'employment_status_code' => '1',
+                'work_mode_code' => '1',
+                'continuous_operation' => false,
+                'prevailing_workplace_code' => '1',
+                'expected_workplaces' => null,
+                'contract_workplace' => 'Praha 1, Dlouhá 1',
+                'workplace_city' => 'Praha',
+                'workplace_municipality_code' => '554782',
+                'profession_code' => '2411',
+                'required_education_code' => null,
+                'position_name' => 'Účetní',
+                'leadership' => false,
+            ],
+            'pension' => [
+                'type_code' => null,
+                'received_from' => null,
+                'early_retirement' => false,
+                'reduced_retirement_age' => false,
+            ],
+            'health_insurance_code' => '111',
+            'facts' => [
+                'highest_education_code' => 'T',
+                'disability_card' => false,
+                'health_restrictions' => [],
+            ],
+            'foreign_legislation' => [
+                'applies' => false,
+                'country_code' => null,
+            ],
+            'proof_identity' => null,
+            'foreign_worker' => null,
+            'czech_residence_address' => null,
+            'contact_address' => null,
+            'attachments' => [],
+        ];
+    }
+
     private function post(): \Psr\Http\Message\ResponseInterface
     {
         return ($this->action)->prepare(

@@ -2909,17 +2909,142 @@ export interface PayrollRegistrationSubmission {
   deadline: PayrollRegistrationDeadline
 }
 
-export interface PayrollRegistrationA1Profile extends Record<string, unknown> {
+export interface PayrollRegistrationA1Address {
+  street: string | null
+  house_number: string | null
+  orientation_number: string | null
+  city: string | null
+  postal_code: string | null
+  country_code: string | null
+  ruian_point: string | null
+}
+
+export interface PayrollRegistrationA1TaxResidency {
+  country_code: string | null
+  identifier_type: string | null
+  identifier: string | null
+  residence_address: PayrollRegistrationA1Address | null
+}
+
+export interface PayrollRegistrationA1Employment {
+  activity_code: string | null
+  relationship_detail_code: string | null
+  actual_start_on: string | null
+  contract_start_on: string | null
+  small_scale: boolean | null
+  employment_status_code: string | null
+  work_mode_code: string | null
+  continuous_operation: boolean | null
+  prevailing_workplace_code: string | null
+  expected_workplaces: string | null
+  contract_workplace: string | null
+  workplace_city: string | null
+  workplace_municipality_code: string | null
+  profession_code: string | null
+  required_education_code: string | null
+  position_name: string | null
+  leadership: boolean | null
+}
+
+export interface PayrollRegistrationA1Pension {
+  type_code: string | null
+  received_from: string | null
+  early_retirement: boolean
+  reduced_retirement_age: boolean
+}
+
+export interface PayrollRegistrationA1HealthRestriction {
+  type_code: string | null
+  from: string | null
+  to: string | null
+}
+
+export interface PayrollRegistrationA1Facts {
+  highest_education_code: string | null
+  disability_card: boolean
+  health_restrictions: PayrollRegistrationA1HealthRestriction[]
+}
+
+export interface PayrollRegistrationA1ForeignLegislation {
+  applies: boolean
+  country_code: string | null
+}
+
+export interface PayrollRegistrationA1ProofIdentity {
+  type_code: string | null
+  number: string | null
+  foreign_issuer: string | null
+  country_code: string | null
+}
+
+export interface PayrollRegistrationA1ForeignWorker {
+  free_access: boolean | null
+  free_access_reason_code: string | null
+  permit_type_code: string | null
+  issuing_labour_office_code: string | null
+  permit_identifier: string | null
+  permit_from: string | null
+  permit_to: string | null
+}
+
+export interface PayrollRegistrationA1Attachment {
+  name: string | null
+  description: string | null
+  data_base64: string
+}
+
+export interface PayrollRegistrationA1ProfilePayload {
   effective_on: string
   row_version: number
+  permanent_address: PayrollRegistrationA1Address
+  tax_residency: PayrollRegistrationA1TaxResidency | null
+  employment: PayrollRegistrationA1Employment
+  pension: PayrollRegistrationA1Pension | null
+  health_insurance_code: string | null
+  facts: PayrollRegistrationA1Facts | null
+  foreign_legislation: PayrollRegistrationA1ForeignLegislation | null
+  proof_identity: PayrollRegistrationA1ProofIdentity | null
+  foreign_worker: PayrollRegistrationA1ForeignWorker | null
+  czech_residence_address: PayrollRegistrationA1Address | null
+  contact_address: PayrollRegistrationA1Address | null
+  attachments: PayrollRegistrationA1Attachment[]
+}
+
+export interface PayrollRegistrationA1Profile extends PayrollRegistrationA1ProfilePayload {
   reference_hash: string
   created_at: string
   created: boolean
 }
 
-export interface PayrollRegistrationA1ProfilePayload extends Record<string, unknown> {
+/** Chybějící údaj, který se z kmenových dat odvodit nedá. */
+export interface PayrollRegistrationA1DraftGap {
+  field: string
+  message: string
+}
+
+/** Uložený snímek se rozešel s kmenovými daty; snímek se neaktualizuje sám. */
+export interface PayrollRegistrationA1DraftDivergence {
+  field: string
+  stored: string | null
+  suggested: string | null
+}
+
+export interface PayrollRegistrationA1Draft {
   effective_on: string
   row_version: number
+  citizenship_country_code: string | null
+  foreigner: boolean
+  variant: string | null
+  variant_error: string | null
+  suggested: PayrollRegistrationA1ProfilePayload
+  sources: Record<string, string>
+  missing: PayrollRegistrationA1DraftGap[]
+  diverged: PayrollRegistrationA1DraftDivergence[]
+}
+
+export interface PayrollRegistrationA1View {
+  profile: PayrollRegistrationA1Profile | null
+  draft: PayrollRegistrationA1Draft
 }
 
 export type PayrollRegistrationEventInteraction =
@@ -5338,9 +5463,9 @@ export const payrollApi = {
   ).then(response => response.data),
   employmentRegistrationA1Profile: (
     employmentId: number,
-  ) => api.get<{ profile: PayrollRegistrationA1Profile | null }>(
+  ) => api.get<PayrollRegistrationA1View>(
     `/payroll/submissions/registration/${employmentId}/a1-profile`,
-  ).then(response => response.data.profile),
+  ).then(response => response.data),
   saveEmploymentRegistrationA1Profile: (
     employmentId: number,
     payload: PayrollRegistrationA1ProfilePayload,

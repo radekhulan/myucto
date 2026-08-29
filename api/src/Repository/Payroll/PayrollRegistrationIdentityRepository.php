@@ -311,6 +311,280 @@ final class PayrollRegistrationIdentityRepository
         return (int) $this->db->pdo()->lastInsertId();
     }
 
+    /**
+     * Kmenová data, ze kterých se skládá NÁVRH profilu REGZEC A1. Čte se jen
+     * pro předvyplnění formuláře; profil se ukládá výhradně do
+     * payroll_registration_a1_profiles, takže tady nesmí být žádný zápis.
+     *
+     * @return array{
+     *   permanent_address:?array<string,mixed>,
+     *   contact_address:?array<string,mixed>,
+     *   tax_residence:?array<string,mixed>,
+     *   health_coverage:?array<string,mixed>,
+     *   terms:?array<string,mixed>,
+     *   employment:?array<string,mixed>,
+     *   work_permit:?array<string,mixed>
+     * }
+     */
+    public function a1DraftSources(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $onDate,
+    ): array {
+        return [
+            'permanent_address' => $this->a1DraftAddress(
+                $supplierId,
+                $employeeId,
+                'residence',
+                $onDate,
+            ),
+            'contact_address' => $this->a1DraftAddress(
+                $supplierId,
+                $employeeId,
+                'mailing',
+                $onDate,
+            ),
+            'tax_residence' => $this->a1DraftTaxResidence(
+                $supplierId,
+                $employeeId,
+                $onDate,
+            ),
+            'health_coverage' => $this->a1DraftHealthCoverage(
+                $supplierId,
+                $employeeId,
+                $onDate,
+            ),
+            'terms' => $this->a1DraftTerms(
+                $supplierId,
+                $employmentId,
+                $onDate,
+            ),
+            'employment' => $this->a1DraftEmployment(
+                $supplierId,
+                $employmentId,
+            ),
+            'work_permit' => $this->a1DraftWorkPermit(
+                $supplierId,
+                $employeeId,
+                $onDate,
+            ),
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function a1DraftAddress(
+        int $supplierId,
+        int $employeeId,
+        string $addressType,
+        string $onDate,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT street_line, city, postal_code, country_code
+               FROM payroll_person_addresses
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND address_type = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([
+            $supplierId,
+            $employeeId,
+            $addressType,
+            $onDate,
+            $onDate,
+        ]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'street_line' => $this->string($row, 'street_line'),
+            'city' => $this->string($row, 'city'),
+            'postal_code' => $this->string($row, 'postal_code'),
+            'country_code' => $this->string($row, 'country_code'),
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function a1DraftTaxResidence(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT residence, country_code
+               FROM payroll_person_tax_residences
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'residence' => $this->string($row, 'residence'),
+            'country_code' => $this->nullableString($row, 'country_code'),
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function a1DraftHealthCoverage(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT jurisdiction, foreign_country_code,
+                    insurer_status, insurer_code
+               FROM payroll_person_health_coverage_history
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'jurisdiction' => $this->string($row, 'jurisdiction'),
+            'foreign_country_code' => $this->nullableString(
+                $row,
+                'foreign_country_code',
+            ),
+            'insurer_status' => $this->string($row, 'insurer_status'),
+            'insurer_code' => $this->nullableString($row, 'insurer_code'),
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function a1DraftTerms(
+        int $supplierId,
+        int $employmentId,
+        string $onDate,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT activity_code, jmhz_relationship_detail_code,
+                    planned_start_on, actual_start_on, work_place,
+                    jmhz_workplace_municipality_code, cz_isco_code,
+                    foreign_legislation_country_code
+               FROM payroll_employment_terms
+              WHERE supplier_id = ?
+                AND employment_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employmentId, $onDate, $onDate]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'activity_code' => $this->nullableString($row, 'activity_code'),
+            'relationship_detail_code' => $this->nullableString(
+                $row,
+                'jmhz_relationship_detail_code',
+            ),
+            'planned_start_on' => $this->nullableString($row, 'planned_start_on'),
+            'actual_start_on' => $this->nullableString($row, 'actual_start_on'),
+            'work_place' => $this->nullableString($row, 'work_place'),
+            'workplace_municipality_code' => $this->nullableString(
+                $row,
+                'jmhz_workplace_municipality_code',
+            ),
+            'cz_isco_code' => $this->nullableString($row, 'cz_isco_code'),
+            'foreign_legislation_country_code' => $this->nullableString(
+                $row,
+                'foreign_legislation_country_code',
+            ),
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function a1DraftEmployment(
+        int $supplierId,
+        int $employmentId,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT relation_type, start_date, actual_start_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $employmentId]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'relation_type' => $this->string($row, 'relation_type'),
+            'start_date' => $this->nullableString($row, 'start_date'),
+            'actual_start_date' => $this->nullableString(
+                $row,
+                'actual_start_date',
+            ),
+        ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function a1DraftWorkPermit(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?array {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT permit_label, issuing_country_code,
+                    effective_from, valid_until
+               FROM payroll_person_foreign_permits
+              WHERE supplier_id = ?
+                AND employee_id = ?
+                AND permit_kind = \'work\'
+                AND effective_from <= ?
+                AND valid_until >= ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $statement->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $raw = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($raw === false) {
+            return null;
+        }
+        $row = $this->row($raw);
+
+        return [
+            'permit_label' => $this->string($row, 'permit_label'),
+            'issuing_country_code' => $this->string(
+                $row,
+                'issuing_country_code',
+            ),
+            'effective_from' => $this->string($row, 'effective_from'),
+            'valid_until' => $this->string($row, 'valid_until'),
+        ];
+    }
+
     public function hasTrustedReceipt(
         int $supplierId,
         string $environment,

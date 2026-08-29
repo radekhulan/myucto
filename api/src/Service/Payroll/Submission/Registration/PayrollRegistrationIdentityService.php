@@ -52,6 +52,85 @@ final readonly class PayrollRegistrationIdentityService
         );
     }
 
+    /**
+     * Uložený profil plus NÁVRH složený z kmenových dat. Návrh je jen
+     * předvyplnění formuláře — uložit ho může výhradně saveA1Profile, a to
+     * zase jen do payroll_registration_a1_profiles.
+     *
+     * @return array{profile:array<string,mixed>|null,draft:array<string,mixed>}
+     */
+    public function a1ProfileView(
+        int $supplierId,
+        int $employmentId,
+    ): array {
+        $this->positive($supplierId, 'Firma');
+        $this->positive($employmentId, 'Pracovní vztah');
+
+        return $this->repository->transaction(function () use (
+            $supplierId,
+            $employmentId,
+        ): array {
+            $employment = $this->repository->lockEmployment(
+                $supplierId,
+                $employmentId,
+            );
+            if ($employment === null) {
+                throw new \OutOfBoundsException('Pracovní vztah nebyl nalezen.');
+            }
+            $employeeId = $employment['employee_id'];
+            $stored = $this->repository->latestA1Profile(
+                $supplierId,
+                $employeeId,
+                $employmentId,
+            );
+            $profile = $stored === null ? null : $this->publicA1Profile(
+                $stored,
+                $this->decodeA1Profile($stored),
+                false,
+            );
+            $effectiveOn = $employment['actual_start_date']
+                ?? $employment['start_date'];
+            if ($effectiveOn === null) {
+                throw new \InvalidArgumentException(
+                    'Pracovní vztah nemá doplněné datum nástupu, ke kterému '
+                    . 'se profil REGZEC A1 zmrazuje.',
+                );
+            }
+            $identity = null;
+            $identityError = null;
+            $foreignTaxIdentifier = null;
+            try {
+                $sensitive = $this->sensitiveIdentityAtInternal(
+                    $supplierId,
+                    $employeeId,
+                    $effectiveOn,
+                    false,
+                );
+                $identity = $sensitive['identity'];
+                $foreignTaxIdentifier =
+                    $sensitive['identifiers']['foreign_tax_identifier'];
+            } catch (\DomainException $exception) {
+                $identityError = $exception->getMessage();
+            }
+            $draft = (new PayrollRegistrationA1DraftBuilder())->build(
+                $this->repository->a1DraftSources(
+                    $supplierId,
+                    $employeeId,
+                    $employmentId,
+                    $effectiveOn,
+                ),
+                $identity,
+                $identityError,
+                $foreignTaxIdentifier,
+                $effectiveOn,
+                (int) ($stored['row_version'] ?? 0),
+                $profile,
+            );
+
+            return ['profile' => $profile, 'draft' => $draft];
+        });
+    }
+
     /** @return array<string,mixed>|null */
     public function a1Profile(
         int $supplierId,

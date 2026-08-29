@@ -12,6 +12,8 @@ import {
   type PayrollRegistrationEventInput,
   type PayrollRegistrationEventInteraction,
   type PayrollRegistrationSubmission,
+  type PayrollRegistrationA1Address,
+  type PayrollRegistrationA1Draft,
   type PayrollRegistrationA1Profile,
   type PayrollRegistrationA1ProfilePayload,
   type PayrollRegistrationChangeDetection,
@@ -94,29 +96,36 @@ const a1ProfileLoading = ref(false)
 const a1ProfileSaving = ref(false)
 const a1ProfileError = ref('')
 const a1ProfileMessage = ref('')
-const a1ProfileJson = ref('')
+const a1ShowPayload = ref(false)
+const a1Draft = ref<PayrollRegistrationA1Draft | null>(null)
+const a1Stored = ref<PayrollRegistrationA1Profile | null>(null)
+const a1Form = ref<PayrollRegistrationA1ProfilePayload>(emptyA1Profile())
+
+function emptyA1Address(): PayrollRegistrationA1Address {
+  return {
+    street: null,
+    house_number: null,
+    orientation_number: null,
+    city: null,
+    postal_code: null,
+    country_code: null,
+    ruian_point: null,
+  }
+}
 
 function emptyA1Profile(): PayrollRegistrationA1ProfilePayload {
   return {
     effective_on: '',
     row_version: 0,
-    permanent_address: {
-      street: null,
-      house_number: '',
-      orientation_number: null,
-      city: '',
-      postal_code: '',
-      country_code: '',
-      ruian_point: null,
-    },
+    permanent_address: emptyA1Address(),
     tax_residency: {
-      country_code: '',
+      country_code: null,
       identifier_type: null,
       identifier: null,
       residence_address: null,
     },
     employment: {
-      activity_code: '',
+      activity_code: null,
       relationship_detail_code: null,
       actual_start_on: '',
       contract_start_on: null,
@@ -162,19 +171,145 @@ function editableA1Profile(profile: PayrollRegistrationA1Profile): PayrollRegist
     created: _created,
     ...editable
   } = profile
-  return editable as PayrollRegistrationA1ProfilePayload
+  return editable
+}
+
+// Prázdný řetězec z <input> není „nevyplněno" — server ho odmítne jako
+// neplatnou hodnotu, zatímco null bere jako chybějící volitelný údaj.
+function blankToNull<T>(value: T): T {
+  if (typeof value === 'string') {
+    return (value.trim() === '' ? null : value.trim()) as T
+  }
+  if (Array.isArray(value)) {
+    return value.map(item => blankToNull(item)) as T
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .map(([key, item]) => [key, blankToNull(item)]),
+    ) as T
+  }
+  return value
+}
+
+const a1Variant = computed(() => a1Draft.value?.variant ?? null)
+const a1IsFull = computed(() => a1Variant.value === 'OST')
+const a1IsLimited = computed(() => a1Variant.value === '10')
+const a1IsForeigner = computed(() => a1Draft.value?.foreigner === true)
+const a1SavedVersion = computed(() => a1Stored.value?.row_version ?? 0)
+
+function a1Source(path: string): string | null {
+  return a1Draft.value?.sources[path] ?? null
+}
+
+const a1MissingByField = computed(() => {
+  const map: Record<string, string> = {}
+  for (const gap of a1Draft.value?.missing ?? []) map[gap.field] = gap.message
+  return map
+})
+
+function a1Missing(path: string): string | null {
+  return a1MissingByField.value[path] ?? null
+}
+
+// Chybějící údaj je pro účetní důležitější než zdroj, proto přebíjí popisek.
+function a1NoteText(path: string): string {
+  return a1Missing(path) ?? a1Source(path) ?? ''
+}
+
+function a1NoteClass(path: string): string {
+  return a1Missing(path) === null
+    ? 'mt-1 block text-xs text-neutral-500'
+    : 'mt-1 block text-xs text-warning-700'
+}
+
+const a1Busy = computed(
+  () => a1ProfileLoading.value || a1ProfileSaving.value || !props.canWrite,
+)
+
+const a1LabelClass = 'block text-xs font-medium text-neutral-700'
+const a1InputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface'
+  + ' px-2 py-1.5 text-sm text-neutral-900 focus:border-primary-500'
+  + ' focus:outline-none focus:ring-2 focus:ring-primary-500/20'
+  + ' disabled:bg-neutral-100'
+const a1SectionClass = 'rounded-md border border-neutral-200 p-3'
+const a1GridClass = 'mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3'
+
+const a1AddressFields: {
+  key: keyof PayrollRegistrationA1Address
+  label: string
+}[] = [
+  { key: 'street', label: 'payroll.people.registration.a1.address.street' },
+  { key: 'house_number', label: 'payroll.people.registration.a1.address.house_number' },
+  { key: 'orientation_number', label: 'payroll.people.registration.a1.address.orientation_number' },
+  { key: 'city', label: 'payroll.people.registration.a1.address.city' },
+  { key: 'postal_code', label: 'payroll.people.registration.a1.address.postal_code' },
+  { key: 'country_code', label: 'payroll.people.registration.a1.address.country_code' },
+  { key: 'ruian_point', label: 'payroll.people.registration.a1.address.ruian_point' },
+]
+
+const a1PayloadPreview = computed(
+  () => JSON.stringify(blankToNull(a1Form.value), null, 2),
+)
+
+function a1EnsureAddress(
+  key: 'czech_residence_address' | 'contact_address',
+  present: boolean,
+): void {
+  a1Form.value[key] = present ? (a1Form.value[key] ?? emptyA1Address()) : null
+}
+
+function a1EnsureResidenceAddress(present: boolean): void {
+  const residency = a1Form.value.tax_residency
+  if (residency === null) return
+  residency.residence_address = present
+    ? (residency.residence_address ?? emptyA1Address())
+    : null
+}
+
+function a1AddRestriction(): void {
+  a1Form.value.facts?.health_restrictions.push({
+    type_code: null,
+    from: null,
+    to: null,
+  })
+}
+
+function a1RemoveRestriction(index: number): void {
+  a1Form.value.facts?.health_restrictions.splice(index, 1)
+}
+
+function a1RemoveAttachment(index: number): void {
+  a1Form.value.attachments.splice(index, 1)
+}
+
+async function a1AddAttachment(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  let binary = ''
+  for (const byte of buffer) binary += String.fromCharCode(byte)
+  a1Form.value.attachments.push({
+    name: file.name,
+    description: null,
+    data_base64: btoa(binary),
+  })
+  input.value = ''
 }
 
 async function loadA1Profile(): Promise<void> {
   a1ProfileLoading.value = true
   a1ProfileError.value = ''
   try {
-    const profile = await payrollApi.employmentRegistrationA1Profile(props.employmentId)
-    a1ProfileJson.value = JSON.stringify(
-      profile === null ? emptyA1Profile() : editableA1Profile(profile),
-      null,
-      2,
-    )
+    const view = await payrollApi.employmentRegistrationA1Profile(props.employmentId)
+    a1Draft.value = view.draft
+    a1Stored.value = view.profile
+    a1Form.value = view.profile === null
+      ? view.draft.suggested
+      : editableA1Profile(view.profile)
+    a1Form.value.effective_on = view.draft.effective_on
+    a1Form.value.row_version = view.draft.row_version
   } catch (exception) {
     a1ProfileError.value = apiErrorMessage(
       exception,
@@ -185,25 +320,32 @@ async function loadA1Profile(): Promise<void> {
   }
 }
 
+function a1ResetToSuggestion(): void {
+  const draft = a1Draft.value
+  if (draft === null) return
+  a1Form.value = blankToNull(JSON.parse(
+    JSON.stringify(draft.suggested),
+  ) as PayrollRegistrationA1ProfilePayload)
+  a1ProfileMessage.value = ''
+}
+
 async function saveA1Profile(): Promise<void> {
   if (!props.canWrite || a1ProfileSaving.value) return
   a1ProfileSaving.value = true
   a1ProfileError.value = ''
   a1ProfileMessage.value = ''
   try {
-    const parsed: unknown = JSON.parse(a1ProfileJson.value)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error(t('payroll.people.registration.a1.invalid_json'))
-    }
     const profile = await payrollApi.saveEmploymentRegistrationA1Profile(
       props.employmentId,
-      parsed as PayrollRegistrationA1ProfilePayload,
+      blankToNull(a1Form.value),
     )
-    a1ProfileJson.value = JSON.stringify(editableA1Profile(profile), null, 2)
+    a1Stored.value = profile
+    a1Form.value = editableA1Profile(profile)
     a1ProfileMessage.value = t('payroll.people.registration.a1.saved', {
       version: profile.row_version,
     })
     resetPreparedFiling()
+    await loadA1Profile()
   } catch (exception) {
     a1ProfileError.value = apiErrorMessage(
       exception,
@@ -959,23 +1101,1056 @@ async function copyXml(): Promise<void> {
             : 'payroll.people.registration.a1.show') }}
         </button>
       </div>
-      <div v-if="a1ProfileOpen" class="mt-3">
-        <p class="mb-2 text-xs text-warning-700">
+      <div v-if="a1ProfileOpen" class="mt-3 space-y-3">
+        <p class="text-xs text-neutral-500">
           {{ t('payroll.people.registration.a1.warning') }}
         </p>
-        <textarea
-          v-model="a1ProfileJson"
-          rows="24"
-          spellcheck="false"
-          class="w-full rounded-md border border-neutral-300 bg-neutral-950 p-3 font-mono text-xs text-neutral-100 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-          :disabled="a1ProfileLoading || a1ProfileSaving || !canWrite"
-          data-test="registration-a1-json"
-        />
-        <div class="mt-3 flex flex-wrap items-center gap-2">
+
+        <p
+          v-if="a1Draft?.variant_error"
+          class="rounded-md bg-warning-50 p-2 text-xs text-warning-800"
+          data-test="registration-a1-variant-error"
+        >
+          {{ a1Draft.variant_error }}
+        </p>
+        <p v-else-if="a1Variant" class="text-xs text-neutral-500">
+          {{ t('payroll.people.registration.a1.variant', { variant: a1Variant }) }}
+        </p>
+
+        <div
+          v-if="(a1Draft?.missing.length ?? 0) > 0"
+          class="rounded-md border border-warning-200 bg-warning-50 p-3"
+          data-test="registration-a1-missing"
+        >
+          <h6 class="text-xs font-semibold text-warning-800">
+            {{ t('payroll.people.registration.a1.missing_title') }}
+          </h6>
+          <ul class="mt-1 space-y-1 text-xs text-warning-800">
+            <li v-for="gap in a1Draft?.missing ?? []" :key="gap.field">
+              <span class="font-mono">{{ gap.field }}</span> — {{ gap.message }}
+            </li>
+          </ul>
+        </div>
+
+        <div
+          v-if="(a1Draft?.diverged.length ?? 0) > 0"
+          class="rounded-md border border-primary-200 bg-primary-50 p-3"
+          data-test="registration-a1-diverged"
+        >
+          <h6 class="text-xs font-semibold text-primary-800">
+            {{ t('payroll.people.registration.a1.diverged_title') }}
+          </h6>
+          <p class="mt-1 text-xs text-primary-800">
+            {{ t('payroll.people.registration.a1.diverged_hint') }}
+          </p>
+          <ul class="mt-1 space-y-1 text-xs text-primary-800">
+            <li v-for="item in a1Draft?.diverged ?? []" :key="item.field">
+              <span class="font-mono">{{ item.field }}</span>:
+              {{ t('payroll.people.registration.a1.diverged_pair', {
+                stored: item.stored ?? '—',
+                suggested: item.suggested ?? '—',
+              }) }}
+            </li>
+          </ul>
+        </div>
+
+        <div :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.permanent_address') }}
+          </h6>
+          <div :class="a1GridClass">
+            <label v-for="field in a1AddressFields" :key="field.key" class="block">
+              <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <input
+                v-model="a1Form.permanent_address[field.key]"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-permanent-${field.key}`"
+              >
+              <span
+                v-if="a1NoteText(`permanent_address.${field.key}`)"
+                :class="a1NoteClass(`permanent_address.${field.key}`)"
+              >
+                {{ a1NoteText(`permanent_address.${field.key}`) }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div :class="a1SectionClass">
+          <label class="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+            <input
+              type="checkbox"
+              :checked="a1Form.czech_residence_address !== null"
+              :disabled="a1Busy"
+              data-test="a1-czech-residence-toggle"
+              @change="a1EnsureAddress(
+                'czech_residence_address',
+                ($event.target as HTMLInputElement).checked,
+              )"
+            >
+            {{ t('payroll.people.registration.a1.section.czech_residence_address') }}
+          </label>
+          <span
+            v-if="a1NoteText('czech_residence_address')"
+            :class="a1NoteClass('czech_residence_address')"
+          >
+            {{ a1NoteText('czech_residence_address') }}
+          </span>
+          <div v-if="a1Form.czech_residence_address !== null" :class="a1GridClass">
+            <label v-for="field in a1AddressFields" :key="field.key" class="block">
+              <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <input
+                v-model="a1Form.czech_residence_address[field.key]"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-czech-residence-${field.key}`"
+              >
+            </label>
+          </div>
+        </div>
+
+        <div v-if="a1IsFull" :class="a1SectionClass">
+          <label class="flex items-center gap-2 text-sm font-semibold text-neutral-900">
+            <input
+              type="checkbox"
+              :checked="a1Form.contact_address !== null"
+              :disabled="a1Busy"
+              data-test="a1-contact-toggle"
+              @change="a1EnsureAddress(
+                'contact_address',
+                ($event.target as HTMLInputElement).checked,
+              )"
+            >
+            {{ t('payroll.people.registration.a1.section.contact_address') }}
+          </label>
+          <div v-if="a1Form.contact_address !== null" :class="a1GridClass">
+            <label v-for="field in a1AddressFields" :key="field.key" class="block">
+              <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <input
+                v-model="a1Form.contact_address[field.key]"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-contact-${field.key}`"
+              >
+              <span
+                v-if="a1NoteText(`contact_address.${field.key}`)"
+                :class="a1NoteClass(`contact_address.${field.key}`)"
+              >
+                {{ a1NoteText(`contact_address.${field.key}`) }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div v-if="!a1IsLimited && a1Form.tax_residency" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.tax_residency') }}
+          </h6>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.tax_residency.country_code') }}
+              </span>
+              <input
+                v-model="a1Form.tax_residency.country_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-tax-residency-country"
+              >
+              <span
+                v-if="a1NoteText('tax_residency.country_code')"
+                :class="a1NoteClass('tax_residency.country_code')"
+              >
+                {{ a1NoteText('tax_residency.country_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.tax_residency.identifier_type') }}
+              </span>
+              <input
+                v-model="a1Form.tax_residency.identifier_type"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-tax-residency-identifier-type"
+              >
+              <span
+                v-if="a1NoteText('tax_residency.identifier_type')"
+                :class="a1NoteClass('tax_residency.identifier_type')"
+              >
+                {{ a1NoteText('tax_residency.identifier_type') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.tax_residency.identifier') }}
+              </span>
+              <input
+                v-model="a1Form.tax_residency.identifier"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-tax-residency-identifier"
+              >
+              <span
+                v-if="a1NoteText('tax_residency.identifier')"
+                :class="a1NoteClass('tax_residency.identifier')"
+              >
+                {{ a1NoteText('tax_residency.identifier') }}
+              </span>
+            </label>
+          </div>
+          <label class="mt-3 flex items-center gap-2 text-xs font-medium text-neutral-700">
+            <input
+              type="checkbox"
+              :checked="a1Form.tax_residency.residence_address !== null"
+              :disabled="a1Busy"
+              data-test="a1-tax-residence-address-toggle"
+              @change="a1EnsureResidenceAddress(
+                ($event.target as HTMLInputElement).checked,
+              )"
+            >
+            {{ t('payroll.people.registration.a1.tax_residency.residence_address') }}
+          </label>
+          <span
+            v-if="a1NoteText('tax_residency.residence_address')"
+            :class="a1NoteClass('tax_residency.residence_address')"
+          >
+            {{ a1NoteText('tax_residency.residence_address') }}
+          </span>
+          <div v-if="a1Form.tax_residency.residence_address !== null" :class="a1GridClass">
+            <label v-for="field in a1AddressFields" :key="field.key" class="block">
+              <span :class="a1LabelClass">{{ t(field.label) }}</span>
+              <input
+                v-model="a1Form.tax_residency.residence_address[field.key]"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-tax-residence-address-${field.key}`"
+              >
+            </label>
+          </div>
+        </div>
+
+        <div :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.employment') }}
+          </h6>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.activity_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.activity_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-activity-code"
+              >
+              <span
+                v-if="a1NoteText('employment.activity_code')"
+                :class="a1NoteClass('employment.activity_code')"
+              >
+                {{ a1NoteText('employment.activity_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.relationship_detail_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.relationship_detail_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-relationship-detail-code"
+              >
+              <span
+                v-if="a1NoteText('employment.relationship_detail_code')"
+                :class="a1NoteClass('employment.relationship_detail_code')"
+              >
+                {{ a1NoteText('employment.relationship_detail_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.actual_start_on') }}
+              </span>
+              <input
+                v-model="a1Form.employment.actual_start_on"
+                type="date"
+                :class="a1InputClass"
+                disabled
+                data-test="a1-employment-actual-start-on"
+              >
+              <span
+                v-if="a1NoteText('employment.actual_start_on')"
+                :class="a1NoteClass('employment.actual_start_on')"
+              >
+                {{ a1NoteText('employment.actual_start_on') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.contract_start_on') }}
+              </span>
+              <input
+                v-model="a1Form.employment.contract_start_on"
+                type="date"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-contract-start-on"
+              >
+              <span
+                v-if="a1NoteText('employment.contract_start_on')"
+                :class="a1NoteClass('employment.contract_start_on')"
+              >
+                {{ a1NoteText('employment.contract_start_on') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.small_scale') }}
+              </span>
+              <select
+                v-model="a1Form.employment.small_scale"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-small-scale"
+              >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+                <option :value="false">{{ t('common.no') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('employment.small_scale')"
+                :class="a1NoteClass('employment.small_scale')"
+              >
+                {{ a1NoteText('employment.small_scale') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.employment_status_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.employment_status_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-status-code"
+              >
+              <span
+                v-if="a1NoteText('employment.employment_status_code')"
+                :class="a1NoteClass('employment.employment_status_code')"
+              >
+                {{ a1NoteText('employment.employment_status_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.work_mode_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.work_mode_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-work-mode-code"
+              >
+              <span
+                v-if="a1NoteText('employment.work_mode_code')"
+                :class="a1NoteClass('employment.work_mode_code')"
+              >
+                {{ a1NoteText('employment.work_mode_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.continuous_operation') }}
+              </span>
+              <select
+                v-model="a1Form.employment.continuous_operation"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-continuous-operation"
+              >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+                <option :value="false">{{ t('common.no') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('employment.continuous_operation')"
+                :class="a1NoteClass('employment.continuous_operation')"
+              >
+                {{ a1NoteText('employment.continuous_operation') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.prevailing_workplace_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.prevailing_workplace_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-prevailing-workplace-code"
+              >
+              <span
+                v-if="a1NoteText('employment.prevailing_workplace_code')"
+                :class="a1NoteClass('employment.prevailing_workplace_code')"
+              >
+                {{ a1NoteText('employment.prevailing_workplace_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.expected_workplaces') }}
+              </span>
+              <input
+                v-model="a1Form.employment.expected_workplaces"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-expected-workplaces"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.contract_workplace') }}
+              </span>
+              <input
+                v-model="a1Form.employment.contract_workplace"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-contract-workplace"
+              >
+              <span
+                v-if="a1NoteText('employment.contract_workplace')"
+                :class="a1NoteClass('employment.contract_workplace')"
+              >
+                {{ a1NoteText('employment.contract_workplace') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.workplace_city') }}
+              </span>
+              <input
+                v-model="a1Form.employment.workplace_city"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-workplace-city"
+              >
+              <span
+                v-if="a1NoteText('employment.workplace_city')"
+                :class="a1NoteClass('employment.workplace_city')"
+              >
+                {{ a1NoteText('employment.workplace_city') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.workplace_municipality_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.workplace_municipality_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-workplace-municipality-code"
+              >
+              <span
+                v-if="a1NoteText('employment.workplace_municipality_code')"
+                :class="a1NoteClass('employment.workplace_municipality_code')"
+              >
+                {{ a1NoteText('employment.workplace_municipality_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.profession_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.profession_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-profession-code"
+              >
+              <span
+                v-if="a1NoteText('employment.profession_code')"
+                :class="a1NoteClass('employment.profession_code')"
+              >
+                {{ a1NoteText('employment.profession_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.required_education_code') }}
+              </span>
+              <input
+                v-model="a1Form.employment.required_education_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-required-education-code"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.position_name') }}
+              </span>
+              <input
+                v-model="a1Form.employment.position_name"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-position-name"
+              >
+              <span
+                v-if="a1NoteText('employment.position_name')"
+                :class="a1NoteClass('employment.position_name')"
+              >
+                {{ a1NoteText('employment.position_name') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.employment.leadership') }}
+              </span>
+              <select
+                v-model="a1Form.employment.leadership"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-employment-leadership"
+              >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+                <option :value="false">{{ t('common.no') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('employment.leadership')"
+                :class="a1NoteClass('employment.leadership')"
+              >
+                {{ a1NoteText('employment.leadership') }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div v-if="!a1IsLimited" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.health_and_facts') }}
+          </h6>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.health_insurance_code') }}
+              </span>
+              <input
+                v-model="a1Form.health_insurance_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-health-insurance-code"
+              >
+              <span
+                v-if="a1NoteText('health_insurance_code')"
+                :class="a1NoteClass('health_insurance_code')"
+              >
+                {{ a1NoteText('health_insurance_code') }}
+              </span>
+            </label>
+            <label v-if="a1Form.facts && a1IsFull" class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.facts.highest_education_code') }}
+              </span>
+              <input
+                v-model="a1Form.facts.highest_education_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-facts-highest-education-code"
+              >
+              <span
+                v-if="a1NoteText('facts.highest_education_code')"
+                :class="a1NoteClass('facts.highest_education_code')"
+              >
+                {{ a1NoteText('facts.highest_education_code') }}
+              </span>
+            </label>
+            <label v-if="a1Form.facts" class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.facts.disability_card') }}
+              </span>
+              <select
+                v-model="a1Form.facts.disability_card"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-facts-disability-card"
+              >
+                <option :value="false">{{ t('common.no') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('facts.disability_card')"
+                :class="a1NoteClass('facts.disability_card')"
+              >
+                {{ a1NoteText('facts.disability_card') }}
+              </span>
+            </label>
+          </div>
+          <div v-if="a1Form.facts" class="mt-3">
+            <span :class="a1LabelClass">
+              {{ t('payroll.people.registration.a1.facts.health_restrictions') }}
+            </span>
+            <div
+              v-for="(restriction, index) in a1Form.facts.health_restrictions"
+              :key="index"
+              class="mt-2 grid gap-2 sm:grid-cols-4"
+            >
+              <input
+                v-model="restriction.type_code"
+                type="text"
+                :placeholder="t('payroll.people.registration.a1.facts.restriction_type')"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-restriction-type-${index}`"
+              >
+              <input
+                v-model="restriction.from"
+                type="date"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-restriction-from-${index}`"
+              >
+              <input
+                v-model="restriction.to"
+                type="date"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-restriction-to-${index}`"
+              >
+              <button
+                type="button"
+                :class="btnOutline('danger')"
+                :disabled="a1Busy"
+                :data-test="`a1-restriction-remove-${index}`"
+                @click="a1RemoveRestriction(index)"
+              >
+                {{ t('common.remove') }}
+              </button>
+            </div>
+            <button
+              type="button"
+              class="mt-2"
+              :class="btnOutline('neutral')"
+              :disabled="a1Busy"
+              data-test="a1-restriction-add"
+              @click="a1AddRestriction"
+            >
+              {{ t('payroll.people.registration.a1.facts.add_restriction') }}
+            </button>
+          </div>
+        </div>
+
+        <div v-if="a1IsFull && a1Form.pension" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.pension') }}
+          </h6>
+          <span v-if="a1NoteText('pension')" :class="a1NoteClass('pension')">
+            {{ a1NoteText('pension') }}
+          </span>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.pension.type_code') }}
+              </span>
+              <input
+                v-model="a1Form.pension.type_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-pension-type-code"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.pension.received_from') }}
+              </span>
+              <input
+                v-model="a1Form.pension.received_from"
+                type="date"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-pension-received-from"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.pension.early_retirement') }}
+              </span>
+              <select
+                v-model="a1Form.pension.early_retirement"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-pension-early-retirement"
+              >
+                <option :value="false">{{ t('common.no') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+              </select>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.pension.reduced_retirement_age') }}
+              </span>
+              <select
+                v-model="a1Form.pension.reduced_retirement_age"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-pension-reduced-retirement-age"
+              >
+                <option :value="false">{{ t('common.no') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div v-if="a1IsFull && a1Form.foreign_legislation" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.foreign_legislation') }}
+          </h6>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_legislation.applies') }}
+              </span>
+              <select
+                v-model="a1Form.foreign_legislation.applies"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-legislation-applies"
+              >
+                <option :value="false">{{ t('common.no') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('foreign_legislation.applies')"
+                :class="a1NoteClass('foreign_legislation.applies')"
+              >
+                {{ a1NoteText('foreign_legislation.applies') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_legislation.country_code') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_legislation.country_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-legislation-country-code"
+              >
+              <span
+                v-if="a1NoteText('foreign_legislation.country_code')"
+                :class="a1NoteClass('foreign_legislation.country_code')"
+              >
+                {{ a1NoteText('foreign_legislation.country_code') }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div v-if="a1IsForeigner && a1Form.proof_identity" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.proof_identity') }}
+          </h6>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.proof_identity.type_code') }}
+              </span>
+              <input
+                v-model="a1Form.proof_identity.type_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-proof-identity-type-code"
+              >
+              <span
+                v-if="a1NoteText('proof_identity.type_code')"
+                :class="a1NoteClass('proof_identity.type_code')"
+              >
+                {{ a1NoteText('proof_identity.type_code') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.proof_identity.number') }}
+              </span>
+              <input
+                v-model="a1Form.proof_identity.number"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-proof-identity-number"
+              >
+              <span
+                v-if="a1NoteText('proof_identity.number')"
+                :class="a1NoteClass('proof_identity.number')"
+              >
+                {{ a1NoteText('proof_identity.number') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.proof_identity.foreign_issuer') }}
+              </span>
+              <input
+                v-model="a1Form.proof_identity.foreign_issuer"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-proof-identity-foreign-issuer"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.proof_identity.country_code') }}
+              </span>
+              <input
+                v-model="a1Form.proof_identity.country_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-proof-identity-country-code"
+              >
+              <span
+                v-if="a1NoteText('proof_identity.country_code')"
+                :class="a1NoteClass('proof_identity.country_code')"
+              >
+                {{ a1NoteText('proof_identity.country_code') }}
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div v-if="a1IsForeigner && a1Form.foreign_worker" :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.foreign_worker') }}
+          </h6>
+          <span v-if="a1NoteText('foreign_worker.permit')" :class="a1NoteClass('foreign_worker.permit')">
+            {{ a1NoteText('foreign_worker.permit') }}
+          </span>
+          <div :class="a1GridClass">
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.free_access') }}
+              </span>
+              <select
+                v-model="a1Form.foreign_worker.free_access"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-free-access"
+              >
+                <option :value="null">{{ t('payroll.people.registration.a1.unset') }}</option>
+                <option :value="true">{{ t('common.yes') }}</option>
+                <option :value="false">{{ t('common.no') }}</option>
+              </select>
+              <span
+                v-if="a1NoteText('foreign_worker.free_access')"
+                :class="a1NoteClass('foreign_worker.free_access')"
+              >
+                {{ a1NoteText('foreign_worker.free_access') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.free_access_reason_code') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_worker.free_access_reason_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-free-access-reason-code"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.permit_type_code') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_worker.permit_type_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-permit-type-code"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.issuing_labour_office_code') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_worker.issuing_labour_office_code"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-issuing-labour-office-code"
+              >
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.permit_identifier') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_worker.permit_identifier"
+                type="text"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-permit-identifier"
+              >
+              <span
+                v-if="a1NoteText('foreign_worker.permit_identifier')"
+                :class="a1NoteClass('foreign_worker.permit_identifier')"
+              >
+                {{ a1NoteText('foreign_worker.permit_identifier') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.permit_from') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_worker.permit_from"
+                type="date"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-permit-from"
+              >
+              <span
+                v-if="a1NoteText('foreign_worker.permit_from')"
+                :class="a1NoteClass('foreign_worker.permit_from')"
+              >
+                {{ a1NoteText('foreign_worker.permit_from') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.permit_to') }}
+              </span>
+              <input
+                v-model="a1Form.foreign_worker.permit_to"
+                type="date"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-permit-to"
+              >
+            </label>
+          </div>
+        </div>
+
+        <div :class="a1SectionClass">
+          <h6 class="text-sm font-semibold text-neutral-900">
+            {{ t('payroll.people.registration.a1.section.attachments') }}
+          </h6>
+          <ul class="mt-2 space-y-1">
+            <li
+              v-for="(attachment, index) in a1Form.attachments"
+              :key="index"
+              class="flex items-center gap-2 text-xs text-neutral-700"
+            >
+              <span class="font-medium">{{ attachment.name }}</span>
+              <input
+                v-model="attachment.description"
+                type="text"
+                :placeholder="t('payroll.people.registration.a1.attachment_description')"
+                :class="a1InputClass"
+                :disabled="a1Busy"
+                :data-test="`a1-attachment-description-${index}`"
+              >
+              <button
+                type="button"
+                :class="btnOutline('danger')"
+                :disabled="a1Busy"
+                :data-test="`a1-attachment-remove-${index}`"
+                @click="a1RemoveAttachment(index)"
+              >
+                {{ t('common.remove') }}
+              </button>
+            </li>
+          </ul>
+          <input
+            type="file"
+            class="mt-2 text-xs"
+            :disabled="a1Busy || a1Form.attachments.length >= 9"
+            data-test="a1-attachment-add"
+            @change="a1AddAttachment"
+          >
+        </div>
+
+        <div :class="a1SectionClass">
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            data-test="registration-a1-payload-toggle"
+            @click="a1ShowPayload = !a1ShowPayload"
+          >
+            {{ t(a1ShowPayload
+              ? 'payroll.people.registration.a1.payload_hide'
+              : 'payroll.people.registration.a1.payload_show') }}
+          </button>
+          <pre
+            v-if="a1ShowPayload"
+            class="mt-2 max-h-96 overflow-auto rounded-md bg-neutral-950 p-3 font-mono text-xs text-neutral-100"
+            data-test="registration-a1-payload"
+          >{{ a1PayloadPreview }}</pre>
+        </div>
+
+        <p v-if="a1ProfileError" class="text-xs text-danger-700" data-test="registration-a1-error">
+          {{ a1ProfileError }}
+        </p>
+
+        <!-- Jedno společné Uložit pro celý profil: server bere celý cílový
+             stav jedním zápisem a zakládá novou verzi, takže tlačítko u každé
+             sekce by slibovalo dílčí uložení, které neexistuje. -->
+        <div
+          v-if="canWrite"
+          class="sticky bottom-0 -mx-3 -mb-3 flex flex-wrap items-center justify-end gap-2 border-t border-neutral-200 bg-surface px-3 py-2"
+        >
+          <span v-if="a1ProfileMessage" class="mr-auto text-xs text-success-700" data-test="registration-a1-saved">
+            {{ a1ProfileMessage }}
+          </span>
+          <span v-else-if="a1SavedVersion > 0" class="mr-auto text-xs text-neutral-500">
+            {{ t('payroll.people.registration.a1.stored_version', { version: a1SavedVersion }) }}
+          </span>
+          <button
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="a1Busy || a1Draft === null"
+            data-test="registration-a1-reset"
+            @click="a1ResetToSuggestion"
+          >
+            {{ t('payroll.people.registration.a1.reset') }}
+          </button>
           <button
             type="button"
             :class="btnFilled('success')"
-            :disabled="!canWrite || a1ProfileLoading || a1ProfileSaving"
+            :disabled="a1Busy"
             data-test="registration-a1-save"
             @click="saveA1Profile"
           >
@@ -983,16 +2158,10 @@ async function copyXml(): Promise<void> {
               <path :d="ICONS.check" />
             </svg>
             {{ a1ProfileSaving
-              ? t('common.loading')
+              ? t('common.saving')
               : t('payroll.people.registration.a1.save') }}
           </button>
-          <span v-if="a1ProfileMessage" class="text-xs text-success-700" data-test="registration-a1-saved">
-            {{ a1ProfileMessage }}
-          </span>
         </div>
-        <p v-if="a1ProfileError" class="mt-2 text-xs text-danger-700" data-test="registration-a1-error">
-          {{ a1ProfileError }}
-        </p>
       </div>
     </div>
 
