@@ -7,6 +7,7 @@ import {
   type PayrollDeadlineItem,
   type PayrollDeadlineOverview,
   type PayrollDeadlinePhase,
+  type PayrollDeadlineSource,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
@@ -24,7 +25,18 @@ import { formatDate, formatMoneyMinor, formatPeriod } from '@/composables/useFor
  * ## Proč zrovna takhle
  *
  * **Seskupeno podle fáze, ne podle pramene.** Účetní neřeší „podání vs. odvod",
- * řeší „co je pozdě". Pramen zůstává jako štítek na řádku.
+ * řeší „co je pozdě". Pramen je uvnitř fáze skoro vždy jeden a týž, takže se
+ * píše JEDNOU nad skupinu; do dlaždic klesne jen tehdy, když se ve fázi liší.
+ * Třináct stejných štítků „Lhůta u člověka" pod sebou nenese žádnou informaci,
+ * jen zabírá řádek na každé dlaždici.
+ *
+ * **Dlaždice místo celošířkových karet.** Prodlení bývá tucet položek naráz;
+ * jako seznam to je nekonečné rolování a na širokém monitoru zůstane vpravo
+ * prázdno. Mřížka srovná stejný obsah do čtvrtiny výšky.
+ *
+ * **Celá dlaždice je odkaz** (`RouterLink`, tedy skutečné `<a href>`), ne
+ * samostatné „Vyřešit" v patičce: cíl je několikanásobně větší, ubyde řádek a
+ * prostřední klik i klávesnice fungují jako u každého jiného odkazu.
  *
  * **`overdue` má vlastní rám a jde první**, i když je termín starý — jinak by
  * zapadl mezi desítkami otevřených lhůt v horizontu 45 dnů.
@@ -165,12 +177,39 @@ function amountLabel(item: PayrollDeadlineItem): string {
   })
 }
 
+/**
+ * Pramen společný celé fázi, nebo `null`, když se ve fázi liší.
+ *
+ * Posuzuje se nad CELOU skupinou, ne nad viditelným výřezem: nadpis popisuje
+ * skupinu, takže sbalení „Otevřených" nesmí změnit, co je nad nimi napsané.
+ */
+function groupSource(group: PhaseGroup): PayrollDeadlineSource | null {
+  const first = group.items[0]?.source
+  if (first === undefined) return null
+
+  return group.items.every(item => item.source === first) ? first : null
+}
+
+/** Štítek pramene v dlaždici má smysl jen tam, kde ho nenese už nadpis fáze. */
+function showsItemSource(group: PhaseGroup): boolean {
+  return groupSource(group) === null
+}
+
+/**
+ * Kolik otevřených lhůt je vidět před rozbalením. Osm = dvě plné řady mřížky
+ * na širokém monitoru; tři (původní počet u celošířkových karet) by ve
+ * čtyřsloupcové mřížce nechávaly v řadě díru.
+ */
+const COLLAPSED_OPEN_ITEMS = 8
+
 function isCollapsed(phase: PayrollDeadlinePhase): boolean {
   return phase === 'open' && !openExpanded.value
 }
 
 function visibleItems(group: PhaseGroup): PayrollDeadlineItem[] {
-  return isCollapsed(group.phase) ? group.items.slice(0, 3) : group.items
+  return isCollapsed(group.phase)
+    ? group.items.slice(0, COLLAPSED_OPEN_ITEMS)
+    : group.items
 }
 
 onMounted(load)
@@ -272,14 +311,30 @@ defineExpose({ reload: load })
           :data-test="`payroll-deadlines-group-${group.phase}`"
           :role="group.phase === 'overdue' ? 'alert' : undefined"
         >
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <h3 class="text-sm font-semibold text-neutral-900">
+          <!--
+            Nadpis skupiny je lehčí než dřív (verzálky místo tučného nadpisu):
+            pod ním je mřížka dlaždic a dva výrazné stupně nad sebou se perou
+            o pozornost, kterou má mít obsah.
+          -->
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <h3 class="text-xs font-semibold tracking-wide text-neutral-600 uppercase">
               {{ t(`payroll.dashboard.deadlines.phase.${group.phase}`) }}
               <span class="font-normal text-neutral-500">({{ group.items.length }})</span>
             </h3>
+            <!--
+              Pramen jednou nad skupinou, ne třináctkrát v dlaždicích. Mizí sám,
+              jakmile fáze míchá podání, odvody a lhůty u lidí.
+            -->
+            <span
+              v-if="groupSource(group)"
+              class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
+              :data-test="`payroll-deadlines-phase-source-${group.phase}`"
+            >
+              {{ t(`payroll.dashboard.deadlines.source.${groupSource(group)}`) }}
+            </span>
             <p
               v-if="group.phase === 'overdue'"
-              class="text-xs font-medium text-danger-700"
+              class="ml-auto text-xs font-medium text-danger-700"
               data-test="payroll-deadlines-overdue-hint"
             >
               {{ t('payroll.dashboard.deadlines.overdue_hint') }}
@@ -287,57 +342,72 @@ defineExpose({ reload: load })
           </div>
 
           <!--
-            Seznam, ne tabulka: na mobilu se sloupce nemají kam vejít a
-            vodorovné rolování je na dashboardu nepřijatelné.
+            Zlomy jsou odvozené od nejužšího místa dlaždice — patičky
+            „datum + odznak prodlení", která potřebuje asi 17 rem, aby zůstala
+            na jednom řádku. Ve sloupci obsahu dashboardu tomu vychází ~300 px
+            i při čtyřech sloupcích na 2xl, takže se čtyřka vejde bez zalomení;
+            pod `sm` je jeden sloupec a nikde nevzniká vodorovné rolování.
           -->
-          <ul class="mt-2 space-y-2">
+          <ul class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             <li
               v-for="item in visibleItems(group)"
               :key="item.reference"
-              class="rounded-md border border-neutral-200 bg-surface p-3"
+              class="min-w-0"
               :data-test="`payroll-deadline-${item.reference}`"
             >
-              <div class="flex min-w-0 flex-wrap items-start justify-between gap-2">
-                <div class="min-w-0">
-                  <p class="font-medium break-words text-neutral-900">{{ itemTitle(item) }}</p>
-                  <p class="mt-0.5 text-xs break-words text-neutral-500">
-                    {{ item.subject }}
-                    <template v-if="item.period"> · {{ formatPeriod(item.period) }}</template>
+              <!--
+                Klikací je celá dlaždice. `RouterLink` je pravý odkaz, takže
+                prostřední klik, Ctrl+klik i Tab fungují bez dalšího zařizování;
+                pořadí fokusu je pořadí v mřížce.
+              -->
+              <RouterLink
+                :to="itemLink(item)"
+                class="flex h-full min-w-0 flex-col rounded-md border border-neutral-200 bg-surface p-2.5 transition hover:border-payroll-500/60 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-payroll-500/40 focus-visible:outline-none"
+                :data-test="`payroll-deadline-link-${item.reference}`"
+              >
+                <div class="flex min-w-0 items-start justify-between gap-2">
+                  <p class="min-w-0 text-sm font-medium break-words text-neutral-900">
+                    {{ itemTitle(item) }}
                   </p>
+                  <span
+                    v-if="showsItemSource(group)"
+                    class="shrink-0 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[0.6875rem] font-medium text-neutral-600"
+                    :data-test="`payroll-deadline-source-${item.reference}`"
+                  >
+                    {{ t(`payroll.dashboard.deadlines.source.${item.source}`) }}
+                  </span>
                 </div>
-                <span
-                  class="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600"
-                  :data-test="`payroll-deadline-source-${item.reference}`"
-                >
-                  {{ t(`payroll.dashboard.deadlines.source.${item.source}`) }}
-                </span>
-              </div>
-
-              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                <span class="font-medium text-neutral-800">{{ formatDate(item.due_on) }}</span>
-                <span
-                  class="rounded-full px-2 py-0.5 font-medium"
-                  :class="PHASE_BADGE[item.phase]"
-                  :data-test="`payroll-deadline-due-${item.reference}`"
-                >
-                  {{ dueLabel(item) }}
-                </span>
-                <span v-if="amountLabel(item)" class="font-mono text-neutral-600">
+                <p class="mt-0.5 text-xs break-words text-neutral-500">
+                  {{ item.subject }}
+                  <template v-if="item.period"> · {{ formatPeriod(item.period) }}</template>
+                </p>
+                <p v-if="amountLabel(item)" class="mt-0.5 font-mono text-xs text-neutral-600">
                   {{ amountLabel(item) }}
-                </span>
-                <RouterLink
-                  :to="itemLink(item)"
-                  class="ml-auto font-medium text-primary-700 underline decoration-dotted underline-offset-2"
-                  :data-test="`payroll-deadline-link-${item.reference}`"
-                >
-                  {{ t('payroll.dashboard.deadlines.resolve') }}
-                </RouterLink>
-              </div>
+                </p>
+
+                <!-- `mt-auto` drží patičky zarovnané i u různě dlouhých názvů. -->
+                <div class="mt-auto flex flex-wrap items-center gap-x-2 gap-y-1 pt-2 text-xs">
+                  <span class="font-medium text-neutral-800">{{ formatDate(item.due_on) }}</span>
+                  <span
+                    class="rounded-full px-1.5 py-0.5 font-medium"
+                    :class="PHASE_BADGE[item.phase]"
+                    :data-test="`payroll-deadline-due-${item.reference}`"
+                  >
+                    {{ dueLabel(item) }}
+                  </span>
+                </div>
+
+                <!--
+                  Viditelné „Vyřešit" zmizelo s klikací dlaždicí, ale čtečka
+                  musí pořád vědět, co odkaz udělá.
+                -->
+                <span class="sr-only">{{ t('payroll.dashboard.deadlines.resolve') }}</span>
+              </RouterLink>
             </li>
           </ul>
 
           <button
-            v-if="group.phase === 'open' && group.items.length > 3"
+            v-if="group.phase === 'open' && group.items.length > COLLAPSED_OPEN_ITEMS"
             type="button"
             class="mt-2 cursor-pointer text-xs font-medium text-primary-700 underline decoration-dotted underline-offset-2"
             data-test="payroll-deadlines-toggle-open"
@@ -345,7 +415,9 @@ defineExpose({ reload: load })
           >
             {{ openExpanded
               ? t('payroll.dashboard.deadlines.collapse')
-              : t('payroll.dashboard.deadlines.expand', { count: group.items.length - 3 }) }}
+              : t('payroll.dashboard.deadlines.expand', {
+                count: group.items.length - COLLAPSED_OPEN_ITEMS,
+              }) }}
           </button>
         </section>
       </div>

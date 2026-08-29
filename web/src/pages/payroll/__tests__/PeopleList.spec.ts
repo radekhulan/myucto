@@ -13,6 +13,9 @@ const m = vi.hoisted(() => ({
   toastWarning: vi.fn(),
   routeQuery: {} as Record<string, string>,
   routerReplace: vi.fn(),
+  // Otevření karty je od opravy historie `push` (zavření zůstalo `replace`),
+  // takže mock musí umět obojí — jinak spadne watch na `expandedId`.
+  routerPush: vi.fn(),
   deletePerson: vi.fn(),
   capabilities: vi.fn(),
   employerSettings: vi.fn(),
@@ -22,7 +25,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: m.routeQuery }),
-  useRouter: () => ({ replace: m.routerReplace }),
+  useRouter: () => ({ replace: m.routerReplace, push: m.routerPush }),
   RouterLink: {
     name: 'RouterLink',
     props: ['to'],

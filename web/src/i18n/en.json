@@ -608,6 +608,7 @@
         "quick_stock_receipt": "New goods receipt",
         "quick_stock_issue": "New goods issue",
         "quick_stock_item": "New stock item",
+        "quick_employee": "New employee",
         "reports_oss": "OSS return",
         "section_finance": "Finance",
         "mcp_server": "MCP server",
@@ -2719,7 +2720,7 @@
         "people": {
             "title": "Employees",
             "subtitle": "An overview of people and their employment relationships in the new payroll module.",
-            "shared_recap_hint": "These are the same employees as in Payroll recap — this does not create a second list.",
+            "person_code": "Personnel number",
             "load_failed": "The employee list could not be loaded.",
             "detail_load_failed": "The employment-relationship detail could not be loaded.",
             "quick_actions": {

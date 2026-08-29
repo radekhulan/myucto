@@ -821,6 +821,9 @@ function canCreate(item: NavItem): boolean {
   if (path.startsWith('/stock/items')) return auth.canWrite('stock.items.write')
   if (path.startsWith('/stock/documents')) return auth.canWrite('stock.documents.write')
   if (path.startsWith('/logbook')) return auth.canWrite('logbook.write')
+  // Zakládání zaměstnance nemá vlastní routu — seznam osob ho otevírá povelem
+  // `?new=1`. Právo zrcadlí BE (payroll.person.write), stejně jako u skladu.
+  if (path.startsWith('/payroll/people')) return auth.canWrite('payroll.person.write')
   return false
 }
 
@@ -956,6 +959,18 @@ const quickActions = computed(() => {
       { to: '/stock/documents/new?doc_type=receipt', label: t('nav.quick_stock_receipt'), icon: ICONS.stock_documents },
       { to: '/stock/documents/new?doc_type=issue',   label: t('nav.quick_stock_issue'),   icon: ICONS.stock_documents },
       { to: '/stock/items/new',                      label: t('nav.quick_stock_item'),    icon: ICONS.stock_items },
+    ] : []),
+    /*
+     * Nový zaměstnanec patří na konec nabídky: mzdy jsou samostatná agenda,
+     * ne doklad, a mezi faktury by rozbily pořadí, které kopíruje běžný den
+     * fakturanta. Podmínka je stejná jako u skladu — licence + firemní opt-in
+     * modulu (migrace 1290); právo `payroll.person.write` doplní `canCreate`
+     * níž, takže bez něj položka ZMIZÍ, nešedne (jako ostatní podmíněné).
+     * Zakládání nemá vlastní routu, otevírá ho povel `?new=1` na seznamu osob.
+     */
+    ...(!clientExperience.value && auth.hasCommercialFeatures
+      && supplierStore.currentSupplier?.payroll_enabled === true ? [
+      { to: '/payroll/people?new=1', label: t('nav.quick_employee'), icon: ICONS.users },
     ] : []),
   ].filter(action => canCreate({
     to: action.to,

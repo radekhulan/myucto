@@ -608,6 +608,7 @@
         "quick_stock_receipt": "Nová příjemka",
         "quick_stock_issue": "Nová výdejka",
         "quick_stock_item": "Nová skladová karta",
+        "quick_employee": "Nový zaměstnanec",
         "reports_oss": "OSS přiznání",
         "section_finance": "Finance",
         "mcp_server": "MCP server",
@@ -2719,7 +2720,7 @@
         "people": {
             "title": "Zaměstnanci",
             "subtitle": "Přehled osob a jejich pracovních vztahů pro nový mzdový modul.",
-            "shared_recap_hint": "Jde o stejné zaměstnance jako ve Mzdové rekapitulaci — nevzniká žádný druhý seznam.",
+            "person_code": "Osobní číslo",
             "load_failed": "Seznam zaměstnanců se nepodařilo načíst.",
             "detail_load_failed": "Detail pracovních vztahů se nepodařilo načíst.",
             "quick_actions": {

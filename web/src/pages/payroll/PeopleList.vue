@@ -218,12 +218,29 @@ function backToList() {
   newEmployment.value = null
 }
 
-// Výběr se zrcadlí do adresy, aby šel poslat a uložit do záložek. Hledání ani
-// filtr se přitom nikde neresetují — návrat zpět je proto zachová.
+/*
+ * Výběr se zrcadlí do adresy, aby šel poslat a uložit do záložek. Hledání ani
+ * filtr se přitom nikde neresetují — návrat zpět je proto zachová.
+ *
+ * Otevření detailu MUSÍ být `push`, zavření `replace`. Dřív se obojí dělalo
+ * `replace`em a otevření tím přepsalo položku historie se seznamem: v historii
+ * po seznamu nezůstalo `/payroll/people`, ale rovnou `/payroll/people?person=1`,
+ * takže tlačítko Zpět skočilo o krok dál — z detailu rovnou na `/payroll`.
+ *
+ * Zavření naopak `replace` zůstává: kdyby i ono pushovalo, vrátilo by Zpět ze
+ * seznamu zpátky do detailu, který uživatel právě zavřel. Přepnutí mezi dvěma
+ * osobami je skutečná navigace mezi dvěma obrazovkami, proto taky `push`;
+ * řetěz to nenafoukne, protože při otevřeném detailu není seznam vidět a další
+ * osoba se dá vybrat jen cíleným odkazem.
+ *
+ * Deep-link `?person=1` se do historie nepřidává podruhé — adresa už tu hodnotu
+ * nese, takže se hlídač vrátí hned na prvním řádku.
+ */
 watch(expandedId, (value) => {
   const person = value === null ? undefined : String(value)
   if ((route.query.person ?? undefined) === person) return
-  void router.replace({ query: { ...route.query, person } })
+  const target = { query: { ...route.query, person } }
+  void (value === null ? router.replace(target) : router.push(target))
 })
 
 const personDeleteCascade = computed<string>(() => {
@@ -460,6 +477,36 @@ function relationLabel(type: PayrollRelationType): string {
 
 function statusLabel(isActive: boolean): string {
   return t(isActive ? 'payroll.people.status.active' : 'payroll.people.status.inactive')
+}
+
+/**
+ * Dva lidé se stejným jménem se v seznamu nedali rozlišit. Rozlišovač je osobní
+ * číslo pracovního vztahu (`code`) — je jednoznačné, není citlivé a seznam ho
+ * už vrací, takže nestojí ani řádek navíc v dotazu.
+ *
+ * Rodné číslo tu SCHVÁLNĚ není: seznam ho nevrací, doplnit by ho šlo jen
+ * maskované (`value_masked`) a maska je po zúžení na dvě číslice (`••••••••89`)
+ * jako rozlišovač stejně slabá — za cenu citlivého údaje na první obrazovce.
+ *
+ * U víc vztahů se vypíšou dva kódy a zbytek se shrne číslem, aby řádek
+ * nenarostl; `+2` je bez gramatiky, proto nepotřebuje překlad.
+ */
+function personCodeLabel(person: PayrollPersonListItem): string {
+  const refs = person.employment_refs
+  if (refs.length === 0) return ''
+  const ordered = [...refs].sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
+  const shown = ordered.slice(0, 2).map(item => item.code).join(', ')
+  const rest = ordered.length - 2
+  return rest > 0 ? `${shown} +${rest}` : shown
+}
+
+/**
+ * Karta osoby má adresu (`?person=<id>`), takže řádek seznamu na ni míří
+ * OPRAVDOVÝM odkazem — ne divem s posluchačem. Jen tak funguje prostřední klik,
+ * Ctrl+klik i klávesnice.
+ */
+function personLink(person: PayrollPersonListItem) {
+  return { query: { ...route.query, person: String(person.id) } }
 }
 
 /**
@@ -901,13 +948,36 @@ async function focusPanel(panel: string) {
   }, 300)
 }
 
+/**
+ * Zakládání zaměstnance nemá vlastní routu — formulář otevírá tlačítko na téhle
+ * stránce. Aby na něj šlo odkázat zvenčí (globální „+" v hlavičce, klávesová
+ * zkratka), přijímá stránka povel `?new=1`.
+ *
+ * Povel se z adresy hned uklidí: je jednorázový, ne stav obrazovky. Bez úklidu
+ * by tlačítko Zpět nebo obnovení stránky formulář otevřely znovu a přepsaly
+ * rozepsaná data prázdným.
+ *
+ * Úklid musí proběhnout PŘED otevřením formuláře — `router.replace` je
+ * plnohodnotná navigace, takže na ni sáhne `scrollBehavior` routeru; ten má pro
+ * odebrání jednorázového povelu výjimku (viz router), aby stránkou necuknul.
+ */
+async function openFromCreateCommand() {
+  const raw = Array.isArray(route.query.new) ? route.query.new[0] : route.query.new
+  if (raw !== '1') return
+  const query = { ...route.query }
+  delete query.new
+  await router.replace({ query })
+  openEmployeeForm()
+}
+
 /*
  * Rychlá akce ze seznamu míří na TUTÉŽ routu, jen s jinými parametry — Vue
  * Router proto komponentu nepřemontuje a `onMounted` už znovu neproběhne. Bez
  * tohohle hlídače by kliknutí na „Zákonná evidence" jen tiše přepsalo adresu
- * a na obrazovce by se nestalo nic.
+ * a na obrazovce by se nestalo nic. Totéž platí pro „+ → Nový zaměstnanec",
+ * když už na seznamu stojím.
  */
-watch(() => [route.query.person, route.query.panel] as const, async ([person, panel]) => {
+watch(() => [route.query.person, route.query.panel, route.query.new] as const, async ([person, panel, isNew]) => {
   const raw = Array.isArray(person) ? person[0] : person
   const id = typeof raw === 'string' && raw !== '' ? Number(raw) : null
   if (id !== null && Number.isInteger(id) && id > 0 && id !== expandedId.value) {
@@ -915,6 +985,7 @@ watch(() => [route.query.person, route.query.panel] as const, async ([person, pa
   }
   const requested = Array.isArray(panel) ? panel[0] : panel
   if (typeof requested === 'string' && requested !== '') await focusPanel(requested)
+  if (isNew !== undefined) await openFromCreateCommand()
 })
 
 /**
@@ -929,6 +1000,7 @@ onMounted(async () => {
   await openFromQuery()
   const panel = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
   if (typeof panel === 'string' && panel !== '') await focusPanel(panel)
+  await openFromCreateCommand()
   payrollStartPeriod.value = await payrollApi.capabilities()
     .then(data => data.state.start_period)
     .catch(() => null)
@@ -960,10 +1032,6 @@ onMounted(async () => {
         {{ t('payroll.people.create.action') }}
       </button>
     </header>
-
-    <section v-if="!editing && !showEmployeeForm" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
-      {{ t('payroll.people.shared_recap_hint') }}
-    </section>
 
     <form
       v-if="showEmployeeForm && !editing"
@@ -1379,12 +1447,44 @@ onMounted(async () => {
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <template v-for="person in people" :key="person.id">
-                <tr class="align-top">
+                <!--
+                  Celý řádek otevírá kartu. Je to skutečný <a> roztažený přes
+                  řádek (`absolute inset-0`), ne posluchač na <tr> — prostřední
+                  klik i Ctrl+klik tak otevřou kartu na novém panelu.
+
+                  Overlay leží POD obsahem (z-0 vs. `relative z-10` na jménu a
+                  na sloupci akcí): kdyby ležel nad ním, nešel by v řádku označit
+                  text a rychlé akce by přestaly reagovat. Klikací tak zůstává
+                  celá plocha řádku kromě samotného jména (které je odkaz samo)
+                  a tlačítek.
+                -->
+                <tr class="relative align-top transition-colors hover:bg-neutral-50">
                   <td v-if="tbl.isVisible('person')" class="px-4 py-3">
-                    <p class="font-medium text-neutral-900">{{ person.full_name }}</p>
+                    <RouterLink
+                      :to="personLink(person)"
+                      class="absolute inset-0 z-0"
+                      tabindex="-1"
+                      aria-hidden="true"
+                      :data-test="`person-row-link-${person.id}`"
+                    />
+                    <span class="relative z-10 inline-block">
+                      <RouterLink
+                        :to="personLink(person)"
+                        class="font-medium text-neutral-900 hover:underline"
+                        :data-test="`person-name-link-${person.id}`"
+                      >{{ person.full_name }}</RouterLink>
+                      <span
+                        v-if="personCodeLabel(person) !== ''"
+                        class="mt-0.5 block text-xs text-neutral-500"
+                        :title="t('payroll.people.person_code')"
+                        :data-test="`person-code-${person.id}`"
+                      >
+                        <span class="sr-only">{{ t('payroll.people.person_code') }}: </span>{{ personCodeLabel(person) }}
+                      </span>
+                    </span>
                     <p
                       v-if="person.needs_setup"
-                      class="mt-1 max-w-sm text-xs leading-snug text-warning-700"
+                      class="relative z-10 mt-1 max-w-sm text-xs leading-snug text-warning-700"
                       :data-test="`person-next-step-${person.id}`"
                     >{{ nextStepLabel(person) }}</p>
                   </td>
@@ -1404,7 +1504,7 @@ onMounted(async () => {
                     Popisek nese `aria-label` i tooltip, takže o něj nepřijde ani
                     čtečka, ani myš.
                   -->
-                  <td v-if="tbl.isVisible('detail')" class="px-4 py-3">
+                  <td v-if="tbl.isVisible('detail')" class="relative z-10 px-4 py-3">
                     <div class="flex flex-wrap items-center justify-end gap-2">
                       <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1430,8 +1530,22 @@ onMounted(async () => {
 
         <div class="space-y-3 p-4 md:hidden">
           <article v-for="person in people" :key="person.id" class="min-w-0 overflow-hidden rounded-lg border border-neutral-200 p-4">
+            <!--
+              Na mobilu se karta NEROZTAHUJE do klikacího cíle: prst by na malé
+              ploše trefil odkaz místo rychlé akce. Odkaz je jen na jméně, kde
+              ho uživatel čeká, a pod ním osobní číslo pro rozlišení jmenovců.
+            -->
             <div class="flex flex-wrap items-start justify-between gap-2">
-              <h2 class="font-semibold text-neutral-900">{{ person.full_name }}</h2>
+              <h2 class="min-w-0 font-semibold text-neutral-900">
+                <RouterLink :to="personLink(person)" class="hover:underline" :data-test="`person-name-link-mobile-${person.id}`">{{ person.full_name }}</RouterLink>
+                <span
+                  v-if="personCodeLabel(person) !== ''"
+                  class="mt-0.5 block text-xs font-normal text-neutral-500"
+                  :data-test="`person-code-mobile-${person.id}`"
+                >
+                  <span class="sr-only">{{ t('payroll.people.person_code') }}: </span>{{ personCodeLabel(person) }}
+                </span>
+              </h2>
               <div class="flex flex-wrap gap-1.5">
                 <span class="rounded-full px-2 py-1 text-xs font-medium" :class="person.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ statusLabel(person.is_active) }}</span>
                 <span v-if="person.needs_setup" class="rounded-full bg-warning-50 px-2 py-1 text-xs font-medium text-warning-700">{{ t('payroll.people.needs_setup') }}</span>
