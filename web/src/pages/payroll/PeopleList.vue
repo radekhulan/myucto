@@ -9,8 +9,10 @@ import {
   type PayrollEmploymentCreatePayload,
   type PayrollOffice,
   type PayrollPeopleFilter,
+  type PayrollEmploymentStatus,
   type PayrollPerson,
   type PayrollPersonCreatePayload,
+  type PayrollPersonEmploymentRef,
   type PayrollPersonListItem,
   type PayrollPersonProfile,
   type PayrollPersonSetupGap,
@@ -18,7 +20,9 @@ import {
   type PayrollRelationType,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
@@ -35,6 +39,11 @@ import PayrollPersonDependantsPanel from './PayrollPersonDependantsPanel.vue'
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
 import { todayIso } from './employmentLifecycleUi'
+import {
+  payrollAgendaLabelKey,
+  payrollAgendas,
+  type PayrollAgendaDefinition,
+} from './payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -292,6 +301,113 @@ const personActions = computed<ActionItem[]>(() => [
     },
   },
 ])
+
+/**
+ * Rychlé akce v řádku seznamu.
+ *
+ * Why: účetní, která chce zapsat nepřítomnost, musela otevřít kartu, najít v ní
+ * rozcestník agend a teprve odtud kliknout dál — tři kliky na jeden zápis, a to
+ * u agendy, kterou dělá denně. Katalog agend
+ * ({@link file://./payrollAgendaLinks.ts}) je přitom hotový, takže se jen
+ * znovupoužije: nejčastější trojice (docházka, nepřítomnosti, mzdové vstupy)
+ * je v řádku jako ikona, zbytek pod „Další agendy". Katalog zůstává JEDINÝM
+ * zdrojem popisků, ikon i práv — seznam ani karta si nic nedrží stranou.
+ *
+ * Seznam kvůli tomu NEDĚLÁ žádný dotaz navíc: cíle vztahových agend nese
+ * `employment_refs`, který jede v témže poddotazu jako `employment_count`.
+ */
+const quickAgendas = computed<PayrollAgendaDefinition[]>(
+  // Stabilní řazení: nejčastější dopředu, jinak pořadí katalogu. Bez toho by
+  // trojice v řádku byla náhodná podle toho, kam kdo agendu do katalogu vložil.
+  () => [...payrollAgendas].sort(
+    (left, right) => Number(right.quick ?? false) - Number(left.quick ?? false),
+  ),
+)
+
+/**
+ * Vztahy, do kterých má smysl něco zadávat. Archivovaný ani nenastoupivší vztah
+ * není cíl — nabízet ho by znamenalo poslat účetní zadat docházku někam, kde ji
+ * agenda stejně odmítne. Když osobě zbydou jen takové, nabídnou se přesto: lepší
+ * je otevřít agendu, která řekne proč, než tvrdit, že vztah není žádný.
+ */
+const AGENDA_TARGET_STATUSES: readonly PayrollEmploymentStatus[] = [
+  'planned',
+  'preregistered',
+  'active',
+  'suspended',
+  'ended',
+]
+
+function agendaEmployments(person: PayrollPersonListItem): PayrollPersonEmploymentRef[] {
+  const refs = person.employment_refs ?? []
+  const usable = refs.filter(item => AGENDA_TARGET_STATUSES.includes(item.status))
+  return usable.length > 0 ? usable : refs
+}
+
+/*
+ * Osoba s víc pracovními vztahy se musí zeptat, do kterého zápis patří — ale
+ * jen ona. U jednoho vztahu (drtivá většina lidí) zůstává akce OBYČEJNÝM
+ * odkazem, takže nestojí klik navíc a jde otevřít i na nové kartě prohlížeče.
+ * Dialog se proto vrací jen tam, kde `to` chybí.
+ */
+function agendaTarget(person: PayrollPersonListItem, agenda: PayrollAgendaDefinition) {
+  if (agenda.scope === 'person') return agenda.to(0, person.id)
+  const targets = agendaEmployments(person)
+  return targets.length === 1 ? agenda.to(targets[0]!.id, person.id) : null
+}
+
+const agendaPicker = ref<{ person: PayrollPersonListItem; agenda: PayrollAgendaDefinition } | null>(null)
+const agendaPickerEmployments = computed(
+  () => (agendaPicker.value === null ? [] : agendaEmployments(agendaPicker.value.person)),
+)
+
+function employmentStatusLabel(status: PayrollEmploymentStatus): string {
+  return t(`payroll.people.employment_status.${status}`)
+}
+
+function employmentPickerLabel(employment: PayrollPersonEmploymentRef): string {
+  const parts = [relationLabel(employment.relation_type)]
+  if (employment.code !== '') parts.push(employment.code)
+  parts.push(employmentStatusLabel(employment.status))
+  return parts.join(' · ')
+}
+
+function chooseAgendaEmployment(employment: PayrollPersonEmploymentRef) {
+  const picked = agendaPicker.value
+  if (!picked) return
+  agendaPicker.value = null
+  void router.push(picked.agenda.to(employment.id, picked.person.id))
+}
+
+function quickActions(person: PayrollPersonListItem): RowAction[] {
+  return quickAgendas.value.map((agenda) => {
+    const allowed = auth.canRead(agenda.permission)
+    const targets = agendaEmployments(person)
+    const missingEmployment = agenda.scope === 'employment' && targets.length === 0
+    const blocked = !allowed || missingEmployment
+    const to = blocked ? undefined : agendaTarget(person, agenda) ?? undefined
+    return {
+      key: `agenda-${agenda.key}`,
+      label: t(payrollAgendaLabelKey(agenda.key)),
+      icon: agenda.icon,
+      variant: agenda.variant,
+      /*
+       * Blokovaná akce se NESKRÝVÁ — mizející tlačítko nejde odlišit od tlačítka,
+       * které tam nikdy nebylo, a uživatel pak hledá funkci, o které ví, že
+       * existuje. Zůstane zašedlá i s větou proč; `RowActionsMenu` ji vypíše
+       * viditelně, protože `title` na dotykovém displeji nic neřekne.
+       */
+      disabled: blocked,
+      disabledReason: !allowed
+        ? t('payroll.people.quick_actions.no_permission')
+        : (missingEmployment ? t('payroll.people.quick_actions.no_employment') : undefined),
+      to,
+      run: blocked || to !== undefined
+        ? undefined
+        : () => { agendaPicker.value = { person, agenda } },
+    } satisfies RowAction
+  })
+}
 
 function removeEmploymentFromDetail(personId: number, employmentId: number) {
   const detail = details.value[personId]
@@ -748,6 +864,60 @@ async function openFromQuery() {
 }
 
 /**
+ * Zákonná evidence a vyživované osoby nejsou stránka, ale panel karty osoby —
+ * ze seznamu k nim proto vede `?person=<id>&panel=<klíč>`. Bez tohohle by
+ * rychlá akce doručila člověka na kartu a on by panel hledal očima; u
+ * vyživovaných osob dokonce pod sbaleným „Další údaje", takže by ho nenašel.
+ *
+ * Parametr se po použití z adresy odstraní: je to jednorázový povel, ne stav
+ * obrazovky, a při návratu Zpět by panel bez varování odscrolloval znovu.
+ *
+ * Úklid adresy musí proběhnout PŘED odscrollováním. `router.replace` je
+ * plnohodnotná navigace, takže na ni sáhne `scrollBehavior` routeru — a ten by
+ * scroll na panel vzápětí zase smázl skokem na začátek stránky. Proto ho
+ * `scrollBehavior` u odebrání povelu `?panel=` vynechává (viz router).
+ */
+async function focusPanel(panel: string) {
+  if (panel !== 'statutory_evidence' && panel !== 'dependants') return
+  if (panel === 'dependants') advancedProfileOpen.value = true
+  const query = { ...route.query }
+  delete query.panel
+  await router.replace({ query })
+  await nextTick()
+  const target = document.querySelector(`[data-panel-anchor="${panel}"]`)
+  if (target === null) return
+  const before = window.scrollY
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  /*
+   * Plynulý scroll umí prohlížeč vypnout (Chrome „Smooth Scrolling") a pak
+   * `scrollIntoView` s `behavior: 'smooth'` NEUDĚLÁ NIC — ověřeno: `smooth`
+   * skončil na 0 px, `auto` na cíli. Povel by tak u části uživatelů tiše
+   * vyzněl naprázdno: panel by se rozbalil, ale stránka by zůstala nahoře.
+   * Když se tedy nic nepohnulo, doskočí se natvrdo. (Cíl už nahoře = scroll
+   * nemá kam jít; druhé volání je pak neškodné nic.)
+   */
+  window.setTimeout(() => {
+    if (window.scrollY === before) target.scrollIntoView({ block: 'start' })
+  }, 300)
+}
+
+/*
+ * Rychlá akce ze seznamu míří na TUTÉŽ routu, jen s jinými parametry — Vue
+ * Router proto komponentu nepřemontuje a `onMounted` už znovu neproběhne. Bez
+ * tohohle hlídače by kliknutí na „Zákonná evidence" jen tiše přepsalo adresu
+ * a na obrazovce by se nestalo nic.
+ */
+watch(() => [route.query.person, route.query.panel] as const, async ([person, panel]) => {
+  const raw = Array.isArray(person) ? person[0] : person
+  const id = typeof raw === 'string' && raw !== '' ? Number(raw) : null
+  if (id !== null && Number.isInteger(id) && id > 0 && id !== expandedId.value) {
+    await openFromQuery()
+  }
+  const requested = Array.isArray(panel) ? panel[0] : panel
+  if (typeof requested === 'string' && requested !== '') await focusPanel(requested)
+})
+
+/**
  * Od kdy firma vede mzdy v MyÚčtu. Karta vztahu z toho pozná zaměstnance, který
  * nastoupil dřív — takový potřebuje počáteční stavy, jinak jeho mzda nespočítá.
  * Výpadek nesmí shodit seznam, proto tichý fallback.
@@ -757,6 +927,8 @@ const payrollStartPeriod = ref<string | null>(null)
 onMounted(async () => {
   await load()
   await openFromQuery()
+  const panel = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
+  if (typeof panel === 'string' && panel !== '') await focusPanel(panel)
   payrollStartPeriod.value = await payrollApi.capabilities()
     .then(data => data.state.start_period)
     .catch(() => null)
@@ -1048,14 +1220,17 @@ onMounted(async () => {
         @saved="updateQuickEdit"
       />
 
-      <PayrollPersonStatutoryEvidencePanel
-        :person-id="expandedId"
-        :can-write="auth.canWrite('payroll.person.write')"
-      />
+      <div data-panel-anchor="statutory_evidence" class="scroll-mt-24">
+        <PayrollPersonStatutoryEvidencePanel
+          :person-id="expandedId"
+          :can-write="auth.canWrite('payroll.person.write')"
+        />
+      </div>
 
       <details
         class="group overflow-hidden rounded-xl border border-neutral-200 bg-surface shadow-sm"
         data-test="advanced-person-profile"
+        :open="advancedProfileOpen"
         @toggle="toggleAdvancedProfile"
       >
         <summary class="cursor-pointer list-none px-4 py-4 sm:px-6">
@@ -1080,10 +1255,12 @@ onMounted(async () => {
             :relation-types="details[expandedId].relation_types"
             @saved="updatePersonProfile"
           />
-          <PayrollPersonDependantsPanel
-            :person-id="expandedId"
-            :can-write="auth.canWrite('payroll.person.write')"
-          />
+          <div data-panel-anchor="dependants" class="scroll-mt-24">
+            <PayrollPersonDependantsPanel
+              :person-id="expandedId"
+              :can-write="auth.canWrite('payroll.person.write')"
+            />
+          </div>
           <PayrollPersonForeignPermitPanel
             :person-id="expandedId"
             :can-write="auth.canWrite('payroll.person.write') && auth.canRead('documents')"
@@ -1219,13 +1396,30 @@ onMounted(async () => {
                   </td>
                   <td v-if="tbl.isVisible('relations')" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
                   <td v-if="tbl.isVisible('count')" class="px-4 py-3 text-right text-neutral-700">{{ person.employment_count }}</td>
-                  <td v-if="tbl.isVisible('detail')" class="px-4 py-3 text-right">
-                    <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                        <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
-                      </svg>
-                      {{ nextStepActionLabel(person) }}
-                    </button>
+                  <!--
+                    Karta zůstává hlavní akcí; vedle ní jsou tři nejčastější
+                    agendy jako ikona a zbytek pod „…". Ikony schválně: popisky
+                    („Docházka a směny", „Nepřítomnosti", …) by sloupec roztáhly
+                    tak, že by tabulka na notebooku začala scrollovat do stran.
+                    Popisek nese `aria-label` i tooltip, takže o něj nepřijde ani
+                    čtečka, ani myš.
+                  -->
+                  <td v-if="tbl.isVisible('detail')" class="px-4 py-3">
+                    <div class="flex flex-wrap items-center justify-end gap-2">
+                      <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
+                        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                          <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
+                        </svg>
+                        {{ nextStepActionLabel(person) }}
+                      </button>
+                      <RowActionsMenu
+                        :actions="quickActions(person)"
+                        :inline-count="3"
+                        icon-only
+                        :menu-label="t('payroll.people.quick_actions.more')"
+                        :data-test="`person-quick-actions-${person.id}`"
+                      />
+                    </div>
                   </td>
                 </tr>
               </template>
@@ -1252,12 +1446,27 @@ onMounted(async () => {
               class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs leading-snug text-warning-700"
               :data-test="`person-next-step-${person.id}`"
             >{{ nextStepLabel(person) }}</p>
-            <button :class="[btnOutline(person.needs_setup ? 'warning' : 'neutral'), 'mt-4']" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
-              </svg>
-              {{ nextStepActionLabel(person) }}
-            </button>
+            <!--
+              Na mobilu se akce nesmí uříznout ani schovat za vodorovný scroll:
+              řádek se proto zalamuje (`flex-wrap`) a v „…" zůstává celý zbytek
+              katalogu. Tři ikonová tlačítka + „…" se vejdou i na nejužší
+              obrazovku vedle „Otevřít kartu".
+            -->
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+              <button :class="btnOutline(person.needs_setup ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="person.needs_setup ? ICONS.edit : ICONS.user" />
+                </svg>
+                {{ nextStepActionLabel(person) }}
+              </button>
+              <RowActionsMenu
+                :actions="quickActions(person)"
+                :inline-count="3"
+                icon-only
+                :menu-label="t('payroll.people.quick_actions.more')"
+                :data-test="`person-quick-actions-mobile-${person.id}`"
+              />
+            </div>
           </article>
         </div>
 
@@ -1271,6 +1480,38 @@ onMounted(async () => {
         />
       </template>
     </section>
+
+    <!--
+      Dialog „do kterého vztahu to patří" se otevírá JEN u osoby, která jich má
+      víc. U jednoho vztahu je akce obyčejný odkaz, takže běžný případ nestojí
+      klik navíc — a tady je ptaní se nutné, ne obtěžování: docházka zapsaná pod
+      špatný vztah skončí ve špatné mzdě.
+    -->
+    <Modal
+      v-if="agendaPicker"
+      :title="t('payroll.people.quick_actions.pick_title', { agenda: t(payrollAgendaLabelKey(agendaPicker.agenda.key)) })"
+      width-class="max-w-md"
+      @close="agendaPicker = null"
+    >
+      <p class="text-sm text-neutral-600" data-test="agenda-picker-hint">
+        {{ t('payroll.people.quick_actions.pick_hint', { name: agendaPicker.person.full_name }) }}
+      </p>
+      <ul class="mt-3 space-y-2" data-test="agenda-picker">
+        <li v-for="employment in agendaPickerEmployments" :key="employment.id">
+          <button
+            type="button"
+            class="flex w-full cursor-pointer items-center justify-between gap-3 rounded-lg border border-neutral-200 px-3 py-2 text-left text-sm hover:border-payroll-500/60 hover:bg-payroll-50"
+            :data-test="`agenda-picker-${employment.id}`"
+            @click="chooseAgendaEmployment(employment)"
+          >
+            <span class="min-w-0 text-neutral-800">{{ employmentPickerLabel(employment) }}</span>
+            <span v-if="employment.is_primary" class="shrink-0 rounded-full bg-success-50 px-2 py-1 text-xs font-medium text-success-700">
+              {{ t('payroll.people.primary') }}
+            </span>
+          </button>
+        </li>
+      </ul>
+    </Modal>
 
   </div>
 </template>

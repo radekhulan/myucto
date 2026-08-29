@@ -778,11 +778,11 @@
   "payroll": {
         "agendas": {
             "title": "Navazující agendy",
-            "subtitle": "Kam u tohoto pracovního vztahu zadat další záznam — odkaz vede na seznam už zúžený na tohoto člověka.",
+            "subtitle": "Kam u tohoto pracovního vztahu zadat další záznam — u každé agendy je vidět, kolik v ní tento člověk má záznamů, a odkaz vede na seznam už zúžený na něj.",
             "count": "žádný záznam | 1 záznam | {count} záznamy | {count} záznamů",
             "last_on": "poslední {date}",
-            "nothing_yet": "Zatím nic: {agendas}.",
-            "load_failed": "Souhrn agend se nepodařilo načíst. Tlačítka fungují dál.",
+            "no_permission": "Agendy s pomlčkou místo počtu neotevřete — nemáte k nim oprávnění. O jeho přidělení požádejte správce firmy.",
+            "load_failed": "Počty záznamů se nepodařilo načíst, proto je u agend pomlčka. Odkazy do agend fungují dál.",
             "items": {
                 "time": "Docházka a směny",
                 "absences": "Nepřítomnosti",
@@ -793,7 +793,10 @@
                 "deduction_agreements": "Dohody o srážkách",
                 "enforcement": "Exekuce",
                 "documents": "Dokumenty",
-                "annual_settlement": "Roční zúčtování"
+                "annual_settlement": "Roční zúčtování",
+                "insolvency": "Insolvence",
+                "statutory_evidence": "Zákonná evidence",
+                "dependants": "Vyživované osoby"
             },
             "focus": {
                 "title": "Seznam je zúžený na {name}.",
@@ -1697,6 +1700,7 @@
             "overtime_amount": "Přesčas celkem (Kč)",
             "surcharges": {
                 "toggle": "Příplatky — noční, víkend, svátek, ztížené prostředí",
+                "toggle_short": "Příplatky",
                 "hint": "Zadejte počet odpracovaných hodin za měsíc. Částku dopočte aplikace ze schváleného průměrného výdělku (u § 117 ze základní sazby minimální mzdy) a sjednané sazby. Příplatky vedené docházkou se sem nezadávají — vznikají při schválení měsíce.",
                 "kinds": {
                     "night": "Noční práce",
@@ -1713,6 +1717,10 @@
                 "hours_label": "{kind} — počet hodin",
                 "hours_placeholder": "hodiny",
                 "factors": "Ztěžujících vlivů",
+                "factors_short": "Vlivů",
+                "hours_short": "Hodiny",
+                "unavailable_badge": "Nedostupné",
+                "unavailable_note_title": "Proč některé příplatky nejde zadat",
                 "unavailable": {
                     "clear_only": "Podklad výpočtu už není k dispozici, takže novou hodnotu zadat nelze. Zadanou hodinu jde vymazat, nebo doplňte chybějící podklad.",
                     "claimed_by_attendance": "Příplatek za toto období už vznikl ze schválené docházky. Ručně ho zadat nelze — vyplatil by se dvakrát.",
@@ -2714,6 +2722,13 @@
             "shared_recap_hint": "Jde o stejné zaměstnance jako ve Mzdové rekapitulaci — nevzniká žádný druhý seznam.",
             "load_failed": "Seznam zaměstnanců se nepodařilo načíst.",
             "detail_load_failed": "Detail pracovních vztahů se nepodařilo načíst.",
+            "quick_actions": {
+                "more": "Další agendy",
+                "no_permission": "Na tuto agendu nemáte oprávnění. Požádejte o něj správce firmy.",
+                "no_employment": "Tato agenda se vede k pracovnímu vztahu. Nejdřív zaměstnanci vztah založte na jeho kartě.",
+                "pick_title": "{agenda} — ke kterému vztahu?",
+                "pick_hint": "{name} má víc pracovních vztahů. Vyberte ten, do kterého záznam patří."
+            },
             "search": "Hledat zaměstnance",
             "search_placeholder": "Jméno zaměstnance",
             "filter": "Zobrazení",

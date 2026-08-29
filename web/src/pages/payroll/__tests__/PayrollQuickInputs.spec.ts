@@ -772,6 +772,90 @@ describe('PayrollQuickInputs', () => {
   })
 
   /*
+   * Právní vysvětlení se nesmí opakovat v každé buňce.
+   *
+   * Odstavec o § 115 nebo o chybějícím průměrném výdělku byl u každého
+   * zaměstnance stejný a nafoukl řádek přes 200 px. Platí-li pro celý sloupec,
+   * vypíše se JEDNOU nad tabulkou a v buňce zůstane značka — text ale zůstává
+   * dostupný v `title` i pro odečítače, informačně se nic neztrácí.
+   */
+  it('hoists a surcharge reason shared by the whole column above the table', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    const blocked = {
+      holiday: {
+        entry_available: false,
+        unavailable_reason: 'holiday_arrangement_missing',
+      },
+    } as const
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 2,
+      items: [
+        fixture({ surcharges: surchargeStates(blocked) }),
+        fixture({
+          employment_id: 13,
+          employee_id: 9,
+          surcharges: surchargeStates(blocked),
+        }),
+      ],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const note = wrapper.get('[data-testid="quick-surcharge-column-note-holiday"]')
+    expect(note.text()).toContain('holiday_arrangement_missing')
+    for (const id of [12, 13]) {
+      const cell = wrapper.get(`[data-testid="quick-surcharge-blocked-holiday-${id}"]`)
+      expect(cell.attributes('title')).toContain('holiday_arrangement_missing')
+      expect(cell.text()).toContain('unavailable_badge')
+    }
+  })
+
+  /*
+   * Řádek, který se od sloupce liší, si plnou větu nechává u sebe — jinak by
+   * se výjimka schovala pod společné vysvětlení, které pro ni neplatí.
+   */
+  it('keeps the full reason in a row that differs from the column', async () => {
+    m.getPref.mockResolvedValue({ visible: true })
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 3,
+      items: [
+        fixture({
+          surcharges: surchargeStates({
+            holiday: { entry_available: false, unavailable_reason: 'basis_missing' },
+          }),
+        }),
+        fixture({
+          employment_id: 13,
+          employee_id: 9,
+          surcharges: surchargeStates({
+            holiday: { entry_available: false, unavailable_reason: 'basis_missing' },
+          }),
+        }),
+        fixture({
+          employment_id: 14,
+          employee_id: 10,
+          surcharges: surchargeStates({
+            holiday: {
+              entry_available: false,
+              unavailable_reason: 'holiday_compensatory_time_off',
+            },
+          }),
+        }),
+      ],
+    }))
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="quick-surcharge-column-note-holiday"]').text())
+      .toContain('basis_missing')
+    const odd = wrapper.get('[data-testid="quick-surcharge-blocked-holiday-14"]')
+    expect(odd.attributes('title')).toBeUndefined()
+    expect(odd.text()).toContain('holiday_compensatory_time_off')
+  })
+
+  /*
    * § 117 náleží ZA KAŽDÝ ztěžující vliv. Bez jejich počtu se nedá počítat —
    * odhadnout jedničku by byl tichý nedoplatek, tak se řádek radši neuloží.
    */

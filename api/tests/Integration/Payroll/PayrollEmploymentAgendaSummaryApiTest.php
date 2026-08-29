@@ -71,16 +71,51 @@ final class PayrollEmploymentAgendaSummaryApiTest extends TestCase
     }
 
     /**
-     * `AGENDA_KEYS` je doména pro klientský union, `AGENDAS` nese SQL. Kdyby se
-     * rozešly, architekturní kontrakt unionů by zelenal nad seznamem, který
-     * endpoint neumí spočítat — proto se porovnávají i na pořadí.
+     * `AGENDA_KEYS` je doména pro klientský union A pořadí výpisu, `AGENDAS`
+     * nese SQL. Kdyby se rozešly, architekturní kontrakt unionů by zelenal nad
+     * seznamem, který endpoint neumí spočítat — nebo by naopak spočítaná agenda
+     * v odpovědi tiše chyběla, protože ji smyčka podle `AGENDA_KEYS` nenavštíví.
+     *
+     * Porovnává se MNOŽINA, ne seznam: pořadí definic je jen pořadí, v jakém
+     * dotazy vznikly, kdežto pořadí výpisu je produktové rozhodnutí a vlastní ho
+     * `AGENDA_KEYS` sama. Držet obojí ručně synchronní by byl další zdroj driftu.
      */
-    public function testAgendaCatalogMatchesItsDomain(): void
+    public function testEveryAgendaKeyHasItsQueryAndViceVersa(): void
     {
+        $keys = PayrollEmploymentAgendaSummaryRepository::AGENDA_KEYS;
+        $defined = PayrollEmploymentAgendaSummaryRepository::definedAgendaKeys();
+        sort($keys);
+        sort($defined);
+
+        self::assertSame($defined, $keys);
         self::assertSame(
             PayrollEmploymentAgendaSummaryRepository::AGENDA_KEYS,
             PayrollEmploymentAgendaSummaryRepository::agendaKeys(),
         );
+    }
+
+    /**
+     * Pořadí, ve kterém agendy dorazí na klienta. Zafixované jmenovitě, protože
+     * je to produktové rozhodnutí (jak často k agendě účetní chodí), ne detail
+     * implementace — a protože se musí krýt s katalogem `payrollAgendaLinks.ts`.
+     */
+    public function testAgendasAreOrderedByHowOftenTheyAreUsed(): void
+    {
+        self::assertSame([
+            'absences',
+            'time',
+            'quick_inputs',
+            'statutory_evidence',
+            'dependants',
+            'components',
+            'travel',
+            'average_earnings',
+            'deduction_agreements',
+            'enforcement',
+            'insolvency',
+            'documents',
+            'annual_settlement',
+        ], PayrollEmploymentAgendaSummaryRepository::agendaKeys());
     }
 
     public function testEmptyEmploymentReportsEveryAgendaAsZero(): void
@@ -115,6 +150,35 @@ final class PayrollEmploymentAgendaSummaryApiTest extends TestCase
         self::assertSame(400_00, $agendas['deduction_agreements']['amount_minor']);
         self::assertSame(0, $agendas['travel']['count']);
         self::assertNull($agendas['travel']['amount_minor']);
+    }
+
+    /**
+     * Insolvence, zákonná evidence a vyživované osoby dorazily do rozcestníku
+     * později než souhrn a chvíli v něm visely bez čísla — účetní pak nepoznala
+     * „nic tam není" od „nezeptali jsme se". Test drží, že se počítají, a hlavně
+     * ČEHO se počítá: insolvence měsíců s režimem (ne všech řádků evidence)
+     * a zákonná evidence napříč všemi kolekcemi panelu, ne jen jednou tabulkou.
+     */
+    public function testCountsPersonScopedAgendasAddedAfterTheOriginalSummary(): void
+    {
+        [$employmentId, $employeeId] = $this->createEmployment($this->supplierId, 'agenda-person');
+        $this->addMonthEvidence($this->supplierId, $employeeId, '2026-06-01', 'approved_standard');
+        $this->addMonthEvidence($this->supplierId, $employeeId, '2026-07-01', 'alert_only');
+        // Měsíc BEZ insolvence je řádek evidence jako každý jiný — do počtu
+        // insolvencí ale nepatří, jinak by číslo měřilo pilnost účetní.
+        $this->addMonthEvidence($this->supplierId, $employeeId, '2026-08-01', 'none');
+        $this->addTaxDeclaration($this->supplierId, $employeeId, '2026-01-01');
+        $this->addHealthMonthEvidence($this->supplierId, $employeeId, '2026-05-01');
+        $this->addDependant($this->supplierId, $employeeId, '2015-04-02');
+
+        $agendas = $this->agendas($this->request($this->supplierId), $employmentId);
+
+        self::assertSame(2, $agendas['insolvency']['count']);
+        self::assertSame('2026-07-01', $agendas['insolvency']['last_on']);
+        self::assertSame(2, $agendas['statutory_evidence']['count']);
+        self::assertSame('2026-05-01', $agendas['statutory_evidence']['last_on']);
+        self::assertSame(1, $agendas['dependants']['count']);
+        self::assertSame('2015-04-02', $agendas['dependants']['last_on']);
     }
 
     public function testForeignSupplierNeitherSeesTheEmploymentNorItsCounts(): void
@@ -211,6 +275,46 @@ final class PayrollEmploymentAgendaSummaryApiTest extends TestCase
                 (supplier_id, employee_id, case_key, case_kind, status, effective_from)
              VALUES (?, ?, ?, "enforcement", "received", "2026-06-01")'
         )->execute([$supplierId, $employeeId, 'SYNTH-EXE-' . $employeeId]);
+    }
+
+    private function addMonthEvidence(
+        int $supplierId,
+        int $employeeId,
+        string $periodStart,
+        string $insolvencyMode,
+    ): void {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_enforcement_person_month_evidence
+                (supplier_id, employee_id, period_start, insolvency_mode)
+             VALUES (?, ?, ?, ?)'
+        )->execute([$supplierId, $employeeId, $periodStart, $insolvencyMode]);
+    }
+
+    private function addTaxDeclaration(int $supplierId, int $employeeId, string $effectiveFrom): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, effective_from)
+             VALUES (?, ?, "unverified", ?)'
+        )->execute([$supplierId, $employeeId, $effectiveFrom]);
+    }
+
+    private function addHealthMonthEvidence(int $supplierId, int $employeeId, string $periodStart): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_health_month_evidence
+                (supplier_id, employee_id, period_start)
+             VALUES (?, ?, ?)'
+        )->execute([$supplierId, $employeeId, $periodStart]);
+    }
+
+    private function addDependant(int $supplierId, int $employeeId, string $birthDate): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_dependants
+                (supplier_id, employee_id, relation, full_name, birth_date, existence_from)
+             VALUES (?, ?, "child_own", "Syntetické dítě", ?, ?)'
+        )->execute([$supplierId, $employeeId, $birthDate, $birthDate]);
     }
 
     /**

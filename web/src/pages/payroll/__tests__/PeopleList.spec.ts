@@ -104,6 +104,7 @@ function person(
     legacy_employment_type: 'hpp',
     employment_count: 0,
     relation_types: [],
+    employment_refs: [],
     setup_gaps: needsSetup ? ['residence'] : [],
     needs_setup: needsSetup,
     can_delete: true,

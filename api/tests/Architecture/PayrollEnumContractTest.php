@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Architecture;
 
+use MyInvoice\Repository\Payroll\PayrollEmploymentAgendaSummaryRepository;
 use MyInvoice\Service\Payroll\Settings\PayrollEmployerPolicyService;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
 use PHPUnit\Framework\Attributes\Group;
@@ -832,6 +833,40 @@ final class PayrollEnumContractTest extends TestCase
             $backend,
             'Přesčas má v rychlém zadání vlastní pole; druhé pole na týž nárok '
             . 'by byl další způsob, jak ho vyplatit dvakrát.',
+        );
+    }
+
+    /**
+     * Rozcestník agend na kartě zaměstnance se řadí podle toho, jak často
+     * k agendě účetní chodí — a to POŘADÍ je kontrakt, ne kosmetika.
+     *
+     * Klientský katalog (`payrollAgendaLinks.ts`) rozhoduje, v jakém pořadí se
+     * dlaždice vykreslí; backend (`AGENDA_KEYS`) v jakém pořadí přijdou počty.
+     * Union `PayrollAgendaKey` se porovnává jen jako množina (viz sweep výše),
+     * takže přeskládat jednu stranu a na druhou zapomenout by dnes nic nechytlo:
+     * mřížka by se u každého člověka vykreslila jinak, než jak je souhrn řazený,
+     * a nikdo by nepoznal proč. Proto se čte skutečné pořadí `key:` z katalogu.
+     */
+    public function testAgendaCatalogOrderMatchesTheClientCatalog(): void
+    {
+        $path = dirname(__DIR__, 3) . '/web/src/pages/payroll/payrollAgendaLinks.ts';
+        self::assertFileExists($path, 'Katalog agend na klientovi chybí.');
+
+        $source = (string) file_get_contents($path);
+        $catalog = substr($source, (int) strpos($source, 'export const payrollAgendas'));
+        // `\r?` schválně: katalog má na Windows CRLF a bez toho by `$` nesedlo.
+        preg_match_all("/^    key: '(\w+)',\r?$/m", $catalog, $matches);
+        $clientOrder = $matches[1];
+
+        // Bez tohohle by rozbitý parser (přejmenovaná konstanta, jiné odsazení)
+        // udělal z testu prázdné porovnání, které projde vždycky.
+        self::assertNotEmpty($clientOrder, 'V katalogu agend se nenašel jediný `key:` — čtečka je rozbitá.');
+
+        self::assertSame(
+            PayrollEmploymentAgendaSummaryRepository::agendaKeys(),
+            $clientOrder,
+            'Pořadí agend v `payrollAgendaLinks.ts` se rozešlo s `AGENDA_KEYS`. '
+            . 'Přeskládat se musí OBĚ strany naráz.',
         );
     }
 

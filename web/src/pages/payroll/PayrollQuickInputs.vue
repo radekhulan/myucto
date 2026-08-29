@@ -339,6 +339,68 @@ function surchargeTotal(row: UiRow): number {
   )
 }
 
+/**
+ * Proč druh příplatku u řádku nejde zadat — klíč do
+ * `payroll.quick_inputs.surcharges.unavailable.*`, nebo `null`, když jde.
+ *
+ * Chybějící stav se čte jako `basis_missing`: server ho posílá u každého řádku,
+ * takže jeho nepřítomnost znamená „podklad nemáme", ne „všechno je v pořádku".
+ */
+function surchargeUnavailableKey(row: UiRow, kind: PayrollQuickSurchargeKind): string | null {
+  const state = surchargeState(row, kind)
+  if (state?.entry_available && !state.clear_only) return null
+  return state?.clear_only ? 'clear_only' : (state?.unavailable_reason ?? 'basis_missing')
+}
+
+function surchargeUnavailableText(row: UiRow, kind: PayrollQuickSurchargeKind): string {
+  const key = surchargeUnavailableKey(row, kind)
+  return key === null ? '' : t(`payroll.quick_inputs.surcharges.unavailable.${key}`)
+}
+
+/**
+ * Vysvětlení, které platí pro CELÝ sloupec, se vytáhne nad tabulku.
+ *
+ * Tentýž odstavec o § 115 nebo o chybějícím průměrném výdělku se u dvaceti
+ * zaměstnanců lišil jenom tím, kolikrát se opakoval — a nafoukl řádek přes
+ * 200 px. Vypíšeme ho jednou; v buňce zůstane kompaktní značka. Vytahuje se až
+ * od dvou řádků: u jediného zablokovaného řádku není co deduplikovat a věta
+ * patří k němu.
+ */
+const surchargeColumnNotes = computed<Partial<Record<PayrollQuickSurchargeKind, string>>>(() => {
+  const notes: Partial<Record<PayrollQuickSurchargeKind, string>> = {}
+  for (const kind of SURCHARGE_KINDS) {
+    const counts = new Map<string, number>()
+    for (const row of rows.value) {
+      const key = surchargeUnavailableKey(row, kind)
+      if (key !== null) counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    let best = 1
+    for (const [key, count] of counts) {
+      if (count > best) {
+        best = count
+        notes[kind] = key
+      }
+    }
+  }
+  return notes
+})
+
+/** Buňka ukazuje jen značku tehdy, když plný důvod stojí nad tabulkou. */
+function surchargeNoteHoisted(row: UiRow, kind: PayrollQuickSurchargeKind): boolean {
+  const key = surchargeUnavailableKey(row, kind)
+  return key !== null && surchargeColumnNotes.value[kind] === key
+}
+
+/** Sloupce, ke kterým se nad tabulkou vypisuje společné vysvětlení. */
+const surchargeNoteColumns = computed(() => SURCHARGE_KINDS
+  .filter(kind => surchargeColumnNotes.value[kind] !== undefined)
+  .map(kind => ({
+    kind,
+    label: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
+    section: t(`payroll.quick_inputs.surcharges.sections.${kind}`),
+    text: t(`payroll.quick_inputs.surcharges.unavailable.${surchargeColumnNotes.value[kind]}`),
+  })))
+
 function formatMoney(value: number): string {
   return formatMoneyMinor(value)
 }
@@ -614,6 +676,21 @@ function modeButtonClass(active: boolean): string[] {
     active
       ? 'border-payroll-600 bg-payroll-50 text-payroll-700'
       : 'border-neutral-300 bg-surface text-neutral-600 hover:border-payroll-300 hover:text-payroll-700',
+  ]
+}
+
+/**
+ * Přepínač příplatků stojí v jedné liště s `ColumnPicker` a `DensityToggle`,
+ * takže musí vypadat jako oni — stejná výška, rám i rádius. Dvojitý rám navíc
+ * ho z lišty vytrhával a působil jako jiný druh ovládacího prvku.
+ */
+function tableToolClass(active: boolean): string[] {
+  return [
+    'inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md',
+    'border px-2.5 text-sm transition-colors',
+    active
+      ? 'border-payroll-200 bg-payroll-50 text-payroll-700'
+      : 'border-neutral-300 bg-surface text-neutral-700 hover:bg-neutral-50',
   ]
 }
 
@@ -961,13 +1038,14 @@ onMounted(() => {
           <button
             type="button"
             data-testid="quick-surcharges-toggle"
-            :class="modeButtonClass(surchargesVisible)"
+            :class="tableToolClass(surchargesVisible)"
             :aria-pressed="surchargesVisible"
             aria-controls="quick-surcharge-columns"
+            :title="t('payroll.quick_inputs.surcharges.toggle')"
             @click="toggleSurcharges"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.coin" /></svg>
-            {{ t('payroll.quick_inputs.surcharges.toggle') }}
+            {{ t('payroll.quick_inputs.surcharges.toggle_short') }}
           </button>
           <div class="hidden flex-wrap items-center gap-2 lg:flex">
             <ColumnPicker :ctrl="tbl" />
@@ -980,34 +1058,80 @@ onMounted(() => {
         >
           {{ t('payroll.quick_inputs.surcharges.hint') }}
         </p>
+        <!--
+          Vysvětlení, které platí pro celý sloupec, stojí JEDNOU tady, ne
+          v každé buňce. V tabulce ho pak zastupuje značka „nedostupné"
+          s týmž textem v `title` a pro odečítače v `sr-only`. Na mobilu se
+          pruh neukazuje — v kartách je věta u pole a `title` tam nefunguje.
+        -->
+        <div
+          v-if="surchargesVisible && surchargeNoteColumns.length"
+          data-testid="quick-surcharge-column-notes"
+          class="hidden border-b border-warning-200 bg-warning-50/70 px-4 py-2 lg:block"
+        >
+          <p class="text-xs font-medium text-warning-800">
+            {{ t('payroll.quick_inputs.surcharges.unavailable_note_title') }}
+          </p>
+          <ul class="mt-1 space-y-0.5">
+            <li
+              v-for="note in surchargeNoteColumns"
+              :key="note.kind"
+              :data-testid="`quick-surcharge-column-note-${note.kind}`"
+              class="text-xs text-neutral-700"
+            >
+              <span class="font-medium text-neutral-900">{{ note.label }}</span>
+              <span class="text-neutral-500"> ({{ note.section }})</span>
+              <span> — {{ note.text }}</span>
+            </li>
+          </ul>
+        </div>
         <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
           <table class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
+                <th v-if="tbl.isVisible('person')" class="w-64 px-4 py-3">{{ t('payroll.quick_inputs.person') }}</th>
                 <th v-if="tbl.isVisible('income_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.income_amount') }}</th>
                 <th v-if="tbl.isVisible('overtime')" class="px-4 py-3">{{ t('payroll.quick_inputs.overtime') }}</th>
                 <th v-if="tbl.isVisible('bonus_amount')" class="px-4 py-3">{{ t('payroll.quick_inputs.bonus_amount') }}</th>
+                <!--
+                  Paragraf je druhý řádek hlavičky, ne pokračování názvu:
+                  `whitespace-nowrap` ho drží pohromadě, aby se „§ 116"
+                  nezlomilo mezi značku a číslo.
+                -->
                 <th
                   v-for="kind in (surchargesVisible ? SURCHARGE_KINDS : [])"
                   :key="kind"
-                  class="px-4 py-3"
+                  class="px-4 py-3 align-bottom"
                   :data-testid="`quick-surcharge-head-${kind}`"
                 >
-                  {{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}
-                  <span class="block font-normal normal-case text-neutral-400">
+                  <span class="block">{{ t(`payroll.quick_inputs.surcharges.kinds.${kind}`) }}</span>
+                  <span class="block whitespace-nowrap font-normal normal-case text-neutral-400">
                     {{ t(`payroll.quick_inputs.surcharges.sections.${kind}`) }}
                   </span>
                 </th>
-                <th v-if="tbl.isVisible('gross_preview')" class="px-4 py-3 text-right">{{ t('payroll.quick_inputs.gross_preview') }}</th>
+                <!--
+                  Věta „hrubé podklady před odvody" platí pro celý sloupec,
+                  takže stojí v hlavičce. V každém řádku to bylo totéž N-krát.
+                -->
+                <th v-if="tbl.isVisible('gross_preview')" class="px-4 py-3 text-right align-bottom">
+                  <span class="block">{{ t('payroll.quick_inputs.gross_preview') }}</span>
+                  <span class="ml-auto block max-w-52 font-normal normal-case text-neutral-400">
+                    {{ t('payroll.quick_inputs.gross_preview_short_hint') }}
+                  </span>
+                </th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="row in rows" :key="row.employment_id" class="align-top">
-                <td v-if="tbl.isVisible('person')" class="px-4 py-4">
-                  <p class="font-semibold text-neutral-900">{{ row.full_name }}</p>
-                  <p class="mt-0.5 text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}</p>
-                  <p class="mt-1 text-xs text-neutral-500">{{ row.employment_code }}</p>
+                <!--
+                  Sloupec s člověkem má pevnou preferovanou šířku a text se
+                  v něm láme. Dlouhé jméno nebo kód vztahu jinak roztáhne
+                  celou tabulku a vodorovný posun se objeví i tam, kde nemá.
+                -->
+                <td v-if="tbl.isVisible('person')" class="w-64 px-4 py-4">
+                  <p class="break-words font-semibold text-neutral-900">{{ row.full_name }}</p>
+                  <p class="mt-0.5 break-words text-xs text-neutral-500">{{ row.birth_number_masked ?? t('payroll.quick_inputs.identifier_missing') }}</p>
+                  <p class="mt-1 break-words text-xs text-neutral-500">{{ row.employment_code }}</p>
                   <span
                     :data-testid="`quick-relation-${row.employment_id}`"
                     class="mt-2 inline-flex rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium text-payroll-700"
@@ -1021,7 +1145,7 @@ onMounted(() => {
                   >
                     {{ employmentStatusLabel(row) }}
                   </span>
-                  <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 max-w-xs text-xs text-warning-700">
+                  <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 text-xs text-warning-700">
                     {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
                   </p>
                 </td>
@@ -1041,7 +1165,7 @@ onMounted(() => {
                     :aria-label="incomeLabel(row)"
                     :aria-invalid="baseError(row) !== null"
                     :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(baseError(row), true), 'w-36']"
+                    :class="[fieldClass(baseError(row), true), 'w-32']"
                     :disabled="loading || saving || !canWrite || row.base_managed_elsewhere || !editable(row.inputs.base)"
                     @input="markDirty(row)"
                   >
@@ -1100,7 +1224,7 @@ onMounted(() => {
                     :aria-label="t('payroll.quick_inputs.overtime_hours')"
                     :aria-invalid="overtimeError(row) !== null"
                     :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-36']"
+                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-32']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
                     @input="markDirty(row)"
                   >
@@ -1113,7 +1237,7 @@ onMounted(() => {
                     :aria-label="additionalIncomeLabel(row)"
                     :aria-invalid="overtimeError(row) !== null"
                     :aria-describedby="overtimeError(row) ? `quick-overtime-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-36']"
+                    :class="[fieldClass(overtimeError(row), true), 'mt-2 w-32']"
                     :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
                     @input="markDirty(row)"
                   >
@@ -1168,7 +1292,7 @@ onMounted(() => {
                     :aria-label="t('payroll.quick_inputs.bonus_amount')"
                     :aria-invalid="bonusError(row) !== null"
                     :aria-describedby="bonusError(row) ? `quick-bonus-error-${row.employment_id}` : undefined"
-                    :class="[fieldClass(bonusError(row), true), 'w-36']"
+                    :class="[fieldClass(bonusError(row), true), 'w-32']"
                     :disabled="loading || saving || !canWrite || row.bonus_managed_elsewhere || !editable(row.inputs.bonus)"
                     @input="markDirty(row)"
                   >
@@ -1199,42 +1323,53 @@ onMounted(() => {
                   :key="kind"
                   class="px-4 py-4"
                 >
-                  <input
-                    :data-testid="`quick-surcharge-${kind}-${row.employment_id}`"
-                    v-model="row.surchargeHours[kind]"
-                    type="text"
-                    inputmode="decimal"
-                    autocomplete="off"
-                    :aria-label="t('payroll.quick_inputs.surcharges.hours_label', {
-                      kind: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
-                    })"
-                    :aria-invalid="surchargeHoursError(row, kind) !== null"
-                    :class="[fieldClass(surchargeHoursError(row, kind), true), 'w-24']"
-                    :placeholder="t('payroll.quick_inputs.surcharges.hours_placeholder')"
-                    :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
-                    @input="markDirty(row)"
-                  >
                   <!--
-                    § 117 přiznává příplatek ZA KAŽDÝ ztěžující vliv, takže
-                    počet vlivů je součást zadání, ne detail.
+                    Hodiny a počet vlivů jsou dvojice vedle sebe, každý se svým
+                    popiskem. Dřív visel input na vlivy pod textem mimo mřížku
+                    a u § 117 to vypadalo jako rozbité rozložení.
                   -->
-                  <label
-                    v-if="surchargeState(row, kind)?.requires_factors"
-                    class="mt-1 flex items-center gap-1 text-xs text-neutral-500"
-                  >
-                    {{ t('payroll.quick_inputs.surcharges.factors') }}
-                    <input
-                      :data-testid="`quick-surcharge-factors-${kind}-${row.employment_id}`"
-                      v-model="row.surchargeFactors[kind]"
-                      type="text"
-                      inputmode="numeric"
-                      autocomplete="off"
-                      :aria-invalid="surchargeFactorsError(row, kind) !== null"
-                      :class="[fieldClass(surchargeFactorsError(row, kind), true), 'h-8 w-14']"
-                      :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
-                      @input="markDirty(row)"
-                    >
-                  </label>
+                  <div class="flex flex-wrap items-end gap-2">
+                    <label class="block">
+                      <span class="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                        {{ t('payroll.quick_inputs.surcharges.hours_short') }}
+                      </span>
+                      <input
+                        :data-testid="`quick-surcharge-${kind}-${row.employment_id}`"
+                        v-model="row.surchargeHours[kind]"
+                        type="text"
+                        inputmode="decimal"
+                        autocomplete="off"
+                        :aria-label="t('payroll.quick_inputs.surcharges.hours_label', {
+                          kind: t(`payroll.quick_inputs.surcharges.kinds.${kind}`),
+                        })"
+                        :aria-invalid="surchargeHoursError(row, kind) !== null"
+                        :class="[fieldClass(surchargeHoursError(row, kind), true), 'w-24']"
+                        :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
+                        @input="markDirty(row)"
+                      >
+                    </label>
+                    <!--
+                      § 117 přiznává příplatek ZA KAŽDÝ ztěžující vliv, takže
+                      počet vlivů je součást zadání, ne detail.
+                    -->
+                    <label v-if="surchargeState(row, kind)?.requires_factors" class="block">
+                      <span class="mb-1 block text-[11px] font-medium uppercase tracking-wide text-neutral-500">
+                        {{ t('payroll.quick_inputs.surcharges.factors_short') }}
+                      </span>
+                      <input
+                        :data-testid="`quick-surcharge-factors-${kind}-${row.employment_id}`"
+                        v-model="row.surchargeFactors[kind]"
+                        type="text"
+                        inputmode="numeric"
+                        autocomplete="off"
+                        :aria-label="t('payroll.quick_inputs.surcharges.factors')"
+                        :aria-invalid="surchargeFactorsError(row, kind) !== null"
+                        :class="[fieldClass(surchargeFactorsError(row, kind), true), 'w-16']"
+                        :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
+                        @input="markDirty(row)"
+                      >
+                    </label>
+                  </div>
                   <p
                     v-if="surchargeHoursError(row, kind) || surchargeFactorsError(row, kind)"
                     class="mt-1 max-w-40 text-xs text-danger-700"
@@ -1246,7 +1381,7 @@ onMounted(() => {
                   <p
                     v-else-if="surchargePreview(row, kind)"
                     :data-testid="`quick-surcharge-preview-${kind}-${row.employment_id}`"
-                    class="mt-1 text-xs font-medium text-payroll-700 tabular-nums"
+                    class="mt-1 text-xs font-medium tabular-nums text-payroll-700"
                   >
                     {{ formatMoney(surchargePreview(row, kind)) }}
                   </p>
@@ -1257,14 +1392,30 @@ onMounted(() => {
                   >
                     {{ serverError(row, `surcharge_${kind}`) }}
                   </p>
-                  <p
-                    v-else-if="!surchargeState(row, kind)?.entry_available || surchargeState(row, kind)?.clear_only"
-                    :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
-                    class="mt-1 max-w-48 text-xs text-warning-700"
-                  >
-                    {{ t(`payroll.quick_inputs.surcharges.unavailable.${
-                      surchargeState(row, kind)?.clear_only ? 'clear_only' : (surchargeState(row, kind)?.unavailable_reason ?? 'basis_missing')}`) }}
-                  </p>
+                  <!--
+                    Důvod, který platí pro celý sloupec, stojí nad tabulkou —
+                    v buňce z něj zbude značka. Řádek, který se od sloupce
+                    liší, si plnou větu nechává u sebe.
+                  -->
+                  <template v-else-if="surchargeUnavailableKey(row, kind)">
+                    <p
+                      v-if="surchargeNoteHoisted(row, kind)"
+                      :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
+                      :title="surchargeUnavailableText(row, kind)"
+                      class="mt-1 inline-flex items-center gap-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700"
+                    >
+                      <svg class="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.bell" /></svg>
+                      {{ t('payroll.quick_inputs.surcharges.unavailable_badge') }}
+                      <span class="sr-only"> — {{ surchargeUnavailableText(row, kind) }}</span>
+                    </p>
+                    <p
+                      v-else
+                      :data-testid="`quick-surcharge-blocked-${kind}-${row.employment_id}`"
+                      class="mt-1 max-w-48 text-xs text-warning-700"
+                    >
+                      {{ surchargeUnavailableText(row, kind) }}
+                    </p>
+                  </template>
                 </td>
                 <td v-if="tbl.isVisible('gross_preview')" class="px-4 py-4 text-right">
                   <p class="text-base font-semibold text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
@@ -1277,7 +1428,6 @@ onMounted(() => {
                   <p v-if="row.excluded_from_gross_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.excluded_inputs', { amount: formatMoney(row.excluded_from_gross_amount_minor) }) }}
                   </p>
-                  <p class="mt-1 max-w-52 text-xs text-neutral-500">{{ t('payroll.quick_inputs.gross_preview_short_hint') }}</p>
                 </td>
               </tr>
             </tbody>
@@ -1314,7 +1464,6 @@ onMounted(() => {
                 <p v-if="row.excluded_from_gross_amount_minor" class="mt-1 text-xs text-neutral-500">
                   {{ t('payroll.quick_inputs.excluded_inputs', { amount: formatMoney(row.excluded_from_gross_amount_minor) }) }}
                 </p>
-                <p class="mt-1 max-w-48 text-xs text-neutral-500">{{ t('payroll.quick_inputs.gross_preview_short_hint') }}</p>
               </div>
             </div>
             <p v-for="blocker in row.blockers" :key="blocker" class="mt-2 text-xs text-warning-700">
@@ -1474,7 +1623,7 @@ onMounted(() => {
                     >
                     <span
                       v-if="surchargeState(row, kind)?.requires_factors"
-                      class="mt-1 flex items-center gap-1 text-xs text-neutral-500"
+                      class="mt-2 flex items-center justify-between gap-2 text-xs text-neutral-500"
                     >
                       {{ t('payroll.quick_inputs.surcharges.factors') }}
                       <input
@@ -1484,7 +1633,7 @@ onMounted(() => {
                         autocomplete="off"
                         :aria-label="t('payroll.quick_inputs.surcharges.factors')"
                         :aria-invalid="surchargeFactorsError(row, kind) !== null"
-                        :class="[fieldClass(surchargeFactorsError(row, kind), true), 'h-8 w-16']"
+                        :class="[fieldClass(surchargeFactorsError(row, kind), true), 'w-16 shrink-0']"
                         :disabled="loading || saving || !canWrite || !surchargeEditable(row, kind)"
                         @input="markDirty(row)"
                       >
@@ -1508,12 +1657,16 @@ onMounted(() => {
                     >
                       {{ serverError(row, `surcharge_${kind}`) }}
                     </span>
+                    <!--
+                      Na mobilu zůstává věta viditelná: `title` se na dotykovém
+                      displeji nedá vyvolat a v kartách se stejně neopakuje
+                      tolikrát jako ve sloupci tabulky.
+                    -->
                     <span
-                      v-else-if="!surchargeState(row, kind)?.entry_available || surchargeState(row, kind)?.clear_only"
+                      v-else-if="surchargeUnavailableKey(row, kind)"
                       class="mt-1 block text-xs text-warning-700"
                     >
-                      {{ t(`payroll.quick_inputs.surcharges.unavailable.${
-                        surchargeState(row, kind)?.clear_only ? 'clear_only' : (surchargeState(row, kind)?.unavailable_reason ?? 'basis_missing')}`) }}
+                      {{ surchargeUnavailableText(row, kind) }}
                     </span>
                   </label>
                 </div>

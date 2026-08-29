@@ -222,6 +222,19 @@ export const router = createRouter({
   scrollBehavior(_to, _from, savedPosition) {
     if (savedPosition) return savedPosition
     if (_to.hash) return { el: _to.hash, behavior: 'smooth' }
+    /*
+     * Jednorázový povel `?panel=<klíč>` (rozcestník agend → panel na kartě
+     * osoby) si po použití uklidí sám sebe `router.replace`em bez toho
+     * parametru. Je to plnohodnotná navigace, takže by se tady jinak vrátilo
+     * `{ top: 0 }` — a router by SMÁZL scroll, který obsluha povelu právě
+     * udělala. Navenek to vypadalo, že proklik nedělá nic: panel se rozbalil,
+     * ale stránka zůstala na začátku. Odebrání povelu proto scroll nepřepisuje;
+     * ostatní navigace včetně stránkování se chovají dál stejně.
+     */
+    if (_from.query.panel !== undefined && _to.query.panel === undefined
+      && _to.path === _from.path) {
+      return false
+    }
     return { top: 0, left: 0 }
   },
 })

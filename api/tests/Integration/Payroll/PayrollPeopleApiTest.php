@@ -143,6 +143,17 @@ final class PayrollPeopleApiTest extends TestCase
             self::assertCount(1, $list['items']);
             self::assertSame($this->employeeId, $list['items'][0]['id']);
             self::assertSame(['partner_dependent'], $list['items'][0]['relation_types']);
+            /*
+             * Rychlé akce v řádku seznamu se zužují na `employment_id`, ne na
+             * osobu. Kdyby seznam vztahy nenesl, musel by si je dotáhnout dotazem
+             * na každý řádek — přehled o padesáti lidech by udělal padesát
+             * požadavků navíc.
+             */
+            $refs = $list['items'][0]['employment_refs'];
+            self::assertCount(1, $refs);
+            self::assertSame('partner_dependent', $refs[0]['relation_type']);
+            self::assertIsInt($refs[0]['id']);
+            self::assertIsBool($refs[0]['is_primary']);
             self::assertSame('legacy', $list['items'][0]['profile_status']);
             $this->assertNoSensitiveFields($list);
 

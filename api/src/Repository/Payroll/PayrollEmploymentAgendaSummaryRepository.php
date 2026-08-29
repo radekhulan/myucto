@@ -35,22 +35,43 @@ final class PayrollEmploymentAgendaSummaryRepository
      * `PayrollEmploymentAgendaSummaryApiTest::testAgendaCatalogMatchesItsDomain()`.
      * Konstanta existuje proto, že architekturní kontrakt unionů umí porovnávat
      * jen ploché seznamy řetězců, ne mapu s SQL.
+     *
+     * ⚠️ Pořadí je PRODUKTOVÉ rozhodnutí, ne pořadí vzniku tabulek, a musí se
+     * krýt s katalogem `web/src/pages/payroll/payrollAgendaLinks.ts` — hlídá
+     * `PayrollEnumContractTest::testAgendaCatalogOrderMatchesTheClientCatalog()`.
+     * Řadí se podle toho, jak často k agendě účetní chodí:
+     *   1) měsíční rutina (nepřítomnosti, docházka, mzdové vstupy),
+     *   2) osobní evidence, která rozhoduje o SPRÁVNOSTI výpočtu — chybějící
+     *      prohlášení k dani nebo nezadané dítě se neprojeví jako chybějící
+     *      záznam, ale jako špatně spočítaná mzda, takže patří na oči nahoru,
+     *   3) občasné agendy (složky, cesty, průměry, srážky, exekuce, insolvence),
+     *   4) výstupy na konec (dokumenty, roční zúčtování).
      */
     public const AGENDA_KEYS = [
-        'time',
         'absences',
+        'time',
         'quick_inputs',
-        'travel',
+        'statutory_evidence',
+        'dependants',
         'components',
+        'travel',
         'average_earnings',
         'deduction_agreements',
         'enforcement',
+        'insolvency',
         'documents',
         'annual_settlement',
     ];
 
     /**
-     * Agendy v pořadí, v jakém je karta zaměstnance vypisuje.
+     * DEFINICE agend: kde se který počet bere.
+     *
+     * Pořadí zápisů tady je jen pořadí, v jakém dotazy vznikly — na výstupu se
+     * NEPROJEVÍ. Řadí {@see self::AGENDA_KEYS}, protože dvě ručně udržovaná
+     * pořadí v jednom souboru se dřív nebo později rozejdou a rozcestník by pak
+     * u každého člověka vypadal jinak, než katalog na klientovi slibuje.
+     * Zdejší klíče a `AGENDA_KEYS` proto musí být stejná MNOŽINA (hlídá test),
+     * ale nemusí být stejný SEZNAM.
      *
      * `permission` musí sedět na `routePermissions` ve `web/src/router/index.ts` —
      * jinak by souhrn prozradil počet exekucí někomu, koho stránka exekucí
@@ -217,12 +238,115 @@ final class PayrollEmploymentAgendaSummaryRepository
                  WHERE supplier_id = ? AND employee_id = ?
                 SQL,
         ],
+        /*
+         * Insolvence NENÍ vlastní tabulka případů — oddlužení se vede jako
+         * měsíční evidence osoby (`payroll_enforcement_person_month_evidence`),
+         * kde ho zapíná `insolvency_mode`. Počítají se proto MĚSÍCE, ve kterých
+         * je insolvence vedená; `none` je „nic tam není", ne řádek navíc.
+         *
+         * Částka zůstává prázdná záměrně: soudem určená srážka existuje jen
+         * u režimu `court_determined_amount`, takže by u standardního oddlužení
+         * i u pouhého upozornění musela lhát nulou.
+         */
+        'insolvency' => [
+            'scope' => self::SCOPE_EMPLOYEE,
+            'permission' => 'payroll.insolvency',
+            'pairs' => 1,
+            'sql' => <<<'SQL'
+                SELECT COUNT(*) AS record_count,
+                       MAX(period_start) AS last_on,
+                       NULL AS amount_minor
+                  FROM payroll_enforcement_person_month_evidence
+                 WHERE supplier_id = ? AND employee_id = ?
+                   AND insolvency_mode <> 'none'
+                SQL,
+        ],
+        /*
+         * Zákonná evidence osoby je ŠEST kolekcí v šesti tabulkách (prohlášení
+         * k dani, daňová rezidence, sociální příslušnost, sleva na pojistném,
+         * zdravotní pojišťovna, měsíční zdravotní evidence) — právě ty, do
+         * kterých vede zapisovací cesta z karty osoby
+         * ({@see PayrollPersonStatutoryEvidenceRepository::EDITABLE}).
+         *
+         * Rozcestník je nesčítá proto, že by šlo o „jednu agendu", ale proto, že
+         * v UI JSOU jeden panel: účetní se ptá „mám u toho člověka vůbec něco
+         * doložené?", ne „kolik mám řádků v tabulce rezidencí". Jeden UNION
+         * místo šesti dotazů drží slib, že souhrn je jeden požadavek.
+         */
+        'statutory_evidence' => [
+            'scope' => self::SCOPE_EMPLOYEE,
+            'permission' => 'payroll',
+            'pairs' => 6,
+            'sql' => <<<'SQL'
+                SELECT COUNT(*) AS record_count,
+                       MAX(occurred_on) AS last_on,
+                       NULL AS amount_minor
+                  FROM (
+                       SELECT effective_from AS occurred_on
+                         FROM payroll_person_tax_declarations
+                        WHERE supplier_id = ? AND employee_id = ?
+                        UNION ALL
+                       SELECT effective_from
+                         FROM payroll_person_tax_residences
+                        WHERE supplier_id = ? AND employee_id = ?
+                        UNION ALL
+                       SELECT effective_from
+                         FROM payroll_person_social_jurisdictions
+                        WHERE supplier_id = ? AND employee_id = ?
+                        UNION ALL
+                       SELECT effective_from
+                         FROM payroll_person_social_discount_claims
+                        WHERE supplier_id = ? AND employee_id = ?
+                        UNION ALL
+                       SELECT effective_from
+                         FROM payroll_person_health_coverage_history
+                        WHERE supplier_id = ? AND employee_id = ?
+                        UNION ALL
+                       SELECT period_start
+                         FROM payroll_person_health_month_evidence
+                        WHERE supplier_id = ? AND employee_id = ?
+                       ) AS combined
+                SQL,
+        ],
+        // `last_on` je NEJPOZDĚJŠÍ začátek vyživování, ne datum pořízení řádku:
+        // rozcestník tím odpovídá na „kdy jsme naposledy někoho přidali", což je
+        // to, co účetní na kartě hledá. Ukončené osoby se nevyřazují — nárok se
+        // dokládá i zpětně a „0 vyživovaných" u člověka s dospělým dítětem by
+        // vypadalo jako chybějící evidence.
+        'dependants' => [
+            'scope' => self::SCOPE_EMPLOYEE,
+            'permission' => 'payroll',
+            'pairs' => 1,
+            'sql' => <<<'SQL'
+                SELECT COUNT(*) AS record_count,
+                       MAX(existence_from) AS last_on,
+                       NULL AS amount_minor
+                  FROM payroll_dependants
+                 WHERE supplier_id = ? AND employee_id = ?
+                SQL,
+        ],
     ];
 
     public function __construct(private readonly Connection $db) {}
 
-    /** @return list<string> */
+    /**
+     * Agendy v pořadí, v jakém je karta vypisuje — ne v pořadí, v jakém k nim
+     * v {@see self::AGENDAS} vznikl dotaz.
+     *
+     * @return list<string>
+     */
     public static function agendaKeys(): array
+    {
+        return self::AGENDA_KEYS;
+    }
+
+    /**
+     * Klíče, ke kterým existuje dotaz. Jen pro test, že se doména a definice
+     * nerozešly — pořadí je tu nahodilé, řadit se má podle {@see agendaKeys()}.
+     *
+     * @return list<string>
+     */
+    public static function definedAgendaKeys(): array
     {
         return array_keys(self::AGENDAS);
     }
@@ -263,8 +387,10 @@ final class PayrollEmploymentAgendaSummaryRepository
     public function summary(int $supplierId, int $employmentId, int $employeeId, array $agendas): array
     {
         $result = [];
-        foreach (self::AGENDAS as $key => $agenda) {
+        // Pořadí odpovědi drží AGENDA_KEYS (pořadí výpisu), ne pořadí definic.
+        foreach (self::AGENDA_KEYS as $key) {
             if (!in_array($key, $agendas, true)) continue;
+            $agenda = self::AGENDAS[$key];
 
             $scopeId = $agenda['scope'] === self::SCOPE_EMPLOYEE ? $employeeId : $employmentId;
             $params = [];

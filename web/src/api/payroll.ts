@@ -128,6 +128,19 @@ export type PayrollPersonSetupGap =
   | 'identifier'
   | 'employment'
 
+/**
+ * Pracovní vztah tak, jak ho vidí seznam osob — jen na výběr cíle rychlé akce.
+ * Řazeno hlavním vztahem napřed, aby u osoby s jedním použitelným vztahem šlo
+ * kliknout rovnou.
+ */
+export interface PayrollPersonEmploymentRef {
+  id: number
+  code: string
+  relation_type: PayrollRelationType
+  status: PayrollEmploymentStatus
+  is_primary: boolean
+}
+
 export interface PayrollPersonListItem {
   id: number
   full_name: string
@@ -137,6 +150,14 @@ export interface PayrollPersonListItem {
   legacy_employment_type: string
   employment_count: number
   relation_types: PayrollRelationType[]
+  /**
+   * Pracovní vztahy osoby jen v rozsahu, který potřebuje ROZCESTNÍK: agendy
+   * jako docházka nebo nepřítomnosti se zužují na `employment_id`, a to seznam
+   * dosud neznal. Jede to ve stejném dotazu jako `employment_count` (tentýž
+   * poddotaz nad `payroll_employments`), takže seznam nestojí ani požadavek,
+   * ani dotaz navíc; plný detail vztahu má dál jen karta osoby.
+   */
+  employment_refs: PayrollPersonEmploymentRef[]
   setup_gaps: PayrollPersonSetupGap[]
   needs_setup: boolean
   can_delete: boolean
@@ -3130,14 +3151,17 @@ export interface PayrollEmploymentDimensionPayload {
  * rozcestník i souhrn řadily stejně a nedaly se rozejít.
  */
 export type PayrollAgendaKey =
-  | 'time'
   | 'absences'
-  | 'travel'
+  | 'time'
   | 'quick_inputs'
+  | 'statutory_evidence'
+  | 'dependants'
   | 'components'
+  | 'travel'
   | 'average_earnings'
   | 'deduction_agreements'
   | 'enforcement'
+  | 'insolvency'
   | 'documents'
   | 'annual_settlement'
 

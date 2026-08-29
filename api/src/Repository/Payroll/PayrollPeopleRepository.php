@@ -387,7 +387,23 @@ final class PayrollPeopleRepository
                     SELECT supplier_id,
                            employee_id,
                            COUNT(*) AS employment_count,
-                           GROUP_CONCAT(DISTINCT relation_type ORDER BY relation_type SEPARATOR ',') AS relation_types
+                           GROUP_CONCAT(DISTINCT relation_type ORDER BY relation_type SEPARATOR ',') AS relation_types,
+                           GROUP_CONCAT(
+                               CONCAT_WS(
+                                   CHAR(31 USING utf8mb4),
+                                   id,
+                                   REPLACE(
+                                       REPLACE(code, CHAR(31 USING utf8mb4), ' '),
+                                       CHAR(10 USING utf8mb4),
+                                       ' '
+                                   ),
+                                   relation_type,
+                                   status,
+                                   is_primary
+                               )
+                               ORDER BY is_primary DESC, id ASC
+                               SEPARATOR '\n'
+                           ) AS employment_refs
                       FROM payroll_employments
                      WHERE supplier_id = ?
                      GROUP BY supplier_id, employee_id
@@ -411,6 +427,7 @@ final class PayrollPeopleRepository
                    employee.employment_type AS legacy_employment_type,
                    COALESCE(relations.employment_count, 0) AS employment_count,
                    COALESCE(relations.relation_types, '') AS relation_types,
+                   COALESCE(relations.employment_refs, '') AS employment_refs,
             SQL
             . "\n                   " . self::setupGapColumns()
             . ' ' . self::fromClause() . ' WHERE employee.supplier_id = ?';
@@ -457,9 +474,51 @@ final class PayrollPeopleRepository
             'legacy_employment_type' => $this->stringValue($row, 'legacy_employment_type'),
             'employment_count' => $employmentCount,
             'relation_types' => $relationTypes,
+            'employment_refs' => $this->employmentRefs($this->stringValue($row, 'employment_refs')),
             'setup_gaps' => $setupGaps,
             'needs_setup' => $setupGaps !== [],
         ];
+    }
+
+    /**
+     * Pracovní vztahy osoby pro rozcestník seznamu.
+     *
+     * Why: rychlé akce v řádku (docházka, nepřítomnosti, mzdové vstupy) se zužují
+     * na `employment_id`, ne na osobu — a to seznam neznal, takže by na každý
+     * řádek potřeboval vlastní dotaz. Jede to proto v TÉMŽE poddotazu, který už
+     * počítá `employment_count`; seznam tak nestojí ani jeden dotaz navíc.
+     *
+     * Sbaleno GROUP_CONCATem: pole odděluje znak US (31), záznamy nový řádek —
+     * `SEPARATOR` bere jen literál, výraz `CHAR(30)` tam MariaDB nepustí. `code`
+     * je volný text uživatele, takže se mu oba oddělovače v SQL nahradí mezerou;
+     * s čárkou nebo dvojtečkou by rozpad tiše rozhodil celé pole. Záznam, který
+     * po rozpadu nemá pět částí, se zahazuje — chybný odkaz je horší než žádný.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function employmentRefs(string $packed): array
+    {
+        if ($packed === '') {
+            return [];
+        }
+
+        $refs = [];
+        foreach (explode("\n", $packed) as $record) {
+            $parts = explode("\x1f", $record);
+            if (count($parts) !== 5) {
+                continue;
+            }
+            [$id, $code, $relationType, $status, $isPrimary] = $parts;
+            $refs[] = [
+                'id' => (int) $id,
+                'code' => $code,
+                'relation_type' => $relationType,
+                'status' => $status,
+                'is_primary' => $isPrimary === '1',
+            ];
+        }
+
+        return $refs;
     }
 
     /** @return array<string,string|int|bool|null> */

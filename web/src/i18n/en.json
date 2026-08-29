@@ -778,11 +778,11 @@
   "payroll": {
         "agendas": {
             "title": "Related agendas",
-            "subtitle": "Where to record more for this employment — the link opens a list already narrowed to this person.",
+            "subtitle": "Where to record more for this employment — each agenda shows how many records this person has in it, and the link opens a list already narrowed to them.",
             "count": "no records | 1 record | {count} records",
             "last_on": "last {date}",
-            "nothing_yet": "Nothing yet: {agendas}.",
-            "load_failed": "The agenda summary could not be loaded. The buttons still work.",
+            "no_permission": "Agendas showing a dash instead of a count cannot be opened — you lack the permission. Ask your company administrator to grant it.",
+            "load_failed": "Record counts could not be loaded, so the agendas show a dash. The links still work.",
             "items": {
                 "time": "Attendance and shifts",
                 "absences": "Absences",
@@ -793,7 +793,10 @@
                 "deduction_agreements": "Deduction agreements",
                 "enforcement": "Enforcements",
                 "documents": "Documents",
-                "annual_settlement": "Annual settlement"
+                "annual_settlement": "Annual settlement",
+                "insolvency": "Insolvency",
+                "statutory_evidence": "Statutory evidence",
+                "dependants": "Dependants"
             },
             "focus": {
                 "title": "The list is narrowed to {name}.",
@@ -1697,6 +1700,7 @@
             "overtime_amount": "Overtime total (CZK)",
             "surcharges": {
                 "toggle": "Surcharges — night, weekend, public holiday, difficult environment",
+                "toggle_short": "Surcharges",
                 "hint": "Enter the hours worked in the month. The amount is derived from the approved average earnings (from the basic minimum wage rate for Section 117) and the agreed rate. Surcharges tracked through attendance are not entered here — they arise when the month is approved.",
                 "kinds": {
                     "night": "Night work",
@@ -1713,6 +1717,10 @@
                 "hours_label": "{kind} — hours",
                 "hours_placeholder": "hours",
                 "factors": "Aggravating factors",
+                "factors_short": "Factors",
+                "hours_short": "Hours",
+                "unavailable_badge": "Not available",
+                "unavailable_note_title": "Why some surcharges cannot be entered",
                 "unavailable": {
                     "clear_only": "The calculation basis is no longer available, so a new value cannot be entered. You can clear what is there, or restore the missing basis.",
                     "claimed_by_attendance": "This surcharge already arose from approved attendance for this period. It cannot be entered manually — it would be paid twice.",
@@ -2714,6 +2722,13 @@
             "shared_recap_hint": "These are the same employees as in Payroll recap — this does not create a second list.",
             "load_failed": "The employee list could not be loaded.",
             "detail_load_failed": "The employment-relationship detail could not be loaded.",
+            "quick_actions": {
+                "more": "More agendas",
+                "no_permission": "You do not have permission for this agenda. Ask your company administrator for it.",
+                "no_employment": "This agenda is kept per employment relationship. Create one for this employee on their card first.",
+                "pick_title": "{agenda} — which relationship?",
+                "pick_hint": "{name} has more than one employment relationship. Pick the one the record belongs to."
+            },
             "search": "Search employees",
             "search_placeholder": "Employee name",
             "filter": "View",

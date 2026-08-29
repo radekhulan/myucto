@@ -705,6 +705,19 @@ const actions = computed<ActionItem[]>(() => [
     </div>
 
     <template v-if="expanded">
+    <!--
+      Rozcestník do agend je PRVNÍ věc pod hlavičkou vztahu, ne až pod výpisem
+      podmínek a lištou životního cyklu. Zadavatel chce „vše, co k člověku můžu
+      zadat" na dosah; „kam s tímhle člověkem jít dál" je přitom mnohem častější
+      potřeba než „co se s vztahem kdy stalo" — a dřív se k tomu muselo scrollovat
+      přes počáteční stavy, tabulku údajů a celý životní cyklus.
+    -->
+    <EmploymentAgendaPanel
+      class="mt-3"
+      :employment-id="employment.id"
+      :employee-id="employment.employee_id"
+    />
+
     <div
       v-if="showOpeningBalances"
       class="mt-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 text-xs text-neutral-700"
@@ -789,16 +802,6 @@ const actions = computed<ActionItem[]>(() => [
     >{{ t('payroll.people.office_missing_warning') }}</p>
 
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
-
-    <!--
-      Rozcestník do navazujících agend patří nad povinnosti a časovou osu:
-      „kam s tímhle člověkem jít dál" je častější potřeba než „co se s vztahem
-      kdy stalo". Načítá se až tady, tedy jen pro rozbalený vztah.
-    -->
-    <EmploymentAgendaPanel
-      :employment-id="employment.id"
-      :employee-id="employment.employee_id"
-    />
 
     <form v-if="editingTerms && termsForm" class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-3 sm:p-4" @submit.prevent="saveTerms">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.people.new_terms') }}</h4>

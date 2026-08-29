@@ -133,6 +133,7 @@ function person(primary = employment()): PayrollPerson {
     legacy_employment_type: 'hpp',
     employment_count: 1,
     relation_types: ['employment'],
+    employment_refs: [],
     can_delete: false,
     delete_blocker: null,
     delete_cascade: {},

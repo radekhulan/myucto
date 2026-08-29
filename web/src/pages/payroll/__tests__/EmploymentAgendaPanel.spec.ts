@@ -28,7 +28,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 }))
 
 import EmploymentAgendaPanel from '@/pages/payroll/EmploymentAgendaPanel.vue'
-import { payrollAgendas } from '@/pages/payroll/payrollAgendaLinks'
+import { payrollCardAgendas } from '@/pages/payroll/payrollAgendaLinks'
 
 function agenda(overrides: Partial<PayrollAgendaSummaryItem> = {}): PayrollAgendaSummaryItem {
   return {
@@ -53,13 +53,17 @@ function mountPanel() {
           props: ['to'],
           template: '<a :data-to="JSON.stringify(to)"><slot /></a>',
         },
-        ActionBar: {
-          props: ['actions'],
-          template: '<div data-test="action-bar" :data-keys="actions.map(a => a.key).join(\',\')" />',
-        },
       },
     },
   })
+}
+
+function tile(wrapper: ReturnType<typeof mountPanel>, key: string) {
+  return wrapper.get(`[data-test="employment-agenda-${key}"]`)
+}
+
+function count(wrapper: ReturnType<typeof mountPanel>, key: string) {
+  return wrapper.get(`[data-test="employment-agenda-count-${key}"]`).text()
 }
 
 describe('EmploymentAgendaPanel', () => {
@@ -67,38 +71,36 @@ describe('EmploymentAgendaPanel', () => {
     vi.clearAllMocks()
     m.canRead.mockReturnValue(true)
     m.employmentAgendaSummary.mockResolvedValue(summary(
-      payrollAgendas.map(item => agenda({ key: item.key })),
+      payrollCardAgendas.map(item => agenda({ key: item.key })),
     ))
   })
 
-  it('nabídne tlačítko na každou agendu, i na tu prázdnou', async () => {
+  it('vypíše VŠECHNY agendy katalogu v jednom seznamu, ne jen ty naplněné', async () => {
     const wrapper = mountPanel()
     await flushPromises()
 
-    const keys = wrapper.get('[data-test="action-bar"]').attributes('data-keys')
-    for (const item of payrollAgendas) {
-      expect(keys).toContain(`agenda-${item.key}`)
+    for (const item of payrollCardAgendas) {
+      const link = tile(wrapper, item.key).get('a')
+      expect(link.attributes('data-to')).toBeTruthy()
     }
+    expect(wrapper.findAll('[data-test="employment-agenda-summary"] > li'))
+      .toHaveLength(payrollCardAgendas.length)
   })
 
-  it('vypíše jen agendy, ve kterých něco je; prázdné jmenuje jednou větou', async () => {
-    m.employmentAgendaSummary.mockResolvedValue(summary([
-      agenda({ key: 'absences', count: 3, last_on: '2026-08-14' }),
-      agenda({ key: 'travel', count: 0 }),
-      agenda({ key: 'enforcement', count: 0 }),
-    ]))
+  it('prázdná agenda zůstane v seznamu, ukáže nulu a dál se dá otevřít', async () => {
+    m.employmentAgendaSummary.mockResolvedValue(summary(
+      payrollCardAgendas.map(item => agenda({
+        key: item.key,
+        count: item.key === 'absences' ? 3 : 0,
+      })),
+    ))
 
     const wrapper = mountPanel()
     await flushPromises()
 
-    expect(wrapper.find('[data-test="employment-agenda-absences"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="employment-agenda-travel"]').exists()).toBe(false)
-    const empty = wrapper.get('[data-test="employment-agendas-empty"]').text()
-    expect(empty).toContain('payroll.agendas.items.travel')
-    expect(empty).toContain('payroll.agendas.items.enforcement')
-    // Agenda, o které server nic neřekl (chybí oprávnění), se nesmí objevit ani
-    // v seznamu, ani mezi prázdnými — jinak by karta tvrdila „zatím nic“.
-    expect(empty).not.toContain('payroll.agendas.items.documents')
+    expect(count(wrapper, 'travel')).toBe('0')
+    expect(count(wrapper, 'absences')).toBe('3')
+    expect(tile(wrapper, 'travel').get('a').attributes('data-to')).toContain('payroll-travel')
   })
 
   it('u agendy se záznamy ukáže počet, datum i částku', async () => {
@@ -109,32 +111,38 @@ describe('EmploymentAgendaPanel', () => {
     const wrapper = mountPanel()
     await flushPromises()
 
-    const row = wrapper.get('[data-test="employment-agenda-travel"]').text()
-    expect(row).toContain('payroll.agendas.count')
-    expect(row).toContain('payroll.agendas.last_on')
+    const row = tile(wrapper, 'travel')
+    expect(count(wrapper, 'travel')).toBe('2')
+    expect(row.text()).toContain('payroll.agendas.last_on')
     // Částka jde přes sdílené `formatMoneyMinor`, tedy s nezlomitelnými mezerami —
     // porovnává se proto normalizovaně, ne na přesný řetězec locale.
-    expect(row.replace(/\s/gu, '')).toContain('1234,00Kč')
+    expect(row.text().replace(/\s/gu, '')).toContain('1234,00Kč')
   })
 
-  it('skryje tlačítko agendy, na kterou uživatel nemá oprávnění', async () => {
+  it('agenda bez oprávnění zůstane vidět, ale nevede nikam a nemá počet', async () => {
     m.canRead.mockImplementation((permission: string) => permission !== 'payroll.enforcement')
     const wrapper = mountPanel()
     await flushPromises()
 
-    const keys = wrapper.get('[data-test="action-bar"]').attributes('data-keys')
-    expect(keys).not.toContain('agenda-enforcement')
-    expect(keys).toContain('agenda-absences')
+    const row = tile(wrapper, 'enforcement')
+    expect(row.find('a').exists()).toBe(false)
+    expect(row.get('[aria-disabled="true"]').attributes('title'))
+      .toBe('payroll.agendas.no_permission')
+    expect(count(wrapper, 'enforcement')).toBe('–')
+    // Tooltip na dotyku neexistuje → věta musí být vidět i na obrazovce.
+    expect(wrapper.get('[data-test="employment-agendas-denied"]').text())
+      .toBe('payroll.agendas.no_permission')
+    expect(tile(wrapper, 'absences').find('a').exists()).toBe(true)
   })
 
-  it('výpadek souhrnu nesmí shodit kartu — tlačítka zůstanou', async () => {
+  it('výpadek souhrnu nesmí shodit kartu — odkazy zůstanou, počty jsou pomlčka', async () => {
     m.employmentAgendaSummary.mockRejectedValue(new Error('403'))
     const wrapper = mountPanel()
     await flushPromises()
 
     expect(wrapper.find('[data-test="employment-agendas-failed"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="action-bar"]').attributes('data-keys'))
-      .toContain('agenda-time')
+    expect(tile(wrapper, 'time').get('a').attributes('data-to')).toContain('payroll-time')
+    expect(count(wrapper, 'time')).toBe('–')
   })
 
   it('souhrn se načte jedním požadavkem, ne jedním na agendu', async () => {
