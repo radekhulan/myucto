@@ -430,8 +430,57 @@ final class PayrollPeriodExportRepository
                 'Export mezd se nepodařilo bezpečně archivovat.',
             );
         }
+        $this->revokeSupersededGrants(
+            (int) $record['supplier_id'],
+            (string) $record['export_scope'],
+            (string) $record['period_start'],
+            (string) $record['period_end'],
+            (int) $result['id'],
+        );
 
         return $result;
+    }
+
+    /**
+     * Zneplatní nepoužité download granty exportů, které nová revize téhož
+     * období nahradila (W30 / D-06).
+     *
+     * Nový export za stejné období a rozsah vzniká proto, že se zdrojová data
+     * změnila — mzdový běh dostal novou revizi, přibyl dokument, opravilo se
+     * podání. Nevyzvednutý grant na PŘEDCHOZÍ export je od té chvíle platný
+     * odkaz na archiv, který už neodpovídá stavu evidence, a nikdo ho
+     * nezneplatňoval. Řádek se maže, ne jen expiruje: nevyzvednutý grant nemá
+     * co doložit (stažení se loguje až při vyzvednutí) a CHECK
+     * `expires_at > created_at` by přepis času neustál.
+     *
+     * Použité granty zůstávají — ty jsou stopou, že se soubor stáhl.
+     */
+    private function revokeSupersededGrants(
+        int $supplierId,
+        string $scope,
+        string $periodStart,
+        string $periodEnd,
+        int $currentExportId,
+    ): void {
+        $this->db->pdo()->prepare(
+            'DELETE grant_row
+               FROM payroll_period_export_download_grants grant_row
+               JOIN payroll_period_exports export_row
+                 ON export_row.supplier_id = grant_row.supplier_id
+                AND export_row.id = grant_row.export_id
+              WHERE grant_row.supplier_id = ?
+                AND grant_row.export_id <> ?
+                AND grant_row.used_at IS NULL
+                AND export_row.export_scope = ?
+                AND export_row.period_start = ?
+                AND export_row.period_end = ?',
+        )->execute([
+            $supplierId,
+            $currentExportId,
+            $scope,
+            $periodStart,
+            $periodEnd,
+        ]);
     }
 
     /** @return array{id:int,export_scope:string,period_start:string,period_end:string,source_manifest_hash:string,manifest_json:string,file_sha256:string,size_bytes:int,mime_type:string,storage_key:string,suggested_filename:string,created_at:string}|null */

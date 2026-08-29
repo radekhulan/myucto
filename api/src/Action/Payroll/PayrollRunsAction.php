@@ -12,8 +12,10 @@ use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnedException;
+use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\PayrollYearClosedException;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
@@ -32,7 +34,122 @@ final class PayrollRunsAction
         private readonly PayrollRunRepository $runs,
         private readonly PayrollRunWorkflow $workflow,
         private readonly PayrollModuleAccess $access,
+        private readonly PayrollPeriodOwnershipService $ownership,
+        private readonly IpMatcher $ipMatcher,
     ) {}
+
+    /**
+     * Stav rezervace mzdového období.
+     *
+     * @param array<string,string> $args
+     */
+    public function periodOwnership(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll',
+            AccessLevel::READ,
+        )) !== null) {
+            return $error;
+        }
+        try {
+            [$year, $month] = self::periodParts($args['period'] ?? null);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'ownership' => $this->ownership->legacyClaimStatus(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+            ),
+        ]);
+    }
+
+    /**
+     * Uvolnění rezervace, kterou drží PŮVODNÍ ruční zaúčtování.
+     *
+     * Bez téhle cesty stačilo, aby legacy větev (i z cronu) zabrala měsíc dřív
+     * než modul, a mzdový běh za ten měsíc už nešlo založit jinak než ručním
+     * zásahem do databáze. Uvolnění je fail-closed — služba ho odmítne, dokud
+     * za období existuje aktivní legacy zaúčtování nebo záznam ve mzdovém
+     * listu — a je auditované včetně povinného důvodu.
+     *
+     * @param array<string,string> $args
+     */
+    public function releaseLegacyPeriod(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (($error = $this->authorize(
+            $request,
+            $response,
+            'payroll.reopen',
+            AccessLevel::WRITE,
+        )) !== null) {
+            return $error;
+        }
+        $body = $this->input($request);
+        try {
+            [$year, $month] = self::periodParts($args['period'] ?? null);
+            $this->ownership->releaseLegacy(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+                $this->requiredUserId($request),
+                $this->requiredString($body, 'reason'),
+                $this->clientIp($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\OutOfBoundsException $e) {
+            return Json::error($response, 'not_found', $e->getMessage(), 404);
+        } catch (PayrollPeriodOwnedException $e) {
+            return Json::error(
+                $response,
+                'payroll_period_owned',
+                $e->getMessage(),
+                409,
+            );
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+
+        return Json::ok($response, [
+            'released' => true,
+            'ownership' => $this->ownership->legacyClaimStatus(
+                $this->currentSupplierId($request),
+                $year,
+                $month,
+            ),
+        ]);
+    }
+
+    /** @return array{0:int,1:int} */
+    private static function periodParts(mixed $period): array
+    {
+        if (!is_string($period)
+            || preg_match('/^([0-9]{4})-(0[1-9]|1[0-2])$/D', $period, $m) !== 1
+        ) {
+            throw new \InvalidArgumentException(
+                'Období musí mít formát YYYY-MM.',
+            );
+        }
+
+        return [(int) $m[1], (int) $m[2]];
+    }
+
+    private function clientIp(Request $request): string
+    {
+        $serverParams = $request->getServerParams();
+
+        return $this->ipMatcher->clientIpFromRequest($serverParams);
+    }
 
     public function list(Request $request, Response $response): Response
     {
@@ -294,6 +411,13 @@ final class PayrollRunsAction
             // uzavírá platební ledger. Obojí je táž agenda jako platební dávky
             // a párování úhrad, které už `payroll.payments` chrání.
             'prepare_payments', 'mark_paid' => 'payroll.payments',
+            // `close` je poslední pečeť běhu — období se tím uzavře stejně
+            // závazně, jako ho `approve` schválil. `cancel` je naopak nevratné
+            // zneplatnění už rozpracovaného (i schváleného) běhu, tedy stejná
+            // třída zásahu jako odemknutí. Ani jedno není zápis mzdového
+            // vstupu, takže catch-all `payroll.inputs.write` na ně nestačí.
+            'close' => 'payroll.approve',
+            'cancel' => 'payroll.reopen',
             default => 'payroll.inputs.write',
         };
         if (($error = $this->authorize(

@@ -426,6 +426,61 @@ final class EmploymentExitDocumentServiceTest extends TestCase
         );
     }
 
+    /**
+     * W30 / C-13 + C-14 — zápočtový list se SONDUJE a jeho vada NEBLOKUJE
+     * potvrzení pro Úřad práce.
+     *
+     * DPP bez pokračující srážky nikdy nesplní § 313 odst. 1 ZP ve spojení
+     * s § 142 odst. 1 (jediný podporovaný důvod vydání jsou srážky ze mzdy),
+     * takže zápočtový list vydat nejde. Dřív o tom `readiness()` mlčela —
+     * `employment_certificate.available` byla natvrdo `true` a uživatel dostal
+     * 422 až po vyplnění celého formuláře.
+     *
+     * Zároveň platí opačný směr: vada podkladu ZÁPOČTOVÉHO LISTU nesmí zhasnout
+     * potvrzení o průměrném výdělku podle § 313 odst. 2 ZP. To je podklad pro
+     * podporu v nezaměstnanosti a s exekučním ledgerem nemá nic společného.
+     */
+    public function testDeductionLedgerGateBlocksOnlyTheEmploymentCertificate(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET relation_type = "dpp"
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->insertApprovedAverageEarningSnapshot(2026, 3);
+        $this->insertTaxDeclaration('signed');
+
+        $readiness = $this->service->readiness(
+            $this->supplierId,
+            $this->employmentId,
+        );
+
+        self::assertFalse(
+            $readiness['employment_certificate']['available'],
+            'Zápočtový list se musí sondovat, ne hlásit dostupnost natvrdo.',
+        );
+        self::assertSame(
+            'dpp_wage_deduction_missing',
+            $readiness['employment_certificate']['readiness_code'],
+        );
+        self::assertSame(
+            [],
+            $readiness['employment_certificate']['deduction_claim_ids'],
+        );
+
+        self::assertTrue(
+            $readiness['average_earnings_certificate']['available'],
+            'Potvrzení pro ÚP nesmí padnout kvůli podkladu zápočtového listu.',
+        );
+        self::assertNull(
+            $readiness['average_earnings_certificate']['readiness_code'],
+        );
+        self::assertSame(
+            2026,
+            $readiness['average_earnings_certificate']['decisive_year'],
+        );
+    }
+
     private function insertTaxDeclaration(string $status): void
     {
         $this->db->pdo()->prepare(

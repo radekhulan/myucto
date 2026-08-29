@@ -215,6 +215,124 @@ final class PayrollFoundationTest extends TestCase
         );
     }
 
+    /**
+     * W30 / C-01 — legacy rezervaci jde uvolnit z aplikace.
+     *
+     * Legacy claim zakládá i cron; dokud nešel uvolnit, stačilo, aby si ho
+     * vzal dřív než modul, a mzdový běh za ten měsíc nešlo založit jinak než
+     * ručním DELETE v databázi. Přesně na tohle narazil první reálný pokus
+     * o červencový běh.
+     */
+    public function testLegacyPeriodClaimCanBeReleasedWhenNoLegacyDataRemain(): void
+    {
+        $this->ownership->claimLegacy($this->supplierId, 2026, 6, 202606, null);
+
+        $status = $this->ownership->legacyClaimStatus($this->supplierId, 2026, 6);
+        self::assertTrue($status['claimed']);
+        self::assertSame('legacy', $status['processor']);
+        self::assertTrue($status['releasable']);
+        self::assertSame([], $status['blockers']);
+
+        $this->ownership->releaseLegacy(
+            $this->supplierId,
+            2026,
+            6,
+            null,
+            'Legacy zaúčtování za období neexistuje, měsíc přebírá modul.',
+        );
+
+        self::assertFalse(
+            $this->ownership->legacyClaimStatus($this->supplierId, 2026, 6)['claimed'],
+        );
+        // Teprve po uvolnění si období může vzít mzdový modul.
+        $this->ownership->claimPayroll(
+            $this->supplierId,
+            2026,
+            6,
+            'payroll_run',
+            1,
+            null,
+        );
+        self::assertSame(
+            'payroll',
+            $this->ownership->legacyClaimStatus(
+                $this->supplierId,
+                2026,
+                6,
+            )['processor'],
+        );
+    }
+
+    /** Uvolnění je fail-closed: se zbylým mzdovým listem se claim nepustí. */
+    public function testLegacyPeriodClaimStaysWhenLegacyDataExist(): void
+    {
+        $this->ownership->claimLegacy($this->supplierId, 2026, 6, 202606, null);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_monthly_records
+                (supplier_id, employee_id, year, month, gross, breakdown,
+                 advance_tax_final, net_final)
+             VALUES (?, ?, 2026, 6, 40000, '{}', 4000, 34000)"
+        )->execute([$this->supplierId, $this->legacyEmployeeId()]);
+
+        $status = $this->ownership->legacyClaimStatus($this->supplierId, 2026, 6);
+        self::assertFalse($status['releasable']);
+        self::assertSame(
+            'legacy_monthly_record_exists',
+            $status['blockers'][0]['code'],
+        );
+
+        $this->expectException(PayrollPeriodOwnedException::class);
+        $this->ownership->releaseLegacy(
+            $this->supplierId,
+            2026,
+            6,
+            null,
+            'Pokus o uvolnění navzdory datům.',
+        );
+    }
+
+    /** Rezervaci mzdového modulu tahle cesta uvolnit nesmí. */
+    public function testPayrollClaimCannotBeReleasedAsLegacy(): void
+    {
+        $this->ownership->claimPayroll(
+            $this->supplierId,
+            2026,
+            6,
+            'payroll_run',
+            1,
+            null,
+        );
+
+        $this->expectException(PayrollPeriodOwnedException::class);
+        $this->ownership->releaseLegacy(
+            $this->supplierId,
+            2026,
+            6,
+            null,
+            'Špatná cesta.',
+        );
+    }
+
+    /** Nevratný zásah bez důvodu se nezaznamená — audit by byl bezcenný. */
+    public function testLegacyReleaseRequiresReason(): void
+    {
+        $this->ownership->claimLegacy($this->supplierId, 2026, 6, 202606, null);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->ownership->releaseLegacy($this->supplierId, 2026, 6, null, '   ');
+    }
+
+    private function legacyEmployeeId(): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employees (supplier_id, full_name, is_active)
+             VALUES (?, "Testovací osoba C-01", 1)'
+        );
+        $stmt->execute([$this->supplierId]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
     public function testInvalidPeriodIsRejectedBeforeDatabaseWrite(): void
     {
         $this->expectException(\InvalidArgumentException::class);

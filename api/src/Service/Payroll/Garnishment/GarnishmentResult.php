@@ -90,6 +90,27 @@ final readonly class GarnishmentResult implements JsonSerializable
                 'Employee payment and withholding must equal garnishable income.',
             );
         }
+        // § 281 o. s. ř.: „Provádět srážky ze mzdy ve větším rozsahu, než
+        // dovolují ustanovení tohoto zákona, je nepřípustné, a to i když s tím
+        // povinný souhlasí." Zákonný strop je součet obou třetin zbytku čisté
+        // mzdy a plně zabavitelné části (§ 279 odst. 1 a 3); víc než to nesmí
+        // odejít ze mzdy ani při pravidle čtyř exekucí, ani v oddlužení,
+        // a paušál plátce mzdy ho podle § 270 odst. 3 o. s. ř. nezvyšuje —
+        // ukrajuje se ze sražené částky. Invariant se hlídá tady, protože
+        // výsledek vzniká na několika cestách (výpočet, oddlužení, načtení
+        // snímku) a strop musí platit na všech (nález E-16).
+        if ($thirdMinorUnits > PHP_INT_MAX - $thirdMinorUnits
+            || $thirdMinorUnits + $thirdMinorUnits > PHP_INT_MAX - $fullyAttachableExcessMinorUnits
+        ) {
+            throw new \OverflowException('Garnishment statutory ceiling exceeds the integer range.');
+        }
+        if ($totalWithheldMinorUnits
+            > $thirdMinorUnits + $thirdMinorUnits + $fullyAttachableExcessMinorUnits
+        ) {
+            throw new \InvalidArgumentException(
+                'Garnishment withholding exceeds the statutory ceiling of § 281 o. s. ř.',
+            );
+        }
     }
 
     public function allocationFor(string $claimId): ?GarnishmentAllocation

@@ -41,6 +41,34 @@ final readonly class GarnishmentInput
     }
 
     /**
+     * Týž vstup s jiným rejstříkem pohledávek. Používá
+     * {@see GarnishmentBatchCalculator} pro přenos zůstatků mezi obdobími;
+     * ostatní pole (období, den výplaty, příjem, evidence) zůstávají beze změny.
+     *
+     * @param list<DeductionClaim> $claims
+     */
+    public function withClaims(array $claims): self
+    {
+        return new self(
+            $this->period,
+            $this->paymentDate,
+            $this->income,
+            $claims,
+            $this->eligibleDependants,
+            $this->dependantsEvidenceComplete,
+            $this->eligibleSpouse,
+            $this->spouseEvidenceComplete,
+            $this->pensionEvidence,
+            $this->hasMultiplePayers,
+            $this->protectedAmountOverrideMinorUnits,
+            $this->insolvency,
+            $this->protectedAmountOverrideVerified,
+            $this->claimRegisterEvidenceComplete,
+            $this->spousePensionEvidence,
+        );
+    }
+
+    /**
      * Klíč `spouse_pension` chybí, dokud doložení důchodu podle nař. vlády
      * č. 441/2024 Sb. nikdo nezodpověděl — kanonický tvar vstupu se hashuje
      * a bajtově porovnává (idempotence `payroll_enforcement_month_results`,

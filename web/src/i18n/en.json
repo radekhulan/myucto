@@ -5974,6 +5974,8 @@
             "categories": {
                 "current_maintenance": "Current maintenance",
                 "maintenance_arrears": "Maintenance arrears",
+                "assigned_maintenance_consideration": "Consideration for assigned maintenance",
+                "assigned_maintenance": "Assigned maintenance",
                 "substitute_maintenance": "Substitute maintenance",
                 "other_priority": "Other priority claim",
                 "non_priority": "Non-priority claim"

@@ -31,9 +31,14 @@ final class PayrollClassificationContractTest extends TestCase
 
     public function testMaintenanceClassificationHasOneOrderedSourceOfTruth(): void
     {
+        // Pořadí = § 280 odst. 2 o. s. ř. Postoupené výživné a úplata za
+        // postupované pohledávky výživného jsou podle § 279 odst. 2 písm. a)
+        // rovněž výživné a v druhé třetině mají místo PŘED náhradním výživným.
         self::assertSame([
             ClaimCategory::CurrentMaintenance,
             ClaimCategory::MaintenanceArrears,
+            ClaimCategory::AssignedMaintenanceConsideration,
+            ClaimCategory::AssignedMaintenance,
             ClaimCategory::SubstituteMaintenance,
         ], ClaimCategory::maintenanceCategories());
 
@@ -51,7 +56,9 @@ final class PayrollClassificationContractTest extends TestCase
         ] as $relativePath) {
             $source = (string) file_get_contents(dirname(__DIR__, 2) . '/' . $relativePath);
             if (preg_match(
-                '/ClaimCategory::(?:CurrentMaintenance|MaintenanceArrears|SubstituteMaintenance)/',
+                '/ClaimCategory::(?:CurrentMaintenance|MaintenanceArrears'
+                    . '|AssignedMaintenanceConsideration|AssignedMaintenance'
+                    . '|SubstituteMaintenance)/',
                 $source,
             ) === 1) {
                 $duplicates[] = $relativePath;
@@ -69,6 +76,8 @@ final class PayrollClassificationContractTest extends TestCase
         self::assertSame([
             ClaimCategory::CurrentMaintenance->value,
             ClaimCategory::MaintenanceArrears->value,
+            ClaimCategory::AssignedMaintenanceConsideration->value,
+            ClaimCategory::AssignedMaintenance->value,
             ClaimCategory::SubstituteMaintenance->value,
             ClaimCategory::OtherPriority->value,
             ClaimCategory::NonPriority->value,

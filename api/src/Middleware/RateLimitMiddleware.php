@@ -347,6 +347,28 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:ai:user:' . $userId, (int) ($rl['ai_per_5min_per_user'] ?? 30), 300];
         }
 
+        // Odhalení citlivého osobního údaje (rodné číslo, číslo účtu, kontakty).
+        // Generický `rl:mut` bucket na tohle nestačí: 60 mutací/min sdílených se
+        // vším ostatním dovolí z jedné kompromitované session vytáhnout celou
+        // mzdovou evidenci za pár minut a v auditu to vypadá jako běžný provoz.
+        // Legitimní použití je jednotky případů denně (účetní si otevře kartu),
+        // takže přísný vlastní bucket nikoho neomezí, ale hromadnou exfiltraci
+        // zpomalí na viditelnou rychlost. Klíčem je uživatel, ne IP — právo
+        // `payroll.person.read_sensitive` je vázané na účet.
+        if ($userId > 0
+            && $method === 'POST'
+            && preg_match(
+                '#^/api/payroll/people/[0-9]+/sensitive-reveal$#',
+                $path,
+            ) === 1
+        ) {
+            return [
+                'rl:reveal:user:' . $userId,
+                (int) ($rl['payroll_reveal_per_5min_per_user'] ?? 20),
+                300,
+            ];
+        }
+
         // Generic per-user mutation/read limit (jen pro přihlášené, mimo public)
         if ($userId > 0 && !str_starts_with($path, '/api/auth/')) {
             if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {

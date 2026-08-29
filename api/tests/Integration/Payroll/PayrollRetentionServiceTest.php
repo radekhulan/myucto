@@ -135,7 +135,7 @@ final class PayrollRetentionServiceTest extends TestCase
 
         $this->expectException(PayrollErasureException::class);
         $this->expectExceptionMessage('Výmaz jde provést až po schválení');
-        $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+        $this->executeAfterCoolingOff($proposalId);
     }
 
     public function testRejectedProposalCannotBeExecuted(): void
@@ -144,7 +144,7 @@ final class PayrollRetentionServiceTest extends TestCase
         $this->proposals->reject($this->supplierId, $proposalId, $this->userId);
 
         $this->expectException(PayrollErasureException::class);
-        $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+        $this->executeAfterCoolingOff($proposalId);
     }
 
     // ── 3. Legal hold přebije lhůtu ──────────────────────────────────────────
@@ -212,7 +212,7 @@ final class PayrollRetentionServiceTest extends TestCase
             $this->employeeId,
         );
 
-        $summary = $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+        $summary = $this->executeAfterCoolingOff($proposalId);
 
         self::assertSame(1, $summary['skipped_hold']);
         self::assertSame(0, $summary['done']);
@@ -234,7 +234,7 @@ final class PayrollRetentionServiceTest extends TestCase
 
         $proposalId = $this->expiredProposal();
         $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
-        $summary = $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+        $summary = $this->executeAfterCoolingOff($proposalId);
 
         self::assertSame(1, $summary['done']);
 
@@ -291,7 +291,7 @@ final class PayrollRetentionServiceTest extends TestCase
         $proposalId = $this->proposals->create($this->supplierId, $this->userId, self::AS_OF, null);
         self::assertNotNull($proposalId);
         $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
-        $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+        $this->executeAfterCoolingOff($proposalId);
 
         self::assertNull(
             $this->fetchOne(
@@ -329,7 +329,7 @@ final class PayrollRetentionServiceTest extends TestCase
 
         $proposalId = $this->expiredProposal();
         $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
-        $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+        $this->executeAfterCoolingOff($proposalId);
 
         // a) Doklad v položce návrhu — přežije i úplný výmaz, protože nemá FK na osobu.
         $items = $this->proposals->items($this->supplierId, $proposalId);
@@ -683,7 +683,111 @@ final class PayrollRetentionServiceTest extends TestCase
         self::assertCount(1, $this->holds->payrollHolds($this->supplierId));
     }
 
+    // ── W30 / C-07: odkladná lhůta a odvolání schválení ──────────────────────
+
+    /**
+     * Schválí-li návrh týž člověk, který ho sestavil, otevře se odkladná
+     * lhůta. Nevratný výmaz tak má okno, ve kterém jde omyl napravit bez
+     * zálohy — a to bez pravidla čtyř očí, které tenhle produkt zavádět nesmí
+     * (řada firem má jedinou účetní).
+     */
+    public function testSelfApprovalOpensCoolingOffWindow(): void
+    {
+        $proposalId = $this->expiredProposal();
+        $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
+
+        $proposal = $this->proposals->find($this->supplierId, $proposalId);
+        self::assertIsArray($proposal);
+        self::assertNotNull(
+            $proposal['executable_from'] ?? null,
+            'Sólo schválení musí otevřít odkladnou lhůtu.',
+        );
+
+        try {
+            $this->proposals->execute(
+                $this->supplierId,
+                $proposalId,
+                $this->userId,
+                null,
+                null,
+                PayrollErasureProposalRepository::EXECUTE_CONFIRMATION,
+            );
+            self::fail('Výmaz v odkladné lhůtě se nesmí provést.');
+        } catch (PayrollErasureException $exception) {
+            self::assertSame('payroll_erasure_cooling_off', $exception->errorCode);
+        }
+
+        self::assertSame(
+            1,
+            $this->rowCount('payroll_monthly_records', 'employee_id', $this->employeeId),
+        );
+    }
+
+    /** Odklad bez odvolatelnosti by byl jen zdržení. */
+    public function testApprovalCanBeRevokedDuringCoolingOff(): void
+    {
+        $proposalId = $this->expiredProposal();
+        $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
+        $this->proposals->revoke($this->supplierId, $proposalId, $this->userId);
+
+        $proposal = $this->proposals->find($this->supplierId, $proposalId);
+        self::assertIsArray($proposal);
+        self::assertSame(
+            PayrollErasureProposalRepository::STATUS_PENDING,
+            (string) $proposal['status'],
+        );
+        self::assertNull($proposal['executable_from'] ?? null);
+        self::assertNotNull($proposal['revoked_at'] ?? null);
+    }
+
+    /** Nevratné smazání nesmí jít odklepnout stejným pohybem jako uložení. */
+    public function testExecuteWithoutTypedConfirmationIsRefused(): void
+    {
+        $proposalId = $this->expiredProposal();
+        $this->proposals->approve($this->supplierId, $proposalId, $this->userId);
+        $this->elapseCoolingOff($proposalId);
+
+        try {
+            $this->proposals->execute($this->supplierId, $proposalId, $this->userId);
+            self::fail('Výmaz bez potvrzovací fráze se nesmí provést.');
+        } catch (PayrollErasureException $exception) {
+            self::assertSame(
+                'payroll_erasure_confirmation_required',
+                $exception->errorCode,
+            );
+        }
+    }
+
     // ── Pomocné ──────────────────────────────────────────────────────────────
+
+    /**
+     * Posune konec odkladné lhůty do minulosti — testovací ekvivalent toho, že
+     * uplynuly tři dny. Sahá se výhradně na `executable_from`, aby zbytek
+     * stavu zůstal takový, jaký ho zapsalo schválení.
+     */
+    private function elapseCoolingOff(int $proposalId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_erasure_proposals
+                SET executable_from = NOW() - INTERVAL 1 HOUR
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $proposalId]);
+    }
+
+    /** @return array<string,int> */
+    private function executeAfterCoolingOff(int $proposalId): array
+    {
+        $this->elapseCoolingOff($proposalId);
+
+        return $this->proposals->execute(
+            $this->supplierId,
+            $proposalId,
+            $this->userId,
+            null,
+            null,
+            PayrollErasureProposalRepository::EXECUTE_CONFIRMATION,
+        );
+    }
 
     private function assessmentFor(int $employeeId): PayrollRetentionAssessment
     {

@@ -14,7 +14,9 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
@@ -25,6 +27,8 @@ use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
 use MyInvoice\Service\Payroll\Posting\PayrollApprovedRevisionPostingService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Run\PayrollRunCalculationPipeline;
+use MyInvoice\Service\Payroll\Run\PayrollRunCommandOutcome;
+use MyInvoice\Service\Payroll\Run\PayrollRunCommandResult;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommandService;
 use MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
@@ -350,6 +354,200 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/D', $preview->sha256());
     }
 
+    /**
+     * C-17 — jeden běh nad jedním datovým řezem až do `closed`.
+     *
+     * Dosud končil syntetický tok u `approve` a zbytek řetězce
+     * (`post` → `prepare_payments` → `mark_paid` → `close`) se testoval jinde,
+     * nad jinými daty a s nastrčenými materializéry. Právě ve švech mezi těmi
+     * bloky ale žije akceptační kritérium „mzda = závazky = platby =
+     * účetnictví": čísla si musí odpovídat napříč čtyřmi různými úložišti
+     * (zmrazená revize, deník, platební závazky, reconciliation ledger).
+     * Nesoulad, který vznikne jen na přechodu mezi dvěma příkazy, nemá jinou
+     * šanci vyplavat — proto tenhle test jede VÝHRADNĚ přes služby z kontejneru
+     * (žádné stuby), aby švy byly ty produkční.
+     */
+    public function testMixedEmploymentRunReachesClosedWithLedgerLiabilitiesAndPaymentsInAgreement(): void
+    {
+        $commands = $this->containerCommandService();
+        // Účetní můstek se rozhoduje podle historie režimu, ne podle sloupce na
+        // firmě — bez záznamu by `post` skončil jako „daňová evidence".
+        $accountingModes = $this->container->get(AccountingModeRepository::class);
+        if (!$accountingModes instanceof AccountingModeRepository) {
+            throw new \RuntimeException('Evidence účetního režimu není dostupná.');
+        }
+        $accountingModes->record($this->supplierId, '2026-01-01', 'double_entry');
+        $this->db->pdo()->prepare(
+            'INSERT INTO accounting_periods
+                (supplier_id, fiscal_year, starts_on, ends_on, status)
+             VALUES (?, 2026, "2026-01-01", "2026-12-31", "open")',
+        )->execute([$this->supplierId]);
+        $chart = $this->container->get(ChartOfAccountsSeeder::class);
+        if (!$chart instanceof ChartOfAccountsSeeder) {
+            throw new \RuntimeException('Seed účtové osnovy není dostupný.');
+        }
+        $chart->seedForSupplier($this->supplierId);
+        $this->configureIncomeTaxOutput();
+        foreach ($this->people as $index => $person) {
+            $this->enableBankPayout($person['employee_id'], $index + 1);
+        }
+
+        $approved = $this->approveMixedEmploymentRun($commands);
+        $runId = (int) $approved->run['id'];
+        $revisionId = (int) $approved->revision['id'];
+        self::assertSame('approved', $approved->run['status']);
+
+        $netTotal = $this->netPayableTotal($revisionId);
+        self::assertGreaterThan(0, $netTotal);
+
+        /*
+         * Šev 1 — `post`: běh se posunul a v deníku VZNIKL vyrovnaný zápis,
+         * jehož osobní náklad sedí na součet zmrazené revize. Kdyby se sem
+         * dostal běh bez účetního zápisu (nebo se zápisem o jiné částce),
+         * „mzda = účetnictví" už neplatí a nikdo by si toho nevšiml.
+         */
+        $posted = $commands->post(
+            $this->supplierId,
+            $runId,
+            (int) $approved->run['row_version'],
+            'full-flow-post',
+            $this->actors[0],
+        );
+        self::assertSame('posted', $posted->run['status']);
+        self::assertSame(
+            PayrollRunCommandOutcome::POSTED,
+            $posted->outcome?->outcome,
+            CanonicalJson::encode($posted->outcome?->details ?? []),
+        );
+        $batch = $this->postingBatch($revisionId);
+        self::assertSame('posted', $batch['status']);
+        self::assertSame(
+            $batch['journal_entry_id'],
+            $posted->outcome?->details['journal_entry_id'] ?? null,
+        );
+        $journalEntryId = (int) $batch['journal_entry_id'];
+        [$debitTotal, $creditTotal] = $this->journalTotals($journalEntryId);
+        self::assertSame($debitTotal, $creditTotal);
+        self::assertSame(
+            9_325_000,
+            $this->journalBalanceMinor($journalEntryId, ['521']),
+            'Osobní náklad v deníku musí sedět na hrubý objem zmrazené revize.',
+        );
+        // Závazkové účty (331/366 vůči lidem, 336 vůči pojišťovnám, 342 finančnímu
+        // úřadu) drží přesně to, co se má následně vyplatit a odvést.
+        $ledgerPayables = $this->journalBalanceMinor(
+            $journalEntryId,
+            ['331', '336', '342', '366'],
+        );
+        self::assertSame(
+            $netTotal,
+            $this->journalBalanceMinor($journalEntryId, ['331', '366']),
+            'Závazek vůči lidem v deníku musí sedět na čistou mzdu z revize.',
+        );
+
+        /*
+         * Šev 2 — `prepare_payments`: zmaterializované závazky musí být tentýž
+         * objem peněz, jaký deník předepsal. Rozejít se to může tiše: jedna
+         * strana zaokrouhlí, druhá vynechá druh závazku, a rozdíl se ukáže až
+         * na výpisu z banky.
+         */
+        $this->activateModuleForProduction();
+        $prepared = $commands->preparePayments(
+            $this->supplierId,
+            $runId,
+            (int) $posted->run['row_version'],
+            'full-flow-prepare-payments',
+            $this->actors[0],
+        );
+        self::assertSame('payment_ready', $prepared->run['status']);
+        self::assertSame(
+            PayrollRunCommandOutcome::PAYMENTS_PREPARED,
+            $prepared->outcome?->outcome,
+        );
+        $liabilities = $this->liabilities($revisionId);
+        self::assertNotSame([], $liabilities);
+        self::assertSame(
+            [],
+            array_values(array_filter(
+                $liabilities,
+                static fn (array $liability): bool
+                    => $liability['direction'] !== 'outgoing',
+            )),
+            'Mzdový běh nesmí vyrobit pohledávku — všechno jsou výdaje.',
+        );
+        $liabilityTotal = array_sum(
+            array_column($liabilities, 'amount_minor'),
+        );
+        self::assertSame(
+            $netTotal,
+            array_sum(array_column(array_values(array_filter(
+                $liabilities,
+                static fn (array $liability): bool
+                    => $liability['liability_kind'] === 'net_wage',
+            )), 'amount_minor')),
+            'Závazky čisté mzdy musí sedět na rozklad čisté mzdy z revize.',
+        );
+        self::assertSame(
+            $ledgerPayables,
+            $liabilityTotal,
+            'Platební závazky se musí rovnat závazkovým účtům účetního zápisu.',
+        );
+        // Pojistka proti prázdné shodě: kdyby se institucionální závazky
+        // nezmaterializovaly vůbec, rovnost výš by pořád „platila".
+        self::assertGreaterThan(
+            $netTotal,
+            $liabilityTotal,
+            'Kromě čisté mzdy musí vzniknout i odvody institucím.',
+        );
+
+        /*
+         * Šev 3 — `mark_paid`: brána pouští běh dál jen tehdy, když
+         * reconciliation ledger pokrývá KAŽDÝ závazek do haléře.
+         */
+        foreach ($liabilities as $liability) {
+            $this->settleLiability($liability['id'], $liability['amount_minor']);
+        }
+        $paid = $commands->markPaid(
+            $this->supplierId,
+            $runId,
+            (int) $prepared->run['row_version'],
+            'full-flow-mark-paid',
+            $this->actors[0],
+        );
+        self::assertSame('paid', $paid->run['status']);
+        self::assertSame(
+            PayrollRunCommandOutcome::PAYMENTS_SETTLED,
+            $paid->outcome?->outcome,
+        );
+        self::assertSame(
+            $liabilityTotal,
+            $paid->outcome?->details['settled_minor'] ?? null,
+        );
+        self::assertSame(
+            $liabilityTotal,
+            $this->settledTotal($revisionId),
+            'Spárované úhrady musí sedět na závazky do haléře.',
+        );
+
+        // Šev 4 — `close`: teprve uzavřený běh je hotová mzda.
+        $closed = $commands->close(
+            $this->supplierId,
+            $runId,
+            (int) $paid->run['row_version'],
+            'full-flow-close',
+            $this->actors[0],
+        );
+        self::assertSame('closed', $closed->run['status']);
+        self::assertNull($closed->outcome);
+        self::assertSame(
+            'closed',
+            (string) $this->scalar(
+                'SELECT status FROM payroll_runs WHERE supplier_id = ? AND id = ?',
+                [$this->supplierId, $runId],
+            ),
+        );
+    }
+
     public function testLowIncomeHppWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(): void
     {
         $this->assertLowIncomeEmploymentWithoutDeclarationReachesValidJmhzTestSubmissionWithoutTransport(
@@ -670,6 +868,38 @@ final class PayrollSyntheticFullFlowTest extends TestCase
             'source_reference' => 'synthetic:full-flow-health-account',
             'verified_on' => '2026-06-15',
         ], $this->actors[0]);
+    }
+
+    /**
+     * Ověřené účty finančního úřadu pro zálohovou i srážkovou daň — bez nich
+     * materializér daňových závazků odmítne vytvořit platební cíl.
+     */
+    private function configureIncomeTaxOutput(): void
+    {
+        $accounts = $this->container->get(PayrollInstitutionAccountRepository::class);
+        if (!$accounts instanceof PayrollInstitutionAccountRepository) {
+            throw new \RuntimeException('Evidence účtů institucí není dostupná.');
+        }
+        foreach ([
+            'advance_tax' => ['1001', '1148'],
+            'withholding_tax' => ['7720', '1148'],
+        ] as $kind => [$specificSymbol, $constantSymbol]) {
+            $accounts->create($this->supplierId, [
+                'institution_type' => 'tax_office',
+                'institution_code' => $kind,
+                'institution_name' => 'Syntetický finanční úřad',
+                'bank_account' => '1000000005/0100',
+                'currency_code' => 'CZK',
+                'variable_symbol' => '0000001900',
+                'specific_symbol' => $specificSymbol,
+                'constant_symbol' => $constantSymbol,
+                'valid_from' => '2026-01-01',
+                'valid_to' => null,
+                'source_kind' => 'official_document',
+                'source_reference' => "synthetic:full-flow-tax-account:{$kind}",
+                'verified_on' => '2026-06-15',
+            ], $this->actors[0]);
+        }
     }
 
     /** @return array{employee_id:int,employment_id:int,name:string} */
@@ -1346,6 +1576,359 @@ final class PayrollSyntheticFullFlowTest extends TestCase
         );
         $statement->execute([$this->supplierId, $revisionId]);
         return array_values($statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Příkazová služba běhu SESTAVENÁ KONTEJNEREM.
+     *
+     * `setUp()` si ji skládá ručně jen se sedmi závislostmi, takže se s ní běh
+     * nedostane za `approved`. Tady jde právě o zbytek řetězce, takže se bere
+     * produkční drát — včetně skutečných materializérů závazků, kontroly úhrad
+     * a produkční brány.
+     */
+    private function containerCommandService(): PayrollRunCommandService
+    {
+        $commands = $this->container->get(PayrollRunCommandService::class);
+        if (!$commands instanceof PayrollRunCommandService) {
+            throw new \RuntimeException('Příkazová služba mzdového běhu není dostupná.');
+        }
+
+        return $commands;
+    }
+
+    private function approveMixedEmploymentRun(
+        PayrollRunCommandService $commands,
+    ): PayrollRunCommandResult {
+        $run = $commands->createRun(
+            $this->supplierId,
+            '2026-06-01',
+            '2026-07-15',
+            null,
+            $this->actors[0],
+        );
+        $locked = $commands->lockInputs(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $run['row_version'],
+            'full-flow-closed-lock',
+            $this->actors[0],
+        );
+        $calculated = $commands->calculate(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $locked->run['row_version'],
+            'full-flow-closed-calculate',
+            $this->actors[0],
+        );
+        self::assertSame(
+            [],
+            $this->blockingValidations((int) $calculated->revision['id']),
+        );
+        $reviewed = $commands->review(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $calculated->run['row_version'],
+            'full-flow-closed-review',
+            $this->actors[0],
+        );
+
+        return $commands->approve(
+            $this->supplierId,
+            (int) $run['id'],
+            (int) $reviewed->run['row_version'],
+            'full-flow-closed-approve',
+            $this->actors[0],
+        );
+    }
+
+    /**
+     * Bez ověřeného účtu a výplatního pravidla se `prepare_payments` nehne —
+     * není kam poslat čistou mzdu.
+     */
+    private function enableBankPayout(int $employeeId, int $sequence): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_person_accounts
+                (supplier_id, employee_id, label, bank_account_ciphertext,
+                 bank_account_hash, bank_account_masked,
+                 allocation_basis_points, effective_from, is_active,
+                 row_version, verification_source, verified_on, verified_by)
+             VALUES (?, ?, "Syntetický účet", "enc:v2:synthetic-account",
+                     UNHEX(?), "••••0005", 10000, "2026-01-01", 1, 1,
+                     "user_verified", "2026-05-01", ?)',
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            hash('sha256', "synthetic-full-flow-account:{$this->supplierId}:{$sequence}"),
+            $this->actors[0],
+        ]);
+        $accountId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payout_rules
+                (supplier_id, employee_id, allocation_reference,
+                 destination_kind, destination_reference, allocation_kind,
+                 priority_no, is_active)
+             VALUES (?, ?, ?, "bank", ?, "remainder", 100, 1)',
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            "FULL-FLOW-REMAINDER-{$sequence}",
+            "account:{$accountId}",
+        ]);
+    }
+
+    /**
+     * Produkční brána materializace závazků chce modul v `active`. Schválení
+     * běhu ho tam překlopí jen při hotovém setupu, který tenhle syntetický řez
+     * nesplňuje — a předmětem testu je platební řetězec, ne aktivace.
+     */
+    private function activateModuleForProduction(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_module_state
+                SET status = "active", activated_by = ?, activated_at = NOW()
+              WHERE supplier_id = ?',
+        )->execute([$this->actors[0], $this->supplierId]);
+    }
+
+    /** @return array<string,mixed> */
+    private function postingBatch(int $revisionId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT status, journal_entry_id
+               FROM payroll_posting_batches
+              WHERE supplier_id = ? AND revision_id = ?',
+        );
+        $statement->execute([$this->supplierId, $revisionId]);
+        $batch = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($batch);
+        self::assertNotNull($batch['journal_entry_id']);
+
+        return [
+            'status' => (string) $batch['status'],
+            'journal_entry_id' => (int) $batch['journal_entry_id'],
+        ];
+    }
+
+    /** @return array{0:int,1:int} strana MD a strana D v haléřích */
+    private function journalTotals(int $journalEntryId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT ROUND(SUM(CASE WHEN side = "debit" THEN amount ELSE 0 END) * 100) AS debit_minor,
+                    ROUND(SUM(CASE WHEN side = "credit" THEN amount ELSE 0 END) * 100) AS credit_minor
+               FROM journal_entry_lines
+              WHERE supplier_id = ? AND entry_id = ?',
+        );
+        $statement->execute([$this->supplierId, $journalEntryId]);
+        $totals = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($totals);
+
+        return [(int) $totals['debit_minor'], (int) $totals['credit_minor']];
+    }
+
+    /**
+     * Zůstatek účtových skupin v jednom účetním zápisu, v haléřích a se
+     * znaménkem podle přirozené strany: u nákladů (5xx) MD − D, u závazků
+     * (3xx) D − MD. Tím se dá porovnat účetní předpis s tím, co drží mzdová
+     * evidence.
+     *
+     * @param list<string> $groupPrefixes
+     */
+    private function journalBalanceMinor(int $journalEntryId, array $groupPrefixes): int
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account.account_code, line.side, line.amount
+               FROM journal_entry_lines line
+               JOIN chart_of_accounts account
+                 ON account.id = line.account_id
+              WHERE line.supplier_id = ? AND line.entry_id = ?',
+        );
+        $statement->execute([$this->supplierId, $journalEntryId]);
+        $balance = 0;
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $code = (string) $line['account_code'];
+            $matches = false;
+            foreach ($groupPrefixes as $prefix) {
+                if (str_starts_with($code, $prefix)) {
+                    $matches = true;
+                    break;
+                }
+            }
+            if (!$matches) {
+                continue;
+            }
+            $amount = (int) round(((float) $line['amount']) * 100);
+            $expense = str_starts_with($code, '5');
+            $debit = $line['side'] === 'debit';
+            $balance += ($expense === $debit) ? $amount : -$amount;
+        }
+
+        return $balance;
+    }
+
+    /**
+     * Součet čisté mzdy k výplatě přes výsledkové API — tedy tou cestou, kterou
+     * čte i účetní na obrazovce, ne přes tabulku závazků, kterou právě ověřujeme.
+     */
+    private function netPayableTotal(int $revisionId): int
+    {
+        $netResults = $this->container->get(PayrollNetResultQueryService::class);
+        if (!$netResults instanceof PayrollNetResultQueryService) {
+            throw new \RuntimeException('Výsledkové API čisté mzdy není dostupné.');
+        }
+        $total = 0;
+        foreach ($this->people as $person) {
+            $breakdown = $netResults->breakdown(
+                $this->supplierId,
+                $revisionId,
+                $person['employee_id'],
+            );
+            $total += (int) $breakdown['payable_after_enforcement_minor'];
+        }
+
+        return $total;
+    }
+
+    /** @return list<array{id:int,amount_minor:int,liability_kind:string,direction:string}> */
+    private function liabilities(int $revisionId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, amount_minor, liability_kind, direction
+               FROM payroll_payment_liabilities
+              WHERE supplier_id = ? AND revision_id = ?
+              ORDER BY id',
+        );
+        $statement->execute([$this->supplierId, $revisionId]);
+        $liabilities = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $liabilities[] = [
+                'id' => (int) $row['id'],
+                'amount_minor' => (int) $row['amount_minor'],
+                'liability_kind' => (string) $row['liability_kind'],
+                'direction' => (string) $row['direction'],
+            ];
+        }
+
+        return $liabilities;
+    }
+
+    /**
+     * Platební dávku, položku, alokaci a bankovní důkaz zakládáme přímo —
+     * předmětem téhle sady je brána `mark_paid` nad reconciliation ledgerem,
+     * ne generování platebního souboru (to má vlastní testy).
+     */
+    private function settleLiability(int $liabilityId, int $amountMinor): void
+    {
+        $pdo = $this->db->pdo();
+        $reference = 'full-flow-' . bin2hex(random_bytes(6));
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_batches
+                (supplier_id, batch_reference, channel, export_format,
+                 planned_payment_date, payer_reference, declared_total_minor,
+                 declared_item_count, snapshot_ciphertext, snapshot_hash,
+                 idempotency_key_hash, created_by)
+             VALUES (?, ?, "bank", "manual", "2026-07-15", "synthetic-payer",
+                     ?, 1, ?, ?, UNHEX(?), ?)',
+        )->execute([
+            $this->supplierId,
+            $reference,
+            $amountMinor,
+            'enc:v2:synthetic-batch',
+            hash('sha256', "full-flow-batch:{$reference}"),
+            hash('sha256', "full-flow-batch-key:{$reference}"),
+            $this->actors[0],
+        ]);
+        $batchId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_items
+                (supplier_id, batch_id, item_reference, recipient_reference,
+                 amount_minor, instruction_ciphertext, instruction_hash,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, "synthetic-recipient", ?, ?, ?, UNHEX(?))',
+        )->execute([
+            $this->supplierId,
+            $batchId,
+            $reference,
+            $amountMinor,
+            'enc:v2:synthetic-item',
+            hash('sha256', "full-flow-item:{$reference}"),
+            hash('sha256', "full-flow-item-key:{$reference}"),
+        ]);
+        $itemId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_allocations
+                (supplier_id, item_id, liability_id, amount_minor,
+                 idempotency_key_hash)
+             VALUES (?, ?, ?, ?, UNHEX(?))',
+        )->execute([
+            $this->supplierId,
+            $itemId,
+            $liabilityId,
+            $amountMinor,
+            hash('sha256', "full-flow-allocation-key:{$reference}"),
+        ]);
+        $allocationId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id, file_name, file_hash, account_number, bank_code,
+                 currency, statement_date, source)
+             VALUES (?, ?, ?, "1000000005", "0100", "CZK", "2026-07-31", "gpc")',
+        )->execute([
+            $this->supplierId,
+            "{$reference}.gpc",
+            hash('sha256', "full-flow-statement:{$reference}"),
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_transactions
+                (statement_id, posted_at, amount, currency, description,
+                 import_fingerprint)
+             VALUES (?, "2026-07-15", ?, "CZK", ?, ?)',
+        )->execute([
+            $statementId,
+            sprintf('-%d.%02d', intdiv($amountMinor, 100), $amountMinor % 100),
+            "Syntetická úhrada {$reference}",
+            hash('sha256', "full-flow-transaction:{$reference}"),
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id,
+                 idempotency_key_hash, matched_by)
+             VALUES (?, ?, "matched", ?, ?, ?, UNHEX(?), ?)',
+        )->execute([
+            $this->supplierId,
+            $allocationId,
+            $amountMinor,
+            $statementId,
+            $transactionId,
+            hash('sha256', "full-flow-match:{$reference}"),
+            $this->actors[0],
+        ]);
+    }
+
+    private function settledTotal(int $revisionId): int
+    {
+        return (int) $this->scalar(
+            'SELECT COALESCE(SUM(payment_match.amount_minor), 0)
+               FROM payroll_payment_matches payment_match
+               JOIN payroll_payment_liabilities liability
+                 ON liability.supplier_id = payment_match.supplier_id
+                AND liability.id = payment_match.liability_id
+              WHERE liability.supplier_id = ? AND liability.revision_id = ?',
+            [$this->supplierId, $revisionId],
+        );
+    }
+
+    /** @param list<mixed> $params */
+    private function scalar(string $sql, array $params): mixed
+    {
+        $statement = $this->db->pdo()->prepare($sql);
+        $statement->execute($params);
+
+        return $statement->fetchColumn();
     }
 
     private function request(string $method, string $uri): \Psr\Http\Message\ServerRequestInterface

@@ -27,6 +27,24 @@ final class PayrollNetCalculator
             ->subtract(new Money($input->employeeHealthMinorUnits))
             ->subtract(new Money($input->advanceTaxMinorUnits))
             ->subtract(new Money($input->withholdingTaxMinorUnits))
+            // MĚSÍČNÍ daňový bonus do základu srážek PATŘÍ (rozhodnuto 8/2026,
+            // nález E-14). § 277 odst. 1 o. s. ř. definuje čistou mzdu tak, že
+            // se od mzdy odečte „záloha na daň z příjmů fyzických osob srážená
+            // z příjmů ze závislé činnosti" a pojistné. Měsíční daňový bonus
+            // podle § 35d odst. 4 zákona o daních z příjmů je součástí téhož
+            // zúčtování zálohy: plátce ho vyplácí spolu se zálohou a o jeho
+            // částku se sražená záloha snižuje, případně jde do záporu.
+            // Odečtená „záloha" je tedy záloha PO bonusu — bonus proto základ
+            // srážek zvyšuje a exekuci podléhá. Shodně to počítá kalkulačka
+            // Exekutorské komory i příručka MPSV.
+            //
+            // Asymetrie s doplatkem z ročního zúčtování níž je záměrná a stojí
+            // na jiném důvodu než na povaze bonusu: ten doplatek NENÍ součástí
+            // měsíčního zúčtování zálohy za tenhle měsíc, ale vrácením přeplatku
+            // na dani za rok minulý (§ 35d odst. 8 ZDP). Není to plnění za
+            // práci a čistou mzdu podle § 277 odst. 1 nezvyšuje. Nejde tedy
+            // o dvojí metr na tutéž veličinu — jeden je zúčtování běžného
+            // měsíce, druhý vypořádání uzavřeného roku.
             ->add(new Money($input->taxBonusMinorUnits));
         $deductions = $this->deductionResolver->resolve(
             $input->deductions,

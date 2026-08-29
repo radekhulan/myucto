@@ -6,6 +6,7 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentCryptoErasure;
 use MyInvoice\Service\Payroll\Retention\PayrollRetentionAssessment;
 use MyInvoice\Service\Payroll\Retention\PayrollRetentionService;
 use PDO;
@@ -43,12 +44,28 @@ final class PayrollErasureProposalRepository
     public const STATUS_REJECTED = 'rejected';
     public const STATUS_EXECUTED = 'executed';
 
+    /**
+     * Odkladná lhůta, když návrh schválí týž člověk, který ho sestavil.
+     * Tři dny: dost na to, aby si omylu všiml kdokoli, kdo se na přehled
+     * podívá další pracovní den, a málo na to, aby to blokovalo vyřízení
+     * žádosti podle čl. 12 odst. 3 GDPR (lhůta jednoho měsíce).
+     */
+    public const SOLO_COOLING_OFF_HOURS = 72;
+
+    /**
+     * Potvrzovací fráze, kterou musí volající opsat. Nevratné smazání se nemá
+     * dát odklepnout stejným pohybem jako uložení formuláře; opsání textu je
+     * jediná bariéra, která funguje i tam, kde je uživatel sám.
+     */
+    public const EXECUTE_CONFIRMATION = 'TRVALE SMAZAT';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollRetentionService $retention,
         private readonly PayrollEmployeeDeletionRepository $deletion,
         private readonly PayrollPersonAnonymizationRepository $anonymization,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollDocumentCryptoErasure $documentErasure,
     ) {}
 
     /**
@@ -199,7 +216,78 @@ final class PayrollErasureProposalRepository
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    /**
+     * Schválení otevře odkladnou lhůtu, ne rovnou provedení.
+     *
+     * Pravidlo čtyř očí se tu ZÁMĚRNĚ nezavádí — řada firem má jedinou účetní
+     * a druhý schvalovatel by se buď nenašel, nebo by vznikl jako druhý účet
+     * téhož člověka. Nevratnost výmazu proto kryje čas: schválí-li návrh týž
+     * člověk, který ho sestavil, jde provést až po {@see SOLO_COOLING_OFF_HOURS}
+     * hodinách a kdykoli do té doby jde schválení vzít zpět
+     * ({@see revoke()}). Schválí-li ho někdo jiný, odklad je nulový — kontrola
+     * druhým párem očí už proběhla, jen se nevynucuje.
+     *
+     * Celé odůvodnění (i právní) je v migraci
+     * `1639_payroll_erasure_cooling_off.sql`.
+     */
     public function approve(
+        int $supplierId,
+        int $proposalId,
+        ?int $userId,
+        ?string $ip = null,
+        ?string $userAgent = null,
+    ): void {
+        $proposal = $this->find($supplierId, $proposalId);
+        $createdBy = $proposal === null || $proposal['created_by'] === null
+            ? null
+            : (int) $proposal['created_by'];
+        // `null` schvalovatel (systémový kontext) se počítá jako sólo — bez
+        // identity nelze tvrdit, že šlo o druhého člověka.
+        $solo = $userId === null || $createdBy === null || $createdBy === $userId;
+        $coolingOffHours = $solo ? self::SOLO_COOLING_OFF_HOURS : 0;
+
+        $this->transition(
+            $supplierId,
+            $proposalId,
+            self::STATUS_PENDING,
+            // Počet hodin je vlastní konstanta (int), ne uživatelský vstup —
+            // do INTERVAL se placeholder v MariaDB spolehlivě nedá.
+            sprintf(
+                'UPDATE payroll_erasure_proposals
+                    SET status = \'approved\', approved_by = ?, approved_at = NOW(),
+                        executable_from = NOW() + INTERVAL %d HOUR,
+                        revoked_by = NULL, revoked_at = NULL,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND status = \'pending\'',
+                $coolingOffHours,
+            ),
+            [$userId, $supplierId, $proposalId],
+        );
+
+        $this->activityLogger->log(
+            'payroll.erasure.approved',
+            $userId,
+            'payroll_erasure_proposal',
+            $proposalId,
+            [
+                'items' => count($this->items($supplierId, $proposalId)),
+                'self_approved' => $solo,
+                'cooling_off_hours' => $coolingOffHours,
+            ],
+            $ip,
+            $userAgent,
+            $supplierId,
+        );
+    }
+
+    /**
+     * Vzetí schválení zpět během odkladné lhůty.
+     *
+     * Návrh se vrací do `pending`, takže ho jde po opravě schválit znovu.
+     * Tohle je půlka, kterou u nevratné operace nemá smysl mít bez odkladu —
+     * a naopak odklad bez odvolatelnosti by byl jen zdržení.
+     */
+    public function revoke(
         int $supplierId,
         int $proposalId,
         ?int $userId,
@@ -209,20 +297,22 @@ final class PayrollErasureProposalRepository
         $this->transition(
             $supplierId,
             $proposalId,
-            self::STATUS_PENDING,
+            self::STATUS_APPROVED,
             'UPDATE payroll_erasure_proposals
-                SET status = \'approved\', approved_by = ?, approved_at = NOW(),
+                SET status = \'pending\', approved_by = NULL, approved_at = NULL,
+                    executable_from = NULL,
+                    revoked_by = ?, revoked_at = NOW(),
                     row_version = row_version + 1
-              WHERE supplier_id = ? AND id = ? AND status = \'pending\'',
+              WHERE supplier_id = ? AND id = ? AND status = \'approved\'',
             [$userId, $supplierId, $proposalId],
         );
 
         $this->activityLogger->log(
-            'payroll.erasure.approved',
+            'payroll.erasure.revoked',
             $userId,
             'payroll_erasure_proposal',
             $proposalId,
-            ['items' => count($this->items($supplierId, $proposalId))],
+            [],
             $ip,
             $userAgent,
             $supplierId,
@@ -257,6 +347,18 @@ final class PayrollErasureProposalRepository
             $userAgent,
             $supplierId,
         );
+    }
+
+    /** Čas databáze — o lhůtách rozhodují tytéž hodiny, které je zapsaly. */
+    private function databaseNow(): string
+    {
+        $stmt = $this->db->pdo()->query('SELECT NOW()');
+        $now = $stmt === false ? false : $stmt->fetchColumn();
+        if (!is_string($now)) {
+            throw new \RuntimeException('Čas databáze nelze načíst.');
+        }
+
+        return $now;
     }
 
     /** @param list<mixed> $params */
@@ -307,7 +409,15 @@ final class PayrollErasureProposalRepository
         ?int $userId,
         ?string $ip = null,
         ?string $userAgent = null,
+        string $confirmation = '',
     ): array {
+        if (trim($confirmation) !== self::EXECUTE_CONFIRMATION) {
+            throw new PayrollErasureException(
+                'payroll_erasure_confirmation_required',
+                'Nevratný výmaz vyžaduje opsání potvrzovací fráze „'
+                    . self::EXECUTE_CONFIRMATION . '".',
+            );
+        }
         $pdo = $this->db->pdo();
         $owns = !$pdo->inTransaction();
         if ($owns) {
@@ -337,6 +447,22 @@ final class PayrollErasureProposalRepository
             throw new PayrollErasureException(
                 'payroll_erasure_not_approved',
                 'Výmaz jde provést až po schválení. Neschválený návrh se neprovádí.',
+            );
+        }
+        // Odkladná lhůta (C-07). `NULL` = návrh schválený před zavedením lhůty,
+        // ten se nezdržuje. Porovnává se v databázi, ne v PHP, aby o čase
+        // rozhodovaly stejné hodiny, které lhůtu zapsaly.
+        $executableFrom = $proposal['executable_from'] ?? null;
+        if (is_string($executableFrom)
+            && $executableFrom > $this->databaseNow()
+        ) {
+            if ($owns) {
+                $pdo->rollBack();
+            }
+            throw new PayrollErasureException(
+                'payroll_erasure_cooling_off',
+                'Návrh výmazu je v odkladné lhůtě — provést ho půjde od '
+                    . $executableFrom . '. Do té doby jde schválení vzít zpět.',
             );
         }
 
@@ -473,6 +599,19 @@ final class PayrollErasureProposalRepository
         $counts = $action === PayrollRetentionAssessment::ACTION_ERASE
             ? $this->deletion->delete($supplierId, $employeeId, $userId, $ip, $userAgent)
             : $this->anonymization->anonymize($supplierId, $employeeId, $userId, $ip, $userAgent);
+
+        // Krypto-výmaz vydaných dokumentů (W30 / C-06). Append-only archiv
+        // podle migrace 1231 se nemaže ani neupravuje — zahodí se datový klíč
+        // subjektu, takže PDF na disku i řádek v evidenci zůstanou beze změny,
+        // ale obsah je nevratně nečitelný. Bez tohohle kroku zůstávaly osobní
+        // údaje (rodné číslo, číslo účtu, srážky) v páskách navždy a čl. 17
+        // GDPR nešlo splnit u nikoho, komu se kdy vytiskla výplatní páska.
+        $counts += $this->documentErasure->erase(
+            $supplierId,
+            $employeeId,
+            $userId,
+            'payroll.erasure.executed',
+        );
 
         return ['outcome' => 'done', 'skip_reason' => null, 'counts' => $counts];
     }

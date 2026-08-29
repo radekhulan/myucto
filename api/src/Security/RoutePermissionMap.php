@@ -158,7 +158,7 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/enforcement/cooperation(/|$)#', 'payroll.enforcement.cooperation', AccessLevel::WRITE],
         ['*', '#^/api/payroll/retention/(holds(/[0-9]+)?|policies/[a-z_]+)$#', 'payroll.retention', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/retention/erasure(/[0-9]+)?$#', 'payroll.erasure', AccessLevel::READ],
-        ['POST', '#^/api/payroll/retention/erasure(/[0-9]+/(approve|reject|execute))?$#', 'payroll.erasure', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/retention/erasure(/[0-9]+/(approve|reject|execute|revoke))?$#', 'payroll.erasure', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people$#', 'payroll', AccessLevel::READ],
         ['POST', '#^/api/payroll/people$#', 'payroll.person.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/people/[0-9]+$#', 'payroll', AccessLevel::READ],
@@ -229,6 +229,16 @@ final class RoutePermissionMap
         // účetní zápis v hlavní knize ani na platební ledger.
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/post$#', 'payroll.post', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/(prepare_payments|mark_paid)$#', 'payroll.payments', AccessLevel::WRITE],
+        // `close` pečetí běh (stejná váha jako `approve`), `cancel` ho nevratně
+        // zneplatní (stejná váha jako `reopen`). Catch-all `payroll.inputs.write`
+        // je na obojí slabý — je to právo na zápis mzdových vstupů.
+        // Rezervace období: čtení pod obecné `payroll`, uvolnění legacy claimu
+        // pod `payroll.reopen` — je to zásah do už zabraného období, ne zápis
+        // mzdového vstupu.
+        ['GET', '#^/api/payroll/periods/[0-9]{4}-[0-9]{2}/ownership$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/periods/[0-9]{4}-[0-9]{2}/ownership/release-legacy$#', 'payroll.reopen', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/close$#', 'payroll.approve', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/runs/[0-9]+/commands/cancel$#', 'payroll.reopen', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/runs/[0-9]+/commands/[a-z_]+$#', 'payroll.inputs.write', AccessLevel::WRITE],
         // Schválení a odvolání výjimky u validace běhu je věcně část schválení
         // mzdy („vím o vadě a přesto se vyplácí"), proto `payroll.approve`.

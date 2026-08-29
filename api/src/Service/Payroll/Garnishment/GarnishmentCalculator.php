@@ -28,10 +28,11 @@ final class GarnishmentCalculator
         $rulesetId = null;
         $rulesetHash = null;
         $rulesetIssues = [];
+        $rulesetDate = self::januaryFirstOfPaymentYear($input->paymentDate);
         try {
             $version = $this->rulesets->forDate(
                 PayrollRulesetDomain::EnforcementDeductions,
-                $input->paymentDate,
+                $rulesetDate,
             );
             $rulesetId = $version->id;
             $rulesetHash = $version->canonicalHash;
@@ -76,9 +77,39 @@ final class GarnishmentCalculator
             300,
         ) * 300;
         $third = intdiv($thirdsBase, 3);
+        // ZÁMĚRNĚ z nezaokrouhleného zbytku (nález E-09, rozhodnuto 8/2026).
+        //
+        // § 279 odst. 3 o. s. ř. odkazuje na „zbytek čisté mzdy vypočtené podle
+        // odstavce 1 věty první", tedy formálně už na zbytek zaokrouhlený dolů
+        // na částku dělitelnou třemi. Doslovný výklad by dal
+        // `excess = floor3(remainder) − threshold`, tj. o 0 až 2 Kč méně.
+        //
+        // Kód drží druhou variantu — zaokrouhlení dolů na dělitelnost třemi se
+        // aplikuje jen na tu část zbytku, která se SKUTEČNĚ dělí na třetiny,
+        // a část nad hranicí se sráží celá. Důvody:
+        //
+        //  • zaokrouhlení v odst. 1 má jediný účel: aby třetiny vyšly na celé
+        //    koruny beze zbytku. Nad hranicí se na třetiny nedělí nic, takže
+        //    tam ta potřeba nevzniká a zaokrouhlení nemá co řešit;
+        //  • § 279 odst. 3 věta druhá s plně zabavitelnou částí zachází jako
+        //    s celkem, který se rozděluje mezi druhou a první třetinu — ne jako
+        //    s dalším dělením na třetiny;
+        //  • je to metodika kalkulačky Exekutorské komory i příručky MPSV, na
+        //    kterou jsou navázané kontrolní výpočty účetních. Odchylka do 2 Kč
+        //    měsíčně by se reklamovala u KAŽDÉ mzdy nad hranicí.
+        //
+        // Rozhodnutí se nemění bez judikátu nebo změny metodiky MPSV; kdo se
+        // k tomu vrátí, ať sem doplní důvod, ne jen nové číslo.
         $excess = max(0, $remainder - $fullyAttachableThreshold);
         $roundingTrace = [
             $protectedTrace,
+            [
+                // § 4 nař. vlády č. 595/2006 Sb. — viz januaryFirstOfPaymentYear().
+                'step' => 'ruleset_effective_date',
+                'payment_date' => $input->paymentDate,
+                'january_first_of_payment_year' => $rulesetDate,
+                'ruleset_id' => $policy->rulesetId(),
+            ],
             [
                 'step' => 'thirds_base',
                 'input_minor_units' => min($remainder, $fullyAttachableThreshold),
@@ -128,8 +159,10 @@ final class GarnishmentCalculator
         }
 
         $claims = $this->activeClaims($input->claims);
+        // Pravidlo čtyř exekucí se počítá z EVIDENCE, ne z pohledávek, na které
+        // v tomhle měsíci zbyl zůstatek — viz orderedEnforcementCount().
         $fourRule = $this->fourEnforcementRuleApplies(
-            $claims,
+            $input->claims,
             $input->pensionEvidence,
             $third,
             $policy,
@@ -543,6 +576,23 @@ final class GarnishmentCalculator
                     : $balances[$claim->id];
                 $weightTotal = self::addExactly($weightTotal, $weight);
             }
+            // Poměrné dělení potřebuje kladný součet vah. Nulový součet je
+            // dosažitelný jen u výživného s nulovou nebo chybějící vahou —
+            // to `validateInput()` shodí do ručního posouzení dřív, než se sem
+            // dojde (`claim:*:maintenance_weight_missing`). Kdyby se tam ta
+            // kontrola někdy vypnula, bez téhle pojistky by výpočet spadl na
+            // dělení nulou uprostřed rozvrhu (nález E-13). Fail-safe je
+            // rozdělit poměrně podle zůstatků: § 280 odst. 3 sice žádá poměr
+            // běžného výživného, ale ten není znám, a nechat věřitele bez
+            // ničeho je horší než rozdělit podle dluhu.
+            if ($weightTotal <= 0) {
+                if ($useMaintenanceWeight) {
+                    $useMaintenanceWeight = false;
+                    continue;
+                }
+
+                break;
+            }
 
             $remainders = [];
             $capped = false;
@@ -599,6 +649,23 @@ final class GarnishmentCalculator
     }
 
     /**
+     * Nárok plátce mzdy na paušální náhradu nákladů.
+     *
+     * Rozhodné je DORUČENÍ příkazu plátci mzdy, ne den jeho vydání. Právo
+     * i povinnost plátce mzdy vznikají až doručením (§ 282 odst. 1 a 3
+     * o. s. ř.: srážky provádí „po tom, kdy mu bude nařízení výkonu
+     * doručeno") a náhrada přísluší za měsíc, v němž plátce srážky skutečně
+     * provádí. Příkaz vydaný v prosinci 2021 a doručený v lednu 2022 tedy
+     * nárok zakládá, přestože podle data vydání by nevycházel; opačně příkaz
+     * vydaný 2021 a doručený 2021 nárok nezakládá, i kdyby se sráželo dál.
+     *
+     * Do 8/2026 se testovalo `orderIssuedOn`, tedy datum vydání (nález E-11).
+     * Den doručení plátci nese `priorityDate` — je to týž údaj, ze kterého
+     * § 280 odst. 5 o. s. ř. odvozuje pořadí (sloupec
+     * `payroll_enforcement_claims.first_payer_delivered_on`, migrace 1594).
+     * Chybí-li, `validateInput()` měsíc stejně shodí do ručního posouzení,
+     * takže se tu čte fail-closed jako „nárok nevznikl".
+     *
      * @param list<DeductionClaim> $claims
      */
     private function hasEligibleFeeClaim(array $claims, EnforcementDeductionPolicy2026 $policy): bool
@@ -607,13 +674,50 @@ final class GarnishmentCalculator
         foreach ($claims as $claim) {
             if (
                 $claim->legalBasis === DeductionLegalBasis::Statutory
-                && $claim->orderIssuedOn >= $feeOrderEffectiveFrom
+                && $claim->priorityDate !== null
+                && $claim->priorityDate >= $feeOrderEffectiveFrom
             ) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Kolik NAŘÍZENÝCH a plátci mzdy doručených výkonů rozhodnutí na mzdě leží.
+     *
+     * § 279 odst. 4 o. s. ř. váže dvě třetiny na to, že „jsou na mzdu povinného
+     * současně nařízeny nejméně 4 výkony rozhodnutí k vymožení splatných
+     * peněžitých pohledávek" a že usnesení „bylo doručeno plátci mzdy" —
+     * o zůstatku pohledávky nemluví. Do 8/2026 se ale počítalo nad
+     * `activeClaims()`, které pohledávky s nulovým zůstatkem odfiltruje, takže
+     * měsíc, kdy na jednu z pěti exekucí zrovna nic nezbývalo (doplatek přišel
+     * jinou cestou, souběžný plátce ji umořil), pravidlo vypnul a povinnému se
+     * srazila jen jedna třetina (nález E-15).
+     *
+     * Počítá se proto nad VŠEMI evidovanými pohledávkami: zastavená exekuce se
+     * eviduje jako neaktivní (`active === false`) a do počtu nepatří, kdežto
+     * nařízená exekuce s momentálně nulovým zůstatkem ano.
+     *
+     * @param list<DeductionClaim> $claims
+     */
+    private function orderedEnforcementCount(array $claims): int
+    {
+        $orders = [];
+        foreach ($claims as $claim) {
+            if (
+                $claim->active
+                && $claim->legalBasis === DeductionLegalBasis::Statutory
+                && $claim->orderOrNoticeDelivered
+                && $claim->enforcementOrderId !== null
+                && trim($claim->enforcementOrderId) !== ''
+            ) {
+                $orders[$claim->enforcementOrderId] = true;
+            }
+        }
+
+        return count($orders);
     }
 
     /**
@@ -625,17 +729,7 @@ final class GarnishmentCalculator
         int $third,
         EnforcementDeductionPolicy2026 $policy,
     ): bool {
-        $orders = [];
-        foreach ($claims as $claim) {
-            if (
-                $claim->legalBasis === DeductionLegalBasis::Statutory
-                && $claim->enforcementOrderId !== null
-            ) {
-                $orders[$claim->enforcementOrderId] = true;
-            }
-        }
-        $statutoryCount = count($orders);
-        if ($statutoryCount < 4) {
+        if ($this->orderedEnforcementCount($claims) < 4) {
             return false;
         }
 
@@ -794,12 +888,23 @@ final class GarnishmentCalculator
         if (!$this->isPeriod($input->period)) {
             $issues[] = 'invalid_payroll_period';
         }
-        if (
-            !$this->isDate($input->paymentDate)
-            || $input->paymentDate < $policy->effectiveFrom()
-            || $input->paymentDate > $policy->effectiveTo()
-        ) {
+        if (!$this->isDate($input->paymentDate)) {
             $issues[] = 'payment_date_outside_ruleset_2026';
+        } else {
+            // § 4 nař. vlády č. 595/2006 Sb. žádá hodnoty ve výši platné
+            // k 1. lednu roku, do něhož připadá den výplaty, a ty musí platit
+            // celý rok. Sada, která končí dřív než 31. prosince (nebo začíná
+            // po 1. lednu), tuhle podmínku splnit nemůže — ať už jde
+            // o administrátorský override s vnitroroční účinností, nebo
+            // o nedopatřením zúžený interval. Fail-closed: měsíc jde na ruční
+            // posouzení, nepočítá se z hodnot, které § 4 použít nedovoluje
+            // (nález E-06).
+            $year = substr($input->paymentDate, 0, 4);
+            if ($policy->effectiveFrom() > "{$year}-01-01"
+                || $policy->effectiveTo() < "{$year}-12-31"
+            ) {
+                $issues[] = 'enforcement_ruleset_not_effective_for_whole_year';
+            }
         }
         if ($input->income->status !== GarnishmentStatus::Supported) {
             foreach ($input->income->issues as $incomeIssue) {
@@ -870,17 +975,9 @@ final class GarnishmentCalculator
             }
         }
 
-        $statutoryOrders = [];
-        foreach ($activeClaims as $claim) {
-            if (
-                $claim->legalBasis === DeductionLegalBasis::Statutory
-                && $claim->enforcementOrderId !== null
-            ) {
-                $statutoryOrders[$claim->enforcementOrderId] = true;
-            }
-        }
-        $statutoryCount = count($statutoryOrders);
-        if ($statutoryCount >= 4 && $input->pensionEvidence === PensionEvidence::Unknown) {
+        if ($this->orderedEnforcementCount($input->claims) >= 4
+            && $input->pensionEvidence === PensionEvidence::Unknown
+        ) {
             $issues[] = 'four_enforcement_pension_exception_evidence_unknown';
         }
 
@@ -1021,6 +1118,40 @@ final class GarnishmentCalculator
         }
 
         return $left * $right;
+    }
+
+    /**
+     * Který den rozhoduje o tom, ZE KTERÉ sady se čtou nezabavitelné částky.
+     *
+     * § 4 nař. vlády č. 595/2006 Sb.: „Při výpočtu nezabavitelné částky
+     * a částky, nad kterou se zbytek čisté mzdy srazí bez omezení, se použije
+     * částka životního minima jednotlivce, částka normativních nákladů na
+     * bydlení … ve výši platné k 1. lednu kalendářního roku, do něhož připadá
+     * den výplaty mzdy."
+     *
+     * Do 8/2026 se sada hledala k SAMOTNÉMU dni výplaty. U dodaných sad, které
+     * pokrývají celý kalendářní rok, to vycházelo nastejno — jenže registry
+     * rulesetů dovolí administrátorský override s vnitroroční účinností
+     * a `forDate()` by ho poslušně použil. Vláda přitom mění životní minimum
+     * i normativní náklady na bydlení několikrát za rok a pro srážky ze mzdy
+     * se ta změna podle § 4 uplatní až od 1. ledna roku následujícího (nález
+     * E-06). Rozhodné datum se proto srovná na 1. leden roku výplaty.
+     *
+     * Zpětné opravy to nerozbíjí: sada 2025 je účinná 1. 1.–31. 12. 2025
+     * a sada 2026 celý rok 2026, takže výplata z kteréhokoli měsíce trefí
+     * touž sadu jako dřív. Že sada opravdu platí celý rok, hlídá
+     * `enforcement_ruleset_not_effective_for_whole_year` ve {@see validateInput()}.
+     *
+     * Neplatné datum se vrací beze změny — shodí `forDate()` a měsíc skončí
+     * na ručním posouzení, což je táž cesta jako dřív.
+     */
+    private static function januaryFirstOfPaymentYear(string $paymentDate): string
+    {
+        if (preg_match('/^(\d{4})-\d{2}-\d{2}$/D', $paymentDate, $matches) !== 1) {
+            return $paymentDate;
+        }
+
+        return "{$matches[1]}-01-01";
     }
 
     private function isPeriod(string $value): bool

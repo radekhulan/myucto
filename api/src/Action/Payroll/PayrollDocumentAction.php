@@ -11,6 +11,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\AnnualPayrollSheetService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentKeyDestroyedException;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentDeliveryLedgerService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -460,6 +461,18 @@ final class PayrollDocumentAction
                 $supplierId,
                 $documentId,
                 $userId,
+            );
+        } catch (PayrollDocumentKeyDestroyedException) {
+            // Krypto-výmaz (W30 / C-06) není chybějící dokument ani chyba
+            // serveru: řádek i soubor existují, jen je jejich obsah po výmazu
+            // osobních údajů nevratně nečitelný. 410 to říká přesně a účetní
+            // se nemusí ptát, kam se páska poděla.
+            return Json::error(
+                $response,
+                'payroll_document_erased',
+                'Dokument je po výmazu osobních údajů nečitelný. Evidence '
+                    . 'o jeho vydání zůstává, obsah už obnovit nelze.',
+                410,
             );
         } catch (\Throwable) {
             return Json::error($response, 'not_found', 'Mzdový dokument nebyl nalezen.', 404);

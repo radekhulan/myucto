@@ -45,6 +45,12 @@ final class EnforcementDeductionRulesetOverrideTest extends TestCase
                 ['type' => 'money_minor', 'value' => 1_759_000],
             'protected_amount.debtor_base.monthly' =>
                 ['type' => 'money_minor', 'value' => 1_495_150],
+            // Hranice plně zabavitelného zbytku je 1,9násobek TÉHOŽ základu
+            // (§ 2 nař. vlády č. 595/2006 Sb.). Override, který ji nechá starou,
+            // od 8/2026 neprojde křížovou kontrolou — viz
+            // testHalfUpdatedOverrideIsRefusedInsteadOfSilentlyMiscalculating().
+            'fully_attachable.threshold.monthly' =>
+                ['type' => 'money_minor', 'value' => 3_342_100],
         ]));
 
         self::assertSame(GarnishmentStatus::Supported, $byDefault->status);
@@ -73,6 +79,60 @@ final class EnforcementDeductionRulesetOverrideTest extends TestCase
 
         self::assertSame(5_000, $byDefault->employerFlatFeeMinorUnits);
         self::assertSame(15_000, $overridden->employerFlatFeeMinorUnits);
+    }
+
+    /**
+     * Odvozené částky se musí shodovat se základem, ze kterého plynou
+     * (§ 1 a § 2 nař. vlády č. 595/2006 Sb.). Do 8/2026 je výpočet nikdy
+     * nepoužil všechny najednou, takže polovičatý override tiše rozešel
+     * `debtor_base` se základem a auditní stopa přitom vypadala v pořádku
+     * (nález E-05). Teď se sada odmítne celá a měsíc jde na ruční posouzení.
+     *
+     * @param array<string,array{type:string,value:int}> $override
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('inconsistentOverrides')]
+    public function testHalfUpdatedOverrideIsRefusedInsteadOfSilentlyMiscalculating(
+        array $override,
+    ): void {
+        $result = $this->calculate($this->overriddenProvider($override));
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertContains('enforcement_ruleset_incomplete', $result->issues);
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+    }
+
+    /** @return iterable<string, array{array<string,array{type:string,value:int}>}> */
+    public static function inconsistentOverrides(): iterable
+    {
+        yield 'základ nesedí na součet složek' => [[
+            'life_minimum.monthly' => ['type' => 'money_minor', 'value' => 586_000],
+        ]];
+        yield 'nezabavitelná částka na povinného nesedí na 85 % základu' => [[
+            'protected_amount.debtor_base.monthly'
+                => ['type' => 'money_minor', 'value' => 1_495_150],
+        ]];
+        yield 'hranice plně zabavitelného zbytku nesedí na 1,9násobek základu' => [[
+            'fully_attachable.threshold.monthly'
+                => ['type' => 'money_minor', 'value' => 3_342_100],
+        ]];
+    }
+
+    /**
+     * Zaokrouhlení vyhlášené částky se toleruje: dvě třetiny z 19 540 Kč jsou
+     * 13 026,666… Kč a nařízení vyhlašuje 13 026,67 Kč (sada 2025). Kontrola
+     * proto hlídá odchylku menší než jeden haléř, ne bajtovou shodu — tady
+     * 16 590 × 2/9 = 3 686,666… Kč vyhlášených jako 3 686,67 Kč.
+     */
+    public function testRoundedDecreeValueIsAccepted(): void
+    {
+        $result = $this->calculate($this->overriddenProvider([
+            'debtor_share.numerator' => ['type' => 'integer', 'value' => 2],
+            'debtor_share.denominator' => ['type' => 'integer', 'value' => 9],
+            'protected_amount.debtor_base.monthly'
+                => ['type' => 'money_minor', 'value' => 368_667],
+        ]));
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
     }
 
     public function testShippedDefaultStillMatchesItsPinnedHash(): void
@@ -108,8 +168,13 @@ final class EnforcementDeductionRulesetOverrideTest extends TestCase
         self::assertIsArray($frozen);
 
         $overriddenProvider = $this->overriddenProvider([
+            'life_minimum.monthly' => ['type' => 'money_minor', 'value' => 586_000],
+            'protected_amount.calculation_base.monthly' =>
+                ['type' => 'money_minor', 'value' => 1_759_000],
             'protected_amount.debtor_base.monthly' =>
                 ['type' => 'money_minor', 'value' => 1_495_150],
+            'fully_attachable.threshold.monthly' =>
+                ['type' => 'money_minor', 'value' => 3_342_100],
         ]);
         $current = $this->calculate($overriddenProvider);
         $reloaded = GarnishmentResult::fromCanonicalArray($frozen);

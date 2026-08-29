@@ -952,6 +952,17 @@ final class Routes
                 '/runs/{id:[0-9]+}/commands/{command:[a-z_]+}',
                 [PayrollRunsAction::class, 'command'],
             );
+            // Rezervace mzdového období. `release-legacy` je jediná cesta, jak
+            // z aplikace uvolnit období zabrané původním ručním zaúčtováním —
+            // bez ní se muselo zasahovat přímo v databázi.
+            $g->get(
+                '/periods/{period:[0-9]{4}-[0-9]{2}}/ownership',
+                [PayrollRunsAction::class, 'periodOwnership'],
+            );
+            $g->post(
+                '/periods/{period:[0-9]{4}-[0-9]{2}}/ownership/release-legacy',
+                [PayrollRunsAction::class, 'releaseLegacyPeriod'],
+            );
             // MZ-01-W07 — chybějící půlka override: varování vyžadující schválení
             // dosud zastavilo `approve` a nešlo ho odklidit žádnou routou.
             $g->post(
@@ -1611,6 +1622,8 @@ final class Routes
             $g->post('/retention/erasure/{id:[0-9]+}/approve', [PayrollRetentionAction::class, 'approveProposal']);
             $g->post('/retention/erasure/{id:[0-9]+}/reject', [PayrollRetentionAction::class, 'rejectProposal']);
             $g->post('/retention/erasure/{id:[0-9]+}/execute', [PayrollRetentionAction::class, 'executeProposal']);
+            // Odvolání schválení během odkladné lhůty (W30 / C-07).
+            $g->post('/retention/erasure/{id:[0-9]+}/revoke', [PayrollRetentionAction::class, 'revokeProposal']);
             $g->put('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'putPolicy']);
             $g->delete('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'deletePolicy']);
         });

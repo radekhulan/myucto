@@ -2118,7 +2118,10 @@ final class PayrollEnforcementApiTest extends TestCase
                     GarnishmentStatus::Supported,
                     50_000,
                     20_000,
-                    10_000,
+                    // Třetina musí unést sraženou částku: § 281 o. s. ř.
+                    // nedovolí srazit víc než dvě třetiny plus plně
+                    // zabavitelnou část, a výsledek si to od 8/2026 hlídá sám.
+                    15_000,
                     0,
                     0,
                     30_000,

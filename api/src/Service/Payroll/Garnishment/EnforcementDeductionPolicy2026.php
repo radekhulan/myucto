@@ -84,6 +84,7 @@ final readonly class EnforcementDeductionPolicy2026
             );
         }
         self::assertComplete($ruleset);
+        self::assertDerivedParametersConsistent($ruleset);
 
         return new self($ruleset);
     }
@@ -211,6 +212,118 @@ final readonly class EnforcementDeductionPolicy2026
             throw new PayrollRulesetException(
                 "Ruleset {$ruleset->id} nemá parametry potřebné pro výpočet exekučních srážek: "
                 . implode(', ', $problems) . '.',
+            );
+        }
+    }
+
+    /**
+     * Křížová kontrola ODVOZENÝCH částek.
+     *
+     * Nařízení vlády č. 595/2006 Sb. vyhlašuje základ i odvozené částky přímo
+     * v korunách a účetní je opisuje z tabulky, proto se vezou jako samostatné
+     * parametry a nedopočítávají se za běhu. Jenže tři z nich — `calculation_base`,
+     * `debtor_base` a `fully_attachable.threshold` — samotný výpočet nikdy
+     * nepoužije všechny najednou: `protectedAmount()` čte jen `debtor_base`
+     * a třetiny jen `threshold`. Do 8/2026 se proto nikde neprojevilo, když
+     * administrátorský override posunul základ a odvozenou částku nechal
+     * starou (nebo naopak): audit trail (identita rulesetu) zůstal konzistentní
+     * a čísla přitom vzájemně neseděla (nález E-05).
+     *
+     * Kontroluje se přesně to, co nařízení říká:
+     *
+     *  • § 1: základ = životní minimum jednotlivce + normativní náklady na
+     *    bydlení + paušál na energie (v roce 2025 je paušál 0). Součet MUSÍ
+     *    sedět na haléř, protože jde o prostý součet vyhlášených čísel;
+     *  • § 1: nezabavitelná částka na povinného = `debtor_share` základu
+     *    (2026: 85 %, 2025: dvě třetiny);
+     *  • § 2: hranice, nad kterou se zbytek srazí bez omezení, = `fully_attachable`
+     *    násobek TÉHOŽ základu (2026: 1,9×, 2025: 1,5×).
+     *
+     * U dvou podílových kontrol se připouští odchylka menší než jeden haléř:
+     * dvě třetiny z 19 540 Kč jsou 13 026,666… Kč a vyhlášená částka je
+     * zaokrouhlená. Zaokrouhlení celé nezabavitelné částky nahoru na celé
+     * koruny řeší až § 3, tedy {@see GarnishmentCalculator::protectedAmount()},
+     * ne tenhle parametr.
+     */
+    private static function assertDerivedParametersConsistent(PayrollRulesetVersion $ruleset): void
+    {
+        $money = static function (string $key) use ($ruleset): int {
+            $value = $ruleset->parameter($key);
+            if ($value->type !== 'money_minor' || !is_int($value->value)) {
+                throw new UnexpectedValueException(
+                    "Enforcement ruleset parameter {$key} is not money.",
+                );
+            }
+
+            return $value->value;
+        };
+        $integer = static function (string $key) use ($ruleset): int {
+            $value = $ruleset->parameter($key);
+            if ($value->type !== 'integer' || !is_int($value->value)) {
+                throw new UnexpectedValueException(
+                    "Enforcement ruleset parameter {$key} is not an integer.",
+                );
+            }
+
+            return $value->value;
+        };
+
+        $base = $money('protected_amount.calculation_base.monthly');
+        $components = $money('life_minimum.monthly')
+            + $money('normative_rent.monthly')
+            + $money('energy_flat.monthly');
+
+        $problems = [];
+        if ($components !== $base) {
+            $problems[] = sprintf(
+                'protected_amount.calculation_base.monthly = %d, ale life_minimum + '
+                . 'normative_rent + energy_flat = %d (§ 1 nař. vlády č. 595/2006 Sb.)',
+                $base,
+                $components,
+            );
+        }
+
+        foreach ([
+            'protected_amount.debtor_base.monthly' => 'debtor_share',
+            'fully_attachable.threshold.monthly' => 'fully_attachable.factor',
+        ] as $derivedKey => $sharePrefix) {
+            $numerator = $integer(
+                $sharePrefix === 'debtor_share'
+                    ? 'debtor_share.numerator'
+                    : 'fully_attachable.factor_numerator',
+            );
+            $denominator = $integer(
+                $sharePrefix === 'debtor_share'
+                    ? 'debtor_share.denominator'
+                    : 'fully_attachable.factor_denominator',
+            );
+            if ($denominator <= 0) {
+                $problems[] = "{$sharePrefix} má nekladného jmenovatele {$denominator}";
+                continue;
+            }
+            $derived = $money($derivedKey);
+            // |derived − base × num / den| < 1 haléř, jen celočíselně.
+            if (abs(($derived * $denominator) - ($base * $numerator)) >= $denominator) {
+                $problems[] = sprintf(
+                    '%s = %d, ale %d × %d/%d dává %d celých a %d/%d haléře',
+                    $derivedKey,
+                    $derived,
+                    $base,
+                    $numerator,
+                    $denominator,
+                    intdiv($base * $numerator, $denominator),
+                    ($base * $numerator) % $denominator,
+                    $denominator,
+                );
+            }
+        }
+
+        if ($problems !== []) {
+            sort($problems, SORT_STRING);
+
+            throw new PayrollRulesetException(
+                "Ruleset {$ruleset->id} má rozejité odvozené částky exekučních srážek: "
+                . implode('; ', $problems) . '.',
             );
         }
     }

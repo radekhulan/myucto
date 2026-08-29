@@ -93,6 +93,27 @@ $n = $pdo->exec(
 );
 $report['payroll_download_grants'] = (int) $n;
 
+// 3f) Ostatní jednorázové mzdové download granty (W30 / D-06). Uklízel se jen
+// grant na jednotlivý dokument; granty na PERIOD-EXPORT, platební export
+// a artefakt podání se hromadily donekonečna. Není to jen kosmetika:
+// nepoužitý grant je platný odkaz na kompletní mzdový archiv období, takže
+// každý zapomenutý řádek je živá cesta k datům, kterou nikdo neeviduje.
+// Retence je stejná jako u dokumentových grantů — jeden den po expiraci nebo
+// po použití; audit stažení zůstává v activity_log, ne tady.
+foreach ([
+    'payroll_period_export_download_grants' => 'payroll_period_export_grants',
+    'payroll_payment_export_download_grants' => 'payroll_payment_export_grants',
+    'payroll_submission_artifact_download_grants'
+        => 'payroll_submission_artifact_grants',
+] as $grantTable => $reportKey) {
+    $n = $pdo->exec(
+        'DELETE FROM ' . $grantTable
+        . ' WHERE expires_at < NOW() - INTERVAL 1 DAY'
+        . '    OR used_at < NOW() - INTERVAL 1 DAY'
+    );
+    $report[$reportKey] = (int) $n;
+}
+
 // 4) ARES/VIES cache — starší 30 dní
 $n = $pdo->exec("DELETE FROM ares_cache WHERE fetched_at < NOW() - INTERVAL 30 DAY");
 $report['ares_cache'] = (int) $n;

@@ -313,6 +313,49 @@ final class HealthNotificationDutyTest extends TestCase
         self::assertStringContainsString('§ 25 odst. 3', $window->source);
     }
 
+    /**
+     * W30 / C-04 — přehled o platbě se posouvá na pracovní den stejně jako
+     * odvod pojistného.
+     *
+     * Obojí plyne ze zákona č. 592/1992 Sb. (§ 25 odst. 3 a § 5 odst. 2) a je
+     * to lhůta v řízení podle správního řádu, tedy § 40 odst. 1 písm. c)
+     * zákona č. 500/2004 Sb. Odvod se posouval odjakživa, přehled ne, a
+     * aplikace proto 3–4× ročně hlásila „po termínu" u podání, které po
+     * termínu nebylo. 20. 6. 2026 je sobota → pondělí 22. 6. 2026.
+     */
+    public function testPaymentOverviewDueDateShiftsToWorkingDay(): void
+    {
+        $window = $this->deadlines->forPaymentOverview('2026-05');
+
+        self::assertSame('2026-06-22', $window->dueOn);
+        self::assertSame('2026-06-20', $window->statutoryDueOn);
+        self::assertTrue($window->isShifted());
+        self::assertStringContainsString(
+            '§ 40 odst. 1 písm. c)',
+            (string) $window->shiftSource,
+        );
+    }
+
+    /**
+     * Osmidenní lhůta hromadného oznámení se ZÁMĚRNĚ neposouvá — plyne z jiného
+     * zákona (§ 10 zákona č. 48/1997 Sb.) a pramen k posunu v repozitáři není.
+     * Dřívější podání je bezpečné, pozdější může znamenat penále.
+     */
+    public function testNotificationDeadlineIsNotShifted(): void
+    {
+        $window = $this->deadlines->forNotification(
+            HealthNotificationDutyKind::EmploymentStart,
+            '2026-06-06',
+            'employment',
+        );
+
+        self::assertSame('2026-06-14', $window->dueOn);
+        self::assertFalse(
+            $window->isShifted(),
+            '14. 6. 2026 je neděle a lhůta se přesto posouvat nesmí.',
+        );
+    }
+
     public function testInvalidPeriodIsRefused(): void
     {
         $this->expectException(HealthNotificationException::class);

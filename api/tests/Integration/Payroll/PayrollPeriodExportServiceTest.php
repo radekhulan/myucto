@@ -140,6 +140,8 @@ final class PayrollPeriodExportServiceTest extends TestCase
         $storedDocument = $this->documentStorage->store(
             $this->supplierId,
             $pdf,
+            null,
+            $employeeIds[0],
         );
         $archivedDocument = $this->documents->insertOrGet([
             'supplier_id' => $this->supplierId,
@@ -472,7 +474,12 @@ final class PayrollPeriodExportServiceTest extends TestCase
         }
         [$runId, $revisionId, $employeeIds, $revisionHash] = $this->approvedRevision(1);
         $bytes = '%PDF-1.4 synthetic resumable payroll export part';
-        $stored = $this->documentStorage->store($this->supplierId, $bytes);
+        $stored = $this->documentStorage->store(
+            $this->supplierId,
+            $bytes,
+            null,
+            $employeeIds[0],
+        );
         $this->documents->insertOrGet([
             'supplier_id' => $this->supplierId,
             'run_id' => $runId,
@@ -503,7 +510,11 @@ final class PayrollPeriodExportServiceTest extends TestCase
         self::assertNull($afterPart['export_id']);
         self::assertSame(1, $this->countRows('payroll_period_export_job_parts WHERE status = "completed"'));
 
-        $this->documentStorage->delete($this->supplierId, $stored['storage_key']);
+        $this->documentStorage->delete(
+            $this->supplierId,
+            $stored['storage_key'],
+            $employeeIds[0],
+        );
         self::assertSame(['processed' => 1, 'succeeded' => 1, 'failed' => 0], $this->queue->processAvailable());
         $completed = $this->queue->detail($this->supplierId, (int) $queued['id']);
         self::assertIsArray($completed);
@@ -554,7 +565,11 @@ final class PayrollPeriodExportServiceTest extends TestCase
             $bytes,
             'retryable-part',
         );
-        $this->documentStorage->delete($this->supplierId, $stored['storage_key']);
+        $this->documentStorage->delete(
+            $this->supplierId,
+            $stored['storage_key'],
+            $employeeIds[0],
+        );
         $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
 
         for ($attempt = 1; $attempt <= 2; ++$attempt) {
@@ -569,7 +584,12 @@ final class PayrollPeriodExportServiceTest extends TestCase
             $this->makePartRetryAvailable((int) $queued['id']);
         }
 
-        $restored = $this->documentStorage->store($this->supplierId, $bytes);
+        $restored = $this->documentStorage->store(
+            $this->supplierId,
+            $bytes,
+            null,
+            $employeeIds[0],
+        );
         self::assertSame($stored['storage_key'], $restored['storage_key']);
         self::assertSame(
             ['processed' => 2, 'succeeded' => 2, 'failed' => 0],
@@ -594,7 +614,11 @@ final class PayrollPeriodExportServiceTest extends TestCase
             '%PDF-1.4 synthetic terminal resumable part',
             'terminal-part',
         );
-        $this->documentStorage->delete($this->supplierId, $stored['storage_key']);
+        $this->documentStorage->delete(
+            $this->supplierId,
+            $stored['storage_key'],
+            $employeeIds[0],
+        );
         $queued = $this->queue->enqueueMonthly($this->supplierId, '2097-08', $this->userId);
 
         for ($attempt = 1; $attempt <= PayrollPeriodExportJobRepository::MAX_ATTEMPTS; ++$attempt) {
@@ -881,7 +905,12 @@ final class PayrollPeriodExportServiceTest extends TestCase
         string $bytes,
         string $key,
     ): array {
-        $stored = $this->documentStorage->store($this->supplierId, $bytes);
+        $stored = $this->documentStorage->store(
+            $this->supplierId,
+            $bytes,
+            null,
+            $employeeId,
+        );
         $this->documents->insertOrGet([
             'supplier_id' => $this->supplierId,
             'run_id' => $runId,

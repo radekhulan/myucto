@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
+use MyInvoice\Service\Report\CzechWorkingDays;
+
 /**
  * Lhůty podání zdravotní pojišťovně.
  *
@@ -16,12 +18,37 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
  * Přehled o platbě má lhůtu shodnou se splatností pojistného, tedy 20. den
  * následujícího kalendářního měsíce podle § 25 odst. 3 zákona č. 592/1992 Sb.
  *
- * Posun lhůty připadající na víkend nebo svátek se ZÁMĚRNĚ nemodeluje.
- * Podklady o něm mlčí a chyba na stranu dřívějšího podání je bezpečná —
- * posunout lhůtu dopředu bez opory by naopak mohla znamenat penále.
+ * ── Posun na pracovní den ───────────────────────────────────────────────────
+ * U PŘEHLEDU O PLATBĚ se posun modeluje, u osmidenního hromadného oznámení ne.
+ * Rozdíl není nedůslednost, ale výsledek toho, že jde o dvě lhůty ze dvou
+ * zákonů:
+ *
+ * - Přehled o platbě i splatnost pojistného plynou z TÉHOŽ zákona
+ *   č. 592/1992 Sb. (§ 25 odst. 3 a § 5 odst. 2) a jsou to lhůty v řízení,
+ *   které se podle § 26c téhož zákona řídí správním řádem; na ně dopadá
+ *   § 40 odst. 1 písm. c) zákona č. 500/2004 Sb. — připadne-li konec lhůty na
+ *   sobotu, neděli nebo svátek, je posledním dnem nejbližší příští pracovní
+ *   den. `PayrollLevyDeadlinePolicy::HEALTH_INSURANCE` (odvod) se stejným
+ *   pramenem posouvá odjakživa; přehled se neposouval, takže aplikace 3–4×
+ *   ročně hlásila „po termínu" u podání, které po termínu není. Obě lhůty jsou
+ *   nadále počítané ze stejného pravidla i stejného pramene posunu.
+ * - Osmidenní lhůta hromadného oznámení plyne ze zákona č. 48/1997 Sb.
+ *   (§ 10) a ZÁMĚRNĚ se neposouvá: pramen k tomu v repozitáři není a chyba na
+ *   stranu dřívějšího podání je bezpečná, kdežto posun dopředu bez opory může
+ *   znamenat penále. Totéž platí pro obě výjimky odvozené jen z metodiky VZP.
+ *
+ * Kromě posunutého `dueOn` okno nese i `statutoryDueOn` (zákonný den PŘED
+ * posunem) a `dueShift`, aby bylo v přehledu termínů poznat, proč se datum
+ * liší od holého 20.
  */
 final class HealthNotificationDeadlinePolicy
 {
+    /**
+     * ID se ZÁMĚRNĚ nebumpuje na `.v2`: pravidlo hromadného oznámení se nemění
+     * a migrace 1623 tímhle ID označkovala existující checklistové položky.
+     * Přejmenovat ho bez datové migrace by z nich udělalo odkazy na neexistující
+     * ruleset. Změnu pravidla nese `rulesetHash()`, který posun zahrnuje.
+     */
     public const RULESET_ID = 'cz-health-insurance-notification-deadlines.v1';
 
     private const BASIS_CALENDAR_DAYS = 'calendar_days';
@@ -29,9 +56,17 @@ final class HealthNotificationDeadlinePolicy
     private const NOTIFICATION_DAYS = 8;
     private const MONTHLY_DUE_DAY = 20;
 
+    /** Posun konce lhůty na nejbližší následující český pracovní den. */
+    public const SHIFT_WORKING_DAY = 'next_czech_working_day';
+    /** Lhůta, která se na pracovní den neposouvá. */
+    public const SHIFT_NONE = 'none';
+
     private const SOURCE_NOTIFICATION = '§ 10 zákona č. 48/1997 Sb.';
     private const SOURCE_PAYMENT_OVERVIEW =
         '§ 25 odst. 3 zákona č. 592/1992 Sb.';
+    private const SOURCE_WORKING_DAY_SHIFT =
+        '§ 40 odst. 1 písm. c) zákona č. 500/2004 Sb. '
+        . '(§ 26c zákona č. 592/1992 Sb.)';
     private const SOURCE_AGREEMENT_EXCEPTION =
         'metodika VZP k oznamovací povinnosti u dohod (DPP a DPČ)';
     private const SOURCE_PARENTAL_EXCEPTION =
@@ -109,18 +144,26 @@ final class HealthNotificationDeadlinePolicy
             );
         }
 
+        $statutoryDueOn = $this->twentiethOfNextMonth($periodEnd);
+
         return $this->window(
             $periodEnd->format('Y-m-d'),
-            $this->twentiethOfNextMonth($periodEnd),
+            CzechWorkingDays::shiftToWorkingDay(
+                new \DateTimeImmutable($statutoryDueOn),
+            )->format('Y-m-d'),
             self::SOURCE_PAYMENT_OVERVIEW,
             self::STATUTE_VERIFIED,
+            $statutoryDueOn,
+            self::SHIFT_WORKING_DAY,
+            self::SOURCE_WORKING_DAY_SHIFT,
         );
     }
 
     public function rulesetHash(): string
     {
         return hash('sha256', self::RULESET_ID . '|'
-            . self::NOTIFICATION_DAYS . '|' . self::MONTHLY_DUE_DAY);
+            . self::NOTIFICATION_DAYS . '|' . self::MONTHLY_DUE_DAY
+            . '|payment_overview_shift=' . self::SHIFT_WORKING_DAY);
     }
 
     private function window(
@@ -128,6 +171,9 @@ final class HealthNotificationDeadlinePolicy
         string $dueOn,
         string $source,
         string $sourceStatus,
+        ?string $statutoryDueOn = null,
+        string $dueShift = self::SHIFT_NONE,
+        ?string $shiftSource = null,
     ): HealthNotificationDeadlineWindow {
         return new HealthNotificationDeadlineWindow(
             earliestSubmissionOn: $earliest,
@@ -137,6 +183,9 @@ final class HealthNotificationDeadlinePolicy
             rulesetHash: $this->rulesetHash(),
             source: $source,
             sourceStatus: $sourceStatus,
+            statutoryDueOn: $statutoryDueOn ?? $dueOn,
+            dueShift: $dueShift,
+            shiftSource: $shiftSource,
         );
     }
 

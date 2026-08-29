@@ -338,13 +338,13 @@ final class GarnishmentCalculatorTest extends TestCase
                 'claim-a',
                 ClaimCategory::NonPriority,
                 1_000_000,
-                orderIssuedOn: '2021-12-31',
+                '2021-12-31',
             ),
             $this->statutoryClaim(
                 'claim-b',
                 ClaimCategory::NonPriority,
                 2_000_000,
-                orderIssuedOn: '2021-12-31',
+                '2021-12-31',
             ),
         ]);
 
@@ -356,13 +356,13 @@ final class GarnishmentCalculatorTest extends TestCase
                 'claim-b',
                 ClaimCategory::NonPriority,
                 2_000_000,
-                orderIssuedOn: '2021-12-31',
+                '2021-12-31',
             ),
             $this->statutoryClaim(
                 'claim-a',
                 ClaimCategory::NonPriority,
                 1_000_000,
-                orderIssuedOn: '2021-12-31',
+                '2021-12-31',
             ),
         ]);
         self::assertSame($result->toCanonicalJson(), $reverse->toCanonicalJson());
@@ -381,7 +381,67 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertSame(0, $result->allocationFor('other')?->secondPoolMinorUnits);
     }
 
-    public function testEmployerFeeIsTakenOnceFromFirstThirdForPost2021Order(): void
+    /**
+     * § 280 odst. 2 o. s. ř. uspokojuje z druhé třetiny bez zřetele na pořadí
+     * nejprve výživné, poté úplatu za postupované pohledávky výživného, poté
+     * postoupené výživné, poté náhradní výživné a teprve pak ostatní přednostní
+     * pohledávky. Do 8/2026 obě postupované skupiny číselník neznal a spadly do
+     * `other_priority`, tedy až za náhradní výživné (nález E-07).
+     */
+    public function testAssignedMaintenancePrecedesSubstituteMaintenanceInSecondPool(): void
+    {
+        $result = $this->calculate(4_200_000, [
+            $this->statutoryClaim('other', ClaimCategory::OtherPriority, 300_000, '2026-01-01'),
+            $this->statutoryClaim(
+                'substitute',
+                ClaimCategory::SubstituteMaintenance,
+                300_000,
+                '2026-01-02',
+                300_000,
+            ),
+            $this->statutoryClaim(
+                'assigned',
+                ClaimCategory::AssignedMaintenance,
+                300_000,
+                '2026-01-03',
+                300_000,
+            ),
+            $this->statutoryClaim(
+                'consideration',
+                ClaimCategory::AssignedMaintenanceConsideration,
+                300_000,
+                '2026-01-04',
+                300_000,
+            ),
+            $this->statutoryClaim(
+                'current',
+                ClaimCategory::CurrentMaintenance,
+                300_000,
+                '2026-01-05',
+                300_000,
+            ),
+        ]);
+
+        self::assertSame(GarnishmentStatus::Supported, $result->status);
+        // Druhá třetina je 929 900: první tři skupiny se uspokojí celé
+        // a na náhradní výživné zbyde jen zbytek. Ostatní přednostní pohledávka
+        // je z druhé třetiny až za nimi a nedostane nic.
+        self::assertSame(300_000, $result->allocationFor('current')?->secondPoolMinorUnits);
+        self::assertSame(300_000, $result->allocationFor('consideration')?->secondPoolMinorUnits);
+        self::assertSame(300_000, $result->allocationFor('assigned')?->secondPoolMinorUnits);
+        self::assertSame(
+            $result->thirdMinorUnits - 900_000,
+            $result->allocationFor('substitute')?->secondPoolMinorUnits,
+        );
+        self::assertSame(0, $result->allocationFor('other')?->secondPoolMinorUnits ?? 0);
+    }
+
+    /**
+     * O nároku na paušál rozhoduje den DORUČENÍ příkazu plátci mzdy, ne den
+     * jeho vydání (§ 282 odst. 1 a 3 o. s. ř.) — nález E-11. Příkaz vydaný
+     * ještě v roce 2021, ale doručený až po 1. 1. 2022, tedy nárok zakládá.
+     */
+    public function testEmployerFeeFollowsTheDeliveryDateNotTheIssueDate(): void
     {
         $result = $this->calculate(4_000_000, [
             $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),
@@ -391,11 +451,23 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertSame(858_200, $result->allocationFor('claim-1')?->firstPoolMinorUnits);
         self::assertSame(863_200, $result->totalWithheldMinorUnits);
 
+        $issuedBeforeButDeliveredAfter = $this->calculate(4_000_000, [
+            $this->statutoryClaim(
+                'claim-late-delivery',
+                ClaimCategory::NonPriority,
+                10_000_000,
+                '2022-01-03',
+                orderIssuedOn: '2021-12-31',
+            ),
+        ]);
+        self::assertSame(5_000, $issuedBeforeButDeliveredAfter->employerFlatFeeMinorUnits);
+
         $oldOrder = $this->calculate(4_000_000, [
             $this->statutoryClaim(
                 'claim-old',
                 ClaimCategory::NonPriority,
                 10_000_000,
+                '2021-12-31',
                 orderIssuedOn: '2021-12-31',
             ),
         ]);
@@ -1001,7 +1073,9 @@ final class GarnishmentCalculatorTest extends TestCase
         ]);
 
         self::assertSame(500_000, $result->allocationFor('earlier')?->firstPoolMinorUnits);
-        self::assertSame(363_200, $result->allocationFor('later')?->firstPoolMinorUnits);
+        // 363 200 minus 50 Kč paušálu (§ 270 odst. 3 o. s. ř.), který se
+        // krájí od konce pořadí uspokojování.
+        self::assertSame(358_200, $result->allocationFor('later')?->firstPoolMinorUnits);
     }
 
     public function testNewSnapshotReevaluatesAllocationsAfterOlderOrderArrives(): void
@@ -1023,7 +1097,7 @@ final class GarnishmentCalculatorTest extends TestCase
 
         $firstSnapshot = $this->calculate(4_000_000, [$middle, $latest]);
         self::assertSame(500_000, $firstSnapshot->allocationFor('middle')?->firstPoolMinorUnits);
-        self::assertSame(363_200, $firstSnapshot->allocationFor('latest')?->firstPoolMinorUnits);
+        self::assertSame(358_200, $firstSnapshot->allocationFor('latest')?->firstPoolMinorUnits);
 
         $secondSnapshot = $this->calculate(4_000_000, [
             $middle,
@@ -1037,7 +1111,7 @@ final class GarnishmentCalculatorTest extends TestCase
             ),
         ]);
         self::assertSame(500_000, $secondSnapshot->allocationFor('oldest')?->firstPoolMinorUnits);
-        self::assertSame(363_200, $secondSnapshot->allocationFor('middle')?->firstPoolMinorUnits);
+        self::assertSame(358_200, $secondSnapshot->allocationFor('middle')?->firstPoolMinorUnits);
         self::assertNull($secondSnapshot->allocationFor('latest'));
     }
 
@@ -1213,6 +1287,258 @@ final class GarnishmentCalculatorTest extends TestCase
         self::assertSame(['2026-01', '2026-02'], array_keys($results));
         self::assertSame(196_600, $results['2026-01']->totalWithheldMinorUnits);
         self::assertSame(196_600, $results['2026-02']->totalWithheldMinorUnits);
+    }
+
+    /**
+     * § 276 o. s. ř.: srážky lze provádět jen do výše vymáhané pohledávky.
+     * Doplatek rozpuštěný do tří měsíců proto NESMÍ téže pohledávce přidělit
+     * třikrát celý zůstatek — zůstatky se mezi obdobími snižují (nález E-04).
+     */
+    public function testBatchCarriesClaimBalancesBetweenPeriods(): void
+    {
+        $calculator = new GarnishmentBatchCalculator(
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
+        );
+        $outstanding = 300_000;
+        $results = $calculator->calculate([
+            // Záměrně v obráceném pořadí — přenos se řídí obdobím, ne vstupem.
+            $this->input(4_000_000, [
+                $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, $outstanding),
+            ], period: '2026-03'),
+            $this->input(4_000_000, [
+                $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, $outstanding),
+            ], period: '2026-01'),
+            $this->input(4_000_000, [
+                $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, $outstanding),
+            ], period: '2026-02'),
+        ]);
+
+        self::assertSame(['2026-01', '2026-02', '2026-03'], array_keys($results));
+
+        // Kapacita první třetiny je 863 200 v KAŽDÉM období. Dřív dostala
+        // pohledávka v každém z nich celý zůstatek 3 000 Kč, dohromady 9 000 Kč
+        // na dluh 3 000 Kč. Teď se zůstatek přenáší, takže se v prvním období
+        // srazí celý dluh a v dalších už jen to, co v něm ukrojil paušál.
+        $paid = [];
+        foreach ($results as $period => $result) {
+            self::assertSame(GarnishmentStatus::Supported, $result->status);
+            $paid[$period] = $result->allocationFor('claim-1')?->totalMinorUnits ?? 0;
+        }
+
+        self::assertSame($outstanding, $results['2026-01']->totalWithheldMinorUnits);
+        self::assertSame(295_000, $paid['2026-01']);
+        self::assertSame(5_000, $results['2026-02']->totalWithheldMinorUnits);
+        self::assertSame(3_300, $paid['2026-02']);
+        self::assertSame(1_700, $results['2026-03']->totalWithheldMinorUnits);
+        self::assertSame(1_100, $paid['2026-03']);
+        self::assertLessThan($outstanding, array_sum($paid));
+    }
+
+    /**
+     * Přenos snižuje zůstatek o částku, která oprávněnému SKUTEČNĚ došla —
+     * tedy po ukrojení paušální náhrady nákladů plátce mzdy (§ 270 odst. 3
+     * o. s. ř.). Paušál dluh neumořuje, patří zaměstnavateli.
+     */
+    public function testBatchDoesNotCreditTheEmployerFeeAgainstTheDebt(): void
+    {
+        $calculator = new GarnishmentBatchCalculator(
+            new GarnishmentCalculator(CzechPayrollRulesets2026::provider()),
+        );
+        $results = $calculator->calculate([
+            $this->input(2_000_000, [
+                $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 300_000),
+            ], period: '2026-01'),
+            $this->input(2_000_000, [
+                $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 300_000),
+            ], period: '2026-02'),
+        ]);
+
+        $first = $results['2026-01'];
+        self::assertSame(5_000, $first->employerFlatFeeMinorUnits);
+        self::assertSame(196_600, $first->totalWithheldMinorUnits);
+        $paidToCreditor = $first->allocationFor('claim-1')?->totalMinorUnits ?? 0;
+        self::assertSame(191_600, $paidToCreditor);
+
+        // Do dalšího období se přenese dluh snížený jen o to, co došlo
+        // oprávněnému — paušál si nechal zaměstnavatel a dluh neumořil.
+        self::assertSame(
+            300_000 - $paidToCreditor,
+            $results['2026-02']->totalWithheldMinorUnits,
+        );
+    }
+
+    /**
+     * § 4 nař. vlády č. 595/2006 Sb. žádá hodnoty ve výši platné k 1. lednu
+     * roku, do něhož připadá den výplaty. Sada s vnitroroční účinností tuhle
+     * podmínku splnit nemůže, takže se z ní nepočítá — měsíc jde na ruční
+     * posouzení místo tichého použití zakázaných hodnot (nález E-06).
+     */
+    public function testMidYearRulesetIsRefusedInsteadOfBeingUsed(): void
+    {
+        $shipped = EnforcementDeductionPolicy2026::shipped()->ruleset;
+        $version = new \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion(
+            $shipped->id,
+            $shipped->version,
+            $shipped->domain,
+            '2026-01-01',
+            '2026-06-30',
+            $shipped->lifecycle,
+            $shipped->capability,
+            $shipped->sources,
+            $shipped->parameters,
+            $shipped->approval,
+            $shipped->technicalReview,
+        );
+
+        $result = (new GarnishmentCalculator(
+            new \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider([$version]),
+        ))->calculate($this->input(
+            4_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            paymentDate: '2026-08-15',
+        ));
+
+        self::assertSame(GarnishmentStatus::ManualReview, $result->status);
+        self::assertSame(0, $result->totalWithheldMinorUnits);
+        self::assertContains(
+            'enforcement_ruleset_not_effective_for_whole_year',
+            $result->issues,
+        );
+    }
+
+    /**
+     * § 279 odst. 4 o. s. ř. mluví o NAŘÍZENÝCH výkonech rozhodnutí, ne
+     * o pohledávkách se zbytkem. Měsíc, kdy na jednu z pěti exekucí zrovna nic
+     * nezbývá, proto pravidlo čtyř exekucí nevypne (nález E-15).
+     */
+    public function testFourEnforcementRuleCountsOrderedExecutionsNotOutstandingOnes(): void
+    {
+        $claims = [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000, '2026-01-01'),
+            $this->statutoryClaim('claim-2', ClaimCategory::NonPriority, 10_000_000, '2026-01-02'),
+            $this->statutoryClaim('claim-3', ClaimCategory::NonPriority, 10_000_000, '2026-01-03'),
+            // Nařízená a doručená exekuce, na kterou v tomhle měsíci nic nezbývá.
+            $this->statutoryClaim('claim-4', ClaimCategory::NonPriority, 0, '2026-01-04'),
+        ];
+
+        $result = $this->calculate(4_000_000, $claims);
+
+        self::assertTrue($result->fourEnforcementRuleApplied);
+        self::assertSame(1_726_400, $result->totalWithheldMinorUnits);
+    }
+
+    /**
+     * Zastavená (neaktivní) exekuce se do počtu podle § 279 odst. 4 nepočítá —
+     * nařízená už není.
+     */
+    public function testStoppedEnforcementDoesNotCountTowardsTheFourEnforcementRule(): void
+    {
+        $claims = [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000, '2026-01-01'),
+            $this->statutoryClaim('claim-2', ClaimCategory::NonPriority, 10_000_000, '2026-01-02'),
+            $this->statutoryClaim('claim-3', ClaimCategory::NonPriority, 10_000_000, '2026-01-03'),
+        ];
+        $stopped = new DeductionClaim(
+            'claim-stopped',
+            DeductionLegalBasis::Statutory,
+            ClaimCategory::NonPriority,
+            10_000_000,
+            '2026-01-04',
+            legalTitleVerified: true,
+            orderOrNoticeDelivered: true,
+            orderIssuedOn: '2022-01-01',
+            priorityClassificationVerified: true,
+            dueMonetaryClaimVerified: true,
+            active: false,
+            enforcementOrderId: 'claim-stopped',
+        );
+
+        $result = $this->calculate(4_000_000, [...$claims, $stopped]);
+
+        self::assertFalse($result->fourEnforcementRuleApplied);
+    }
+
+    /**
+     * § 281 o. s. ř. — přes dvě třetiny zbytku a plně zabavitelnou část se
+     * srazit nesmí nic, ani vlastní chybou. Invariant hlídá výsledek sám,
+     * protože vzniká na několika cestách (nález E-16).
+     */
+    public function testResultRefusesWithholdingAboveTheStatutoryCeiling(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new \MyInvoice\Service\Payroll\Garnishment\GarnishmentResult(
+            '2026-06',
+            GarnishmentStatus::Supported,
+            4_000_000,
+            1_410_200,
+            863_200,
+            0,
+            0,
+            // 2 × 863 200 + 0 = 1 726 400 je strop; o korunu víc je § 281.
+            1_726_500,
+            4_000_000 - 1_726_500,
+            true,
+            false,
+            [new \MyInvoice\Service\Payroll\Garnishment\GarnishmentAllocation(
+                'claim-1',
+                1_726_500,
+                0,
+            )],
+            [],
+            [],
+            EnforcementDeductionPolicy2026::shipped()->rulesetId(),
+            EnforcementDeductionPolicy2026::shipped()->rulesetHash(),
+        );
+    }
+
+    /**
+     * ZAFIXOVANÉ VÝKLADOVÉ ROZHODNUTÍ, nikoli běžný regresní test.
+     *
+     * § 1 nař. vlády č. 595/2006 Sb. skládá nezabavitelnou částku z částky na
+     * povinného a čtvrtin na vyživované osoby; § 3 pak zaokrouhluje NAHORU
+     * „základní částku, která nesmí být povinnému sražena z měsíční mzdy",
+     * tedy až výsledný SOUČET. Kód to tak dělá — a rozchází se proto o 2 Kč
+     * s tabulkami, které zaokrouhlují každou čtvrtinu zvlášť (nález E-10).
+     *
+     * Tři vyživované osoby: 14 101,50 + 3 × 3 525,375 = 24 677,625 → 24 678 Kč.
+     * Zaokrouhlením po osobě by vyšlo 14 102 + 3 × 3 526 = 24 680 Kč.
+     *
+     * Reklamace na „chybějící dvě koruny" je proto očekávaná a odpověď na ni
+     * je tenhle test, ne oprava výpočtu.
+     */
+    public function testProtectedAmountRoundsUpOnlyOnceFromTheSumNotPerPerson(): void
+    {
+        $result = $this->calculate(
+            6_000_000,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+            eligibleDependants: 3,
+        );
+
+        self::assertSame(2_467_800, $result->protectedAmountMinorUnits);
+        self::assertNotSame(2_468_000, $result->protectedAmountMinorUnits);
+    }
+
+    /**
+     * ZAFIXOVANÉ VÝKLADOVÉ ROZHODNUTÍ (nález E-09): plně zabavitelný zbytek se
+     * počítá z NEZAOKROUHLENÉHO zbytku čisté mzdy. Zdůvodnění je v komentáři
+     * u výpočtu v {@see \MyInvoice\Service\Payroll\Garnishment\GarnishmentCalculator}.
+     *
+     * Zbytek 31 523 Kč (příjem 45 625 − nezabavitelná částka 14 102) je o 2 Kč
+     * nad hranicí 31 521 Kč. Doslovný výklad § 279 odst. 3 by zbytek nejdřív
+     * zaokrouhlil dolů na dělitelný třemi (31 521) a plně zabavitelná část by
+     * byla nula; tady jsou to 2 Kč.
+     */
+    public function testFullyAttachableExcessIsMeasuredFromTheUnroundedRemainder(): void
+    {
+        $result = $this->calculate(
+            4_562_500,
+            [$this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000)],
+        );
+
+        self::assertSame(1_410_200, $result->protectedAmountMinorUnits);
+        self::assertSame(200, $result->fullyAttachableExcessMinorUnits);
+        self::assertSame(1_050_700, $result->thirdMinorUnits);
     }
 
     /** @param list<DeductionClaim> $claims */

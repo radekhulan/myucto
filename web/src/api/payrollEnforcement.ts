@@ -18,9 +18,14 @@ export type EnforcementCaseCommand =
   | 'resume_remittance'
   | 'mark_paid'
   | 'stop'
+// Pořadí kopíruje § 280 odst. 2 o. s. ř.: nejprve výživné, poté úplata za
+// postupované pohledávky výživného, poté postoupené výživné, poté náhradní
+// výživné a teprve pak ostatní přednostní pohledávky.
 export type EnforcementClaimCategory =
   | 'current_maintenance'
   | 'maintenance_arrears'
+  | 'assigned_maintenance_consideration'
+  | 'assigned_maintenance'
   | 'substitute_maintenance'
   | 'other_priority'
   | 'non_priority'

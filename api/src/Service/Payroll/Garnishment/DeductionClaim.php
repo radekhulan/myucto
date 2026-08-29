@@ -35,6 +35,35 @@ final readonly class DeductionClaim
         }
     }
 
+    /**
+     * Táž pohledávka se sníženým zůstatkem. Používá
+     * {@see GarnishmentBatchCalculator}, aby se doplatek rozpuštěný do víc
+     * období nesrazil na týž dluh několikrát (§ 276 o. s. ř.).
+     */
+    public function withOutstanding(int $outstandingMinorUnits): self
+    {
+        if ($outstandingMinorUnits === $this->outstandingMinorUnits) {
+            return $this;
+        }
+
+        return new self(
+            $this->id,
+            $this->legalBasis,
+            $this->category,
+            $outstandingMinorUnits,
+            $this->priorityDate,
+            $this->legalTitleVerified,
+            $this->orderOrNoticeDelivered,
+            $this->orderIssuedOn,
+            $this->priorityClassificationVerified,
+            $this->agreementVerified,
+            $this->maintenanceWeightMinorUnits,
+            $this->dueMonetaryClaimVerified,
+            $this->active,
+            $this->enforcementOrderId,
+        );
+    }
+
     /** @return array<string,mixed> */
     public function toCanonicalArray(): array
     {

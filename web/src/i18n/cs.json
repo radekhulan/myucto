@@ -5974,6 +5974,8 @@
             "categories": {
                 "current_maintenance": "Běžné výživné",
                 "maintenance_arrears": "Dlužné výživné",
+                "assigned_maintenance_consideration": "Úplata za postoupené výživné",
+                "assigned_maintenance": "Postoupené výživné",
                 "substitute_maintenance": "Náhradní výživné",
                 "other_priority": "Jiná přednostní pohledávka",
                 "non_priority": "Nepřednostní pohledávka"

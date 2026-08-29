@@ -102,12 +102,16 @@ class PayrollDocumentService
         PayrollDocumentStorageScope $scope,
     ): void {
         try {
-            foreach ($scope->createdKeys() as $storageKey) {
+            foreach ($scope->createdEntries() as $entry) {
                 if ($this->documents->countByStorageKey(
                     $supplierId,
-                    $storageKey,
+                    $entry['storage_key'],
                 ) === 0) {
-                    $this->storage->delete($supplierId, $storageKey);
+                    $this->storage->delete(
+                        $supplierId,
+                        $entry['storage_key'],
+                        $entry['subject_id'],
+                    );
                 }
             }
         } finally {
@@ -250,6 +254,8 @@ class PayrollDocumentService
             $supplierId,
             $artifact->bytes,
             $storageScope,
+            $employeeId ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID,
+            $actorUserId,
         );
         return $this->documents->insertOrGet([
             'supplier_id' => $supplierId,
@@ -383,6 +389,8 @@ class PayrollDocumentService
             $supplierId,
             $artifact->bytes,
             $storageScope,
+            $employeeId ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID,
+            $actorUserId,
         );
         return $this->documents->insertOrGet([
             'supplier_id' => $supplierId,
@@ -428,7 +436,13 @@ class PayrollDocumentService
             $entries[] = new PayrollBundleEntry(
                 (int) $document['id'],
                 PayrollDocumentKind::from((string) $document['document_kind']),
-                $this->storage->readVerified($supplierId, (string) $document['storage_key']),
+                $this->storage->readVerified(
+                    $supplierId,
+                    (string) $document['storage_key'],
+                    (int) ($document['employee_scope_id']
+                        ?? $document['employee_id']
+                        ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID),
+                ),
                 (string) $document['file_sha256'],
                 (string) $document['mime_type'],
             );
@@ -567,6 +581,9 @@ class PayrollDocumentService
             'bytes' => $this->storage->readVerified(
                 $supplierId,
                 (string) $document['storage_key'],
+                (int) ($document['employee_scope_id']
+                    ?? $document['employee_id']
+                    ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID),
             ),
         ];
     }
@@ -680,6 +697,8 @@ class PayrollDocumentService
             $supplierId,
             $artifact->bytes,
             $storageScope,
+            $employeeId ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID,
+            $actorUserId,
         );
         return $this->documents->insertOrGet([
             'supplier_id' => $supplierId,

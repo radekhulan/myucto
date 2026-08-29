@@ -376,7 +376,7 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         $first = $this->buildSheet();
         $firstArchived = $this->archiveSheet($first);
         $firstKey = (string) $firstArchived['storage_key'];
-        $firstBytes = $this->storage->readVerified($this->supplierId, $firstKey);
+        $firstBytes = $this->storage->readVerified($this->supplierId, $firstKey, $this->employeeId);
 
         $manifest = json_decode(
             (string) $first['revision']['source_manifest_json'],
@@ -442,7 +442,7 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         // Původní PDF se nesmí hnout ani o bajt.
         self::assertSame(
             $firstBytes,
-            $this->storage->readVerified($this->supplierId, $firstKey),
+            $this->storage->readVerified($this->supplierId, $firstKey, $this->employeeId),
         );
         self::assertSame(
             $firstArchived['file_sha256'],
@@ -536,7 +536,7 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         );
         self::assertCount(1, $first);
         $key = (string) $first[0]['storage_key'];
-        $bytes = $this->storage->readVerified($this->supplierId, $key);
+        $bytes = $this->storage->readVerified($this->supplierId, $key, $this->employeeId);
         self::assertStringStartsWith('%PDF-', $bytes);
 
         // Zmrazená páska je v revizi ve schématu v2, hydrátor čte v1 i v2.
@@ -583,7 +583,7 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         self::assertSame((int) $first[0]['id'], (int) $second[0]['id']);
         self::assertSame(
             $bytes,
-            $this->storage->readVerified($this->supplierId, $key),
+            $this->storage->readVerified($this->supplierId, $key, $this->employeeId),
         );
     }
 
@@ -621,7 +621,7 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         self::assertSame($firstId, (int) $second[0]['supersedes_document_id']);
         self::assertSame(
             $firstBytes,
-            $this->storage->readVerified($this->supplierId, $firstKey),
+            $this->storage->readVerified($this->supplierId, $firstKey, $this->employeeId),
         );
 
         // Další dávka nad touž revizí a touž verzí vrací hotový doklad.
@@ -941,7 +941,12 @@ final class PayrollSheetDocumentLifecycleTest extends TestCase
         self::assertNotSame('', $revisionHash);
         self::assertNotSame('', $sourceHash);
 
-        $stored = $this->storage->store($this->supplierId, $bytes);
+        $stored = $this->storage->store(
+            $this->supplierId,
+            $bytes,
+            null,
+            $this->employeeId,
+        );
         $pdo->prepare(
             'INSERT INTO payroll_generated_documents
                 (supplier_id, run_id, revision_id, employee_id, document_kind,

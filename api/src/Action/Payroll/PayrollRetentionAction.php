@@ -377,6 +377,17 @@ final class PayrollRetentionAction
         return $this->transition($request, $response, $args, 'execute');
     }
 
+    /**
+     * Vzetí schválení zpět během odkladné lhůty (C-07). Půlka, bez které by
+     * byl odklad jen zdržením — omyl musí jít napravit dřív, než se provede.
+     *
+     * @param array{id:string} $args
+     */
+    public function revokeProposal(Request $request, Response $response, array $args): Response
+    {
+        return $this->transition($request, $response, $args, 'revoke');
+    }
+
     /** @param array{id:string} $args */
     private function transition(
         Request $request,
@@ -397,14 +408,27 @@ final class PayrollRetentionAction
             $result = match ($step) {
                 'approve' => $this->proposals->approve($supplierId, $proposalId, $userId, $ip, $userAgent),
                 'reject' => $this->proposals->reject($supplierId, $proposalId, $userId, $ip, $userAgent),
-                default => $this->proposals->execute($supplierId, $proposalId, $userId, $ip, $userAgent),
+                'revoke' => $this->proposals->revoke($supplierId, $proposalId, $userId, $ip, $userAgent),
+                default => $this->proposals->execute(
+                    $supplierId,
+                    $proposalId,
+                    $userId,
+                    $ip,
+                    $userAgent,
+                    self::confirmation($request),
+                ),
             };
         } catch (PayrollErasureException $e) {
             return Json::error(
                 $response,
                 $e->errorCode,
                 $e->getMessage(),
-                $e->errorCode === 'not_found' ? 404 : 409,
+                match ($e->errorCode) {
+                    'not_found' => 404,
+                    // Chybějící potvrzovací fráze je vada požadavku, ne stavu.
+                    'payroll_erasure_confirmation_required' => 422,
+                    default => 409,
+                },
             );
         }
 
@@ -466,6 +490,15 @@ final class PayrollRetentionAction
         }
 
         return $error;
+    }
+
+    /** Opsaná potvrzovací fráze z těla požadavku na provedení výmazu. */
+    private static function confirmation(Request $request): string
+    {
+        $body = $request->getParsedBody();
+        $value = is_array($body) ? ($body['confirmation'] ?? null) : null;
+
+        return is_string($value) ? $value : '';
     }
 
     private function clientIp(Request $request): string

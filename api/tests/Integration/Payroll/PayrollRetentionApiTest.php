@@ -290,6 +290,7 @@ final class PayrollRetentionApiTest extends TestCase
                 'POST',
                 '/api/payroll/retention/erasure/' . $proposalId . '/execute',
                 $this->erasureRole(AccessLevel::WRITE),
+                ['confirmation' => PayrollErasureProposalRepository::EXECUTE_CONFIRMATION],
             ),
             new Response(),
             ['id' => (string) $proposalId],
@@ -324,11 +325,28 @@ final class PayrollRetentionApiTest extends TestCase
             $this->rowCount('payroll_monthly_records', 'employee_id', $this->employeeId),
         );
 
+        // Sólo schválení otevře odkladnou lhůtu (W30 / C-07) — provést jde
+        // až po ní, a jen s opsanou potvrzovací frází.
+        $tooSoon = $this->action->executeProposal(
+            $this->roleRequest(
+                'POST',
+                '/api/payroll/retention/erasure/' . $proposalId . '/execute',
+                $this->erasureRole(AccessLevel::WRITE),
+                ['confirmation' => PayrollErasureProposalRepository::EXECUTE_CONFIRMATION],
+            ),
+            new Response(),
+            ['id' => (string) $proposalId],
+        );
+        self::assertSame(409, $tooSoon->getStatusCode());
+        self::assertSame('payroll_erasure_cooling_off', $this->errorOf($tooSoon)['code']);
+        $this->elapseCoolingOff($proposalId);
+
         $execute = $this->action->executeProposal(
             $this->roleRequest(
                 'POST',
                 '/api/payroll/retention/erasure/' . $proposalId . '/execute',
                 $this->erasureRole(AccessLevel::WRITE),
+                ['confirmation' => PayrollErasureProposalRepository::EXECUTE_CONFIRMATION],
             ),
             new Response(),
             ['id' => (string) $proposalId],
@@ -342,6 +360,16 @@ final class PayrollRetentionApiTest extends TestCase
     }
 
     // ── Pomocné ──────────────────────────────────────────────────────────────
+
+    /** Testovací ekvivalent uplynutí odkladné lhůty (W30 / C-07). */
+    private function elapseCoolingOff(int $proposalId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_erasure_proposals
+                SET executable_from = NOW() - INTERVAL 1 HOUR
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $proposalId]);
+    }
 
     private function expiredProposal(): int
     {

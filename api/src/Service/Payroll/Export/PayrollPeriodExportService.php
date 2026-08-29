@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Export;
 
 use MyInvoice\Repository\Payroll\PayrollPeriodExportRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Payroll\Document\PayrollDocumentKeyRing;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentStorage;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -430,8 +431,17 @@ final class PayrollPeriodExportService
             $fileHash = $this->stringField($document, 'file_sha256');
             $fileSize = $this->integerField($document, 'size_bytes');
             $mimeType = $this->stringField($document, 'mime_type');
+            // Subjekt (osoba, nebo 0 u dokumentu firmy) je od W30 součástí
+            // cesty i šifrovacího kontextu — bez něj se dokument nedešifruje.
+            $subjectId = (int) ($document['employee_scope_id']
+                ?? $document['employee_id']
+                ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID);
             $bytes = $completedPartBytes === null
-                ? $this->documents->readVerified($supplierId, $storageKey)
+                ? $this->documents->readVerified(
+                    $supplierId,
+                    $storageKey,
+                    $subjectId,
+                )
                 : $completedPartBytes('document', $documentId, $fileHash, $fileSize);
             $this->assertArchivedBytes(
                 $bytes,
@@ -584,7 +594,13 @@ final class PayrollPeriodExportService
     {
         foreach ($documents as $document) {
             if ($this->integerField($document, 'id') === $sourceId) {
-                return $this->documents->readVerified($supplierId, $this->stringField($document, 'storage_key'));
+                return $this->documents->readVerified(
+                    $supplierId,
+                    $this->stringField($document, 'storage_key'),
+                    (int) ($document['employee_scope_id']
+                        ?? $document['employee_id']
+                        ?? PayrollDocumentKeyRing::COMPANY_SUBJECT_ID),
+                );
             }
         }
         throw new \DomainException('Zdrojový dokument části exportu mezd nebyl nalezen.');

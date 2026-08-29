@@ -279,6 +279,66 @@ final class EmploymentExitSnapshotBuilder
     }
 
     /**
+     * Suchý běh datové části stavitele zápočtového listu — protějšek
+     * {@see AverageEarningsSnapshotBuilder::probe()}.
+     *
+     * Projde přesně ty fail-closed brány, které NEZÁVISÍ na obsahu formuláře:
+     * existenci a čitelnost zdrojů, přípustnost druhu vztahu a ledger
+     * pokračujících srážek. Brány závislé na vyplněném podkladu (shoda evidence
+     * se srážkami, důvod opravy, intervaly pracovních kategorií) tu nejsou —
+     * ty jde posoudit až proti odeslanému formuláři a `readiness()` o nich nic
+     * tvrdit nesmí.
+     *
+     * Bez tohohle běhu hlásila `readiness()` u zápočtového listu natvrdo
+     * `available: true` a uživatel se o fail-closed bráně dozvěděl až z 422 po
+     * vyplnění celého formuláře.
+     *
+     * @return list<int> ID pokračujících srážek, které do listu patří
+     */
+    public function probe(int $supplierId, int $employmentId): array
+    {
+        if (!$this->db->pdo()->inTransaction()) {
+            throw new \LogicException(
+                'Suchý běh výstupního snapshotu vyžaduje aktivní transakci.',
+            );
+        }
+        if ($supplierId <= 0 || $employmentId <= 0) {
+            throw new \InvalidArgumentException(
+                'Identita výstupního potvrzení není platná.',
+            );
+        }
+        $sources = $this->revisions->lockCertificateSources(
+            $supplierId,
+            $employmentId,
+        );
+        $relationType = EmploymentExitRelationshipPolicy::documentKind(
+            self::text($sources['employment'], 'relation_type'),
+        );
+        $claims = $this->revisions->lockContinuingDeductionClaims(
+            $supplierId,
+            self::positiveInt($sources['employee'], 'id'),
+            self::text($sources['employment'], 'end_date'),
+        );
+        // U DPP je jediný podporovaný důvod vydání „srážky ze mzdy"
+        // (`sickness_insurance` je fail-closed), takže prázdný ledger znamená,
+        // že list nepůjde vydat bez ohledu na to, co uživatel vyplní.
+        if ($relationType === 'dpp' && $claims === []) {
+            throw new EmploymentExitReadinessException(
+                'dpp_wage_deduction_missing',
+                'Důvod vydání pro DPP neodpovídá žádné pokračující srážce.',
+            );
+        }
+        // Snapshot zaměstnavatele je společná fail-closed brána generování —
+        // chybějící nebo nečitelné údaje firmy shodí i zápočtový list.
+        ($this->employers)($supplierId);
+
+        return array_map(
+            static fn (array $claim): int => self::positiveInt($claim, 'id'),
+            $claims,
+        );
+    }
+
+    /**
      * @param list<array<string,mixed>> $claims
      * @param list<array{source_claim_id:int,beneficiary:string,ordering_authority:string,decision_reference:string}> $evidence
      * @return list<EmploymentCertificateDeduction>

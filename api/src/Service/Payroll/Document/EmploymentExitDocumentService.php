@@ -177,6 +177,22 @@ final class EmploymentExitDocumentService
      * nikdy netvrdí „lze vydat" tam, kde by generování spadlo na fail-closed
      * bráně, a naopak.
      *
+     * ── Proč se dokumenty posuzují každý zvlášť ────────────────────────────
+     * Dřív se všechny tři zjišťovaly v JEDNOM try/catch a zápočtový list se
+     * navíc vůbec nesondoval (vracel natvrdo `available: true`). Mělo to dvě
+     * důsledky, oba na úkor člověka, který právě skončil:
+     *
+     * - Zápočtový list se tvářil vždycky dostupný a fail-closed brána se
+     *   ozvala až 422 po vyplnění celého formuláře.
+     * - Vada v EXEKUČNÍM LEDGERU (podklad jen pro zápočtový list, § 313
+     *   odst. 1 ZP) zablokovala i potvrzení o průměrném výdělku pro Úřad
+     *   práce (§ 313 odst. 2 ZP). Člověk tak kvůli nesouvisející vadě
+     *   nedostal podklad pro dávku v nezaměstnanosti.
+     *
+     * Proto se sonduje každý dokument vlastní branou. Společná zůstává jen
+     * ta část, bez které nemá smysl žádný z nich — vztah se musí dát načíst
+     * a jeho druh musí být pro výstupní dokumenty přípustný.
+     *
      * @return array{
      *   employment_certificate:array{
      *     available:bool,
@@ -219,20 +235,24 @@ final class EmploymentExitDocumentService
             EmploymentExitRelationshipPolicy::documentKind(
                 self::text($sources['employment'], 'relation_type'),
             );
-            $claims = $this->revisions->lockContinuingDeductionClaims(
-                $supplierId,
-                self::positiveInt($sources['employee'], 'id'),
-                self::text($sources['employment'], 'end_date'),
-            );
-            $certificate = [
-                'available' => true,
-                'readiness_code' => null,
-                'deduction_claim_ids' => array_map(
-                    static fn (array $claim): int =>
-                        self::positiveInt($claim, 'id'),
-                    $claims,
-                ),
-            ];
+            // Sonda zápočtového listu je oddělená: její selhání (typicky vada
+            // v exekučním ledgeru) nesmí zhasnout potvrzení pro Úřad práce.
+            try {
+                $certificate = [
+                    'available' => true,
+                    'readiness_code' => null,
+                    'deduction_claim_ids' => $this->builder->probe(
+                        $supplierId,
+                        $employmentId,
+                    ),
+                ];
+            } catch (EmploymentExitReadinessException $exception) {
+                $certificate = [
+                    'available' => false,
+                    'readiness_code' => $exception->readinessCode,
+                    'deduction_claim_ids' => [],
+                ];
+            }
             $end = new \DateTimeImmutable(
                 self::text($sources['employment'], 'end_date'),
             );
