@@ -693,24 +693,40 @@ final class Bootstrap
             // o žádné knihovně ani bráně neví a vědět nesmí.
             //
             // ── Fail-closed rozcestník ──────────────────────────────────────
-            // Je-li zaregistrovaná a zapnutá odesílací brána VČETNĚ certifikátu,
+            // Nahoře stojí `SessionAwareIsdsTransport`. Ten rozhoduje až za
+            // běhu, podle KONKRÉTNÍHO volání: nese-li `ChannelContext` živou
+            // relaci, kterou člověk právě potvrdil v Mobilním klíči (nebo SMS
+            // kódem), jde úkon přímo do ISDS přes `DirectIsdsInboxTransport`.
+            // Nově se tou cestou i ODESÍLÁ — souhlas člověka je u Mobilního
+            // klíče součástí přihlášení, takže odeslání v takové relaci není
+            // strojové odeslání za zády účetní, ale její vlastní úkon. Relace
+            // do kontejneru nikdy nedorazí, proto se to nedá rozhodnout tady.
+            //
+            // Bez takové relace se jede náhradní cestou a ta je beze změny:
+            // je-li zaregistrovaná a zapnutá odesílací brána VČETNĚ certifikátu,
             // bindne se `GatewayIsdsTransport`. Ten neodesílá (nemůže — mezi
             // přípravou a odesláním stojí člověk, viz jeho docblock), ale říká
             // pravdu o tom, kudy cesta ven vede a že po bráně NEVEDE čtení
             // schránky. Jinak zůstává `UnavailableIsdsTransport`: nenastavená
             // instalace nesmí spadnout, ale musí hlásit srozumitelnou překážku.
             //
-            // Rozhodnutí ovlivňuje jen TEXT překážky. Povolení cokoliv odeslat
-            // dává až `IsdsGatewayRegistrationService::load()` v okamžiku
-            // odesílání — a ten hází pojmenované chyby.
+            // Volba náhradní cesty ovlivňuje jen TEXT překážky. Povolení
+            // cokoliv odeslat dává až `IsdsGatewayRegistrationService::load()`
+            // v okamžiku odesílání, resp. u přímé cesty kontrola živé relace
+            // v `DirectIsdsInboxTransport::assertConfirmedSession()` — obojí
+            // hází pojmenované chyby.
             \MyInvoice\Service\Submission\Channel\Isds\IsdsTransport::class => function (ContainerInterface $c) {
                 $registrations = $c->get(
                     \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class,
                 );
-
-                return \MyInvoice\Service\Submission\Channel\Isds\Gateway\GatewayIsdsTransport::isConfigured($registrations)
+                $fallback = \MyInvoice\Service\Submission\Channel\Isds\Gateway\GatewayIsdsTransport::isConfigured($registrations)
                     ? $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\GatewayIsdsTransport::class)
                     : $c->get(\MyInvoice\Service\Submission\Channel\Isds\UnavailableIsdsTransport::class);
+
+                return new \MyInvoice\Service\Submission\Channel\Isds\SessionAwareIsdsTransport(
+                    $c->get(\MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport::class),
+                    $fallback,
+                );
             },
 
             // Testovací šev registrace brány — bez něj by se `GatewayIsdsTransport`

@@ -37,8 +37,23 @@ final readonly class IsdsChannel implements SubmissionChannel, SubmissionInboxCh
 {
     public const CODE = 'isds';
 
-    /** Stavy ISDS, od kterých je zpráva prokazatelně doručená. */
-    private const DELIVERED_STATES = ['DELIVERED', 'READ', 'UNDELIVERABLE_READ', 'IN_SAFE', 'IN_ARCHIVE'];
+    /**
+     * Stavy ISDS, od kterých je zpráva prokazatelně doručená.
+     *
+     * `SUBSTITUTED` (doručení fikcí podle § 17 odst. 4) a `RECEIVED` (doručení
+     * přihlášením podle § 17 odst. 3) tu původně chyběly, přestože jsou to
+     * právě ty dva stavy, které doručení zakládají. Bez nich by podání zůstalo
+     * viset v „odesláno, doručenka nedorazila" i po skutečném doručení.
+     */
+    private const DELIVERED_STATES = [
+        'DELIVERED',
+        'SUBSTITUTED',
+        'RECEIVED',
+        'READ',
+        'UNDELIVERABLE_READ',
+        'IN_SAFE',
+        'IN_ARCHIVE',
+    ];
 
     public function __construct(private IsdsTransport $transport) {}
 
