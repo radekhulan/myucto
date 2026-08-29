@@ -1124,8 +1124,20 @@ async function approveAllInputs() {
   }
 }
 
+/**
+ * Zrušení vstupu POJMENUJE, koho a čeho se týká.
+ *
+ * Undo toast tu nejde: zrušený vstup server neobnoví a založit ho znovu by
+ * narazilo na `external_id` původního řádku, který v evidenci zůstává.
+ * Dotaz proto zůstává, ale s osobou, složkou a obdobím — nad seznamem
+ * padesáti vstupů „Opravdu zrušit?" neříká nic.
+ */
 async function cancelInput(input: PayrollInput) {
-  if (!window.confirm(t('payroll.components.inputs.cancel_confirm'))) return
+  if (!window.confirm(t('payroll.components.inputs.cancel_confirm', {
+    name: input.employee_name,
+    component: input.component_name,
+    period: input.period_start.slice(0, 7),
+  }))) return
   inputError.value = ''
   saving.value = true
   try {

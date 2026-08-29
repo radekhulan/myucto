@@ -220,17 +220,41 @@ final class AutomaticLeaveEntitlementService
             }
         }
 
-        $timeEntries = array_values(array_filter(
-            $this->approvedTimeEntries($supplierId, (int) $employment['id'], $start, $end),
-            static fn (array $entry): bool => isset(
-                $approvedPeriods[substr((string) $entry['starts_at_utc'], 0, 7) . '-01'],
-            ),
-        ));
+        // `requiredMonths` žádá schválení jen u měsíců, které se do období
+        // vešly CELÉ — u vztahu končícího 15. června se tedy červen nevyžaduje.
+        // Filtr níž ale odpracovanou dobu bere výhradně ze schválených měsíců,
+        // takže hodiny odpracované v tom posledním neúplném měsíci bez jediného
+        // slova zmizely a nárok na dovolenou vyšel nižší. Ticho je tu horší než
+        // překážka: účetní nemá jak poznat, že se počítalo z menšího základu.
+        //
+        // Blokátor se proto zvedá podle SKUTEČNÝCH dat, ne podle kalendáře —
+        // existuje-li schválený docházkový záznam v měsíci bez schválené
+        // docházky, výpočet se zastaví. Neúplný měsíc BEZ záznamů nikoho
+        // neblokuje, takže se průběžný výpočet uprostřed měsíce nerozbije.
+        $allTimeEntries = $this->approvedTimeEntries($supplierId, (int) $employment['id'], $start, $end);
+        $timeEntries = [];
+        foreach ($allTimeEntries as $entry) {
+            $period = substr((string) $entry['starts_at_utc'], 0, 7) . '-01';
+            if (isset($approvedPeriods[$period])) {
+                $timeEntries[] = $entry;
+                continue;
+            }
+            $blockers['approved_time_month_missing'] = true;
+        }
         $workedMinutes = array_sum(array_column($timeEntries, 'minutes'));
         $approvedAbsences = $this->approvedAbsences($supplierId, (int) $employment['id'], $start, $end);
         $substituteMinutes = 0;
         $absenceSources = [];
         foreach ($approvedAbsences as $absence) {
+            // Neomluvené zameškání není podle § 348 odst. 1 výkon práce ani
+            // podle § 216 odst. 2 započitatelná překážka — nemá tedy do
+            // odpracované doby přinést nic, a přesto se o něm nedá říct, že by
+            // potřebovalo právní posouzení. Odpovídá se na něj nulou, ne
+            // překážkou. (Krácení dovolené za ně řeší § 223 odst. 1 samostatně
+            // v knize dovolené, ne tady.)
+            if ($absence['absence_type'] === 'unexcused') {
+                continue;
+            }
             if ($absence['absence_type'] !== 'vacation') {
                 $blockers['absence_legal_assessment_required'] = true;
                 continue;

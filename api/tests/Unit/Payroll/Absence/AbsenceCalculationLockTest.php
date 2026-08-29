@@ -18,22 +18,39 @@ use PHPUnit\Framework\TestCase;
  */
 final class AbsenceCalculationLockTest extends TestCase
 {
-    /** @return iterable<string,array{string,int,list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>,int,int}> */
+    /**
+     * ⚠ Zámek u DPN se VĚDOMĚ posunul (W28 / V-12). Do té doby se zaokrouhlovalo
+     * matematicky (HalfUp) na haléře, a to PER SMĚNU. To odporovalo § 142 odst. 2
+     * ZP ve spojení s § 144 („Mzda nebo plat se zaokrouhlují na celé koruny
+     * směrem nahoru." — přes § 144 i na náhradu mzdy): vznikal systematický
+     * nedoplatek a haléřová částka, kterou nelze vyplatit.
+     *
+     * Nové hodnoty jsou proto vždy NAHORU a vždy v celých korunách; redukovaný
+     * hodinový výdělek je jen položka do stopy výpočtu (§ 192 odst. 2 ZP jeho
+     * zaokrouhlení vůbec neupravuje) a aritmetika běží na přesném zlomku.
+     *
+     * Kontrolní srovnání starých a nových hodnot:
+     * 15 432 → 15 500 · 174 869 → 174 900 · 335 637 → 335 700 ·
+     * 51 222 → 51 300 · 678 345 → 678 400. Všechny rozdíly jsou pod 1 Kč
+     * a ve prospěch zaměstnance.
+     *
+     * @return iterable<string,array{string,int,list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>,int,int}>
+     */
     public static function sicknessCases(): iterable
     {
         yield 'první redukční hranice, jedna hodina' => [
             '2026-06-15',
             28_578,
             [self::segment(10, '2026-06-15', 60, 60)],
-            25_720,
-            15_432,
+            25_721,
+            15_500,
         ];
         yield 'všechna tři pásma, osmihodinová směna' => [
             '2026-06-15',
             50_000,
             [self::segment(11, '2026-06-15', 480, 480)],
             36_431,
-            174_869,
+            174_900,
         ];
         yield 'tři směny včetně částečně započitatelné' => [
             '2026-01-01',
@@ -43,23 +60,52 @@ final class AbsenceCalculationLockTest extends TestCase
                 self::segment(2, '2026-01-02', 450, 225),
                 self::segment(3, '2026-01-03', 300, 7),
             ],
-            47_140,
-            335_637,
+            47_141,
+            335_700,
         ];
         yield 'nízký průměr pod první hranicí, směna bez ID' => [
             '2026-12-31',
             12_345,
             [self::segment(null, '2026-12-31', 461, 461)],
             11_111,
-            51_222,
+            51_300,
         ];
         yield 'průměr na třetí hranici' => [
             '2026-03-09',
             85_698,
             [self::segment(7, '2026-03-09', 1_440, 1_439)],
-            47_140,
-            678_345,
+            47_141,
+            678_400,
         ];
+    }
+
+    /**
+     * § 142 odst. 2 ve spojení s § 144 ZP: náhrada mzdy se zaokrouhluje na celé
+     * koruny NAHORU. Haléřová částka je nevyplatitelná, a zaokrouhlení dolů
+     * (nebo matematické) by bylo krácení bez opory v zákoně.
+     *
+     * @param list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}> $segments
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('sicknessCases')]
+    public function testDpnCompensationIsWholeCrownsRoundedUp(
+        string $date,
+        int $averageHourlyMinor,
+        array $segments,
+        int $expectedReducedHourlyMinor,
+        int $expectedCompensationMinor,
+    ): void {
+        $result = (new SicknessCompensationCalculator(
+            CzechPayrollRulesets2026::provider(),
+        ))->calculate($date, $averageHourlyMinor, $segments);
+
+        self::assertSame(0, $result->compensationMinor % 100);
+        self::assertSame('ceil-to-czk-on-period-total', $result->trace['compensation_rounding']);
+        // Zaokrouhluje se nahoru, tedy nikdy o víc než o korunu.
+        $exactUpperBound = $expectedCompensationMinor;
+        $exactLowerBound = $expectedCompensationMinor - 100;
+        self::assertGreaterThan($exactLowerBound, $result->compensationMinor);
+        self::assertLessThanOrEqual($exactUpperBound, $result->compensationMinor);
+        self::assertSame($expectedReducedHourlyMinor, $result->reducedHourlyMinor);
     }
 
     /**

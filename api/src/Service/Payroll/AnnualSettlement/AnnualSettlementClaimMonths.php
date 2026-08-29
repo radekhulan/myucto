@@ -30,6 +30,32 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
  * nepočítá.
  *
  * ─────────────────────────────────────────────────────────────────────────────
+ * Interval evidence je interval PODMÍNEK, ne trvání zaměstnání
+ * ─────────────────────────────────────────────────────────────────────────────
+ * `effective_from` / `effective_to` v `payroll_person_tax_credit_claims` NESMÍ
+ * nést datum nástupu ani výstupu. Nese datum, od kdy (a do kdy) byly splněné
+ * podmínky nároku — u invalidity den přiznání invalidního důchodu, u ZTP/P
+ * platnost průkazu. § 35ba odst. 3 na trvání pracovního poměru u plátce nijak
+ * nenavazuje:
+ *
+ *   „Poplatník může uplatnit slevu na dani podle odstavce 1 písm. b) až e)
+ *   o částku ve výši jedné dvanáctiny za každý kalendářní měsíc, na jehož
+ *   počátku byly podmínky pro uplatnění nároku na slevu na dani splněny."
+ *
+ * Zaměstnanec, který nastoupil 1. července a invalidní důchod pobírá od ledna,
+ * má proto v ročním zúčtování DVANÁCT dvanáctin slevy na invaliditu, ne šest.
+ * Klíčové proto je, co se do intervalu zapíše: ořezat ho datem nástupu (ať už
+ * v UI, v importu, nebo dodatečným ořezem v tomhle kódu) by z ročního zúčtování
+ * ukrojilo částku, na kterou poplatník nárok má. Interval se tu tedy VĚDOMĚ
+ * nijak neprotíná s obdobím zaměstnání — na rozdíl od prohlášení a rezidentství
+ * ({@see AnnualSettlementEvidenceMonths}), kde je vazba na plátce naopak
+ * pojmovým znakem.
+ *
+ * Základní slevu na poplatníka [§ 35ba odst. 1 písm. a)] dvanáctinování NEBERE
+ * vůbec — odstavec 3 ji ve výčtu nemá. Proto je ve výsledku vedená jako
+ * `prorated = false`.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
  * Fail-closed
  * ─────────────────────────────────────────────────────────────────────────────
  * Nedoložený nárok (§ 38l) se NEPOČÍTÁ ani jako nula — vrací se překážka.

@@ -76,6 +76,17 @@ final readonly class ExternalEmployerTaxCertificate implements JsonSerializable
         public ?string $payerTaxIdentification = null,
         /** § 38ch odst. 3 věta druhá — do 15. února po uplynutí zdaňovacího období. */
         public ?string $receivedOn = null,
+        /**
+         * Tiskopis „za období od“ — začátek zaměstnání u předchozího plátce.
+         *
+         * § 38ch odst. 1 i § 38g odst. 2 mluví o plátcích „POSTUPNĚ“. Bez
+         * období nejde poznat, jestli plátci šli za sebou, nebo se překrývali —
+         * a překryv znamená povinnost podat přiznání a zákaz zúčtování.
+         * `null` proto znamená „nevíme“, ne „souběh nebyl“.
+         */
+        public ?string $employmentFrom = null,
+        /** Tiskopis „za období do“; `null` u vztahu, který k 31. 12. trval. */
+        public ?string $employmentTo = null,
     ) {
         if (trim($certificateReference) === '') {
             throw new InvalidArgumentException('External tax certificate reference must not be empty.');
@@ -91,6 +102,37 @@ final readonly class ExternalEmployerTaxCertificate implements JsonSerializable
                 'External tax certificate receipt date must be an ISO date.',
             );
         }
+        foreach ([$employmentFrom, $employmentTo] as $date) {
+            if ($date !== null && preg_match('~^\d{4}-\d{2}-\d{2}$~', $date) !== 1) {
+                throw new InvalidArgumentException(
+                    'External tax certificate employment period must use ISO dates.',
+                );
+            }
+        }
+        if ($employmentFrom !== null && $employmentTo !== null && $employmentTo < $employmentFrom) {
+            throw new InvalidArgumentException(
+                'External tax certificate employment period must not end before it starts.',
+            );
+        }
+    }
+
+    /**
+     * Překrývá se zaměstnání u tohohle plátce se zaměstnáním u jiného?
+     *
+     * `null` = nevíme, protože aspoň jedno z potvrzení období nenese. Rozdíl
+     * proti `false` je podstatný: `false` znamená „plátci šli postupně“, `null`
+     * znamená „z podkladu to nejde říct“.
+     */
+    public function overlapsPeriodOf(self $other, int $taxYear): ?bool
+    {
+        if ($this->employmentFrom === null || $other->employmentFrom === null) {
+            return null;
+        }
+        $yearEnd = sprintf('%04d-12-31', $taxYear);
+        $thisTo = $this->employmentTo ?? $yearEnd;
+        $otherTo = $other->employmentTo ?? $yearEnd;
+
+        return $this->employmentFrom <= $otherTo && $other->employmentFrom <= $thisTo;
     }
 
     /**
@@ -133,6 +175,8 @@ final readonly class ExternalEmployerTaxCertificate implements JsonSerializable
             'payer_name' => $this->payerName,
             'payer_tax_identification' => $this->payerTaxIdentification,
             'received_on' => $this->receivedOn,
+            'employment_from' => $this->employmentFrom,
+            'employment_to' => $this->employmentTo,
             'gross_income_minor_units' => $this->grossIncomeMinorUnits,
             'advance_base_minor_units' => $this->advanceBaseMinorUnits,
             'advance_tax_minor_units' => $this->advanceTaxMinorUnits,

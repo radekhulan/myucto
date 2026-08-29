@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
   type PayrollEmployerSettings,
@@ -31,6 +32,8 @@ type SubmissionTab =
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 // „Co jsem odeslal a jak to dopadlo" je nejčastější důvod, proč se sem někdo
 // podívá — proto je stav odeslání první záložka a zároveň ta výchozí. Připravit
 // registraci nebo hlášení je jednorázový úkon, sledovat výsledek úkon opakovaný.
@@ -75,7 +78,6 @@ const snapshotsPage = computed(() =>
 // vrátilo do produkce.
 const environment = ref<PayrollRegzelEnvironment>('production')
 const officeId = ref<number | null>(null)
-const evidenceConfirmed = ref(false)
 const error = ref('')
 const success = ref('')
 
@@ -176,13 +178,17 @@ function newIdempotencyKey(): string {
   return `regzel-${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
 
+/**
+ * Příprava XML NEPOTVRZUJE evidenci podruhé.
+ *
+ * Správnost údajů se stvrzuje jednou — při uložení profilu, kde se zapíše
+ * `evidence_confirmed_at`. Příprava jen čte tentýž profil, takže zaškrtávací
+ * box tady stvrzoval už jednou stvrzený fakt a přidával krok navíc před každým
+ * odesláním. Nahradila ho pasivní věta „Profil potvrzen dne …" nad formulářem.
+ */
 async function prepare() {
   error.value = ''
   success.value = ''
-  if (!evidenceConfirmed.value) {
-    error.value = t('payroll.regzel.prepare.confirmation_required')
-    return
-  }
   if (!profile.value?.is_complete) {
     error.value = t('payroll.regzel.prepare.profile_required')
     return
@@ -197,10 +203,8 @@ async function prepare() {
     const snapshot = await payrollApi.prepareRegzel({
       office_id: officeId.value,
       environment: environment.value,
-      evidence_confirmed: true,
       idempotency_key: newIdempotencyKey(),
     })
-    evidenceConfirmed.value = false
     success.value = snapshot.created
       ? t('payroll.regzel.prepare.created')
       : t('payroll.regzel.prepare.replayed')
@@ -230,7 +234,6 @@ function readableBytes(bytes: number): string {
 }
 
 watch(environment, async () => {
-  evidenceConfirmed.value = false
   success.value = ''
   // Jiné prostředí = jiný seznam, takže stránka musí zpět na začátek.
   snapshotsOffset.value = 0
@@ -250,6 +253,42 @@ async function loadInboxBadge() {
   }
 }
 
+/**
+ * Záložka je součást adresy (`/payroll/submissions/:tab`).
+ *
+ * Deset záložek jsou fakticky deset obrazovek: bez adresy na ně nešlo odkázat
+ * ani je uložit do záložek a refresh vracel uživatele na Transport. Neznámý
+ * `:tab` (zastaralý odkaz, překlep) se překlopí na výchozí záložku místo
+ * prázdné stránky.
+ *
+ * Používá se `replace`, ne `push`: přepínání záložek není navigace mezi
+ * stránkami a nemá zaplevelit tlačítko Zpět.
+ */
+function tabFromRoute(value: unknown): SubmissionTab | null {
+  const raw = Array.isArray(value) ? value[0] : value
+  return tabs.includes(raw as SubmissionTab) ? raw as SubmissionTab : null
+}
+
+const routedTab = tabFromRoute(route.params.tab)
+if (routedTab !== null) activeTab.value = routedTab
+
+watch(activeTab, (tab) => {
+  if (tabFromRoute(route.params.tab) === tab) return
+  void router.replace({ name: 'payroll-submissions-tab', params: { tab } })
+})
+
+watch(() => route.params.tab, (value) => {
+  const tab = tabFromRoute(value)
+  if (tab !== null && tab !== activeTab.value) activeTab.value = tab
+})
+
+onMounted(() => {
+  // Zastaralý odkaz na neexistující záložku se srovná hned po připojení, aby
+  // adresa neukazovala na něco jiného, než co je vidět.
+  if (route.name === 'payroll-submissions-tab' && tabFromRoute(route.params.tab) === null) {
+    void router.replace({ name: 'payroll-submissions-tab', params: { tab: activeTab.value } })
+  }
+})
 onMounted(load)
 onMounted(loadInboxBadge)
 </script>
@@ -457,21 +496,6 @@ onMounted(loadInboxBadge)
             />
           </label>
         </div>
-
-        <label
-          v-if="canWrite"
-          class="mt-5 flex cursor-pointer items-start gap-3 rounded-lg border border-payroll-500/30 bg-payroll-50 p-4"
-        >
-          <input
-            v-model="evidenceConfirmed"
-            data-test="regzel-prepare-confirmation"
-            type="checkbox"
-            class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500"
-          >
-          <span class="text-sm text-neutral-700">
-            {{ t('payroll.regzel.prepare.confirmation') }}
-          </span>
-        </label>
 
         <div class="mt-5 flex flex-wrap justify-end gap-2">
           <button

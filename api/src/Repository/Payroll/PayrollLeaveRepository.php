@@ -22,6 +22,7 @@ final class PayrollLeaveRepository
         private readonly Connection $db,
         private readonly PayrollLeaveLedgerDeletionRepository $ledgerDeletion,
         private readonly PayrollLeaveEntitlementDeletionRepository $entitlementDeletion,
+        private readonly PayrollAbsenceRepository $absences,
     ) {}
 
     /** @return list<array<string,mixed>> */
@@ -177,9 +178,43 @@ final class PayrollLeaveRepository
     }
 
     /**
-     * Pojistka § 223 odst. 2 ZP — po krácení musí zaměstnanci, jehož pracovní
-     * poměr trval po celý kalendářní rok, zůstat dovolená aspoň v délce dvou
-     * týdnů.
+     * Pojistky § 223 ZP pro krácení dovolené.
+     *
+     * ─────────────────────────────────────────────────────────────────────────
+     * Odstavec 1 — DŮVOD a ROZSAH krácení
+     * ─────────────────────────────────────────────────────────────────────────
+     * „Zaměstnavatel může dovolenou krátit jen za neomluveně zameškanou směnu,
+     * a to o počet neomluveně zameškaných hodin; neomluvená zameškání kratších
+     * částí jednotlivých směn lze sčítat."
+     *
+     * Krácení je tedy shora omezené počtem hodin, které zaměstnanec neomluveně
+     * zameškal — ne úvahou účetní. Modul to donedávna vynutit nemohl, protože
+     * `payroll_absences.absence_type` hodnotu pro neomluvenou nepřítomnost
+     * neměl; přidala ji migrace 1636. Rozsah se počítá z PUBLIKOVANÝCH SMĚN
+     * schválených absencí typu `unexcused` — tedy z těch hodin, které měl
+     * zaměstnanec podle rozvrhu odpracovat a neodpracoval. Částečné zameškání
+     * nese absence přes `partial_first_minutes` / `partial_last_minutes`
+     * a sčítá se, přesně jak žádá věta za středníkem.
+     *
+     * Není-li neomluvená absence evidovaná vůbec, krátit nelze. Je to
+     * fail-closed záměrně: § 348 odst. 3 svěřuje určení, co je neomluvené
+     * zameškání, zaměstnavateli po projednání s odborovou organizací — je to
+     * právní úkon, který má být zapsaný, ne dopočítaný ze záporného čísla
+     * v knize dovolené.
+     *
+     * ─────────────────────────────────────────────────────────────────────────
+     * Odstavec 2 — jen z důvodu vzniklého v TOMTÉŽ roce
+     * ─────────────────────────────────────────────────────────────────────────
+     * „Dovolená, na kterou vzniklo právo v příslušném kalendářním roce, se krátí
+     * pouze z důvodu podle odstavce 1, který vznikl v tomto roce." Do rozsahu se
+     * proto berou jen neomluvené absence ležící v roce nároku.
+     *
+     * ─────────────────────────────────────────────────────────────────────────
+     * Odstavec 3 — minimum dvou týdnů
+     * ─────────────────────────────────────────────────────────────────────────
+     * „Při krácení dovolené musí být zaměstnanci, jehož pracovní poměr k témuž
+     * zaměstnavateli trval po celý kalendářní rok, poskytnuta dovolená alespoň
+     * v délce 2 týdnů."
      *
      * Základem je stanovený nárok na daný rok, ne aktuální zůstatek: zákon mluví
      * o dovolené, která má být poskytnuta, a už vyčerpané dny na tom nic nemění.
@@ -219,6 +254,19 @@ final class PayrollLeaveRepository
                 'Krácení nesmí přesáhnout stanovený nárok na dovolenou.'
             );
         }
+        // § 223 odst. 1 a 2: krátit lze jen o neomluveně zameškané hodiny
+        // vzniklé v roce, za který se dovolená poskytuje.
+        $unexcusedMinutes = $this->unexcusedMinutes($supplierId, $employmentId, $year);
+        if ($alreadyShortened + $shortenedMinutes > $unexcusedMinutes) {
+            throw new \InvalidArgumentException(sprintf(
+                'Dovolenou lze krátit jen o neomluveně zameškané hodiny (§ 223 odst. 1 ZP).'
+                . ' Za rok %d je evidováno %d minut neomluvené nepřítomnosti,'
+                . ' krácení by dosáhlo %d minut.',
+                $year,
+                $unexcusedMinutes,
+                $alreadyShortened + $shortenedMinutes,
+            ));
+        }
         if (!$this->employmentCoveredWholeYear($supplierId, $employmentId, $year)) {
             return;
         }
@@ -238,6 +286,46 @@ final class PayrollLeaveRepository
                 $remaining,
             ));
         }
+    }
+
+    /**
+     * Neomluveně zameškané minuty za rok nároku (§ 223 odst. 1 a 2 ZP).
+     *
+     * Počítají se jen SCHVÁLENÉ absence typu `unexcused` — neschválená absence
+     * je návrh, ne zaměstnavatelovo určení podle § 348 odst. 3 — a jen ta část,
+     * která leží v roce nároku. Rozsah dává rozvrh: `publishedShiftSegments`
+     * vrací minuty publikovaných směn, které do absence spadají, včetně
+     * omezení částečně zameškaných směn (`partial_*_minutes`). Bez publikované
+     * směny je zameškaných hodin nula — nelze zameškat směnu, která nebyla
+     * rozvržená.
+     */
+    private function unexcusedMinutes(int $supplierId, int $employmentId, int $year): int
+    {
+        $yearFrom = sprintf('%04d-01-01', $year);
+        $yearTo = sprintf('%04d-12-31', $year);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM payroll_absences
+              WHERE supplier_id = ? AND employment_id = ? AND status = 'approved'
+                AND absence_type = 'unexcused'
+                AND date_from <= ? AND date_to >= ?
+              ORDER BY date_from, id"
+        );
+        $stmt->execute([$supplierId, $employmentId, $yearTo, $yearFrom]);
+
+        $minutes = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $absence) {
+            foreach ($this->absences->publishedShiftSegments($absence, false) as $segment) {
+                // Absence smí přesáhnout přes Silvestra; do krácení za tenhle
+                // rok patří jen směny ležící v něm (§ 223 odst. 2).
+                $localDate = (string) $segment['local_date'];
+                if ($localDate < $yearFrom || $localDate > $yearTo) {
+                    continue;
+                }
+                $minutes += (int) $segment['eligible_minutes'];
+            }
+        }
+
+        return $minutes;
     }
 
     private function employmentCoveredWholeYear(int $supplierId, int $employmentId, int $year): bool

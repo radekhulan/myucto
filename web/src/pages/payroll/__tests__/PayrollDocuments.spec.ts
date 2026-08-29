@@ -7,7 +7,9 @@ const m = vi.hoisted(() => ({
   listDocuments: vi.fn(),
   listAnnualDocuments: vi.fn(),
   peoplePage: vi.fn(),
+  peopleOptions: vi.fn(),
   person: vi.fn(),
+  downloadDocumentById: vi.fn(),
   generatePayrollSheet: vi.fn(),
   generateTaxCertificate: vi.fn(),
   generateMonthlyBundle: vi.fn(),
@@ -34,7 +36,9 @@ vi.mock('@/api/payroll', () => ({
     listDocuments: m.listDocuments,
     listAnnualDocuments: m.listAnnualDocuments,
     peoplePage: m.peoplePage,
+    peopleOptions: m.peopleOptions,
     person: m.person,
+    downloadDocumentById: m.downloadDocumentById,
     generatePayrollSheet: m.generatePayrollSheet,
     generateTaxCertificate: m.generateTaxCertificate,
     generateMonthlyBundle: m.generateMonthlyBundle,
@@ -223,6 +227,13 @@ describe('PayrollDocuments', () => {
       is_active: true,
       needs_setup: false,
     })
+    m.peopleOptions.mockResolvedValue([
+      { id: 31, full_name: 'Testovací Zaměstnanec', is_active: true, needs_setup: false },
+      { id: 32, full_name: 'Druhá Osoba', is_active: true, needs_setup: false },
+      // Neaktivní člověk se do dávky nebere.
+      { id: 33, full_name: 'Bývalý Zaměstnanec', is_active: false, needs_setup: false },
+    ])
+    m.downloadDocumentById.mockResolvedValue(undefined)
     m.generatePayrollSheet.mockResolvedValue({
       id: 41,
       document_kind: 'payroll_sheet',
@@ -516,5 +527,141 @@ describe('PayrollDocuments', () => {
         correction_reason: 'Oprava nesprávně uvedeného identifikátoru poplatníka.',
       },
     )
+  })
+
+  /**
+   * X-11: roční dokumenty šly jen po jednom — pro 500 lidí 1500 kliknutí,
+   * zatímco měsíční pásky hromadné dávno jsou. Rozsah „za všechny" projede
+   * stejné tři akce nad celou firmou.
+   */
+  it('vystaví roční dokument všem aktivním zaměstnancům najednou', async () => {
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    const annualTab = wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')
+    await annualTab!.trigger('click')
+    await flushPromises()
+
+    // Bez vybrané osoby tlačítka drží a věta říká proč.
+    expect(wrapper.text()).toContain('payroll.documents.batch_annual.blocked_no_person')
+
+    await wrapper.get('[data-test="annual-scope-all"]').trigger('click')
+    await flushPromises()
+
+    const sheetButton = wrapper.findAll('button').find(button =>
+      button.text() === 'payroll.documents.generate_payroll_sheet')
+    await sheetButton!.trigger('click')
+    await flushPromises()
+
+    // Jen aktivní lidé; bývalý zaměstnanec do dávky nepatří.
+    expect(m.generatePayrollSheet).toHaveBeenCalledTimes(2)
+    expect(m.generatePayrollSheet.mock.calls.map(call => call[0])).toEqual([31, 32])
+    expect(wrapper.get('[data-test="annual-batch-report"]').text())
+      .toContain('payroll.documents.batch_annual.progress')
+  })
+
+  /**
+   * Neúspěšný řádek se nesmí ztratit v počtu — dávka ho vypíše jménem
+   * i důvodem, jinak zbývá otevřít 500 lidí a hádat, kdo chybí.
+   */
+  it('neúspěšné řádky dávky vypíše jménem', async () => {
+    m.generatePayrollSheet.mockImplementation((employeeId: number) =>
+      employeeId === 32
+        ? Promise.reject({ response: { data: { error: { message: 'Chybí schválená revize.' } } } })
+        : Promise.resolve({ id: 41 }))
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')!
+      .trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="annual-scope-all"]').trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.documents.generate_payroll_sheet')!
+      .trigger('click')
+    await flushPromises()
+
+    const failures = wrapper.get('[data-test="annual-batch-failures"]')
+    expect(failures.text()).toContain('Druhá Osoba')
+    expect(failures.text()).toContain('Chybí schválená revize.')
+    expect(failures.text()).not.toContain('Testovací Zaměstnanec')
+  })
+
+  /**
+   * Osoba, která dokument za rok už má, se PŘESKOČÍ — nahrazení je oprava
+   * s povinným důvodem. Vypadnout ale musí viditelně, jménem.
+   */
+  it('osobu s hotovým dokumentem přeskočí a řekne to', async () => {
+    m.listAnnualDocuments.mockResolvedValue({
+      year: 2026,
+      items: [{
+        id: 55,
+        employee_id: 31,
+        employee_name: 'Testovací Zaměstnanec',
+        document_kind: 'annual_payroll_sheet',
+        document_revision_no: 1,
+        mime_type: 'application/pdf',
+        suggested_filename: 'mzdovy-list.pdf',
+        file_sha256: 'c'.repeat(64),
+        size_bytes: 1234,
+        created_at: '2026-08-01 08:00:00',
+      }],
+      total: 1,
+    })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')!
+      .trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="annual-scope-all"]').trigger('click')
+    await wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.documents.generate_payroll_sheet')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(m.generatePayrollSheet).toHaveBeenCalledTimes(1)
+    expect(m.generatePayrollSheet).toHaveBeenCalledWith(32, expect.any(Number))
+    expect(wrapper.get('[data-test="annual-batch-skipped"]').text())
+      .toContain('Testovací Zaměstnanec')
+  })
+
+  /**
+   * X-16: hotový měsíční ZIP se dřív jen OZNÁMIL větou, ze které nevedl odkaz.
+   * Teď je z něj tlačítko, které soubor stáhne.
+   */
+  it('hotový měsíční balík nabídne ke stažení, ne jen oznámí', async () => {
+    m.documentBatch.mockResolvedValue({
+      id: 81,
+      run_id: 11,
+      revision_id: 12,
+      period_start: '2026-07-01',
+      status: 'completed',
+      item_count: 1,
+      succeeded_count: 1,
+      failed_count: 0,
+      bundle_document_id: 22,
+      bundle_filename: 'mzdovy-balicek-2026-07.zip',
+      created_at: '2026-08-01 08:00:00',
+      started_at: '2026-08-01 08:00:01',
+      completed_at: '2026-08-01 08:00:09',
+      updated_at: '2026-08-01 08:00:09',
+    })
+    m.documentBatchItems.mockResolvedValue({ items: [], total: 0 })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="generate-document-batch"]').trigger('click')
+    await flushPromises()
+
+    const download = wrapper.get('[data-test="download-batch-bundle"]')
+    expect(wrapper.text()).toContain('mzdovy-balicek-2026-07.zip')
+    await download.trigger('click')
+    await flushPromises()
+
+    expect(m.downloadDocumentById).toHaveBeenCalledWith(22, 'mzdovy-balicek-2026-07.zip')
   })
 })

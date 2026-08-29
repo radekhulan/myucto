@@ -20,9 +20,26 @@ final class MonthlyAdvanceTaxCalculator
             $calculationDate,
         );
 
+        // § 38h odst. 1: základ pro výpočet zálohy se zaokrouhluje do 100 Kč na
+        // celé koruny nahoru a nad 100 Kč na celé stokoruny nahoru.
+        //
+        // Způsob zaokrouhlení je v rulesetu (`advance.rounding.*`) a admin ho
+        // smí přepsat, takže se sem MUSÍ dostat z rulesetu — dřív byl natvrdo
+        // v kódu a administrátorův override tiše nic neudělal, což je horší než
+        // kdyby ho katalog vůbec nenabízel. Neznámá hodnota výpočet zastaví:
+        // spočítat zálohu jinak, než jak je pravidlo evidované, znamená vyrobit
+        // snapshot, který nesedí na vlastní stopu.
         $roundedBase = $input->taxableIncomeMinorUnits <= 10_000
-            ? PayrollRounding::ceilToCzk($input->taxableIncomeMinorUnits)
-            : PayrollRounding::ceilToHundredCzk($input->taxableIncomeMinorUnits);
+            ? $this->applyRounding(
+                $ruleset,
+                'advance.rounding.base_up_to_100_czk',
+                $input->taxableIncomeMinorUnits,
+            )
+            : $this->applyRounding(
+                $ruleset,
+                'advance.rounding.base_above_100_czk',
+                $input->taxableIncomeMinorUnits,
+            );
         $highRateThreshold = $this->moneyParameter(
             $ruleset,
             'advance.high_threshold.monthly',
@@ -51,7 +68,7 @@ final class MonthlyAdvanceTaxCalculator
                 'numerator' => $highRateStep->unroundedNumerator,
                 'denominator' => $highRateStep->unroundedDenominator,
             ],
-        ], 100);
+        ], $this->roundingMultiple($ruleset, 'advance.rounding.result'));
 
         $nonRefundableCredits = $input->otherNonRefundableCreditsMinorUnits;
         if ($input->signedDeclaration && $input->claimTaxpayerCredit) {
@@ -114,6 +131,51 @@ final class MonthlyAdvanceTaxCalculator
             taxBonusAmountThresholdMet: $bonusAmountThresholdMet,
             taxBonusEligibilityReason: $taxBonusEligibilityReason,
         );
+    }
+
+    /**
+     * Zaokrouhlovací strategie, které umí modul spočítat.
+     *
+     * Klíč = hodnota parametru v rulesetu, hodnota = násobek v haléřích, na
+     * který se zaokrouhluje NAHORU. Jiné strategie (dolů, na půlky) tu vědomě
+     * nejsou: § 38h odst. 1 ani § 146 odst. 1 daňového řádu jiný směr u zálohy
+     * nepřipouštějí a nabídnout je by znamenalo dovolit spočítat zálohu
+     * protizákonně.
+     */
+    private const ROUNDING_MULTIPLES_MINOR_UNITS = [
+        'ceil-to-1-czk' => 100,
+        'ceil-to-100-czk' => 10_000,
+    ];
+
+    private function applyRounding(
+        PayrollRulesetVersion $ruleset,
+        string $key,
+        int $minorUnits,
+    ): int {
+        return PayrollRounding::ceilToMultiple(
+            $minorUnits,
+            $this->roundingMultiple($ruleset, $key),
+        );
+    }
+
+    private function roundingMultiple(PayrollRulesetVersion $ruleset, string $key): int
+    {
+        $value = $ruleset->parameter($key);
+        if ($value->type !== 'text' || !is_string($value->value)) {
+            throw new UnexpectedValueException(
+                "Payroll ruleset parameter {$key} is not text.",
+            );
+        }
+        $multiple = self::ROUNDING_MULTIPLES_MINOR_UNITS[$value->value] ?? null;
+        if ($multiple === null) {
+            throw new UnexpectedValueException(sprintf(
+                'Payroll ruleset parameter %s has unsupported rounding strategy "%s".',
+                $key,
+                $value->value,
+            ));
+        }
+
+        return $multiple;
     }
 
     private function moneyParameter(PayrollRulesetVersion $ruleset, string $key): int

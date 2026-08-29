@@ -98,6 +98,9 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-payments': ['payroll.payments'],
   'payroll-posting-reconciliation': ['payroll.post'],
   'payroll-people': ['payroll'],
+  // Adresa karty člověka jen přesměruje na seznam; práva musí být stejná, jinak
+  // by odkaz končil na homepage dřív, než se přesměrování vůbec provede.
+  'payroll-person': ['payroll'],
   'payroll-quick-inputs': ['payroll'],
   'payroll-components': ['payroll'],
   'payroll-benefit-baskets': ['payroll'],
@@ -111,6 +114,7 @@ const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   'payroll-documents': ['payroll.documents'],
   'payroll-annual-settlement': ['payroll.documents'],
   'payroll-submissions': ['payroll.submissions'],
+  'payroll-submissions-tab': ['payroll.submissions'],
   'payroll-settings': ['payroll.settings'],
   'payroll-rulesets': ['payroll.rulesets'],
   'payroll-retention': ['payroll.retention'],

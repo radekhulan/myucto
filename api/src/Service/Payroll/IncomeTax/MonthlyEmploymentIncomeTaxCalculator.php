@@ -199,25 +199,46 @@ final class MonthlyEmploymentIncomeTaxCalculator
             ),
         );
         $withholdingGroups = [];
+        $roundedWithholdingBases = [];
         foreach ($withholdingBases as $group => $base) {
             if ($base === 0) {
                 continue;
             }
+            // § 36 odst. 3 věta třetí: „Základ daně se nesnižuje o nezdanitelnou
+            // část základu daně (§ 15) a zaokrouhluje se na celé koruny dolů…"
+            // a věta pátá: „Daň z příjmů vybíraná zvláštní sazbou se zaokrouhluje
+            // na celé koruny dolů." Zaokrouhluje se tedy DVAKRÁT — nejdřív
+            // základ, teprve pak daň z něj vypočtená.
+            // Zaokrouhlením až daně by vykázaný základ neodpovídal přepočtu
+            // finančního úřadu a rozcházel by se o korunu.
+            //
+            // Zaokrouhluje se ÚHRN za skupinu (dohody do limitu / ostatní
+            // příjmy), protože právě z něj se v jednom měsíci sráží jedna daň;
+            // per vztah by se zaokrouhlovalo tolikrát, kolik má poplatník
+            // dohod, a odchylka by se násobila.
+            $roundedBase = intdiv($base, 100) * 100;
+            $roundedWithholdingBases[$group] = $roundedBase;
+            if ($roundedBase === 0) {
+                continue;
+            }
             $step = CalculationStep::calculate(
                 "monthly-withholding-tax-{$group}",
-                $base,
+                $roundedBase,
                 DecimalRate::fromString($policy->rate('withholding.rate')),
                 RoundingMode::Floor,
             );
             $withholdingGroups[] = new WithholdingTaxGroupResult(
                 $group,
-                $base,
+                $roundedBase,
                 intdiv($step->outputMinorUnits, 100) * 100,
                 $step,
+                $base,
             );
         }
+        // Do ročního úhrnu jde ZAOKROUHLENÝ základ — je to částka, kterou
+        // plátce vykázal a ze které daň skutečně srazil.
         $withholdingBase = 0;
-        foreach ($withholdingBases as $base) {
+        foreach ($roundedWithholdingBases as $base) {
             $withholdingBase = TaxIntegerMath::add($withholdingBase, $base);
         }
         $withholdingTax = 0;

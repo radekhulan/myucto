@@ -192,9 +192,25 @@ final class AnnualTaxSettlementCalculator
         // v šestinásobku minimální mzdy, a podle § 35c odst. 3 nejméně 100 Kč.
         // Příjem se posuzuje za celý rok, tedy včetně mezd od předchozích plátců
         // (§ 38ch odst. 4 „z úhrnu mezd … všemi plátci postupně").
+        //
+        // Obě strany úhrnu musí měřit TOTÉŽ. Vlastní kumulace nese součet
+        // měsíčních ZÁKLADŮ pro výpočet zálohy, kdežto z potvrzení se dřív bral
+        // ř. 1 tiskopisu — „úhrn zúčtovaných příjmů". To jsou dvě různé veličiny
+        // a míchaly se do jednoho součtu.
+        //
+        // Rozhodl to § 35c odst. 4 sám: „Daňový bonus může uplatnit poplatník,
+        // který ve zdaňovacím období měl příjem podle § 6 nebo 7 alespoň ve výši
+        // šestinásobku minimální mzdy. Do těchto příjmů se nezahrnují příjmy od
+        // daně osvobozené, příjmy, z nichž je daň vybírána srážkou podle
+        // zvláštní sazby daně…" U závislé činnosti je základ daně podle § 6
+        // odst. 12 roven příjmu, a srážkově zdaněné příjmy do zálohového základu
+        // nevstupují — základ pro výpočet zálohy je tedy přesně ta veličina,
+        // kterou § 35c odst. 4 popisuje. Ř. 1 potvrzení naopak srážkově zdaněné
+        // příjmy obsahovat MŮŽE, a práh by pak vyšel splněný tam, kde splněný
+        // není. Na obou stranách se proto sčítá zálohový základ (ř. 5).
         $qualifyingIncome = TaxIntegerMath::add(
             $input->bonusQualifyingIncomeMinorUnits,
-            $external['gross_income_minor_units'],
+            $external['advance_base_minor_units'],
         );
         $thresholdMet = $qualifyingIncome >= $rates->bonusMinimumIncomeMinorUnits;
         $amountThresholdMet = AnnualSettlementStatute::isAnnualBonusAmountEligible(
@@ -331,6 +347,50 @@ final class AnnualTaxSettlementCalculator
             // který poplatníkovi nenáleží.
             if (!$certificate->isComplete()) {
                 $blockers[] = AnnualSettlementBlocker::ExternalCertificateIncomplete;
+            }
+            // § 38ch odst. 3 věta druhá: „Plátce daně roční zúčtování záloh
+            // a daňového zvýhodnění neprovede, pokud poplatník tyto doklady
+            // nepředloží plátci daně do 15. února po uplynutí zdaňovacího
+            // období." Lhůta se váže na KAŽDÝ doklad zvlášť — jeden opožděný
+            // doklad brání zúčtování stejně jako doklad chybějící.
+            //
+            // Datum se dosud neslo jen jako údaj a nikdy se s lhůtou
+            // neporovnalo; souhrnné `prior_documents_received_on` hlídala
+            // {@see AnnualSettlementEligibility}, ale jednotlivá potvrzení
+            // proklouzla. Prázdné datum tu blokátor nezvedá — o tom, že doklady
+            // vůbec došly, rozhoduje právě ten souhrnný údaj a zdvojit ho by
+            // znamenalo zastavit zúčtování u každého historicky zadaného
+            // potvrzení bez data.
+            if ($certificate->receivedOn !== null
+                && $certificate->receivedOn > AnnualSettlementStatute::priorDocumentsDeadline(
+                    $input->taxYear,
+                )->format('Y-m-d')
+            ) {
+                $blockers[] = AnnualSettlementBlocker::PriorEmployerDocumentsLate;
+            }
+        }
+
+        // § 38ch odst. 1: zúčtování náleží poplatníkovi, který mzdu pobíral
+        // „pouze od jednoho nebo od více plátců daně POSTUPNĚ“. Totéž slovo je
+        // v § 38g odst. 2 podmínkou toho, že poplatník nemusí podat přiznání —
+        // při SOUBĚHU plátců výjimka neplatí, přiznání je povinné a plátce
+        // podle § 38ch odst. 1 věty druhé zúčtování provést nesmí.
+        //
+        // Období od–do nese potvrzení od migrace 1637. Nemá-li ho, vrací
+        // `overlapsPeriodOf()` `null` — „nevíme“ — a blokátor se nezvedá:
+        // souběh se z prázdného pole prokázat nedá a fail-closed na chybějící
+        // údaj by zastavil i historicky uložená potvrzení, kde poplatník
+        // postupnost podle § 38k odst. 4 prohlásil.
+        $certificates = array_values($input->externalCertificates);
+        $count = count($certificates);
+        for ($left = 0; $left < $count; $left++) {
+            for ($right = $left + 1; $right < $count; $right++) {
+                if ($certificates[$left]->overlapsPeriodOf(
+                    $certificates[$right],
+                    $input->taxYear,
+                ) === true) {
+                    $blockers[] = AnnualSettlementBlocker::MustFileTaxReturn;
+                }
             }
         }
 

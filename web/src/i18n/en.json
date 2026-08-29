@@ -1938,7 +1938,7 @@
                 "approved": "The monthly input was approved and received an immutable component snapshot.",
                 "approve_failed": "The monthly input could not be approved.",
                 "cancel": "Cancel",
-                "cancel_confirm": "Really cancel this draft payroll input? It disappears from the list and stops blocking the payroll run.",
+                "cancel_confirm": "Cancel the \"{component}\" input for {name} in period {period}? It disappears from the list and stops blocking the payroll run.",
                 "cancelled": "The monthly input was cancelled.",
                 "cancel_failed": "The monthly input could not be cancelled.",
                 "reverse_benefit": "Reverse benefit",
@@ -2147,6 +2147,9 @@
             "batch_failed": "The document batch could not be finished.",
             "batch_poll_failed": "The batch status could not be loaded.",
             "batch_bundle_ready": "The monthly ZIP was created only after every person succeeded.",
+            "batch_bundle_download": "Download the monthly ZIP",
+            "batch_bundle_downloading": "Downloading…",
+            "batch_bundle_failed": "The monthly ZIP could not be downloaded.",
             "batch_attempts": "attempts: {count}",
             "batch_retry": "Retry",
             "batch_retry_queued": "The item has been queued again.",
@@ -2200,6 +2203,22 @@
             "payroll_sheet_hint": "The sheet uses approved monthly revisions only. Identity and address are stored in an encrypted immutable annual snapshot.",
             "generate_tax_certificate_advance": "Advance-tax certificate",
             "generate_tax_certificate_withholding": "Withholding-tax certificate",
+            "batch_annual": {
+                "scope_label": "Scope for issuing annual documents",
+                "scope": {
+                    "selected": "For one person",
+                    "all": "For every employee"
+                },
+                "scope_all_hint": "The document is issued for every active employee for {year}. The run is tied to this tab — keep it open.",
+                "blocked_no_person": "Pick a person first, or switch the scope to every employee.",
+                "progress": "Done {done} of {total}.",
+                "cancel": "Stop",
+                "item_failed": "The document could not be issued.",
+                "targets_failed": "The employee list for bulk issuing could not be loaded.",
+                "skipped_title": "Skipped ({count})",
+                "skipped_hint": "These people already have the document for the year. Replacing it is a correction with a mandatory reason — issue that one by one.",
+                "failed_title": "Failed ({count})"
+            },
             "tax_certificate_created": "The annual tax certificate is ready to download.",
             "tax_certificate_failed": "The tax certificate could not be created.",
             "tax_certificate_hint": "A certificate is created only from a supported official form, approved payroll, complete statutory evidence and actual payments proven no later than 31 January of the following year.",
@@ -2309,6 +2328,9 @@
             "certificate_payer_name": "Previous employer",
             "certificate_payer_tax_id": "Employer tax ID",
             "certificate_received_on": "Received on",
+            "certificate_employment_from": "For the period from",
+            "certificate_employment_to": "For the period to",
+            "certificate_employment_period_hint": "The period stated on the form. It reveals concurrent payers: if two periods overlap, the taxpayer drew wages simultaneously, the annual settlement cannot be performed and they must file a tax return (§ 38g(2)). An empty period means \"unknown\", not \"there was no overlap\" — older certificates do not carry it.",
             "certificate_amount_placeholder": "not stated",
             "certificate_evidence_status": "Evidence",
             "certificate_evidence_reference": "Supporting reference (optional)",
@@ -2475,7 +2497,19 @@
                 "approved": "Approved employments: {count}.",
                 "failed": "Employments that could not be approved: {count}. Reload the data and review row errors.",
                 "select_all": "Select all open employments on the visible page",
-                "select": "Select employment: {name}"
+                "select": "Select employment: {name}",
+                "title": "Bulk attendance approval",
+                "hint": "{count} employments will be approved with a JMHZ summary. The agreed fund, weekly hours and hours worked come from each employment's own suggestion.",
+                "confirm": "Approve ({count})",
+                "standard_fund_hint": "The server never suggests this value, so it is entered once for the whole batch. It applies to every employment being approved.",
+                "blocked_no_candidates": "The selection contains no employment that can be approved in bulk.",
+                "blocked_no_standard_fund": "Fill in the standard monthly fund — without it the JMHZ summary would be incomplete.",
+                "excluded": {
+                    "title": "Not approved in bulk ({count}) — handle these individually",
+                    "absences": "the month contains absences, so answering the unworked-hours and obstacles questions is a decision, not a recorded fact",
+                    "no_preview": "the JMHZ summary suggestion is missing",
+                    "incomplete_suggestions": "the JMHZ summary suggestion is incomplete"
+                }
             },
             "columns": {
                 "employee": "Employee / employment",
@@ -2623,6 +2657,8 @@
                 "consent_saved": "Overtime consent saved.",
                 "consent_failed": "Overtime consent could not be saved.",
                 "consent_blocked_no_date": "Fill in the date the agreement takes effect.",
+                "prefilled_date": "Prefilled with the first day of the month on screen. Days before this date count as ordered overtime (8 h/week, 150 h/year).",
+                "prefilled_date_other_month": "Prefilled with the first day of the browsed month {period}, not the date on the paperwork. Days before this date count as ordered overtime (8 h/week, 150 h/year) — correct the date when recording retroactively.",
                 "prohibition_banner": "The recorded overtime breaches a statutory overtime ban. The payroll run cannot be approved until the finding is overridden with a reason.",
                 "averaging_summary": "Averaging period of {weeks} weeks ({from} – {to}): {used} of {limit}.",
                 "averaging_compensated": "{minutes} excluded as compensatory time off (Section 93(5)).",
@@ -3949,6 +3985,9 @@
                     "NEMPRI": "Employer notice of an employee benefit claim",
                     "HZUPN": "Employer report at the end of incapacity for work",
                     "ELDP": "Pension insurance record sheet",
+                    "JMHZ25": "Employer's single monthly report",
+                    "OZUSPOJ": "Notice of intent to claim the insurance discount",
+                    "REGZELDOPL25": "Supplementary employer registration data",
                     "STATUTORY_ACCIDENT_INSURANCE": "Statutory accident insurance"
                 },
                 "capability": {
@@ -5166,6 +5205,8 @@
                 "delete": "Delete",
                 "delete_confirm": "Really delete this dimension?",
                 "deleted": "Dimension deleted.",
+                "restored": "Dimension restored.",
+                "restore_failed": "Failed to restore the dimension.",
                 "delete_failed": "Failed to delete the dimension.",
                 "in_use_error": "This dimension is used in an approved payroll revision — you can only end its validity, not delete it.",
                 "terminate_hint": "This dimension cannot be deleted because it is used in history — end its validity by setting a validity end date instead."
@@ -11484,6 +11525,7 @@
     "saving": "Saving…",
     "select_all": "Select all",
     "unset": "not set",
+    "undo": "Undo",
     "deleting": "Deleting…",
     "saved": "Saved.",
     "deleted": "Deleted.",
@@ -17736,6 +17778,7 @@
       "employee_obstacle": "Employee-side obstacle",
       "employer_obstacle": "Employer-side obstacle",
       "compensatory_time_off": "Compensatory time off for overtime",
+      "unexcused": "Unexcused absence",
       "other": "Other absence"
     },
     "status": {
@@ -17758,7 +17801,7 @@
       "partial_first": "First-day absence (hours)",
       "partial_last": "Last-day absence (hours)",
       "create": "Create absence",
-      "cancel_confirm": "Cancel this absence? Annual leave creates a traceable reversing entry.",
+      "cancel_confirm": "Cancel the {type} absence for {name} from {from} to {to}? Annual leave creates a traceable reversing entry.",
       "correction_pending": "The related payroll run requires correction review.",
       "average_required_hint": "Pick the average earnings the compensation is calculated from — the absence cannot be created without it.",
       "average_missing_for_relation": "No average earnings have been calculated for this relation. Calculate one on the Averages tab and come back here.",

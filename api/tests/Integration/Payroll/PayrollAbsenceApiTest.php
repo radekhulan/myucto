@@ -467,6 +467,119 @@ final class PayrollAbsenceApiTest extends TestCase
         self::assertSame(-480, (int) $this->json($confirmed)['calculation']['minutes_delta']);
     }
 
+    /**
+     * W28 / V-16 — § 223 odst. 1 ZP: „Zaměstnavatel může dovolenou krátit jen
+     * za neomluveně zameškanou směnu, a to o počet neomluveně zameškaných
+     * hodin."
+     *
+     * Bez evidované neomluvené absence není o co krátit. Dřív kniha dovolené
+     * přijala libovolné záporné číslo, protože `payroll_absences` druh
+     * `unexcused` vůbec neznal (doplnila ho migrace 1636).
+     */
+    public function testShorteningWithoutRecordedUnexcusedAbsenceIsRefused(): void
+    {
+        $this->createEntitlement(124_800);
+
+        $refused = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'effective_date' => '2026-06-30',
+                'entry_type' => 'shortening',
+                'minutes_delta' => -480,
+                'reason' => 'Krácení bez evidované neomluvené absence.',
+            ]),
+            new Response(),
+        );
+
+        self::assertSame(422, $refused->getStatusCode());
+        self::assertStringContainsString(
+            'neomluveně zameškané hodiny',
+            (string) $refused->getBody(),
+        );
+    }
+
+    /**
+     * S evidovanou neomluvenou absencí krácení projde — ale jen do počtu
+     * skutečně zameškaných hodin. Osmihodinová směna (8:00–16:30 s půlhodinovou
+     * přestávkou) dá 480 minut; 481 už ne.
+     */
+    public function testShorteningIsCappedByTheRecordedUnexcusedHours(): void
+    {
+        $this->createEntitlement(124_800);
+        // § 223 odst. 3 potřebuje stanovenou týdenní pracovní dobu, aby šlo
+        // ověřit minimum dvou týdnů.
+        $this->insertEmploymentTerms(40);
+        $this->insertPublishedShift('2026-06-15 06:00:00', '2026-06-15 14:30:00', 30);
+        $this->recordApprovedUnexcusedAbsence('2026-06-15');
+
+        $ok = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'effective_date' => '2026-06-30',
+                'entry_type' => 'shortening',
+                'minutes_delta' => -480,
+                'reason' => 'Krácení za neomluveně zameškanou směnu 15. 6.',
+            ]),
+            new Response(),
+        );
+        self::assertSame(201, $ok->getStatusCode(), (string) $ok->getBody());
+
+        // Druhé krácení už nemá krytí — § 223 odst. 1 je strop, ne návod.
+        $refused = $this->action->createLeaveEntry(
+            $this->request('POST')->withParsedBody([
+                'employment_id' => $this->employmentId,
+                'leave_year' => 2026,
+                'effective_date' => '2026-06-30',
+                'entry_type' => 'shortening',
+                'minutes_delta' => -60,
+                'reason' => 'Krácení nad rámec zameškaných hodin.',
+            ]),
+            new Response(),
+        );
+
+        self::assertSame(422, $refused->getStatusCode());
+        self::assertStringContainsString(
+            'neomluveně zameškané hodiny',
+            (string) $refused->getBody(),
+        );
+    }
+
+    private function insertEmploymentTerms(int $weeklyHours): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            '2026-01-01',
+            '2026-01-01',
+            $weeklyHours,
+        ]);
+    }
+
+    private function recordApprovedUnexcusedAbsence(string $date): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_absences
+                (supplier_id, employment_id, absence_type, date_from, date_to,
+                 timezone_name, compensation_policy, support_status, status,
+                 requested_by, decided_by, decided_at)
+             VALUES (?, ?, 'unexcused', ?, ?, 'Europe/Prague', 'none',
+                     'manual_review', 'approved', ?, ?, NOW())"
+        )->execute([
+            $this->supplierId,
+            $this->employmentId,
+            $date,
+            $date,
+            $this->userId,
+            $this->userId,
+        ]);
+    }
+
     private function approveVacation(int $averageId): Response
     {
         $created = $this->createAbsence($averageId);

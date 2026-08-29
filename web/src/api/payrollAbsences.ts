@@ -1,9 +1,21 @@
 import { api } from './client'
 
+/**
+ * Druhy nepřítomnosti. Pořadí zrcadlí `payroll_absences.absence_type`
+ * (kontrakt hlídá `PayrollEnumContractTest`).
+ *
+ * `unexcused` je NEOMLUVENÁ nepřítomnost a stojí zvlášť schválně: jen o ni se
+ * podle § 223 odst. 1 zákoníku práce smí krátit dovolená. `employee_obstacle`
+ * je proti tomu překážka v práci (§ 191 a násl.), tedy nepřítomnost OMLUVENÁ,
+ * za kterou krátit nelze; `other` je zbytková kategorie, ze které by se právní
+ * následek odvozovat neměl. Za neomluveně zameškanou dobu mzda ani náhrada
+ * nepřísluší — server proto u tohohle druhu vynucuje `compensation_policy`
+ * `none`.
+ */
 export type AbsenceType =
   | 'vacation' | 'dpn' | 'quarantine' | 'ocr' | 'long_term_care' | 'ppm'
   | 'paternity' | 'parental' | 'unpaid_leave' | 'employee_obstacle'
-  | 'employer_obstacle' | 'compensatory_time_off' | 'other'
+  | 'employer_obstacle' | 'compensatory_time_off' | 'unexcused' | 'other'
 
 export interface PayrollAbsenceEmployment {
   id: number

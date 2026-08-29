@@ -26,6 +26,17 @@ const m = vi.hoisted(() => ({
   jmhzTransportHistory: vi.fn(),
   pollJmhzTransportAttempt: vi.fn(),
   closeJmhzTransportAttempt: vi.fn(),
+  routeParams: {} as Record<string, string>,
+  routerReplace: vi.fn(),
+}))
+
+// Aktivní záložka je součást adresy (`/payroll/submissions/:tab`), takže
+// stránka potřebuje router. Originál se rozprostře, ať zůstanou i ostatní
+// exporty (RouterLink).
+vi.mock('vue-router', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-router')>()),
+  useRoute: () => ({ name: 'payroll-submissions', params: m.routeParams, query: {} }),
+  useRouter: () => ({ replace: m.routerReplace }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -472,6 +483,7 @@ async function clickTab(
 describe('PayrollSubmissions', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeParams = {}
     setup()
   })
 
@@ -553,17 +565,20 @@ describe('PayrollSubmissions', () => {
       .toContain('payroll.submissions.signing.title')
   })
 
-  it('bez potvrzení XML nevytvoří a API chybu zobrazí trvale inline', async () => {
+  /**
+   * Potvrzení evidence se stvrzuje JEDNOU — při uložení profilu. Příprava XML
+   * čte tentýž profil a nic nového nepotvrzuje, takže tady žádný zaškrtávací
+   * box být nesmí: stránka místo něj ukazuje pasivní větu s datem potvrzení.
+   */
+  it('XML připraví bez druhého potvrzení a API chybu zobrazí trvale inline', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
     await clickTab(wrapper, 'regzel')
     await flushPromises()
 
-    await wrapper.get('[data-test="regzel-prepare"]').trigger('click')
-    expect(m.prepare).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-test="regzel-error"]').text()).toContain(
-      'payroll.regzel.prepare.confirmation_required',
-    )
+    expect(wrapper.find('[data-test="regzel-prepare-confirmation"]').exists())
+      .toBe(false)
+    expect(wrapper.text()).toContain('payroll.regzel.prepare.profile_confirmed')
 
     m.prepare.mockRejectedValue({
       response: {
@@ -574,15 +589,14 @@ describe('PayrollSubmissions', () => {
         },
       },
     })
-    await wrapper.get('[data-test="regzel-prepare-confirmation"]').setValue(true)
     await wrapper.get('[data-test="regzel-prepare"]').trigger('click')
     await flushPromises()
 
     expect(m.prepare).toHaveBeenCalledWith(expect.objectContaining({
       office_id: 42,
       environment: 'production',
-      evidence_confirmed: true,
     }))
+    expect(m.prepare.mock.calls[0][0]).not.toHaveProperty('evidence_confirmed')
     expect(wrapper.get('[data-test="regzel-error"]').text()).toContain(
       'Produkční VS nesmí být testovací.',
     )

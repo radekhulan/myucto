@@ -73,6 +73,16 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // MZ-18-W07 — reconciliation účetního můstku mezd (mzda ↔ deník ↔ platby).
       { path: 'payroll/posting-reconciliation', name: 'payroll-posting-reconciliation', component: () => import('@/pages/payroll/PayrollPostingReconciliation.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Karta člověka má vlastní adresu, aby na ni šlo odkázat z termínů, e-mailu
+      // i z jiné agendy. Zůstává to ale JEDNA komponenta (viz komentář v
+      // PeopleList.vue u `selectedDetail`) — rozpojení do samostatné stránky by
+      // znamenalo přepsat panely, které si předávají stav. Adresa se proto
+      // překlopí na tvar, který stránka umí, místo aby vznikl druhý pohled.
+      {
+        path: 'payroll/people/:id(\\d+)',
+        name: 'payroll-person',
+        redirect: to => ({ name: 'payroll-people', query: { person: String(to.params.id) } }),
+      },
       { path: 'payroll/quick-inputs', name: 'payroll-quick-inputs', component: () => import('@/pages/payroll/PayrollQuickInputs.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/components', name: 'payroll-components', component: () => import('@/pages/payroll/PayrollComponents.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Přehled čerpání ročních košů osvobození (§ 6 odst. 9 ZDP) za firmu. Jede
@@ -92,6 +102,11 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // zúčtování vůbec provést lze. Doklad je až výsledek.
       { path: 'payroll/annual-settlement', name: 'payroll-annual-settlement', component: () => import('@/pages/payroll/PayrollAnnualSettlement.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/submissions', name: 'payroll-submissions', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Deset záložek podání jsou fakticky deset obrazovek. Bez adresy se na ně
+      // nedalo odkázat ani je uložit do záložek a po refreshi spadl uživatel zpět
+      // na Transport. Neznámý `:tab` stránka překlopí zpět na výchozí záložku,
+      // takže zastaralý odkaz nekončí prázdnem.
+      { path: 'payroll/submissions/:tab([a-z_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/settings', name: 'payroll-settings', component: () => import('@/pages/payroll/EmployerSettings.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Retenční lhůty ukazují katalog z kódu a pouštějí dvojí zápis — odchylku
       // firmy a zadržení výmazu. Jedou na `payroll.retention` — stejný klíč hlídá

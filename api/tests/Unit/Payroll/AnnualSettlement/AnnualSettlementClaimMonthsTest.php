@@ -159,6 +159,40 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
     }
 
     /**
+     * W28 / V-19. § 35ba odst. 3 váže dvanáctiny na SPLNĚNÍ PODMÍNEK, ne na
+     * trvání zaměstnání u plátce: „…o částku ve výši jedné dvanáctiny za každý
+     * kalendářní měsíc, na jehož počátku byly podmínky pro uplatnění nároku na
+     * slevu na dani splněny."
+     *
+     * Zaměstnanec, který nastoupil 1. července a invalidní důchod pobírá od
+     * ledna, má proto DVANÁCT dvanáctin slevy na invaliditu, ne šest. Ořezat
+     * interval datem nástupu by mu ukrojilo polovinu slevy — tenhle test to
+     * uzamyká. Interval nároku se tedy vědomě nijak neprotíná s obdobím
+     * zaměstnání (na rozdíl od prohlášení a rezidentství).
+     */
+    public function testDisabilityCreditIsNotClippedByTheHireDate(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->credits(
+            [
+                // Nárok na slevu na invaliditu trvá celý rok…
+                $this->creditRow('disability-basic', '2019-05-01', null),
+                // …i když u tohohle plátce zaměstnání začalo až v červenci.
+                $this->creditRow('taxpayer', sprintf('%04d-07-01', self::YEAR), null),
+            ],
+            self::YEAR,
+            true,
+        );
+
+        self::assertSame([], $result['blockers']);
+        $months = [];
+        foreach ($result['credits'] as $credit) {
+            $months[$credit->kind->value] = $credit->months;
+        }
+        self::assertSame(12, $months['disability-basic'] ?? null);
+        self::assertSame(6, $months['taxpayer'] ?? null);
+    }
+
+    /**
      * Nepodepsané prohlášení je legitimní stav — zúčtování stejně padá na
      * DeclarationNotSigned, takže tady se druhá překážka nevyrábí.
      */

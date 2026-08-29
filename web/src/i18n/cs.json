@@ -1938,7 +1938,7 @@
                 "approved": "Měsíční vstup byl schválen a získal neměnný snapshot složky.",
                 "approve_failed": "Měsíční vstup se nepodařilo schválit.",
                 "cancel": "Zrušit",
-                "cancel_confirm": "Opravdu zrušit tento rozpracovaný mzdový vstup? Ze seznamu zmizí a přestane blokovat mzdový běh.",
+                "cancel_confirm": "Zrušit vstup „{component}\" pro {name} za období {period}? Ze seznamu zmizí a přestane blokovat mzdový běh.",
                 "cancelled": "Měsíční vstup byl zrušen.",
                 "cancel_failed": "Měsíční vstup se nepodařilo zrušit.",
                 "reverse_benefit": "Stornovat benefit",
@@ -2147,6 +2147,9 @@
             "batch_failed": "Dávku výstupních dokumentů se nepodařilo dokončit.",
             "batch_poll_failed": "Stav dávky se nepodařilo načíst.",
             "batch_bundle_ready": "Měsíční ZIP vznikl až po úspěšném dokončení všech osob.",
+            "batch_bundle_download": "Stáhnout měsíční ZIP",
+            "batch_bundle_downloading": "Stahuji…",
+            "batch_bundle_failed": "Měsíční ZIP se nepodařilo stáhnout.",
             "batch_attempts": "pokusů: {count}",
             "batch_retry": "Opakovat",
             "batch_retry_queued": "Položka je znovu zařazená do fronty.",
@@ -2200,6 +2203,22 @@
             "payroll_sheet_hint": "List vznikne pouze ze schválených měsíčních revizí. Identita a adresa se uloží do šifrovaného neměnného ročního snapshotu.",
             "generate_tax_certificate_advance": "Potvrzení se zálohovou daní",
             "generate_tax_certificate_withholding": "Potvrzení se srážkovou daní",
+            "batch_annual": {
+                "scope_label": "Rozsah vystavení ročních dokumentů",
+                "scope": {
+                    "selected": "Za jednu osobu",
+                    "all": "Za všechny zaměstnance"
+                },
+                "scope_all_hint": "Dokument se vystaví všem aktivním zaměstnancům za rok {year}. Běh je vázaný na tuhle záložku — nechte ji otevřenou.",
+                "blocked_no_person": "Nejdřív vyberte osobu, nebo přepněte rozsah na všechny zaměstnance.",
+                "progress": "Hotovo {done} z {total}.",
+                "cancel": "Zastavit",
+                "item_failed": "Dokument se nepodařilo vystavit.",
+                "targets_failed": "Nepodařilo se načíst seznam zaměstnanců pro hromadné vystavení.",
+                "skipped_title": "Přeskočeno ({count})",
+                "skipped_hint": "Tyto osoby už dokument za rok mají. Nahrazení je oprava s povinným důvodem — vystavte ji jednotlivě.",
+                "failed_title": "Nepodařilo se ({count})"
+            },
             "tax_certificate_created": "Roční daňové potvrzení je připraveno ke stažení.",
             "tax_certificate_failed": "Daňové potvrzení se nepodařilo vytvořit.",
             "tax_certificate_hint": "Potvrzení vznikne jen z podporovaného formuláře, schválených mezd, úplné zákonné evidence a skutečných úhrad doložených nejpozději do 31. ledna následujícího roku.",
@@ -2309,6 +2328,9 @@
             "certificate_payer_name": "Předchozí zaměstnavatel",
             "certificate_payer_tax_id": "DIČ zaměstnavatele",
             "certificate_received_on": "Převzato dne",
+            "certificate_employment_from": "Za období od",
+            "certificate_employment_to": "Za období do",
+            "certificate_employment_period_hint": "Období z tiskopisu. Slouží k rozpoznání souběhu plátců: překrývají-li se dvě období, pobíral poplatník mzdu současně, roční zúčtování provést nelze a musí podat přiznání (§ 38g odst. 2). Nevyplněné období znamená „nevíme“, ne „souběh nebyl“ — starší potvrzení ho nenesou.",
             "certificate_amount_placeholder": "nevyplněno",
             "certificate_evidence_status": "Doložení",
             "certificate_evidence_reference": "Odkaz na podklad (volitelné)",
@@ -2475,7 +2497,19 @@
                 "approved": "Schválené vztahy: {count}.",
                 "failed": "Nepodařilo se schválit vztahy: {count}. Obnovte data a zkontrolujte řádkové chyby.",
                 "select_all": "Vybrat všechny otevřené vztahy na zobrazené stránce",
-                "select": "Vybrat vztah: {name}"
+                "select": "Vybrat vztah: {name}",
+                "title": "Hromadné schválení docházky",
+                "hint": "Schválí se {count} vztahů se souhrnem JMHZ. Dohodnutý fond, týdenní doba a odpracované hodiny se berou z návrhu pro každý vztah zvlášť.",
+                "confirm": "Schválit ({count})",
+                "standard_fund_hint": "Server tenhle údaj nenavrhuje, proto se zadává jednou pro celou dávku. Platí pro všechny schvalované vztahy.",
+                "blocked_no_candidates": "Ve výběru není žádný vztah, který by šel schválit hromadně.",
+                "blocked_no_standard_fund": "Vyplňte stanovený měsíční fond — bez něj by souhrn JMHZ nebyl úplný.",
+                "excluded": {
+                    "title": "Hromadně se neschválí ({count}) — odbavte je jednotlivě",
+                    "absences": "měsíc obsahuje absence, takže odpověď na neodpracované hodiny a překážky je rozhodnutí, ne údaj z evidence",
+                    "no_preview": "chybí návrh souhrnu JMHZ",
+                    "incomplete_suggestions": "návrh souhrnu JMHZ je neúplný"
+                }
             },
             "columns": {
                 "employee": "Zaměstnanec / vztah",
@@ -2623,6 +2657,8 @@
                 "consent_saved": "Souhlas s prací přesčas byl uložen.",
                 "consent_failed": "Souhlas s prací přesčas se nepodařilo uložit.",
                 "consent_blocked_no_date": "Vyplňte datum, od kterého dohoda platí.",
+                "prefilled_date": "Předvyplněno prvním dnem zobrazeného měsíce. Dny před tímto datem se posuzují jako nařízený přesčas (8 h/týden, 150 h/rok).",
+                "prefilled_date_other_month": "Předvyplněno prvním dnem prohlíženého měsíce {period}, ne dnem z papíru. Dny před tímto datem se posuzují jako nařízený přesčas (8 h/týden, 150 h/rok) — u zpětného zápisu datum opravte.",
                 "prohibition_banner": "Evidovaný přesčas porušuje zákaz práce přesčas. Mzdový běh nepůjde schválit, dokud k nálezu neuvedete ruční výjimku s důvodem.",
                 "averaging_summary": "Vyrovnávací období {weeks} týdnů ({from} – {to}): {used} z {limit}.",
                 "averaging_compensated": "Náhradním volnem vyňato {minutes} (§ 93 odst. 5).",
@@ -3949,6 +3985,9 @@
                     "NEMPRI": "Oznámení zaměstnavatele o žádosti o dávku",
                     "HZUPN": "Hlášení při ukončení pracovní neschopnosti",
                     "ELDP": "Evidenční list důchodového pojištění",
+                    "JMHZ25": "Jednotné měsíční hlášení zaměstnavatele",
+                    "OZUSPOJ": "Oznámení záměru uplatňovat slevu na pojistném",
+                    "REGZELDOPL25": "Doplnění registračních údajů zaměstnavatele",
                     "STATUTORY_ACCIDENT_INSURANCE": "Zákonné úrazové pojištění"
                 },
                 "capability": {
@@ -5166,6 +5205,8 @@
                 "delete": "Smazat",
                 "delete_confirm": "Opravdu smazat tuto dimenzi?",
                 "deleted": "Dimenze byla smazána.",
+                "restored": "Dimenze byla obnovena.",
+                "restore_failed": "Dimenzi se nepodařilo obnovit.",
                 "delete_failed": "Dimenzi se nepodařilo smazat.",
                 "in_use_error": "Dimenze je použitá ve schválené mzdové revizi — jde jen ukončit její účinnost (nastavit konec platnosti), ne ji smazat.",
                 "terminate_hint": "Dimenzi nejde smazat, protože je použitá v historii — ukončete její účinnost nastavením konce platnosti."
@@ -11484,6 +11525,7 @@
     "saving": "Ukládám…",
     "select_all": "Vybrat vše",
     "unset": "nevyplněno",
+    "undo": "Vrátit zpět",
     "deleting": "Mažu…",
     "saved": "Uloženo.",
     "deleted": "Smazáno.",
@@ -17736,6 +17778,7 @@
       "employee_obstacle": "Překážka na straně zaměstnance",
       "employer_obstacle": "Překážka na straně zaměstnavatele",
       "compensatory_time_off": "Náhradní volno za přesčas",
+      "unexcused": "Neomluvená absence",
       "other": "Jiná absence"
     },
     "status": {
@@ -17758,7 +17801,7 @@
       "partial_first": "Čerpání první den (hodiny)",
       "partial_last": "Čerpání poslední den (hodiny)",
       "create": "Založit absenci",
-      "cancel_confirm": "Opravdu zrušit absenci? U dovolené vznikne dohledatelná reverzní položka.",
+      "cancel_confirm": "Zrušit absenci {type} pro {name} od {from} do {to}? U dovolené vznikne dohledatelná reverzní položka.",
       "correction_pending": "Navazující mzdový běh vyžaduje kontrolu opravy.",
       "average_required_hint": "Vyberte průměrný výdělek, ze kterého se náhrada spočítá — bez něj nepřítomnost založit nejde.",
       "average_missing_for_relation": "Pro tento vztah není spočítaný žádný průměrný výdělek. Spočítejte ho na záložce Průměry a vraťte se sem.",

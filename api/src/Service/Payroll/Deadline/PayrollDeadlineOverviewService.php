@@ -269,7 +269,10 @@ final readonly class PayrollDeadlineOverviewService
                 'checklist_phase' => (string) $row['phase'],
                 'deadline_source' => $row['deadline_source'],
                 'deadline_source_status' => $row['deadline_source_status'],
-                'path' => '/payroll/employees/' . (int) $row['employee_id'],
+                // `/payroll/employees/{id}` neexistuje — ta cesta byla přepsaná
+                // z názvu tabulky, ne z routeru, takže odkaz z přehledu termínů
+                // vedl na prázdno. Adresa karty člověka je `/payroll/people/{id}`.
+                'path' => '/payroll/people/' . (int) $row['employee_id'],
             ];
         }
 

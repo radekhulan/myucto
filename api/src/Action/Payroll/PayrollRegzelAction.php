@@ -116,12 +116,12 @@ final class PayrollRegzelAction
 
         try {
             $body = $this->body($request);
-            if (!$this->bool($body, 'evidence_confirmed')) {
-                throw new RegzelValidationException(
-                    'regzel_evidence_confirmation_required',
-                    'Před přípravou XML musíš potvrdit aktuálnost zdrojových údajů.',
-                );
-            }
+            // Potvrzení evidovaných údajů se vyžaduje JEDNOU — při uložení
+            // profilu ({@see EmployerRegistrationService::saveProfile()}), kde
+            // se také zapíše `evidence_confirmed_at`. Příprava XML čte tentýž
+            // profil a nic dalšího nepotvrzuje, takže druhý zaškrtávací box
+            // stvrzoval tentýž fakt podruhé. Kdo profil změní, musí ho uložit
+            // znovu — a tím ho potvrdí. Datum potvrzení stránka ukazuje větou.
             $result = $this->service->prepareSupplementalInformation(
                 $this->currentSupplierId($request),
                 $this->positiveInt($body, 'office_id'),

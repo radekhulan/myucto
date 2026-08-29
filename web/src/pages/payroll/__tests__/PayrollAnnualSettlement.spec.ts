@@ -516,6 +516,56 @@ describe('Roční zúčtování', () => {
     expect(payload[0].advance_tax_minor_units).toBe(450_000)
   })
 
+  /**
+   * Období „za období od–do" z tiskopisu rozhoduje o souběhu plátců
+   * (§ 38g odst. 2). Prázdné období znamená „nevíme", ne „souběh nebyl", takže
+   * se posílá jako `null` a pole NESMÍ být povinné — historická potvrzení ho
+   * nenesou a fail-closed by je shodilo.
+   */
+  it('období u potvrzení načte, uloží a prázdné pošle jako null', async () => {
+    m.previewAnnualSettlement.mockResolvedValue(previewResponse({
+      certificates: [{
+        certificate_reference: 'POT-1',
+        payer_name: 'Předchozí plátce',
+        payer_tax_identification: null,
+        received_on: '2027-02-10',
+        employment_from: '2026-01-01',
+        employment_to: '2026-06-30',
+        gross_income_minor_units: 3_000_000,
+        advance_base_minor_units: 3_000_000,
+        advance_tax_minor_units: 450_000,
+        non_refundable_credit_minor_units: 257_000,
+        child_credit_minor_units: 0,
+        tax_bonus_minor_units: 0,
+        evidence_status: 'verified',
+        evidence_reference: 'doklad',
+        missing_statutory_fields: [],
+      }],
+    }))
+    m.saveAnnualSettlementCertificates.mockResolvedValue([])
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('[data-test="annual-settlement-person"]').trigger('click')
+    await flushPromises()
+
+    const from = wrapper.find('[data-test="certificate-employment-from"]')
+    const to = wrapper.find('[data-test="certificate-employment-to"]')
+    expect((from.element as HTMLInputElement).value).toBe('2026-01-01')
+    expect((to.element as HTMLInputElement).value).toBe('2026-06-30')
+    // Nepovinné: prázdné pole nesmí formulář blokovat.
+    expect(from.attributes('required')).toBeUndefined()
+    expect(to.attributes('required')).toBeUndefined()
+
+    // Konec se vymaže — „nevíme", ne „trvá dodnes".
+    await to.setValue('')
+    await wrapper.find('[data-test="annual-settlement-save-certificates"]').trigger('click')
+    await flushPromises()
+
+    const [, , payload] = m.saveAnnualSettlementCertificates.mock.calls[0]
+    expect(payload[0].employment_from).toBe('2026-01-01')
+    expect(payload[0].employment_to).toBeNull()
+  })
+
   it('uloží podklady s row_version, aby souběžná úprava nepřepsala odpovědi', async () => {
     m.saveAnnualSettlementRequest.mockResolvedValue({})
     const wrapper = mountPage()

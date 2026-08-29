@@ -3640,6 +3640,20 @@ export interface PayrollAnnualSettlementCertificate {
   payer_tax_identification: string | null
   /** § 38ch odst. 3 věta druhá — do 15. února po uplynutí období. */
   received_on: string | null
+  /**
+   * Tiskopisové „za období od–do" u předchozího plátce.
+   *
+   * Rozhoduje o tom, jestli poplatník pobíral mzdu POSTUPNĚ (§ 38ch odst. 1),
+   * nebo od dvou plátců SOUČASNĚ — překryv dvou období zvedne blokátor
+   * `must_file_tax_return`, protože zúčtování pak provést nelze a poplatník
+   * musí podat přiznání (§ 38g odst. 1 a 2).
+   *
+   * `null` znamená „nevíme", NE „souběh nebyl": historická potvrzení období
+   * nenesou a povinné pole by je zablokovalo. Bez období se tedy souběh jen
+   * nedá prokázat — netvrdí se, že nenastal.
+   */
+  employment_from: string | null
+  employment_to: string | null
   /** ř. 1 tiskopisu — úhrn zúčtovaných příjmů. */
   gross_income_minor_units: number | null
   /** ř. 5 tiskopisu — základ daně. */
@@ -3704,6 +3718,9 @@ export interface PayrollAnnualSettlementCertificatePayload {
   payer_name: string | null
   payer_tax_identification: string | null
   received_on: string | null
+  /** Tiskopisové „za období od–do"; `null` = „nevíme", ne „souběh nebyl". */
+  employment_from: string | null
+  employment_to: string | null
   gross_income_minor_units: number | null
   advance_base_minor_units: number | null
   advance_tax_minor_units: number | null
@@ -4552,6 +4569,39 @@ export interface PayrollJmhzImportedProtocolResult {
   errors: PayrollJmhzProtocolError[]
 }
 
+/**
+ * Stažení mzdového dokumentu přes jednorázový grant.
+ *
+ * Stojí mimo `payrollApi`, aby se na něj šlo odkázat i zevnitř objektu bez
+ * kruhové reference v typu.
+ */
+async function downloadDocumentById(
+  documentId: number,
+  suggestedFilename: string,
+): Promise<void> {
+  const grant = await api.post<{ token: string; expires_at: string }>(
+    `/payroll/documents/${documentId}/download-grant`,
+  ).then(response => response.data)
+  const response = await api.get<Blob>(
+    `/payroll/documents/${documentId}/download`,
+    {
+      responseType: 'blob',
+      headers: { 'X-Payroll-Download-Token': grant.token },
+    },
+  )
+  const objectUrl = URL.createObjectURL(response.data)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = suggestedFilename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
 export const payrollApi = {
   capabilities: () =>
     api.get<PayrollCapabilitiesResponse>('/payroll/capabilities').then(response => response.data),
@@ -5238,10 +5288,13 @@ export const payrollApi = {
     }>('/payroll/submissions/regzel/snapshots', {
       params: { environment, ...pageParams(page) },
     }).then(response => response.data),
+  /**
+   * Bez `evidence_confirmed` — správnost údajů se potvrzuje jednou při uložení
+   * profilu, ne znovu před každou přípravou XML. Server flag už nevyžaduje.
+   */
   prepareRegzel: (payload: {
     office_id: number
     environment: PayrollRegzelEnvironment
-    evidence_confirmed: boolean
     idempotency_key: string
   }) =>
     api.post<{ snapshot: PayrollRegzelSnapshot }>('/payroll/submissions/regzel/prepare', payload)
@@ -5645,29 +5698,19 @@ export const payrollApi = {
         headers: { 'Idempotency-Key': idempotencyKey },
       },
     ).then(response => response.data),
-  downloadDocument: async (payrollDocument: PayrollDocument): Promise<void> => {
-    const grant = await api.post<{ token: string; expires_at: string }>(
-      `/payroll/documents/${payrollDocument.id}/download-grant`,
-    ).then(response => response.data)
-    const response = await api.get<Blob>(
-      `/payroll/documents/${payrollDocument.id}/download`,
-      {
-        responseType: 'blob',
-        headers: { 'X-Payroll-Download-Token': grant.token },
-      },
-    )
-    const objectUrl = URL.createObjectURL(response.data)
-    try {
-      const anchor = document.createElement('a')
-      anchor.href = objectUrl
-      anchor.download = payrollDocument.suggested_filename
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-    } finally {
-      URL.revokeObjectURL(objectUrl)
-    }
-  },
+  /**
+   * Stažení dokumentu, o kterém známe jen `id` a název souboru.
+   *
+   * Používá to dávka pásek: hotový ZIP zná jen `bundle_document_id` +
+   * `bundle_filename`, celý řádek dokumentu k němu na stránce není. Načítat ho
+   * jen kvůli stažení by bylo volání navíc — grant i tak jede na `id`.
+   */
+  downloadDocumentById,
+  downloadDocument: (payrollDocument: PayrollDocument): Promise<void> =>
+    downloadDocumentById(
+      payrollDocument.id,
+      payrollDocument.suggested_filename,
+    ),
   timeMonth: (
     period: string,
     incomplete = false,

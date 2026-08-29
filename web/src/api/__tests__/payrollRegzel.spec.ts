@@ -41,7 +41,6 @@ describe('payroll REGZEL API', () => {
     await payrollApi.prepareRegzel({
       office_id: 42,
       environment: 'test',
-      evidence_confirmed: true,
       idempotency_key: 'synthetic-key',
     })
     expect(m.post).toHaveBeenCalledWith(
@@ -49,9 +48,10 @@ describe('payroll REGZEL API', () => {
       expect.objectContaining({
         office_id: 42,
         environment: 'test',
-        evidence_confirmed: true,
       }),
     )
+    // Potvrzení evidence se stvrzuje při uložení profilu, ne znovu tady.
+    expect(m.post.mock.calls.at(-1)?.[1]).not.toHaveProperty('evidence_confirmed')
 
     const snapshot: PayrollRegzelSnapshot = {
       id: 9,

@@ -135,9 +135,11 @@ function itemTitle(item: PayrollDeadlineItem): string {
 }
 
 /**
- * Kam se to řeší. Vědomě se NEpoužívá `item.path` ze serveru: pro checklist
- * vrací `/payroll/employees/{id}`, což v routeru neexistuje — karta člověka se
- * otevírá dotazem na seznamu lidí. Pojmenované routy navíc přežijí přesun cesty.
+ * Kam se to řeší. Vědomě se NEpoužívá `item.path` ze serveru — pojmenované routy
+ * přežijí přesun cesty a stránka lidí umí rovnou konečný tvar s dotazem, takže
+ * odkaz nemusí projít přesměrováním. Serverová `path` už ale míří na existující
+ * `/payroll/people/{id}` (dřív vracela neexistující `/payroll/employees/{id}`),
+ * takže na ni může navázat i jiný konzument.
  */
 function itemLink(item: PayrollDeadlineItem): RouteLocationRaw {
   if (item.source === 'levy') return { name: 'payroll-payments' }

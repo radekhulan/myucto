@@ -11,10 +11,17 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 
 final class PayrollAbsenceValidator
 {
+    /**
+     * `unexcused` = neomluvené zameškání směny nebo její části (§ 223 odst. 1
+     * ZP, o kterém rozhoduje zaměstnavatel podle § 348 odst. 3). Je to JEDINÝ
+     * druh absence, o který se smí krátit dovolená — kniha dovolené proti němu
+     * krácení poměřuje. Vědomě je oddělený od `employee_obstacle`: překážka
+     * v práci je nepřítomnost OMLUVENÁ a krátit se za ni nesmí.
+     */
     private const TYPES = [
         'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
         'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-        'employer_obstacle', 'compensatory_time_off', 'other',
+        'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
     ];
 
     private const DOMAIN = PayrollRulesetDomain::CompensationAverages;
@@ -50,6 +57,9 @@ final class PayrollAbsenceValidator
             // (§ 114 odst. 3 zákoníku práce) — přesčas se už zaplatil mzdou,
             // volnem se nahrazuje jen příplatek. Proto `none`, ne přehlédnutí.
             'compensatory_time_off' => 'none',
+            // Za neomluveně zameškanou dobu mzda ani náhrada nepřísluší —
+            // zaměstnanec v ní nepracoval a žádná překážka v práci to nekryje.
+            'unexcused' => 'none',
             default => 'none',
         };
         if (in_array($policy, ['average_100', 'statutory_manual_review'], true)

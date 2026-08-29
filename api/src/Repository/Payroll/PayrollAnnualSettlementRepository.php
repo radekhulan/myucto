@@ -699,11 +699,12 @@ final class PayrollAnnualSettlementRepository
             'INSERT INTO payroll_annual_settlement_certificates
                 (supplier_id, employee_id, tax_year, certificate_reference,
                  payer_name, payer_tax_identification, received_on,
+                 employment_from, employment_to,
                  gross_income_minor, advance_base_minor, advance_tax_minor,
                  credit_35ba_minor, credit_35c_minor, tax_bonus_minor,
                  evidence_status, evidence_reference, note,
                  created_by, updated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($rows as $row) {
             try {
@@ -715,6 +716,8 @@ final class PayrollAnnualSettlementRepository
                     $row['payer_name'] ?? null,
                     $row['payer_tax_identification'] ?? null,
                     $row['received_on'] ?? null,
+                    $row['employment_from'] ?? null,
+                    $row['employment_to'] ?? null,
                     $row['gross_income_minor'] ?? null,
                     $row['advance_base_minor'] ?? null,
                     $row['advance_tax_minor'] ?? null,

@@ -111,7 +111,50 @@ const breakMinutes = ref(0)
 const remoteWork = ref(false)
 const standbyMinutes = ref(0)
 const publish = ref(true)
-const timezone = ref(Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Prague')
+/**
+ * Časové pásmo zápisu docházky — VÝBĚR, ne volný text.
+ *
+ * Hodnota se posílá na server a přepočítává „nástěnný" čas na okamžik
+ * (`payrollWallTimeToIso`). Dokud to bylo volné textové pole, prošel překlep
+ * („Europe/Praha") i prázdno a zápis skončil chybou až na serveru, případně se
+ * čas posunul o hodinu. Nabídka jede z `Intl.supportedValuesOf('timeZone')`,
+ * takže se nemusí nikde udržovat seznam; když ho prohlížeč nemá (starší
+ * WebKit), zůstane krátký seznam běžných pásem, aby pole nebylo prázdné.
+ * Uloženou hodnotu mimo nabídku doplní `selectedTimezone`, aby ji výběr
+ * nezahodil.
+ */
+const TIMEZONE_FALLBACK = [
+  'Europe/Prague', 'Europe/Bratislava', 'Europe/Vienna', 'Europe/Berlin',
+  'Europe/Warsaw', 'Europe/London', 'UTC',
+]
+
+function supportedTimezones(): string[] {
+  const supported = (Intl as unknown as {
+    supportedValuesOf?: (key: string) => string[]
+  }).supportedValuesOf
+  if (typeof supported !== 'function') return TIMEZONE_FALLBACK
+  try {
+    const values = supported('timeZone')
+    return values.length > 0 ? values : TIMEZONE_FALLBACK
+  } catch {
+    return TIMEZONE_FALLBACK
+  }
+}
+
+const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  || 'Europe/Prague'
+const timezone = ref(browserTimezone)
+const timezoneOptions = computed(() => supportedTimezones()
+  .map(zone => ({ value: zone, label: zone })))
+/**
+ * Vlastní hodnota mimo nabídku (jiný prohlížeč, starší zápis) se do výběru
+ * propašuje jako vybraná položka — jinak by ji `SearchableSelect` ukázal jako
+ * prázdno a první uložení by ji tiše přepsalo.
+ */
+const selectedTimezone = computed(() => ({
+  value: timezone.value,
+  label: timezone.value,
+}))
 const importName = ref('')
 const importFormat = ref<'csv' | 'xlsx'>('csv')
 const importContent = ref('')
@@ -440,6 +483,37 @@ const consentError = ref('')
 const consentBlockedReason = computed<string | null>(() =>
   consentValidFrom.value === '' ? t('payroll.time.overtime.consent_blocked_no_date') : null,
 )
+
+/**
+ * Upozornění na PŘEDVYPLNĚNÉ datum účinnosti.
+ *
+ * Souhlas, zákaz, náhradní volno i vyrovnávací období se předvyplňují prvním
+ * dnem PROHLÍŽENÉHO měsíce. To je pohodlné (nejčastěji se zapisuje k měsíci,
+ * který mám na obrazovce) a stálo by to jinak jedno kliknutí navíc u každého
+ * člověka, ale u souhlasu podle § 93 odst. 3 to není kosmetika: dny, které
+ * souhlas nekryje, se poměřují s NAŘÍZENÝM přesčasem (8 h/týden, 150 h/rok)
+ * místo dohodnutého. Kdo souhlas dopisuje zpětně a jen odklepne předvyplněnou
+ * hodnotu, oreže si vlastní evidenci o měsíce, aniž by to viděl.
+ *
+ * Datum se proto NEMAŽE (to by přidalo krok všem), ale dokud drží
+ * předvyplněnou hodnotu, je pod polem věta, co ta hodnota znamená. Když se
+ * navíc prohlíží jiný měsíc než ten aktuální — právě ta situace, kdy past
+ * kousne — je věta důraznější.
+ */
+const browsingOtherMonth = computed(() => period.value !== localPayrollPeriod())
+
+function prefilledDateNotice(value: string): string | null {
+  if (value !== `${period.value}-01`) return null
+  return browsingOtherMonth.value
+    ? t('payroll.time.overtime.prefilled_date_other_month', { period: period.value })
+    : t('payroll.time.overtime.prefilled_date')
+}
+
+function prefilledDateClass(value: string): string {
+  return value === `${period.value}-01` && browsingOtherMonth.value
+    ? 'mt-1 block text-xs text-warning-700'
+    : 'mt-1 block text-xs text-neutral-500'
+}
 
 function overtimeWarnings(item: PayrollTimeOverviewItem) {
   return item.overtime_limits?.findings.filter(finding => finding.severity === 'warning') ?? []
@@ -809,12 +883,13 @@ async function approve() {
       },
     })
     toast.success(t('payroll.time.approved'))
-    approveError.value = null
+    approveFailures.value = []
     closeApproval()
     await load()
   } catch (error: any) {
-    approveError.value = describeApproveFailure(error, item)
-    toast.error(approveError.value.message)
+    const failure = describeApproveFailure(error, item)
+    approveFailures.value = [failure]
+    toast.error(failure.message)
   } finally {
     saving.value = false
   }
@@ -850,31 +925,134 @@ function toggleAllVisible() {
     : selectableItems.value.map(item => item.employment.id)
 }
 
+/*
+ * ─── Hromadné schválení docházky ────────────────────────────────────────────
+ *
+ * Dřív posílalo `approveTimeMonth` BEZ souhrnu JMHZ, zatímco schválení jednoho
+ * vztahu jde přes modal s dvanácti poli. Měsíc se tak dal schválit dvěma
+ * různě úplnými způsoby podle toho, kolik lidí bylo zaškrtnutých — a hromadná
+ * cesta si tiše vybrala tu chudší.
+ *
+ * Souhrn se proto skládá i v dávce, ale JEN z toho, co je odvozené:
+ *   · `agreed_fund_hours`, `weekly_work_hours`, `worked_hours` — návrh serveru
+ *     pro TEN řádek (`preview.suggestions`),
+ *   · IN07/IN08 (neodpracované hodiny, překážky) — server je odvozuje z toho,
+ *     jestli měsíc obsahuje absence (`requires_unworked_hours_followup`).
+ *     Řádek s absencí se do dávky NEVEZME: tam je odpověď lidské rozhodnutí,
+ *     ne údaj z evidence, a odhadnout ji by znamenalo vyplnit hlášení ČSSZ za
+ *     uživatele.
+ *   · `standard_fund_hours` server nenavrhuje NIKDY (vždy `null`), takže je to
+ *     jediné pole, které dávka chce — jednou pro celou dávku, ne 500×.
+ *
+ * Nezpůsobilé řádky se nezahazují ani nezamlčí: vypíšou se jménem i důvodem,
+ * aby bylo jasné, koho zbývá odbavit ručně.
+ */
+const bulkApprovalOpen = ref(false)
+const bulkStandardFund = ref('')
+const bulkNote = ref('')
+
+type BulkExclusion = { name: string; employmentId: number; reason: string }
+
+const bulkSelectedItems = computed(() => selectableItems.value.filter(item =>
+  selectedEmploymentIds.value.includes(item.employment.id),
+))
+
+function bulkExclusionReason(item: PayrollTimeOverviewItem): string | null {
+  const preview = item.jmhz_work_summary?.preview
+  if (!preview) return t('payroll.time.bulk.excluded.no_preview')
+  if (preview.requires_unworked_hours_followup) {
+    return t('payroll.time.bulk.excluded.absences')
+  }
+  const suggestions = preview.suggestions
+  if (!suggestions.agreed_fund_hours
+    || !suggestions.weekly_work_hours
+    || !suggestions.worked_hours
+  ) {
+    return t('payroll.time.bulk.excluded.incomplete_suggestions')
+  }
+  return null
+}
+
+const bulkCandidates = computed(() =>
+  bulkSelectedItems.value.filter(item => bulkExclusionReason(item) === null))
+
+const bulkExclusions = computed<BulkExclusion[]>(() => bulkSelectedItems.value
+  .map(item => ({ item, reason: bulkExclusionReason(item) }))
+  .filter((row): row is { item: PayrollTimeOverviewItem; reason: string } =>
+    row.reason !== null)
+  .map(row => ({
+    name: row.item.employment.full_name,
+    employmentId: row.item.employment.id,
+    reason: row.reason,
+  })))
+
+const bulkBlockedReason = computed<string | null>(() => {
+  if (bulkCandidates.value.length === 0) {
+    return t('payroll.time.bulk.blocked_no_candidates')
+  }
+  if (bulkStandardFund.value.trim() === '') {
+    return t('payroll.time.bulk.blocked_no_standard_fund')
+  }
+  return null
+})
+
+function openBulkApproval() {
+  if (bulkSelectedItems.value.length === 0) return
+  bulkStandardFund.value = ''
+  bulkNote.value = ''
+  approveFailures.value = []
+  bulkApprovalOpen.value = true
+}
+
+function closeBulkApproval() {
+  bulkApprovalOpen.value = false
+}
+
 async function approveSelected() {
-  const items = selectableItems.value.filter(item =>
-    selectedEmploymentIds.value.includes(item.employment.id),
-  )
-  if (items.length === 0) return
+  const items = bulkCandidates.value
+  if (items.length === 0 || bulkBlockedReason.value !== null) return
+  const standardFund = bulkStandardFund.value.trim()
+  const note = bulkNote.value.trim()
   saving.value = true
+  // Nesbírá se PRVNÍ důvod, ale VŠECHNY: „nepodařilo se schválit 3 vztahy"
+  // znamená otevřít tři řádky a hádat, který na čem spadl.
+  const failures: ApproveFailure[] = []
   let approved = 0
-  let failed = 0
   for (const item of items) {
+    const preview = item.jmhz_work_summary?.preview
+    if (!preview) continue
     try {
       await payrollApi.approveTimeMonth(period.value, {
         employment_id: item.employment.id,
         row_version: item.month.row_version,
+        jmhz_work_summary: {
+          source_snapshot_sha256: preview.source_snapshot_sha256,
+          standard_fund_hours: standardFund,
+          agreed_fund_hours: preview.suggestions.agreed_fund_hours ?? '',
+          weekly_work_hours: preview.suggestions.weekly_work_hours ?? '',
+          worked_hours: preview.suggestions.worked_hours ?? '',
+          // Měsíc bez absencí — odvozeno serverem, ne odhadnuto tady.
+          unworked_hours_occurred: false,
+          work_obstacles_occurred: false,
+          unworked_total_hours: null,
+          unworked_paid_hours: null,
+          dpn_without_employer_compensation_hours: null,
+          dpn_with_employer_compensation_hours: null,
+          vacation_hours: null,
+          care_hours: null,
+          employee_obstacle_paid_hours: null,
+          employer_obstacle_hours: null,
+          confirmation_note: note,
+        },
       })
       approved += 1
     } catch (error: any) {
-      failed += 1
-      // Z hromadného schválení si necháme PRVNÍ konkrétní důvod i s odkazem,
-      // kam pro chybějící podklad jít. „Nepodařilo se schválit 3 vztahy" bez
-      // toho znamená otevřít tři řádky a hádat, který na čem spadl.
-      approveError.value ??= describeApproveFailure(error, item)
+      failures.push(describeApproveFailure(error, item))
     }
   }
+  approveFailures.value = failures
   if (approved > 0) toast.success(t('payroll.time.bulk.approved', { count: approved }))
-  if (failed > 0) toast.error(t('payroll.time.bulk.failed', { count: failed }))
+  bulkApprovalOpen.value = false
   await load()
   saving.value = false
 }
@@ -1475,16 +1653,25 @@ const APPROVE_ERROR_CODES: PayrollApproveErrorCode[] = [
   'overtime_conflict',
 ]
 
-const approveError = ref<{
+/**
+ * SEZNAM selhání, ne jedno.
+ *
+ * Hromadné schválení dřív hlásilo jen počet („nepodařilo se schválit 3") plus
+ * první konkrétní důvod. Pro 500 lidí je to nepoužitelné: zbylé řádky se musí
+ * dohledat ručně. Panel proto drží každý neúspěšný řádek zvlášť — jméno,
+ * důvod a odkaz, kam pro chybějící podklad jít.
+ */
+type ApproveFailure = {
   code: PayrollApproveErrorCode | null
   message: string
   name: string
   employmentId: number
-} | null>(null)
+}
 
-const approveErrorTarget = computed<RouteLocationRaw | null>(() => {
-  const failure = approveError.value
-  if (!failure || failure.code === null) return null
+const approveFailures = ref<ApproveFailure[]>([])
+
+function approveFailureTarget(failure: ApproveFailure): RouteLocationRaw | null {
+  if (failure.code === null) return null
   const employment = String(failure.employmentId)
   switch (failure.code) {
     case 'holiday_arrangement_missing':
@@ -1498,10 +1685,10 @@ const approveErrorTarget = computed<RouteLocationRaw | null>(() => {
     case 'inputs_locked':
       return { name: 'payroll-runs' }
   }
-})
+}
 
 function clearApproveError() {
-  approveError.value = null
+  approveFailures.value = []
 }
 
 onMounted(() => {
@@ -1548,9 +1735,10 @@ onMounted(() => {
         </button>
         <button
           v-if="canApprove && selectedEmploymentIds.length > 0"
+          data-test="bulk-approve-open"
           :class="btnFilled('success')"
           :disabled="saving"
-          @click="approveSelected"
+          @click="openBulkApproval"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
           {{ t('payroll.time.bulk.approve', { count: selectedEmploymentIds.length }) }}
@@ -1563,26 +1751,38 @@ onMounted(() => {
       podkladu. Panel místo toastu: uživatel musí vidět, CO chybí a KAM jít.
     -->
     <section
-      v-if="approveError"
+      v-if="approveFailures.length"
       class="rounded-xl border border-danger-500/40 bg-danger-50 p-4 text-sm text-danger-700"
       data-test="approve-error"
     >
       <div class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p class="font-semibold">{{ t('payroll.time.approve_failed') }}</p>
-          <p class="mt-1 max-w-prose leading-snug">{{ approveError.message }}</p>
-          <RouterLink
-            v-if="approveErrorTarget"
-            :to="approveErrorTarget"
-            class="mt-2 inline-flex text-sm font-medium underline"
-            data-test="approve-error-link"
-          >{{ t(`payroll.time.approve_errors.link.${approveError.code}`) }}</RouterLink>
-        </div>
+        <p class="font-semibold">
+          {{ approveFailures.length === 1
+            ? t('payroll.time.approve_failed')
+            : t('payroll.time.bulk.failed', { count: approveFailures.length }) }}
+        </p>
         <button :class="btnOutline('neutral')" @click="clearApproveError">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
           {{ t('common.close') }}
         </button>
       </div>
+      <ul class="mt-2 space-y-2">
+        <li
+          v-for="failure in approveFailures"
+          :key="failure.employmentId"
+          data-test="approve-error-row"
+          class="border-t border-danger-500/20 pt-2 first:border-t-0 first:pt-0"
+        >
+          <p class="font-medium">{{ failure.name }}</p>
+          <p class="mt-0.5 max-w-prose leading-snug">{{ failure.message }}</p>
+          <RouterLink
+            v-if="approveFailureTarget(failure)"
+            :to="approveFailureTarget(failure)!"
+            class="mt-1 inline-flex text-sm font-medium underline"
+            data-test="approve-error-link"
+          >{{ t(`payroll.time.approve_errors.link.${failure.code}`) }}</RouterLink>
+        </li>
+      </ul>
     </section>
 
     <section v-if="editorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 shadow-sm sm:p-6">
@@ -1623,10 +1823,17 @@ onMounted(() => {
             <option v-for="item in categories" :key="item" :value="item">{{ t(`payroll.time.category.${item}`) }}</option>
           </select>
         </label>
-        <label class="block">
+        <div class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.timezone') }}</span>
-          <input v-model="timezone" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
-        </label>
+          <SearchableSelect
+            v-model="timezone"
+            data-test="time-editor-timezone"
+            :options="timezoneOptions"
+            :selected-option="selectedTimezone"
+            :clearable="false"
+            accent="payroll"
+          />
+        </div>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.starts') }}</span>
           <input v-model="startsAt" type="datetime-local" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
@@ -2202,6 +2409,79 @@ onMounted(() => {
       </form>
     </Modal>
 
+    <!--
+      Hromadné schválení se souhrnem JMHZ. Jediné pole je zákonný fond, který
+      server nenavrhuje; zbytek se bere z návrhu pro každý řádek zvlášť. Řádky
+      s absencí se do dávky neberou a jsou vypsané jménem — tam je odpověď
+      na IN07/IN08 lidské rozhodnutí, ne údaj z evidence.
+    -->
+    <Modal
+      v-if="bulkApprovalOpen"
+      :title="t('payroll.time.bulk.title')"
+      width-class="max-w-xl"
+      @close="closeBulkApproval"
+    >
+      <form data-test="bulk-approve-form" class="space-y-4" @submit.prevent="approveSelected">
+        <p class="max-w-prose text-sm text-neutral-600">
+          {{ t('payroll.time.bulk.hint', { count: bulkCandidates.length }) }}
+        </p>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.standard_fund') }}</span>
+          <input
+            v-model="bulkStandardFund"
+            data-test="bulk-standard-fund"
+            inputmode="decimal"
+            required
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+          >
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.bulk.standard_fund_hint') }}</span>
+        </label>
+        <label class="block">
+          <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.jmhz.note') }}</span>
+          <textarea
+            v-model="bulkNote"
+            data-test="bulk-note"
+            maxlength="500"
+            rows="2"
+            class="w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+          />
+        </label>
+
+        <section
+          v-if="bulkExclusions.length"
+          data-test="bulk-approve-excluded"
+          class="rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-700"
+        >
+          <p class="font-medium">{{ t('payroll.time.bulk.excluded.title', { count: bulkExclusions.length }) }}</p>
+          <ul class="mt-2 space-y-1">
+            <li v-for="row in bulkExclusions" :key="row.employmentId">
+              <span class="font-medium">{{ row.name }}</span> — {{ row.reason }}
+            </li>
+          </ul>
+        </section>
+
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="closeBulkApproval">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="submit"
+            data-test="bulk-approve-confirm"
+            :class="btnFilled('success')"
+            :disabled="saving || Boolean(bulkBlockedReason)"
+            :title="disabledTitle(Boolean(bulkBlockedReason), bulkBlockedReason)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+            {{ t('payroll.time.bulk.confirm', { count: bulkCandidates.length }) }}
+          </button>
+        </div>
+        <p v-if="bulkBlockedReason" :class="BTN_DISABLED_NOTE" data-test="bulk-approve-blocked">
+          {{ bulkBlockedReason }}
+        </p>
+      </form>
+    </Modal>
+
     <Modal
       v-if="consentItem"
       :title="t('payroll.time.overtime.consent_title')"
@@ -2220,6 +2500,13 @@ onMounted(() => {
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
               <input v-model="consentValidFrom" data-test="overtime-consent-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <span
+                v-if="prefilledDateNotice(consentValidFrom)"
+                data-test="overtime-consent-prefilled-date"
+                :class="prefilledDateClass(consentValidFrom)"
+              >
+                {{ prefilledDateNotice(consentValidFrom) }}
+              </span>
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
@@ -2283,6 +2570,13 @@ onMounted(() => {
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
               <input v-model="protectionValidFrom" data-test="overtime-protection-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <span
+                v-if="prefilledDateNotice(protectionValidFrom)"
+                data-test="overtime-protection-prefilled-date"
+                :class="prefilledDateClass(protectionValidFrom)"
+              >
+                {{ prefilledDateNotice(protectionValidFrom) }}
+              </span>
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>
@@ -2339,6 +2633,13 @@ onMounted(() => {
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_overtime_date') }}</span>
               <input v-model="compensationDate" data-test="overtime-compensation-date" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <span
+                v-if="prefilledDateNotice(compensationDate)"
+                data-test="overtime-compensation-prefilled-date"
+                :class="prefilledDateClass(compensationDate)"
+              >
+                {{ prefilledDateNotice(compensationDate) }}
+              </span>
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.compensation_minutes') }}</span>
@@ -2408,6 +2709,13 @@ onMounted(() => {
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_from') }}</span>
               <input v-model="averagingValidFrom" data-test="overtime-averaging-valid-from" type="date" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+              <span
+                v-if="prefilledDateNotice(averagingValidFrom)"
+                data-test="overtime-averaging-prefilled-date"
+                :class="prefilledDateClass(averagingValidFrom)"
+              >
+                {{ prefilledDateNotice(averagingValidFrom) }}
+              </span>
             </label>
             <label class="block">
               <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.time.overtime.consent_valid_to') }}</span>

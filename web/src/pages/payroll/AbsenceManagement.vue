@@ -90,7 +90,7 @@ const textareaClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surfa
 const absenceTypes: AbsenceType[] = [
   'vacation', 'dpn', 'quarantine', 'ocr', 'long_term_care', 'ppm',
   'paternity', 'parental', 'unpaid_leave', 'employee_obstacle',
-  'employer_obstacle', 'compensatory_time_off', 'other',
+  'employer_obstacle', 'compensatory_time_off', 'unexcused', 'other',
 ]
 const leaveEntryTypes = ['carryover', 'adjustment', 'shortening', 'overdrawn', 'payout']
 
@@ -456,8 +456,21 @@ async function decide(
   }
 }
 
+/**
+ * Zrušení nepřítomnosti se ptá, ale POJMENUJE, čeho se ptá.
+ *
+ * Undo toast tu nejde: zrušenou nepřítomnost server neumí vrátit a založit ji
+ * znovu by z rozhodnuté udělalo znovu žádanou — jiný stav, ne návrat.
+ * Zůstává tedy dotaz, ale s koho a čeho se týká: „Opravdu zrušit?" nad
+ * seznamem třiceti řádků neříká vůbec nic.
+ */
 async function cancel(item: PayrollAbsence) {
-  if (!window.confirm(t('payroll_absence.absences.cancel_confirm'))) return
+  if (!window.confirm(t('payroll_absence.absences.cancel_confirm', {
+    name: item.full_name,
+    type: t(`payroll_absence.types.${item.absence_type}`),
+    from: item.date_from,
+    to: item.date_to,
+  }))) return
   saving.value = true
   try {
     await payrollAbsenceApi.cancel(item.id, item.row_version)

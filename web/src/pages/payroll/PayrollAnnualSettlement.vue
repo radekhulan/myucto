@@ -111,6 +111,14 @@ interface CertificateForm {
   payer_name: string
   payer_tax_identification: string
   received_on: string
+  /**
+   * Tiskopisové „za období od–do". Prázdno = „nevíme", ne „souběh nebyl":
+   * překryv dvou vyplněných období zvedne blokátor `must_file_tax_return`
+   * (§ 38g odst. 2), ale historická potvrzení období nenesou, takže se
+   * nevyžadují.
+   */
+  employment_from: string
+  employment_to: string
   gross_income: string
   advance_base: string
   advance_tax: string
@@ -357,6 +365,8 @@ function certificateForm(certificate: PayrollAnnualSettlementCertificate): Certi
     payer_name: certificate.payer_name ?? '',
     payer_tax_identification: certificate.payer_tax_identification ?? '',
     received_on: certificate.received_on ?? '',
+    employment_from: certificate.employment_from ?? '',
+    employment_to: certificate.employment_to ?? '',
     gross_income: amountToInput(certificate.gross_income_minor_units),
     advance_base: amountToInput(certificate.advance_base_minor_units),
     advance_tax: amountToInput(certificate.advance_tax_minor_units),
@@ -375,6 +385,8 @@ function addCertificate(): void {
     payer_name: '',
     payer_tax_identification: '',
     received_on: '',
+    employment_from: '',
+    employment_to: '',
     gross_income: '',
     advance_base: '',
     advance_tax: '',
@@ -408,6 +420,10 @@ async function saveCertificates(): Promise<void> {
         payer_name: row.payer_name.trim() || null,
         payer_tax_identification: row.payer_tax_identification.trim() || null,
         received_on: row.received_on || null,
+        // Prázdné období jde na server jako `null` — „nevíme". Nula ani
+        // dopočtený rok tu nedávají smysl: souběh se pak jen neprokáže.
+        employment_from: row.employment_from || null,
+        employment_to: row.employment_to || null,
         gross_income_minor_units: inputToAmount(row.gross_income),
         advance_base_minor_units: inputToAmount(row.advance_base),
         advance_tax_minor_units: inputToAmount(row.advance_tax),
@@ -1065,6 +1081,40 @@ onMounted(async () => {
                     class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                   >
                 </label>
+                <!--
+                  Tiskopisové „za období od–do". Rozhoduje o tom, jestli poplatník
+                  pobíral mzdu POSTUPNĚ, nebo od dvou plátců SOUČASNĚ — překryv
+                  zvedne blokátor přiznání (§ 38g odst. 2). Nepovinné schválně:
+                  historická potvrzení období nenesou a prázdno znamená „nevíme",
+                  ne „souběh nebyl".
+                -->
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_employment_from') }}
+                  </span>
+                  <input
+                    v-model="certificate.employment_from"
+                    data-test="certificate-employment-from"
+                    type="date"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_employment_to') }}
+                  </span>
+                  <input
+                    v-model="certificate.employment_to"
+                    data-test="certificate-employment-to"
+                    type="date"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+                <p class="text-xs text-neutral-500 sm:col-span-2">
+                  {{ t('payroll.annual_settlement.certificate_employment_period_hint') }}
+                </p>
 
                 <label
                   v-for="field in CERTIFICATE_AMOUNTS"

@@ -81,11 +81,22 @@ final readonly class AnnualTaxRates
         public int $bonusMinimumAmountMinorUnits,
         /** § 38ch odst. 5 a § 35d odst. 8: práh výplaty. Nerovnost je OSTRÁ. */
         public int $payoutThresholdMinorUnits,
-        /** § 35bb odst. 1 věta první: roční sleva na manžela. */
+        /**
+         * § 35bb odst. 1 věta první: roční sleva na manžela.
+         *
+         * ⚠ DO VÝPOČTU NEVSTUPUJE. Modul slevu na manžela neuplatňuje —
+         * chybí evidence podmínek (společně hospodařící domácnost, vyživované
+         * dítě do 3 let podle § 35bb odst. 2 písm. a), doložení podle § 38l),
+         * takže {@see AnnualSettlementAnnualClaims::PresentUnsupported}
+         * zúčtování zastaví. Číslo se drží jen proto, aby ho účetní viděla
+         * v administraci a aby se roční a měsíční ruleset nemohly rozejít
+         * nepozorovaně; ve stopě výpočtu je označené jako NEUPLATNĚNÉ —
+         * viz {@see toArray()}.
+         */
         public int $spouseCreditMinorUnits,
-        /** § 35bb odst. 1 věta druhá: násobek u manžela s nárokem na průkaz ZTP/P. */
+        /** § 35bb odst. 1 věta druhá: násobek u manžela s nárokem na průkaz ZTP/P. Do výpočtu nevstupuje. */
         public int $spouseCreditZtpPMultiplier,
-        /** § 35bb odst. 2 písm. b): nejvyšší vlastní příjem manžela; nerovnost NEOSTRÁ. */
+        /** § 35bb odst. 2 písm. b): nejvyšší vlastní příjem manžela; nerovnost NEOSTRÁ. Do výpočtu nevstupuje. */
         public int $spouseIncomeLimitMinorUnits,
         /** @var array<string,int> roční částka slevy podle TaxCreditKind->value */
         public array $annualCreditMinorUnits,
@@ -257,9 +268,19 @@ final readonly class AnnualTaxRates
             'bonus_minimum_income_minor_units' => $this->bonusMinimumIncomeMinorUnits,
             'bonus_minimum_amount_minor_units' => $this->bonusMinimumAmountMinorUnits,
             'payout_threshold_minor_units' => $this->payoutThresholdMinorUnits,
-            'spouse_credit_minor_units' => $this->spouseCreditMinorUnits,
-            'spouse_credit_ztp_p_multiplier' => $this->spouseCreditZtpPMultiplier,
-            'spouse_income_limit_minor_units' => $this->spouseIncomeLimitMinorUnits,
+            // Sleva na manžela se ve stopě drží POD VLASTNÍM KLÍČEM s příznakem
+            // `applied = false`. Ploché klíče vedle sazeb, které se skutečně
+            // počítají, dělaly ze snapshotu tvrzení „sleva byla posouzena" —
+            // a to modul nedělá. Vstupní podmínky (§ 35bb odst. 2, § 38l)
+            // nemá v evidenci a zúčtování na nich fail-closed padá.
+            'spouse_credit' => [
+                'applied' => false,
+                'reason' => 'eligibility_manual_review',
+                'statute' => 'zdp-35bb',
+                'annual_credit_minor_units' => $this->spouseCreditMinorUnits,
+                'ztp_p_multiplier' => $this->spouseCreditZtpPMultiplier,
+                'income_limit_minor_units' => $this->spouseIncomeLimitMinorUnits,
+            ],
             'annual_credit_minor_units' => $this->annualCreditMinorUnits,
             'annual_child_credit_minor_units' => $this->annualChildCreditMinorUnits,
             // Odvození 12× platí pro slevy a daňové zvýhodnění. Prahy výplaty

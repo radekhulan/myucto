@@ -116,6 +116,8 @@ final class AnnualTaxSettlementService
                 'payer_name' => $certificate->payerName,
                 'payer_tax_identification' => $certificate->payerTaxIdentification,
                 'received_on' => $certificate->receivedOn,
+                'employment_from' => $certificate->employmentFrom,
+                'employment_to' => $certificate->employmentTo,
                 'gross_income_minor' => $certificate->grossIncomeMinorUnits,
                 'advance_base_minor' => $certificate->advanceBaseMinorUnits,
                 'advance_tax_minor' => $certificate->advanceTaxMinorUnits,
@@ -173,6 +175,8 @@ final class AnnualTaxSettlementService
             self::text($row['payer_name'] ?? null),
             self::text($row['payer_tax_identification'] ?? null),
             self::isoDate($row['received_on'] ?? null),
+            self::isoDate($row['employment_from'] ?? null),
+            self::isoDate($row['employment_to'] ?? null),
         );
     }
 
@@ -537,6 +541,8 @@ final class AnnualTaxSettlementService
                     self::text($row['payer_name'] ?? null),
                     self::text($row['payer_tax_identification'] ?? null),
                     self::isoDate($row['received_on'] ?? null),
+                    self::isoDate($row['employment_from'] ?? null),
+                    self::isoDate($row['employment_to'] ?? null),
                 ),
             $rows,
         );

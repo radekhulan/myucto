@@ -221,18 +221,52 @@ async function save() {
   }
 }
 
+/**
+ * Smazání dimenze bez potvrzovacího dialogu, ale s možností vzít to zpět.
+ *
+ * Nativní `confirm()` se ptal PŘED akcí, a to u vratné věci znamená daň za
+ * každé jedno smazání — u pěti dimenzí pět dialogů, které navíc neřeknou,
+ * které dimenze se to týká. Undo toast obrátí pořadí: akce proběhne hned
+ * a osm vteřin je čas ji vrátit. Server dimenzi v použití stejně nepustí
+ * (`dimension_in_use`), takže se dialogem nic nechránilo.
+ *
+ * Vrácení dimenzi ZALOŽÍ ZNOVU (nové `id`, tytéž údaje) — obnovit smazaný
+ * řádek server neumí. Pro uživatele je výsledek stejný; vazby, které by
+ * smazání blokovaly, existovat nemohly.
+ */
 async function remove(dimension: PayrollDimension) {
   if (!props.canWrite) return
-  if (!window.confirm(t('payroll.employer.dimensions.delete_confirm'))) return
   try {
     await payrollApi.deletePayrollDimension(dimension.id)
     dimensions.value = dimensions.value.filter(item => item.id !== dimension.id)
-    toast.success(t('payroll.employer.dimensions.deleted'))
+    toast.success(t('payroll.employer.dimensions.deleted'), {
+      label: t('common.undo'),
+      handler: () => restore(dimension),
+    })
   } catch (error: unknown) {
     const code = apiCode(error)
     toast.error(code === 'dimension_in_use'
       ? t('payroll.employer.dimensions.in_use_error')
       : (apiMessage(error) || t('payroll.employer.dimensions.delete_failed')))
+  }
+}
+
+async function restore(dimension: PayrollDimension) {
+  try {
+    const restored = await payrollApi.createPayrollDimension({
+      dimension_type: dimension.dimension_type,
+      code: dimension.code,
+      name: dimension.name,
+      valid_from: dimension.valid_from,
+      valid_to: dimension.valid_to,
+      is_active: dimension.is_active,
+      default_account_code: dimension.default_account_code,
+      row_version: 0,
+    })
+    dimensions.value = [...dimensions.value, restored]
+    toast.success(t('payroll.employer.dimensions.restored'))
+  } catch (error: unknown) {
+    toast.error(apiMessage(error) || t('payroll.employer.dimensions.restore_failed'))
   }
 }
 

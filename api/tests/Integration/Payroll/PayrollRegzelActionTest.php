@@ -321,23 +321,20 @@ final class PayrollRegzelActionTest extends TestCase
         self::assertSame(403, $forbidden->getStatusCode());
 
         $this->saveConfirmedProfile();
-        $unconfirmed = $this->action->prepare(
+        // Příprava XML potvrzení NEVYŽADUJE — evidence se stvrzuje jednou při
+        // uložení profilu. Tělo bez `evidence_confirmed` proto musí projít.
+        $withoutConfirmation = $this->action->prepare(
             $this->request('POST', '/api/payroll/submissions/regzel/prepare', [
                 'office_id' => $this->officeId,
                 'environment' => 'production',
-                'evidence_confirmed' => false,
                 'idempotency_key' => 'regzel-action-unconfirmed',
             ]),
             new Response(),
         );
-        self::assertSame(422, $unconfirmed->getStatusCode());
-        self::assertSame(
-            'regzel_evidence_confirmation_required',
-            $this->json($unconfirmed)['error']['code'],
-        );
-        self::assertSame(
-            'Před přípravou XML musíš potvrdit aktuálnost zdrojových údajů.',
-            $this->json($unconfirmed)['error']['message'],
+        self::assertContains(
+            $withoutConfirmation->getStatusCode(),
+            [200, 201],
+            'Příprava XML nesmí vyžadovat druhé potvrzení evidence.',
         );
 
         $unsupported = $this->action->prepare(

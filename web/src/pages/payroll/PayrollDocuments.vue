@@ -62,6 +62,8 @@ const generatingAnnualKind = ref<AnnualGenerationKind | null>(null)
 const pendingCorrectionKind = ref<PayrollTaxCertificateKind | null>(null)
 const correctionReason = ref('')
 const downloadingId = ref<number | null>(null)
+const downloadingBundle = ref(false)
+const bundleError = ref('')
 const exportingScope = ref<PayrollPeriodExportScope | null>(null)
 let loadSequence = 0
 let batchPollTimer: ReturnType<typeof setTimeout> | null = null
@@ -141,8 +143,151 @@ async function loadFocusPersonName(): Promise<void> {
     // Neplatný nebo již nepřístupný deep-link přizná stávající text „neznámá osoba".
   }
 }
+/*
+ * ─── Roční dokumenty za VÍC lidí ────────────────────────────────────────────
+ *
+ * Do W29 šly roční dokumenty jen po jednom: tlačítka byla `disabled`, dokud
+ * nebyla vybraná právě jedna osoba. Pro 50 lidí je to 50× (vybrat osobu → tři
+ * tlačítka), pro 500 pětkrát tolik — a přitom měsíční pásky hromadné dávno jsou.
+ *
+ * Dávka jede z prohlížeče, ne ze serverové fronty jako u měsíčních pásek: každé
+ * generování je na serveru samostatná transakce s obsahově odvozeným klíčem
+ * archivu, takže opakování nevytvoří duplikát a smyčka nepotřebuje vlastní stav
+ * v databázi. Cena je, že běh je vázaný na otevřenou záložku — proto průběh
+ * VIDÍ (hotovo/celkem), jde ZASTAVIT a neúspěšné řádky se vypíšou jménem
+ * i důvodem, ne jako počet.
+ *
+ * Trvalá serverová fronta po vzoru `ApprovedRevisionDocumentBatchService` je
+ * logický další krok (přežila by zavření prohlížeče); chtěla by ale vlastní
+ * tabulku dávek pro roční rozsah, protože stávající visí na běhu a revizi.
+ *
+ * Osoby, které už dokument daného druhu za rok mají, se PŘESKAKUJÍ: jejich
+ * nahrazení je oprava (§ opravné potvrzení) a ta má povinný důvod, který za
+ * uživatele vymyslet nelze. Vypíšou se jménem, aby bylo jasné, že nezmizely.
+ */
+const batchScope = ref<'selected' | 'all'>('selected')
+const batchRunningKind = ref<AnnualGenerationKind | null>(null)
+const batchCancelled = ref(false)
+const batchDone = ref(0)
+const batchTotal = ref(0)
+const batchFailures = ref<Array<{ id: number; name: string; reason: string }>>([])
+const batchSkipped = ref<Array<{ id: number; name: string }>>([])
+const batchCompletedKind = ref<AnnualGenerationKind | null>(null)
+
+const batchActive = computed(() => batchRunningKind.value !== null)
+
+function resetBatchReport(): void {
+  batchDone.value = 0
+  batchTotal.value = 0
+  batchFailures.value = []
+  batchSkipped.value = []
+  batchCompletedKind.value = null
+}
+
+function cancelBatch(): void {
+  batchCancelled.value = true
+}
+
+/** Cílový seznam osob: buď jedna vybraná, nebo všichni aktivní lidé firmy. */
+async function batchTargets(): Promise<Array<{ id: number; name: string }>> {
+  if (batchScope.value === 'selected') {
+    const employeeId = selectedEmployeeId.value
+    if (employeeId === null) return []
+    return [{
+      id: employeeId,
+      name: focusPersonName.value ?? String(employeeId),
+    }]
+  }
+  const options = await payrollApi.peopleOptions()
+  return options
+    .filter(option => option.is_active)
+    .map(option => ({ id: option.id, name: option.full_name }))
+}
+
+/**
+ * Má už osoba dokument toho druhu za rok? Rozhoduje se z NAČTENÉ stránky, takže
+ * to není záruka — je to jen levné vynechání toho, co je vidět. Server sám
+ * duplikát nevytvoří (klíč archivu je odvozený z obsahu) a opravu si vyžádá
+ * odvoláním na existující doklad.
+ */
+function hasAnnualDocument(employeeId: number, kind: AnnualGenerationKind): boolean {
+  const documentKind = kind === 'payroll_sheet' ? 'annual_payroll_sheet' : kind
+  return annualItems.value.some(item =>
+    item.employee_id === employeeId && item.document_kind === documentKind)
+}
+
+async function runAnnualBatch(kind: AnnualGenerationKind): Promise<void> {
+  if (batchActive.value || generatingAnnualKind.value !== null) return
+  resetBatchReport()
+  batchCancelled.value = false
+  batchRunningKind.value = kind
+  try {
+    const targets = await batchTargets()
+    batchTotal.value = targets.length
+    for (const target of targets) {
+      if (batchCancelled.value) break
+      if (hasAnnualDocument(target.id, kind)) {
+        batchSkipped.value.push(target)
+        batchDone.value += 1
+        continue
+      }
+      try {
+        if (kind === 'payroll_sheet') {
+          await payrollApi.generatePayrollSheet(target.id, year.value)
+        } else {
+          await payrollApi.generateTaxCertificate(target.id, year.value, kind, {
+            supersedes_document_id: null,
+            correction_reason: null,
+          })
+        }
+      } catch (error) {
+        batchFailures.value.push({
+          id: target.id,
+          name: target.name,
+          reason: apiErrorMessage(error, t('payroll.documents.batch_annual.item_failed')),
+        })
+      }
+      batchDone.value += 1
+    }
+    batchCompletedKind.value = kind
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_annual.targets_failed')))
+  } finally {
+    batchRunningKind.value = null
+    await load()
+  }
+}
+
+/**
+ * Jedna osoba jde pořád starou cestou — kvůli OPRAVĚ.
+ *
+ * U jednotlivce se existující potvrzení nahrazuje opravným dokladem s povinným
+ * důvodem (`requestTaxCertificate` na to otevře formulář). V dávce se takový
+ * člověk PŘESKOČÍ a vypíše: důvod opravy za uživatele vymyslet nelze a padesát
+ * formulářů po sobě není hromadná akce.
+ */
+function runAnnualKind(kind: AnnualGenerationKind): void {
+  if (batchScope.value === 'all') {
+    void runAnnualBatch(kind)
+    return
+  }
+  if (kind === 'payroll_sheet') {
+    void generatePayrollSheet()
+    return
+  }
+  requestTaxCertificate(kind)
+}
+
+const annualBlockedReason = computed<string | null>(() => {
+  if (batchScope.value === 'selected' && selectedEmployeeId.value === null) {
+    return t('payroll.documents.batch_annual.blocked_no_person')
+  }
+  return null
+})
+
 const annualActions = computed<ActionItem[]>(() => {
-  const disabled = selectedEmployeeId.value === null
+  const disabled = annualBlockedReason.value !== null
+    || batchActive.value
     || generatingAnnualKind.value !== null
   return [
     {
@@ -152,8 +297,10 @@ const annualActions = computed<ActionItem[]>(() => {
       tier: 'primary',
       variant: 'primary',
       disabled,
-      loading: generatingAnnualKind.value === 'payroll_sheet',
-      run: generatePayrollSheet,
+      disabledReason: annualBlockedReason.value ?? undefined,
+      loading: generatingAnnualKind.value === 'payroll_sheet'
+        || batchRunningKind.value === 'payroll_sheet',
+      run: () => runAnnualKind('payroll_sheet'),
     },
     {
       key: 'tax-certificate-advance',
@@ -162,11 +309,10 @@ const annualActions = computed<ActionItem[]>(() => {
       tier: 'secondary',
       variant: 'primary',
       disabled,
-      loading: generatingAnnualKind.value
-        === 'taxable_income_advance_certificate',
-      run: () => requestTaxCertificate(
-        'taxable_income_advance_certificate',
-      ),
+      disabledReason: annualBlockedReason.value ?? undefined,
+      loading: generatingAnnualKind.value === 'taxable_income_advance_certificate'
+        || batchRunningKind.value === 'taxable_income_advance_certificate',
+      run: () => runAnnualKind('taxable_income_advance_certificate'),
     },
     {
       key: 'tax-certificate-withholding',
@@ -175,11 +321,10 @@ const annualActions = computed<ActionItem[]>(() => {
       tier: 'secondary',
       variant: 'primary',
       disabled,
-      loading: generatingAnnualKind.value
-        === 'taxable_income_withholding_certificate',
-      run: () => requestTaxCertificate(
-        'taxable_income_withholding_certificate',
-      ),
+      disabledReason: annualBlockedReason.value ?? undefined,
+      loading: generatingAnnualKind.value === 'taxable_income_withholding_certificate'
+        || batchRunningKind.value === 'taxable_income_withholding_certificate',
+      run: () => runAnnualKind('taxable_income_withholding_certificate'),
     },
   ]
 })
@@ -438,6 +583,35 @@ async function retryBatchItem(item: PayrollDocumentBatchItem): Promise<void> {
   }
 }
 
+/**
+ * Hotový balík se STAHUJE, neoznamuje.
+ *
+ * Dřív tu byla jen věta „balík je připraven" a jediná cesta k němu vedla přes
+ * archiv a export období — z panelu, který o balíku ví, nevedl žádný odkaz.
+ * Chyba se hlásí větou v panelu, ne mizícím toastem: uživatel na to tlačítko
+ * kliknul a musí se dozvědět, proč nemá soubor.
+ */
+async function downloadBundle(): Promise<void> {
+  const documentId = documentBatch.value?.bundle_document_id
+  if (documentId === null || documentId === undefined || downloadingBundle.value) return
+  downloadingBundle.value = true
+  bundleError.value = ''
+  try {
+    await payrollApi.downloadDocumentById(
+      documentId,
+      documentBatch.value?.bundle_filename
+        || `${t('payroll.documents.batch_bundle_ready')}.zip`,
+    )
+  } catch (error) {
+    bundleError.value = apiErrorMessage(
+      error,
+      t('payroll.documents.batch_bundle_failed'),
+    )
+  } finally {
+    downloadingBundle.value = false
+  }
+}
+
 async function download(item: PayrollDocument): Promise<void> {
   if (downloadingId.value !== null) return
   downloadingId.value = item.id
@@ -556,8 +730,32 @@ onBeforeUnmount(clearBatchPoll)
       <div class="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200" role="progressbar" :aria-valuemin="0" :aria-valuemax="documentBatch.item_count" :aria-valuenow="documentBatch.succeeded_count">
         <div class="h-full bg-success-500 transition-all" :style="{ width: `${documentBatch.item_count ? Math.round(documentBatch.succeeded_count * 100 / documentBatch.item_count) : 0}%` }" />
       </div>
-      <p v-if="documentBatch.bundle_document_id" class="mt-3 text-sm font-medium text-success-700">
-        {{ t('payroll.documents.batch_bundle_ready') }}
+      <div v-if="documentBatch.bundle_document_id" class="mt-3 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          data-test="download-batch-bundle"
+          :class="btnFilled('success')"
+          :disabled="downloadingBundle"
+          @click="downloadBundle()"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.download" />
+          </svg>
+          {{ t(downloadingBundle
+            ? 'payroll.documents.batch_bundle_downloading'
+            : 'payroll.documents.batch_bundle_download') }}
+        </button>
+        <p class="text-sm font-medium text-success-700">
+          {{ documentBatch.bundle_filename || t('payroll.documents.batch_bundle_ready') }}
+        </p>
+      </div>
+      <p
+        v-if="bundleError"
+        data-test="batch-bundle-error"
+        class="mt-2 text-sm text-danger-700"
+        role="alert"
+      >
+        {{ bundleError }}
       </p>
       <div v-if="documentBatchItems.length" class="mt-4 max-h-80 overflow-auto rounded-md border border-neutral-200 bg-surface">
         <div v-for="item in documentBatchItems" :key="item.id" class="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-3 py-2 text-sm last:border-b-0" data-test="document-batch-item">
@@ -719,8 +917,34 @@ onBeforeUnmount(clearBatchPoll)
       v-if="activeTab === 'annual' && auth.canWrite('payroll.documents')"
       class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm"
     >
-      <div class="flex flex-wrap items-end gap-3">
-        <div class="min-w-64 flex-1">
+      <!--
+        Rozsah vystavení. Do W29 šly roční dokumenty JEN po jednom — pro 500
+        lidí 1500 kliknutí. „Za všechny" projede stejné tři akce nad celou
+        firmou; průběh je vidět, jde zastavit a co se nepovedlo, je vypsané
+        jménem.
+      -->
+      <div class="flex flex-wrap gap-2" role="group" :aria-label="t('payroll.documents.batch_annual.scope_label')">
+        <button
+          v-for="scope in (['selected', 'all'] as const)"
+          :key="scope"
+          type="button"
+          :data-test="`annual-scope-${scope}`"
+          :aria-pressed="batchScope === scope"
+          :disabled="batchActive"
+          :class="[
+            'rounded-full border px-3 py-1.5 text-sm font-medium transition-colors',
+            batchScope === scope
+              ? 'border-payroll-500 bg-payroll-50 text-payroll-700'
+              : 'border-neutral-300 text-neutral-600 hover:border-neutral-400',
+          ]"
+          @click="batchScope = scope"
+        >
+          {{ t(`payroll.documents.batch_annual.scope.${scope}`) }}
+        </button>
+      </div>
+
+      <div class="mt-3 flex flex-wrap items-end gap-3">
+        <div v-if="batchScope === 'selected'" class="min-w-64 flex-1">
           <span class="form-label">{{ t('payroll.documents.select_employee') }}</span>
           <PayrollPersonSearchSelect
             v-model="selectedEmployeeId"
@@ -730,8 +954,59 @@ onBeforeUnmount(clearBatchPoll)
             data-test="payroll-documents-person"
           />
         </div>
+        <p v-else class="min-w-64 flex-1 text-sm text-neutral-600">
+          {{ t('payroll.documents.batch_annual.scope_all_hint', { year }) }}
+        </p>
         <ActionBar :actions="annualActions" />
       </div>
+      <!-- Průběh dávky: bez něj by 500 lidí bylo jen dlouhé ticho. -->
+      <section
+        v-if="batchActive || batchCompletedKind"
+        data-test="annual-batch-report"
+        class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-4"
+        role="status"
+      >
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <p class="text-sm font-medium text-neutral-900">
+            {{ t('payroll.documents.batch_annual.progress', {
+              done: batchDone,
+              total: batchTotal,
+            }) }}
+          </p>
+          <button
+            v-if="batchActive"
+            type="button"
+            data-test="annual-batch-cancel"
+            :class="btnOutline('warning')"
+            @click="cancelBatch"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.x" />
+            </svg>
+            {{ t('payroll.documents.batch_annual.cancel') }}
+          </button>
+        </div>
+        <div class="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200" role="progressbar" :aria-valuemin="0" :aria-valuemax="batchTotal" :aria-valuenow="batchDone">
+          <div
+            class="h-full bg-payroll-500 transition-all"
+            :style="{ width: `${batchTotal ? Math.round(batchDone * 100 / batchTotal) : 0}%` }"
+          />
+        </div>
+        <div v-if="batchSkipped.length" class="mt-3 text-sm text-neutral-700" data-test="annual-batch-skipped">
+          <p class="font-medium">{{ t('payroll.documents.batch_annual.skipped_title', { count: batchSkipped.length }) }}</p>
+          <p class="mt-1 leading-snug">{{ batchSkipped.map(row => row.name).join(', ') }}</p>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.documents.batch_annual.skipped_hint') }}</p>
+        </div>
+        <div v-if="batchFailures.length" class="mt-3 text-sm text-danger-700" data-test="annual-batch-failures">
+          <p class="font-medium">{{ t('payroll.documents.batch_annual.failed_title', { count: batchFailures.length }) }}</p>
+          <ul class="mt-1 space-y-1">
+            <li v-for="row in batchFailures" :key="row.id">
+              <span class="font-medium">{{ row.name }}</span> — {{ row.reason }}
+            </li>
+          </ul>
+        </div>
+      </section>
+
       <p class="mt-2 text-xs text-neutral-500">{{ t('payroll.documents.payroll_sheet_hint') }}</p>
       <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.documents.tax_certificate_hint') }}</p>
       <form

@@ -87,6 +87,30 @@ function row(employmentId: number, fullName: string) {
       category_minutes: {},
       incomplete: false,
     },
+    /*
+     * Měsíc bez absencí, se kterým si hromadné schválení poradí: server
+     * navrhuje dohodnutý fond, týdenní dobu i odpracované hodiny a
+     * `requires_unworked_hours_followup = false` říká, že IN07/IN08 jsou
+     * odvozené, ne lidské rozhodnutí. Zákonný fond server nenavrhuje nikdy.
+     */
+    jmhz_work_summary: {
+      preview: {
+        derivation_version: 'v1',
+        control_catalog_key: null,
+        control_manifest_sha256: null,
+        source_snapshot_sha256: 'a'.repeat(64),
+        suggestions: {
+          standard_fund_hours: null,
+          agreed_fund_hours: '160',
+          weekly_work_hours: '40',
+          evidence_days: 20,
+          worked_hours: '160',
+        },
+        issues: [],
+        requires_unworked_hours_followup: false,
+      },
+      current_revision: null,
+    },
   }
 }
 
@@ -639,7 +663,11 @@ describe('TimeAttendance', () => {
 describe('TimeAttendance — měsíční mřížka', () => {
   const GRID_MOUNT = {
     attachTo: document.body,
-    global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    global: {
+      // `teleport` se stubuje, aby obsah modalu (hromadné schválení) zůstal
+      // ve wrapperu — jinak skončí v `document.body` a `wrapper.get()` ho mine.
+      stubs: { RouterLink: { template: '<a><slot /></a>' }, teleport: true },
+    },
   }
 
   beforeEach(() => {
@@ -786,18 +814,122 @@ describe('TimeAttendance — měsíční mřížka', () => {
     const wrapper = mount(TimeAttendance, GRID_MOUNT)
     await flushPromises()
 
-    const checkbox = wrapper.find('thead input[type="checkbox"]')
-    await checkbox.trigger('change')
-    const bulk = wrapper.findAll('button')
-      .find(button => button.text().includes('payroll.time.bulk.approve'))
-    expect(bulk).toBeDefined()
-    await bulk!.trigger('click')
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
     await flushPromises()
 
     const panel = wrapper.find('[data-test="approve-error"]')
     expect(panel.exists()).toBe(true)
     expect(panel.text()).toContain('payroll.time.approve_errors.holiday_arrangement_missing')
     expect(wrapper.find('[data-test="approve-error-link"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /**
+   * X-18: hromadné schválení posílalo `approveTimeMonth` BEZ souhrnu JMHZ,
+   * zatímco schválení jednoho vztahu šlo přes modal s dvanácti poli. Měsíc se
+   * tak dal schválit dvěma různě úplnými způsoby. Souhrn se teď skládá i
+   * v dávce — z návrhu serveru pro každý řádek plus jednoho zákonného fondu.
+   */
+  it('hromadné schválení pošle souhrn JMHZ z návrhu, ne prázdno', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A', 'Osoba B']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(2)
+    expect(m.approveTimeMonth.mock.calls[0][1]).toMatchObject({
+      employment_id: 12,
+      jmhz_work_summary: {
+        source_snapshot_sha256: 'a'.repeat(64),
+        standard_fund_hours: '168',
+        agreed_fund_hours: '160',
+        weekly_work_hours: '40',
+        worked_hours: '160',
+        unworked_hours_occurred: false,
+        work_obstacles_occurred: false,
+      },
+    })
+    wrapper.unmount()
+  })
+
+  /**
+   * Bez zákonného fondu by souhrn nebyl úplný — tlačítko proto drží a věta
+   * pod ním říká proč (zašedlé tlačítko bez důvodu je slepá ulička).
+   */
+  it('hromadné schválení bez zákonného fondu neodešle a řekne proč', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A']))
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="bulk-approve-blocked"]').text())
+      .toContain('payroll.time.bulk.blocked_no_standard_fund')
+    wrapper.unmount()
+  })
+
+  /**
+   * Měsíc s absencí se do dávky nevezme: odpověď na IN07/IN08 je tam lidské
+   * rozhodnutí, ne údaj z evidence. Vypadnout ale musí VIDITELNĚ, jménem —
+   * tiché vynechání by tvrdilo, že je hotovo.
+   */
+  it('vztah s absencí z dávky vyřadí a pojmenuje ho', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    page.items[1].jmhz_work_summary.preview.requires_unworked_hours_followup = true
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+
+    const excluded = wrapper.get('[data-test="bulk-approve-excluded"]')
+    expect(excluded.text()).toContain('Osoba B')
+    expect(excluded.text()).toContain('payroll.time.bulk.excluded.absences')
+
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledTimes(1)
+    expect(m.approveTimeMonth.mock.calls[0][1]).toMatchObject({ employment_id: 12 })
+    wrapper.unmount()
+  })
+
+  /**
+   * Selhání se sbírají VŠECHNA. „Nepodařilo se schválit 3 vztahy" znamená
+   * otevřít tři řádky a hádat, který na čem spadl.
+   */
+  it('vypíše každý neúspěšný řádek dávky jménem', async () => {
+    m.timeMonth.mockResolvedValue(gridPage(['Osoba A', 'Osoba B']))
+    m.approveTimeMonth.mockRejectedValue({
+      response: { data: { error: { code: 'average_earning_missing', message: '409' } } },
+    })
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await wrapper.get('[data-test="bulk-standard-fund"]').setValue('168')
+    await wrapper.get('[data-test="bulk-approve-form"]').trigger('submit')
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test="approve-error-row"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('Osoba A')
+    expect(rows[1].text()).toContain('Osoba B')
     wrapper.unmount()
   })
 
