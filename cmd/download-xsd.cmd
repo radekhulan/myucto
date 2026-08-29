@@ -24,7 +24,7 @@ set "CSSZ_OSVC_URL=https://www.cssz.gov.cz/documents/20143/3201321/OSVC25.xsd/5d
 if not exist "%DIR%" mkdir "%DIR%"
 
 if "%~1"=="" (
-    set "FORMS=dphdp3 dphkh1 dphshv dpfdp5 dppdp9 dpzvd6 dpsvd2 dpzmb1 dpzdb1 isdoc osvc25 jmhz"
+    set "FORMS=dphdp3 dphkh1 dphshv dpfdp5 dppdp9 dpzvd6 dpsvd2 dpzmb1 dpzdb1 dpshl1 dpszd1 isdoc osvc25 jmhz"
 ) else (
     set "FORMS=%*"
 )

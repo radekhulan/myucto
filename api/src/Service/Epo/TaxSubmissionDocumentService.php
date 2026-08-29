@@ -522,6 +522,7 @@ final class TaxSubmissionDocumentService
             'ossei1' => 'OSS',
             'dpzmb1', 'dpzdb1' => 'Daňové bonusy',
             'dpzvd6', 'dpsvd2' => 'Vyúčtování daně ze závislé činnosti',
+            'dpshl1', 'dpszd1' => 'Příjmy nerezidentů',
             default => strtoupper($formCode),
         };
     }

@@ -2443,6 +2443,15 @@ final class Routes
         $app->get ('/api/tax/analysis',  [\MyInvoice\Action\Tax\TaxAction::class, 'analysis']);
         $app->put ('/api/tax/profile',   [\MyInvoice\Action\Tax\TaxAction::class, 'updateProfile']);
 
+        // Písemnosti k příjmům daňových nerezidentů — oznámení o příjmech
+        // plynoucích do zahraničí (DPSHL1, § 38da) a hlášení o srážce zajištění
+        // daně (DPSZD1, § 38e). Nejsou pod `/api/payroll` schválně: z mezd
+        // nevznikají (viz ForeignIncomeNoticeAction).
+        $app->get  ('/api/tax/foreign-income/catalog',
+            [\MyInvoice\Action\Tax\ForeignIncomeNoticeAction::class, 'catalog']);
+        $app->post ('/api/tax/foreign-income/{form:[a-z0-9]+}/xml',
+            [\MyInvoice\Action\Tax\ForeignIncomeNoticeAction::class, 'download']);
+
         // Bank statements (M5b)
         $app->post ('/api/bank-statements/upload',           [BankStatementAction::class, 'upload']);
         $app->post ('/api/bank-statements/upload-pdf',       [BankStatementAction::class, 'importPdf']);

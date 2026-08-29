@@ -72,6 +72,8 @@ final readonly class SubmissionArtifactValidator
         'DPZDB1' => 'dpzdb1',
         'DPZVD6' => 'dpzvd6',
         'DPSVD2' => 'dpsvd2',
+        'DPSHL1' => 'dpshl1',
+        'DPSZD1' => 'dpszd1',
     ];
 
     public function __construct(

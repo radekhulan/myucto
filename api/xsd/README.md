@@ -75,6 +75,8 @@ https://adisspr.mfcr.cz/dpr/adis/idpr_pub/epo2_info/popis_struktury_seznam.faces
 | `dpsvd2.xsd` | Vyúčtování daně vybírané srážkou DPSVD2 | https://adisspr.mfcr.cz/adis/jepo/schema/dpsvd2_epo2.xsd |
 | `dpzmb1.xsd` | Žádost o poukázání měsíčního daňového bonusu DPZMB1 (§ 35d odst. 5) | https://adisspr.mfcr.cz/adis/jepo/schema/dpzmb1_epo2.xsd |
 | `dpzdb1.xsd` | Žádost o poukázání doplatku na bonusu DPZDB1 (§ 35d odst. 9) | https://adisspr.mfcr.cz/adis/jepo/schema/dpzdb1_epo2.xsd |
+| `dpshl1.xsd` | Oznámení o příjmech plynoucích do zahraničí DPSHL1 (§ 38da) | https://adisspr.mfcr.cz/adis/jepo/schema/dpshl1_epo2.xsd |
+| `dpszd1.xsd` | Hlášení o srážce zajištění daně DPSZD1 (§ 38e) | https://adisspr.mfcr.cz/adis/jepo/schema/dpszd1_epo2.xsd |
 
 > **Pozn.:** soubor zde **musí mít jméno bez `_epo2` suffixu** (např. `dphdp3.xsd`, ne
 > `dphdp3_epo2.xsd`). XmlSchemaValidator hledá `storage/xsd/{form_code}.xsd`.

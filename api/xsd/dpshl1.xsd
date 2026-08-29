@@ -1,0 +1,860 @@
+<?xml version="1.0" encoding="utf-8"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" attributeFormDefault="unqualified" elementFormDefault="unqualified">
+  <xs:simpleType xmlns:xalan="http://xml.apache.org/xslt" name="dateInMultiFormat">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="(([1-9])|((0[1-9])|([12][0-9]))|(3[0-1]))\.((0?[1-9])|(1[0-2]))\.((19[0-9]{2})|(2[0-9]{3}))"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element xmlns:xalan="http://xml.apache.org/xslt" name="Pisemnost">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="DPSHL1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element maxOccurs="1" minOccurs="1" name="VetaD">
+                <xs:complexType>
+                  <xs:attribute fixed="DPS" name="k_uladis" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Vyplňte text DPS.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute fixed="HL1" name="dokument" use="required"/>
+                  <xs:attribute name="c_ufo_cil" use="required">
+                    <xs:annotation>
+                      <xs:documentation>vyplňte zbývající část oficiálního názvu místně příslušného finančního úřadu (správce daně), v jehož územním obvodu máte v době podání adresu místa pobytu nebo sídlo.&lt;br /&gt;Pro hodnotu této položky použijte číselník Územní finanční orgány (ufo). Z číselníku se vkládá položka c_ufo.&lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněno číslo existujícího FÚ.&lt;br&gt;
+Pro popis číselníku Územní finanční orgány klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/ufo"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="hl_typ" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Typ oznámení/hlášení DPS.&lt;br /&gt;R - řádné&lt;br /&gt;N - následné</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_zjist" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Vyplňuje se u následného hlášení.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="1" minOccurs="1" name="VetaP">
+                <xs:complexType>
+                  <xs:attribute name="opr_prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>fyzické osoby oprávněné k podpisu.&lt;BR&gt;Vyplňuje se, je-li typ daňového subjektu nebo typ jeho podepisující osoby právnická osoba.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_kod" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Číselný kód podle níže uvedených typů podepisující osoby:&lt;br&gt;Fyzická osoba: &lt;br&gt;1 - zákonný zástupce nebo opatrovník&lt;br&gt;2 - ustanovený zástupce&lt;br&gt;3 - společný zástupce, společný zmocněnec&lt;br&gt;4a - obecný zmocněnec - fyzická osoba i právnická osoba&lt;br&gt;4b - fyzická osoba daňový poradce nebo advokát&lt;br&gt;5a - osoba spravující pozůstalost&lt;br&gt;5b - zástupce osoby spravující pozůstalost&lt;br&gt;6a - dědic po skončení řízení o pozůstalosti&lt;br&gt;6b - zástupce dědice po skončení řízení o pozůstalosti&lt;br&gt;7b - zástupce právního nástupce právnické osoby&lt;br&gt;&lt;br&gt;Právnická osoba:&lt;br&gt;1 - zákonný zástupce nebo opatrovník&lt;br&gt;2 - ustanovený zástupce&lt;br&gt;3 - společný zástupce, společný zmocněnec&lt;br&gt;4a - obecný zmocněnec - fyzická osoba i právnická osoba&lt;br&gt;4c - právnická osoba vykonávající daňové poradenství&lt;br&gt;5a - osoba spravující pozůstalost&lt;br&gt;5b - zástupce osoby spravující pozůstalost&lt;br&gt;6a - dědic po skončení řízení o pozůstalosti&lt;br&gt;6b - zástupce dědice po skončení řízení o pozůstalosti&lt;br&gt;7a - právní nástupce právnické osoby&lt;br&gt;7b - zástupce právního nástupce právnické osoby</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>uveďte příjmení osoby, která sestavila oznámení/hlášení.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_email" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte e-mailovou adresu osoby, která sestavila oznámení/hlášení.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="255"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>uveďte jméno osoby, která sestavila oznámení/hlášení.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_telef" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>uveďte telefon osoby, která sestavila oznámení/hlášení.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="14"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="typ_ds" use="required">
+                    <xs:annotation>
+                      <xs:documentation>zvolte typ subjektu, pro který je oznámení/hlášení vyplňováno. &lt;ul&gt;&lt;li&gt;F - fyzické osoby (živnost)&lt;/li&gt;&lt;li&gt;P - právnické osoby (s.r.o., a.s., v.o.s, …)&lt;/li&gt;&lt;li&gt;L - Plátcova pokladna&lt;/li&gt;</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="opr_jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>fyzické osoby oprávněné k podpisu.&lt;BR&gt;Vyplňuje se, je-li typ daňového subjektu nebo typ jeho podepisující osoby právnická osoba.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_dat_nar" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává fyzická podepisující osoba, buď datum narození nebo evidenční číslo je povinné.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="sest_titul" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>uveďte titul osoby, která sestavila oznámení/hlášení.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="10"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="ulice" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte název ulice a číslo popisné a orientační, popř. P.O. Box.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="38"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte příjmení fyzické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte jméno fyzické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="30"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="opr_postaveni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>fyzické osoby oprávněné k podpisu.&lt;BR&gt;Vyplňuje se, je-li typ daňového subjektu nebo typ jeho podepisující osoby právnická osoba.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="40"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_orient" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="4"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="naz_obce" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte název obce.&lt;br&gt;
+Pro popis číselníku Obce klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/obce"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="48"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_ev_cislo" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Pokud podává fyzická podepisující osoba, buď datum narození nebo evidenční číslo je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_pop" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="6"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_nazev" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává právnická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="255"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává fyzická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zkrobchjm" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte název právnické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="255"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává fyzická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="psc" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte poštovní kód (směrovací číslo) obce. PSČ v České republice musí mít délku 5 znaků bez mezer.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="10"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_obce" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu, dle číselníku obcí.&lt;br&gt;
+Pro popis číselníku Obce klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/obce"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="6"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_ic" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává právnická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:pattern value="[0-9]{1,10}"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="dic" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte daňové identifikační číslo přidělené v České republice.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:pattern value="[0-9]{1,10}"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_typ" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>F - fyzická osoba &lt;BR&gt; P - právnická osoba&lt;BR&gt; Pokud podává podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_pracufo" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>územní pracoviště, kde je nebo bude umístěn spis daňového subjektu (podle § 13 zákona číslo 456/2011 Sb., o Finanční správě České republiky, ve znění pozdějších předpisů).&lt;br&gt;
+Pro popis číselníku Pracoviště FÚ klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/pracufo"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="unbounded" minOccurs="0" name="VetaR">
+                <xs:complexType>
+                  <xs:attribute name="poradi" use="required">
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="t_prilohy" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Jeden řádek textové přílohy, max. 72 znaků</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="72"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kod_sekce" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Označení oddílu, ke kterému se příloha vztahuje:&lt;BR /&gt;O - obecná textová příloha</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="1" minOccurs="1" name="VetaH">
+                <xs:complexType>
+                  <xs:attribute name="prijmeni_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte příjmení fyzické osoby.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být u fyzické osoby (typ_popl = "01") vyplněna.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="jmeno_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte jméno fyzické osoby.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být u fyzické osoby (typ_popl = "01") vyplněna.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="obch_jm_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte název právnické osoby.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být vyplněna, pokud se nejedná o fyzickou osobu (typ_popl &lt;&gt; "01").</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="45"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="typ_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.4.2019 (včetně):&lt;br /&gt;Uveďte příslušný číselný kód z následujícího výčtu:&lt;br /&gt;01 – fyzická osoba&lt;br /&gt;02 – obchodní společnost&lt;br /&gt;03 – sdružení&lt;br /&gt;04 – jiná právnická osoba&lt;br /&gt;05 – státní nebo mezinárodní organizace&lt;br /&gt;06 – ostatní&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.4.2019:&lt;br /&gt;Uveďte příslušný číselný kód z následujícího výčtu:&lt;br /&gt;01 – fyzická osoba&lt;br /&gt;02 – obchodní společnost/právnická osoba&lt;br /&gt;03 – sdružení&lt;br /&gt;04 – jiná právnická osoba&lt;br /&gt;05 – státní nebo mezinárodní organizace&lt;br /&gt;06 – ostatní&lt;br /&gt;07 – nespecifikováno&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být vyplněna.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_narozeni" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte pouze pro fyzickou osobu.&lt;br /&gt;Položka obsahuje kritickou kontrolu: u fyzické osoby (typ_popl = "01") musí být vyplněno datum narození (d_narozeni) nebo daňová identifikace ve státě daňové rezidence (dic_popl).</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="pohlavi" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.2.2024 (včetně) nebo rok úhrady poplatníkovi/ rok zaúčtování od 2024 (včetně):&lt;br /&gt;Neobsazeno&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování do 31.1.2024 (včetně) nebo rok úhrady poplatníkovi/ rok zaúčtování do 2023 (včetně):&lt;br /&gt;Uveďte pouze pro fyzickou osobu.&lt;br /&gt;F - žena&lt;br /&gt;M - muž</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="misto_nar" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte pouze pro fyzickou osobu.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="35"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="k_stat_nar" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte pouze pro fyzickou osobu.&lt;br /&gt;Pro hodnotu této položky použijte číselník Země (zeme). Z číselníku se vkládá položka kod2. &lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněn kód existujícího státu.&lt;br&gt;
+Pro popis číselníku Země klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/zeme"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="k_stat_dr" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte kód státu daňové rezidence poplatníka podle § 2, odst. 3 a § 17, odst. 4 zákona o daních z příjmů; kódy států uvádějte http://www.financnisprava.cz/cs/mezinarodni-spoluprace/mezinarodni-zdanovani-prime-dane/seznam-kodu-statu dle odkazu – použije se pouze dvoumístný kód vymezený písmeny velké abecedy.&lt;br /&gt;Pro hodnotu této položky použijte číselník Země (zeme). Z číselníku se vkládá položka kod2. &lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být vyplněna a musí obsahovat kód existujícího státu.&lt;br&gt;
+Pro popis číselníku Země klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/zeme"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="dic_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte číslo daňové identifikace ve státě daňové rezidence.&lt;br /&gt;Položka obsahuje kritickou kontrolu: u fyzické osoby (typ_popl = "01") musí být vyplněno datum narození (d_narozeni) nebo daňová identifikace ve státě daňové rezidence (dic_popl).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="typ_dic" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Typ daňové identifikace:&lt;br /&gt;D – DIČ&lt;br /&gt;R – RČ&lt;br /&gt;S – Sociální pojištění&lt;br /&gt;J – jiné</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="k_stat_dic" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Kód státu vydávající daňovou identifikaci – z kódů států viz bod 14.&lt;br /&gt;Pro hodnotu této položky použijte číselník Země (zeme). Z číselníku se vkládá položka kod2. &lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněn kód existujícího státu&lt;br&gt;
+Pro popis číselníku Země klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/zeme"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="typ_adr" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte příslušný číselný kód z následujícího výčtu:&lt;br /&gt;01 – bydliště&lt;br /&gt;02 – sídlo&lt;br /&gt;03 – nespecifikováno&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být vyplněna.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="naz_obce_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte název obce.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být vyplněna.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="45"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="psc_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte poštovní kód (směrovací číslo) obce.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="10"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="ulice_c_popl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte název ulice a číslo popisné a orientační, popř. P.O. Box.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="38"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="druh_prij" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte zdroj příjmu poplatníka – specifikaci dle § 22 zákona o daních z příjmů (Oznámení se vyplňuje za každý druh příjmu samostatně).&lt;br /&gt;Pro hodnotu této položky použijte číselník DPS - kódy rozlišení příjmů dle § 22 Odst. 1 (k_rozl_prij). Z číselníku se vkládá položka c_druh_prij.&lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněno číslo existujícího příjmu.&lt;br&gt;
+Pro popis číselníku DPS - kódy rozlišení příjmů dle § 22 Odst. 1 klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/k_rozl_prij"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="k_rozl_prij" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte příslušný kód z následujícího výčtu (Oznámení se vyplňuje za každý druh příjmu samostatně):&lt;br /&gt;7 – příjmy ze služeb (§22 odst. 1 písm. c), příjmy z nezávislé činnosti (§22 odst. 1 písm. f) bod 1)&lt;br /&gt;10 – podíly na zisku – dividendy (§22 odst. 1 písm. g) bod 3)&lt;br /&gt;11 – úroky (§22 odst. 1 písm. g) bod 4)&lt;br /&gt;12 – licenční poplatky průmyslové (§22 odst. 1 písm. g) bod 1), kulturní (§22 odst. 1 písm. g) bod 2), užívání movité věci (§22 odst. 1 písm. g) bod 5)&lt;br /&gt;13 – zisky ze zcizení majetku (§ 22 odst. 1 písm. d), § 22 odst 1 písm. h), § 22 odst. 1 písm. i)) pokud se jedná o bezúplatný příjem&lt;br /&gt;16 – odměny člena orgánů právnické osoby (§22 odst. 1 písm. g) bod 6)&lt;br /&gt;17 – příjmy sportovců a umělců (§22 odst. 1 písm. f) bod 2)&lt;br /&gt;21 – ostatní příjmy tj. výhry (§22 odst. 1 písm. g) bod 8), sankce ze závazkových vztahů (§22 odst. 1 písm. g) bod 12), příjmy ze svěřenského fondu (§22 odst. 1 písm. g) bod 13), bezúplatné příjmy (§22 odst. 1 písm. g) bod 14)&lt;br /&gt;&lt;br /&gt;Kód vychází z vybraného druhu příjmu (20 Druh příjmu). Mělo by se jednat o hodnotu atributu k_rozl_prij příslušného záznamu číselníku DPS - kódy rozlišení příjmů dle § 22 Odst. 1 (k_rozl_prij).&lt;br&gt;
+Pro popis číselníku DPS - kódy rozlišení příjmů dle § 22 Odst. 1 klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/k_rozl_prij"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sazba" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.2.2024 (včetně) nebo rok úhrady poplatníkovi/ rok zaúčtování od 2024 (včetně):&lt;br /&gt;  Uveďte sazbu daně dle § 36 zákona o daních z příjmů včetně modifikace sazby daně podle smluv o zamezení dvojího zdanění; u příjmů v podobě dividend, úroků nebo licenčních poplatků, které podle zákona o daních z příjmů podléhají osvobození nebo pokud smlouva o zamezení dvojího zdanění dává nárok na zdanění pouze druhému státu, uveďte sazbu ve výši 0 (takový příjem je pro účely Oznámení dále označován jako osvobozený příjem)&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování od 1.4.2019 (včetně):&lt;br /&gt;Uveďte sazbu daně dle § 36 zákona o daních z příjmů včetně modifi kace sazby daně podle smluv o zamezení dvojího zdanění; pokud příjem podléhá osvobození podle zákona o daních z příjmů nebo pokud smlouva o zamezení dvojího zdanění dává nárok na zdanění pouze druhému státu, uveďte sazbu daně ve výši 0 (takový příjem je pro účely Oznámení dále označován jako osvobozený příjem)&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.4.2019:&lt;br /&gt;Dle § 36 zákona o daních z příjmů včetně modifikace sazby podle smluv o zamezení dvojího zdanění; pokud příjem podléhá  osvobození podle § 19 zákona o daních z příjmů, uveďte sazbu daně ve výši 0.&lt;br /&gt;&lt;br /&gt;V číselníku DPS - sazby daně dle států (stat_sazba) jsou pro vyplněnou kombinaci druh příjmu (20 Druh příjmu) a stát (14 Stát daňové rezidence) uvedeny přípustné hodnoty sazby daně.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota musí být vyplněna a musí být v rozmezí 0 až 100.&lt;br&gt;
+Pro popis číselníku DPS - sazby daně dle států klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/stat_sazba"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="5"/>
+                        <xs:fractionDigits value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zp_uhrady" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>U - úhrada poplatníkovi&lt;br /&gt;Z - zaúčtování závazků</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_uhrady" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.1.2021 (včetně):&lt;br /&gt;Uveďte datum úhrady poplatníkovi / datum zaúčtování. V případě, že předmětem oznámení je osvobozený příjem, vyplňte pouze rok úhrady poplatníkovi / zaúčtování.&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.1.2021:&lt;br /&gt;Uveďte datum úhrady poplatníkovi/ datum zaúčtování.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritické kontroly: musí být vyplněno datum (d_uhrady) nebo rok (r_uhrady); nesmí však být vyplněno datum i rok současně; rok z data (d_uhrady) nesmí být starší než 2014.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="kc_uhrady" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.1.2024 (včetně) nebo rok úhrady poplatníkovi/ rok zaúčtování od 2024 (včetně):&lt;br /&gt;Uveďte částku, která byla uhrazena nerezidentovi (po odečtení sražené daně) nebo hodnotu zaúčtovaného závazku (včetně daně). V případě, že předmětem daně je osvobozený příjem v podobě dividend nebo licenčních poplatků, uveďte do ročního oznámení souhrn těchto příjmů. V případě, že předmětem daně je osvobozený příjem v podobě úroků, uveďte do ročního oznámení pouze příjmy za kalendářní měsíce, ve kterých byl překročen limit 300 000 Kč.&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování od 1.1.2021 (včetně) nebo rok úhrady poplatníkovi/ rok zaúčtování od 2021 (včetně):&lt;br /&gt;Uveďte částku, která byla uhrazena nerezidentovi (po odečtení sražené daně) nebo hodnotu zaúčtovaného závazku (včetně daně). V případě, že předmětem daně je osvobozený příjem, uveďte do ročního oznámení pouze příjmy za kalendářní měsíce, ve kterých byl překročen limit 300 000 Kč.&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.1.2021:&lt;br /&gt;Uveďte částku, která byla uhrazena nerezidentovi (po odečtení sražené daně) nebo hodnotu zaúčtovaného závazku včetně daně.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="16"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="k_meny" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Měna (měna, ve které byla platba poplatníkovi provedena).&lt;br /&gt;Pro hodnotu této položky použijte číselník Měna (mena). Z číselníku se vkládá položka k_meny. &lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněn kód existující měny&lt;br&gt;
+Pro popis číselníku Měna klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/mena"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="3"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kurz" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Kurz (dle § 38 zákona o daních z příjmů).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="7"/>
+                        <xs:fractionDigits value="3"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_zakldane" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.4.2019 (včetně):&lt;br /&gt;Uveďte základ daně zaokrouhlený dle § 36 odst. 3 zákona o daních z příjmů; &lt;strong&gt;v případě osvobozeného příjmu uveďte hrubou částku daného příjmu ve vazbě na sazbu daně ve výši 0 v řádku 22&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.4.2019:&lt;br /&gt;Uveďte základ daně zaokrouhlený dle § 36 odst. 3 zákona o daních z příjmů.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="16"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_hrubprij" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte částku hrubého příjmu.&lt;br /&gt;Řádky 27a a 27b vyplňte pouze v případě příjmu, u něhož se základ daně zvyšuje o „povinné pojistné“ (viz § 6 odst. 12, 15 zákona o daních z příjmů).&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="16"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_pojistne" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte částku „povinného pojistného“ podle § 6 odst. 12 zákona o daních z příjmů.&lt;br /&gt;Řádky 27a a 27b vyplňte pouze v případě příjmu, u něhož se základ daně zvyšuje o „povinné pojistné“ (viz § 6 odst. 12, 15 zákona o daních z příjmů).&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sraz_dan" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Daň sražená podle zákona o daních z příjmů včetně modifikace sazby podle smluv o zamezení dvojího zdanění poplatníkovi se  sídlem nebo bydlištěm v zahraničí zaokrouhlená dle § 36 odst. 3 zákona o daních z příjmů.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_povsraz" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>§ 38d, odst. 1 a 2 zákona o daních z příjmů.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="d_splat" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>§ 38d, odst. 3 zákona o daních z příjmů.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="poznamka" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.4.2019 (včetně):&lt;br /&gt;Do poznámky uveďte:&lt;br /&gt;zdůvodnění nesprávně sražené a odvedené daně;&lt;br /&gt;v případě sdělení o vydaném dobropisu uveďte identifikaci dokladu, ke kterému se dobropis vztahuje (např. číslo dokladu, ke kterému byl dobropis vystaven, údaje o dobropisu se uvedou znaménkem mínus); pokud bude snížení daňové povinnosti v důsledku vydání dobropisu vyrovnáno zápočtem s daňovou povinností vyplývající z jiného dokladu, uveďte číslo dokladu, na jehož základě daňová povinnost vznikla.&lt;br /&gt;V případě podání následného Oznámení přesně specifikujte, k jakému řádnému Oznámení se podávané následné Oznámení vztahuje (např. Oznámení ze dne).&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.4.2019:&lt;br /&gt;Do poznámky uveďte:&lt;br /&gt;zdůvodnění nesprávně sražené a odvedené daně;&lt;br /&gt;v případě sdělení o vydaném dobropisu uveďte identifikaci dokladu, ke kterému se dobropis vztahuje (např. číslo dokladu, ke kterému byl dobropis vystaven, údaje o dobropisu se uvedou znaménkem –); pokud bude snížení daňové povinnosti v důsledku vydání dobropisu vyrovnáno zápočtem s daňovou povinností vyplývající z jiného dokladu, uveďte číslo dokladu, na jehož základě daňová povinnost vznikla.&lt;br /&gt;V případě podání následného hlášení přesně specifikujte, k jakému řádnému hlášení se podávané následné hlášení vztahuje (např. hlášení ze dne).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="75"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_hrubprij_zahr" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum úhrady poplatníkovi/ datum zaúčtování od 1.4.2019 (včetně):&lt;br /&gt;Uveďte hrubý příjem v zahraniční měně.&lt;br /&gt;&lt;br /&gt;Datum úhrady poplatníkovi/ datum zaúčtování před 1.4.2019:&lt;br /&gt;Zdanitelný příjem v zahraniční měně.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="16"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="mena_hr_prij" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Měna.&lt;br /&gt;Pro hodnotu této položky použijte číselník Měna (mena). Z číselníku se vkládá položka k_meny. &lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněn kód existující měny.&lt;br&gt;
+Pro popis číselníku Měna klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/mena"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="3"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="r_uhrady" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Položka pro vyplnění samotného roku na ř. 23 (rok úhrady poplatníkovi/ rok zaúčtování od 2021). V případě, že předmětem oznámení je osvobozený příjem, vyplňte pouze rok úhrady poplatníkovi / zaúčtování.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritické kontroly: musí být vyplněno datum (d_uhrady) nebo rok (r_uhrady); nesmí však být vyplněno datum i rok současně; rok (r_uhrady) nesmí být starší než 2021.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="99" minOccurs="0" name="VetaU">
+                <xs:complexType>
+                  <xs:attribute name="d_odv" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Datum platby.&lt;br /&gt;Řádky 32, 33, 34 se nevyplňují v případě, kdy předmětem oznámení je osvobozený příjem.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="kc_odv" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Částka v Kč.&lt;br /&gt;Řádky 32, 33, 34 se nevyplňují v případě, kdy předmětem oznámení je osvobozený příjem.&lt;br /&gt;Položka obsahuje kritickou kontrolu: hodnota nesmí být záporná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="ucet" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Účet správce daně uveďte v následující struktuře (YYYYYY-XXXXXXXXXX/KKKK) Y - předčíslí, X - číslo účtu, K - kód banky&lt;br /&gt;Řádky 32, 33, 34 se nevyplňují v případě, kdy předmětem oznámení je osvobozený příjem.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="25"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="1" minOccurs="0" name="Prilohy">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element maxOccurs="unbounded" minOccurs="0" name="ObecnaPriloha">
+                      <xs:complexType>
+                        <xs:simpleContent>
+                          <xs:extension base="xs:base64Binary">
+                            <xs:attribute name="cislo" use="required" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>Pořadové číslo přílohy. Nesmí být v rámci jednoho podání duplicitní</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:decimal">
+                                  <xs:totalDigits value="4"/>
+                                  <xs:fractionDigits value="0"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                            <xs:attribute name="nazev" use="optional" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>Popis přiloženého souboru</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                  <xs:minLength value="0"/>
+                                  <xs:maxLength value="255"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                            <xs:attribute name="jm_souboru" use="optional" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>&lt;strong&gt;Název přiloženého souboru.&lt;/strong&gt;&lt;br/&gt;Povolené typy souborů jsou: DOC, DOCX, RTF, XLS, XLSX, PDF, JPG, TXT a TXT/CSV. Dále je možné přiložit podepsané (formát PKCS#7) a komprimované (formát ZIP) soubory, vždy však jde o jeden podepsaný nebo jeden komprimovaný soubor některého z podporovaných formátů. Součet velikostí všech souborů přiložených v elektronické podobě (tzv. e-příloh) může být nejvýše 10 240 kilobajtů.</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                  <xs:minLength value="0"/>
+                                  <xs:maxLength value="255"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                            <xs:attribute name="kodovani" use="optional" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>Kódování přiloženého souboru</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                  <xs:enumeration value="base64"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                          </xs:extension>
+                        </xs:simpleContent>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+            <xs:attribute name="verzePis" type="xs:string"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element maxOccurs="1" minOccurs="0" name="Kontrola">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:any maxOccurs="unbounded" minOccurs="0" processContents="lax"/>
+            </xs:sequence>
+            <xs:anyAttribute processContents="lax"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="verzeSW" type="xs:string"/>
+      <xs:attribute name="nazevSW" type="xs:string"/>
+      <xs:anyAttribute processContents="lax"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

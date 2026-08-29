@@ -96,6 +96,11 @@ final class XmlSchemaValidator
         // `skipped` a `validatedSubmission()` by podání zablokoval.
         'dpzmb1' => 'dpzmb1.xsd',
         'dpzdb1' => 'dpzdb1.xsd',
+        // Písemnosti k příjmům daňových nerezidentů: oznámení o příjmech
+        // plynoucích do zahraničí (§ 38da ZDP) a hlášení o srážce zajištění
+        // daně (§ 38e ZDP). Obě jsou událostní, ne za zdaňovací období.
+        'dpshl1' => 'dpshl1.xsd',
+        'dpszd1' => 'dpszd1.xsd',
         // Epic DP v2 (issue #19): ČSSZ přehled OSVČ (sociální pojištění, roční e-podání).
         // Vlastní schéma ČSSZ (ns http://schemas.cssz.cz/OSVC2025), importuje baseTypes2.xsd
         // (oba v api/xsd/). Jiný kanál i formát než EPO MFČR.

@@ -353,6 +353,9 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'reports/cnb-rate-audit', name: 'reports-cnb-rate-audit', component: () => import('@/pages/reports/CnbRateAudit.vue') },
       // FR3 (vendor audit 2026-08) — úplnost číselné řady vydaných dokladů (mezera = auditní signál pro FÚ).
       { path: 'reports/invoice-series-completeness', name: 'reports-invoice-series-completeness', component: () => import('@/pages/reports/InvoiceSeriesCompleteness.vue') },
+      // § 38da a § 38e ZDP — písemnosti k příjmům daňových nerezidentů. Nejsou
+      // pod mzdami: ze mzdy ani jedna povinnost nevzniká (viz komponenta).
+      { path: 'reports/foreign-income', name: 'reports-foreign-income', component: () => import('@/pages/reports/ForeignIncomeNotices.vue') },
       { path: 'reports/submissions',    name: 'reports-submissions', component: () => import('@/pages/reports/TaxSubmissions.vue') },
       { path: 'reports/monthly-export', name: 'reports-monthly-export', component: () => import('@/pages/reports/MonthlyExportReport.vue') },
       { path: 'reports/oss',            name: 'reports-oss', component: () => import('@/pages/reports/OssReport.vue'), meta: { requiresOss: true } },

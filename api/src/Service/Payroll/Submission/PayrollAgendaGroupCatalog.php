@@ -129,6 +129,15 @@ final class PayrollAgendaGroupCatalog
         // povinností proto nepatří o nic víc než přiznání k DPH.
         'DPZVD6',
         'DPSVD2',
+        // Oznámení o příjmech plynoucích do zahraničí (§ 38da) a hlášení
+        // o srážce zajištění daně (§ 38e). Do mzdových panelů nepatří dokonce
+        // ani okrajově: § 38e odst. 1 věta poslední zajištění ze záloh z příjmů
+        // ze závislé činnosti vylučuje a § 38da odst. 5 písm. b) vylučuje
+        // z oznamovací povinnosti příjem podle § 6 odst. 4 — jediný, ze kterého
+        // mzdový modul sráží daň zvláštní sazbou. Mzdová data je tedy neživí
+        // vůbec; podávají se k platbám, které aplikace neeviduje.
+        'DPSHL1',
+        'DPSZD1',
     ];
 
     /**

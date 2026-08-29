@@ -38,6 +38,13 @@ final class TaxSubmissionAccess
      * sem jejich XML by nikomu nic neodemklo — jen rozostřilo dělicí čáru mezi
      * bezplatnou a placenou částí.
      *
+     * `dpshl1` (oznámení o příjmech plynoucích do zahraničí, § 38da) a `dpszd1`
+     * (hlášení o srážce zajištění daně, § 38e) tu nejsou z jiného důvodu než
+     * předchozí čtyři: z mezd nevznikají a jejich věcnou část zadává uživatel,
+     * takže by je bezplatný zákazník sestavit uměl. Jsou to ale podání pro
+     * platby do zahraničí, tedy agenda, kterou drží placená část — a výchozí
+     * odpověď zůstává „placené", dokud se nerozhodne jinak.
+     *
      * @var list<string>
      */
     private const FREE_FORM_CODES = ['dphdp3', 'dphkh1', 'dphshv'];

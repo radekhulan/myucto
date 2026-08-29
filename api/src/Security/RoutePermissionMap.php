@@ -499,6 +499,12 @@ final class RoutePermissionMap
         ['*', '#^/api/reports/monthly-export(/|$)#', 'reports.export', AccessLevel::WRITE],
         ['GET', '#^/api/reports/closing-package(/|$)#', 'reports.export', AccessLevel::READ],
         ['*', '#^/api/reports/closing-package(/|$)#', 'reports.export', AccessLevel::WRITE],
+        // Písemnosti k příjmům nerezidentů (§ 38da, § 38e). Číselníky pro
+        // formulář jsou čtení; generování XML je POST, protože věcnou část nese
+        // tělo požadavku, a zakládá archivní záznam podání — proto WRITE, ne
+        // modulový fallback `reports`.
+        ['GET', '#^/api/tax/foreign-income/catalog$#', 'reports', AccessLevel::READ],
+        ['POST', '#^/api/tax/foreign-income/[a-z0-9]+/xml$#', 'reports.export', AccessLevel::WRITE],
         ['GET', '#^/api/(reports|tax-return)(/|$).*(xml|export|pdf|download)#', 'reports.export', AccessLevel::READ],
         ['GET', '#^/api/(reports|tax-return|tax)(/|$)#', 'reports', AccessLevel::READ],
         ['*', '#^/api/(reports|tax-return|tax)(/|$)#', 'reports', AccessLevel::WRITE],
