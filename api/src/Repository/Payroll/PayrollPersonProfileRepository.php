@@ -397,6 +397,32 @@ final class PayrollPersonProfileRepository
         return $version === false ? 0 : (int) $version;
     }
 
+    private function earliestEmploymentStart(int $supplierId, int $employeeId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(start_date)
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    private function hasIdentityVersion(int $supplierId, int $employeeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @param list<IdentityInput> $rows */
     private function saveIdentityHistory(int $supplierId, int $employeeId, array $rows): void
     {
@@ -431,8 +457,23 @@ final class PayrollPersonProfileRepository
               WHERE supplier_id = ? AND employee_id = ? AND id = ?
               FOR UPDATE'
         );
+        $earliestEmploymentStart = $this->earliestEmploymentStart($supplierId, $employeeId);
+        $hasExistingVersion = $this->hasIdentityVersion($supplierId, $employeeId);
         foreach ($rows as $row) {
             if ($row['id'] === null) {
+                // ⚠️ PRVNÍ verze identity musí platit od NÁSTUPU, ne ode dne, kdy
+                // se karta vyplnila. Prvotní registrace do registru pojištěnců se
+                // podává k datu nástupu a bez identity k němu skončí na
+                // `K rozhodnému datu chybí historická identita osoby.` — což
+                // potká každého, kdo přejde z jiného systému. O jméně se nic
+                // nedomýšlí, posouvá se jen datum, odkdy uložená verze platí.
+                if (!$hasExistingVersion
+                    && $earliestEmploymentStart !== null
+                    && $row['effective_from'] > $earliestEmploymentStart
+                ) {
+                    $row['effective_from'] = $earliestEmploymentStart;
+                }
+                $hasExistingVersion = true;
                 $birthSurname = $row['birth_surname'];
                 if (!$row['birth_surname_present'] && $row['birth_surname_source_id'] !== null) {
                     $birthSurnameSource->execute([

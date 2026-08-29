@@ -103,13 +103,18 @@ final class JmhzOfficialSourceMonitor
             $hosts = $source['document_hosts'] ?? null;
             $prefixes = $source['document_path_prefixes'] ?? null;
             $extensions = $source['document_extensions'] ?? null;
-            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
+            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api', 'article_list'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
                 throw new RuntimeException("Monitor oficiálních zdrojů JMHZ má neplatný zdroj {$id}.");
             }
             $this->assertHttpsUrl($indexUrl, []);
             $validatedHosts = $this->validateStringList($hosts, "Zdroj {$id} má neplatný host dokumentu.", '/\A[a-z0-9.-]+\z/D');
             $validatedPrefixes = $this->validateStringList($prefixes, "Zdroj {$id} má neplatný prefix dokumentu.", '#\A/[A-Za-z0-9._~!$&\'()*+,;=:@%/-]*\z#D');
-            $validatedExtensions = $this->validateStringList($extensions, "Zdroj {$id} má neplatnou příponu dokumentu.", '/\A[a-z0-9]{2,8}\z/D');
+            // Seznam článků příponu nemá a mít nesmí: `isOfficialArticleUrl()`
+            // filtruje jen hostitele a prefix cesty. Prázdný výčet by u ostatních
+            // formátů znamenal, že neprojde nic, proto je povolený jen tady.
+            $validatedExtensions = $indexFormat === 'article_list'
+                ? []
+                : $this->validateStringList($extensions, "Zdroj {$id} má neplatnou příponu dokumentu.", '/\A[a-z0-9]{2,8}\z/D');
             $this->assertHttpsUrl($indexUrl, [$this->host($indexUrl)]);
             $validatedSource = [
                 'label' => $label,
@@ -159,15 +164,23 @@ final class JmhzOfficialSourceMonitor
             $pageUrl = $this->mpsvDocumentationPageUrl($index, $source);
             $page = ($this->fetch)($pageUrl, self::MAX_INDEX_BYTES);
             $documents = $this->extractMpsvDocuments($page, $source);
+        } elseif ($source['index_format'] === 'article_list') {
+            $documents = $this->extractArticles($index, $source);
         } else {
             $documents = $this->extractDocuments($index, $source);
         }
-        foreach ($documents as &$document) {
-            $contents = ($this->fetch)($document['url'], self::MAX_DOCUMENT_BYTES);
-            $document['sha256'] = hash('sha256', $contents);
-            $document['byte_length'] = strlen($contents);
+        if ($source['index_format'] !== 'article_list') {
+            // Články se po jednom NESTAHUJÍ. Jde o provozní oznámení, kde je
+            // signálem to, že přibyla položka — a stránka článku nese menu,
+            // patičku a další volatilní obsah, takže by se hlásila změna
+            // pokaždé. Otisk se proto počítá z názvu a odkazu.
+            foreach ($documents as &$document) {
+                $contents = ($this->fetch)($document['url'], self::MAX_DOCUMENT_BYTES);
+                $document['sha256'] = hash('sha256', $contents);
+                $document['byte_length'] = strlen($contents);
+            }
+            unset($document);
         }
-        unset($document);
 
         return [
             'id' => $id,
@@ -175,6 +188,113 @@ final class JmhzOfficialSourceMonitor
             'index_url' => $source['index_url'],
             'documents' => $documents,
         ];
+    }
+
+    /**
+     * Seznam ČLÁNKŮ, ne dokumentů.
+     *
+     * ČSSZ oznamuje vady katalogu kontrol, výpadky, posuny lhůt i nové
+     * povinnosti výhradně v aktualitách — 28. 8. 2026 tam takhle přišla vada ve
+     * vyhodnocování kontrol 164, 270, 290, 291 a 333 spolu s hromadným
+     * přepočtem stavů. V žádném dokumentu na ePortálu ani na vývojářském
+     * portálu to není, takže bez téhle větve se o tom nedozvíme.
+     *
+     * Články nemají příponu, takže `isOfficialDocumentUrl()` je odmítne;
+     * filtruje se jen hostitel a prefix cesty.
+     *
+     * @param array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>,api_slug?:string,documentation_title?:string} $source
+     * @return list<array{key:string,title:string,version:?string,url:string,sha256?:string,byte_length?:int}>
+     */
+    private function extractArticles(string $html, array $source): array
+    {
+        $articles = [];
+        foreach ($this->indexLinks($html, $source) as [$url, $title]) {
+            if (!$this->isOfficialArticleUrl($url, $source)) {
+                continue;
+            }
+            if ($title === '') {
+                continue;
+            }
+            $key = $url;
+            if (isset($articles[$key])) {
+                continue;
+            }
+            $articles[$key] = [
+                'key' => $key,
+                'title' => $title,
+                'version' => null,
+                'url' => $url,
+                'sha256' => hash('sha256', $title . "
+" . $url),
+                'byte_length' => strlen($title),
+            ];
+        }
+        ksort($articles, SORT_STRING);
+
+        return array_values($articles);
+    }
+
+    /**
+     * @param array{index_url:string,document_hosts:list<string>,document_path_prefixes:list<string>} $source
+     * @return list<array{0:string,1:string}>
+     */
+    private function indexLinks(string $html, array $source): array
+    {
+        $dom = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        try {
+            // ⚠️ `loadHTML()` bez určení kódování předpokládá ISO-8859-1, takže
+            // by z „přepočet" udělalo „pÅepoÄet". U dokumentů to nevadí (názvy
+            // jsou většinou názvy souborů), u článků ano — název je součástí
+            // otisku, takže by se rozbitý text uložil do stavu monitoru.
+            if (!$dom->loadHTML(
+                '<?xml encoding="UTF-8">' . $html,
+                LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
+            )) {
+                throw new RuntimeException("Index {$source['index_url']} není platné HTML.");
+            }
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        $nodes = (new DOMXPath($dom))->query('//a[@href]');
+        if ($nodes === false) {
+            throw new RuntimeException("Index {$source['index_url']} nelze prohledat.");
+        }
+        $links = [];
+        foreach ($nodes as $node) {
+            $href = trim((string) $node->attributes?->getNamedItem('href')?->nodeValue);
+            if ($href === '') {
+                continue;
+            }
+            $links[] = [
+                $this->resolveUrl($source['index_url'], $href),
+                $this->normalizeText((string) $node->textContent),
+            ];
+        }
+
+        return $links;
+    }
+
+    /** @param array{document_hosts:list<string>,document_path_prefixes:list<string>} $source */
+    private function isOfficialArticleUrl(string $url, array $source): bool
+    {
+        $parts = parse_url($url);
+        $host = isset($parts['host']) ? strtolower((string) $parts['host']) : '';
+        $path = (string) ($parts['path'] ?? '');
+        if (($parts['scheme'] ?? null) !== 'https'
+            || !in_array($host, $source['document_hosts'], true)
+        ) {
+            return false;
+        }
+        foreach ($source['document_path_prefixes'] as $prefix) {
+            if (str_starts_with($path, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -729,6 +729,44 @@ final class PayrollPersonProfileApiTest extends TestCase
     }
 
     /** @return array<string,mixed> */
+    /**
+     * První verze identity musí platit od NÁSTUPU, ne ode dne, kdy se karta
+     * vyplnila.
+     *
+     * ⚠️ Prvotní registrace do registru pojištěnců se podává k datu nástupu.
+     * Když identita začíná až dnem zápisu, `PayrollRegistrationIdentityService`
+     * k rozhodnému datu nic nenajde a registrace je trvale nepodatelná — což
+     * potká každého, kdo přejde z jiného systému.
+     */
+    public function testFirstIdentityVersionStartsAtTheEarliestEmployment(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employments
+                (supplier_id, employee_id, code, relation_type, status,
+                 is_primary, start_date)
+             VALUES (?, ?, ?, "employment", "active", 0, "2024-03-01")'
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            'HIST-' . bin2hex(random_bytes(4)),
+        ]);
+
+        // Karta se vyplňuje až dnes; formulář pošle dnešní datum.
+        $payload = $this->completePayload();
+        $payload['identity_history'][0]['effective_from'] = '2026-08-29';
+
+        $response = $this->put($this->supplierId, $this->employeeId, $payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        $profile = $this->json($response)['profile'];
+        self::assertSame(
+            '2024-03-01',
+            $profile['identity_history'][0]['effective_from'],
+            'první verze identity musí sahat k nejstaršímu vztahu',
+        );
+    }
+
     private function completePayload(): array
     {
         return [

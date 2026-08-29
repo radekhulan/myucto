@@ -305,6 +305,46 @@ final class HealthNotificationDutyTest extends TestCase
         self::assertSame('2027-01-20', $window->dueOn);
     }
 
+    /**
+     * Opravný přehled běží od ZJIŠTĚNÍ chyby, ne od mzdového období.
+     *
+     * § 25 odst. 4 z. 592/1992 Sb. (nový od 1. 1. 2026). Odvozovat ho od
+     * období by nešlo: chyba se zpravidla najde až měsíce po řádném termínu
+     * a lhůta by vycházela do minulosti.
+     */
+    public function testCorrectivePaymentOverviewRunsFromTheDayTheErrorWasFound(): void
+    {
+        $window = $this->deadlines->forCorrectivePaymentOverview('2026-09-11');
+
+        self::assertSame('2026-09-11', $window->earliestSubmissionOn);
+        self::assertSame('2026-09-19', $window->statutoryDueOn);
+        self::assertStringContainsString('§ 25 odst. 4', $window->source);
+    }
+
+    /** Posouvá se na pracovní den stejně jako řádný přehled — táž povinnost. */
+    public function testCorrectivePaymentOverviewShiftsToWorkingDay(): void
+    {
+        // 29. 8. 2026 + 8 dní = neděle 6. 9. → pondělí 7. 9.
+        $window = $this->deadlines->forCorrectivePaymentOverview('2026-08-29');
+
+        self::assertSame('2026-09-06', $window->statutoryDueOn);
+        self::assertSame('2026-09-07', $window->dueOn);
+        self::assertTrue($window->isShifted());
+    }
+
+    /**
+     * Sada pravidel se přidáním opravné lhůty změnila. Uložené termíny nesou
+     * hash a musí být poznat, podle čeho vznikly.
+     */
+    public function testRulesetHashCoversTheCorrectiveDeadline(): void
+    {
+        self::assertNotSame(
+            hash('sha256', 'cz-health-insurance-notification-deadlines.v1|8|20'
+                . '|payment_overview_shift=next_czech_working_day'),
+            $this->deadlines->rulesetHash(),
+        );
+    }
+
     public function testPaymentOverviewIsDueOnTheTwentiethOfTheFollowingMonth(): void
     {
         $window = $this->deadlines->forPaymentOverview('2026-01');

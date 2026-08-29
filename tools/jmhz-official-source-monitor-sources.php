@@ -23,6 +23,24 @@ return [
         'document_path_prefixes' => ['/assets/documents/'],
         'document_extensions' => ['csv', 'docx', 'eml', 'html', 'pdf', 'xlsx', 'xml', 'xsd', 'zip'],
     ],
+    /*
+     * Provozní oznámení ČSSZ. Sem chodí vady katalogu kontrol, výpadky, posuny
+     * lhůt i nové povinnosti — 28. 8. 2026 tu ČSSZ oznámila nedostatek ve
+     * vyhodnocování kontrol 164, 270, 290, 291 a 333 a hromadný přepočet stavů
+     * s opětovným vystavením protokolů. Nic z toho není v žádném dokumentu na
+     * ePortálu ani na vývojářském portálu.
+     *
+     * `article_list` neotevírá jednotlivé články: signálem je, že položka
+     * přibyla, a stránka článku nese volatilní obsah.
+     */
+    'cssz-jmhz-aktuality' => [
+        'label' => 'ČSSZ — Aktuality JMHZ',
+        'index_url' => 'https://www.cssz.gov.cz/aktuality-jmhz',
+        'index_format' => 'article_list',
+        'document_hosts' => ['www.cssz.gov.cz'],
+        'document_path_prefixes' => ['/web/cz/-/'],
+        'document_extensions' => [],
+    ],
     'cssz-jmhz-eportal' => [
         'label' => 'ePortál ČSSZ — Jednotné měsíční hlášení zaměstnavatele',
         'index_url' => 'https://eportal.cssz.cz/web/portal/-/sluzby/jednotne-mesicni-hlaseni-zamestnavatele',

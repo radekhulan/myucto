@@ -64,6 +64,8 @@ final class HealthNotificationDeadlinePolicy
     private const SOURCE_NOTIFICATION = '§ 10 zákona č. 48/1997 Sb.';
     private const SOURCE_PAYMENT_OVERVIEW =
         '§ 25 odst. 3 zákona č. 592/1992 Sb.';
+    private const SOURCE_CORRECTIVE_PAYMENT_OVERVIEW =
+        '§ 25 odst. 4 zákona č. 592/1992 Sb.';
     private const SOURCE_WORKING_DAY_SHIFT =
         '§ 40 odst. 1 písm. c) zákona č. 500/2004 Sb. '
         . '(§ 26c zákona č. 592/1992 Sb.)';
@@ -159,11 +161,46 @@ final class HealthNotificationDeadlinePolicy
         );
     }
 
+    /**
+     * Lhůta OPRAVNÉHO přehledu o platbě pojistného.
+     *
+     * § 25 odst. 4 z. 592/1992 Sb. (nový od 1. 1. 2026) ji váže na den, kdy
+     * zaměstnavatel chybu ZJISTIL, ne na mzdové období. Řádný přehled má
+     * pevný 20. den následujícího měsíce, takže se odsud počítat nedá:
+     * chyba se zpravidla najde až měsíce po něm a lhůta by byla dávno pryč.
+     *
+     * Posouvá se na pracovní den stejně jako řádný přehled — jde o tutéž
+     * povinnost vůči téže pojišťovně, jen v opravné variantě.
+     */
+    public function forCorrectivePaymentOverview(
+        string $discoveredOn,
+    ): HealthNotificationDeadlineWindow {
+        $discovered = $this->date($discoveredOn);
+        $statutoryDueOn = $discovered
+            ->add(new \DateInterval('P' . self::NOTIFICATION_DAYS . 'D'))
+            ->format('Y-m-d');
+
+        return $this->window(
+            $discoveredOn,
+            CzechWorkingDays::shiftToWorkingDay(
+                new \DateTimeImmutable($statutoryDueOn),
+            )->format('Y-m-d'),
+            self::SOURCE_CORRECTIVE_PAYMENT_OVERVIEW,
+            self::STATUTE_VERIFIED,
+            $statutoryDueOn,
+            self::SHIFT_WORKING_DAY,
+            self::SOURCE_WORKING_DAY_SHIFT,
+        );
+    }
+
     public function rulesetHash(): string
     {
         return hash('sha256', self::RULESET_ID . '|'
             . self::NOTIFICATION_DAYS . '|' . self::MONTHLY_DUE_DAY
-            . '|payment_overview_shift=' . self::SHIFT_WORKING_DAY);
+            . '|payment_overview_shift=' . self::SHIFT_WORKING_DAY
+            // Přidání opravné lhůty je změna sady pravidel, ne jen nová metoda:
+            // uložené termíny nesou hash a musí být poznat, podle čeho vznikly.
+            . '|corrective_overview=' . self::NOTIFICATION_DAYS);
     }
 
     private function window(

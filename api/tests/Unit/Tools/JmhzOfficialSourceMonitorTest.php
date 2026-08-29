@@ -176,6 +176,65 @@ final class JmhzOfficialSourceMonitorTest extends TestCase
         self::assertSame('1.2.3', $state['sources']['mpsv']['documents'][0]['version']);
     }
 
+    /**
+     * Aktuality ČSSZ jsou seznam ČLÁNKŮ, ne dokumentů.
+     *
+     * Právě tam chodí vady katalogu kontrol, výpadky a nové povinnosti —
+     * 28. 8. 2026 takhle přišla vada ve vyhodnocování kontrol 164, 270, 290,
+     * 291 a 333. Články nemají příponu, takže je filtr dokumentů odmítal
+     * a celý běh skončil chybou „neobsahuje žádný rozpoznatelný dokument".
+     */
+    public function testArticleIndexDetectsANewAnnouncement(): void
+    {
+        $index = static fn (string ...$titles): string => '<html><body>'
+            . implode('', array_map(
+                static fn (string $t, int $i): string =>
+                    '<a href="/web/cz/-/clanek-' . $i . '">' . $t . '</a>',
+                $titles,
+                array_keys($titles),
+            ))
+            . '<a href="https://example.test/cizi">Cizí odkaz</a></body></html>';
+
+        $monitor = new JmhzOfficialSourceMonitor(
+            $this->articleSources(),
+            static fn (string $url, int $maxBytes): string => $index('Aktualizace JMHZ'),
+        );
+        $first = $monitor->monitor($this->statePath());
+        self::assertTrue($first['baseline_created']);
+        self::assertSame(1, $first['sources'][0]['document_count']);
+
+        // ⚠️ Kdyby se stahoval každý článek zvlášť, tenhle test by síťově
+        // selhal — a v provozu by se hlásila změna při každé úpravě patičky.
+        $monitor = new JmhzOfficialSourceMonitor(
+            $this->articleSources(),
+            static fn (string $url, int $maxBytes): string =>
+                $index('Aktualizace JMHZ', 'Upozornění pro zaměstnavatele — přepočet stavu JMH'),
+        );
+        $second = $monitor->monitor($this->statePath());
+
+        self::assertTrue($second['changed']);
+        self::assertSame(1, $second['change_count']);
+        self::assertStringContainsString(
+            'přepočet stavu JMH',
+            json_encode($second['changes'], JSON_UNESCAPED_UNICODE) ?: '',
+        );
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function articleSources(): array
+    {
+        return [
+            'cssz-aktuality' => [
+                'label' => 'ČSSZ — Aktuality JMHZ',
+                'index_url' => 'https://www.cssz.gov.cz/aktuality-jmhz',
+                'index_format' => 'article_list',
+                'document_hosts' => ['www.cssz.gov.cz'],
+                'document_path_prefixes' => ['/web/cz/-/'],
+                'document_extensions' => [],
+            ],
+        ];
+    }
+
     /** @param array<string,string> $responses */
     private function monitor(array $responses): JmhzOfficialSourceMonitor
     {
