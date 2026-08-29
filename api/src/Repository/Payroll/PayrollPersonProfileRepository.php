@@ -397,6 +397,23 @@ final class PayrollPersonProfileRepository
         return $version === false ? 0 : (int) $version;
     }
 
+    /** @return array<string,true> druhy adres, které už verzi mají */
+    private function addressTypesWithVersion(int $supplierId, int $employeeId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT address_type
+               FROM payroll_person_addresses
+              WHERE supplier_id = ? AND employee_id = ?'
+        );
+        $stmt->execute([$supplierId, $employeeId]);
+        $types = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) ?: [] as $type) {
+            $types[(string) $type] = true;
+        }
+
+        return $types;
+    }
+
     private function earliestEmploymentStart(int $supplierId, int $employeeId): ?string
     {
         $stmt = $this->db->pdo()->prepare(
@@ -558,8 +575,23 @@ final class PayrollPersonProfileRepository
                     row_version = row_version + 1
               WHERE supplier_id = ? AND employee_id = ? AND id = ?'
         );
+        $earliestEmploymentStart = $this->earliestEmploymentStart($supplierId, $employeeId);
+        $seenTypes = $this->addressTypesWithVersion($supplierId, $employeeId);
         foreach ($rows as $row) {
             if ($row['id'] === null) {
+                // ⚠️ Táž vada jako u historie identity: PRVNÍ adresa daného
+                // druhu se razítkovala dnem vyplnění karty, ne nástupem. Kdo
+                // přešel z jiného systému, pak u návrhu profilu REGZEC A1 viděl
+                // „osoba nemá k rozhodnému dni evidovanou adresu", přestože ji
+                // zadal. Adresa se nemění, jen datum, odkdy uložená verze platí.
+                $type = (string) $row['address_type'];
+                if (!isset($seenTypes[$type])
+                    && $earliestEmploymentStart !== null
+                    && $row['effective_from'] > $earliestEmploymentStart
+                ) {
+                    $row['effective_from'] = $earliestEmploymentStart;
+                }
+                $seenTypes[$type] = true;
                 $insert->execute([
                     $supplierId,
                     $employeeId,

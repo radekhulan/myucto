@@ -591,7 +591,7 @@ onMounted(load)
         <button
           v-if="canWrite"
           type="button"
-          :class="btnOutline('primary')"
+          :class="btnOutline('success')"
           data-test="start-quick-edit"
           @click="startEdit"
         >
