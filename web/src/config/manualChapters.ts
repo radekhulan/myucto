@@ -28,6 +28,9 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/reports\/shv(?:\/|$)/, '39_Souhrnne_hlaseni'],
   [/^\/reports\/oss(?:\/|$)/, '40_OSS'],
   [/^\/reports\/income-tax(?:\/|$)/, '38_Dan_z_prijmu'],
+  // Oznámení podle § 38da a § 38e je popsané v kapitole o dani z příjmů,
+  // ne u mezd: mzdových příjmů se obě podání netýkají.
+  [/^\/reports\/foreign-income(?:\/|$)/, '38_Dan_z_prijmu'],
   [/^\/reports\/submissions(?:\/|$)/, '89_Archiv_podani_a_rekonciliace'],
   [/^\/reports\/monthly-export(?:\/|$)/, '42_Hromadny_export'],
   [/^\/reports\/(?:dph|kh|s74b|vat-corrections|vat-coefficient|s46)(?:\/|$)/, '36_Vykazy_DPH'],

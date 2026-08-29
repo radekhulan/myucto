@@ -467,6 +467,11 @@ const navSections = computed<NavSection[]>(() => {
         // hospodaření nebo z peněžního deníku a obojí je za licencí.
         ...(auth.hasCommercialFeatures ? [
           { to: '/reports/income-tax',  label: t('nav.reports_income_tax'),  icon: ICONS.tax_income },
+          // Oznámení o příjmech do zahraničí a zajištění daně (§ 38da, § 38e).
+          // Patří sem, ne ke mzdám: § 38da odst. 5 písm. b) vylučuje příjmy
+          // podle § 6 odst. 4 a § 38e poslední větou vylučuje závislou činnost,
+          // takže se mezd netýkají. Obrazovka byla dostupná jen přímou adresou.
+          { to: '/reports/foreign-income', label: t('nav.reports_foreign_income'), icon: ICONS.tax_income },
         ] : []),
         // Oprava odpočtu §74b se přesunula do Účetních nástrojů za Spojené osoby
         // (vedle §46 — obě jsou korekce DPH nad saldem, ne běžná měsíční agenda).

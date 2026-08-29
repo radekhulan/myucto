@@ -493,6 +493,7 @@
         "reports_vat_corrections": "VAT corrections (§43, §79)",
         "reports_shv": "Recapitulative statement",
         "reports_income_tax": "Income tax",
+        "reports_foreign_income": "Income paid abroad",
         "reports_cnb_audit": "FX rate audit (CNB)",
         "reports_series_completeness": "Numbering series completeness",
         "reports_submissions": "EPO filing & archive",
