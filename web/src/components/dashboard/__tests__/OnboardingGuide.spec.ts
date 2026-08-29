@@ -198,4 +198,19 @@ describe('OnboardingGuide', () => {
 
     expect(wrapper.findAll('button[aria-pressed="true"]')).toHaveLength(1)
   })
+
+  /**
+   * ⚠️ Krok bez ikony se vykreslí jako prázdné dlaždice — `ICONS[s.id]` vrátí
+   * undefined a `<path d>` zůstane bez hodnoty. Projde to revizí i typovou
+   * kontrolou (mapa je `Record<string, string>`) a je to vidět až na obrazovce;
+   * přesně takhle zůstal bez ikony krok „AI extrakce dokladů".
+   */
+  it('každý krok má ikonu', async () => {
+    const wrapper = await mountGuide()
+
+    const missing = wrapper.findAll('svg path')
+      .filter(p => (p.attributes('d') ?? '').trim() === '')
+
+    expect(missing).toHaveLength(0)
+  })
 })
