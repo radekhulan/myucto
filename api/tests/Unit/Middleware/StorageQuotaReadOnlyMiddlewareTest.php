@@ -59,7 +59,7 @@ final class StorageQuotaReadOnlyMiddlewareTest extends TestCase
         ?float $percent = null,
         bool $enforceable = true,
     ): StorageQuotaReadOnlyMiddleware {
-        $policy = $this->createMock(StorageQuotaPolicy::class);
+        $policy = $this->createStub(StorageQuotaPolicy::class);
         $policy->method('isEnforceable')->willReturn($enforceable);
         $policy->method('evaluate')->willReturn($this->quotaStatus($state, $percent, $enforceable));
         $policy->method('readOnlyMessage')->willReturn('Vyčerpali jste přidělený prostor instalace.');

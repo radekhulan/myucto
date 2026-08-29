@@ -137,7 +137,7 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
 
     private function validator(): PayrollEmployerSettingsValidator
     {
-        $accounts = $this->createMock(ChartOfAccountsRepository::class);
+        $accounts = $this->createStub(ChartOfAccountsRepository::class);
         $map = [];
         foreach (PayrollAccountingDefaults::ACCOUNTS as $definition) {
             $map[$definition['code']] = [

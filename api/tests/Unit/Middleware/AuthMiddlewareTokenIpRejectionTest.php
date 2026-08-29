@@ -70,7 +70,7 @@ final class AuthMiddlewareTokenIpRejectionTest extends TestCase
 
     private function process(?object $logger): ResponseInterface
     {
-        $tokens = $this->createMock(ApiTokenService::class);
+        $tokens = $this->createStub(ApiTokenService::class);
         $tokens->method('validate')->willReturn([
             'id'                   => 7,
             'user_id'              => 3,
@@ -88,18 +88,18 @@ final class AuthMiddlewareTokenIpRejectionTest extends TestCase
         // Nenulová sada pravidel je podmínka, aby se allowlist vůbec vyhodnocoval.
         $tokens->method('ipRulesFor')->willReturn(['198.51.100.0/24']);
 
-        $ipMatcher = $this->createMock(IpMatcher::class);
+        $ipMatcher = $this->createStub(IpMatcher::class);
         $ipMatcher->method('clientIp')->willReturn(self::CLIENT_IP);
         $ipMatcher->method('matches')->willReturn(false);
 
         $middleware = new AuthMiddleware(
             new Config([]),
-            $this->createMock(SessionManager::class),
-            $this->createMock(Connection::class),
+            $this->createStub(SessionManager::class),
+            $this->createStub(Connection::class),
             new ResponseFactory(),
             $tokens,
             $ipMatcher,
-            $this->createMock(UserRoleProfile::class),
+            $this->createStub(UserRoleProfile::class),
             $this->apiRequestLoggerStub(),
             $logger,
         );
@@ -114,7 +114,7 @@ final class AuthMiddlewareTokenIpRejectionTest extends TestCase
     /** `ApiRequestLogger` je final a mimo bypass-finals allowlist — stavíme ho reálně nad mock Connection. */
     private function apiRequestLoggerStub(): ApiRequestLogger
     {
-        return new ApiRequestLogger($this->createMock(Connection::class), new NullLogger());
+        return new ApiRequestLogger($this->createStub(Connection::class), new NullLogger());
     }
 
     private function neverCalledHandler(): RequestHandlerInterface

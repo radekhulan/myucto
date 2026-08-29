@@ -128,12 +128,12 @@ final class LicenseRenewTelemetryTest extends TestCase
 
         // Konfigurace, která na každé čtení vybuchne — nejtvrdší dostupný způsob,
         // jak sběr telemetrie rozbít zevnitř.
-        $broken = $this->createMock(Config::class);
+        $broken = $this->createStub(Config::class);
         $broken->method('get')->willThrowException(new RuntimeException('konfigurace je rozbitá'));
         $builder = new TelemetryPayloadBuilder(
             $broken,
             $this->probe(new Config([])),
-            $this->createMock(VersionService::class),
+            $this->createStub(VersionService::class),
             new ManagedModeGuard($broken),
         );
 
@@ -170,7 +170,7 @@ final class LicenseRenewTelemetryTest extends TestCase
         }
         $config = new Config($data);
 
-        $version = $this->createMock(VersionService::class);
+        $version = $this->createStub(VersionService::class);
         $version->method('getCurrentVersion')->willReturn('5.21.0');
 
         return new TelemetryPayloadBuilder($config, $this->probe($config), $version, new ManagedModeGuard($config));
@@ -179,11 +179,11 @@ final class LicenseRenewTelemetryTest extends TestCase
     /** Skutečná probe (final, nemockuje se) nad mockovaným prostředím. */
     private function probe(Config $config): InstanceHealthProbe
     {
-        $db = $this->createMock(Connection::class);
+        $db = $this->createStub(Connection::class);
         $db->method('hasTable')->willReturn(false);
         $db->method('pdo')->willThrowException(new RuntimeException('DB nedostupná'));
 
-        $environment = $this->createMock(EnvironmentCheckService::class);
+        $environment = $this->createStub(EnvironmentCheckService::class);
         $environment->method('migrationStatus')
             ->willReturn(['available' => true, 'applied' => 1512, 'total' => 1512, 'pending' => [], 'pending_count' => 0]);
 

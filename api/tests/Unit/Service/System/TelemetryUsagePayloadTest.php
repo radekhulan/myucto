@@ -299,7 +299,7 @@ final class TelemetryUsagePayloadTest extends TestCase
         $builder = new TelemetryPayloadBuilder(
             $config,
             $this->probe($config),
-            $this->createMock(VersionService::class),
+            $this->createStub(VersionService::class),
             new ManagedModeGuard($config),
             $quota,
         );
@@ -356,7 +356,7 @@ final class TelemetryUsagePayloadTest extends TestCase
         $payload = (new TelemetryPayloadBuilder(
             $config,
             $this->probe($config),
-            $this->createMock(VersionService::class),
+            $this->createStub(VersionService::class),
             new ManagedModeGuard($config),
             $quota,
         ))->build();
@@ -418,11 +418,11 @@ final class TelemetryUsagePayloadTest extends TestCase
     /** Skutečná probe nad nedostupnou databází — zdravotní část degraduje na null. */
     private function probe(Config $config): InstanceHealthProbe
     {
-        $db = $this->createMock(Connection::class);
+        $db = $this->createStub(Connection::class);
         $db->method('hasTable')->willReturn(false);
         $db->method('pdo')->willThrowException(new RuntimeException('DB nedostupná'));
 
-        $environment = $this->createMock(EnvironmentCheckService::class);
+        $environment = $this->createStub(EnvironmentCheckService::class);
         $environment->method('migrationStatus')
             ->willReturn(['available' => false, 'applied' => 0, 'pending' => [], 'pending_count' => null]);
 

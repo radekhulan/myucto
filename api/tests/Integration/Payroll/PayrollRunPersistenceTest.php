@@ -1442,7 +1442,7 @@ final class PayrollRunPersistenceTest extends TestCase
             $this->actors[1],
         );
 
-        $approvedPosting = $this->createMock(
+        $approvedPosting = $this->createStub(
             PayrollApprovedRevisionPostingService::class,
         );
         $approvedPosting->method('post')->willReturn([]);

@@ -40,8 +40,8 @@ final class HealthPaymentOverviewServiceInsurerCodebookTest extends TestCase
     {
         return new HealthPaymentOverviewService(
             new HealthInsuranceOverviewRepository(
-                $this->createMock(Connection::class),
-                $this->createMock(PayrollStatutoryResultRepository::class),
+                $this->createStub(Connection::class),
+                $this->createStub(PayrollStatutoryResultRepository::class),
             ),
             new HealthPaymentOverviewBuilder(),
         );

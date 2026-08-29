@@ -270,8 +270,9 @@ final class MfaRecoveryCodeTest extends TestCase
     private function issueFirstBatch(): array
     {
         $action = Bootstrap::buildApp()->getContainer()->get(\MyInvoice\Action\Auth\TotpAction::class);
+        // setAccessible() je od PHP 8.1 bez efektu a od 8.5 deprecated — reflexe
+        // se na neveřejnou metodu dostane sama.
         $method = new \ReflectionMethod($action, 'issueFirstRecoveryCodes');
-        $method->setAccessible(true);
         $result = (array) $method->invoke($action, $this->userId, '127.0.0.1', 'phpunit');
 
         return $result['recovery_codes'] ?? [];

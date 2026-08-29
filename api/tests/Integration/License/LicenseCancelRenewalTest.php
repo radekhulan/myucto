@@ -276,7 +276,7 @@ final class LicenseCancelRenewalTest extends TestCase
         $validUntil = time() + 20 * 86400;
         $this->prime($this->cancelledSubscription($validUntil), $validUntil);
 
-        $this->client->method('resumeRenewal')
+        $this->client->expects($this->once())->method('resumeRenewal')
             ->willReturn(['ok' => true, 'pay_url' => 'https://myucto.cz/gw/abc', 'valid_until' => $validUntil]);
 
         $this->service->resumeRenewal();
@@ -303,7 +303,7 @@ final class LicenseCancelRenewalTest extends TestCase
         // říct, ne nabízet „zkuste to znovu".
         $validUntil = time() + 20 * 86400;
         $this->prime($this->cancelledSubscription($validUntil), $validUntil);
-        $this->client->method('resumeRenewal')
+        $this->client->expects($this->once())->method('resumeRenewal')
             ->willReturn(['ok' => false, 'error' => 'instance_not_restorable']);
 
         $result = $this->service->resumeRenewal();

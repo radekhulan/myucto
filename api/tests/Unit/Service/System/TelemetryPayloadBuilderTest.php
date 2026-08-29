@@ -221,13 +221,13 @@ final class TelemetryPayloadBuilderTest extends TestCase
     {
         // Licence je to, na čem stojí provoz zákazníka; diagnostika je to, co
         // chceme my. Když se sběr rozbije, smí z toho vzniknout nanejvýš null.
-        $config = $this->createMock(Config::class);
+        $config = $this->createStub(Config::class);
         $config->method('get')->willThrowException(new RuntimeException('konfigurace je rozbitá'));
 
         $builder = new TelemetryPayloadBuilder(
             $config,
             $this->probe(new Config(['app' => ['managed' => true]])),
-            $this->createMock(VersionService::class),
+            $this->createStub(VersionService::class),
             new ManagedModeGuard($config),
         );
 
@@ -238,7 +238,7 @@ final class TelemetryPayloadBuilderTest extends TestCase
     {
         $config = new Config(['app' => ['managed' => true, 'managed_provider' => 'servermaster']]);
 
-        $environment = $this->createMock(EnvironmentCheckService::class);
+        $environment = $this->createStub(EnvironmentCheckService::class);
         $environment->method('migrationStatus')->willReturn([
             'available'     => true,
             'applied'       => 1512,
@@ -247,7 +247,7 @@ final class TelemetryPayloadBuilderTest extends TestCase
             'pending_count' => 2,
         ]);
 
-        $version = $this->createMock(VersionService::class);
+        $version = $this->createStub(VersionService::class);
         $version->method('getCurrentVersion')->willReturn('5.21.0');
 
         $builder = new TelemetryPayloadBuilder(
@@ -282,7 +282,7 @@ final class TelemetryPayloadBuilderTest extends TestCase
         return new TelemetryPayloadBuilder(
             $config,
             $this->probe($config),
-            $this->createMock(VersionService::class),
+            $this->createStub(VersionService::class),
             new ManagedModeGuard($config),
         );
     }
@@ -294,12 +294,12 @@ final class TelemetryPayloadBuilderTest extends TestCase
      */
     private function probe(Config $config, ?EnvironmentCheckService $environment = null): InstanceHealthProbe
     {
-        $db = $this->createMock(Connection::class);
+        $db = $this->createStub(Connection::class);
         $db->method('hasTable')->willReturn(false);
         $db->method('pdo')->willThrowException(new RuntimeException('DB nedostupná'));
 
         if ($environment === null) {
-            $environment = $this->createMock(EnvironmentCheckService::class);
+            $environment = $this->createStub(EnvironmentCheckService::class);
             $environment->method('migrationStatus')
                 ->willReturn(['available' => false, 'applied' => 0, 'pending' => [], 'pending_count' => null]);
         }
