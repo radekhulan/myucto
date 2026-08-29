@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollMealEntitlementBasisLockedException;
+use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
@@ -115,6 +116,63 @@ final class PayrollEmploymentAction
                 $this->userId($request),
                 $this->ip($request),
                 $request->getHeaderLine('User-Agent'),
+                // Mzdu drží vztah, ne verze podmínek — obrazovky, které ji
+                // nenabízejí, klíč vůbec neposílají a uložená hodnota zůstává.
+                array_key_exists('monthly_gross_minor', $body),
+                $this->validator->optionalMonthlyGrossMinor($body),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+        return Json::ok($response, ['employment' => $employment]);
+    }
+
+    /**
+     * OPRAVA platné verze podmínek — beze vzniku nové verze.
+     *
+     * Why: dokud byla jediná cesta k úpravě „nová verze podmínek", zakládal
+     * překlep v úvazku nebo doplněná účtárna novou verzi s vlastním datem
+     * účinnosti. Do historie se tím zapsalo, že se podmínky k tomu datu
+     * změnily, přestože se jen opravoval už zapsaný údaj.
+     *
+     * `effective_from` se z těla NEBERE: účinnost je vlastnost opravované
+     * verze. Payload podmínek ji vyžaduje, takže se doplní z uložené hodnoty —
+     * klient tak nemá čím ji omylem posunout.
+     *
+     * @param array{id:string} $args
+     */
+    public function correctTerms(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $supplierId = $this->currentSupplierId($request);
+            $employmentId = (int) $args['id'];
+            $current = $this->employments->currentTermsEffectiveFrom($supplierId, $employmentId);
+            if ($current === null) {
+                throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
+            }
+            $body['effective_from'] = $current;
+            $employment = $this->employments->correctTerms(
+                $supplierId,
+                $employmentId,
+                $this->validator->terms(
+                    $body,
+                    $this->employments->currentCzIscoCode($supplierId, $employmentId),
+                    $this->employments->currentOtherWithholdingEligibility(
+                        $supplierId,
+                        $employmentId,
+                    ),
+                    $this->employments->currentRelationType($supplierId, $employmentId),
+                ),
+                $this->validator->rowVersion($body),
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+                array_key_exists('monthly_gross_minor', $body),
+                $this->validator->optionalMonthlyGrossMinor($body),
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
@@ -379,6 +437,15 @@ final class PayrollEmploymentAction
                 'meal_entitlement_basis_locked',
                 $e->getMessage(),
                 409,
+            ),
+            // Oprava na místě už nejde, ale nová verze ano — kód nese období,
+            // od kterého je zúčtováno, aby frontend uměl nabídnout tu druhou cestu.
+            $e instanceof PayrollTermsSettledException => Json::error(
+                $response,
+                'payroll_terms_settled',
+                $e->getMessage(),
+                409,
+                ['settled_period' => $e->settledPeriod],
             ),
             $e instanceof \DomainException => Json::error(
                 $response,

@@ -27,6 +27,16 @@ import {
 const props = defineProps<{
   employmentId: number
   employeeId: number
+  /**
+   * Panel stojí v úzkém postranním pruhu karty (široké obrazovky).
+   *
+   * Why prop a ne media query: mřížka se láme podle ŠÍŘKY OKNA, ale v pruhu
+   * je k dispozici 20 rem bez ohledu na to, jak je okno široké — na 2000 px by
+   * se `xl:grid-cols-3` pokusilo nacpat tři dlaždice do 320 px a popisky by
+   * přetekly. Kdo panel umístí, ví o kolik místa jde; sama komponenta to
+   * z okna nepozná.
+   */
+  compact?: boolean
 }>()
 
 const { t } = useI18n()
@@ -126,6 +136,19 @@ watch(() => props.employmentId, load)
 onMounted(load)
 
 const TILE = 'flex h-full min-w-0 flex-col gap-0.5 rounded-md border px-3 py-2 text-xs'
+/*
+ * Mřížka, ne sloupec: agend je třináct a pod sebou by z přehledu udělaly
+ * stránku, kterou je nutné odscrollovat. Tři sloupce na širokém monitoru
+ * (xl ≈ 425 px na dlaždici), dva od tabletu, jeden na mobilu. Zlom na `md`,
+ * ne `sm`: druhý řádek dlaždice nese datum a částku („poslední 01. 08. 2026 ·
+ * 4 500,00 Kč"), což je přes 200 px.
+ *
+ * V postranním pruhu naopak JEDEN sloupec vždycky — pruh má 20 rem bez ohledu
+ * na šířku okna a svislé místo tam nic jiného nezabírá.
+ */
+const GRID = computed(() => props.compact === true
+  ? 'grid-cols-1'
+  : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3')
 </script>
 
 <template>
@@ -137,14 +160,19 @@ const TILE = 'flex h-full min-w-0 flex-col gap-0.5 rounded-md border px-3 py-2 t
   <section class="rounded-lg border border-payroll-500/30 bg-payroll-50/60 p-3" data-test="employment-agendas">
     <div class="min-w-0">
       <h4 class="text-sm font-semibold text-neutral-900">{{ t('payroll.agendas.title') }}</h4>
-      <p class="mt-0.5 text-xs text-neutral-500">{{ t('payroll.agendas.subtitle') }}</p>
+      <!--
+        V pruhu se dlouhý popis vypustí: zabral by třetinu viditelné výšky
+        a odsunul dlaždice, kvůli kterým tam pruh je. V toku (úzká okna)
+        zůstává — tam je panel jediné vysvětlení, co ta čísla znamenají.
+      -->
+      <p v-if="compact !== true" class="mt-0.5 text-xs text-neutral-500">{{ t('payroll.agendas.subtitle') }}</p>
     </div>
 
     <!--
       Načítání má vlastní stav, protože prázdná mřížka a mřížka se samými
       nulami vypadají stejně — a jedna z nich lže.
     -->
-    <div v-if="loading" class="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+    <div v-if="loading" :class="['mt-3 grid gap-2', GRID]">
       <div v-for="index in 6" :key="index" class="h-12 animate-pulse rounded-md bg-neutral-100" />
     </div>
 
@@ -157,18 +185,9 @@ const TILE = 'flex h-full min-w-0 flex-col gap-0.5 rounded-md border px-3 py-2 t
         {{ t('payroll.agendas.load_failed') }}
       </p>
 
-      <!--
-        Mřížka, ne sloupec: agend je třináct a pod sebou by z přehledu udělaly
-        stránku, kterou je nutné odscrollovat. Tři sloupce na širokém monitoru
-        (xl ≈ 425 px na dlaždici), dva od tabletu, jeden na mobilu.
-        Zlom na `md`, ne `sm`: druhý řádek dlaždice nese datum a částku
-        („poslední 01. 08. 2026 · 4 500,00 Kč"), což je přes 200 px — při dvou
-        sloupcích už od 640 px by se popisek agendy začal ořezávat. Ověřeno na
-        334 px (jeden sloupec, mobil): nic se neořezává ani nescrolluje vodorovně.
-        Odkazy jsou <a>, takže se seznam projde tabulátorem bez myši.
-      -->
+      <!-- Rozvržení mřížky viz `GRID`. Odkazy jsou <a>, takže se seznam projde tabulátorem bez myši. -->
       <ul
-        class="mt-3 grid grid-cols-1 items-stretch gap-2 md:grid-cols-2 xl:grid-cols-3"
+        :class="['mt-3 grid items-stretch gap-2', GRID]"
         data-test="employment-agenda-summary"
       >
         <li v-for="row in rows" :key="row.agenda.key" :data-test="`employment-agenda-${row.agenda.key}`">

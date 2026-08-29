@@ -3196,6 +3196,35 @@
             "initial_terms": "Počáteční smluvní podmínky",
             "new_terms": "Nová verze podmínek",
             "terms_saved": "Nová verze smluvních podmínek byla uložena.",
+            "terms_corrected": "Platné podmínky byly opraveny.",
+            "essentials_title": "Základní údaje",
+            "essentials_hint": "Změny se ukládají jedním tlačítkem dole.",
+            "monthly_gross": "Pravidelná hrubá mzda",
+            "terms_dates_title": "Termíny",
+            "person_evidence_title": "Ze zákonné evidence osoby",
+            "health_insurer": "Zdravotní pojišťovna",
+            "health_insurer_hint": "Vede se v zákonné evidenci osoby, ne u vztahu — sem se hodnota jen přebírá. Rozhoduje o tom, komu se odvádí zdravotní pojistné.",
+            "health_insurer_state": {
+                "verified": "Ověřeno",
+                "unverified": "Neověřeno",
+                "not_applicable": "Netýká se",
+                "missing": "Nezadáno"
+            },
+            "gross_invalid": "Pravidelná hrubá mzda musí být částka, například 45000 nebo 45000,50.",
+            "new_terms_date_required": "Vyplňte datum, od kterého nové podmínky platí.",
+            "terms_group": {
+                "workplace": "Místo výkonu práce",
+                "insurance": "Pojištění a daň",
+                "exceptions": "Výjimečné situace",
+                "exceptions_hint": "Zvýšená sazba zaměstnavatele, sleva na pojistném a zvláštní příznaky pro ČSSZ. Běžný pracovní poměr tu nemá co vyplňovat."
+            },
+            "save_mode": {
+                "title": "Jak změnu uložit",
+                "correct": "Opravit platné podmínky",
+                "correct_hint": "Přepíše verzi platnou od {date}. Pro překlepy a doplnění chybějícího údaje.",
+                "version": "Od data platí nové podmínky",
+                "version_hint": "Založí novou verzi. Původní zůstane v historii."
+            },
             "mutation_failed": "Změnu pracovního vztahu se nepodařilo uložit.",
             "transition_saved": "Stav pracovního vztahu byl změněn.",
             "transition_date": "Změna stavu k",
@@ -3634,11 +3663,13 @@
             "event": {
                 "created": "Vztah založen",
                 "terms_changed": "Smluvní podmínky změněny",
+                "terms_corrected": "Platné podmínky opraveny",
                 "status_changed": "Stav změněn",
                 "checklist_changed": "Povinnost aktualizována"
             },
             "term_field": {
                 "office_id": "Mzdová účtárna",
+                "monthly_gross_minor": "Pravidelná hrubá mzda",
                 "effective_from": "Účinnost od",
                 "contract_signed_on": "Smlouva uzavřena",
                 "planned_start_on": "Plánovaný nástup",

@@ -52,6 +52,7 @@ function employment(overrides: Partial<PayrollEmployment> = {}): PayrollEmployme
   return {
     id: 31,
     tax_declaration: null,
+    health_insurer: null,
     employee_id: 17,
     office_id: null,
     office_code: null,

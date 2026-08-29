@@ -1120,6 +1120,12 @@ final class Routes
             // do prohlížeče jde jen shoda (viz PayrollCzIscoAction).
             $g->get('/cz-isco', [PayrollCzIscoAction::class, 'search']);
             $g->put('/employments/{id:[0-9]+}/terms', [PayrollEmploymentAction::class, 'addTerms']);
+            // PUT zakládá NOVOU verzi podmínek, PATCH opravuje tu platnou.
+            // Dvě různé věci, dvě routy — ať se nedají splést jedním příznakem v těle.
+            $g->patch(
+                '/employments/{id:[0-9]+}/terms/current',
+                [PayrollEmploymentAction::class, 'correctTerms'],
+            );
             $g->patch('/employments/{id:[0-9]+}/code', [PayrollEmploymentAction::class, 'rename']);
             $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);
             $g->post(

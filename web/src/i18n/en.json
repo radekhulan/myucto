@@ -3196,6 +3196,35 @@
             "initial_terms": "Initial contractual terms",
             "new_terms": "New terms version",
             "terms_saved": "A new version of the contractual terms has been saved.",
+            "terms_corrected": "The effective terms have been corrected.",
+            "essentials_title": "Key details",
+            "essentials_hint": "Changes are saved with the single button below.",
+            "monthly_gross": "Regular gross pay",
+            "terms_dates_title": "Dates",
+            "person_evidence_title": "From the person's statutory evidence",
+            "health_insurer": "Health insurer",
+            "health_insurer_hint": "It is kept in the person's statutory evidence, not on the relationship — the value is only mirrored here. It decides where health insurance is paid.",
+            "health_insurer_state": {
+                "verified": "Verified",
+                "unverified": "Unverified",
+                "not_applicable": "Not applicable",
+                "missing": "Not recorded"
+            },
+            "gross_invalid": "The regular gross pay must be an amount, for example 45000 or 45000.50.",
+            "new_terms_date_required": "Fill in the date from which the new terms apply.",
+            "terms_group": {
+                "workplace": "Place of work",
+                "insurance": "Insurance and tax",
+                "exceptions": "Exceptional situations",
+                "exceptions_hint": "Increased employer rate, insurance discount and special flags for the social security administration. An ordinary employment needs none of it."
+            },
+            "save_mode": {
+                "title": "How to save the change",
+                "correct": "Correct the effective terms",
+                "correct_hint": "Overwrites the version effective from {date}. For typos and filling in a missing detail.",
+                "version": "New terms apply from a date",
+                "version_hint": "Creates a new version. The current one stays in the history."
+            },
             "mutation_failed": "The employment relationship could not be updated.",
             "transition_saved": "The employment status has been changed.",
             "transition_date": "Status change on",
@@ -3634,11 +3663,13 @@
             "event": {
                 "created": "Relationship created",
                 "terms_changed": "Contractual terms changed",
+                "terms_corrected": "Effective terms corrected",
                 "status_changed": "Status changed",
                 "checklist_changed": "Duty updated"
             },
             "term_field": {
                 "office_id": "Payroll office",
+                "monthly_gross_minor": "Regular gross pay",
                 "effective_from": "Effective from",
                 "contract_signed_on": "Contract signed",
                 "planned_start_on": "Planned start",

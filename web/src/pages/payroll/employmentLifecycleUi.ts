@@ -79,6 +79,9 @@ export type EmploymentDiffValue =
   | { kind: 'text', text: string }
   | { kind: 'date', iso: string }
   | { kind: 'key', key: string }
+  // Částka v haléřích. Časová osa ji dřív vypsala syrově, takže u změny mzdy
+  // stálo „4000000 → 4500000" — číslo, které se musí v hlavě dělit stem.
+  | { kind: 'money', minor: number }
 
 const CHECKLIST_ITEM_KEYS = new Set([
   'employment_contract', 'legacy_start_date', 'health_insurance_registration',
@@ -182,6 +185,11 @@ export function employmentDiffValue(field: string, value: unknown): EmploymentDi
 
   if (DATE_FIELDS.has(field) && /^\d{4}-\d{2}-\d{2}/.test(text)) {
     return { kind: 'date', iso: text }
+  }
+
+  if (field === 'monthly_gross_minor') {
+    const minor = Number(text)
+    if (Number.isInteger(minor)) return { kind: 'money', minor }
   }
 
   // Úvazek se ukládá v bazických bodech (10000 = plný). Číslo „10000" nikomu nic neřekne.

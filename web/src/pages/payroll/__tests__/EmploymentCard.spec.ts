@@ -8,6 +8,7 @@ vi.mock('@/api/payroll', () => ({
     renameEmployment: vi.fn(),
     setEmploymentMealEntitlementBasis: vi.fn(),
     addEmploymentTerms: vi.fn(),
+    correctEmploymentTerms: vi.fn(),
     updateEmploymentChecklist: vi.fn(),
     deleteEmployment: vi.fn(),
     // Panel zásad příplatků se na kartě montuje taky — bez tovární funkce by
@@ -80,10 +81,11 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 
 import EmploymentCard from '@/pages/payroll/EmploymentCard.vue'
 import { resetPayrollOffices } from '@/composables/usePayrollOffices'
+import { resetPayrollJmhzOptions } from '@/composables/usePayrollJmhzOptions'
 
 /**
- * Formulář podmínek má víc SearchableSelectů (účtárna, obec) — hledání podle
- * jména komponenty trefí ten první, takže se rozlišují podle `data-test`.
+ * Karta má víc SearchableSelectů (účtárna, obec) — hledání podle jména
+ * komponenty trefí ten první, takže se rozlišují podle `data-test`.
  */
 function selectByTest(wrapper: VueWrapper, test: string) {
   const found = wrapper.findAllComponents({ name: 'SearchableSelect' })
@@ -99,11 +101,28 @@ const actionBarStub = {
   },
 }
 
+/**
+ * Karta je od téhle verze rovnou editovatelná — nic se neotevírá tlačítkem.
+ * Po mountu se ale čeká na číselníky (účtárny, JMHZ), takže se `flushPromises`
+ * dělá vždycky; jinak by testy sahaly na prázdné nabídky.
+ */
+async function mountCard(
+  employmentValue: PayrollEmployment = employment(),
+  options: Record<string, unknown> = {},
+) {
+  const wrapper = mount(EmploymentCard, {
+    props: { employment: employmentValue, canWrite: true },
+    ...options,
+  })
+  await flushPromises()
+  return wrapper
+}
 
 function employment(): PayrollEmployment {
   return {
     id: 10,
     tax_declaration: null,
+    health_insurer: null,
     employee_id: 20,
     office_id: null,
     office_code: null,
@@ -199,9 +218,16 @@ function employment(): PayrollEmployment {
 }
 
 describe('EmploymentCard', () => {
-  // Nabídka účtáren se drží v paměti modulu na celý běh aplikace; mezi případy
-  // se musí vyprázdnit, jinak by druhý test dostal seznam z prvního.
-  beforeEach(resetPayrollOffices)
+  // Nabídky se drží v paměti modulu na celý běh aplikace; mezi případy se
+  // musí vyprázdnit, jinak by druhý test dostal seznam z prvního.
+  beforeEach(() => {
+    resetPayrollOffices()
+    resetPayrollJmhzOptions()
+    // Volání se musí počítat od nuly: řada případů tvrdí, že se DRUHÁ cesta
+    // uložení nepoužila, a nasčítaná volání z předchozího testu by to zakryla.
+    // `clearAllMocks` maže jen historii volání, ne návratové hodnoty z továrny.
+    vi.clearAllMocks()
+  })
 
   /**
    * Zaměstnanec převzatý z jiného zpracování dostane výzvu k doplnění úhrnů.
@@ -212,7 +238,7 @@ describe('EmploymentCard', () => {
     [false, 'payroll.people.openings.hint'],
     [true, 'payroll.people.openings.done'],
   ])('u převzatého zaměstnance mluví o úhrnech podle toho, jestli jsou (%s)', async (filled, key) => {
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard({ ...employment(), start_date: '2025-04-01' }, {
       props: {
         employment: { ...employment(), start_date: '2025-04-01' },
         canWrite: true,
@@ -225,19 +251,21 @@ describe('EmploymentCard', () => {
           PayrollOpeningBalancesPanel: {
             emits: ['loaded'],
             template: '<div />',
-            mounted() { this.$emit('loaded', filled) },
+            // Atrapa je prostý objekt (ne argument `mount`), takže na ni Vue
+            // nedosadí svoje typy a `this.$emit` se musí doplnit ručně.
+            mounted(this: { $emit: (event: string, value: boolean) => void }) {
+              this.$emit('loaded', filled)
+            },
           },
         },
       },
     })
-    await flushPromises()
 
-    const notice = wrapper.get('[data-test="opening-balances-needed"]')
-    expect(notice.text()).toContain(key)
+    expect(wrapper.get('[data-test="opening-balances-needed"]').text()).toContain(key)
   })
 
-  it('umožní novému zaměstnanci potvrdit nulový počáteční stav bez fiktivních měsíců', () => {
-    const wrapper = mount(EmploymentCard, {
+  it('umožní novému zaměstnanci potvrdit nulový počáteční stav bez fiktivních měsíců', async () => {
+    const wrapper = await mountCard(employment(), {
       props: {
         employment: { ...employment(), start_date: '2026-08-01' },
         canWrite: true,
@@ -258,8 +286,8 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="opening-panel"]').attributes('data-first')).toBe('null')
   })
 
-  it('u převzatého zaměstnance začíná počáteční stav měsícem nástupu', () => {
-    const wrapper = mount(EmploymentCard, {
+  it('u převzatého zaměstnance začíná počáteční stav měsícem nástupu', async () => {
+    const wrapper = await mountCard(employment(), {
       props: {
         employment: { ...employment(), start_date: '2026-03-10' },
         canWrite: true,
@@ -279,35 +307,170 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="opening-panel"]').attributes('data-first')).toBe('3')
   })
 
-  it('read-only uživateli ukáže historii a checklist, ale žádné mutace', () => {
-    const wrapper = mount(EmploymentCard, {
+  /**
+   * Read-only uživatel vidí totéž, jen nic nepřepíše. Pole zůstávají —
+   * zašedlá hodnota se čte líp než tabulka, která ji vypisuje jinde a jinak.
+   */
+  it('read-only uživateli ukáže údaje zamčené, ne skryté', async () => {
+    const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: false },
     })
 
     expect(wrapper.text()).toContain('payroll.people.timeline_title')
     expect(wrapper.text()).toContain('payroll.people.checklist.employment_contract')
-    expect(wrapper.find('[data-test="jmhz-identity-on-date"]').exists()).toBe(true)
+    expect(
+      (wrapper.get('[data-test="terms-monthly-gross"]').element as HTMLInputElement).disabled,
+    ).toBe(true)
     expect(wrapper.find('[data-test="jmhz-identity-form"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('payroll.people.transition.preregistered')
   })
 
-  it('oprávněnému uživateli sestaví stavové ActionBar akce a datum účinnosti', () => {
-    const wrapper = mount(EmploymentCard, {
+  /**
+   * V liště zůstal jen životní cyklus. Úprava podmínek se nezahajuje tlačítkem —
+   * pole jsou editovatelná rovnou, takže „Nová verze podmínek" jako akce zmizela
+   * a rozhodnutí padá až u Uložit.
+   */
+  it('v liště nechá jen životní cyklus, ne zahájení úpravy', async () => {
+    const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true },
-      global: {
-        stubs: {
-          ActionBar: {
-            props: ['actions'],
-            template: '<div data-test="actions"><span v-for="action in actions" v-show="action.show">{{ action.label }}</span></div>',
-          },
-        },
-      },
+      global: { stubs: actionBarStub },
     })
 
+    const actions = wrapper.get('[data-test="actions"]').text()
+    expect(actions).toContain('payroll.people.transition.preregistered')
+    expect(actions).toContain('payroll.people.transition.no_show')
+    expect(actions).not.toContain('payroll.people.new_terms')
     expect(wrapper.find('input[type="date"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.preregistered')
-    expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.no_show')
-    expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.new_terms')
+  })
+
+  /**
+   * ⚠️ Jádro karty: běžná úprava NESMÍ zakládat novou verzi podmínek.
+   * Kdo si přišel opravit překlep, dřív tím do evidence zapsal změnu podmínek
+   * k datu, které si musel vymyslet.
+   */
+  it('běžnou úpravu uloží jako opravu platné verze, ne jako novou', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    // Dokud není co uložit, lišta se neukazuje — karta nevypadá jako formulář.
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('37.50')
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(true)
+    // Datum účinnosti se u opravy vůbec neptá.
+    expect(wrapper.find('[data-test="terms-effective-from"]').exists()).toBe(false)
+
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.addEmploymentTerms).not.toHaveBeenCalled()
+    const [id, rowVersion, payload] = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)!
+    expect(id).toBe(10)
+    expect(rowVersion).toBe(1)
+    expect(payload.weekly_hours).toBe('37.50')
+    // Účinnost drží opravovaná verze; klient ji neposílá, aby s ní nešlo hnout.
+    expect('effective_from' in payload).toBe(false)
+  })
+
+  it('novou verzi založí, jen když si ji uživatel vybere — a vyžádá si datum', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    const stored = employment()
+    stored.terms[0]!.effective_from = '2099-12-31'
+    const wrapper = await mountCard(stored)
+
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('30.00')
+    await wrapper.get('[data-test="save-mode-version"]').setValue()
+
+    const effectiveFrom = wrapper.get('[data-test="terms-effective-from"]')
+    expect((effectiveFrom.element as HTMLInputElement).value).toBe('2100-01-01')
+    expect(effectiveFrom.attributes('min')).toBe('2100-01-01')
+
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.correctEmploymentTerms).not.toHaveBeenCalled()
+    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2].effective_from)
+      .toBe('2100-01-01')
+  })
+
+  /**
+   * Zúčtované období se přepsat nedá. Server to odmítne kódem, ale samotné
+   * „nepovedlo se" by uživatele nechalo tápat — karta proto rovnou přepne na
+   * cestu, která projde.
+   */
+  it('po odmítnutí opravy ze zúčtovaného období přepne na novou verzi', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockRejectedValue({
+      response: { data: { error: { code: 'payroll_terms_settled', message: 'Už je zúčtováno.' } } },
+    })
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('20.00')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('Už je zúčtováno.')
+    expect((wrapper.get('[data-test="save-mode-version"]').element as HTMLInputElement).checked)
+      .toBe(true)
+    expect(wrapper.find('[data-test="terms-effective-from"]').exists()).toBe(true)
+  })
+
+  it('mzdu vezme jako součást téže změny a pošle ji v haléřích', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    expect((wrapper.get('[data-test="terms-monthly-gross"]').element as HTMLInputElement).value)
+      .toBe('40000')
+    await wrapper.get('[data-test="terms-monthly-gross"]').setValue('45000,50')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2].monthly_gross_minor)
+      .toBe(4500050)
+  })
+
+  it('nesmyslnou mzdu neodešle a řekne proč', async () => {
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="terms-monthly-gross"]').setValue('čtyřicet tisíc')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.correctEmploymentTerms).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="terms-save-error"]').text())
+      .toContain('payroll.people.gross_invalid')
+  })
+
+  /**
+   * Režim stravování má vlastní endpoint, ale pro uživatele je to jedno pole
+   * mezi ostatními — ukládá se tímtéž tlačítkem a podmínky pak musí jet
+   * s NOVOU verzí řádku, jinak by druhý zápis spadl na konflikt verzí.
+   */
+  it('uloží režim stravování i podmínky jedním tlačítkem a v pořadí', async () => {
+    const afterMeal = { ...employment(), meal_entitlement_basis: 'calendar_day' as const, row_version: 2 }
+    vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockResolvedValue(afterMeal)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(afterMeal)
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="employment-meal-entitlement-basis"]').setValue('calendar_day')
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('38.00')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.setEmploymentMealEntitlementBasis)
+      .toHaveBeenCalledWith(10, 1, 'calendar_day')
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[1]).toBe(2)
+  })
+
+  it('zahodí rozdělanou změnu a lištu schová', async () => {
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('12.00')
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="terms-discard"]').trigger('click')
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(false)
+    expect((wrapper.get('[data-test="terms-weekly-hours"]').element as HTMLInputElement).value)
+      .toBe('40.00')
   })
 
   /**
@@ -315,83 +478,35 @@ describe('EmploymentCard', () => {
    * a vede tam, kde se nastavuje — jinak se rozejde se zákonnou evidencí
    * a mzdový běh spadne na `tax_declaration_term_conflict`.
    */
-  it('prohlášení k dani jen ukazuje a odkazuje do zákonné evidence', async () => {
-    const wrapper = mount(EmploymentCard, {
-      props: {
-        employment: {
-          ...employment(),
-          tax_declaration: {
-            status: 'signed' as const,
-            effective_from: '2026-01-01',
-            effective_to: null,
-          },
-        },
-        canWrite: true,
-      },
+  it('prohlášení k dani a pojišťovnu jen ukazuje a odkazuje do evidence', async () => {
+    const wrapper = await mountCard({
+      ...employment(),
+      tax_declaration: { status: 'signed' as const, effective_from: '2026-01-01', effective_to: null },
+      health_insurer: { status: 'verified' as const, code: '111', effective_from: '2026-01-01' },
     })
 
     expect(wrapper.get('[data-test="employment-tax-declaration"]').text())
       .toContain('payroll.people.tax_declaration_state.signed')
-
-    await wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )!.trigger('click')
-    await flushPromises()
-
-    // Ve formuláři nové verze podmínek už zaškrtávátko není.
+    expect(wrapper.get('[data-test="employment-health-insurer"]').text()).toContain('111')
+    // Editovatelné zaškrtávátko pro prohlášení na kartě není nikde.
     expect(wrapper.find('input[type="checkbox"][name="tax_declaration_signed"]').exists())
       .toBe(false)
-    expect(wrapper.get('[data-test="terms-tax-declaration"]').text())
-      .toContain('payroll.people.tax_declaration_state.signed')
 
-    await wrapper.get('[data-test="terms-tax-declaration-link"]').trigger('click')
+    await wrapper.get('[data-test="employment-tax-declaration-link"]').trigger('click')
     expect(wrapper.emitted('focusStatutoryEvidence')).toHaveLength(1)
   })
 
-  it('bez záznamu v evidenci hlásí nezadáno, ne mlčky nepodepsáno', () => {
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
+  it('bez záznamu v evidenci hlásí nezadáno, ne mlčky nepodepsáno', async () => {
+    const wrapper = await mountCard()
 
     expect(wrapper.get('[data-test="employment-tax-declaration"]').text())
       .toContain('payroll.people.tax_declaration_state.missing')
-  })
-
-  /**
-   * „Upravit" je zelené jako všude jinde. Dokud se ale čeká na potvrzení
-   * nástupu, vede zeleně ono — dvě zelená tlačítka vedle sebe by si
-   * konkurovala a nebylo by poznat, co se čeká teď.
-   */
-  it('„Upravit" je zelené, ale ustoupí, když se čeká na potvrzení nástupu', () => {
-    function variantOf(employmentValue: PayrollEmployment): string | undefined {
-      const wrapper = mount(EmploymentCard, {
-        props: { employment: employmentValue, canWrite: true },
-        global: {
-          stubs: {
-            ActionBar: {
-              props: ['actions'],
-              template: '<div data-test="actions"><span v-for="action in actions" :key="action.key" :data-test="`variant-${action.key}`">{{ action.variant }}</span></div>',
-            },
-          },
-        },
-      })
-      return wrapper.get('[data-test="variant-new-terms"]').text()
-    }
-
-    expect(variantOf({ ...employment(), start_date: '2099-01-01' })).toBe('success')
-    expect(variantOf({ ...employment(), start_date: '2020-01-01' })).toBe('neutral')
+    expect(wrapper.get('[data-test="employment-health-insurer"]').text())
+      .toContain('payroll.people.health_insurer_state.missing')
   })
 
   it('edituje JMHZ evidenci jako tri-state a čte APZ z připnutých možností', async () => {
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    expect(edit).toBeDefined()
-    await edit!.trigger('click')
-    await flushPromises()
+    const wrapper = await mountCard()
 
     expect(wrapper.find('[data-test="jmhz-evidence"]').exists()).toBe(true)
     await wrapper.get('[data-test="jmhz-apz-status"]').setValue('yes')
@@ -401,32 +516,9 @@ describe('EmploymentCard', () => {
     expect(wrapper.find('[data-test="jmhz-apz-instrument"]').exists()).toBe(false)
   })
 
-  it('novou verzi nabídne až ode dne následujícího po poslední verzi', async () => {
-    const stored = employment()
-    stored.terms[0]!.effective_from = '2099-12-31'
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: stored, canWrite: true },
-    })
-    await wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )!.trigger('click')
-    await flushPromises()
-
-    const effectiveFrom = wrapper.get('[data-test="terms-effective-from"]')
-    expect((effectiveFrom.element as HTMLInputElement).value).toBe('2100-01-01')
-    expect(effectiveFrom.attributes('min')).toBe('2100-01-01')
-  })
-
   it('běžný vztah nemá JMHZ výjimku a změnu uloží jen jednou do účinných podmínek', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
 
     const profile = wrapper.get('[data-test="jmhz-ordinary-profile"]')
     const checks = profile.findAll('input[type="checkbox"]')
@@ -434,10 +526,10 @@ describe('EmploymentCard', () => {
     expect(checks.every(check => !(check.element as HTMLInputElement).checked)).toBe(true)
 
     await checks[3].setValue(true)
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
     expect(payload?.jmhz_deep_mining_work_applies).toBe(true)
     expect(payload?.jmhz_specific_legal_fact_applies).toBe(false)
   })
@@ -455,20 +547,9 @@ describe('EmploymentCard', () => {
     ['small_scale_employment', false],
     ['dpp', false],
   ] as const)('nabídne zařazení pro srážkovou daň jen u %s (%s)', async (relationType, visible) => {
-    const wrapper = mount(EmploymentCard, {
-      props: {
-        employment: { ...employment(), relation_type: relationType },
-        canWrite: true,
-      },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    const wrapper = await mountCard({ ...employment(), relation_type: relationType })
 
-    const field = wrapper.find('[data-test="other-withholding-eligibility"]')
-    expect(field.exists()).toBe(visible)
+    expect(wrapper.find('[data-test="other-withholding-eligibility"]').exists()).toBe(visible)
   })
 
   /**
@@ -479,14 +560,7 @@ describe('EmploymentCard', () => {
     const stored = employment()
     stored.relation_type = 'statutory_body'
     stored.terms[0]!.other_withholding_eligibility = 'eligible'
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: stored, canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    const wrapper = await mountCard(stored)
 
     expect(
       (wrapper.get('[data-test="other-withholding-eligibility"]').element as HTMLSelectElement).value,
@@ -499,14 +573,7 @@ describe('EmploymentCard', () => {
    * vybral — u běžné sazby by chtěla doklad, který neexistuje.
    */
   it('u zvýšené sazby zaměstnavatele se doptá na podklad, u běžné ne', async () => {
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    const wrapper = await mountCard()
 
     const category = wrapper.get('[data-test="social-employer-rate-category"]')
     expect((category.element as HTMLSelectElement).value).toBe('ordinary')
@@ -520,25 +587,16 @@ describe('EmploymentCard', () => {
   })
 
   it('uloží zvýšenou sazbu a slevu i bez volitelných odkazů na podklady', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
+
+    await wrapper.get('[data-test="social-employer-rate-category"]').setValue('risk_employment')
+    await wrapper.get('[data-test="social-part-time-discount-reason"]').setValue('under_21')
+    await wrapper.get('[data-test="terms-change-reason"]').setValue('Změna ověřených podmínek')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    await wrapper.get('[data-test="social-employer-rate-category"]')
-      .setValue('risk_employment')
-    await wrapper.get('[data-test="social-part-time-discount-reason"]')
-      .setValue('under_21')
-    await wrapper.get('textarea').setValue('Změna ověřených podmínek')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-
-    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
     expect(payload?.social_employer_rate_category).toBe('risk_employment')
     expect(payload?.social_employer_rate_category_evidence).toBeNull()
     expect(payload?.social_part_time_discount_reason).toBe('under_21')
@@ -546,14 +604,7 @@ describe('EmploymentCard', () => {
   })
 
   it('řídí 10502 podle serverové politiky a pro S nastaví pevné Žádné', async () => {
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    const wrapper = await mountCard()
 
     await wrapper.get('[data-test="jmhz-activity-code"]').setValue('1')
     expect(wrapper.find('[data-test="jmhz-relationship-detail"]').exists()).toBe(true)
@@ -566,69 +617,67 @@ describe('EmploymentCard', () => {
     expect((fixedDetail.element as HTMLSelectElement).disabled).toBe(true)
   })
 
-  it('při otevření opravy odstraní historické 10502 u činnosti, která je zakazuje', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+  /**
+   * Srovnání historického 10502 podle číselníku není změna uživatele — nesmí
+   * proto samo vyvolat lištu s Uložit. Neplatný kód se srovná při nejbližším
+   * skutečném zápisu.
+   */
+  it('historické 10502 srovná tiše a odešle až s první skutečnou změnou', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
     const legacy = employment()
     legacy.terms[0]!.activity_code = 'A'
     legacy.terms[0]!.jmhz_relationship_detail_code = '1'
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: legacy, canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    const wrapper = await mountCard(legacy)
 
     expect(wrapper.find('[data-test="jmhz-relationship-detail"]').exists()).toBe(false)
-    await wrapper.get('form').trigger('submit')
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('35.00')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
-    expect(payload?.jmhz_relationship_detail_code).toBeNull()
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
+      .jmhz_relationship_detail_code).toBeNull()
   })
 
   it('vybere obec atomicky z připnutého CISOB a odešle kanonický název i kód', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
 
     const municipality = selectByTest(wrapper, 'jmhz-municipality')
     municipality.vm.$emit('search', 'Praha')
     await flushPromises()
     municipality.vm.$emit('update:modelValue', '554782')
     await flushPromises()
-    await wrapper.get('textarea').setValue('Ověření pracoviště')
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    const payload = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+    const payload = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
     expect(payload?.jmhz_workplace_municipality_code).toBe('554782')
     expect(payload?.work_place).toBe('Hlavní město Praha')
     expect(payload?.jmhz_workplace_country_code).toBe('CZ')
+  })
 
-    const reopen = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await reopen!.trigger('click')
+  /**
+   * Vymazání obce musí sundat i název a stát — jinak by v podmínkách zůstal
+   * text pracoviště bez kódu, se kterým podání JMHZ neprojde. Vlastní případ:
+   * po úspěšném uložení se karta překreslí z odpovědi serveru, takže „vyplnit
+   * a hned smazat" v jednom testu měří jen to překreslení.
+   */
+  it('vymazání obce sundá i název a stát pracoviště', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const stored = employment()
+    stored.terms[0]!.jmhz_workplace_municipality_code = '554782'
+    stored.terms[0]!.work_place = 'Hlavní město Praha'
+    stored.terms[0]!.jmhz_workplace_country_code = 'CZ'
+    const wrapper = await mountCard(stored)
+
+    selectByTest(wrapper, 'jmhz-municipality').vm.$emit('update:modelValue', null)
     await flushPromises()
-    const reopenedMunicipality = selectByTest(wrapper, 'jmhz-municipality')
-    reopenedMunicipality.vm.$emit('search', 'Praha')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
-    reopenedMunicipality.vm.$emit('update:modelValue', '554782')
-    await flushPromises()
-    reopenedMunicipality.vm.$emit('update:modelValue', null)
-    await flushPromises()
-    await wrapper.get('textarea').setValue('Vymazání pracoviště')
-    await wrapper.get('form').trigger('submit')
-    await flushPromises()
-    const cleared = vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2]
+
+    const cleared = vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2]
     expect(cleared?.jmhz_workplace_municipality_code).toBeNull()
     expect(cleared?.work_place).toBeNull()
     expect(cleared?.jmhz_workplace_country_code).toBeNull()
@@ -637,7 +686,7 @@ describe('EmploymentCard', () => {
   it('nabídne smazání vztahu v „…" a v potvrzení jmenuje, co přesně zmizí', async () => {
     vi.mocked(payrollApi.deleteEmployment).mockResolvedValue({})
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -666,7 +715,7 @@ describe('EmploymentCard', () => {
       },
       delete_cascade: {},
     }
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(blocked, {
       props: { employment: blocked, canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -682,7 +731,7 @@ describe('EmploymentCard', () => {
       .toContain('payroll.people.transition.no_show')
   })
 
-  it('u převzatého vztahu skryje interní značky a registraci nabídne s varováním', () => {
+  it('u převzatého vztahu skryje interní značky a registraci nabídne s varováním', async () => {
     const legacy: PayrollEmployment = {
       ...employment(),
       code: 'legacy',
@@ -708,7 +757,7 @@ describe('EmploymentCard', () => {
         created_at: '2026-01-01T00:00:00Z',
       }],
     }
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(legacy, {
       props: { employment: legacy, canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -741,7 +790,7 @@ describe('EmploymentCard', () => {
       row_version: 3,
     }]
 
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(legacy, {
       props: { employment: legacy, canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -767,7 +816,7 @@ describe('EmploymentCard', () => {
    * Časová osa dřív vypisovala hodnoty diffu syrově z databáze, takže uživatel
    * v české aplikaci četl „pending → completed" a „→ partner_dependent".
    */
-  it('v časové ose nenechá projít syrovou databázovou hodnotu', () => {
+  it('v časové ose nenechá projít syrovou databázovou hodnotu', async () => {
     const detail = employment()
     detail.timeline = [{
       id: 2,
@@ -783,9 +832,9 @@ describe('EmploymentCard', () => {
       created_at: '2026-01-05 00:00:00',
     }]
 
-    const text = mount(EmploymentCard, {
+    const text = (await mountCard(detail, {
       props: { employment: detail, canWrite: false },
-    }).text()
+    })).text()
 
     expect(text).toContain('payroll.people.checklist_status.pending')
     expect(text).toContain('payroll.people.checklist_status.completed')
@@ -798,22 +847,50 @@ describe('EmploymentCard', () => {
   })
 
   /**
+   * Změna mzdy se v časové ose ukládá v haléřích. Syrově vypsaná by z ní
+   * udělala „4000000 → 4500000" — číslo, které se musí v hlavě dělit stem.
+   */
+  it('změnu mzdy vypíše v korunách, ne v haléřích', async () => {
+    const detail = employment()
+    detail.timeline = [{
+      id: 4,
+      event_type: 'terms_corrected',
+      from_status: null,
+      to_status: null,
+      effective_on: '2026-01-05',
+      note: null,
+      diff: { monthly_gross_minor: { from: 4000000, to: 4500000 } },
+      created_at: '2026-01-05 00:00:00',
+    }]
+
+    const text = (await mountCard(detail, {
+      props: { employment: detail, canWrite: false },
+    })).text()
+
+    expect(text).toContain('payroll.people.event.terms_corrected')
+    expect(text).not.toContain('4000000')
+  })
+
+  /**
    * Karta ukazovala deset povinností a deset událostí naráz, takže jeden člověk
    * se dvěma vztahy zabral přes čtyřicet řádků evidence.
    */
-  it('povinnosti otevře, jen když je co plnit', () => {
-    const pending = employment()
-    expect(mount(EmploymentCard, { props: { employment: pending, canWrite: false } })
-      .get('[data-test="employment-checklist"]').attributes('open')).toBeDefined()
+  it('povinnosti otevře, jen když je co plnit', async () => {
+    const pending = await mountCard(employment(), {
+      props: { employment: employment(), canWrite: false },
+    })
+    expect(pending.get('[data-test="employment-checklist"]').attributes('open')).toBeDefined()
 
-    const done = employment()
-    done.checklist = done.checklist.map(item => ({ ...item, status: 'completed' as const }))
-    expect(mount(EmploymentCard, { props: { employment: done, canWrite: false } })
-      .get('[data-test="employment-checklist"]').attributes('open')).toBeUndefined()
+    const doneValue = employment()
+    doneValue.checklist = doneValue.checklist.map(item => ({ ...item, status: 'completed' as const }))
+    const done = await mountCard(doneValue, {
+      props: { employment: doneValue, canWrite: false },
+    })
+    expect(done.get('[data-test="employment-checklist"]').attributes('open')).toBeUndefined()
   })
 
-  it('časovou osu nechá sbalenou', () => {
-    const wrapper = mount(EmploymentCard, {
+  it('časovou osu nechá sbalenou', async () => {
+    const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: false },
     })
     expect(wrapper.get('[data-test="employment-timeline"]').attributes('open')).toBeUndefined()
@@ -825,7 +902,7 @@ describe('EmploymentCard', () => {
     closed.end_date = '2026-06-30'
     closed.allowed_transitions = []
 
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(closed, {
       props: { employment: closed, canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -834,7 +911,7 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="employment-toggle"]').trigger('click')
     expect(wrapper.find('[data-test="employment-checklist"]').exists()).toBe(true)
 
-    const open = mount(EmploymentCard, {
+    const open = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -847,7 +924,7 @@ describe('EmploymentCard', () => {
    * stavové přechody — a tím vztah vypadl i z výplatní listiny.
    */
   it('nástup, který už nastal, potvrdí jedním krokem a k datu nástupu', async () => {
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -867,11 +944,11 @@ describe('EmploymentCard', () => {
     })
   })
 
-  it('u nástupu v budoucnu nabídne předregistraci, ne potvrzení', () => {
+  it('u nástupu v budoucnu nabídne předregistraci, ne potvrzení', async () => {
     const future = employment()
     future.start_date = '2099-01-01'
 
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(future, {
       props: { employment: future, canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -885,7 +962,7 @@ describe('EmploymentCard', () => {
    * kdo importuje, musí ho umět srovnat s tím, co posílá druhá strana.
    */
   it('označení pro import docházky jde změnit', async () => {
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(employment(), {
       props: { employment: employment(), canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -901,25 +978,7 @@ describe('EmploymentCard', () => {
     expect(payrollApi.renameEmployment).toHaveBeenCalledWith(10, 1, 'DOCHAZKA-7')
   })
 
-  it('uloží explicitní zákonný režim nároku na stravování', async () => {
-    const updated = { ...employment(), meal_entitlement_basis: 'calendar_day' as const }
-    vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockResolvedValue(updated)
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-      global: { stubs: actionBarStub },
-    })
-
-    await wrapper.get('[data-test="employment-meal-entitlement-basis"]')
-      .setValue('calendar_day')
-    await flushPromises()
-
-    expect(payrollApi.setEmploymentMealEntitlementBasis)
-      .toHaveBeenCalledWith(10, 1, 'calendar_day')
-    expect(wrapper.emitted('updated')).toEqual([[updated]])
-  })
-
-  it('česky vysvětlí zámek režimu po schváleném příspěvku', async () => {
-    toastMocks.error.mockClear()
+  it('česky vysvětlí zámek režimu stravování po schváleném příspěvku', async () => {
     vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockRejectedValue({
       response: {
         data: {
@@ -930,18 +989,15 @@ describe('EmploymentCard', () => {
         },
       },
     })
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-      global: { stubs: actionBarStub },
-    })
+    const wrapper = await mountCard()
 
-    await wrapper.get('[data-test="employment-meal-entitlement-basis"]')
-      .setValue('calendar_day')
+    await wrapper.get('[data-test="employment-meal-entitlement-basis"]').setValue('calendar_day')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    expect(toastMocks.error)
-      .toHaveBeenCalledWith('payroll.people.meal_entitlement_basis.locked')
-    expect(wrapper.emitted('updated')).toBeUndefined()
+    expect(wrapper.get('[data-test="terms-save-error"]').text())
+      .toContain('payroll.people.meal_entitlement_basis.locked')
+    expect(payrollApi.correctEmploymentTerms).not.toHaveBeenCalled()
   })
 
   /**
@@ -955,7 +1011,7 @@ describe('EmploymentCard', () => {
     // Server vybírá cíl podle historie — karta z něj dělá jedno tlačítko.
     archived.allowed_transitions = ['ended']
 
-    const wrapper = mount(EmploymentCard, {
+    const wrapper = await mountCard(archived, {
       props: { employment: archived, canWrite: true },
       global: { stubs: actionBarStub },
     })
@@ -972,7 +1028,7 @@ describe('EmploymentCard', () => {
     confirmSpy.mockRestore()
   })
 
-  it('změnu stavu neukáže dvakrát — hlavička ji už nese', () => {
+  it('změnu stavu neukáže dvakrát — hlavička ji už nese', async () => {
     const detail = employment()
     detail.timeline = [{
       id: 3,
@@ -985,9 +1041,9 @@ describe('EmploymentCard', () => {
       created_at: '2026-06-30 00:00:00',
     }]
 
-    const text = mount(EmploymentCard, {
+    const text = (await mountCard(detail, {
       props: { employment: detail, canWrite: false },
-    }).text()
+    })).text()
 
     expect(text).toContain('payroll.people.employment_status.ended')
     expect(text).not.toContain('payroll.people.term_field.status')
@@ -995,19 +1051,11 @@ describe('EmploymentCard', () => {
 
   /**
    * Účtárnu nešlo vybrat NIKDE ve frontendu — karta ji jen vypisovala, přestože
-   * na ni míří blokátor běhu `employment_without_office`. Tohle je ta chybějící
-   * cesta: vybraná účtárna musí dojít v podmínkách na server.
+   * na ni míří blokátor běhu `employment_without_office`.
    */
-  it('nabídne výběr mzdové účtárny a pošle ji v nové verzi podmínek', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+  it('nabídne výběr mzdové účtárny mezi základními údaji a pošle ji na server', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
 
     const office = selectByTest(wrapper, 'terms-office')
     // Deaktivovaná účtárna se nenabízí — vybrat jde jen aktivní.
@@ -1016,30 +1064,27 @@ describe('EmploymentCard', () => {
     ])
     office.vm.$emit('update:modelValue', 7)
     await flushPromises()
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2].office_id).toBe(7)
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2].office_id).toBe(7)
   })
 
   /**
    * Chybějící účtárna je UPOZORNĚNÍ, ne zákaz: karta řekne, co kvůli ní nepůjde,
-   * ale nic na ní nezablokuje. Blokátorem se to stane až při uzamčení vstupů běhu.
+   * ale nic na ní nezablokuje. Stojí hned u pole, kterým se to spraví.
    */
-  it('u vztahu bez účtárny varuje, u vztahu s účtárnou mlčí', () => {
-    const without = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
+  it('u vztahu bez účtárny varuje, u vztahu s účtárnou mlčí', async () => {
+    const without = await mountCard()
     expect(without.find('[data-test="employment-office-missing"]').exists()).toBe(true)
 
-    const withOffice = mount(EmploymentCard, {
-      props: {
-        employment: { ...employment(), office_id: 7, office_code: 'PHA', office_name: 'Praha' },
-        canWrite: true,
-      },
+    const withOffice = await mountCard({
+      ...employment(),
+      office_id: 7,
+      office_code: 'PHA',
+      office_name: 'Praha',
     })
     expect(withOffice.find('[data-test="employment-office-missing"]').exists()).toBe(false)
-    expect(withOffice.get('[data-test="employment-office"]').text()).toBe('Praha')
   })
 
   /**
@@ -1047,49 +1092,57 @@ describe('EmploymentCard', () => {
    * Formulář ho měl `required`, takže kdo si přišel opravit úvazek, musel napřed
    * vymyslet větu do časové osy.
    */
-  it('uloží novou verzi podmínek i bez vyplněného důvodu změny', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
-    const wrapper = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    const edit = wrapper.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )
-    await edit!.trigger('click')
-    await flushPromises()
+  it('uloží změnu i bez vyplněného důvodu', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    const wrapper = await mountCard()
 
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('39.00')
     const reason = wrapper.get('[data-test="terms-change-reason"]')
     expect(reason.attributes('required')).toBeUndefined()
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     await flushPromises()
 
-    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls.at(-1)?.[2].change_reason).toBeNull()
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[2].change_reason)
+      .toBeNull()
+  })
+
+  /**
+   * Postranní pruh je jeden a týž prvek na všech šířkách — pod zlomem `2xl`
+   * jen spadne do toku. Kdyby se vykresloval dvakrát (jednou pro úzké, jednou
+   * pro široké), rozešel by se a `data-test` by přestaly být jednoznačné.
+   */
+  it('rozcestník i zrcadlo evidence drží v jednom postranním pruhu', async () => {
+    const wrapper = await mountCard()
+
+    expect(wrapper.findAll('[data-test="employment-rail"]')).toHaveLength(1)
+    const rail = wrapper.get('[data-test="employment-rail"]')
+    expect(rail.find('[data-test="employment-agendas-stub"]').exists()).toBe(true)
+    expect(rail.find('[data-test="employment-person-evidence"]').exists()).toBe(true)
+    // Editace zůstává v hlavním sloupci, ne v pruhu.
+    expect(rail.find('[data-test="employment-terms"]').exists()).toBe(false)
+    // Pruh se ukotví teprve na širokém monitoru; níž je to obyčejný blok toku.
+    //
+    // ⚠️ Zlom je `xl`, ne `2xl`, a je to měřené rozhodnutí: obrazovka 4096 px
+    // při škálování 156 % dá 1454 CSS pixelů, takže na 2xl by pruh nenaskočil
+    // ani na 4K monitoru. CSS pixely nejsou fyzické.
+    expect(rail.classes()).toContain('xl:sticky')
+    // Vyšší než okno se musí dát projet uvnitř, ne uvíznout ukotvený.
+    expect(rail.classes().some(name => name.startsWith('xl:max-h-'))).toBe(true)
+    expect(rail.classes()).toContain('xl:overflow-y-auto')
   })
 
   /**
    * Podrobnosti se u běžného pracovního poměru sbalí a otevřou se samy jen tam,
-   * kde je někdo vyplnil — jinak měl formulář přes dvacet polí, ze kterých pět
+   * kde je někdo vyplnil — jinak by karta začínala dvaceti poli, ze kterých pět
    * lidí ze šesti nepotřebuje ani jedno.
    */
   it('sbalí podrobnosti podmínek, dokud v nich něco není', async () => {
-    const plain = mount(EmploymentCard, {
-      props: { employment: employment(), canWrite: true },
-    })
-    await plain.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )!.trigger('click')
-    await flushPromises()
+    const plain = await mountCard()
     expect(plain.get('[data-test="terms-advanced"]').attributes('open')).toBeUndefined()
 
     const filled = employment()
-    filled.terms[0].activity_code = '1'
-    const withDetail = mount(EmploymentCard, {
-      props: { employment: filled, canWrite: true },
-    })
-    await withDetail.findAll('button').find(button =>
-      button.text().includes('payroll.people.new_terms'),
-    )!.trigger('click')
-    await flushPromises()
+    filled.terms[0]!.regular_workplace = 'Dílna'
+    const withDetail = await mountCard(filled)
     expect(withDetail.get('[data-test="terms-advanced"]').attributes('open')).toBeDefined()
   })
 })

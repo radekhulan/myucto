@@ -669,6 +669,111 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
      * cesta ji proto doplní z výchozí účtárny zaměstnavatele — jinak by vztah
      * bez účtárny prošel až ke kontrolním součtům schválení.
      */
+    /**
+     * OPRAVA platné verze nesmí založit druhou verzi podmínek.
+     *
+     * Dokud byla jediná cesta k úpravě „nová verze podmínek", zapsal překlep
+     * v úvazku do evidence změnu, ke které nikdy nedošlo: dvě verze, dvě
+     * období výpočtu a časová osa, která tvrdí něco jiného než smlouva.
+     */
+    public function testCorrectionRewritesTheEffectiveTermsInsteadOfAddingAVersion(): void
+    {
+        $employment = $this->create($this->employeeId, 'OPRAVA-1', 'employment', true);
+        self::assertCount(1, $employment['terms']);
+        $originalTermsId = $employment['terms'][0]['id'];
+
+        $corrected = $this->correctTerms($employment, [
+            'weekly_hours' => '37.5',
+            'monthly_gross_minor' => 4500000,
+        ] + $this->termsPayload(true, '2026-01-01'));
+
+        self::assertCount(1, $corrected['terms'], 'Oprava nesmí přidat verzi podmínek.');
+        self::assertSame($originalTermsId, $corrected['terms'][0]['id']);
+        self::assertSame('37.50', $corrected['terms'][0]['weekly_hours']);
+        // Účinnost drží opravovaná verze — tělo požadavku s ní nesmí hnout.
+        self::assertSame('2026-01-01', $corrected['terms'][0]['effective_from']);
+        self::assertSame(4500000, $corrected['monthly_gross_minor']);
+
+        $events = array_column($corrected['timeline'], 'event_type');
+        self::assertContains('terms_corrected', $events);
+        self::assertNotContains('terms_changed', $events);
+    }
+
+    /**
+     * Účinnost je vlastnost opravované verze. Klient ji neposílá vůbec —
+     * a kdyby ji poslal, nesmí se projevit, jinak by z opravy udělal posun
+     * období, ke kterému se váže výpočet.
+     */
+    public function testCorrectionIgnoresAnyEffectiveDateFromTheRequest(): void
+    {
+        $employment = $this->create($this->employeeId, 'OPRAVA-2', 'employment', true);
+
+        $corrected = $this->correctTerms(
+            $employment,
+            ['effective_from' => '2026-09-01'] + $this->termsPayload(true, '2026-09-01'),
+        );
+
+        self::assertSame('2026-01-01', $corrected['terms'][0]['effective_from']);
+    }
+
+    /**
+     * Nová verze zůstává tou správnou cestou pro skutečnou změnu podmínek —
+     * obě cesty musí vedle sebe fungovat, jinak by oprava jen přejmenovala
+     * problém.
+     */
+    public function testNewVersionStillAddsASecondTermsRow(): void
+    {
+        $employment = $this->create($this->employeeId, 'OPRAVA-3', 'employment', true);
+
+        $changed = $this->terms($employment, $this->termsPayload(true, '2026-03-01'));
+
+        self::assertCount(2, $changed['terms']);
+        self::assertSame('2026-03-01', $changed['terms'][0]['effective_from']);
+        self::assertContains('terms_changed', array_column($changed['timeline'], 'event_type'));
+    }
+
+    /** Ukončený vztah je archiv — opravovat se v něm nedá stejně jako verzovat. */
+    public function testCorrectionIsRefusedOnAClosedEmployment(): void
+    {
+        $employment = $this->create($this->employeeId, 'OPRAVA-4', 'employment', true);
+        $employment = $this->transition($employment, 'active', '2026-01-01');
+        $employment = $this->transition($employment, 'ended', '2026-02-28');
+
+        $response = $this->action->correctTerms(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/terms/current",
+                ['row_version' => $employment['row_version']]
+                    + $this->termsPayload(true, '2026-01-01'),
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+    }
+
+    /**
+     * Zrcadlo zákonné evidence osoby na kartě vztahu: prohlášení k dani i
+     * zdravotní pojišťovna. Bez nich je účetní na kartě hledala a nenašla,
+     * přestože rozhodují o slevě na poplatníka a o tom, komu se odvádí.
+     */
+    public function testCardMirrorsTaxDeclarationAndHealthInsurerFromPersonEvidence(): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_person_health_coverage_history
+                (supplier_id, employee_id, jurisdiction, insurer_status, insurer_code,
+                 effective_from, effective_to)
+             VALUES (?, ?, 'czech_regime_verified', 'verified', '111', '2020-01-01', NULL)"
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        $employment = $this->create($this->employeeId, 'ZRCADLO-1', 'employment', true);
+
+        self::assertSame('verified', $employment['health_insurer']['status']);
+        self::assertSame('111', $employment['health_insurer']['code']);
+        self::assertArrayHasKey('tax_declaration', $employment);
+    }
+
     public function testEmploymentWithoutOfficeTakesTheEmployerDefault(): void
     {
         $this->db->pdo()->prepare(
@@ -772,6 +877,29 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
             $this->request(
                 'PUT',
                 "/api/payroll/employments/{$employment['id']}/terms",
+                ['row_version' => $employment['row_version'], ...$payload],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        return $this->json($response)['employment'];
+    }
+
+    /**
+     * Oprava platné verze — PATCH, ne PUT. Dvě routy schválně: jeden příznak
+     * v těle by se dal splést, dvě cesty ne.
+     *
+     * @param array<string,mixed> $employment
+     * @param array<string,mixed> $payload
+     * @return array<string,mixed>
+     */
+    private function correctTerms(array $employment, array $payload): array
+    {
+        $response = $this->action->correctTerms(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/terms/current",
                 ['row_version' => $employment['row_version'], ...$payload],
             ),
             new Response(),

@@ -44,6 +44,7 @@ function employment(relationType: PayrollEmployment['relation_type'] = 'employme
   return {
     id: 12,
     tax_declaration: null,
+    health_insurer: null,
     employee_id: 20,
     office_id: null,
     office_code: null,

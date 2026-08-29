@@ -456,6 +456,30 @@ final class PayrollEmploymentValidator
         ];
     }
 
+    /**
+     * Pravidelná hrubá mzda z těla požadavku, je-li vůbec poslaná.
+     *
+     * Mzdu drží pracovní vztah, ne verze podmínek. Obrazovka, která ji
+     * nenabízí, klíč neposílá — a `null` z chybějícího klíče se nesmí splést
+     * s vědomým „mzda není sjednaná". Rozlišuje to volající přes
+     * `array_key_exists()`; tady jde jen o tvar hodnoty.
+     *
+     * @param array<string,mixed> $input
+     */
+    public function optionalMonthlyGrossMinor(array $input): ?int
+    {
+        $value = $input['monthly_gross_minor'] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_int($value) || $value < 0) {
+            throw new \InvalidArgumentException(
+                'Pravidelná hrubá mzda musí být nezáporná částka v haléřích.',
+            );
+        }
+        return $value;
+    }
+
     /** @param array<string,mixed> $input */
     public function rowVersion(array $input): int
     {

@@ -156,11 +156,12 @@ final class PayrollEmploymentRepository
         // Prohlášení k dani se vede u OSOBY, ne u vztahu — čte se proto jednou
         // za osobu, ne v cyklu přes vztahy. Karta vztahu ho jen ukazuje
         // a odkazuje na zákonnou evidenci, kde se nastavuje.
-        $taxDeclaration = $this->taxDeclaration(
-            $supplierId,
-            $employeeId,
-            (new \DateTimeImmutable('today'))->format('Y-m-d'),
-        );
+        $today = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        $taxDeclaration = $this->taxDeclaration($supplierId, $employeeId, $today);
+        // Zdravotní pojišťovna je stejný případ jako prohlášení k dani: vede ji
+        // zákonná evidence OSOBY, ale rozhoduje o odvodu z tohoto vztahu —
+        // a účetní ji na kartě hledala. Zrcadlo, ne druhé zadávací místo.
+        $healthInsurer = $this->healthInsurer($supplierId, $employeeId, $today);
 
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
@@ -205,6 +206,7 @@ final class PayrollEmploymentRepository
                     $this->configuredAccounts($supplierId),
                 ),
                 'tax_declaration' => $taxDeclaration,
+                'health_insurer' => $healthInsurer,
                 'terms' => $this->terms($supplierId, $employmentId),
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
@@ -363,6 +365,181 @@ final class PayrollEmploymentRepository
         $value = $stmt->fetchColumn();
 
         return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * Datum účinnosti verze podmínek, která u vztahu právě platí.
+     *
+     * Oprava platné verze žádnou účinnost NEZADÁVÁ — bere tu uloženou. Payload
+     * podmínek ji ale vyžaduje, takže si ji akce vyzvedne odsud a doplní do
+     * těla požadavku; jinak by klient musel posílat údaj, kterým stejně nesmí
+     * nic změnit (a mohl by ho poslat špatně).
+     */
+    public function currentTermsEffectiveFrom(int $supplierId, int $employmentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT effective_from
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $value = $stmt->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+
+    /**
+     * OPRAVA platné verze podmínek — přepis na místě, bez nové verze.
+     *
+     * Why: verzování podmínek je právně správně („od 1. 9. platí jiný úvazek"),
+     * ale jako JEDINÁ cesta k úpravě je to past. Kdo si přišel spravit překlep
+     * v úvazku nebo doplnit účtárnu, kterou nikdo nevyplnil, dostal formulář
+     * „Nová verze podmínek" s povinným datem účinnosti — a založil tím druhou
+     * verzi, která tvrdí, že se podmínky k tomu datu změnily. Časová osa pak
+     * lže a mzdový běh počítá dvě období tam, kde je jedno.
+     *
+     * Rozdíl proti {@see addTerms()}:
+     *   - `effective_from` se NEMĚNÍ (bere se uložené, viz volající akce),
+     *   - řádek podmínek se přepíše, nevzniká nový,
+     *   - událost je `terms_corrected`, ne `terms_changed`,
+     *   - NEZAKLÁDÁ se sada povinností: oprava překlepu není změna podmínek,
+     *     ze které by plynula nová oznamovací povinnost.
+     *
+     * @param TermsInput $data
+     * @return array<string,mixed>
+     */
+    public function correctTerms(
+        int $supplierId,
+        int $employmentId,
+        array $data,
+        int $expectedVersion,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+        bool $replaceMonthlyGross = false,
+        ?int $monthlyGrossMinor = null,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $data,
+            $expectedVersion,
+            $userId,
+            $ip,
+            $userAgent,
+            $replaceMonthlyGross,
+            $monthlyGrossMinor,
+        ): array {
+            $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $employeeId = (int) $employment['employee_id'];
+            $status = (string) $employment['status'];
+            if (in_array($status, ['ended', 'archived', 'no_show'], true)) {
+                throw new \DomainException(
+                    'U ukončeného, archivovaného nebo nenastoupeného vztahu nelze podmínky opravit.'
+                );
+            }
+            $actualStart = $employment['actual_start_date'] === null
+                ? null
+                : (string) $employment['actual_start_date'];
+            if ($actualStart !== null) {
+                $data['actual_start_on'] = $actualStart;
+            }
+            $this->lockEmployee($supplierId, $employeeId);
+            $data['office_id'] = $this->resolveOffice(
+                $supplierId,
+                $data['office_id'],
+                $employment['office_id'] === null ? null : (int) $employment['office_id'],
+            );
+            $this->assertPrimaryAvailable($supplierId, $employeeId, $data['is_primary'], $employmentId);
+
+            $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
+            if ($previous === null) {
+                throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
+            }
+            // Účinnost je vlastnost opravované verze, ne údaj z požadavku.
+            $data['effective_from'] = (string) $previous['effective_from'];
+            $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
+                $supplierId,
+                $employeeId,
+                $data['effective_from'],
+            );
+            $this->assertTermsCorrectable(
+                $supplierId,
+                $employmentId,
+                $data['effective_from'],
+                $previous['effective_to'] === null ? null : (string) $previous['effective_to'],
+            );
+
+            $this->updateTerms($supplierId, (int) $previous['id'], $data);
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET office_id = ?, is_primary = ?, start_date = ?,
+                        actual_start_date = ?, end_date = ?,
+                        monthly_gross_minor =
+                            CASE WHEN ? = 1 THEN ? ELSE monthly_gross_minor END,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([
+                $data['office_id'],
+                (int) $data['is_primary'],
+                $data['planned_start_on'],
+                $data['actual_start_on'],
+                $data['fixed_term_end_on'],
+                (int) $replaceMonthlyGross,
+                $monthlyGrossMinor,
+                $supplierId,
+                $employmentId,
+                $expectedVersion,
+            ]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+
+            $diff = $this->diff($previous, $data);
+            if ($replaceMonthlyGross
+                && $employment['monthly_gross_minor'] !== $monthlyGrossMinor
+            ) {
+                $diff['monthly_gross_minor'] = [
+                    'from' => $employment['monthly_gross_minor'],
+                    'to' => $monthlyGrossMinor,
+                ];
+            }
+            /*
+             * Oprava, která nic nezměnila, na časovou osu nepatří — jinak by
+             * se do historie zapisovalo každé otevření a zavření formuláře.
+             */
+            if ($diff !== []) {
+                $this->insertEvent(
+                    $supplierId,
+                    $employmentId,
+                    'terms_corrected',
+                    null,
+                    null,
+                    $data['effective_from'],
+                    $data['change_reason'],
+                    $diff,
+                    $userId,
+                );
+            }
+            $this->activityLogger->log(
+                'payroll.employment.terms_corrected',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                [
+                    'effective_from' => $data['effective_from'],
+                    'changed_fields' => array_keys($diff),
+                ],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return $this->find($supplierId, $employeeId, $employmentId);
+        });
     }
 
     /** @param TermsInput $data
@@ -901,6 +1078,42 @@ final class PayrollEmploymentRepository
         ];
     }
 
+    /**
+     * Zdravotní pojišťovna osoby platná k danému dni.
+     *
+     * Karta vztahu ji jen UKAZUJE a vede do zákonné evidence, kde se
+     * nastavuje — stejný důvod jako u prohlášení k dani: druhé editovatelné
+     * místo pro tentýž údaj se dřív nebo později rozejde s prvním.
+     *
+     * @return array{status:string,code:?string,effective_from:string}|null
+     */
+    private function healthInsurer(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT insurer_status, insurer_code, effective_from
+               FROM payroll_person_health_coverage_history
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'status' => (string) $row['insurer_status'],
+            'code' => $row['insurer_code'] === null ? null : (string) $row['insurer_code'],
+            'effective_from' => (string) $row['effective_from'],
+        ];
+    }
+
     private function find(int $supplierId, int $employeeId, int $employmentId): array
     {
         foreach ($this->listForEmployee($supplierId, $employeeId) as $employment) {
@@ -1179,6 +1392,135 @@ final class PayrollEmploymentRepository
             $data['change_reason'],
             $userId,
         ]);
+    }
+
+    /**
+     * Přepis řádku podmínek na místě. Sloupce jsou tytéž jako u
+     * {@see insertTerms()} kromě `effective_from` a `effective_to`, které
+     * drží zařazení verze v čase — a to oprava měnit nesmí.
+     *
+     * @param TermsInput $data
+     */
+    private function updateTerms(int $supplierId, int $termsId, array $data): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET
+                 office_id = ?,
+                 contract_signed_on = ?, planned_start_on = ?, actual_start_on = ?,
+                 fixed_term_end_on = ?, weekly_hours = ?,
+                 leave_entitlement_weeks_override = ?, workload_basis_points = ?,
+                 work_place = ?, regular_workplace = ?, cz_isco_code = ?,
+                 activity_code = ?, jmhz_relationship_detail_code = ?,
+                 jmhz_workplace_municipality_code = ?, jmhz_workplace_country_code = ?,
+                 jmhz_external_codebook_overlay_key = ?,
+                 jmhz_external_codebook_manifest_sha256 = ?,
+                 jmhz_apz_contribution_status = ?, jmhz_apz_instrument_code = ?,
+                 jmhz_functional_benefits_status = ?,
+                 jmhz_temporary_assignment_status = ?,
+                 jmhz_orchard_discount_eligible = ?,
+                 jmhz_specific_legal_fact_applies = ?,
+                 jmhz_ozp_employment_support_applies = ?,
+                 jmhz_deep_mining_work_applies = ?,
+                 social_insurance_participation = ?, health_insurance_participation = ?,
+                 tax_regime = ?, other_withholding_eligibility = ?,
+                 foreign_legislation_country_code = ?, a1_certificate_until = ?,
+                 risky_work = ?,
+                 social_employer_rate_category = ?, social_employer_rate_category_evidence = ?,
+                 social_part_time_discount_reason = ?, social_part_time_discount_evidence = ?,
+                 social_part_time_discount_notified_on = ?,
+                 tax_declaration_signed = ?, is_primary = ?, change_reason = ?,
+                 row_version = row_version + 1
+               WHERE supplier_id = ? AND id = ?'
+        )->execute([
+            $data['office_id'],
+            $data['contract_signed_on'],
+            $data['planned_start_on'],
+            $data['actual_start_on'],
+            $data['fixed_term_end_on'],
+            $data['weekly_hours'],
+            $data['leave_entitlement_weeks_override'],
+            $data['workload_basis_points'],
+            $data['work_place'],
+            $data['regular_workplace'],
+            $data['cz_isco_code'],
+            $data['activity_code'],
+            $data['jmhz_relationship_detail_code'],
+            $data['jmhz_workplace_municipality_code'],
+            $data['jmhz_workplace_country_code'],
+            $data['jmhz_external_codebook_overlay_key'],
+            $data['jmhz_external_codebook_manifest_sha256'],
+            $data['jmhz_apz_contribution_status'],
+            $data['jmhz_apz_instrument_code'],
+            $data['jmhz_functional_benefits_status'],
+            $data['jmhz_temporary_assignment_status'],
+            (int) $data['jmhz_orchard_discount_eligible'],
+            (int) $data['jmhz_specific_legal_fact_applies'],
+            (int) $data['jmhz_ozp_employment_support_applies'],
+            (int) $data['jmhz_deep_mining_work_applies'],
+            $data['social_insurance_participation'],
+            $data['health_insurance_participation'],
+            $data['tax_regime'],
+            $data['other_withholding_eligibility'],
+            $data['foreign_legislation_country_code'],
+            $data['a1_certificate_until'],
+            (int) $data['risky_work'],
+            $data['social_employer_rate_category'],
+            $data['social_employer_rate_category_evidence'],
+            $data['social_part_time_discount_reason'],
+            $data['social_part_time_discount_evidence'],
+            $data['social_part_time_discount_notified_on'],
+            (int) $data['tax_declaration_signed'],
+            (int) $data['is_primary'],
+            $data['change_reason'],
+            $supplierId,
+            $termsId,
+        ]);
+    }
+
+    /**
+     * Opravit na místě jde jen verzi, ze které ještě nikdo nic nevyplatil.
+     *
+     * Zúčtované období je uzavřený výstup: mzdový list, odvody i podání
+     * vycházejí z podmínek, které v něm platily. Přepsat je zpětně by
+     * znamenalo, že se doklad a data pod ním rozejdou, aniž by o tom byl
+     * jediný záznam. Od chvíle, kdy je běh zaúčtovaný nebo vyplacený, je
+     * proto správná cesta NOVÁ VERZE od konkrétního data — a uživatel se to
+     * musí dozvědět větou, ne obecným „nepovedlo se".
+     */
+    private function assertTermsCorrectable(
+        int $supplierId,
+        int $employmentId,
+        string $effectiveFrom,
+        ?string $effectiveTo,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MIN(run.period_start)
+               FROM payroll_run_employments run_employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run_employment.supplier_id
+                AND revision.id = run_employment.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE run_employment.supplier_id = ?
+                AND run_employment.employment_id = ?
+                AND run.status IN ("posted", "payment_ready", "paid", "closed")
+                AND run.period_start >= ?
+                AND (? IS NULL OR run.period_start <= ?)'
+        );
+        $stmt->execute([
+            $supplierId,
+            $employmentId,
+            // Období běhu je vždy prvním dnem měsíce, kdežto účinnost verze
+            // může začít uprostřed — porovnává se proto k začátku měsíce.
+            substr($effectiveFrom, 0, 8) . '01',
+            $effectiveTo,
+            $effectiveTo,
+        ]);
+        $settled = $stmt->fetchColumn();
+        if (is_string($settled) && $settled !== '') {
+            throw new PayrollTermsSettledException($settled);
+        }
     }
 
     /**

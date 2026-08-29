@@ -201,9 +201,20 @@ export interface PayrollEmployment {
    * odkud si ho přebírá i `terms[].tax_declaration_signed`.
    */
   tax_declaration: PayrollEmploymentTaxDeclaration | null
+  /**
+   * Zdravotní pojišťovna platná dnes, přečtená ze zákonné evidence OSOBY.
+   * Stejné pravidlo jako u prohlášení k dani: karta zrcadlí, nenastavuje.
+   */
+  health_insurer: PayrollEmploymentHealthInsurer | null
   terms: PayrollEmploymentTerms[]
   checklist: PayrollEmploymentChecklistItem[]
   timeline: PayrollEmploymentEvent[]
+}
+
+export interface PayrollEmploymentHealthInsurer {
+  status: 'verified' | 'unverified' | 'not_applicable'
+  code: string | null
+  effective_from: string
 }
 
 export interface PayrollEmploymentTaxDeclaration {
@@ -287,7 +298,10 @@ export interface PayrollEmploymentChecklistItem {
 
 export interface PayrollEmploymentEvent {
   id: number
-  event_type: 'created' | 'terms_changed' | 'status_changed' | 'checklist_changed'
+  // `terms_corrected` = oprava platné verze (přepis na místě), `terms_changed`
+  // = nová verze od data. V historii se to nesmí slít — jedno je oprava
+  // zápisu, druhé skutečná změna podmínek.
+  event_type: 'created' | 'terms_changed' | 'terms_corrected' | 'status_changed' | 'checklist_changed'
   from_status: PayrollEmploymentStatus | null
   to_status: PayrollEmploymentStatus | null
   effective_on: string
@@ -338,6 +352,21 @@ export type PayrollEmploymentTermsPayload = Omit<
   jmhz_ozp_employment_support_applies?: boolean
   jmhz_deep_mining_work_applies?: boolean
 }
+
+/**
+ * Podmínky pro OPRAVU platné verze.
+ *
+ * Bez `effective_from`: účinnost drží opravovaná verze a server ji doplní
+ * sám. Typ to vynucuje, aby se do PATCH nedalo omylem poslat datum z formuláře
+ * nové verze — to by z opravy udělalo posun účinnosti.
+ *
+ * `monthly_gross_minor` je volitelné a rozlišuje se PŘÍTOMNOSTÍ klíče: chybí =
+ * mzdu neřešíme, `null` = mzda není sjednaná.
+ */
+export type PayrollEmploymentTermsCorrectionPayload =
+  Omit<PayrollEmploymentTermsPayload, 'effective_from'> & {
+    monthly_gross_minor?: number | null
+  }
 
 export interface PayrollEmploymentCreatePayload {
   code: string
@@ -5168,11 +5197,33 @@ export const payrollApi = {
   createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
     api.post<{ employment: PayrollEmployment }>(`/payroll/people/${personId}/employments`, payload)
       .then(response => response.data.employment),
-  addEmploymentTerms: (employmentId: number, rowVersion: number, payload: PayrollEmploymentTermsPayload) =>
+  // Mzda smí jet i s novou verzí podmínek — „od září bereš víc" je jedna
+  // změna, ne dvě. Klíč je volitelný: kdo ho nepošle, mzdy se nedotkne.
+  addEmploymentTerms: (
+    employmentId: number,
+    rowVersion: number,
+    payload: PayrollEmploymentTermsPayload & { monthly_gross_minor?: number | null },
+  ) =>
     api.put<{ employment: PayrollEmployment }>(`/payroll/employments/${employmentId}/terms`, {
       row_version: rowVersion,
       ...payload,
     }).then(response => response.data.employment),
+  /**
+   * OPRAVA platné verze podmínek — přepis na místě, bez nové verze.
+   *
+   * `effective_from` se neposílá schválně: účinnost je vlastnost opravované
+   * verze, ne údaj, kterým by šlo z formuláře hnout. Server si ji doplní
+   * z uložené hodnoty.
+   */
+  correctEmploymentTerms: (
+    employmentId: number,
+    rowVersion: number,
+    payload: PayrollEmploymentTermsCorrectionPayload,
+  ) =>
+    api.patch<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/terms/current`,
+      { row_version: rowVersion, ...payload },
+    ).then(response => response.data.employment),
   employmentJmhzEvidenceOptions: () =>
     api.get<{ options: PayrollEmploymentJmhzEvidenceOptions }>(
       '/payroll/jmhz/employment-evidence-options',
