@@ -70,10 +70,7 @@ function policy(overrides: Partial<PayrollEmployerPolicy> = {}): PayrollEmployer
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
     leave_entitlement_weeks: 5,
-    four_eyes_required: true,
-    automatic_calculation_enabled: false,
     automatic_posting_enabled: false,
-    automatic_payments_enabled: false,
     delivery_channel: 'disabled',
     delivery_verified_on: null,
     source_kind: 'migration',
@@ -250,13 +247,21 @@ describe('EmployerPolicies', () => {
     expect(m.createEmployerPolicy.mock.calls[0][0]).toMatchObject({
       row_version: 0,
       source_kind: 'manual',
-      four_eyes_required: false,
-      automatic_calculation_enabled: false,
       automatic_posting_enabled: false,
-      automatic_payments_enabled: false,
       delivery_channel: 'disabled',
       delivery_verified_on: null,
     })
+    /*
+     * Přepínače bez konzumenta (D-01/D-02) se z formuláře nesmí vrátit ani
+     * jako mrtvá pole: kdyby je klient dál posílal, obrazovka by o nich zase
+     * začala tvrdit, že něco dělají.
+     */
+    expect(m.createEmployerPolicy.mock.calls[0][0])
+      .not.toHaveProperty('four_eyes_required')
+    expect(m.createEmployerPolicy.mock.calls[0][0])
+      .not.toHaveProperty('automatic_calculation_enabled')
+    expect(m.createEmployerPolicy.mock.calls[0][0])
+      .not.toHaveProperty('automatic_payments_enabled')
 
     wrapper.unmount()
   })

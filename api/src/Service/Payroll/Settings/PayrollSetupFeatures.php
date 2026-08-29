@@ -9,10 +9,7 @@ final readonly class PayrollSetupFeatures
     public function __construct(
         public bool $homeOffice = false,
         public bool $travelExpenses = false,
-        public bool $fourEyes = false,
-        public bool $automaticCalculation = false,
         public bool $automaticPosting = false,
-        public bool $automaticPayments = false,
         public bool $secureDelivery = false,
         public bool $jmhz = false,
         public int $activeApproverCount = 0,

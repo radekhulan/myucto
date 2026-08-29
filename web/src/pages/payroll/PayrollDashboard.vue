@@ -182,9 +182,17 @@ async function enable() {
   }
 }
 
+/**
+ * Zrušení rozdělaného nastavení bez dialogu, ale s možností vzít to zpět.
+ *
+ * Běží jen ve stavu `setup`, tedy dokud se nic nespočítalo — zrušením se žádná
+ * mzdová data neztratí, jen se zavře rozdělané zapínání. Zapnout to zase je
+ * jedno volání s týmž počátečním obdobím, takže se to dá doslova vrátit.
+ * Dialog tady jen zdržoval každé jedno kliknutí.
+ */
 async function disableSetup() {
   if (!state.value || state.value.status !== 'setup') return
-  if (!window.confirm(t('payroll.activation.disable_confirm'))) return
+  const previousPeriod = state.value.start_period ?? startPeriod.value
   saving.value = true
   try {
     const updated = await payrollApi.setActivation({
@@ -193,7 +201,35 @@ async function disableSetup() {
       row_version: state.value.row_version,
     })
     if (capabilities.value) capabilities.value.state = updated
-    toast.success(t('payroll.activation.disabled'))
+    toast.success(t('payroll.activation.disabled'), {
+      label: t('common.undo'),
+      handler: () => void restoreSetup(previousPeriod),
+    })
+  } catch (error: any) {
+    if (error?.response?.data?.error?.code === 'row_version_conflict') {
+      toast.warning(t('payroll.activation.conflict'))
+      await load()
+    } else {
+      toast.error(error?.response?.data?.error?.message || t('payroll.activation.failed'))
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+async function restoreSetup(period: string) {
+  if (!state.value) return
+  saving.value = true
+  try {
+    const updated = await payrollApi.setActivation({
+      enabled: true,
+      start_period: period,
+      row_version: state.value.row_version,
+    })
+    if (capabilities.value) capabilities.value.state = updated
+    startPeriod.value = period
+    toast.success(t('payroll.activation.enabled'))
+    void loadMonthStatus()
   } catch (error: any) {
     if (error?.response?.data?.error?.code === 'row_version_conflict') {
       toast.warning(t('payroll.activation.conflict'))

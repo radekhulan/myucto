@@ -122,7 +122,19 @@ export interface NetResultDeduction {
   priority_no: number
   requested_minor: number
   applied_minor: number
+  /** Provedla se dohoda v tomhle měsíci? Pozastavená se neprovádí. */
+  active: boolean
+  /**
+   * Kolik se REÁLNĚ nedostalo věřiteli. U pozastavené dohody 0 — nesrazilo se
+   * nic proto, že se srážet nemělo, ne proto, že by na to nezbylo místo.
+   */
   unapplied_minor: number
+  /**
+   * Účetní zbytek `requested − applied`, na kterém stojí invariant zmrazeného
+   * snímku. U pozastavené dohody se rovná celé nárokované částce, takže se
+   * uživateli nezobrazuje jako schodek — je to jen doprovodné číslo.
+   */
+  accounting_unapplied_minor: number
 }
 
 export interface NetResultAllocation {

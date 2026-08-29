@@ -147,19 +147,21 @@ final class PayrollEmployerPolicyService
             }
             $result[$field] = $value;
         }
-        $result['four_eyes_required'] = false;
-        foreach ([
-            'automatic_calculation_enabled',
-            'automatic_posting_enabled',
-            'automatic_payments_enabled',
-        ] as $field) {
-            if (!is_bool($input[$field] ?? null)) {
-                throw new \InvalidArgumentException(
-                    "Pole {$field} musí být boolean.",
-                );
-            }
-            $result[$field] = $input[$field];
+        /*
+         * Z politiky zbyl jediný přepínač automatiky, `automatic_posting_enabled`
+         * — jako jediný má konzumenta (automatické zaúčtování schválené revize).
+         * `four_eyes_required` bylo uzavřeným rozhodnutím trvale vypnuté a
+         * `automatic_calculation_enabled` ani `automatic_payments_enabled`
+         * nikdo nečetl, takže obrazovka nabízela tři přepínače, z nichž dva
+         * nic nedělaly a jeden nešel zapnout. Vstup je snáší mlčky (starší
+         * klienti je ještě posílají), ale neukládají se.
+         */
+        if (!is_bool($input['automatic_posting_enabled'] ?? null)) {
+            throw new \InvalidArgumentException(
+                'Pole automatic_posting_enabled musí být boolean.',
+            );
         }
+        $result['automatic_posting_enabled'] = $input['automatic_posting_enabled'];
 
         $deliveryVerifiedOn = $this->nullableDate(
             $input['delivery_verified_on'] ?? null,

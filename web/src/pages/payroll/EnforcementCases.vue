@@ -686,10 +686,22 @@ async function createCase() {
   }
 }
 
+/**
+ * Smazání případu se potvrzuje dál — vratné to není.
+ *
+ * Server smaže záznam včetně historie událostí a znovu ho založit znamená nový
+ * případ s novým id; odkazy z evidence by na něj nemířily. Undo toast by tady
+ * sliboval něco, co aplikace nedokáže. Dialog ale musí říct, KOHO se to týká:
+ * obrazovka drží víc případů jedné firmy a „opravdu?" nad špatně vybraným
+ * řádkem vypadá stejně jako nad správným.
+ */
 async function deleteCase() {
   const current = detail.value
   if (!current || !canDeleteUnusedCase.value) return
-  if (!window.confirm(t('payroll.enforcement.delete_confirm'))) return
+  if (!window.confirm(t('payroll.enforcement.delete_confirm', {
+    name: current.full_name,
+    kind: t(`payroll.enforcement.kinds.${current.case_kind}`),
+  }))) return
   saving.value = true
   try {
     await payrollEnforcementApi.deleteCase(current.id, current.row_version)
@@ -842,9 +854,19 @@ function selectDecisionDocument(document: DocItem) {
   documentCandidates.value = []
 }
 
+/**
+ * Změny stavu případu se potvrzují dál. Zpětný příkaz sice u některých existuje,
+ * ale každý přechod zapíše událost do historie případu — „vzít zpět" by tedy
+ * znamenalo druhý zápis, ne návrat do původního stavu. Doplňuje se jméno osoby:
+ * text příkazu sám o sobě neřekne, na kterém případu stojíme.
+ */
 async function openTransition(command: EnforcementCaseCommand) {
   if (!documentCommands.has(command) && !reasonCommands.has(command)) {
-    if (!window.confirm(t(`payroll.enforcement.commands.confirm.${command}`))) return
+    const question = t(`payroll.enforcement.commands.confirm.${command}`)
+    const name = detail.value?.full_name ?? ''
+    if (!window.confirm(name === ''
+      ? question
+      : t('payroll.enforcement.commands.confirm_for', { question, name }))) return
     await transition(command)
     return
   }
@@ -999,10 +1021,19 @@ function copySameOrderPriority() {
   newClaim.value.first_payer_delivered_on = reference?.first_payer_delivered_on ?? null
 }
 
+/**
+ * Pohledávka se maže s potvrzením — vratné to není. Znovu založená pohledávka
+ * dostane nové id, takže by se rozpadlo `same_order_as_claim_id` u pohledávek,
+ * které se na ni odkazují pořadím. Dialog pojmenuje kategorii a zůstatek: v
+ * tabulce jich pod sebou stojí víc a liší se jen čísly.
+ */
 async function deleteClaim(claim: EnforcementClaim) {
   const current = detail.value
   if (!current || current.status !== 'received') return
-  if (!window.confirm(t('payroll.enforcement.delete_claim_confirm'))) return
+  if (!window.confirm(t('payroll.enforcement.delete_claim_confirm', {
+    category: t(`payroll.enforcement.categories.${claim.category}`),
+    amount: money(claim.outstanding_minor_units),
+  }))) return
   saving.value = true
   try {
     await payrollEnforcementApi.deleteClaim(current.id, claim.id, claim.row_version)

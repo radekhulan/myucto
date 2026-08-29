@@ -91,7 +91,15 @@ export interface PayrollPaymentBatch {
   batch_reference: string
   channel: 'bank' | 'cash'
   export_format: 'abo' | 'sepa' | 'manual'
+  /** Datum PŘÍKAZU — u odvodů dřív než zákonný termín, o rezervu na převod. */
   planned_payment_date: string
+  /**
+   * Zákonný termín ze splatnosti závazků v dávce. `null` u dávek založených
+   * dřív, než se termín začal odvozovat — tehdy se o rozdílu netvrdí nic.
+   */
+  statutory_due_on: string | null
+  /** Liší se datum příkazu od zákonného termínu? */
+  is_shifted: boolean
   currency_code: string
   declared_total_minor: number
   declared_item_count: number

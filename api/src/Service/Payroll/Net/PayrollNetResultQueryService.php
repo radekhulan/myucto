@@ -241,6 +241,8 @@ final class PayrollNetResultQueryService
                 ? (int) $match[1]
                 : null;
             $meta = $agreementId === null ? null : ($titles[$agreementId] ?? null);
+            $active = self::deductionIsActive($deduction);
+            $unapplied = self::nonNegativeInt($deduction, 'unapplied_minor_units');
             $result[] = [
                 'agreement_id' => $agreementId,
                 'deduction_reference' => $reference,
@@ -251,7 +253,9 @@ final class PayrollNetResultQueryService
                 'priority_no' => self::nonNegativeInt($deduction, 'priority'),
                 'requested_minor' => self::nonNegativeInt($deduction, 'requested_minor_units'),
                 'applied_minor' => self::nonNegativeInt($deduction, 'applied_minor_units'),
-                'unapplied_minor' => self::nonNegativeInt($deduction, 'unapplied_minor_units'),
+                'active' => $active,
+                'unapplied_minor' => $active ? $unapplied : 0,
+                'accounting_unapplied_minor' => $unapplied,
             ];
         }
         usort(
@@ -261,6 +265,31 @@ final class PayrollNetResultQueryService
         );
 
         return $result;
+    }
+
+    /**
+     * Provedla se dohoda v tomhle měsíci vůbec?
+     *
+     * Zmrazený snímek nese `active` od {@see PayrollDeductionResult}. Starší
+     * revize, spočtené dřív, než se příznak začal ukládat, klíč nemají — tehdy
+     * se pozastavené dohody do výsledku nedostávaly jinak než jako aktivní,
+     * takže chybějící klíč znamená „aktivní" a rozklad se u nich nemění.
+     *
+     * @param array<string,mixed> $deduction
+     */
+    private static function deductionIsActive(array $deduction): bool
+    {
+        $value = $deduction['active'] ?? null;
+        if ($value === null) {
+            return true;
+        }
+        if (!is_bool($value)) {
+            throw new \UnexpectedValueException(
+                'net_pay.deductions.active musí být pravdivostní hodnota.',
+            );
+        }
+
+        return $value;
     }
 
     /**

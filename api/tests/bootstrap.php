@@ -37,6 +37,8 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/FuelingRepository.php',
     '*/api/src/Repository/InvoiceRepository.php',
     '*/api/src/Repository/PasskeyCredentialRepository.php',
+    '*/api/src/Repository/PayrollEmployeeRepository.php',
+    '*/api/src/Repository/PayrollMonthlyRecordRepository.php',
     '*/api/src/Repository/PostingRuleRepository.php',
     '*/api/src/Repository/Payroll/PayrollEmployerSettingsRepository.php',
     '*/api/src/Repository/Payroll/PayrollPostingBatchRepository.php',

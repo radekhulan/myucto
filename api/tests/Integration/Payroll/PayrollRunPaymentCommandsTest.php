@@ -782,10 +782,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             new PayrollSetupFeatures(
                 homeOffice: false,
                 travelExpenses: false,
-                fourEyes: false,
-                automaticCalculation: false,
                 automaticPosting: false,
-                automaticPayments: false,
                 secureDelivery: false,
                 jmhz: false,
                 activeApproverCount: 0,
@@ -1211,12 +1208,9 @@ final class PayrollRunPaymentCommandsTest extends TestCase
             'home_office_policy' => 'not_used',
             'travel_expense_policy' => 'not_used',
             'leave_entitlement_weeks' => 4,
-            'four_eyes_required' => false,
-            'automatic_calculation_enabled' => true,
             // Vypnuté automatické zaúčtování je právě ten případ, kdy dosud
             // neexistovala žádná cesta, jak mzdy zaúčtovat.
             'automatic_posting_enabled' => false,
-            'automatic_payments_enabled' => true,
             'delivery_channel' => 'disabled',
             'delivery_verified_on' => null,
             'source_kind' => 'manual',

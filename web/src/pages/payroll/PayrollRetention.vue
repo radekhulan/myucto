@@ -337,18 +337,55 @@ async function savePolicy() {
   }
 }
 
+/**
+ * Zrušení odchylky bez dialogu, ale s možností vzít to zpět.
+ *
+ * Odchylka je pouhé nastavení: zrušením se nic nesmaže ani nezpřístupní k
+ * výmazu, jen se lhůta vrátí na katalogovou hodnotu. Vrácení je doslovné —
+ * `putPolicy()` je upsert, takže se zapíšou tytéž tři hodnoty, které tu byly.
+ * Proto tady dialog jen zdržoval; vratná věc si ho nezaslouží.
+ */
 async function deletePolicy() {
-  if (!confirm(t('payroll.retention.policy_delete_confirm'))) return
+  const restored = {
+    category: policyForm.category,
+    label: policyForm.label,
+    extra_years: Number(policyForm.extraYears) || 0,
+    override_years: policyForm.determined ? null : policyForm.overrideYears,
+    reason: policyForm.reason,
+  }
   policyForm.saving = true
   try {
-    await payrollRetentionApi.deletePolicy(policyForm.category)
+    await payrollRetentionApi.deletePolicy(restored.category)
     policyForm.open = false
-    toast.success(t('payroll.retention.policy_deleted'))
+    toast.success(
+      t('payroll.retention.policy_deleted_named', { label: restored.label }),
+      { label: t('common.undo'), handler: () => void restorePolicy(restored) },
+    )
     await load()
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
     policyForm.saving = false
+  }
+}
+
+async function restorePolicy(policy: {
+  category: string
+  label: string
+  extra_years: number
+  override_years: number | null
+  reason: string
+}) {
+  try {
+    await payrollRetentionApi.putPolicy(policy.category, {
+      extra_years: policy.extra_years,
+      override_years: policy.override_years,
+      reason: policy.reason,
+    })
+    toast.success(t('payroll.retention.policy_restored', { label: policy.label }))
+    await load()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
   }
 }
 
@@ -401,10 +438,20 @@ async function saveHold() {
 
 /**
  * Uvolnění výmaz zase PUSTÍ — proto se potvrzuje. Není to úklid seznamu,
- * ale rozhodnutí, že důvod zadržení pominul.
+ * ale rozhodnutí, že důvod zadržení pominul. Undo toast by tady byl slib, který
+ * aplikace neudrží: mezi uvolněním a vrácením může výmaz proběhnout.
+ *
+ * Dialog ale pojmenuje, koho a čeho se to týká — firemní zadržení a zadržení
+ * konkrétní osoby stojí ve stejném seznamu a záměna má opačné následky.
  */
 async function releaseHold(hold: PayrollRetentionHold) {
-  if (!confirm(t('payroll.retention.hold_release_confirm'))) return
+  const subject = hold.subject_kind === 'company'
+    ? t('payroll.retention.hold_subject_company')
+    : (hold.employee_full_name || t('payroll.retention.person_gone'))
+  if (!confirm(t('payroll.retention.hold_release_confirm', {
+    subject,
+    reason: t(`payroll.retention.hold_reason.${hold.reason}`),
+  }))) return
   try {
     await payrollRetentionApi.releaseHold(hold.id)
     toast.success(t('payroll.retention.hold_released'))

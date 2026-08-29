@@ -1191,6 +1191,71 @@ describe('PayrollPayments', () => {
     expect(wrapper.text()).toContain('Jehla v kupce sena')
   })
 
+  /*
+   * Datum příkazu není zákonný termín — u odvodů jde příkaz dřív, aby částka
+   * stihla být PŘIPSÁNA. Backend to už dávno posílal (`statutory_due_on`,
+   * `is_shifted`), obrazovka ale ukazovala jen datum příkazu, takže dřívější
+   * datum vypadalo jako chyba a účetní ho „opravila" na zákonný termín.
+   */
+  it('explains why the order date differs from the statutory due date', async () => {
+    m.batches.mockResolvedValue({
+      period: '2026-08',
+      items: [{
+        id: 51,
+        batch_reference: 'payroll-batch:synthetic',
+        channel: 'bank',
+        export_format: 'abo',
+        planned_payment_date: '2026-08-18',
+        statutory_due_on: '2026-08-20',
+        is_shifted: true,
+        currency_code: 'CZK',
+        declared_total_minor: 4_250_000,
+        declared_item_count: 1,
+        settled_minor: 0,
+        created_at: '2026-08-04 08:00:00',
+        exports: [],
+      }],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    expect(wrapper.find('[data-test="batch-statutory-due"]').exists()).toBe(true)
+    expect(wrapper.get('[data-layout="batch-desktop"]').text())
+      .toContain('payroll.payments.batch.shifted_from_statutory')
+    expect(wrapper.get('[data-layout="batch-mobile"]').text())
+      .toContain('payroll.payments.batch.shifted_from_statutory')
+  })
+
+  /** Když se příkaz s termínem kryje, není co vysvětlovat — a nic se nepíše. */
+  it('says nothing when the order date already is the statutory due date', async () => {
+    m.batches.mockResolvedValue({
+      period: '2026-08',
+      items: [{
+        id: 51,
+        batch_reference: 'payroll-batch:synthetic',
+        channel: 'bank',
+        export_format: 'abo',
+        planned_payment_date: '2026-08-20',
+        statutory_due_on: '2026-08-20',
+        is_shifted: false,
+        currency_code: 'CZK',
+        declared_total_minor: 4_250_000,
+        declared_item_count: 1,
+        settled_minor: 0,
+        created_at: '2026-08-04 08:00:00',
+        exports: [],
+      }],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    expect(wrapper.find('[data-test="batch-statutory-due"]').exists()).toBe(false)
+  })
+
   /** Krátká nabídka zůstává v prohlížeči — picker ji nesmí objednávat znovu. */
   it('keeps short pickers local and asks the server for nothing', async () => {
     const wrapper = mount(PayrollPayments)

@@ -17,8 +17,7 @@ final class PayrollEmployerPolicyRepository
         payday_month_offset, payday_business_day_rule,
         balance_rounding_mode, home_office_policy, travel_expense_policy,
         leave_entitlement_weeks,
-        four_eyes_required, automatic_calculation_enabled,
-        automatic_posting_enabled, automatic_payments_enabled,
+        automatic_posting_enabled,
         delivery_channel, delivery_verified_on, source_kind,
         source_reference, created_by, updated_by, row_version,
         created_at, updated_at
@@ -155,13 +154,10 @@ final class PayrollEmployerPolicyRepository
                      payday_month_offset, payday_business_day_rule,
                      balance_rounding_mode, home_office_policy,
                      travel_expense_policy, leave_entitlement_weeks,
-                     four_eyes_required,
-                     automatic_calculation_enabled,
-                     automatic_posting_enabled,
-                     automatic_payments_enabled, delivery_channel,
+                     automatic_posting_enabled, delivery_channel,
                      delivery_verified_on, source_kind, source_reference,
                      created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
             );
             $stmt->execute($this->writeValues(
                 $supplierId,
@@ -251,10 +247,7 @@ final class PayrollEmployerPolicyRepository
                         home_office_policy = ?,
                         travel_expense_policy = ?,
                         leave_entitlement_weeks = ?,
-                        four_eyes_required = ?,
-                        automatic_calculation_enabled = ?,
                         automatic_posting_enabled = ?,
-                        automatic_payments_enabled = ?,
                         delivery_channel = ?,
                         delivery_verified_on = ?,
                         source_kind = ?,
@@ -396,10 +389,7 @@ final class PayrollEmployerPolicyRepository
             array_key_exists('leave_entitlement_weeks', $data)
                 ? self::requiredInt($data, 'leave_entitlement_weeks')
                 : 4,
-            (int) self::requiredBool($data, 'four_eyes_required'),
-            (int) self::requiredBool($data, 'automatic_calculation_enabled'),
             (int) self::requiredBool($data, 'automatic_posting_enabled'),
-            (int) self::requiredBool($data, 'automatic_payments_enabled'),
             self::requiredString($data, 'delivery_channel'),
             self::nullableString($data, 'delivery_verified_on'),
             self::requiredString($data, 'source_kind'),
@@ -459,21 +449,9 @@ final class PayrollEmployerPolicyRepository
             'leave_entitlement_weeks',
         );
         $row['row_version'] = self::requiredInt($row, 'row_version');
-        $row['four_eyes_required'] = self::requiredBool(
-            $row,
-            'four_eyes_required',
-        );
-        $row['automatic_calculation_enabled'] = self::requiredBool(
-            $row,
-            'automatic_calculation_enabled',
-        );
         $row['automatic_posting_enabled'] = self::requiredBool(
             $row,
             'automatic_posting_enabled',
-        );
-        $row['automatic_payments_enabled'] = self::requiredBool(
-            $row,
-            'automatic_payments_enabled',
         );
         foreach (['created_by', 'updated_by'] as $field) {
             $row[$field] = self::nullableInt($row, $field);

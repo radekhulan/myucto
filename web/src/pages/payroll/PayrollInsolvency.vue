@@ -174,11 +174,23 @@ async function save() {
   }
 }
 
+/**
+ * Zrušení schváleného oddlužení se potvrzuje dál — vratné to není. Zrušením
+ * padá schválený platební pokyn a znovu ho vytvořit znamená projít celé
+ * schválení; „vzít zpět" by tady bylo prázdné slovo.
+ *
+ * Dialog pojmenuje období a pracovní vztah: obrazovka se přepíná mezi osobami
+ * i měsíci a zrušení ve špatném měsíci vypadá při obecném „opravdu?" stejně.
+ */
 async function cancelApproved() {
   const current = evidence.value
   const selectedEmployee = employeeId.value
   if (!current?.row_version || selectedEmployee === null || !canWrite.value) return
-  if (!window.confirm(t('payroll.insolvency.cancel_confirm'))) return
+  const employment = options.value.employments.find(item => item.id === employmentId.value)
+  if (!window.confirm(t('payroll.insolvency.cancel_confirm', {
+    period: period.value,
+    employment: employment?.code ?? t('payroll.insolvency.employment_unknown'),
+  }))) return
   saving.value = true
   try {
     const cancelled = await payrollEnforcementApi.cancelInsolvency(

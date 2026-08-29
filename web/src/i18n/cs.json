@@ -858,7 +858,7 @@
             "manual_review_action": "Co s tím:",
             "open": "Otevřít",
             "reset": "Vrátit ověřenou hodnotu",
-            "reset_confirm": "Opravdu zahodit ruční úpravu a vrátit se k ověřené sadě z aplikace?",
+            "reset_confirm": "Zahodit ruční úpravu domény {domain} (verze {version}) a vrátit se k ověřené sadě z aplikace? Zadané hodnoty se přepíšou a vrátit je zpět nelze.",
             "reset_done": "Vráceno na ověřenou sadu.",
             "reset_default_reason": "Návrat k ověřené sadě z aplikace.",
             "checksum_invalid": "Neplatný kontrolní součet",
@@ -1120,6 +1120,7 @@
                 "actions": "Akce",
                 "revision": "Revize {revision}",
                 "item_count": "{count} položek",
+                "shifted_from_statutory": "Zákonný termín {date} — příkaz je dřív, aby částka stihla být připsaná.",
                 "manual": "Ruční hotovostní výplata nevyžaduje bankovní soubor.",
                 "no_export": "Export zatím nebyl vytvořen.",
                 "generate": "Vygenerovat export",
@@ -1402,6 +1403,7 @@
                 "deductions_title": "Srážky podle pořadí",
                 "priority": "Pořadí {priority}",
                 "unapplied": "Neuplatněno: {value}",
+                "deduction_suspended": "Dohoda byla v tomto měsíci pozastavená, proto se z ní nesráželo. Nejde o schodek vůči věřiteli.",
                 "unapplied_unattested": "Nezabavitelná částka stojí na nároku, který nikdo nedoložil ({claim}). Dohoda o srážkách z ní čerpat nesmí, proto se nesrazilo nic — nejde o nedostatek místa v čisté mzdě. Doložením nároku se strop obnoví.",
                 "unapplied_unattested_claim": {
                     "dependants": "vyživované osoby",
@@ -2794,8 +2796,8 @@
             "delete": {
                 "action": "Smazat pracovní vztah",
                 "person_action": "Smazat zaměstnance",
-                "confirm": "Smaže se pracovní vztah včetně {summary}. Tuhle akci nelze vzít zpět.",
-                "confirm_empty": "Smaže se pracovní vztah. Tuhle akci nelze vzít zpět.",
+                "confirm": "Smaže se pracovní vztah {code} včetně {summary}. Tuhle akci nelze vzít zpět.",
+                "confirm_empty": "Smaže se pracovní vztah {code}. Tuhle akci nelze vzít zpět.",
                 "person_confirm": "Smaže se zaměstnanec {name} včetně {summary}. Tuhle akci nelze vzít zpět.",
                 "person_confirm_empty": "Smaže se zaměstnanec {name}. Tuhle akci nelze vzít zpět.",
                 "done": "Pracovní vztah byl smazán.",
@@ -3517,6 +3519,7 @@
                 "archived": "Archivovat skončený pracovní vztah?",
                 "no_show": "Potvrdit, že pracovník nenastoupil?"
             },
+            "transition_confirm_for": "{question}\n\nVztah: {code}, k datu {date}",
             "insurance_mode": {
                 "automatic": "Automaticky podle pravidel",
                 "included": "Účast vzniká",
@@ -4739,6 +4742,8 @@
                     "submitted": "Potvrzujete pouze odeslání v oficiálním rozhraní? Povinnost tím ještě nebude splněná.",
                     "accepted": "Potvrzujete, že vybraný dokument skutečně dokládá přijetí ELDP úřadem?"
                 },
+                "confirmFor": "{question}\n\nELDP: {employment}, rok {year}",
+                "employmentUnknown": "bez zvoleného vztahu",
                 "saved": {
                     "submitted": "Odeslání bylo doloženo. Povinnost čeká na potvrzení přijetí.",
                     "accepted": "Přijetí úřadem bylo doloženo a povinnost ELDP je splněná."
@@ -4960,12 +4965,9 @@
                 "leave_entitlement_weeks_hint": "Nejméně 4 týdny; běžná firemní výměra je 5. Výjimku lze nastavit na pracovním vztahu.",
                 "automation": "Automatizace",
                 "automation_title": "Schvalování a automatické kroky",
-                "automatic_calculation": "Automaticky vypočítat",
+                "automation_hint": "Vypnuté automatické zaúčtování neznamená, že se neúčtuje — jen si zaúčtování schválené revize vyvoláte sami. Výpočet a přípravu plateb spouští účetní vždy ručně.",
                 "automatic_posting": "Automaticky zaúčtovat",
-                "automatic_payments": "Automaticky připravit platby",
-                "auto_calculation_short": "výpočet",
                 "auto_posting_short": "účtování",
-                "auto_payments_short": "platby",
                 "delivery_channel": "Bezpečný kanál doručení",
                 "delivery_verified_on": "Kanál ověřen dne",
                 "source_reference": "Reference schváleného podkladu (volitelné)",
@@ -5017,17 +5019,9 @@
                         "ok": "Cestovní politika je nakonfigurovaná.",
                         "blocked": "Cestovní náhrady vyžadují dokončenou politiku."
                     },
-                    "automatic_calculation": {
-                        "ok": "Automatický výpočet je povolený politikou.",
-                        "blocked": "Automatický výpočet není povolený účinnou politikou."
-                    },
                     "automatic_posting": {
                         "ok": "Automatické zaúčtování je povolené politikou.",
                         "blocked": "Automatické zaúčtování není povolené účinnou politikou."
-                    },
-                    "automatic_payments": {
-                        "ok": "Automatická příprava plateb je povolená politikou.",
-                        "blocked": "Automatická příprava plateb není povolená účinnou politikou."
                     },
                     "secure_delivery": {
                         "ok": "Bezpečný kanál doručení je ověřený.",
@@ -5232,7 +5226,6 @@
             "enable": "Zahájit nastavení",
             "enabled": "Mzdový modul byl aktivován.",
             "disable": "Zrušit zahájení nastavení",
-            "disable_confirm": "Opravdu zrušit zahájení nastavení mezd? Mzdová data se nesmažou.",
             "disabled": "Zahájení nastavení mezd bylo zrušeno.",
             "failed": "Aktivaci mzdového modulu se nepodařilo uložit.",
             "conflict": "Nastavení mezitím změnil jiný uživatel. Načetl se aktuální stav.",
@@ -5645,7 +5638,8 @@
             "instruction_bound": "Evidence je svázaná s neměnným platebním pokynem #{id}.",
             "explicit_cancel_required": "Schválený pokyn nelze zrušit změnou režimu. Použijte samostatné tlačítko Zrušit schválené oddlužení.",
             "cancel": "Zrušit schválené oddlužení",
-            "cancel_confirm": "Opravdu zrušit dosud nepoužitý platební pokyn oddlužení?",
+            "cancel_confirm": "Zrušit dosud nepoužitý platební pokyn oddlužení za období {period} u pracovního vztahu {employment}? Schválení se tím ruší a vrátit to zpět nelze.",
+            "employment_unknown": "bez zvoleného vztahu",
             "cancelled": "Dosud nepoužité schválené oddlužení bylo zrušeno.",
             "cancel_failed": "Schválené oddlužení se nepodařilo zrušit.",
             "saved": "Evidence oddlužení byla uložena.",
@@ -5723,7 +5717,7 @@
             "case_created": "Případ srážek byl založen.",
             "case_deleted": "Omylem založený případ byl smazán.",
             "delete_case": "Smazat omylem založený případ",
-            "delete_confirm": "Opravdu smazat tento případ bez pohledávky a dalších návazností? Tuto akci nelze vrátit zpět.",
+            "delete_confirm": "Smazat případ {kind} pro {name}? Případ nemá pohledávku ani další návaznosti a smazání nelze vrátit zpět.",
             "delete_blocked": {
                 "claim_exists": "Případ už obsahuje pohledávku. Zachovejte jeho historii a případ zastavte nebo uzavřete standardním krokem.",
                 "event_exists": "Případ už má právně významnou změnu stavu. Zachovejte jeho historii a použijte zastavení nebo uzavření.",
@@ -5741,7 +5735,7 @@
             "claim_not_found": "Pohledávka už v případu není. Obnovte detail.",
             "edit_claim": "Opravit rozpracovanou pohledávku",
             "save_claim_changes": "Uložit opravu",
-            "delete_claim_confirm": "Opravdu chcete tuto rozpracovanou pohledávku smazat? Smazání nelze vrátit.",
+            "delete_claim_confirm": "Smazat rozpracovanou pohledávku {category} se zůstatkem {amount}? Smazání nelze vrátit.",
             "claim_change_blocked": {
                 "case_started": "Pohledávku lze opravit nebo smazat jen před zahájením srážení. Aktivní případ zachovejte v auditní historii.",
                 "allocation_exists": "Pohledávka už vstoupila do mzdového výpočtu. Nelze ji přepsat ani smazat; proveďte navazující opravu.",
@@ -6006,7 +6000,8 @@
                     "resume_remittance": "Obnovit srážení a odesílání částek?",
                     "mark_paid": "Označit případ s nulovým zůstatkem za uhrazený?",
                     "stop": "Vyberte rozhodnutí a uveďte důvod zastavení případu."
-                }
+                },
+                "confirm_for": "{question}\n\nPřípad: {name}"
             },
             "recipient_account": "Příjemce srážky (katalog platebních účtů)",
             "recipient_account_none": "Nezvoleno",
@@ -6180,8 +6175,10 @@
             "policy_reason_placeholder": "Např. vnitřní předpis, smluvní závazek nebo probíhající spor.",
             "policy_saved": "Odchylka uložena.",
             "policy_delete": "Zrušit odchylku",
-            "policy_delete_confirm": "Zrušit odchylku firmy? Lhůta se vrátí na hodnotu z katalogu.",
             "policy_deleted": "Odchylka zrušena.",
+            "policy_deleted_named": "Odchylka u kategorie „{label}“ zrušena.",
+            "policy_restored": "Odchylka u kategorie „{label}“ vrácena.",
+            "hold_subject_company": "celá firma",
             "holds_title": "Zadržení výmazu",
             "no_holds": "Žádné zadržení",
             "no_holds_hint": "Zadržení drží výmaz osoby i po uplynutí lhůty — kvůli kontrole, sporu, exekuci nebo insolvenci. Firemní zadržení se zadává v Účetnictví a platí i na mzdy.",
@@ -6198,7 +6195,7 @@
             "hold_description_required": "Vyplňte č. j. nebo popis řízení — bez něj nelze doložit, proč se výmaz zadržel.",
             "hold_description_placeholder": "Např. č. j. kontroly, spisová značka nebo popis řízení.",
             "hold_placed": "Zadržení zapsáno.",
-            "hold_release_confirm": "Uvolnit zadržení? Výmaz osoby tím zase půjde navrhnout a provést.",
+            "hold_release_confirm": "Uvolnit zadržení „{reason}“ u {subject}? Výmaz tím zase půjde navrhnout a provést a vrátit to zpět nelze.",
             "hold_released": "Zadržení uvolněno.",
             "hold_reason": {
                 "tax_audit": "daňová kontrola",

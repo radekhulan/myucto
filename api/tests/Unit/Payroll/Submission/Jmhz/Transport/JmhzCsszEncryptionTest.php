@@ -119,10 +119,24 @@ final class JmhzCsszEncryptionTest extends TestCase
     public function testMissingCertificateFileReportsTransportErrorCode(): void
     {
         $root = $this->tempDir();
-        // `certificate()` volá file_get_contents() bez zavináče, takže chybějící
-        // soubor vedle výjimky vyhodí i PHP warning. Ten je tady OČEKÁVANÝ stav,
-        // ne regrese — kdyby se nepotlačil, PHPUnit by z něj udělal chybu testu.
-        set_error_handler(static fn (): bool => true, E_WARNING);
+        /*
+         * Odpovědí na chybějící certifikát je VÝHRADNĚ `JmhzTransportException`.
+         * Dřív k ní `certificate()` přidával ještě warning z `file_get_contents()`
+         * — do logu i (podle `display_errors`) do odpovědi, včetně absolutní
+         * cesty. Handler tady warning nepotlačuje, ale ZACHYTÁVÁ: kdyby se
+         * zavináč ze zdroje ztratil, test spadne na tomhle, ne na PHPUnit
+         * převodu warningů.
+         */
+        $warnings = [];
+        set_error_handler(static function (int $severity, string $message) use (&$warnings): bool {
+            // Vlastní handler dostane i potlačenou diagnostiku — `@` jen zúží
+            // `error_reporting()`. Zajímá nás proto jen to, co by se REÁLNĚ
+            // vypsalo do logu; ostatní se tiše zahodí, stejně jako v běhu.
+            if ((error_reporting() & $severity) !== 0) {
+                $warnings[] = $message;
+            }
+            return true;
+        }, E_WARNING | E_NOTICE);
         try {
             (new JmhzCsszEncryption($root))->certificate();
             self::fail('Chybějící certifikát musí selhat.');
@@ -132,6 +146,7 @@ final class JmhzCsszEncryptionTest extends TestCase
             restore_error_handler();
             $this->removeDir($root);
         }
+        self::assertSame([], $warnings, 'Chybějící certifikát nesmí vyhodit PHP warning.');
     }
 
     /**

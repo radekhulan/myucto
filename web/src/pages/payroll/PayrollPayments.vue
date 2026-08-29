@@ -1668,8 +1668,22 @@ onMounted(load)
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="batch in batches" :key="batch.id" class="align-top">
-                  <td class="whitespace-nowrap px-4 py-3 text-neutral-700">
-                    {{ formatDate(batch.planned_payment_date) }}
+                  <td class="px-4 py-3 text-neutral-700">
+                    <span class="whitespace-nowrap">{{ formatDate(batch.planned_payment_date) }}</span>
+                    <!--
+                      Datum příkazu není zákonný termín: u odvodů se posílá dřív,
+                      aby částka stihla být PŘIPSÁNA. Bez téhle věty vypadá dřívější
+                      datum jako chyba a účetní ho „opraví" na zákonný termín.
+                    -->
+                    <span
+                      v-if="batch.is_shifted && batch.statutory_due_on"
+                      class="mt-0.5 block text-xs text-neutral-500"
+                      data-test="batch-statutory-due"
+                    >
+                      {{ t('payroll.payments.batch.shifted_from_statutory', {
+                        date: formatDate(batch.statutory_due_on),
+                      }) }}
+                    </span>
                   </td>
                   <td class="px-4 py-3">
                     <span class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium uppercase text-payroll-700">
@@ -1745,6 +1759,14 @@ onMounted(load)
                 <p class="mt-1 text-sm text-neutral-500">
                   {{ formatDate(batch.planned_payment_date) }} ·
                   {{ t('payroll.payments.batch.item_count', { count: batch.declared_item_count }) }}
+                </p>
+                <p
+                  v-if="batch.is_shifted && batch.statutory_due_on"
+                  class="mt-0.5 text-xs text-neutral-500"
+                >
+                  {{ t('payroll.payments.batch.shifted_from_statutory', {
+                    date: formatDate(batch.statutory_due_on),
+                  }) }}
                 </p>
               </div>
               <span class="rounded-full bg-payroll-50 px-2 py-1 text-xs font-medium uppercase text-payroll-700">

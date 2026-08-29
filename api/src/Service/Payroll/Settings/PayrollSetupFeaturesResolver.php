@@ -41,18 +41,9 @@ final class PayrollSetupFeaturesResolver
                     $policy,
                     'travel_expense_policy',
                 ) !== 'not_used',
-            fourEyes: false,
-            automaticCalculation: $this->bool(
-                $policy,
-                'automatic_calculation_enabled',
-            ),
             automaticPosting: $this->bool(
                 $policy,
                 'automatic_posting_enabled',
-            ),
-            automaticPayments: $this->bool(
-                $policy,
-                'automatic_payments_enabled',
             ),
             secureDelivery: $policy !== null
                 && $this->string($policy, 'delivery_channel') !== 'disabled',

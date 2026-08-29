@@ -98,29 +98,11 @@ final class PayrollSetupCheckService
         $this->featureFlagCheck(
             $checks,
             $blockers,
-            $features->automaticCalculation,
-            $policy,
-            'automatic_calculation_enabled',
-            'automatic_calculation',
-            'Automatický výpočet',
-        );
-        $this->featureFlagCheck(
-            $checks,
-            $blockers,
             $features->automaticPosting,
             $policy,
             'automatic_posting_enabled',
             'automatic_posting',
             'Automatické zaúčtování',
-        );
-        $this->featureFlagCheck(
-            $checks,
-            $blockers,
-            $features->automaticPayments,
-            $policy,
-            'automatic_payments_enabled',
-            'automatic_payments',
-            'Automatická příprava plateb',
         );
 
         if ($features->secureDelivery) {

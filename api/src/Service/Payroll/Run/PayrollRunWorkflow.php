@@ -120,9 +120,6 @@ final class PayrollRunWorkflow
             throw new \DomainException('Kontrola a schválení vyžadují uložený výsledek.');
         }
         if ($command === PayrollRunCommand::APPROVE) {
-            if ($context->fourEyesRequired && $context->reviewedBy === null) {
-                throw new \DomainException('Před schválením musí být evidována odborná kontrola.');
-            }
             if ($context->blockerCount > 0) {
                 throw new \DomainException('Mzdový běh obsahuje blokující validace.');
             }

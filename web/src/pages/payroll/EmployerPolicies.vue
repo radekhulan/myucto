@@ -72,10 +72,7 @@ function newPolicy(): PayrollEmployerPolicyPayload {
     home_office_policy: 'not_used',
     travel_expense_policy: 'not_used',
     leave_entitlement_weeks: 5,
-    four_eyes_required: false,
-    automatic_calculation_enabled: false,
     automatic_posting_enabled: false,
-    automatic_payments_enabled: false,
     delivery_channel: 'disabled',
     delivery_verified_on: null,
     source_kind: 'manual',
@@ -210,10 +207,7 @@ function edit(policy: PayrollEmployerPolicy) {
     home_office_policy: policy.home_office_policy,
     travel_expense_policy: policy.travel_expense_policy,
     leave_entitlement_weeks: policy.leave_entitlement_weeks,
-    four_eyes_required: false,
-    automatic_calculation_enabled: policy.automatic_calculation_enabled,
     automatic_posting_enabled: policy.automatic_posting_enabled,
-    automatic_payments_enabled: policy.automatic_payments_enabled,
     delivery_channel: policy.delivery_channel,
     delivery_verified_on: policy.delivery_verified_on,
     source_kind: policy.source_kind,
@@ -511,11 +505,9 @@ onMounted(load)
                 }) }}
               </td>
               <td v-if="tbl.isVisible('automation')" class="px-3 py-3 text-neutral-600">
-                {{ [
-                  policy.automatic_calculation_enabled ? t('payroll.employer.policies.auto_calculation_short') : null,
-                  policy.automatic_posting_enabled ? t('payroll.employer.policies.auto_posting_short') : null,
-                  policy.automatic_payments_enabled ? t('payroll.employer.policies.auto_payments_short') : null,
-                ].filter(Boolean).join(', ') || '—' }}
+                {{ policy.automatic_posting_enabled
+                  ? t('payroll.employer.policies.auto_posting_short')
+                  : '—' }}
               </td>
               <td v-if="tbl.isVisible('state')" class="px-3 py-3">
                 <span
@@ -750,20 +742,21 @@ onMounted(load)
         <legend class="text-sm font-semibold text-neutral-900">
           {{ t('payroll.employer.policies.automation_title') }}
         </legend>
-        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <label class="flex items-start gap-2">
-            <input v-model="form.automatic_calculation_enabled" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
-            <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.automatic_calculation') }}</span>
-          </label>
+        <!--
+          Zbyl jediný přepínač, protože jediný něco dělá. „Automatický výpočet"
+          a „Automatická příprava plateb" tu stály jako běžná zaškrtávátka,
+          ale nic je nečetlo — kdo si je zapnul, čekal spočítané mzdy a dostal
+          prázdný běh. Přepínač k nim přijde až s funkcí.
+        -->
+        <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label class="flex items-start gap-2">
             <input v-model="form.automatic_posting_enabled" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
             <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.automatic_posting') }}</span>
           </label>
-          <label class="flex items-start gap-2">
-            <input v-model="form.automatic_payments_enabled" type="checkbox" :disabled="!canWrite" class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-payroll-600 focus:ring-payroll-500">
-            <span class="text-sm text-neutral-700">{{ t('payroll.employer.policies.automatic_payments') }}</span>
-          </label>
         </div>
+        <p class="mt-2 text-xs text-neutral-500">
+          {{ t('payroll.employer.policies.automation_hint') }}
+        </p>
       </fieldset>
 
       <div class="mt-6 grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">

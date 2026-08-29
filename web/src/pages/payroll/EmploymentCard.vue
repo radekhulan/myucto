@@ -473,9 +473,17 @@ async function transition(target: PayrollEmploymentStatus) {
   if (!transitionDate.value || busy.value) return
   // Návrat z archivu míří na `ended`/`no_show`, ale nic neukončuje — ptát se
   // „Ukončit pracovní vztah?" by uživateli tvrdilo opak toho, co dělá.
+  // Dialog zůstává: ukončení vztahu zapíše datum do evidence a rozjede
+  // návazné povinnosti (ELDP, odhláška), takže „vzít zpět" jedním kliknutím
+  // aplikace neumí. Musí ale říct, KTERÉHO vztahu se to týká — na kartě osoby
+  // jich stojí pod sebou víc a liší se jen kódem.
   if (props.employment.status !== 'archived'
       && ['ended', 'archived', 'no_show'].includes(target)
-      && !window.confirm(t(`payroll.people.transition_confirm.${target}`))) return
+      && !window.confirm(t('payroll.people.transition_confirm_for', {
+        question: t(`payroll.people.transition_confirm.${target}`),
+        code: props.employment.code,
+        date: formatDate(transitionDate.value),
+      }))) return
 
   busy.value = true
   try {
@@ -545,12 +553,18 @@ const deleteBlockerMessage = computed<string>(
   () => props.employment.delete_blocker?.message ?? '',
 )
 
+/**
+ * Smazání vztahu se potvrzuje dál — vratné to není. Server maže i navázané
+ * záznamy (proto `delete_cascade`) a znovu je založit ručně nejde. Dialog už
+ * vypisoval, CO smazání vezme s sebou; chyběl kód vztahu, tedy KTERÝ z několika
+ * vztahů téže osoby se maže.
+ */
 async function removeEmployment() {
   if (busy.value || !props.employment.can_delete) return
   const summary = cascadeSummary.value
   const question = summary === ''
-    ? t('payroll.people.delete.confirm_empty')
-    : t('payroll.people.delete.confirm', { summary })
+    ? t('payroll.people.delete.confirm_empty', { code: props.employment.code })
+    : t('payroll.people.delete.confirm', { summary, code: props.employment.code })
   if (!window.confirm(question)) return
 
   busy.value = true

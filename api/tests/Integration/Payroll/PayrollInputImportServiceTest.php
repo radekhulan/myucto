@@ -288,6 +288,78 @@ final class PayrollInputImportServiceTest extends TestCase
     }
 
     /**
+     * Idempotence se smí uplatnit jen na požadavek, který by jinak PROŠEL.
+     *
+     * Dokud se obsahový otisk hledal dřív, než se ověřil formát, dal se
+     * replayem obejít vstupní validace: druhé zavolání s týmž obsahem a
+     * nesmyslným formátem nevrátilo chybu, ale uložený import — tedy odpověď
+     * tvářící se jako úspěch nad požadavkem, který by napoprvé neprošel.
+     * Tohle je vstupní brána dat, takže pořadí musí být opačné.
+     */
+    public function testReplayWithAnInvalidFormatIsRejectedInsteadOfServed(): void
+    {
+        $csv = $this->csv([
+            [self::EMPLOYMENT_CODE, self::COMPONENT_CODE, '25000', 'imp-format-1'],
+        ]);
+        $first = $this->imports->apply(
+            $this->supplierId,
+            self::PERIOD,
+            'csv',
+            'odmeny.csv',
+            $csv,
+            $this->userId,
+        );
+        self::assertFalse($first['replayed']);
+
+        try {
+            $this->imports->apply(
+                $this->supplierId,
+                self::PERIOD,
+                'pdf',
+                'odmeny.csv',
+                $csv,
+                $this->userId,
+            );
+            self::fail('Replay s neplatným formátem musí být odmítnutý.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame('Formát musí být csv nebo xlsx.', $e->getMessage());
+        }
+
+        // Stejně tak neplatný název souboru: ani ten replay neomlouvá.
+        try {
+            $this->imports->apply(
+                $this->supplierId,
+                self::PERIOD,
+                'csv',
+                '',
+                $csv,
+                $this->userId,
+            );
+            self::fail('Replay s neplatným názvem souboru musí být odmítnutý.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame('Název importního souboru není platný.', $e->getMessage());
+        }
+
+        // Odmítnutí nic nezaložilo ani nezměnilo — původní import stojí dál.
+        self::assertSame(1, $this->countImports());
+        self::assertSame(1, $this->countInputs());
+
+        $replayed = $this->imports->apply(
+            $this->supplierId,
+            self::PERIOD,
+            'CSV ',
+            'odmeny.csv',
+            $csv,
+            $this->userId,
+        );
+        self::assertTrue($replayed['replayed']);
+        self::assertSame(
+            PayrollTimeValue::int($first['id'] ?? null, 'import_id'),
+            PayrollTimeValue::int($replayed['id'] ?? null, 'import_id'),
+        );
+    }
+
+    /**
      * Idempotence stojí na hashi OBSAHU, ne na názvu souboru. Jiný obsah (byť
      * o jediný haléř) je nový import — jinak by oprava překlepu tiše propadla.
      */

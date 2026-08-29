@@ -289,13 +289,22 @@ final class PayrollRunWorkflowTest extends TestCase
         self::assertSame(PayrollRunStatus::APPROVED, $approval->to);
     }
 
-    public function testApprovalStillRequiresReviewUnderFourEyes(): void
+    /**
+     * Pravidlo čtyř očí se nezavádí (uzavřené rozhodnutí) a v kódu po něm
+     * nesmí zůstat cesta, kterou by šlo schválení zablokovat. Test proto hlídá
+     * OPAK původního: schválení bez zapsané kontroly projít MUSÍ, ať se
+     * kontext poskládá jakkoli — příznak, kterým to šlo dřív obrátit, je pryč.
+     */
+    public function testApprovalNeverDemandsASecondPairOfEyes(): void
     {
-        $this->expectException(\DomainException::class);
-        $this->workflow->transition(
+        $approval = $this->workflow->transition(
             PayrollRunStatus::CALCULATED,
             PayrollRunCommand::APPROVE,
-            $this->context(reviewedBy: null, fourEyesRequired: true),
+            $this->context(calculatedBy: 4, reviewedBy: null),
+        );
+        self::assertSame(PayrollRunStatus::APPROVED, $approval->to);
+        self::assertFalse(
+            property_exists(PayrollRunTransitionContext::class, 'fourEyesRequired'),
         );
     }
 
@@ -374,7 +383,6 @@ final class PayrollRunWorkflowTest extends TestCase
         bool $hasPostingBatch = true,
         bool $hasPaymentBatch = true,
         ?string $reason = null,
-        bool $fourEyesRequired = false,
     ): PayrollRunTransitionContext {
         return new PayrollRunTransitionContext(
             actorUserId: $actorUserId,
@@ -387,7 +395,6 @@ final class PayrollRunWorkflowTest extends TestCase
             hasPostingBatch: $hasPostingBatch,
             hasPaymentBatch: $hasPaymentBatch,
             reason: $reason,
-            fourEyesRequired: $fourEyesRequired,
         );
     }
 }

@@ -55,7 +55,9 @@ function fixture(overrides: Partial<NetResultBreakdown> = {}): NetResultBreakdow
         priority_no: 1,
         requested_minor: 200_000,
         applied_minor: 0,
+        active: true,
         unapplied_minor: 200_000,
+        accounting_unapplied_minor: 200_000,
       },
     ],
     deducted_minor: 0,
@@ -145,7 +147,9 @@ describe('PayrollNetPayBreakdown', () => {
         priority_no: 1,
         requested_minor: 200_000,
         applied_minor: 200_000,
+        active: true,
         unapplied_minor: 0,
+        accounting_unapplied_minor: 0,
       }],
       deducted_minor: 200_000,
     }))
@@ -153,6 +157,40 @@ describe('PayrollNetPayBreakdown', () => {
     const wrapper = mountBreakdown()
     await flushPromises()
 
+    expect(wrapper.find('[data-test="unapplied-reason"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
+   * Nález E-17. Pozastavená dohoda měla `unapplied = requested`, protože to je
+   * účetní zbytek ze zmrazeného snímku — obrazovka z toho udělala „neuplatněno
+   * 2 000 Kč", jako by se nepodařilo srazit. Nesrazilo se ale proto, že se
+   * srážet NEMĚLO. Backend proto posílá schodek (0) a účetní zbytek zvlášť
+   * a obrazovka místo částky vysvětlí, že dohoda v tom měsíci stála.
+   */
+  it('says a suspended deduction was not run instead of reporting a shortfall', async () => {
+    netResultMock.mockResolvedValue(fixture({
+      deductions: [{
+        agreement_id: 7,
+        deduction_reference: 'agreement:7',
+        agreement_reference: 'agreement:7',
+        title: 'Spoření',
+        deduction_kind: 'other',
+        total_limit_minor: null,
+        priority_no: 1,
+        requested_minor: 200_000,
+        applied_minor: 0,
+        active: false,
+        unapplied_minor: 0,
+        accounting_unapplied_minor: 200_000,
+      }],
+    }))
+
+    const wrapper = mountBreakdown()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="deduction-suspended"]').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('payroll.runs.net.unapplied')
     expect(wrapper.find('[data-test="unapplied-reason"]').exists()).toBe(false)
     wrapper.unmount()
   })

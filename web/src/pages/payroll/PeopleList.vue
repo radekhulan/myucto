@@ -227,6 +227,12 @@ const personDeleteCascade = computed<string>(() => {
 
 const personDeleteBlocker = computed(() => selectedPerson.value?.delete_blocker ?? null)
 
+/**
+ * Smazání osoby se potvrzuje dál — vratné to není. Odchází s ní i všechno
+ * navázané (proto `person_cascade`) a znovu založená osoba by měla nové id,
+ * takže by se na ni nenapojily ani doklady, ani mzdové snímky. Dialog už
+ * pojmenovává osobu i to, co s ní odejde, takže tady zůstává beze změny.
+ */
 async function removePerson() {
   const person = selectedPerson.value
   if (!person || deletingPerson.value || !person.can_delete) return

@@ -221,7 +221,6 @@ final class PayrollEmployerPolicyApiTest extends TestCase
             $this->request('POST', $this->supplierId)->withParsedBody(
                 $this->payload([
                     'home_office_policy' => 'manual_review',
-                    'four_eyes_required' => false,
                 ]),
             ),
             new Response(),
@@ -337,10 +336,7 @@ final class PayrollEmployerPolicyApiTest extends TestCase
             'balance_rounding_mode' => 'exact_minor_units',
             'home_office_policy' => 'not_used',
             'travel_expense_policy' => 'not_used',
-            'four_eyes_required' => false,
-            'automatic_calculation_enabled' => false,
             'automatic_posting_enabled' => false,
-            'automatic_payments_enabled' => false,
             'delivery_channel' => 'disabled',
             'delivery_verified_on' => null,
             'source_kind' => 'manual',

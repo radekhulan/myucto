@@ -176,10 +176,7 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             $this->policyInput([
                 'home_office_policy' => 'not_used',
                 'travel_expense_policy' => 'not_used',
-                'four_eyes_required' => false,
-                'automatic_calculation_enabled' => false,
                 'automatic_posting_enabled' => false,
-                'automatic_payments_enabled' => false,
                 'delivery_channel' => 'disabled',
                 'delivery_verified_on' => null,
             ]),
@@ -213,10 +210,7 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             $this->policyInput([
                 'home_office_policy' => 'manual_review',
                 'travel_expense_policy' => 'not_used',
-                'four_eyes_required' => false,
-                'automatic_calculation_enabled' => false,
                 'automatic_posting_enabled' => false,
-                'automatic_payments_enabled' => false,
                 'delivery_channel' => 'disabled',
                 'delivery_verified_on' => null,
             ]),
@@ -230,10 +224,7 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             new PayrollSetupFeatures(
                 homeOffice: true,
                 travelExpenses: true,
-                fourEyes: true,
-                automaticCalculation: true,
                 automaticPosting: true,
-                automaticPayments: true,
                 secureDelivery: true,
                 jmhz: true,
                 activeApproverCount: 1,
@@ -246,9 +237,7 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
         self::assertEqualsCanonicalizing([
             'home_office_policy',
             'travel_expense_policy',
-            'automatic_calculation',
             'automatic_posting',
-            'automatic_payments',
             'secure_delivery',
             // `jmhz_certificate` mezi blokátory NENÍ schválně: produkční
             // endpoint VREP není doložený, takže se z aplikace ostře stejně
@@ -274,10 +263,7 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             new PayrollSetupFeatures(
                 homeOffice: true,
                 travelExpenses: true,
-                fourEyes: true,
-                automaticCalculation: true,
                 automaticPosting: true,
-                automaticPayments: true,
                 secureDelivery: true,
                 jmhz: true,
                 activeApproverCount: 2,
@@ -380,10 +366,7 @@ final class PayrollEmployerPolicySetupCheckTest extends TestCase
             'balance_rounding_mode' => 'exact_minor_units',
             'home_office_policy' => 'configured',
             'travel_expense_policy' => 'configured',
-            'four_eyes_required' => true,
-            'automatic_calculation_enabled' => true,
             'automatic_posting_enabled' => true,
-            'automatic_payments_enabled' => true,
             'delivery_channel' => 'employee_portal',
             'delivery_verified_on' => '2025-12-15',
             'source_kind' => 'manual',

@@ -25,10 +25,7 @@ final class PayrollInputImportService
         string $content,
     ): array {
         $periodStart = $this->period($period);
-        $format = strtolower(trim($format));
-        if (!in_array($format, ['csv', 'xlsx'], true)) {
-            throw new \InvalidArgumentException('Formát musí být csv nebo xlsx.');
-        }
+        $format = $this->format($format);
         $sourceName = $this->sourceName($sourceName);
         $parsed = $this->parser->parse($format, $content);
         $valid = [];
@@ -179,7 +176,16 @@ final class PayrollInputImportService
         string $content,
         ?int $userId,
     ): array {
+        /*
+         * Tvar vstupu se ověřuje PŘED hledáním obsahového otisku. Idempotence
+         * se smí uplatnit jen na požadavek, který by jinak prošel: kdyby se
+         * hash hledal dřív, replay se stejným obsahem a nesmyslným formátem
+         * (nebo obdobím či názvem souboru) by místo odmítnutí vydal uložený
+         * import — vstupní brána dat by tak validaci obešla opakováním.
+         */
         $periodStart = $this->period($period);
+        $this->format($format);
+        $this->sourceName($sourceName);
         $contentHash = hash('sha256', $content, true);
         $existing = $this->imports->findByHash($supplierId, $periodStart, $contentHash);
         if ($existing !== null) {
@@ -305,6 +311,16 @@ final class PayrollInputImportService
             'source_kind' => 'import',
             'external_id' => $externalId,
         ];
+    }
+
+    private function format(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        if (!in_array($normalized, ['csv', 'xlsx'], true)) {
+            throw new \InvalidArgumentException('Formát musí být csv nebo xlsx.');
+        }
+
+        return $normalized;
     }
 
     private function period(string $value): string

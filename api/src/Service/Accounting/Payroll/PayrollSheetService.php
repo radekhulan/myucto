@@ -85,15 +85,24 @@ final class PayrollSheetService
                 'taxpayer_type'       => $employee['taxpayer_type'],
                 'tax_credit_taxpayer' => $employee['tax_credit_taxpayer'],
                 'child_count'         => $employee['child_count'],
-                // Rodné číslo má přednost (§38j odst. 2 písm. a) ZDP); chybí-li, náhradou
-                // je datum narození. Předpočteno tady, aby šablona neřešila Twig `default`
-                // footgun s explicitním NULL (default filtr bez `true` substituuje jen
-                // nedefinované, ne skutečně NULL hodnoty).
-                'birth_id_label'      => $employee['birth_number'] !== null ? 'Rodné číslo' : 'Datum narození',
-                'birth_id_value'      => $employee['birth_number']
-                    ?? ($employee['birth_date'] !== null
-                        ? (new \DateTimeImmutable($employee['birth_date']))->format('d.m.Y')
-                        : '—'),
+                /*
+                 * §38j odst. 2 písm. a) ZDP dává na mzdovém listu přednost
+                 * rodnému číslu. Touhle routou k němu ale VEDE CESTA ŽÁDNÁ:
+                 * `PayrollEmployeeRepository` sloupec `birth_number` od W1/P-02
+                 * ani nečte (legacy agenda je chráněná jen právem `accounting`,
+                 * takže by plné rodné číslo viděl i uživatel bez mzdových práv).
+                 * Kód tu přesto na klíč `birth_number` sahal, jenže ten už v
+                 * poli není — každé vykreslení mzdového listu proto vyhodilo
+                 * „Undefined array key" a stejně skončilo u data narození.
+                 * Náhrada je tedy jediná možnost, ne varianta: hlásí se rovnou
+                 * a bez varování. Rodné číslo na mzdovém listu umí nový mzdový
+                 * modul, který ho čte zapečetěné z `payroll_person_identifiers`
+                 * a odhalení eviduje.
+                 */
+                'birth_id_label'      => 'Datum narození',
+                'birth_id_value'      => $employee['birth_date'] !== null
+                    ? (new \DateTimeImmutable($employee['birth_date']))->format('d.m.Y')
+                    : '—',
             ],
             'rows'           => $rows,
             'totals'         => $totals,
@@ -115,7 +124,10 @@ final class PayrollSheetService
 
         return [
             'name'        => (string) ($row['company_name'] ?? ''),
-            'ico'         => $row['ic'] !== null && $row['ic'] !== '' ? (string) $row['ic'] : null,
+            // `?: []` výš počítá s tím, že firma nemusí existovat — pak ale
+            // v řádku není ani klíč `ic`. Podmínka na něj proto sahá přes `??`,
+            // jinak si prázdný řádek vyžádá „Undefined array key".
+            'ico'         => ($row['ic'] ?? '') !== '' ? (string) $row['ic'] : null,
             'address'     => implode(', ', $addressParts),
             'prepared_at' => (new \DateTimeImmutable())->format('d.m.Y H:i'),
         ];

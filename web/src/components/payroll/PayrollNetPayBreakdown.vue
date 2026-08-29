@@ -225,7 +225,14 @@ watch(
                 {{ t('payroll.runs.net.priority', { priority: deduction.priority_no }) }}
                 · {{ t(`payroll.deductions.kinds.${deduction.deduction_kind}`) }}
               </p>
-              <p v-if="deduction.unapplied_minor" class="mt-0.5 text-xs text-warning-700">
+              <p
+                v-if="deduction.active === false"
+                class="mt-0.5 text-xs text-neutral-500"
+                data-test="deduction-suspended"
+              >
+                {{ t('payroll.runs.net.deduction_suspended') }}
+              </p>
+              <p v-else-if="deduction.unapplied_minor" class="mt-0.5 text-xs text-warning-700">
                 {{ t('payroll.runs.net.unapplied', { value: money(deduction.unapplied_minor) }) }}
               </p>
               <p

@@ -484,6 +484,81 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         self::assertNull($breakdown['enforcement_evidence_source']);
     }
 
+    /**
+     * Nález E-17: pozastavená dohoda nesmí v rozkladu vypadat jako schodek.
+     *
+     * `unapplied_minor_units` ve zmrazeném snímku je ÚČETNÍ zbytek, na kterém
+     * stojí invariant `unapplied === requested − applied` — u pozastavené dohody
+     * se proto rovná celé nárokované částce. Read model to vypisoval syrově,
+     * takže obrazovka tvrdila „neuplatněno 500 Kč", ačkoli se v tom měsíci
+     * srážet vůbec nemělo. Schodek vůči věřiteli je nula; účetní zbytek se
+     * vydává zvlášť, aby se dal invariant ověřit i z odpovědi.
+     */
+    public function testSuspendedDeductionReportsNoShortfallInTheReadModel(): void
+    {
+        $agreement = $this->createAgreement('Stravenky', 50_000);
+        $revisionId = $this->approveRevision([
+            $this->personFixture(
+                $this->employeeId,
+                'Synteticka Osoba A',
+                $agreement,
+                50_000,
+                7,
+                activeDeduction: false,
+            ),
+        ]);
+
+        $breakdown = $this->results->breakdown(
+            $this->supplierId,
+            $revisionId,
+            $this->employeeId,
+        );
+
+        self::assertCount(1, $breakdown['deductions']);
+        $deduction = $breakdown['deductions'][0];
+        self::assertFalse($deduction['active']);
+        self::assertSame(50_000, $deduction['requested_minor']);
+        self::assertSame(0, $deduction['applied_minor']);
+        self::assertSame(0, $deduction['unapplied_minor']);
+        self::assertSame(50_000, $deduction['accounting_unapplied_minor']);
+    }
+
+    /**
+     * Aktivní dohoda, na kterou nezbylo, schodek vykázat MUSÍ — jinak by oprava
+     * E-17 umlčela i případ, kvůli kterému údaj existuje.
+     */
+    public function testActiveDeductionStillReportsItsShortfall(): void
+    {
+        $agreement = $this->createAgreement('Stravenky', 5_000_000);
+        $revisionId = $this->approveRevision([
+            $this->personFixture(
+                $this->employeeId,
+                'Synteticka Osoba A',
+                $agreement,
+                5_000_000,
+                7,
+            ),
+        ]);
+
+        $breakdown = $this->results->breakdown(
+            $this->supplierId,
+            $revisionId,
+            $this->employeeId,
+        );
+
+        $deduction = $breakdown['deductions'][0];
+        self::assertTrue($deduction['active']);
+        self::assertGreaterThan(0, $deduction['unapplied_minor']);
+        self::assertSame(
+            $deduction['accounting_unapplied_minor'],
+            $deduction['unapplied_minor'],
+        );
+        self::assertSame(
+            $deduction['requested_minor'] - $deduction['applied_minor'],
+            $deduction['accounting_unapplied_minor'],
+        );
+    }
+
     public function testNetResultApiRejectsPersonOutsideTheRevision(): void
     {
         $agreement = $this->createAgreement('Stravenky', 50_000);
@@ -538,6 +613,7 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         int $accountId,
         bool $splitPayout = false,
         ?array $evidenceSource = null,
+        bool $activeDeduction = true,
     ): array {
         // Kanonický tvar reference z pipeline. Fixtura tu dřív psala holé id,
         // takže rozklad čisté mzdy vycházel zeleně na tvaru, jaký ostrý běh
@@ -560,7 +636,7 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
                     100,
                     $requestedMinor,
                     null,
-                    true,
+                    $activeDeduction,
                 ),
             ],
         ));

@@ -858,7 +858,7 @@
             "manual_review_action": "What to do:",
             "open": "Open",
             "reset": "Restore verified value",
-            "reset_confirm": "Really discard the manual override and return to the verified built-in set?",
+            "reset_confirm": "Discard the manual override of the {domain} domain (version {version}) and return to the verified built-in set? The entered values are overwritten and cannot be brought back.",
             "reset_done": "Restored to the verified set.",
             "reset_default_reason": "Return to the verified built-in set.",
             "checksum_invalid": "Invalid checksum",
@@ -1120,6 +1120,7 @@
                 "actions": "Actions",
                 "revision": "Revision {revision}",
                 "item_count": "{count} items",
+                "shifted_from_statutory": "Statutory due date {date} — the order goes out earlier so the amount is credited in time.",
                 "manual": "A manual cash payment does not require a bank file.",
                 "no_export": "No export has been generated yet.",
                 "generate": "Generate export",
@@ -1402,6 +1403,7 @@
                 "deductions_title": "Deductions by order",
                 "priority": "Order {priority}",
                 "unapplied": "Not applied: {value}",
+                "deduction_suspended": "The agreement was suspended this month, so nothing was withheld under it. This is not a shortfall towards the creditor.",
                 "unapplied_unattested": "The protected amount rests on an allowance nobody documented ({claim}). A deduction agreement may not draw on it, so nothing was withheld — this is not a shortage of room in the net pay. Documenting the allowance restores the cap.",
                 "unapplied_unattested_claim": {
                     "dependants": "dependants",
@@ -2794,8 +2796,8 @@
             "delete": {
                 "action": "Delete relationship",
                 "person_action": "Delete employee",
-                "confirm": "This deletes the employment relationship including {summary}. This action cannot be undone.",
-                "confirm_empty": "This deletes the employment relationship. This action cannot be undone.",
+                "confirm": "This deletes employment {code} including {summary}. This action cannot be undone.",
+                "confirm_empty": "This deletes employment {code}. This action cannot be undone.",
                 "person_confirm": "This deletes the employee {name} including {summary}. This action cannot be undone.",
                 "person_confirm_empty": "This deletes the employee {name}. This action cannot be undone.",
                 "done": "The employment relationship has been deleted.",
@@ -3517,6 +3519,7 @@
                 "archived": "Archive the ended employment relationship?",
                 "no_show": "Confirm that the worker did not start?"
             },
+            "transition_confirm_for": "{question}\n\nEmployment: {code}, effective {date}",
             "insurance_mode": {
                 "automatic": "Automatic from rules",
                 "included": "Participating",
@@ -4739,6 +4742,8 @@
                     "submitted": "Are you confirming submission through the official interface only? This will not fulfil the obligation yet.",
                     "accepted": "Do you confirm that the selected document actually proves the authority accepted the ELDP?"
                 },
+                "confirmFor": "{question}\n\nELDP: {employment}, year {year}",
+                "employmentUnknown": "no employment selected",
                 "saved": {
                     "submitted": "Submission was evidenced. The obligation is awaiting acceptance confirmation.",
                     "accepted": "Authority acceptance was evidenced and the ELDP obligation is fulfilled."
@@ -4960,12 +4965,9 @@
                 "leave_entitlement_weeks_hint": "At least 4 weeks; 5 is a common company allowance. An employment-level exception can override it.",
                 "automation": "Automation",
                 "automation_title": "Approval and automated steps",
-                "automatic_calculation": "Calculate automatically",
+                "automation_hint": "Automatic posting turned off does not mean nothing is posted — you simply trigger the posting of an approved revision yourself. Calculation and payment preparation are always started manually.",
                 "automatic_posting": "Post automatically",
-                "automatic_payments": "Prepare payments automatically",
-                "auto_calculation_short": "calculation",
                 "auto_posting_short": "posting",
-                "auto_payments_short": "payments",
                 "delivery_channel": "Secure delivery channel",
                 "delivery_verified_on": "Channel verified on",
                 "source_reference": "Approved source reference (optional)",
@@ -5017,17 +5019,9 @@
                         "ok": "The travel-expense policy is configured.",
                         "blocked": "Travel expenses require a completed policy."
                     },
-                    "automatic_calculation": {
-                        "ok": "Automatic calculation is allowed by policy.",
-                        "blocked": "Automatic calculation is not allowed by the effective policy."
-                    },
                     "automatic_posting": {
                         "ok": "Automatic posting is allowed by policy.",
                         "blocked": "Automatic posting is not allowed by the effective policy."
-                    },
-                    "automatic_payments": {
-                        "ok": "Automatic payment preparation is allowed by policy.",
-                        "blocked": "Automatic payment preparation is not allowed by the effective policy."
                     },
                     "secure_delivery": {
                         "ok": "The secure delivery channel is verified.",
@@ -5232,7 +5226,6 @@
             "enable": "Start setup",
             "enabled": "The payroll module has been enabled.",
             "disable": "Cancel payroll setup",
-            "disable_confirm": "Cancel payroll setup? No payroll data will be deleted.",
             "disabled": "Payroll setup has been cancelled.",
             "failed": "The payroll activation could not be saved.",
             "conflict": "Another user changed the settings. The current state has been reloaded.",
@@ -5645,7 +5638,8 @@
             "instruction_bound": "The record is bound to immutable payment instruction #{id}.",
             "explicit_cancel_required": "An approved instruction cannot be cancelled by changing the mode. Use the separate Cancel approved debt relief button.",
             "cancel": "Cancel approved debt relief",
-            "cancel_confirm": "Cancel this unused debt-relief payment instruction?",
+            "cancel_confirm": "Cancel the unused debt-relief payment instruction for {period} on employment {employment}? The approval is withdrawn and this cannot be undone.",
+            "employment_unknown": "no employment selected",
             "cancelled": "The unused approved debt relief was cancelled.",
             "cancel_failed": "The approved debt relief could not be cancelled.",
             "saved": "The debt-relief record was saved.",
@@ -5723,7 +5717,7 @@
             "case_created": "The deduction case was created.",
             "case_deleted": "The accidentally created case was deleted.",
             "delete_case": "Delete accidentally created case",
-            "delete_confirm": "Delete this case with no claim or downstream records? This action cannot be undone.",
+            "delete_confirm": "Delete the {kind} case for {name}? The case has no claim or downstream records and the deletion cannot be undone.",
             "delete_blocked": {
                 "claim_exists": "The case already contains a claim. Keep its history and stop or close the case through the standard workflow.",
                 "event_exists": "The case already has a legally significant status change. Keep its history and use the stop or close workflow.",
@@ -5741,7 +5735,7 @@
             "claim_not_found": "The claim is no longer in the case. Refresh the detail.",
             "edit_claim": "Correct draft claim",
             "save_claim_changes": "Save correction",
-            "delete_claim_confirm": "Do you really want to delete this draft claim? This cannot be undone.",
+            "delete_claim_confirm": "Delete the draft {category} claim with an outstanding balance of {amount}? This cannot be undone.",
             "claim_change_blocked": {
                 "case_started": "A claim can only be corrected or deleted before withholding starts. Keep an active case in the audit history.",
                 "allocation_exists": "The claim has entered a payroll calculation. It cannot be overwritten or deleted; create a follow-up correction.",
@@ -6006,7 +6000,8 @@
                     "resume_remittance": "Resume withholding and remittance?",
                     "mark_paid": "Mark the zero-balance case as paid?",
                     "stop": "Select the decision and provide a reason for stopping the case."
-                }
+                },
+                "confirm_for": "{question}\n\nCase: {name}"
             },
             "recipient_account": "Deduction recipient (payment account catalogue)",
             "recipient_account_none": "Not selected",
@@ -6180,8 +6175,10 @@
             "policy_reason_placeholder": "E.g. internal policy, contractual obligation or pending dispute.",
             "policy_saved": "Deviation saved.",
             "policy_delete": "Remove deviation",
-            "policy_delete_confirm": "Remove the company deviation? The period returns to the catalogue value.",
             "policy_deleted": "Deviation removed.",
+            "policy_deleted_named": "Deviation for “{label}” removed.",
+            "policy_restored": "Deviation for “{label}” restored.",
+            "hold_subject_company": "the whole company",
             "holds_title": "Erasure holds",
             "no_holds": "No hold in place",
             "no_holds_hint": "A hold keeps a person's data even after the period elapses — because of an audit, dispute, enforcement or insolvency. Company-wide holds are entered in Accounting and apply to payroll too.",
@@ -6198,7 +6195,7 @@
             "hold_description_required": "Enter the case number or a description — without it the hold cannot be evidenced.",
             "hold_description_placeholder": "E.g. audit reference, case number or description of the proceedings.",
             "hold_placed": "Hold recorded.",
-            "hold_release_confirm": "Release the hold? Erasure of the person can then be proposed and carried out again.",
+            "hold_release_confirm": "Release the “{reason}” hold on {subject}? Erasure can then be proposed and carried out again, and this cannot be undone.",
             "hold_released": "Hold released.",
             "hold_reason": {
                 "tax_audit": "tax audit",

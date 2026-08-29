@@ -172,7 +172,20 @@ async function completeManually(): Promise<void> {
   if (!canComplete.value || statement.value === null || manualCompletion.value === null
     || confirmationDocument.value === null
   ) return
-  if (!window.confirm(t(`payroll.eldp.manual.confirm.${authorityStatus.value}`))) return
+  /*
+   * Dialog tady zůstává: doložením se tvrdí, co se stalo VENKU, u ČSSZ.
+   * Aplikace to nemůže vzít zpět — evidenci nelze smazat a nepravdivé doložení
+   * by prohlásilo povinnost za splněnou. Musí ale říct, čeho se týká: panel se
+   * přepíná mezi vztahy i roky a doložení u špatného ELDP vypadá při obecné
+   * otázce stejně jako u správného.
+   */
+  const employment = employmentOptions.value
+    .find(option => option.value === employmentId.value)
+  if (!window.confirm(t('payroll.eldp.manual.confirmFor', {
+    question: t(`payroll.eldp.manual.confirm.${authorityStatus.value}`),
+    employment: employment?.label ?? t('payroll.eldp.manual.employmentUnknown'),
+    year: year.value,
+  }))) return
 
   completing.value = true
   completionError.value = ''

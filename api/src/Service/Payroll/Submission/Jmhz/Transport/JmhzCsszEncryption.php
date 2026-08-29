@@ -57,8 +57,12 @@ final class JmhzCsszEncryption
     {
         $root = $this->resourceRoot ?? dirname(__DIR__, 6) . '/resources/payroll/jmhz';
         $path = $root . DIRECTORY_SEPARATOR . self::RELATIVE_PATH;
-        $pem = file_get_contents($path);
-        if ($pem === false) {
+        // Chybějící nebo nečitelný certifikát je tady OČEKÁVANÝ stav (chybná
+        // instalace) a odpovědí na něj je JmhzTransportException. Bez potlačení
+        // by se navrch vysypal ještě PHP warning s absolutní cestou — do logu
+        // i do odpovědi, podle nastavení display_errors.
+        $pem = @file_get_contents($path);
+        if (!is_string($pem) || $pem === '') {
             throw new JmhzTransportException(
                 'jmhz_encryption_certificate_missing',
                 'Šifrovací certifikát ČSSZ není v aplikaci k dispozici.',

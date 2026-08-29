@@ -3054,10 +3054,13 @@ export interface PayrollEmployerPolicy {
   home_office_policy: PayrollOptionalPolicyState
   travel_expense_policy: PayrollOptionalPolicyState
   leave_entitlement_weeks: number
-  four_eyes_required: boolean
-  automatic_calculation_enabled: boolean
+  /**
+   * Jediný přepínač automatiky, který něco dělá: schválená revize se zaúčtuje
+   * sama. Vypnutý znamená „účetní si zaúčtování vyvolá sama", ne „neúčtuje se".
+   * Automatický výpočet a automatická příprava plateb tu bývaly taky, ale
+   * nikdo je nečetl — přepínač přijde až s funkcí.
+   */
   automatic_posting_enabled: boolean
-  automatic_payments_enabled: boolean
   delivery_channel: PayrollDeliveryChannel
   delivery_verified_on: string | null
   source_kind: PayrollPolicySourceKind

@@ -542,10 +542,10 @@ final class PayrollSettingsDeletionApiTest extends TestCase
             "INSERT INTO payroll_employer_policies
                 (supplier_id, valid_from, valid_to, payday_day, payday_month_offset,
                  payday_business_day_rule, balance_rounding_mode, home_office_policy,
-                 travel_expense_policy, four_eyes_required, delivery_channel,
+                 travel_expense_policy, delivery_channel,
                  delivery_verified_on, source_kind)
              VALUES (?, ?, ?, 15, 1, 'previous_business_day', 'nearest_crown', 'not_used',
-                     'not_used', 1, 'disabled', NULL, 'manual')"
+                     'not_used', 'disabled', NULL, 'manual')"
         )->execute([$this->supplierId, $validFrom, $validTo]);
 
         return (int) $this->db->pdo()->lastInsertId();

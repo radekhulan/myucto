@@ -409,9 +409,19 @@ async function loadImpactPreview() {
   }
 }
 
+/**
+ * Návrat k ověřené sadě se potvrzuje dál — vratné to není. Ruční hodnoty se
+ * přepíšou dodanými a aplikace si je nikam neodkládá; „vzít zpět" by znamenalo
+ * zadat je znovu ručně. Dialog proto pojmenuje doménu a verzi: pravidla se
+ * otevírají v panelu nad seznamem a obecné „opravdu?" nad špatně vybranou
+ * doménou vypadá stejně jako nad správnou.
+ */
 async function resetToDefault() {
   if (!detail.value) return
-  if (!window.confirm(t('payroll.rulesets.reset_confirm'))) return
+  if (!window.confirm(t('payroll.rulesets.reset_confirm', {
+    domain: t(`payroll.rulesets.domain.${detail.value.domain}`),
+    version: detail.value.version,
+  }))) return
   saving.value = true
   try {
     const result = await payrollRulesetsApi.reset(
