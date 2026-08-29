@@ -11,6 +11,7 @@ final class EpoSubmissionService
 {
     private const SUPPORTED_FORMS = [
         'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9',
+        'dpzvd6', 'dpsvd2', 'dpzmb1', 'dpzdb1',
     ];
 
     /**

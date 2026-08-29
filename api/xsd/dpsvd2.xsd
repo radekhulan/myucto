@@ -1,0 +1,952 @@
+<?xml version="1.0" encoding="utf-8"?><xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" attributeFormDefault="unqualified" elementFormDefault="unqualified">
+  <xs:simpleType xmlns:xalan="http://xml.apache.org/xslt" name="dateInMultiFormat">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="(([1-9])|((0[1-9])|([12][0-9]))|(3[0-1]))\.((0?[1-9])|(1[0-2]))\.((19[0-9]{2})|(2[0-9]{3}))"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:element xmlns:xalan="http://xml.apache.org/xslt" name="Pisemnost">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="DPSVD2">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element maxOccurs="1" minOccurs="1" name="VetaD">
+                <xs:complexType>
+                  <xs:attribute name="kc_dpsii02" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2013&lt;br /&gt;neobsazeno&lt;br /&gt;&lt;br /&gt;do 2012&lt;br /&gt;Uveďte úhrn částek upravujících sraženou daň (&lt;strong&gt;hodnota ze sloupce 8 řádku 13 v části I.&lt;/strong&gt;).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zdobd_od" type="dateInMultiFormat" use="required">
+                    <xs:annotation>
+                      <xs:documentation>vyplňte počátek zdaňovacího období.&lt;br /&gt;Položka obsahuje kritické kontroly: Je kontrolována přípustnost kombinace kódu rozlišení (k_rozl) a roku počátku zdaň. období. Přípustné kombinace jsou stejné jako u konce zdaň. období (viz popis položky zdobd_do). Datum počátku ZO nesmí být větší než aktuální datum.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsii01" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte úhrn částek daně, která měla být sražena (&lt;strong&gt;hodnota ze sloupce 1 řádku 13 v části I.&lt;/strong&gt;)</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="k_rozl" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2025&lt;br /&gt;Kód rozlišení důvodu pro podání Vyúčtování vyplňte pouze v níže uvedených případech a učiňte podání v uvedených lhůtách:&lt;br /&gt;&lt;strong&gt;A&lt;/strong&gt; – do 30 dnů ode dne účinnosti rozhodnutí o úpadku, a to za část zdaňovacího období, která uplynula do dne předcházejícího účinnosti tohoto rozhodnutí a za kterou dosud nebylo podáno (§ 244 odst. 1 daňového řádu),&lt;br /&gt;&lt;strong&gt;B&lt;/strong&gt; – do 15 dnů ode dne předložení konečné zprávy, a to za uplynulou část zdaňovacího období, za kterou dosud nebylo podáno (§ 244 odst. 3 a 4 daňového řádu),&lt;br /&gt;&lt;strong&gt;G&lt;/strong&gt; – za předcházející zdaňovací období, pokud nebylo Vyúčtování dosud podáno a původní lhůta pro jeho podání dosud neuplynula (§ 245&lt;br /&gt;daňového řádu), a to z důvodů a ve lhůtách uvedených pod příslušnými písmeny. Např. GA – za předcházející zdaňovací období, pokud nebylo Vyúčtování dosud podáno a původní lhůta pro jeho podání dosud neuplynula, a to do 30 dnů ode dne účinnosti rozhodnutí o úpadku,&lt;br /&gt;&lt;strong&gt;H&lt;/strong&gt; – za zbývající část zdaňovacího období, na které se nevztahovalo podání Vyúčtování v případech uvedených v 01c, a to ve lhůtě do 3 měsíců po uplynutí kalendářního roku (§ 137 odst. 2 daňového řádu),&lt;br /&gt;&lt;strong&gt;I&lt;/strong&gt; – do 3 měsíců ode dne smrti zůstavitele, a to za část zdaňovacího období, která uplynula přede dnem jeho smrti. Povinnost plní osoba spravující pozůstalost (§ 239b odst. 4 daňového řádu),&lt;br /&gt;&lt;strong&gt;J&lt;/strong&gt; – do 30 dnů ode dne zániku právnické osoby bez likvidace, a to za část zdaňovacího období, která uplynula přede dnem jejího zániku (§ 240a daňového řádu). Není-li právního nástupce, plní tuto povinnost zřizovatel či zakladatel (defi nice právního nástupce – viz § 240 odst. 2 daňového řádu).&lt;br /&gt;&lt;strong&gt;K&lt;/strong&gt; – do 30 dnů ode dne vstupu právnické osoby do likvidace, a to za část zdaňovacího období, která uplynula přede dnem jejího vstupu do likvidace (§ 240c odst. 2 daňového řádu),&lt;br /&gt;&lt;strong&gt;L&lt;/strong&gt; – do 15 dnů ode dne zpracování návrhu na použití likvidačního zůstatku, a to za část zdaňovacího období, která uplynula přede dnem zpracování tohoto návrhu (§ 240c odst. 3 daňového řádu),&lt;br /&gt;&lt;strong&gt;M&lt;/strong&gt; – do konce měsíce následujícího po měsíci, v němž byl plátce daně naposledy povinen odvést podle zákona „daň vybíranou srážkou“, popřípadě podat hlášení, z důvodu zániku této povinnosti před uplynutím kalendářního roku, a to za uplynulou část zdaňovacího období (§ 234 daňového řádu),&lt;br /&gt;&lt;strong&gt;N&lt;/strong&gt; – do 30 dnů ode dne skončení řízení o pozůstalosti, a to za část zdaňovacího období, která uplynula do dne předcházejícího dni skončení řízení o pozůstalosti. Povinnost plní osoba spravující pozůstalost (§ 239b odst. 5 daňového řádu),&lt;br /&gt;&lt;strong&gt;O&lt;/strong&gt; – do 15 dnů ode dne předložení řádné zprávy o zpeněžování majetku likvidační podstaty nebo jeho části soudu (v případě soudem nařízené likvidace pozůstalosti), a to za část zdaňovacího období, která uplynula přede dnem předložení této zprávy. Povinnost plní likvidační správce (§ 239c daňového řádu).,&lt;br /&gt;&lt;strong&gt;U&lt;/strong&gt; – do 15 dnů ode dne ukončení správy svěřenského fondu, a to za část zdaňovacího období, která uplynula přede dnem tohoto ukončení. Povinnost plní svěřenský správce (§ 240e odst. 2 daňového řádu).&lt;br /&gt;&lt;strong&gt;W&lt;/strong&gt; – do 15 dnů ode dne zániku svěřenského fondu, a to za část zdaňovacího období, která uplynula přede dnem tohoto zániku (§ 240e odst. 3 daňového řádu).&lt;br /&gt;&lt;br /&gt;od 2014&lt;br /&gt;Kód rozlišení důvodu pro podání Vyúčtování vyplňte pouze v níže uvedených případech a učiňte podání v uvedených lhůtách:&lt;br /&gt;&lt;strong&gt;A&lt;/strong&gt; – do 30 dnů ode dne účinnosti rozhodnutí o úpadku, a to za část zdaňovacího období, která uplynula do dne předcházejícího účinnosti tohoto rozhodnutí a za kterou dosud nebylo podáno (§ 244 odst. 1 daňového řádu),&lt;br /&gt;&lt;strong&gt;B&lt;/strong&gt; – do 15 dnů ode dne předložení konečné zprávy, a to za uplynulou část zdaňovacího období, za kterou dosud nebylo podáno (§ 244 odst. 3 a 4 daňového řádu),&lt;br /&gt;&lt;strong&gt;G&lt;/strong&gt; – za předcházející zdaňovací období, pokud nebylo Vyúčtování dosud podáno a původní lhůta pro jeho podání dosud neuplynula (§ 245&lt;br /&gt;daňového řádu), a to z důvodů a ve lhůtách uvedených pod příslušnými písmeny. Např. GA – za předcházející zdaňovací období, pokud nebylo Vyúčtování dosud podáno a původní lhůta pro jeho podání dosud neuplynula, a to do 30 dnů ode dne účinnosti rozhodnutí o úpadku,&lt;br /&gt;&lt;strong&gt;H&lt;/strong&gt; – za zbývající část zdaňovacího období, na které se nevztahovalo podání Vyúčtování v případech uvedených v 01c, a to ve lhůtě do 3 měsíců po uplynutí kalendářního roku (§ 137 odst. 2 daňového řádu),&lt;br /&gt;&lt;strong&gt;I&lt;/strong&gt; – do 3 měsíců ode dne smrti zůstavitele, a to za část zdaňovacího období, která uplynula přede dnem jeho smrti. Povinnost plní osoba spravující pozůstalost (§ 239b odst. 4 daňového řádu),&lt;br /&gt;&lt;strong&gt;J&lt;/strong&gt; – do 30 dnů ode dne zániku právnické osoby bez likvidace, a to za část zdaňovacího období, která uplynula přede dnem jejího zániku (§ 240a daňového řádu). Není-li právního nástupce, plní tuto povinnost zřizovatel či zakladatel (defi nice právního nástupce – viz § 240 odst. 2 daňového řádu).&lt;br /&gt;&lt;strong&gt;K&lt;/strong&gt; – do 30 dnů ode dne vstupu právnické osoby do likvidace, a to za část zdaňovacího období, která uplynula přede dnem jejího vstupu do likvidace (§ 240c odst. 2 daňového řádu),&lt;br /&gt;&lt;strong&gt;L&lt;/strong&gt; – do 15 dnů ode dne zpracování návrhu na použití likvidačního zůstatku, a to za část zdaňovacího období, která uplynula přede dnem zpracování tohoto návrhu (§ 240c odst. 3 daňového řádu),&lt;br /&gt;&lt;strong&gt;M&lt;/strong&gt; – do konce měsíce následujícího po měsíci, v němž byl plátce daně naposledy povinen odvést podle zákona „daň vybíranou srážkou“, popřípadě podat hlášení, z důvodu zániku této povinnosti před uplynutím kalendářního roku, a to za uplynulou část zdaňovacího období (§ 234 daňového řádu),&lt;br /&gt;&lt;strong&gt;N&lt;/strong&gt; – do 30 dnů ode dne skončení řízení o pozůstalosti, a to za část zdaňovacího období, která uplynula do dne předcházejícího dni skončení řízení o pozůstalosti. Povinnost plní osoba spravující pozůstalost (§ 239b odst. 5 daňového řádu),&lt;br /&gt;&lt;strong&gt;O&lt;/strong&gt; – do 15 dnů ode dne předložení řádné zprávy o zpeněžování majetku likvidační podstaty nebo jeho části soudu (v případě soudem nařízené likvidace pozůstalosti), a to za část zdaňovacího období, která uplynula přede dnem předložení této zprávy. Povinnost plní likvidační správce (§ 239c daňového řádu).&lt;br /&gt;&lt;br /&gt;do 2013&lt;br /&gt;Vyplňte jednu z následujících hodnot:&lt;br /&gt;&lt;strong&gt;A&lt;/strong&gt; – do 30 dnů ode dne účinnosti rozhodnutí o úpadku (§ 244 odst. 1 daňového řádu),&lt;br /&gt;  &lt;strong&gt;B&lt;/strong&gt; – do 15 dnů ode dne předložení konečné zprávy (§ 244 odst. 3 a 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;C&lt;/strong&gt; – do 15 dnů ode dne podání návrhu na zrušení konkursu (§ 244 odst. 3 a 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;D&lt;/strong&gt; – do 15 dnů ode dne zrušení konkursu (§ 244 odst. 3 a 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;E&lt;/strong&gt; – do 15 dnů ode dne splnění jiného způsobu řešení úpadku (§ 244 odst. 3 a 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;F&lt;/strong&gt; – do 15 dnů ode dne přechodu oprávnění nakládat s majetkem náležejícím do majetkové podstaty z insolvenčního správce na daňový subjekt a opačně (§ 244 odst. 4 a 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;G&lt;/strong&gt; – &lt;strong&gt;(A, B, C, D, E, F)&lt;/strong&gt; – za předcházející zdaňovací období, pokud nebylo Vyúčtování dosud podáno a původní lhůta pro jeho podání dosud neuplynula (§ 245 daňového řádu), a to z důvodů a ve lhůtách uvedených pod písmeny A–F, tzn. uveďte jednu z možných kombinací (GA, GB, GC, GD, GE, GF). Např. GA – za předcházející zdaňovací období, pokud nebylo Vyúčtování dosud podáno a původní lhůta pro jeho podání dosud neuplynula, a to do 30 dnů ode dne účinnosti rozhodnutí o úpadku,&lt;br /&gt;  &lt;strong&gt;H&lt;/strong&gt; – za zbývající část zdaňovacího období, na které se nevztahovalo podání Vyúčtování z předcházejících titulů, a to ve lhůtě do 3 měsíců po uplynutí kalendářního roku (§ 137 odst. 2 daňového řádu),&lt;br /&gt;  &lt;strong&gt;I&lt;/strong&gt; – do 6 měsíců od úmrtí zůstavitele dědic, na kterého přešla daňová povinnost (§ 239 odst. 3 daňového řádu),&lt;br /&gt;  &lt;strong&gt;J&lt;/strong&gt; – do konce následujícího měsíce po zániku právnické osoby bez likvidace, včetně zániku právnické osoby při přeměně obchodní společnosti. Není-li právního nástupce, plní tuto povinnost zřizovatel či zakladatel. Obdobně postupují subjekty se sídlem nebo bydlištěm v zahraničí při zrušení stálé provozovny na území České republiky (§ 240 odst. 4 daňového řádu),&lt;br /&gt;  &lt;strong&gt;K&lt;/strong&gt; – do 1 měsíce ode dne vstupu právnické osoby do likvidace, a to za uplynulou část zdaňovacího období, za kterou dosud nebylo podáno (§ 240 odst. 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;L&lt;/strong&gt; – ke dni zpracování návrhu na rozdělení likvidačního zůstatku právnické osoby, a to za uplynulou část zdaňovacího období, za kterou dosud nebylo podáno (§ 240 odst. 5 daňového řádu),&lt;br /&gt;  &lt;strong&gt;M&lt;/strong&gt; – do konce měsíce následujícího po měsíci, v němž byl plátce daně naposled povinen odvést daň, popřípadě podat hlášení, z důvodu zániku této povinnosti před uplynutím kalendářního roku, a to za uplynulou část zdaňovacího období (§ 234 odst. 3 daňového řádu).  </xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="lh_odv" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte datum zákonné lhůty pro podání daňového přiznání k dani z příjmů v průběhu zdaňovacího období (např. při vstupu do likvidace, úmrtí daňového subjektu apod.), pokud jste v období, za které předkládáte Vyúčtování, byli takové daňové přiznání povinni podat v souladu se zvláštním předpisem a měli jste odvést sraženou daň nejpozději do termínu pro podání tohoto daňového přiznání (§ 38d odst. 3 věta druhá zákona).&lt;br /&gt;Položka obsahuje kritické kontroly: zadaná hodnota musí být větší než datum zdaňovacího období od, zadaná hodnota musí být menší než datum zdaňovacího období do.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="c_ufo_cil" use="required">
+                    <xs:annotation>
+                      <xs:documentation>vyplňte zbývající část oficiálního názvu místně příslušného finančního úřadu (správce daně), v jehož územním obvodu máte v době podání adresu místa pobytu nebo sídlo.&lt;br /&gt;Pro hodnotu této položky použijte číselník Územní finanční orgány (ufo). Z číselníku se vkládá položka c_ufo.&lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být vyplněno číslo existujícího FÚ.&lt;br&gt;
+Pro popis číselníku Územní finanční orgány klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/ufo"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_ins" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2025&lt;br /&gt;Uveďte datum vztahující se k údaji na řádku 01c. Podle typu události se jedná o jedno z dat: účinnost rozhodnutí o úpadku (A), předložení konečné zprávy (B), datum úmrtí (I), zánik právnické osoby bez likvidace (J), vstup právnické osoby do likvidace (K), zpracování návrhu na použití likvidačního zůstatku právnické osoby (L), zánik povinnosti srážet daň před uplynutím kalendářního roku (M), skončení řízení o pozůstalosti (N), předložení řádné zprávy o zpeněžování majetku likvidační podstaty (O), ukončení správy svěřenského fondu (U), zánik svěřenského fondu (W).&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období se zahrnuje &lt;strong&gt;u kódů A, U a W povinnost za kalendářní měsíce (případně za část kalendářního měsíce) dané části zdaňovacího období (kalendářního roku), ve kterých plátci daně vznikla povinnost srazit daň (§ 38d odst. 1 a 2 zákona) ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování, a to bez ohledu na lhůtu pro odvod sražené daně. Pro kódy B, J, K, L, N, O platí, že se do Vyúčtování zahrnuje povinnost za celé kalendářní měsíce&lt;/strong&gt; dané části zdaňovacího období (kalendářního roku), a to bez ohledu na lhůtu pro odvod sražené daně ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování. &lt;strong&gt;Pokud je však oprávněný subjekt k podání Vyúčtování schopen uvést celkovou daňovou povinnost ke dni (tzn. jeho daňová povinnost je konečná), není nutné dodržet výše uvedené pravidlo ve vztahu k celému období – platí pro kódy J, L, N, O. U kódu M a I se jedná o podání ke dni.&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;od 2016&lt;br /&gt;Uveďte datum vztahující se k údaji na řádku 01c. Podle typu události se jedná o jedno z dat: účinnost rozhodnutí o úpadku (A), předložení konečné zprávy (B), datum úmrtí (I), zánik právnické osoby bez likvidace (J), vstup právnické osoby do likvidace (K), zpracování návrhu na použití likvidačního zůstatku právnické osoby (L), zánik povinnosti srážet daň před uplynutím kalendářního roku (M), skončení řízení o pozůstalosti (N), předložení řádné zprávy o zpeněžování majetku likvidační podstaty (O).&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období se zahrnuje &lt;strong&gt;u kódu A povinnost za kalendářní měsíce (případně za část kalendářního měsíce) dané části zdaňovacího období (kalendářního roku), ve kterých plátci daně vznikla povinnost srazit daň (§ 38d odst. 1 a 2 zákona) ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování, a to bez ohledu na lhůtu pro odvod sražené daně. Pro kódy B, J, K, L, N, O platí, že se do Vyúčtování zahrnuje povinnost za celé kalendářní měsíce&lt;/strong&gt; dané části zdaňovacího období (kalendářního roku), a to bez ohledu na lhůtu pro odvod sražené daně ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování. &lt;strong&gt;Pokud je však oprávněný subjekt k podání Vyúčtování schopen uvést celkovou daňovou povinnost ke dni (tzn. jeho daňová povinnost je konečná), není nutné dodržet výše uvedené pravidlo ve vztahu k celému období – platí pro kódy J, L, N, O. U kódu M a I se jedná o podání ke dni.&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;2015&lt;br /&gt;Uveďte datum vztahující se k údaji na řádku 01c. Podle typu události se jedná o jedno z dat: účinnost rozhodnutí o úpadku (A), předložení konečné zprávy (B), datum úmrtí (I), zánik právnické osoby bez likvidace (J), vstup právnické osoby do likvidace (K), zpracování návrhu na použití likvidačního zůstatku právnické osoby (L), zánik povinnosti srážet daň před uplynutím kalendářního roku (M), skončení řízení o pozůstalosti (N), předložení řádné zprávy o zpeněžování majetku likvidační podstaty (O).&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období se zahrnuje povinnost za celé kalendářní měsíce dané části zdaňovacího období (kalendářního roku) – platí pro kódy A (pouze pro části zdaňovacího období 2015), B, J, K, L, N, O, a to bez ohledu na lhůtu pro odvod sražené daně ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování. &lt;strong&gt;Pokud je však oprávněný subjekt k podání Vyúčtování schopen uvést celkovou daňovou povinnost ke dni (tzn. jeho daňová povinnost je konečná), není nutné dodržet výše uvedené pravidlo ve vztahu k celému období – platí pro kódy J, L, N, O. U kódu M a I se jedná o podání ke dni.&lt;/strong&gt;&lt;br /&gt;&lt;strong&gt;U kódu A se od části zdaňovacího období 2016 do Vyúčtování podávaných za část zdaňovacího období zahrnuje povinnost za kalendářní měsíce (případně za část kalendářního měsíce) dané části zdaňovacího období (kalendářního roku) ve kterých plátci daně vznikla povinnost srazit daň (§ 38d odst. 1 a 2 zákona) ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování, a to bez ohledu na lhůtu pro odvod sražené daně.&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;2014&lt;br /&gt;Uveďte datum vztahující se k údaji na řádku 01c. Podle typu události se jedná o jedno z dat: účinnost rozhodnutí o úpadku (A), předložení konečné zprávy (B), datum úmrtí (I), zánik právnické osoby bez likvidace (J), vstup právnické osoby do likvidace (K), zpracování návrhu na použití likvidačního zůstatku právnické osoby (L), zánik povinnosti srážet daň před uplynutím kalendářního roku (M), skončení řízení o pozůstalosti (N), předložení řádné zprávy o zpeněžování majetku likvidační podstaty (O).&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období se zahrnuje povinnost za celé kalendářní měsíce dané části zdaňovacího období (kalendářního roku) – platí pro kódy A, B, J, K, L, N, O, a to bez ohledu na lhůtu pro odvod sražené daně ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování. &lt;strong&gt;Pokud je však oprávněný subjekt k podání Vyúčtování schopen uvést celkovou daňovou povinnost ke dni (tzn. jeho daňová povinnost je konečná), není nutné dodržet výše uvedené pravidlo ve vztahu k celému zálohovému období – platí pro kódy J, L, N, O. U kódu M a I se jedná o podání ke dni.&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;do 2013&lt;br /&gt;Uveďte datum vztahující se k údaji na řádku 01c. Podle typu události se jedná o jedno z dat: účinnost rozhodnutí o úpadku (A, G), předložení konečné zprávy (B, G), podání návrhu na zrušení konkursu (C, G), zrušení konkursu (D, G), splnění jiného způsobu řešení úpadku (E, G), přechod oprávnění nakládat s majetkem náležejícím do majetkové podstaty z insolvenčního správce na daňový subjekt a opačně (F, G), datum úmrtí (I), zánik právnické osoby bez likvidace včetně právnické osoby při přeměně obchodní společnosti (J), vstup právnické osoby do likvidace (K), zpracování návrhu na rozdělení likvidačního zůstatku právnické osoby (L), zánik povinnosti srážet zálohu na daň před uplynutím kalendářního roku (M).&lt;br /&gt;&lt;br /&gt;&lt;strong&gt;Upozornění pro části zdaňovacího období 2013:&lt;/strong&gt;&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období se zahrnuje povinnost za celé kalendářní měsíce dané části zdaňovacího období (kalendářního roku), a to bez ohledu na lhůtu pro odvod sražené daně ve vztahu ke dni úkonu či skutečnosti, která zakládá povinnost podat Vyúčtování.&lt;br /&gt;&lt;br /&gt;&lt;strong&gt;Upozornění pro části zdaňovacího období 2012:&lt;/strong&gt;&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období 2012 se zahrnuje daňová povinnost pouze za ty celé kalendářní měsíce dané části zdaňovacího období (roku), za které již podle zákona uplynula lhůta pro odvod daně a konec této lhůty předchází den, uvedený pod 01d (tj. den úkonu či skutečnosti zakládající povinnost podání Vyúčtování, v tiskopisu uvedeno pod písmeny A–F a J–L).&lt;br /&gt;&lt;br /&gt;&lt;strong&gt;Upozornění pro části zdaňovacího období 2011:&lt;/strong&gt;&lt;br /&gt;Do Vyúčtování podávaných za část zdaňovacího období se zahrnuje daňová povinnost pouze za ty celé kalendářní měsíce dané části zdaňovacího období (roku), za které již podle zákona uplynula lhůta pro odvod daně a konec této lhůty předchází den, uvedený pod 01d (tj. den úkonu či skutečnosti zakládající povinnost podání Vyúčtování, v tiskopisu uvedeno pod písmeny A–F a J-L).Položka obsahuje kritickou kontrolu: u kódů rozlišení A-F musí být měsíc z data o 2 vyšší než měsíc z data konce zdaňovacího období.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="zdobd_do" type="dateInMultiFormat" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Vyplňte konec zdaňovacího období.&lt;br /&gt;Položka obsahuje kritické kontroly: Datum musí být větší nebo rovno datumu počátku zdaňovacího období, rok musí být shodný s rokem data počátku zdaňovacího období; musí být menší nebo rovno aktuálnímu datu; Je kontrolována přípustnost kombinace kódu rozlišení (k_rozl) a roku konce zdaň. období. Přípustné kombinace jsou:&lt;br /&gt;A: 2010 až (akt. rok)&lt;br /&gt;B: 2010 až (akt. rok)&lt;br /&gt;C: 2010 až 2013&lt;br /&gt;D: 2010 až 2013&lt;br /&gt;E: 2010 až 2013&lt;br /&gt;F: 2010 až 2013&lt;br /&gt;GA: 2010 až (akt. rok - 1)&lt;br /&gt;GB: 2010 až (akt. rok - 1)&lt;br /&gt;GC: 2010 až 2012&lt;br /&gt;GD: 2010 až 2012&lt;br /&gt;GE: 2010 až 2012&lt;br /&gt;GF: 2010 až 2012&lt;br /&gt;GI: 2013 až (akt. rok -1)&lt;br /&gt;GJ: 2013 až (akt. rok -1)&lt;br /&gt;GK: 2013 až (akt. rok -1)&lt;br /&gt;GL: 2013 až (akt. rok -1)&lt;br /&gt;GM: 2013 až (akt. rok -1)&lt;br /&gt;GN: 2013 až (akt. rok -1)&lt;br /&gt;GO: 2013 až (akt. rok -1)&lt;br /&gt;H: 2010 až (akt. rok)&lt;br /&gt;I: 2010 až (akt. rok)&lt;br /&gt;J: 2010 až (akt. rok)&lt;br /&gt;K: 2010 až (akt. rok)&lt;br /&gt;L: 2010 až (akt. rok)&lt;br /&gt;M: 2010 až (akt. rok)&lt;br /&gt;N: 2014 až (akt. rok)&lt;br /&gt;O: 2014 až (akt. rok)&lt;br /&gt;(nevyplněný): 2010 až (akt. rok - 1)</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsii03" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2013&lt;br /&gt;neobsazeno&lt;br /&gt;&lt;br /&gt;do 2012&lt;br /&gt;Uveďte výsledek výpočtu (ř. 1 – ř. 2)</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_drp" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Druh příjmu. Vyplňte jednu z následujících hodnot:&lt;br /&gt;  771 - příjmy právnických osob,&lt;br /&gt;  772 - příjmy fyzických osob.  </xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="3"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute fixed="VD2" name="dokument" use="required"/>
+                  <xs:attribute fixed="DPS" name="k_uladis" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Vyplňte text DPS.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsii04" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte úhrn částek daně, která byla odvedena (&lt;strong&gt;hodnota ze sloupce 10 řádku 13 v části I.&lt;/strong&gt;)</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsii05" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2013&lt;br /&gt;proveďte výpočet (ř. 4 – ř. 1). Kladná částka znamená, že za vykazované zdaňovací období bylo zaplaceno více. Záporná, že za vykazované zdaňovací období zbývá na dani doplatit. O vratitelný přeplatek je možné požádat příslušného správce daně formou žádosti (žádost podle § 155 odst. 2 daňového řádu).&lt;br /&gt;&lt;br /&gt;2012&lt;br /&gt;proveďte výpočet (ř. 4 – ř. 3). Kladná částka znamená, že za vykazované zdaňovací období bylo zaplaceno více. Záporná, že za vykazované zdaňovací období zbývá na dani doplatit. O vratitelný přeplatek je možné požádat příslušného správce daně formou žádosti (žádost podle § 155 odst. 2 daňového řádu).&lt;br /&gt;&lt;br /&gt;2011&lt;br /&gt;Proveďte výpočet (ř. 4 – ř. 3). Kladná částka znamená, že bylo zaplaceno více. Záporná, že zbývá na dani doplatit. O přeplatek je možné požádat příslušného správce daně formou žádosti (žádost podle § 155 odst. 2 daňového řádu).&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;Proveďte výpočet (ř. 4 – ř. 3). Kladná částka znamená, že bylo zaplaceno více. Záporná, že zbývá na dani doplatit. O přeplatek je možné požádat příslušného správce daně formou žádosti (žádost podle § 155 odst. 2 daňového řádu).&lt;br /&gt; &lt;strong&gt;Vznikne-li přeplatek na řádku 5 části II. pouze z titulu změny odvedené daně (vybrané z příjmů ze závislé činnosti a z funkčních požitků srážkou podle zvláštní sazby daně) na zálohu na daň z příjmů fyzických osob ze závislé činnosti a z funkčních požitků (v důsledku dodatečně podepsaného prohlášení viz sl. 6 části I. Vyúčtování), bude s částkou takto vzniklého přeplatku nakládáno v souladu s ustanovením § 153 a 154 daňového řádu.&lt;/strong&gt;</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="dapdps_forma" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Typ Vyúčtování.&lt;BR /&gt;&lt;STRONG&gt;B&lt;/STRONG&gt; - řádné&lt;BR /&gt;&lt;STRONG&gt;O&lt;/STRONG&gt; - řádné-opravné&lt;BR /&gt;&lt;STRONG&gt;D&lt;/STRONG&gt; - dodatečné&lt;BR /&gt;&lt;STRONG&gt;E&lt;/STRONG&gt; - dodatečné-opravné</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_zjist" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>U dodatečného Vyúčtování uveďte datum zjištění důvodů pro podání (§ 141 odst. 5 daňového řádu).</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="1" minOccurs="1" name="VetaP">
+                <xs:complexType>
+                  <xs:attribute name="c_pracufo" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>územní pracoviště, kde je nebo bude umístěn spis daňového subjektu (podle § 13 zákona číslo 456/2011 Sb., o Finanční správě České republiky, ve znění pozdějších předpisů).&lt;br&gt;
+Pro popis číselníku Pracoviště FÚ klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/pracufo"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="opr_prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte příjmení oprávněné osoby. Tyto údaje budou vyplňovány pouze v případech, kdy je Vyúčtování (vztahuje se i na přílohy Vyúčtování) podáváno právnickou osobou, včetně případů kdy je právnická osoba v postavení zástupce daňového subjektu, za nějž zpracovává a podává Vyúčtování (vztahuje se i na přílohy Vyúčtování).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_kod" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Číselný kód podle níže uvedených typů podepisující osoby:&lt;br&gt;Fyzická osoba: &lt;br&gt;1 - zákonný zástupce nebo opatrovník&lt;br&gt;2 - ustanovený zástupce&lt;br&gt;3 - společný zástupce, společný zmocněnec&lt;br&gt;4a - obecný zmocněnec - fyzická osoba i právnická osoba&lt;br&gt;4b - fyzická osoba daňový poradce nebo advokát&lt;br&gt;5a - osoba spravující pozůstalost&lt;br&gt;5b - zástupce osoby spravující pozůstalost&lt;br&gt;6a - dědic po skončení řízení o pozůstalosti&lt;br&gt;6b - zástupce dědice po skončení řízení o pozůstalosti&lt;br&gt;7b - zástupce právního nástupce právnické osoby&lt;br&gt;&lt;br&gt;Právnická osoba:&lt;br&gt;1 - zákonný zástupce nebo opatrovník&lt;br&gt;2 - ustanovený zástupce&lt;br&gt;3 - společný zástupce, společný zmocněnec&lt;br&gt;4a - obecný zmocněnec - fyzická osoba i právnická osoba&lt;br&gt;4c - právnická osoba vykonávající daňové poradenství&lt;br&gt;5a - osoba spravující pozůstalost&lt;br&gt;5b - zástupce osoby spravující pozůstalost&lt;br&gt;6a - dědic po skončení řízení o pozůstalosti&lt;br&gt;6b - zástupce dědice po skončení řízení o pozůstalosti&lt;br&gt;7a - právní nástupce právnické osoby&lt;br&gt;7b - zástupce právního nástupce právnické osoby</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Příjmení osoby, která sestavila Vyúčtování. </xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_email" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>E-mailová adresa osoby, která sestavila Vyúčtování.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="255"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Jméno osoby, která sestavila Vyúčtování. </xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="sest_telef" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Telefon osoby, která sestavila Vyúčtování. </xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="14"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="typ_ds" use="required">
+                    <xs:annotation>
+                      <xs:documentation>zvolte typ subjektu, pro který je vyúčtování vyplňováno. &lt;ul&gt;&lt;li&gt;F - fyzické osoby (živnost)&lt;/li&gt;&lt;li&gt;P - právnické osoby (s.r.o., a.s., v.o.s, …)&lt;/li&gt;&lt;li&gt;L - Plátcova pokladna&lt;/li&gt;&lt;/ul&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: v případě podání VDA za zdaňovací období/část zdaňovacího období roku 2024 nebo pozdější (tj. ROK(D:zdobd_do) &gt;= 2024) nelze použít typ daňového subjektu "L - plátcova pokladna"</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="opr_jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte jméno oprávněné osoby. Tyto údaje budou vyplňovány pouze v případech, kdy je Vyúčtování (vztahuje se i na přílohy Vyúčtování) podáváno právnickou osobou, včetně případů kdy je právnická osoba v postavení zástupce daňového subjektu, za nějž zpracovává a podává Vyúčtování (vztahuje se i na přílohy Vyúčtování).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_dat_nar" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává fyzická podepisující osoba, buď datum narození nebo evidenční číslo je povinné.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="sest_titul" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Titul osoby, která sestavila Vyúčtování.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="10"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="ulice" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="38"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>daňového subjektu fyzické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>daňového subjektu fyzické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="30"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="opr_postaveni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte vztah k právnické osobě. Tyto údaje budou vyplňovány pouze v případech, kdy je Vyúčtování (vztahuje se i na přílohy Vyúčtování) podáváno právnickou osobou, včetně případů kdy je právnická osoba v postavení zástupce daňového subjektu, za nějž zpracovává a podává Vyúčtování (vztahuje se i na přílohy Vyúčtování).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="40"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_orient" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="4"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="naz_obce" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místo pobytu nebo sídla daňového subjektu&lt;br&gt;
+Pro popis číselníku Obce klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/obce"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="48"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_ev_cislo" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Pokud podává fyzická podepisující osoba, buď datum narození nebo evidenční číslo je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="titul" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>daňového subjektu fyzické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="10"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_pop" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="6"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_nazev" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává právnická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="255"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_jmeno" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává fyzická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="20"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zkrobchjm" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Obchodní jméno daňového subjektu právnické osoby.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="255"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_prijmeni" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává fyzická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="36"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="psc" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu. PSČ v České republice musí mít délku 5 znaků bez mezer.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="10"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="c_obce" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>místa pobytu nebo sídla daňového subjektu, dle číselníku obcí.&lt;br&gt;
+Pro popis číselníku Obce klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/obce"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="6"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_ic" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>podepisující osoba.&lt;BR&gt;Pokud podává právnická podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:pattern value="[0-9]{1,10}"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="dic" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Vyplňte přidělené Daňové identifikační číslo podle osvědčení o registraci k daním (DIČ). Pro zdaňovací období 2023 a nižší je možno podat vyúčtování jménem plátcovy pokladny.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:pattern value="[0-9]{1,10}"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="zast_typ" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>F - fyzická osoba &lt;BR&gt; P - právnická osoba&lt;BR&gt; Pokud podává podepisující osoba je povinné.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="unbounded" minOccurs="0" name="VetaR">
+                <xs:complexType>
+                  <xs:attribute name="poradi" use="required">
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="t_prilohy" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Jeden řádek textové přílohy, max. 72 znaků</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="72"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kod_sekce" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Označení oddílu, ke kterému se příloha vztahuje:&lt;BR /&gt;O - obecná textová příloha.&lt;BR /&gt;D - důvody pro podání dodatečného vyúčtování</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="1"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="unbounded" minOccurs="0" name="VetaO">
+                <xs:complexType>
+                  <xs:attribute name="kc_dpsi04" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2017&lt;br /&gt;zůstává neobsazen (tzn. nevyplňuje se).&lt;br /&gt;&lt;br /&gt;2013 až 2016&lt;br /&gt;zůstává neobsazen (tzn. nevyplňuje se) z důvodu, že od počátku zdaňovacího období 2013 se veškeré opravy předcházejících zdaňovacích období řeší pouze prostřednictvím dodatečných vyúčtování k příslušnému zdaňovacímu období.&lt;br /&gt;&lt;br /&gt;2012&lt;br /&gt;uveďte dodatečně odvedenou daň za období 2009. Opravy podle § 38d odst. 8 zákona z důvodu nesprávně sražené daně (dodatečná oprava) zdaňovacího období 2010 a 2011 se řeší formou dodatečného Vyúčtování ke zdaňovacímu období 2010 příp. 2011.&lt;br /&gt;&lt;br /&gt;2011&lt;br /&gt;uveďte dodatečně odvedenou daň za období 2008 a 2009. Opravy podle § 38d odst. 8 zákona z důvodu nesprávně sražené daně (dodatečná oprava) zdaňovacího období 2010 se řeší formou dodatečného Vyúčtování ke zdaňovacímu období 2010.&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;Uveďte částku daně z příjmů ze závislé činnosti a z funkčních požitků, která byla v příslušném měsíci dodatečně sražena podle § 38d odst. 8 zákona a týká se předchozího období. Informace o všech provedených opravách je nutné předepsaným způsobem uvést v příloze.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritické kontroly: hodnota nesmí být záporná, hodnota nesmí být pro Vyúčtování daně z příjmů právnických osob vyplněna, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi02" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte částku daně, která byla v měsíci sražena.&lt;br /&gt;Položka obsahuje kritické kontroly: hodnota nesmí být záporná, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi06" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2017&lt;br /&gt;uveďte částku daňové povinnosti, obsaženou v částce daně ze sloupce 1, kterou nelze u poplatníka považovat za splněnou z důvodu prokazatelně účiněného prohlášení k dani (§ 38d odst. 4 písm. a), § 38k zákona).&lt;br /&gt;&lt;br /&gt;2014 až 2016&lt;br /&gt;uveďte částku daňové povinnosti, obsaženou v částce daně ze sloupce 1, kterou nelze u poplatníka považovat za splněnou z důvodu dodatečného podpisu prohlášení k dani (§ 38d odst. 4 písm. a), § 38k zákona).&lt;br /&gt;&lt;br /&gt;2011, 2012, 2013&lt;br /&gt;uveďte částku daňové povinnosti, obsaženou v částce daně ze sloupce 1, kterou nelze u poplatníka považovat za splněnou z důvodu dodatečného podpisu prohlášení k dani (§ 38d odst. 4 písm. a), § 38k zákona).&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;uveďte částku daňové povinnosti, obsaženou v částce daně ze sloupce 1, kterou nelze u poplatníka považovat za splněnou z důvodu dodatečného podpisu prohlášení k dani (§ 38d odst. 4 písm. a), § 38k zákona). Jedná se o částku daně, která byla původně před podpisem prohlášení k dani poplatníka sražena v souladu s § 38d odst. 1 zákona a dodatečným podpisem poplatníkova prohlášení k dani &lt;strong&gt;je na ni pohlíženo jako na zálohu na daň z příjmů fyzických osob ze závislé činnosti a z funkčních požitků.&lt;/strong&gt;&lt;br /&gt;S touto částkou bude správce daně nakládat v souladu s ustanovením § 153 a 154 daňového řádu.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritické kontroly: hodnota nesmí být záporná, hodnota nesmí být pro Vyúčtování daně z příjmů právnických osob vyplněna, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi03" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte částku daně (z celkové částky ve sloupci 1), která měla být odvedena nejpozději do termínu pro podání daňového přiznání v průběhu zdaňovacího období (podle § 38d odst. 3 věty druhé zákona), spadá-li tento termín do období, za které je předkládáno Vyúčtování.&lt;br /&gt;Položka obsahuje kritické kontroly: hodnota nesmí být záporná, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="mesic" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Vyplňte číslo kalendářního měsíce.&lt;br /&gt;Položka obsahuje kritickou kontrolu: musí být zadáno celé číslo v intervalu 1 až 12.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="2"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi01" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2014&lt;br /&gt;uveďte celkovou částku daňové povinnosti, která měla být v souladu s ustanovením § 38d odstavců 1, 2 a 8 zákona &lt;strong&gt;v příslušném měsíci sražena&lt;/strong&gt;, a to bez ohledu na skutečnost, zda Vám již byla správcem daně předepsána k přímé úhradě. Čj. případného rozhodnutí (platebního výměru) uveďte ve sloupci 7. Součástí celkové částky ve sloupci 1 může být dodatečně opravená daň z příjmů ze závislé činnosti jen, týká-li se období, za které je podáváno Vyúčtování.&lt;br /&gt;&lt;br /&gt;2011, 2012, 2013&lt;br /&gt;Uveďte celkovou částku daňové povinnosti, která měla být v souladu s ustanovením § 38d odstavců 1, 2 a 8 zákona &lt;strong&gt;v příslušném měsíci sražena&lt;/strong&gt;, a to bez ohledu na skutečnost, zda Vám již byla správcem daně předepsána k přímé úhradě. Čj. případného rozhodnutí (platebního výměru) uveďte ve sloupci 7. Součástí celkové částky ve sloupci 1 může být dodatečně opravená daň z příjmů ze závislé činnosti a z funkčních požitků jen, týká-li se období, za které je podáváno Vyúčtování.&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;Uveďte celkovou částku daňové povinnosti, která měla být v souladu s ustanovením § 38d odstavců 1, 2 a 8 zákona &lt;strong&gt;v příslušném měsíci sražena&lt;/strong&gt;, a to bez ohledu na skutečnost, zda Vám již byla správcem daně předepsána k přímému placení. Čj. případného rozhodnutí (platebního výměru) uveďte ve sloupci 7. Součástí celkové částky ve sloupci 1 může být dodatečně sražená daň z příjmů ze závislé činnosti a z funkčních požitků jen, týká-li se období, za které je podáváno Vyúčtování. Dodatečně sražená daň za předchozí období se uvede ve sloupci 4.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritické kontroly: hodnota nesmí být záporná, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi08" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2013&lt;br /&gt;neobsazeno&lt;br /&gt;&lt;br /&gt;do 2012&lt;br /&gt;Uveďte částku vypočtenou dle údajů v tiskopisu. Hodnota může být i záporná.&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi07" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Nepovinná hodnota, slouží pro snadnější výpočet sloupce 8a.&lt;br /&gt;Položka obsahuje kritickou kontrolu: nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi05" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2017&lt;br /&gt;zůstává neobsazen (tzn. nevyplňuje se).&lt;br /&gt;&lt;br /&gt;2013 až 2016&lt;br /&gt;zůstává neobsazen (tzn. nevyplňuje se) z důvodu, že od počátku zdaňovacího období 2013 se veškeré opravy předcházejících zdaňovacích období řeší pouze prostřednictvím dodatečných vyúčtování k příslušnému zdaňovacímu období.&lt;br /&gt;&lt;br /&gt;2012&lt;br /&gt;uveďte celkovou částku vrácených přeplatků daně z příjmů fyzických osob ze závislé činnosti a z funkčních požitků (podle ust. § 38d odst. 8 zákona), jen pokud přeplatky vznikly v důsledku nesprávně vyšší sražené daně ve zdaňovacím období 2009. Pokud přeplatek na dani vznikl z důsledku nesprávně vyšší sražené daně ve zdaňovacím období 2010 a 2011, řeší se formou dodatečného Vyúčtování ke zdaňovacímu období 2010 příp. 2011. O vrácené přeplatky, vzniklé z titulu nesprávně vyšší sražené daně v období, za které je podáváno Vyúčtování, by měla být snížena částka ve sloupci 1. Informace o všech provedených opravách je nutné předepsaným způsobem uvést v příloze.&lt;br /&gt;&lt;br /&gt;2011&lt;br /&gt;uveďte celkovou částku vrácených přeplatků daně z příjmů fyzických osob ze závislé činnosti a z funkčních požitků (podle ust. § 38d odst. 8 zákona), jen pokud přeplatky vznikly v důsledku nesprávně vyšší sražené daně ve zdaňovacím období 2008 a 2009. Pokud přeplatek na dani vznikl z důsledku nesprávně vyšší sražené daně ve zdaňovacím období 2010, řeší se formou dodatečného Vyúčtování ke zdaňovacímu období 2010. O vrácené přeplatky, vzniklé z titulu nesprávně vyšší sražené daně v období, za které je podáváno Vyúčtování, by měla být snížena částka ve sloupci 1. Informace o všech provedených opravách je nutné předepsaným způsobem uvést v příloze.&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;Uveďte celkovou částku vrácených přeplatků daně z příjmů fyzických osob ze závislé činnosti a z funkčních požitků (podle ust. § 38d odst. 8 zákona), jen pokud přeplatky vznikly v důsledku nesprávně vyšší sražené daně v předcházejících obdobích. O vrácené přeplatky, vzniklé z titulu nesprávně vyšší sražené daně v období, za které je podáváno Vyúčtování, by měla být snížena částka ve sloupci 1. Informace o všech provedených opravách je nutné předepsaným způsobem uvést v příloze.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritické kontroly: hodnota nesmí být záporná, hodnota nesmí být pro Vyúčtování daně z příjmů právnických osob vyplněna, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi08a" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2012&lt;br /&gt;uveďte částku vypočtenou dle údajů v tiskopisu. &lt;strong&gt;Do vypočtené částky neuvádějte částky, které Vám za vykazované zdaňovací období již byly správcem daně předepsány k přímé úhradě (viz sloupec 7).&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;2011&lt;br /&gt;uveďte částku vypočtenou dle údajů v tiskopisu. &lt;strong&gt;Do vypočtené částky neuvádějte částky, které Vám za uvedené zdaňovací období (2011) již byly správcem daně předepsány k přímé úhradě (viz sloupec 7).&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;uveďte částku vypočtenou dle údajů v tiskopisu. &lt;strong&gt;Do vypočtené částky neuvádějte částky, které Vám za uvedené zdaňovací období (příp. vykazovanou část zdaňovacího období) již byly správcem daně předepsány k přímému placení (viz sloupec 7).&lt;/strong&gt;&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi09" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte rozdíl (značeno +/–) mezi původně vyúčtovanou a dodatečně vyúčtovanou částkou. Kladná částka znamená, že bylo původně vyúčtováno méně, tzn. zbývá doplatit, záporná částka znamená, že bylo původně vyúčtováno více. Vyplňuje se pouze u dodatečného Vyúčtování (&lt;strong&gt;poprvé lze podat za zdaňovací období 2010&lt;/strong&gt;). Další informace k vyplnění dodatečného Vyúčtování jsou uvedeny pod 01a.&lt;br /&gt;Položka obsahuje kritické kontroly: u dodatečného Vyúčtování musí být zadána nenulová hodnota, nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_dpsi10" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>od 2011&lt;br /&gt;Uveďte úhrn částek skutečně odvedených za uvedené zdaňovací období na účet finančního úřadu, včetně částek, které Vám byly správcem daně předepsány k přímé úhradě ve vykazovaném zdaňovacím období. Neuvádějte částky, které jste odvedli na základě rozhodnutí správce daně (platební výměr) za minulá zdaňovací období.&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;Uveďte úhrn částek skutečně odvedených za uvedené zdaňovací období na účet finančního úřadu, včetně částek, které Vám byly správcem daně předepsány k přímému placení ve vykazovaném zdaňovacím období. Neuvádějte částky, které jste odvedli na základě rozhodnutí správce daně (platební výměr) za minulá zdaňovací období.&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: nesmí být zadána hodnota v měsíci mimo zdaňovací období.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="cj_dpsi07" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>uveďte čj. rozhodnutí (platebního výměru), kterým Vám správce daně předepsal dlužné částky za vykazované zdaňovací období k přímé úhradě (viz popis u sloupce 1).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="30"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="1" minOccurs="0" name="VetaS">
+                <xs:complexType>
+                  <xs:attribute name="s_kc_dpsi04" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 4.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi07" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 7.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi05" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 5.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi03" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 3.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi01" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 1.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi08" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 8.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi02" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 2.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi06" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 6.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi08a" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 8a.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi09" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 9.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="s_kc_dpsi10" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte součet sloupce 10.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="unbounded" minOccurs="0" name="VetaA">
+                <xs:complexType>
+                  <xs:attribute name="fu_c_komds" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte číslo bankovního účtu, na který byla poukazována úhrada daňové povinnosti v období, za které předkládáte Vyúčtování, a to i v případě, že došlo k chybě při výběru bankovního účtu.&lt;br/&gt;&lt;br /&gt;&lt;strong&gt;Od ZO 2012 se položka nevyplňuje.&lt;/strong&gt;</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:pattern value="[0-9]{1,10}"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="fu_pbu" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte předčíslí bankovního účtu, na který byla poukazována úhrada daňové povinnosti v období, za které předkládáte Vyúčtování, a to i v případě, že došlo k chybě při výběru bankovního účtu.&lt;br/&gt;&lt;br /&gt;&lt;strong&gt;Od ZO 2012 se položka nevyplňuje.&lt;/strong&gt;</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:minLength value="0"/>
+                        <xs:maxLength value="6"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="fu_k_bank" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte kód banky bankovního účtu, na který byla poukazována úhrada daňové povinnosti v období, za které předkládáte Vyúčtování, a to i v případě, že došlo k chybě při výběru bankovního účtu.&lt;br/&gt;&lt;br /&gt;&lt;strong&gt;Od ZO 2012 se položka nevyplňuje.&lt;/strong&gt;&lt;br&gt;
+Pro popis číselníku Kód banky klikněte &lt;a href="https://mojedane.gov.cz/pmd/dokumentace/ciselniky/ukazka/cbanka"&gt;zde&lt;/a&gt;.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:string">
+                        <xs:pattern value="[0-9]{1,4}"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="unbounded" minOccurs="0" name="VetaB">
+                <xs:complexType>
+                  <xs:attribute name="mesic_opr" use="required">
+                    <xs:annotation>
+                      <xs:documentation>od 2011&lt;br /&gt;Uveďte měsíc opravy podle § 38d zákona.&lt;br /&gt;&lt;br /&gt;2010&lt;br /&gt;Uveďte měsíc sražení, ve kterém byla provedena podle § 38d odst. 8 zákona dodatečná oprava srážky daně (daň byla dodatečně sražena, nebo byl poplatníkovi vrácen přeplatek nesprávně sražené vyšší daně).&lt;br /&gt;&lt;br /&gt;Položka obsahuje kritickou kontrolu: zadaná hodnota musí být celé číslo v itervalu 1 až 12.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="2"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="kc_castka" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte částku, která je rovna hodnotě provedené opravy. Se znaménkem minus uveďte částku vráceného přeplatku nesprávně sražené vyšší daně.&lt;br /&gt; Položka obsahuje kritickou kontrolu: zadaná hodnota nesmí být rovna 0.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="14"/>
+                        <xs:fractionDigits value="2"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="rok_nespr" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte rok sražení, v němž byla původně daň sražena chybně.&lt;br /&gt;Položka obsahuje kritickou kontrolu: pro vyúčtování daně z příjmů právnických osob nesmí být příloha k vyúčtování vyplněná.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="mesic_nespr" use="required">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte měsíc sražení, v němž byla původně daň sražena chybně.</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="2"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                  <xs:attribute name="d_dodsraz" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte datum dodatečné srážky poplatníkovi.&lt;br /&gt;Položka obsahuje kritickou kontrolu: datum nesmí být větší než dnesní datum.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="d_vracprepl" type="dateInMultiFormat" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte datum vrácení přeplatku nesprávně sražené vyšší daně poplatníkovi.&lt;br /&gt;Položka obsahuje kritickou kontrolu: je-li prázdné datum dodatečného sražení daně nesmí být datum vrácení přeplatku vyšší než dnešní datum.</xs:documentation>
+                    </xs:annotation>
+                  </xs:attribute>
+                  <xs:attribute name="rok_opr" use="optional">
+                    <xs:annotation>
+                      <xs:documentation>Uveďte rok opravy podle § 38d zákona. Zadaná hodnota nesmí být menší, než sloupec 1 (rok).</xs:documentation>
+                    </xs:annotation>
+                    <xs:simpleType>
+                      <xs:restriction base="xs:decimal">
+                        <xs:totalDigits value="4"/>
+                        <xs:fractionDigits value="0"/>
+                      </xs:restriction>
+                    </xs:simpleType>
+                  </xs:attribute>
+                </xs:complexType>
+              </xs:element>
+              <xs:element maxOccurs="1" minOccurs="0" name="Prilohy">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element maxOccurs="unbounded" minOccurs="0" name="ObecnaPriloha">
+                      <xs:complexType>
+                        <xs:simpleContent>
+                          <xs:extension base="xs:base64Binary">
+                            <xs:attribute name="cislo" use="required" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>Pořadové číslo přílohy. Nesmí být v rámci jednoho podání duplicitní</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:decimal">
+                                  <xs:totalDigits value="4"/>
+                                  <xs:fractionDigits value="0"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                            <xs:attribute name="nazev" use="optional" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>Popis přiloženého souboru</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                  <xs:minLength value="0"/>
+                                  <xs:maxLength value="255"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                            <xs:attribute name="jm_souboru" use="optional" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>&lt;strong&gt;Název přiloženého souboru.&lt;/strong&gt;&lt;br/&gt;Povolené typy souborů jsou: DOC, DOCX, RTF, XLS, XLSX, PDF, JPG, TXT a TXT/CSV. Dále je možné přiložit podepsané (formát PKCS#7) a komprimované (formát ZIP) soubory, vždy však jde o jeden podepsaný nebo jeden komprimovaný soubor některého z podporovaných formátů. Součet velikostí všech souborů přiložených v elektronické podobě (tzv. e-příloh) může být nejvýše 10 240 kilobajtů.</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                  <xs:minLength value="0"/>
+                                  <xs:maxLength value="255"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                            <xs:attribute name="kodovani" use="optional" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+                              <xs:annotation>
+                                <xs:documentation>Kódování přiloženého souboru</xs:documentation>
+                              </xs:annotation>
+                              <xs:simpleType>
+                                <xs:restriction base="xs:string">
+                                  <xs:enumeration value="base64"/>
+                                </xs:restriction>
+                              </xs:simpleType>
+                            </xs:attribute>
+                          </xs:extension>
+                        </xs:simpleContent>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+            <xs:attribute name="verzePis" type="xs:string"/>
+          </xs:complexType>
+        </xs:element>
+        <xs:element maxOccurs="1" minOccurs="0" name="Kontrola">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:any maxOccurs="unbounded" minOccurs="0" processContents="lax"/>
+            </xs:sequence>
+            <xs:anyAttribute processContents="lax"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+      <xs:attribute name="verzeSW" type="xs:string"/>
+      <xs:attribute name="nazevSW" type="xs:string"/>
+      <xs:anyAttribute processContents="lax"/>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

@@ -85,6 +85,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Repository\Payroll\PayrollPeriodExportJobRepository::STATUSES',
         'payroll.ts::PayrollDeadlinePhase'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::PHASES',
+        'payroll.ts::PayrollRegistrationChangeDuty'
+            => 'const:MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::DUTY_KINDS',
         'payroll.ts::PayrollDeadlineSource'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::SOURCES',
         'payrollRulesets.ts::PayrollRulesetOutlookSeverity'

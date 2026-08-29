@@ -85,6 +85,17 @@ final class XmlSchemaValidator
         // se archivuje se statusem validation, download i tak funguje).
         'dppdp9' => 'dppdp9_epo2.xsd',
         'dpfdp7' => 'dpfdp7_epo2.xsd',
+        // Vyúčtování daně ze závislé činnosti (§ 38j odst. 4 ZDP) a vyúčtování
+        // daně vybírané srážkou. Pozor: srážková daň NENÍ „DPZ", ale vlastní
+        // písemnost DPSVD2 s vlastním schématem — přílohy 25 5466/A jsou uvnitř
+        // jako věty, ne druhé podání.
+        'dpzvd6' => 'dpzvd6.xsd',
+        'dpsvd2' => 'dpsvd2.xsd',
+        // Žádosti o poukázání chybějící částky na daňovém bonusu
+        // (§ 35d odst. 5 a 9 ZDP). Bez záznamu tady by validace skončila
+        // `skipped` a `validatedSubmission()` by podání zablokoval.
+        'dpzmb1' => 'dpzmb1.xsd',
+        'dpzdb1' => 'dpzdb1.xsd',
         // Epic DP v2 (issue #19): ČSSZ přehled OSVČ (sociální pojištění, roční e-podání).
         // Vlastní schéma ČSSZ (ns http://schemas.cssz.cz/OSVC2025), importuje baseTypes2.xsd
         // (oba v api/xsd/). Jiný kanál i formát než EPO MFČR.

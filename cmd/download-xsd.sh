@@ -24,7 +24,7 @@ BASE="https://adisspr.mfcr.cz/adis/jepo/schema"
 ISDOC_URL="https://isdoc.cz/6.0.2/xsd/isdoc-invoice-6.0.2.xsd"
 # ČSSZ přehled OSVČ — URL i cílový název (osvcYY) měň při novém ročníku (viz README).
 CSSZ_OSVC_URL="https://www.cssz.gov.cz/documents/20143/3201321/OSVC25.xsd/5d467add-4c11-0e56-4d54-d455b56c15c9"
-FORMS=("dphdp3" "dphkh1" "dphshv" "dpfdp5" "dppdp9" "isdoc" "osvc25" "jmhz")
+FORMS=("dphdp3" "dphkh1" "dphshv" "dpfdp5" "dppdp9" "dpzvd6" "dpsvd2" "dpzmb1" "dpzdb1" "isdoc" "osvc25" "jmhz")
 
 mkdir -p "$DIR"
 

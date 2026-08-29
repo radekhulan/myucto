@@ -29,6 +29,13 @@ final class TaxSubmissionAccess
      * by v bezplatné části nemělo co dělat. Nový výkaz se sem musí přidat
      * vědomě — výchozí odpověď je „placené".
      *
+     * Ze stejného důvodu tu nejsou `dpzmb1` ani `dpzdb1` (žádosti o poukázání
+     * chybějící částky na daňovém bonusu, § 35d odst. 5 a 9): staví se výhradně
+     * ze zmrazených výsledků mzdového běhu a celé `/api/payroll` je za licencí.
+     * Bezplatný zákazník nemá data, ze kterých by je bylo možné sestavit, takže
+     * uvolnit sem jejich XML by nikomu nic neodemklo — jen rozostřilo dělicí
+     * čáru mezi bezplatnou a placenou částí.
+     *
      * @var list<string>
      */
     private const FREE_FORM_CODES = ['dphdp3', 'dphkh1', 'dphshv'];

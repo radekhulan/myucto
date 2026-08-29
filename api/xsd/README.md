@@ -71,6 +71,10 @@ https://adisspr.mfcr.cz/dpr/adis/idpr_pub/epo2_info/popis_struktury_seznam.faces
 | `dphshv.xsd` | Souhrnné hlášení DPHSHV | https://adisspr.mfcr.cz/adis/jepo/schema/dphshv_epo2.xsd |
 | `dpfdp5.xsd` | Daň z příjmů FO DPFDP5 | https://adisspr.mfcr.cz/adis/jepo/schema/dpfdp5_epo2.xsd |
 | `dppdp9.xsd` | Daň z příjmů PO DPPDP9 | https://adisspr.mfcr.cz/adis/jepo/schema/dppdp9_epo2.xsd |
+| `dpzvd6.xsd` | Vyúčtování daně ze závislé činnosti DPZVD6 | https://adisspr.mfcr.cz/adis/jepo/schema/dpzvd6_epo2.xsd |
+| `dpsvd2.xsd` | Vyúčtování daně vybírané srážkou DPSVD2 | https://adisspr.mfcr.cz/adis/jepo/schema/dpsvd2_epo2.xsd |
+| `dpzmb1.xsd` | Žádost o poukázání měsíčního daňového bonusu DPZMB1 (§ 35d odst. 5) | https://adisspr.mfcr.cz/adis/jepo/schema/dpzmb1_epo2.xsd |
+| `dpzdb1.xsd` | Žádost o poukázání doplatku na bonusu DPZDB1 (§ 35d odst. 9) | https://adisspr.mfcr.cz/adis/jepo/schema/dpzdb1_epo2.xsd |
 
 > **Pozn.:** soubor zde **musí mít jméno bez `_epo2` suffixu** (např. `dphdp3.xsd`, ne
 > `dphdp3_epo2.xsd`). XmlSchemaValidator hledá `storage/xsd/{form_code}.xsd`.

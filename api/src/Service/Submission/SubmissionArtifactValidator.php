@@ -68,6 +68,8 @@ final readonly class SubmissionArtifactValidator
         'DPFO' => 'dpfdp5',
         'OSSEI1' => 'ossei1',
         'OSVC25' => 'osvc25',
+        'DPZMB1' => 'dpzmb1',
+        'DPZDB1' => 'dpzdb1',
     ];
 
     public function __construct(

@@ -117,6 +117,12 @@ final class PayrollAgendaGroupCatalog
         'DPFO',
         'OSSEI1',
         'OSVC',
+        // Žádosti o poukázání chybějící částky na daňovém bonusu
+        // (§ 35d odst. 5 a 9). Mzdová data je živí, ale povinnost to není:
+        // je to podání správci daně, které plátce podává, když CHCE své
+        // peníze zpátky. Do panelů mzdových povinností nepatří.
+        'DPZMB1',
+        'DPZDB1',
     ];
 
     /**

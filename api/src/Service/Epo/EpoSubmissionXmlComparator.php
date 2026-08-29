@@ -93,7 +93,10 @@ final class EpoSubmissionXmlComparator
 
     private function formCode(\DOMDocument $dom): ?string
     {
-        $known = ['dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9', 'ossei1'];
+        $known = [
+            'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9', 'ossei1',
+            'dpzmb1', 'dpzdb1',
+        ];
         foreach ((new \DOMXPath($dom))->query('//*') ?: [] as $node) {
             $name = strtolower((string) $node->localName);
             if (in_array($name, $known, true)) {

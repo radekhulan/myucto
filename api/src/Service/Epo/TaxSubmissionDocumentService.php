@@ -520,6 +520,7 @@ final class TaxSubmissionDocumentService
             'dpfdp5', 'dpfdp7' => 'DPFO',
             'dppdp9' => 'DPPO',
             'ossei1' => 'OSS',
+            'dpzmb1', 'dpzdb1' => 'Daňové bonusy',
             default => strtoupper($formCode),
         };
     }
