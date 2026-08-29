@@ -12,6 +12,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\TaxBonus\TaxBonusClaim;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\TaxBonus\TaxBonusRequestService;
 use MyInvoice\Service\Payroll\TaxBonus\TaxBonusRequestXmlBuilder;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
@@ -39,6 +40,7 @@ final class TaxBonusRequestAction
         private readonly TaxSubmissionArchiver $archiver,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollModuleAccess $access,
     ) {}
 
     public function preview(Request $request, Response $response): Response
@@ -47,6 +49,14 @@ final class TaxBonusRequestAction
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
+        if (!$this->access->isEnabled($supplierId)) {
+            return Json::error(
+                $response,
+                'payroll_disabled',
+                'Vedení mezd je pro tuto firmu vypnuté v nastavení.',
+                403,
+            );
+        }
         [$year, $month, $error] = $this->parsePeriod($request);
         if ($error !== null) {
             return Json::error($response, 'validation_failed', $error, 400);
@@ -69,6 +79,14 @@ final class TaxBonusRequestAction
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
+        if (!$this->access->isEnabled($supplierId)) {
+            return Json::error(
+                $response,
+                'payroll_disabled',
+                'Vedení mezd je pro tuto firmu vypnuté v nastavení.',
+                403,
+            );
+        }
         [$year, $month, $error] = $this->parsePeriod($request);
         if ($error !== null) {
             return Json::error($response, 'validation_failed', $error, 400);
