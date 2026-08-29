@@ -195,9 +195,21 @@ export interface PayrollEmployment {
   delete_blocker: PayrollDeleteBlocker | null
   delete_cascade: PayrollDeleteCascade
   accounting: PayrollEmploymentAccounting
+  /**
+   * Prohlášení k dani platné dnes, přečtené ze zákonné evidence OSOBY.
+   * Karta vztahu ho jen ukazuje — nastavuje se výhradně v zákonné evidenci,
+   * odkud si ho přebírá i `terms[].tax_declaration_signed`.
+   */
+  tax_declaration: PayrollEmploymentTaxDeclaration | null
   terms: PayrollEmploymentTerms[]
   checklist: PayrollEmploymentChecklistItem[]
   timeline: PayrollEmploymentEvent[]
+}
+
+export interface PayrollEmploymentTaxDeclaration {
+  status: 'signed' | 'not-signed' | 'unverified'
+  effective_from: string
+  effective_to: string | null
 }
 
 export interface PayrollEmploymentTerms {
@@ -544,6 +556,11 @@ export interface PayrollStatutoryEvidence {
   effective_on: string
   /** Poslední den uzavřený schválenou mzdou; do něj se historie nepřepisuje. */
   frozen_through: string | null
+  /**
+   * Běhy, které tu hranici drží. Editor podle nich nabídne „Otevřít mzdu
+   * k opravě" místo toho, aby uživatele poslal běh hledat na jinou stránku.
+   */
+  frozen_runs: PayrollStatutoryEvidenceFrozenRun[]
   sections: Record<PayrollStatutoryEvidenceSection, PayrollStatutoryEvidenceRow[]>
   other_employer_bases: PayrollStatutoryEvidenceRow[]
   /**
@@ -551,6 +568,15 @@ export interface PayrollStatutoryEvidence {
    * Klíče jsou tytéž, jaké hlásí `PayrollRunStatutoryInputAssembler`.
    */
   blockers: string[]
+}
+
+export interface PayrollStatutoryEvidenceFrozenRun {
+  id: number
+  row_version: number
+  status: string
+  period_start: string
+  /** Příkaz, kterým se běh otevře k opravě; null = ze svého stavu ho nelze otevřít. */
+  command: 'request_correction' | 'reopen' | null
 }
 
 export interface PayrollStatutoryEvidencePayload {

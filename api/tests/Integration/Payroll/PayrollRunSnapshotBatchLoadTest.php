@@ -467,6 +467,40 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
     }
 
     /** Dimenze účinná až po období do snapshotu daného měsíce nepatří. */
+    /**
+     * Prohlášení k dani ve snímku vztahu se bere ze zákonné evidence OSOBY.
+     *
+     * Dřív šlo o samostatný sloupec smluvních podmínek, takže podpis
+     * prohlášení uprostřed vztahu (evidence ano, podmínky ne) shodil celou
+     * daňovou doménu blokátorem `tax_declaration_term_conflict` — a odstranit
+     * ho šlo jen novou verzí smlouvy, kterou nikdo kvůli podpisu nedělá.
+     */
+    public function testTermTaxDeclarationFollowsStatutoryEvidence(): void
+    {
+        $this->seed(1);
+        $employeeId = $this->ids(
+            'SELECT id FROM payroll_employees WHERE supplier_id = ? ORDER BY id',
+            [$this->supplierId],
+        )[0];
+        // Osoba prohlášení podepsala v průběhu vztahu — evidence to ví,
+        // sloupec smluvních podmínek zůstal, jak byl. Přesně tenhle rozpor
+        // shazoval mzdový běh.
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_person_tax_declarations
+                (supplier_id, employee_id, status, effective_from)
+             VALUES (?, ?, "signed", "2026-01-01")'
+        )->execute([$this->supplierId, $employeeId]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET tax_declaration_signed = 0
+              WHERE supplier_id = ? AND effective_from = "2026-06-01"'
+        )->execute([$this->supplierId]);
+
+        $term = $this->build()->data['people'][0]['employments'][0]['term'];
+
+        self::assertTrue($term['tax_declaration_signed']);
+    }
+
     public function testDimensionEffectiveAfterThePeriodIsNotFrozenIn(): void
     {
         $this->seed(1);

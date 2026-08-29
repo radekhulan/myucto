@@ -43,6 +43,7 @@ import EmploymentExitDocumentsPanel from '@/pages/payroll/EmploymentExitDocument
 function employment(relationType: PayrollEmployment['relation_type'] = 'employment'): PayrollEmployment {
   return {
     id: 12,
+    tax_declaration: null,
     employee_id: 20,
     office_id: null,
     office_code: null,

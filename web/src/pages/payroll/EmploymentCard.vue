@@ -51,6 +51,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
   deleted: [employmentId: number]
+  /** „Kde se to nastavuje" — stránka osoby na to odroluje k panelu evidence. */
+  focusStatutoryEvidence: []
 }>()
 
 const { t } = useI18n()
@@ -72,6 +74,25 @@ const ordinaryProfileFields = [
 ] as const
 
 const currentTerms = computed(() => props.employment.terms[0] ?? null)
+
+/**
+ * Prohlášení poplatníka k dani.
+ *
+ * Karta ho POUZE UKAZUJE. Dřív tu stálo bezpopiskové zaškrtávátko ve formuláři
+ * nové verze podmínek, tedy druhé nezávisle editovatelné místo pro tentýž údaj,
+ * který vede zákonná evidence osoby (`payroll_person_tax_declarations`). Když
+ * se obě hodnoty rozešly, mzdový běh spadl na `tax_declaration_term_conflict` —
+ * a rozejít se musely: prohlášení se podepisuje i odvolává kdykoliv v průběhu
+ * vztahu, kdežto smluvní podmínky se kvůli podpisu neverzují.
+ *
+ * Rozhoduje přitom o měsíční slevě na poplatníka (§ 35ba, § 38k odst. 4 ZDP),
+ * takže nestačí ho schovat — musí být vidět i s cestou tam, kde se nastavuje.
+ */
+const taxDeclaration = computed(() => props.employment.tax_declaration)
+const taxDeclarationLabel = computed(() => taxDeclaration.value === null
+  ? t('payroll.people.tax_declaration_state.missing')
+  : t(`payroll.people.tax_declaration_state.${taxDeclaration.value.status}`))
+const taxDeclarationSigned = computed(() => taxDeclaration.value?.status === 'signed')
 
 function nextCalendarDay(isoDate: string): string {
   const [year, month, day] = isoDate.split('-').map(Number)
@@ -392,6 +413,9 @@ async function startTermsEdit() {
     social_part_time_discount_reason: terms.social_part_time_discount_reason ?? 'none',
     social_part_time_discount_evidence: terms.social_part_time_discount_evidence ?? null,
     social_part_time_discount_notified_on: terms.social_part_time_discount_notified_on ?? null,
+    // Server hodnotu z těla ignoruje a odvodí ji ze zákonné evidence osoby
+    // (viz `PayrollEmploymentRepository::taxDeclarationSigned()`); posílá se
+    // dál jen proto, že ji tvar payloadu vyžaduje.
     tax_declaration_signed: terms.tax_declaration_signed,
     is_primary: terms.is_primary,
     change_reason: null,
@@ -633,7 +657,11 @@ const actions = computed<ActionItem[]>(() => [
     label: t('payroll.people.new_terms'),
     icon: 'edit',
     tier: 'secondary',
-    variant: 'neutral',
+    // „Upravit" je zelené jako všude jinde v aplikaci (faktury, doklady).
+    // Vedle „Potvrdit nástup", které zeleně vede jako primární akce, by ale
+    // byla zelená dvakrát a nebylo by poznat, co se čeká teď — dokud se čeká
+    // na potvrzení nástupu, ustupuje úprava podmínek do neutrální.
+    variant: startAlreadyHappened.value ? 'neutral' : 'success',
     disabled: busy.value || currentTerms.value === null,
     show: props.canWrite
       && ['planned', 'preregistered', 'active', 'suspended'].includes(props.employment.status),
@@ -787,6 +815,28 @@ const actions = computed<ActionItem[]>(() => [
           <span class="mt-1 block text-neutral-500">{{ t('payroll.people.meal_entitlement_basis.hint') }}</span>
         </dd>
       </div>
+      <!--
+        Prohlášení k dani rozhoduje o měsíční slevě na poplatníka, ale na kartě
+        nebylo vidět vůbec — jen jako bezpopiskové zaškrtávátko ve formuláři
+        nové verze podmínek. Tady je stav i odkaz tam, kde se nastavuje.
+      -->
+      <div data-test="employment-tax-declaration">
+        <dt class="text-neutral-500">{{ t('payroll.people.tax_declaration') }}</dt>
+        <dd class="mt-0.5 flex flex-wrap items-center gap-2">
+          <span
+            class="rounded-full px-2 py-0.5 text-xs font-medium"
+            :class="taxDeclarationSigned
+              ? 'bg-success-50 text-success-800'
+              : 'bg-warning-100 text-warning-800'"
+          >{{ taxDeclarationLabel }}</span>
+          <button
+            type="button"
+            class="font-medium text-payroll-700 underline underline-offset-2"
+            data-test="employment-tax-declaration-link"
+            @click="emit('focusStatutoryEvidence')"
+          >{{ t('payroll.people.tax_declaration_edit') }}</button>
+        </dd>
+      </div>
       <div><dt class="text-neutral-500">{{ t('payroll.people.accounting') }}</dt><dd class="mt-0.5 text-neutral-800">{{ employment.accounting.gross_debit }}/{{ employment.accounting.gross_credit }} · {{ employment.accounting.employer_insurance_debit }}/{{ employment.accounting.employer_insurance_credit }}</dd></div>
     </dl>
 
@@ -850,7 +900,30 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600">{{ t('payroll.people.actual_start') }}<input v-model="termsForm.actual_start_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.fixed_end') }}<input v-model="termsForm.fixed_term_end_on" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
-        <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="termsForm.tax_declaration_signed" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.tax_declaration') }}</label>
+        <!--
+          Prohlášení k dani tu bývalo jako poslední bezpopiskové zaškrtávátko
+          v široké mřížce. Rozhoduje o měsíční slevě na poplatníka, ale
+          nastavuje se v zákonné evidenci osoby — tady se proto jen ukazuje,
+          i s cestou tam.
+        -->
+        <div class="text-xs text-neutral-600 sm:col-span-2" data-test="terms-tax-declaration">
+          {{ t('payroll.people.tax_declaration') }}
+          <p class="mt-1 flex flex-wrap items-center gap-2">
+            <span
+              class="rounded-full px-2 py-0.5 text-xs font-medium"
+              :class="taxDeclarationSigned
+                ? 'bg-success-50 text-success-800'
+                : 'bg-warning-100 text-warning-800'"
+            >{{ taxDeclarationLabel }}</span>
+            <button
+              type="button"
+              class="font-medium text-payroll-700 underline underline-offset-2"
+              data-test="terms-tax-declaration-link"
+              @click="emit('focusStatutoryEvidence')"
+            >{{ t('payroll.people.tax_declaration_edit') }}</button>
+          </p>
+          <span class="mt-1 block text-neutral-500">{{ t('payroll.people.tax_declaration_hint') }}</span>
+        </div>
         <!--
           Důvod změny server bere jako VOLITELNÝ text (`optionalText`, 500 znaků),
           jenže formulář ho měl `required` — kdo si přišel opravit úvazek, musel

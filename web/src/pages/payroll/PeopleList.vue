@@ -933,6 +933,9 @@ async function focusPanel(panel: string) {
   await nextTick()
   const target = document.querySelector(`[data-panel-anchor="${panel}"]`)
   if (target === null) return
+  // Odrolovat na sbalený panel je totéž jako neudělat nic — kdo si zákonnou
+  // evidenci předtím zavřel, dostal by prázdnou hlavičku a hledal by dál.
+  target.querySelector('details')?.setAttribute('open', '')
   const before = window.scrollY
   target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   /*
@@ -1388,6 +1391,7 @@ onMounted(async () => {
           :payroll-start-period="payrollStartPeriod"
           @updated="updateEmployment(expandedId, $event)"
           @deleted="removeEmploymentFromDetail(expandedId, $event)"
+          @focus-statutory-evidence="focusPanel('statutory_evidence')"
         />
       </section>
     </div>

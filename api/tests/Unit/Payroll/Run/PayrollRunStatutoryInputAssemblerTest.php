@@ -682,7 +682,18 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
         ));
     }
 
-    public function testContradictoryTaxDeclarationEvidenceBlocksOnlyTaxDomain(): void
+    /**
+     * Prohlášení k dani má JEDEN zdroj — zákonnou evidenci osoby.
+     *
+     * Sloupec smluvních podmínek býval druhým, nezávisle editovatelným místem
+     * pro tentýž údaj a jeho rozpor s evidencí shazoval celou daňovou doménu
+     * blokátorem `tax_declaration_term_conflict`. Rozejít se přitom musely:
+     * prohlášení se podepisuje kdykoliv v průběhu vztahu, kdežto smluvní
+     * podmínky se kvůli podpisu neverzují. Snímek si dnes hodnotu bere z téže
+     * evidence ({@see PayrollRunSnapshotBuilder}), takže zastaralý sloupec
+     * nesmí výpočet zastavit.
+     */
+    public function testStaleTaxDeclarationOnTermDoesNotBlockTaxDomain(): void
     {
         $snapshot = $this->completeSnapshot();
         $snapshot['people'][0]['employments'][0]['term']['tax_declaration_signed'] =
@@ -692,15 +703,11 @@ final class PayrollRunStatutoryInputAssemblerTest extends TestCase
 
         self::assertNotNull($bundle->socialInsurance);
         self::assertNotNull($bundle->healthInsurance);
-        self::assertSame([], $bundle->incomeTax);
-        self::assertSame(
-            'tax_declaration_term_conflict',
-            $bundle->issues[0]->code,
-        );
-        self::assertSame(
-            'employment:84',
-            $bundle->issues[0]->relationshipReference,
-        );
+        self::assertNotSame([], $bundle->incomeTax);
+        self::assertSame([], array_values(array_filter(
+            $bundle->issues,
+            static fn ($issue): bool => $issue->code === 'tax_declaration_term_conflict',
+        )));
     }
 
     public function testUnverifiedAndCrossTenantAccumulatorStatesFailClosed(): void

@@ -10,6 +10,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\PayrollPersonStatutoryEvidenceValidator;
+use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
+use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
+use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use PDO;
 use UnexpectedValueException;
 
@@ -231,6 +234,7 @@ final class PayrollPersonStatutoryEvidenceRepository
         private readonly PayrollPersonStatutoryEvidenceValidator $validator,
         private readonly PayrollApprovedPeriodFreeze $freeze,
         private readonly ActivityLogger $activityLogger,
+        private readonly PayrollRunWorkflow $workflow = new PayrollRunWorkflow(),
     ) {}
 
     /** @return array<string,mixed>|null */
@@ -340,11 +344,16 @@ final class PayrollPersonStatutoryEvidenceRepository
         foreach (array_keys(self::EDITABLE) as $key) {
             $sections[$key] = $this->editorRows($supplierId, $employeeId, $key);
         }
+        $frozenThrough = $this->freeze->frozenThrough($supplierId);
 
         return [
             'employee_id' => $employeeId,
             'effective_on' => $effectiveOn,
-            'frozen_through' => $this->freeze->frozenThrough($supplierId),
+            'frozen_through' => $frozenThrough,
+            // Bez tohohle editor ví, že je historie zamčená, ale ne ČÍM —
+            // uživatel by musel sám najít mzdový běh, který hranici drží,
+            // a odejít ho otevřít jinam. Dotaz je stejně tak jako tak jeden.
+            'frozen_runs' => $this->frozenRuns($supplierId, $frozenThrough),
             'sections' => $sections,
             // Volba plátce doplatku minima se odkazuje na vyměřovací základ
             // u jiného zaměstnavatele. Ten se tady needituje, ale bez jeho
@@ -1169,6 +1178,66 @@ final class PayrollPersonStatutoryEvidenceRepository
         }
 
         return $blockers;
+    }
+
+    /**
+     * Mzdové běhy, které drží hranici zmrazení.
+     *
+     * Hranice je MAXIMUM `period_start` schválených běhů zaokrouhlené na konec
+     * měsíce ({@see PayrollApprovedPeriodFreeze}), takže ji drží běhy právě
+     * z toho měsíce — a je-li jich víc (běh na účtárnu), drží ji všechny.
+     * Otevřít jeden z nich hranici neposune, proto se vrací celý seznam.
+     *
+     * `command` je příkaz, kterým se běh otevře k opravě. Bere se z workflow,
+     * ne z vlastního seznamu stavů: druhá kopie pravidla by nabízela tlačítko,
+     * které server odmítne.
+     *
+     * @return list<array{id:int,row_version:int,status:string,period_start:string,command:?string}>
+     */
+    private function frozenRuns(int $supplierId, ?string $frozenThrough): array
+    {
+        if ($frozenThrough === null) {
+            return [];
+        }
+        $monthStart = substr($frozenThrough, 0, 8) . '01';
+        $rows = $this->rows(
+            "SELECT DISTINCT run.id, run.row_version, run.status, run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE revision.supplier_id = ?
+                AND revision.status = 'approved'
+                AND run.status NOT IN ('correction_pending', 'reopened')
+                AND run.period_start BETWEEN ? AND ?
+              ORDER BY run.id",
+            [$supplierId, $monthStart, $frozenThrough],
+        );
+
+        $runs = [];
+        foreach ($rows as $row) {
+            $status = PayrollRunStatus::tryFrom((string) $row['status']);
+            $command = null;
+            if ($status !== null) {
+                foreach ($this->workflow->availableCommands($status) as $available) {
+                    if ($available === PayrollRunCommand::REQUEST_CORRECTION
+                        || $available === PayrollRunCommand::REOPEN
+                    ) {
+                        $command = $available->value;
+                        break;
+                    }
+                }
+            }
+            $runs[] = [
+                'id' => (int) $row['id'],
+                'row_version' => (int) $row['row_version'],
+                'status' => (string) $row['status'],
+                'period_start' => (string) $row['period_start'],
+                'command' => $command,
+            ];
+        }
+
+        return $runs;
     }
 
     /** @return list<array<string,mixed>> */

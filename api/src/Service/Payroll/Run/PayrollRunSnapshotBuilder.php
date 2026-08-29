@@ -444,8 +444,10 @@ final class PayrollRunSnapshotBuilder
                     'tax_regime' => (string) $row['tax_regime'],
                     'other_withholding_eligibility' =>
                         (string) $row['other_withholding_eligibility'],
-                    'tax_declaration_signed' =>
-                        (bool) $row['tax_declaration_signed'],
+                    'tax_declaration_signed' => $this->taxDeclarationSigned(
+                        $statutoryEvidence[$employeeId] ?? null,
+                        $row,
+                    ),
                     'risky_work' => (bool) $row['risky_work'],
                     'social_employer_rate_category' =>
                         (string) $row['social_employer_rate_category'],
@@ -547,6 +549,36 @@ final class PayrollRunSnapshotBuilder
             hash('sha256', $manifestJson),
             $validations,
         );
+    }
+
+    /**
+     * Prohlášení k dani do snímku vztahu.
+     *
+     * Zdrojem je ZÁKONNÁ EVIDENCE OSOBY, ne sloupec smluvních podmínek.
+     * Prohlášení se podepisuje (i odvolává) kdykoliv v průběhu vztahu, kdežto
+     * `payroll_employment_terms` je verze smlouvy — dokud se hodnota brala
+     * odtud, znamenal každý pozdější podpis rozpor mezi oběma místy a mzdový
+     * běh na něj spadl (`tax_declaration_term_conflict`), aniž by ho kdo mohl
+     * odstranit jinak než novou verzí smluvních podmínek.
+     *
+     * Sloupec zůstává záložním zdrojem jen tam, kde evidence není k dispozici
+     * (volitelná závislost, osoba bez evidence). Chybějící evidenci ohlásí
+     * assembler vlastním blokátorem `tax_declaration_evidence_missing`.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function taxDeclarationSigned(mixed $evidence, array $row): bool
+    {
+        if (is_array($evidence)) {
+            $incomeTax = $evidence['income_tax'] ?? null;
+            $declaration = is_array($incomeTax) ? ($incomeTax['declaration'] ?? null) : null;
+            $status = is_array($declaration) ? ($declaration['status'] ?? null) : null;
+            if (is_string($status)) {
+                return $status === 'signed';
+            }
+        }
+
+        return (bool) $row['tax_declaration_signed'];
     }
 
     /**

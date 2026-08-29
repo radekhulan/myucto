@@ -51,6 +51,7 @@ import PayrollPersonQuickEdit from '@/pages/payroll/PayrollPersonQuickEdit.vue'
 function employment(overrides: Partial<PayrollEmployment> = {}): PayrollEmployment {
   return {
     id: 31,
+    tax_declaration: null,
     employee_id: 17,
     office_id: null,
     office_code: null,

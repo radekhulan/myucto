@@ -1415,16 +1415,14 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
-        $signed = $term['tax_declaration_signed'] ?? null;
-        $evidenceSigned = $declarationStatus === TaxDeclarationStatus::Signed;
-        if (!is_bool($signed) || $signed !== $evidenceSigned) {
-            $this->issue(
-                'income_tax',
-                'tax_declaration_term_conflict',
-                $personReference,
-                $relationshipReference,
-            );
-        }
+        // Prohlášení k dani se ZDE nekontroluje proti snímku smluvních podmínek.
+        // Býval to blokátor `tax_declaration_term_conflict`, jenže obě strany
+        // dnes pochází z téhož zdroje: `PayrollRunSnapshotBuilder` plní
+        // `term.tax_declaration_signed` ze zákonné evidence osoby, protože
+        // prohlášení se podepisuje v průběhu vztahu a druhé editovatelné místo
+        // pro tentýž údaj bylo past, ne kontrola. Formatter hlášku zná dál —
+        // starší revize si svůj text nesou s sebou.
+        //
         // `tax_regime` je override VÝSLEDKU („zdaň to srážkou / v cizině / ručně")
         // a podporovaná je z něj zatím jen `advance`. Zařazení podle § 6 odst. 4
         // písm. b) ZDP se proto NEBERE odsud: to je vstupní skutečnost, na kterou

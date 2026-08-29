@@ -103,6 +103,7 @@ const actionBarStub = {
 function employment(): PayrollEmployment {
   return {
     id: 10,
+    tax_declaration: null,
     employee_id: 20,
     office_id: null,
     office_code: null,
@@ -307,6 +308,78 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.preregistered')
     expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.transition.no_show')
     expect(wrapper.get('[data-test="actions"]').text()).toContain('payroll.people.new_terms')
+  })
+
+  /**
+   * Prohlášení k dani nesmí jít zadat na dvou místech. Karta ho jen ukazuje
+   * a vede tam, kde se nastavuje — jinak se rozejde se zákonnou evidencí
+   * a mzdový běh spadne na `tax_declaration_term_conflict`.
+   */
+  it('prohlášení k dani jen ukazuje a odkazuje do zákonné evidence', async () => {
+    const wrapper = mount(EmploymentCard, {
+      props: {
+        employment: {
+          ...employment(),
+          tax_declaration: {
+            status: 'signed' as const,
+            effective_from: '2026-01-01',
+            effective_to: null,
+          },
+        },
+        canWrite: true,
+      },
+    })
+
+    expect(wrapper.get('[data-test="employment-tax-declaration"]').text())
+      .toContain('payroll.people.tax_declaration_state.signed')
+
+    await wrapper.findAll('button').find(button =>
+      button.text().includes('payroll.people.new_terms'),
+    )!.trigger('click')
+    await flushPromises()
+
+    // Ve formuláři nové verze podmínek už zaškrtávátko není.
+    expect(wrapper.find('input[type="checkbox"][name="tax_declaration_signed"]').exists())
+      .toBe(false)
+    expect(wrapper.get('[data-test="terms-tax-declaration"]').text())
+      .toContain('payroll.people.tax_declaration_state.signed')
+
+    await wrapper.get('[data-test="terms-tax-declaration-link"]').trigger('click')
+    expect(wrapper.emitted('focusStatutoryEvidence')).toHaveLength(1)
+  })
+
+  it('bez záznamu v evidenci hlásí nezadáno, ne mlčky nepodepsáno', () => {
+    const wrapper = mount(EmploymentCard, {
+      props: { employment: employment(), canWrite: true },
+    })
+
+    expect(wrapper.get('[data-test="employment-tax-declaration"]').text())
+      .toContain('payroll.people.tax_declaration_state.missing')
+  })
+
+  /**
+   * „Upravit" je zelené jako všude jinde. Dokud se ale čeká na potvrzení
+   * nástupu, vede zeleně ono — dvě zelená tlačítka vedle sebe by si
+   * konkurovala a nebylo by poznat, co se čeká teď.
+   */
+  it('„Upravit" je zelené, ale ustoupí, když se čeká na potvrzení nástupu', () => {
+    function variantOf(employmentValue: PayrollEmployment): string | undefined {
+      const wrapper = mount(EmploymentCard, {
+        props: { employment: employmentValue, canWrite: true },
+        global: {
+          stubs: {
+            ActionBar: {
+              props: ['actions'],
+              template: '<div data-test="actions"><span v-for="action in actions" :key="action.key" :data-test="`variant-${action.key}`">{{ action.variant }}</span></div>',
+            },
+          },
+        },
+      })
+      return wrapper.get('[data-test="variant-new-terms"]').text()
+    }
+
+    expect(variantOf({ ...employment(), start_date: '2099-01-01' })).toBe('success')
+    expect(variantOf({ ...employment(), start_date: '2020-01-01' })).toBe('neutral')
   })
 
   it('edituje JMHZ evidenci jako tri-state a čte APZ z připnutých možností', async () => {

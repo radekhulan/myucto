@@ -153,6 +153,15 @@ final class PayrollEmploymentRepository
         );
         $stmt->execute([$supplierId, $employeeId]);
 
+        // Prohlášení k dani se vede u OSOBY, ne u vztahu — čte se proto jednou
+        // za osobu, ne v cyklu přes vztahy. Karta vztahu ho jen ukazuje
+        // a odkazuje na zákonnou evidenci, kde se nastavuje.
+        $taxDeclaration = $this->taxDeclaration(
+            $supplierId,
+            $employeeId,
+            (new \DateTimeImmutable('today'))->format('Y-m-d'),
+        );
+
         $result = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
             $row = $this->row($fetched);
@@ -195,6 +204,7 @@ final class PayrollEmploymentRepository
                     $relationType,
                     $this->configuredAccounts($supplierId),
                 ),
+                'tax_declaration' => $taxDeclaration,
                 'terms' => $this->terms($supplierId, $employmentId),
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
@@ -228,6 +238,11 @@ final class PayrollEmploymentRepository
                 $data['terms']['office_id'],
             );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
+            $data['terms']['tax_declaration_signed'] = $this->taxDeclarationSigned(
+                $supplierId,
+                $employeeId,
+                (string) $data['terms']['effective_from'],
+            );
             if ($data['code'] === '') {
                 $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
             }
@@ -407,6 +422,11 @@ final class PayrollEmploymentRepository
                     : (int) $employment['office_id'],
             );
             $this->assertPrimaryAvailable($supplierId, $employeeId, $data['is_primary'], $employmentId);
+            $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
+                $supplierId,
+                $employeeId,
+                (string) $data['effective_from'],
+            );
 
             $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
             if ($previous !== null && $data['effective_from'] <= (string) $previous['effective_from']) {
@@ -834,6 +854,53 @@ final class PayrollEmploymentRepository
     }
 
     /** @return array<string,mixed> */
+    /**
+     * Prohlášení k dani osoby platné k danému dni.
+     *
+     * Jediný zdroj pravdy je zákonná evidence osoby — zaškrtávátko na kartě
+     * vztahu z ní hodnotu jen přebírá. Chybí-li záznam, bere se prohlášení za
+     * NEPODEPSANÉ: bez něj se měsíční sleva podle § 38k odst. 4 ZDP uplatnit
+     * nesmí a za nesraženou zálohu ručí plátce (§ 38s ZDP).
+     */
+    private function taxDeclarationSigned(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): bool {
+        return ($this->taxDeclaration($supplierId, $employeeId, $onDate)['status'] ?? null)
+            === 'signed';
+    }
+
+    /** @return array{status:string,effective_from:string,effective_to:?string}|null */
+    private function taxDeclaration(
+        int $supplierId,
+        int $employeeId,
+        string $onDate,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT status, effective_from, effective_to
+               FROM payroll_person_tax_declarations
+              WHERE supplier_id = ? AND employee_id = ?
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to >= ?)
+              ORDER BY effective_from DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employeeId, $onDate, $onDate]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+
+        return [
+            'status' => (string) $row['status'],
+            'effective_from' => (string) $row['effective_from'],
+            'effective_to' => $row['effective_to'] === null
+                ? null
+                : (string) $row['effective_to'],
+        ];
+    }
+
     private function find(int $supplierId, int $employeeId, int $employmentId): array
     {
         foreach ($this->listForEmployee($supplierId, $employeeId) as $employment) {
@@ -1021,7 +1088,16 @@ final class PayrollEmploymentRepository
         return $events;
     }
 
-    /** @param TermsInput $data */
+    /**
+     * @param TermsInput $data
+     *
+     * `tax_declaration_signed` se NEBERE z těla požadavku, i když ho validátor
+     * pořád přijímá (starší klienti ho posílají). Prohlášení k dani je právní
+     * skutečnost vedená v čase v `payroll_person_tax_declarations`; druhé
+     * editovatelné místo pro tentýž údaj znamenalo, že se obě hodnoty rozešly
+     * a mzdový běh spadl na `tax_declaration_term_conflict`. Sloupec tak
+     * zůstává odvozeným zrcadlem evidence k začátku účinnosti verze.
+     */
     private function insertTerms(
         int $supplierId,
         int $employmentId,

@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   statutoryEvidence: vi.fn(),
   saveStatutoryEvidence: vi.fn(),
   employerSettings: vi.fn(),
+  commandRun: vi.fn(),
+  canWrite: vi.fn(() => true),
   success: vi.fn(),
   error: vi.fn(),
 }))
@@ -15,7 +17,12 @@ vi.mock('@/api/payroll', () => ({
     statutoryEvidence: mocks.statutoryEvidence,
     saveStatutoryEvidence: mocks.saveStatutoryEvidence,
     employerSettings: mocks.employerSettings,
+    commandRun: mocks.commandRun,
   },
+}))
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ canWrite: mocks.canWrite }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
@@ -29,9 +36,13 @@ vi.mock('@/composables/useCountries', () => ({
   ]),
 }))
 
-vi.mock('vue-i18n', () => ({
+// `useFormat` (sdílené formátování dat) táhne @/i18n, které volá skutečné
+// `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
-    t: (key: string) => key,
+    t: (key: string, params?: Record<string, unknown>) =>
+      params === undefined ? key : `${key}:${JSON.stringify(params)}`,
     locale: { value: 'cs' },
   }),
 }))
@@ -161,6 +172,7 @@ function emptyEvidence(overrides: Partial<PayrollStatutoryEvidence> = {}): Payro
     employee_id: 17,
     effective_on: '2026-08-31',
     frozen_through: null,
+    frozen_runs: [],
     sections: {
       tax_declarations: [],
       tax_residences: [],
@@ -227,6 +239,7 @@ function savedRow(section: string, index = 0): PayrollStatutoryEvidenceRow {
 describe('PayrollPersonStatutoryEvidencePanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.canWrite.mockReturnValue(true)
     resetDefaultHealthInsurerCode()
     mocks.statutoryEvidence.mockResolvedValue(emptyEvidence())
     mocks.saveStatutoryEvidence.mockResolvedValue(filledEvidence())
@@ -607,6 +620,94 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
       wrapper.get('[data-test="tax_declarations-0-effective_to"]').attributes('disabled'),
     ).toBeUndefined()
     expect(wrapper.find('[data-test="statutory-evidence-frozen"]').exists()).toBe(true)
+  })
+
+  it('ukáže nahoře, co u sekce teď platí a od kdy', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted()
+
+    const current = wrapper.get('[data-test="current-tax_declarations"]').text()
+    expect(current).toContain('payroll.people.statutory_evidence.option.status.signed')
+    expect(current).toContain('payroll.people.statutory_evidence.current_from')
+    // Sekce bez záznamu nesmí tvrdit stav, který nemá.
+    expect(wrapper.get('[data-test="current-tax_residences"]').text())
+      .toContain('payroll.people.statutory_evidence.current_missing')
+  })
+
+  it('odkaz na podklad a poznámka jsou sbalené, dokud nic nenesou', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence())
+    const wrapper = await startEditing()
+    await wrapper.get('[data-test="add-tax_declarations"]').trigger('click')
+
+    const details = wrapper.get('[data-test="evidence-details-tax_declarations-0"]')
+    expect(details.attributes('open')).toBeUndefined()
+    // Sbalené neznamená nedostupné — pole zůstávají v řádku.
+    expect(details.find('[data-test="tax_declarations-0-evidence_note"]').exists()).toBe(true)
+  })
+
+  it('u zamčeného řádku nabídne novou verzi od dalšího měsíce, ne jen zašedlá pole', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted()
+
+    await wrapper.get('[data-test="change-from-tax_declarations"]').trigger('click')
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+
+    // Minulost zůstává, jen se uzavře hranicí zmrazení…
+    expect(savedRow('tax_declarations')).toMatchObject({
+      id: 5,
+      effective_from: '2026-01-01',
+      effective_to: '2026-04-30',
+      status: 'signed',
+    })
+    // …a nová verze pokračuje prvním dnem dalšího měsíce.
+    const created = savedRow('tax_declarations', 1)
+    expect(created.id).toBeUndefined()
+    expect(created).toMatchObject({
+      effective_from: '2026-05-01',
+      effective_to: null,
+      status: 'signed',
+    })
+  })
+
+  it('nabídne otevřít k opravě všechny běhy, které hranici drží', async () => {
+    mocks.commandRun.mockResolvedValue({})
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      frozen_through: '2026-04-30',
+      blockers: [],
+      sections: {
+        ...filledEvidence().sections,
+      },
+      frozen_runs: [
+        { id: 71, row_version: 3, status: 'approved', period_start: '2026-04-01', command: 'request_correction' },
+        { id: 72, row_version: 1, status: 'paid', period_start: '2026-04-01', command: 'request_correction' },
+      ],
+    }))
+    const wrapper = await mounted()
+
+    await wrapper.get('[data-test="open-run-tax_declarations"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.commandRun).toHaveBeenCalledTimes(2)
+    expect(mocks.commandRun.mock.calls[0]![0]).toBe(71)
+    expect(mocks.commandRun.mock.calls[0]![1]).toBe('request_correction')
+    expect(mocks.commandRun.mock.calls[0]![2]).toMatchObject({ row_version: 3 })
+    expect(mocks.commandRun.mock.calls[1]![0]).toBe(72)
+  })
+
+  it('bez práva na opravu běhu tlačítko nenabídne', async () => {
+    mocks.canWrite.mockReturnValue(false)
+    mocks.statutoryEvidence.mockResolvedValue(emptyEvidence({
+      frozen_through: '2026-04-30',
+      blockers: [],
+      sections: { ...filledEvidence().sections },
+      frozen_runs: [
+        { id: 71, row_version: 3, status: 'approved', period_start: '2026-04-01', command: 'request_correction' },
+      ],
+    }))
+    const wrapper = await mounted()
+
+    expect(wrapper.find('[data-test="open-run-tax_declarations"]').exists()).toBe(false)
   })
 
   it('upozorní na dva otevřené záznamy dřív, než je server odmítne jako překryv', async () => {

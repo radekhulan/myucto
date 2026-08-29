@@ -261,6 +261,92 @@ final class PayrollPersonStatutoryEvidenceRepositoryTest extends TestCase
         )->execute([$this->supplierId, $this->employeeId]);
     }
 
+    /**
+     * Editor musí vědět, KTERÝ běh hranici drží.
+     *
+     * Bez toho napsal jen „do … je historie uzavřená" a uživatel měl sám najít
+     * mzdu, odejít na jinou stránku a otevřít ji k opravě.
+     */
+    public function testEditorViewNamesRunsHoldingTheFreeze(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->insertCompleteEvidence($pdo);
+        $runId = $this->approveRun($pdo, '2026-06-01', 'approved');
+
+        $view = $this->repository->editorView(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-07-31',
+        );
+
+        self::assertNotNull($view);
+        self::assertSame('2026-06-30', $view['frozen_through']);
+        self::assertSame([[
+            'id' => $runId,
+            'row_version' => 1,
+            'status' => 'approved',
+            'period_start' => '2026-06-01',
+            'command' => 'request_correction',
+        ]], $view['frozen_runs']);
+    }
+
+    /**
+     * Otevřený běh hranici nedrží — a nesmí tedy ani nabízet, že se otevře
+     * znovu. Editor jinak nabídne akci, kterou už nikdo nepotřebuje.
+     */
+    public function testRunOpenedForCorrectionNoLongerHoldsTheFreeze(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->insertCompleteEvidence($pdo);
+        $this->approveRun($pdo, '2026-06-01', 'correction_pending');
+
+        $view = $this->repository->editorView(
+            $this->supplierId,
+            $this->employeeId,
+            '2026-07-31',
+        );
+
+        self::assertNotNull($view);
+        self::assertNull($view['frozen_through']);
+        self::assertSame([], $view['frozen_runs']);
+    }
+
+    private function approveRun(PDO $pdo, string $periodStart, string $status): int
+    {
+        $pdo->prepare(
+            'INSERT INTO payroll_runs
+                (supplier_id, period_start, payment_date, status, current_revision_no)
+             VALUES (?, ?, ?, ?, 1)'
+        )->execute([
+            $this->supplierId,
+            $periodStart,
+            substr($periodStart, 0, 8) . '15',
+            $status,
+        ]);
+        $runId = (int) $pdo->lastInsertId();
+
+        $snapshot = json_encode(['schema_version' => 'payroll-run-input.v2'], JSON_THROW_ON_ERROR);
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json, input_snapshot_hash,
+                 result_snapshot_json, result_snapshot_hash, idempotency_key_hash,
+                 approved_at)
+             VALUES (?, ?, 1, "approved", "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())'
+        )->execute([
+            $this->supplierId,
+            $runId,
+            str_repeat('c', 64),
+            $snapshot,
+            hash('sha256', $snapshot),
+            $snapshot,
+            hash('sha256', $snapshot),
+            random_bytes(32),
+        ]);
+
+        return $runId;
+    }
+
     private function createEmployee(PDO $pdo, int $supplierId): int
     {
         $pdo->prepare(

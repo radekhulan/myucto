@@ -48,6 +48,13 @@ export interface StatutoryFieldSpec {
 export interface StatutorySectionSpec {
   key: PayrollStatutoryEvidenceSection
   kind: 'interval' | 'month'
+  /**
+   * Pole, jehož hodnota pojmenovává stav sekce v přehledu „co teď platí".
+   * Bez něj by přehled musel hádat, které z pěti polí je to podstatné.
+   */
+  summaryKey: string
+  /** Doplněk přehledu (kód pojišťovny); vykresluje ho panel, ne tenhle modul. */
+  summaryDetailKey?: string
   fields: readonly StatutoryFieldSpec[]
 }
 
@@ -80,6 +87,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
   {
     key: 'tax_declarations',
     kind: 'interval',
+    summaryKey: 'status',
     fields: [
       { key: 'status', kind: 'enum', options: ['signed', 'not-signed', 'unverified'] },
       {
@@ -92,6 +100,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
   {
     key: 'tax_residences',
     kind: 'interval',
+    summaryKey: 'residence',
     fields: [
       { key: 'residence', kind: 'enum', options: ['czech-resident', 'non-resident', 'unverified'] },
       {
@@ -112,6 +121,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
   {
     key: 'social_jurisdictions',
     kind: 'interval',
+    summaryKey: 'jurisdiction',
     fields: [
       {
         key: 'jurisdiction',
@@ -144,6 +154,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
   {
     key: 'social_discount_claims',
     kind: 'interval',
+    summaryKey: 'status',
     fields: [
       { key: 'status', kind: 'enum', options: ['not_claimed', 'verified', 'unverified'] },
       {
@@ -156,6 +167,8 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
   {
     key: 'health_coverages',
     kind: 'interval',
+    summaryKey: 'jurisdiction',
+    summaryDetailKey: 'insurer_code',
     fields: [
       {
         key: 'jurisdiction',
@@ -185,6 +198,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
   {
     key: 'health_month_evidence',
     kind: 'month',
+    summaryKey: 'top_up_responsibility',
     fields: [
       {
         key: 'top_up_responsibility',
@@ -291,6 +305,59 @@ export function visibleFields(
   row: PayrollStatutoryEvidenceRow,
 ): StatutoryFieldSpec[] {
   return section.fields.filter(field => isFieldVisible(field, row))
+}
+
+/**
+ * Doklad je NEPOVINNÝ, a přesto zabíral většinu formuláře — odkaz na podklad,
+ * ID dokumentu a poznámka jsou tři pětiny každého řádku. Panel je proto sbaluje
+ * pod „Doplnit podklad"; tenhle predikát říká, co tam patří, ať se rozdělení
+ * neopisuje v šabloně u každé sekce zvlášť.
+ */
+export function isEvidenceDetailField(field: StatutoryFieldSpec): boolean {
+  return field.kind === 'evidence' || field.kind === 'document'
+}
+
+/** Věcná pole řádku — všechno, co není doklad. */
+export function primaryFields(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+): StatutoryFieldSpec[] {
+  return visibleFields(section, row).filter(field => !isEvidenceDetailField(field))
+}
+
+/** Pole dokladu; prázdné pole znamená, že sekce nemá co sbalovat. */
+export function evidenceDetailFields(
+  section: StatutorySectionSpec,
+  row: PayrollStatutoryEvidenceRow,
+): StatutoryFieldSpec[] {
+  return visibleFields(section, row).filter(isEvidenceDetailField)
+}
+
+/**
+ * Řádek, který k danému dni PLATÍ.
+ *
+ * Přehled nahoře musí odpovědět „co teď platí a od kdy" — a to je přesně ten
+ * řádek, který k témuž dni čte serverový snímek: u intervalů poslední začátek
+ * do daného dne s koncem po něm, u měsíční evidence záznam za týž měsíc.
+ */
+export function currentRow(
+  section: StatutorySectionSpec,
+  rows: readonly PayrollStatutoryEvidenceRow[],
+  effectiveOn: string,
+): PayrollStatutoryEvidenceRow | null {
+  if (section.kind === 'month') {
+    const month = effectiveOn.slice(0, 7)
+    return rows.find(row => text(row, 'period_start').slice(0, 7) === month) ?? null
+  }
+  let found: PayrollStatutoryEvidenceRow | null = null
+  for (const row of rows) {
+    const from = text(row, 'effective_from')
+    const to = text(row, 'effective_to')
+    if (from === '' || from > effectiveOn) continue
+    if (to !== '' && to < effectiveOn) continue
+    if (found === null || from >= text(found, 'effective_from')) found = row
+  }
+  return found
 }
 
 /**
