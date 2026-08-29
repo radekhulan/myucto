@@ -4908,8 +4908,20 @@
         },
         "eldp": {
             "title": "Pension insurance record sheet",
-            "intro": "Builds the record sheet for a calendar year, or for the part of it that ends when the employee leaves pension insurance. The source is always a frozen approved payroll revision; a missing month or an absence the module cannot record blocks preparation and says why.",
-            "legalBasis": "Act No. 582/1991 Coll., Sections 38 and 39. From 2026 the Czech Social Security Administration assembles the record sheet from the monthly employer report; a standalone sheet remains for years before 2026, for participation ending before 1 April 2026, and on request from the authority.",
+            "intro": "The record sheet is no longer an annual duty. From 2026 the employer neither draws it up nor files it — pension insurance data is reported in the single monthly employer report and the Czech Social Security Administration assembles the sheet from it; employees can see it on the ČSSZ ePortal. Here you prepare one only in three exceptions:",
+            "exceptions": {
+                "beforeTwentySix": "For periods before 1 January 2026, governed by the earlier wording of the Act.",
+                "endedBeforeApril": "For employment ended before 1 April 2026, covered by the transitional provision.",
+                "authorityRequest": "On request from ČSSZ/ÚSSZ under Section 38a(2) and (3) — when the deadline for the monthly or corrective report has passed, or the record sheet cannot be assembled from the reported data."
+            },
+            "notApplicable": {
+                "title": "No record sheet is drawn up for this year and employment.",
+                "authorityHint": "If ČSSZ/ÚSSZ asked you to file one, tick the request option below and enter the date you received it; the eight-day deadline runs from that day."
+            },
+            "exceptionOnly": {
+                "title": "This is an exception, not an annual duty."
+            },
+            "legalBasis": "Act No. 582/1991 Coll., Section 38(1) and (2) and Section 39(1) as amended by Act No. 360/2025 Coll.; exceptions under Section 38a(2) and (3) and the transitional provisions. The form itself was not abolished, it merely stopped being routine.",
             "person": "Person",
             "employment": "Employment",
             "year": "Year",

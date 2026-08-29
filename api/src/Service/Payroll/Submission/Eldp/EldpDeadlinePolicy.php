@@ -49,22 +49,56 @@ use MyInvoice\Service\Report\CzechWorkingDays;
  * obou paragrafů před novelou i mapovací tabulka starých ustanovení na nová
  * jsou v `private/Mzdy/24-ELDP-ZNENI-DO-2025.md`.
  *
- * ## Přechodná pravidla od JMHZ
+ * ## Roční povinnost zaměstnavatele od roku 2026 NEEXISTUJE
  *
- * Podle *Pravidel podání JMHZ a souvisejících procesů* verze 1.4.4, kap. 4
- * sestavuje od roku 2026 ELDP sama ČSSZ z údajů měsíčního hlášení. Samostatný
- * evidenční list vede a předkládá zaměstnavatel jen:
+ * ⚠️ Tohle je nejdůležitější věta celé třídy a nesmí se „opravit" zpátky.
+ * Novela č. 360/2025 Sb. přepsala § 38 zákona č. 582/1991 Sb.: podle odst. 1
+ * sděluje zaměstnavatel údaje pro důchodové pojištění **prostřednictvím
+ * jednotného měsíčního hlášení zaměstnavatele**, a podle odst. 2 „**Česká
+ * správa sociálního zabezpečení sestaví evidenční list** na základě údajů
+ * sdělovaných podle odstavce 1". Zaměstnanci se list zpřístupňuje na ePortálu
+ * (§ 39 odst. 1). Zaměstnavatel tedy evidenční list **nevyhotovuje ani
+ * nepředkládá** — žádná roční povinnost „sestav a odešli ELDP za rok" mu
+ * nezůstala a modul ji nesmí nabízet. Nabízet ji znamená posílat mzdovou
+ * účetní dělat práci, kterou za ni dělá ČSSZ, a naopak ji utvrzovat, že za
+ * data v důchodovém pojištění odpovídá ona.
  *
- * - za roky **před 1. 1. 2026** stávajícím způsobem,
- * - při **skončení účasti zaměstnance před 1. 4. 2026**,
- * - **na výzvu ČSSZ/ÚSSZ** s údaji za rok 2026 nebo když z nahlášených údajů
- *   ELDP sestavit nelze; při výzvě v průběhu roku se list uzavírá posledním
- *   měsícem, za který už zaměstnavatel zúčtoval příjem,
- * - u příslušníků ozbrojených sil (ti se předkládají MV/MO, ne ČSSZ —
- *   tuhle větev modul nepodporuje).
+ * Proto {@see self::forYear()} **odmítá roky od 2026**: řádná roční lhůta
+ * 30. dubna je pro ně nezákonná — počítala by se z povinnosti, která
+ * neexistuje. `forYear()` slouží už jen letům, na která podle čl. V bodu 1
+ * zák. č. 360/2025 Sb. dopadá znění účinné do 31. 12. 2025.
+ *
+ * ## Tiskopis zrušen nebyl — úzká ruční cesta zůstává
+ *
+ * Podle podkladu ČSSZ *Řešení částečně zrušených tiskopisů k 4. 12. 2025*
+ * tiskopisy ELDP **NEBUDOU zrušeny**. Samostatný evidenční list vede a
+ * předkládá zaměstnavatel dál, ale jen ve vyjmenovaných výjimkách:
+ *
+ * - za období **před 1. 1. 2026** stávajícím způsobem,
+ * - u zaměstnání **skončených před 1. 4. 2026**,
+ * - **na výzvu ČSSZ/ÚSSZ** podle § 38a odst. 2 a 3 zákona č. 582/1991 Sb. —
+ *   uplynula-li lhůta pro měsíční hlášení nebo pro opravné hlášení, anebo
+ *   nelze-li z nahlášených údajů evidenční list sestavit; při výzvě v průběhu
+ *   roku se list uzavírá posledním měsícem, za který už zaměstnavatel
+ *   zúčtoval příjem (přechodně též čl. V bod 8 zák. č. 360/2025 Sb. pro rok
+ *   2026),
+ * - u příslušníků ozbrojených sil (§ 38 odst. 5, § 39 odst. 3 — předkládají se
+ *   MV/MO, ne ČSSZ; tuhle větev modul nepodporuje).
+ *
+ * O přípustnosti rozhoduje jediné místo: {@see self::standaloneStatementAllowed()}.
+ * Roční workflow z něj neplyne pro žádný rok od 2026 — vždycky je to výjimka.
  */
 final class EldpDeadlinePolicy
 {
+    /**
+     * Poslední rok, za který zaměstnavatel evidenční list vůbec vyhotovoval
+     * za celý kalendářní rok. Není to rok podpory modulu ani rok rulesetu —
+     * je to den účinnosti novely č. 360/2025 Sb. vyjádřený rokem: od roku 2026
+     * sestavuje evidenční list ČSSZ z měsíčního hlášení (§ 38 odst. 2 zákona
+     * č. 582/1991 Sb.) a roční lhůta zaměstnavateli neběží.
+     */
+    public const LAST_ANNUAL_YEAR = 2025;
+
     public const ANNUAL_RULESET = 'cz-eldp-deadlines.annual.v1';
     public const TERMINATION_RULESET = 'cz-eldp-deadlines.termination.v1';
     public const AUTHORITY_REQUEST_RULESET =
@@ -84,11 +118,27 @@ final class EldpDeadlinePolicy
     ];
 
     /**
-     * Řádný roční evidenční list za skončený kalendářní rok.
+     * Řádný roční evidenční list za skončený kalendářní rok — jen do roku 2025.
+     *
+     * Od roku 2026 žádná roční lhůta zaměstnavateli neběží, protože mu neběží
+     * ani povinnost: evidenční list sestavuje ČSSZ z měsíčního hlášení
+     * (§ 38 odst. 2 zákona č. 582/1991 Sb. ve znění zák. č. 360/2025 Sb.).
+     * Vydat pro takový rok termín 30. dubna by znamenalo vymyslet povinnost.
+     * Metoda proto raději spadne, než aby vrátila lhůtu, která neexistuje;
+     * přípustné výjimky mají vlastní okna ({@see self::forTermination()},
+     * {@see self::forAuthorityRequest()}).
      */
     public function forYear(int $year): EldpDeadlineWindow
     {
         self::assertYear($year);
+        if ($year > self::LAST_ANNUAL_YEAR) {
+            throw new \InvalidArgumentException(
+                'Za rok ' . $year . ' zaměstnavatel evidenční list nevyhotovuje '
+                . 'ani nepředkládá — sestavuje jej ČSSZ z jednotného měsíčního '
+                . 'hlášení (§ 38 odst. 2 zákona č. 582/1991 Sb.). Roční lhůta '
+                . 'evidenčního listu se pro tento rok neurčuje.',
+            );
+        }
 
         return $this->window(
             sprintf('%04d-01-01', $year + 1),
@@ -165,7 +215,14 @@ final class EldpDeadlinePolicy
     /**
      * Přípustnost samostatného evidenčního listu za daný rok.
      *
-     * @return array{allowed:bool,reason:string,rule:string}
+     * `routine` odlišuje běžnou roční povinnost od výjimky. Pravdivá je jen
+     * u let, kdy roční evidenční list opravdu existoval — od roku 2026 už
+     * nikdy: každá povolená cesta je tam jednorázová výjimka, kterou spouští
+     * konkrétní událost (skončení zaměstnání, výzva úřadu), ne konec roku.
+     * Kdo tuhle hodnotu jednou zobrazí uživateli, nesmí ji přestat rozlišovat —
+     * bez ní vypadá výjimka na obrazovce stejně jako roční rutina.
+     *
+     * @return array{allowed:bool,routine:bool,reason:string,rule:string}
      */
     public static function standaloneStatementAllowed(
         int $year,
@@ -175,14 +232,21 @@ final class EldpDeadlinePolicy
         if ($year < 2026) {
             return [
                 'allowed' => true,
-                'reason' => 'Za roky před 1. 1. 2026 vede a předkládá evidenční list zaměstnavatel.',
+                'routine' => true,
+                'reason' => 'Za období před 1. 1. 2026 vede a předkládá evidenční list '
+                    . 'zaměstnavatel podle znění účinného do 31. 12. 2025 '
+                    . '(čl. V bod 1 zákona č. 360/2025 Sb.).',
                 'rule' => 'transitional_before_2026',
             ];
         }
         if ($requestedByAuthority) {
             return [
                 'allowed' => true,
-                'reason' => 'Evidenční list se sestavuje na výzvu ČSSZ/ÚSSZ.',
+                'routine' => false,
+                'reason' => 'Evidenční list se sestavuje na výzvu ČSSZ/ÚSSZ podle '
+                    . '§ 38a odst. 2 a 3 zákona č. 582/1991 Sb. — uplynula lhůta pro '
+                    . 'měsíční nebo opravné hlášení, anebo z nahlášených údajů '
+                    . 'evidenční list sestavit nelze.',
                 'rule' => 'on_authority_request',
             ];
         }
@@ -192,16 +256,23 @@ final class EldpDeadlinePolicy
         ) {
             return [
                 'allowed' => true,
-                'reason' => 'Účast na důchodovém pojištění skončila před 1. 4. 2026.',
+                'routine' => false,
+                'reason' => 'Zaměstnání skončilo před 1. 4. 2026, takže na ně dopadá '
+                    . 'přechodné ustanovení a evidenční list vyhotoví zaměstnavatel.',
                 'rule' => 'transitional_participation_ended_before_april_2026',
             ];
         }
 
         return [
             'allowed' => false,
-            'reason' => 'Od roku 2026 sestavuje evidenční list ČSSZ z údajů měsíčního hlášení; '
-                . 'samostatný evidenční list se vede jen při skončení účasti před 1. 4. 2026 '
-                . 'nebo na výzvu ČSSZ/ÚSSZ.',
+            'routine' => false,
+            'reason' => 'Zaměstnavatel evidenční list nevyhotovuje ani nepředkládá — '
+                . 'údaje pro důchodové pojištění sděluje jednotným měsíčním hlášením '
+                . 'a evidenční list z nich sestaví ČSSZ (§ 38 odst. 1 a 2 zákona '
+                . 'č. 582/1991 Sb.). Zaměstnanci je dostupný na ePortálu ČSSZ '
+                . '(§ 39 odst. 1). Samostatný list se vyhotovuje jen za období před '
+                . 'rokem 2026, u zaměstnání skončených před 1. 4. 2026 a na výzvu '
+                . 'ČSSZ/ÚSSZ podle § 38a odst. 2 a 3.',
             'rule' => 'assembled_by_cssz_from_monthly_report',
         ];
     }

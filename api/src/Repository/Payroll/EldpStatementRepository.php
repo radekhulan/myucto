@@ -89,6 +89,33 @@ final class EldpStatementRepository
         return $rows;
     }
 
+    /**
+     * Poslední den evidovaného zaměstnání.
+     *
+     * Rozhoduje o tom, jestli na vztah dopadá přechodná výjimka „skončení
+     * před 1. 4. 2026". Čte se ještě před sestavením, aby obsluha věděla,
+     * jestli evidenční list vůbec smí vzniknout, dřív než vyplní potvrzení.
+     *
+     * @return array{found:bool,end_date:string|null}
+     */
+    public function employmentParticipation(int $supplierId, int $employmentId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT end_date FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $employmentId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return ['found' => false, 'end_date' => null];
+        }
+
+        return [
+            'found' => true,
+            'end_date' => $row['end_date'] === null ? null : (string) $row['end_date'],
+        ];
+    }
+
     public function insertClaim(
         int $supplierId,
         string $environment,

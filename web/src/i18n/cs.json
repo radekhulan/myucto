@@ -4908,8 +4908,20 @@
         },
         "eldp": {
             "title": "Evidenční list důchodového pojištění",
-            "intro": "Sestaví evidenční list za kalendářní rok nebo za jeho část při skončení účasti na důchodovém pojištění. Podklad se bere výhradně ze zmrazených schválených mzdových revizí; chybějící měsíc nebo absence, kterou modul neumí zapsat, přípravu zablokují a řeknou proč.",
-            "legalBasis": "Zákon č. 582/1991 Sb., § 38 a § 39. Za roky od 2026 sestavuje evidenční list ČSSZ z údajů měsíčního hlášení; samostatný list se vede za roky před 2026, při skončení účasti před 1. 4. 2026 a na výzvu ČSSZ/ÚSSZ.",
+            "intro": "Evidenční list už nepatří mezi roční povinnosti. Od roku 2026 jej zaměstnavatel nevyhotovuje ani nepředkládá — údaje pro důchodové pojištění sděluje jednotným měsíčním hlášením a list z nich sestaví ČSSZ; zaměstnanci je dostupný na ePortálu ČSSZ. Tady jej připravíte jen ve třech výjimkách:",
+            "exceptions": {
+                "beforeTwentySix": "Za období před 1. 1. 2026, na které se použije dřívější znění zákona.",
+                "endedBeforeApril": "U zaměstnání skončených před 1. 4. 2026, na která dopadá přechodné ustanovení.",
+                "authorityRequest": "Na výzvu ČSSZ/ÚSSZ podle § 38a odst. 2 a 3 — uplynula-li lhůta pro měsíční nebo opravné hlášení, anebo nelze-li z nahlášených údajů evidenční list sestavit."
+            },
+            "notApplicable": {
+                "title": "Za tento rok a pracovní vztah se evidenční list nevyhotovuje.",
+                "authorityHint": "Jestli vás ČSSZ/ÚSSZ k předložení vyzvala, zaškrtněte níže sestavení na výzvu a zadejte datum jejího doručení; od toho dne běží lhůta osmi dnů."
+            },
+            "exceptionOnly": {
+                "title": "Jde o výjimku, ne o roční povinnost."
+            },
+            "legalBasis": "Zákon č. 582/1991 Sb., § 38 odst. 1 a 2 a § 39 odst. 1 ve znění zákona č. 360/2025 Sb.; výjimky podle § 38a odst. 2 a 3 a přechodných ustanovení. Tiskopis zrušen nebyl, jen se přestal používat rutinně.",
             "person": "Osoba",
             "employment": "Pracovní vztah",
             "year": "Rok",

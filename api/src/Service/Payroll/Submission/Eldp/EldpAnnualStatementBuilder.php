@@ -267,6 +267,10 @@ final class EldpAnnualStatementBuilder
             ],
             'eligibility' => [
                 'rule' => $eligibility['rule'],
+                // Do neměnného snapshotu patří i to, jestli šlo o běžnou roční
+                // povinnost, nebo o výjimku. Za pár let už z roku a dat nepůjde
+                // poznat, proč evidenční list vůbec vznikl.
+                'routine' => $eligibility['routine'],
                 'reason' => $eligibility['reason'],
                 'requested_by_authority' => $requestedByAuthority,
                 'authority_request_received_on' => $authorityRequestReceivedOn,

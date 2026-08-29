@@ -310,6 +310,51 @@ final readonly class EldpStatementService
     }
 
     /**
+     * Smí za tenhle rok a vztah vůbec vzniknout samostatný evidenční list?
+     *
+     * Odpověď se vydává PŘED sestavením, aby obrazovka nevypadala jako roční
+     * rutina, kterou stačí odklikat. Zaměstnavatel od roku 2026 evidenční list
+     * nevede (§ 38 odst. 1 a 2 zákona č. 582/1991 Sb.) a jediné přípustné cesty
+     * jsou výjimky; kdyby se to obsluha dozvěděla až z chyby po vyplnění
+     * potvrzení, naučí se ji odklikávat jako překážku, ne číst jako pravidlo.
+     *
+     * `authority_request_available` říká, že tentýž rozsah by přípustný byl,
+     * kdyby ho vyžádala ČSSZ/ÚSSZ. Není to nabídka, jak zákaz obejít — výzva je
+     * skutečná událost, kterou uživatel dokládá datem doručení.
+     *
+     * @return array{
+     *   allowed:bool,routine:bool,reason:string,rule:string,
+     *   employment_end_date:string|null,authority_request_available:bool,
+     *   last_annual_year:int
+     * }
+     */
+    public function eligibility(
+        int $supplierId,
+        int $employmentId,
+        int $year,
+    ): array {
+        $participation = $this->repository->employmentParticipation(
+            $supplierId,
+            $employmentId,
+        );
+        $endDate = $participation['end_date'];
+        $eligibility = EldpDeadlinePolicy::standaloneStatementAllowed(
+            $year,
+            $endDate !== null && $endDate <= sprintf('%04d-12-31', $year)
+                ? $endDate
+                : null,
+            false,
+        );
+
+        return [
+            ...$eligibility,
+            'employment_end_date' => $endDate,
+            'authority_request_available' => !$eligibility['allowed'],
+            'last_annual_year' => EldpDeadlinePolicy::LAST_ANNUAL_YEAR,
+        ];
+    }
+
+    /**
      * Přesné bajty zmrazeného XML se v evidenčním listu neuchovávají znovu —
      * pravdou je artefakt platformy podání. Tahle metoda proto vrací jen
      * ověřený dešifrovaný snapshot pro zobrazení a znovusestavení.

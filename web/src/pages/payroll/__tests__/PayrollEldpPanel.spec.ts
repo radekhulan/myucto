@@ -76,7 +76,22 @@ function setup(): void {
       end_date: null,
     }],
   })
-  m.eldpStatement.mockResolvedValue({ statement: null, supported: {}, manual_completion: null })
+  m.eldpStatement.mockResolvedValue({
+    statement: null,
+    supported: {},
+    // Výchozí je rok, kdy roční evidenční list ještě existoval; scénáře od
+    // roku 2026 si přípustnost přepisují samy.
+    eligibility: {
+      allowed: true,
+      routine: true,
+      reason: 'Za období před 1. 1. 2026 vede evidenční list zaměstnavatel.',
+      rule: 'transitional_before_2026',
+      employment_end_date: null,
+      authority_request_available: false,
+      last_annual_year: 2025,
+    },
+    manual_completion: null,
+  })
   m.prepareEldp.mockResolvedValue({
     statement_id: 5,
     created: true,
@@ -144,6 +159,63 @@ describe('PayrollEldpPanel', () => {
     const button = wrapper.get('[data-test="eldp-prepare"]')
     expect(button.attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('payroll.eldp.noSendNotice')
+  })
+
+  /*
+   * Od roku 2026 zaměstnavatel evidenční list nevyhotovuje. Panel to musí
+   * říct NAD formulářem a přípravu vůbec nenabídnout — jinak vypadá zrušená
+   * roční povinnost pořád jako úkol, který má účetní odbavit.
+   */
+  it('nenabídne přípravu tam, kde evidenční list sestavuje ČSSZ', async () => {
+    m.eldpStatement.mockResolvedValue({
+      statement: null,
+      supported: {},
+      eligibility: {
+        allowed: false,
+        routine: false,
+        reason: 'Zaměstnavatel evidenční list nevyhotovuje ani nepředkládá.',
+        rule: 'assembled_by_cssz_from_monthly_report',
+        employment_end_date: null,
+        authority_request_available: true,
+        last_annual_year: 2025,
+      },
+      manual_completion: null,
+    })
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+
+    expect(wrapper.get('[data-test="eldp-not-applicable"]').text())
+      .toContain('nevyhotovuje')
+    expect(wrapper.get('[data-test="eldp-prepare"]').attributes('disabled'))
+      .toBeDefined()
+    expect(m.prepareEldp).not.toHaveBeenCalled()
+  })
+
+  it('výjimku označí jako výjimku, ne jako roční povinnost', async () => {
+    m.eldpStatement.mockResolvedValue({
+      statement: null,
+      supported: {},
+      eligibility: {
+        allowed: true,
+        routine: false,
+        reason: 'Zaměstnání skončilo před 1. 4. 2026.',
+        rule: 'transitional_participation_ended_before_april_2026',
+        employment_end_date: '2026-03-31',
+        authority_request_available: false,
+        last_annual_year: 2025,
+      },
+      manual_completion: null,
+    })
+    const wrapper = mount(PayrollEldpPanel)
+    await flushPromises()
+
+    await fillConfirmation(wrapper)
+
+    expect(wrapper.get('[data-test="eldp-exception"]').text())
+      .toContain('payroll.eldp.exceptionOnly.title')
+    expect(wrapper.find('[data-test="eldp-not-applicable"]').exists()).toBe(false)
   })
 
   it('vypíše blokátory pojmenované serverem', async () => {

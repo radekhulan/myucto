@@ -1,6 +1,14 @@
 <script setup lang="ts">
 /*
- * Evidenční list důchodového pojištění.
+ * Evidenční list důchodového pojištění — VÝJIMKA, ne roční rutina.
+ *
+ * Od roku 2026 zaměstnavatel evidenční list nevyhotovuje ani nepředkládá:
+ * údaje pro důchodové pojištění sděluje jednotným měsíčním hlášením a list
+ * z nich sestaví ČSSZ (§ 38 odst. 1 a 2 zákona č. 582/1991 Sb. ve znění
+ * zák. č. 360/2025 Sb.); zaměstnanci je dostupný na ePortálu (§ 39 odst. 1).
+ * Panel proto NEVEDE nikoho k tomu, aby „odbavil ELDP za loňský rok" —
+ * přípustnost si vyžádá od serveru dřív, než dá vyplnit potvrzení, a když
+ * povinnost nevznikla, řekne to a přípravu nedovolí.
  *
  * Žádné tlačítko tady neodesílá — lokální podání se zastaví ve stavu
  * „připraveno" a nabízí jen kontrolní XML. Člověk podání dokončí v oficiálním
@@ -13,6 +21,7 @@ import { documentsApi, type DocItem } from '@/api/documents'
 import {
   payrollApi,
   type PayrollEldpAuthorityStatus,
+  type PayrollEldpEligibility,
   type PayrollEldpManualCompletionOverview,
   type PayrollEldpPrepared,
   type PayrollEldpStatement,
@@ -32,7 +41,17 @@ const downloading = ref(false)
 const employments = ref<PayrollEmployment[]>([])
 const personId = ref<number | null>(null)
 const employmentId = ref<number | null>(null)
-const year = ref<number>(new Date().getFullYear() - 1)
+/*
+ * Poslední rok, za který zaměstnavatel evidenční list vyhotovoval za celý
+ * kalendářní rok. Zrcadlí `EldpDeadlinePolicy::LAST_ANNUAL_YEAR` — server je
+ * jediná autorita, ale výchozí rok se musí zvolit dřív, než dorazí odpověď.
+ * Bez téhle meze by panel od roku 2027 sám předvyplňoval „loni" a znovu tak
+ * nabízel roční povinnost, která od roku 2026 neexistuje.
+ */
+const LAST_ANNUAL_ELDP_YEAR = 2025
+const year = ref<number>(
+  Math.min(new Date().getFullYear() - 1, LAST_ANNUAL_ELDP_YEAR),
+)
 const environment = defineModel<PayrollRegzelEnvironment>('environment', {
   default: 'production',
 })
@@ -42,6 +61,7 @@ const requestedByAuthority = ref(false)
 const authorityRequestReceivedOn = ref('')
 const note = ref('')
 const statement = ref<PayrollEldpStatement | null>(null)
+const eligibility = ref<PayrollEldpEligibility | null>(null)
 const prepared = ref<PayrollEldpPrepared | null>(null)
 const blockers = ref<Array<{ code: string, message: string }>>([])
 const error = ref('')
@@ -93,6 +113,17 @@ const yearOptions = computed(() => {
     .map(value => ({ value, label: String(value) }))
 })
 /*
+ * Fail-closed: dokud server nepotvrdí, že samostatný evidenční list za tenhle
+ * rozsah vůbec vzniká, příprava se nenabízí. Jedinou cestou přes zákaz je
+ * výzva ČSSZ/ÚSSZ (§ 38a odst. 2 a 3), a tu uživatel dokládá datem doručení —
+ * není to odklikávací výjimka, ale skutečná událost.
+ */
+const standaloneAllowed = computed(() =>
+  eligibility.value !== null
+  && (eligibility.value.allowed || requestedByAuthority.value))
+/* Roční rutina existuje jen pro období před rokem 2026; jinde je to výjimka. */
+const isRoutineYear = computed(() => eligibility.value?.routine === true)
+/*
  * Obě potvrzení musí padnout výslovně. Vyloučené doby mění osobní vyměřovací
  * základ a odečítané doby po dosažení důchodového věku modul neumí odvodit —
  * proto je nula podmíněná potvrzením, ne výpočtem.
@@ -101,6 +132,7 @@ const canPrepare = computed(() =>
   canWrite.value
   && !preparing.value
   && employmentId.value !== null
+  && standaloneAllowed.value
   && excludedDaysConfirmed.value
   && deductedDaysNone.value
   && (!requestedByAuthority.value || authorityRequestReceivedOn.value !== '')
@@ -123,6 +155,7 @@ async function loadEmployments(id: number): Promise<void> {
 
 async function loadStatement(): Promise<void> {
   statement.value = null
+  eligibility.value = null
   if (employmentId.value === null) {
     return
   }
@@ -133,9 +166,13 @@ async function loadStatement(): Promise<void> {
       environment: environment.value,
     })
     statement.value = response.statement
+    // Fail-closed i proti starší odpovědi bez přípustnosti: bez ní se příprava
+    // nenabízí, protože bychom nevěděli, jestli povinnost vůbec vznikla.
+    eligibility.value = response.eligibility ?? null
     manualCompletion.value = response.manual_completion
   } catch {
     statement.value = null
+    eligibility.value = null
     manualCompletion.value = null
   }
 }
@@ -315,9 +352,42 @@ watch(requestedByAuthority, value => {
       <p class="mt-1 max-w-prose">
         {{ t('payroll.eldp.intro') }}
       </p>
+      <ul class="mt-2 max-w-prose list-disc space-y-1 pl-5 text-sm">
+        <li>{{ t('payroll.eldp.exceptions.beforeTwentySix') }}</li>
+        <li>{{ t('payroll.eldp.exceptions.endedBeforeApril') }}</li>
+        <li>{{ t('payroll.eldp.exceptions.authorityRequest') }}</li>
+      </ul>
       <p class="mt-2 max-w-prose text-xs text-neutral-500">
         {{ t('payroll.eldp.legalBasis') }}
       </p>
+    </div>
+
+    <!--
+      Stav přípustnosti stojí nad formulářem, ne pod tlačítkem: kdyby se
+      obsluha dozvěděla až z chyby po vyplnění potvrzení, že povinnost
+      nevznikla, naučí se hlášku odklikávat jako překážku místo číst ji
+      jako pravidlo.
+    -->
+    <div
+      v-if="eligibility && !standaloneAllowed"
+      data-test="eldp-not-applicable"
+      class="rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-800"
+      role="status"
+    >
+      <p class="font-medium">{{ t('payroll.eldp.notApplicable.title') }}</p>
+      <p class="mt-1 max-w-prose">{{ eligibility.reason }}</p>
+      <p v-if="eligibility.authority_request_available" class="mt-2 max-w-prose">
+        {{ t('payroll.eldp.notApplicable.authorityHint') }}
+      </p>
+    </div>
+    <div
+      v-else-if="eligibility && !isRoutineYear"
+      data-test="eldp-exception"
+      class="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-700"
+      role="status"
+    >
+      <p class="font-medium">{{ t('payroll.eldp.exceptionOnly.title') }}</p>
+      <p class="mt-1 max-w-prose">{{ eligibility.reason }}</p>
     </div>
 
     <div

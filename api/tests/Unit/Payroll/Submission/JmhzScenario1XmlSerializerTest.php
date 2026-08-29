@@ -62,6 +62,31 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringContainsString('<formularePocetVBaliku>3</formularePocetVBaliku>', $result['xml']);
     }
 
+    /**
+     * Měsíční hlášení nese ELDP údaje — a musí je nést dál.
+     *
+     * Od roku 2026 zaměstnavatel samostatný evidenční list nevyhotovuje;
+     * evidenční list sestaví ČSSZ právě z těchto atributů měsíčního hlášení
+     * (§ 38 odst. 2 zákona č. 582/1991 Sb.). Kdyby někdo při rušení ročního
+     * ELDP workflow zrušil i tenhle blok, přestala by ČSSZ mít z čeho
+     * evidenční list sestavit a doba pojištění by v hlášení zmizela.
+     */
+    public function testMonthlyReportCarriesEldpAttributes(): void
+    {
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolution(),
+            $this->envelope(),
+        );
+
+        self::assertStringContainsString('<form:eldpSeznam>', $result['xml']);
+        // 10240 kód, 10241/10242 platnost, 10356 počet dnů, 10245 vyměřovací základ
+        self::assertStringContainsString('<form:kod>1++</form:kod>', $result['xml']);
+        self::assertStringContainsString('<form:platnostOd>2026-07-01</form:platnostOd>', $result['xml']);
+        self::assertStringContainsString('<form:platnostDo>2026-07-31</form:platnostDo>', $result['xml']);
+        self::assertStringContainsString('<form:pocetDnu>31</form:pocetDnu>', $result['xml']);
+        self::assertStringContainsString('<form:vymerovaciZaklad>1000</form:vymerovaciZaklad>', $result['xml']);
+    }
+
     public function testContentCorrectionHasNoLocalBlockingControlCoverageGap(): void
     {
         $result = (new JmhzScenario1XmlValidator())->dryRunCorrection(

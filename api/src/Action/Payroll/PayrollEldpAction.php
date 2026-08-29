@@ -80,14 +80,26 @@ final class PayrollEldpAction
         return Json::ok($response, [
             'statement' => $statement,
             'manual_completion' => $manualCompletion,
+            // Přípustnost se vydává hned s podklady, ne až jako chyba přípravy:
+            // od roku 2026 zaměstnavatel evidenční list nevede a obrazovka to
+            // musí říct dřív, než na ní někdo začne vyplňovat potvrzení.
+            'eligibility' => $this->service->eligibility(
+                $this->currentSupplierId($request),
+                $employmentId,
+                $year,
+            ),
             'supported' => [
                 'agenda_code' => EldpStatementService::AGENDA_CODE,
                 'evidence_schema' => 'jmhz-1.4.3.4 eldpType',
                 'submission_schema_available' => false,
                 'stops_at_status' => 'prepared',
                 'legal_basis' => 'Zákon č. 582/1991 Sb., § 38 odst. 4 a § 39 odst. 2 '
-                    . 'až 4, ve znění účinném do 31. 12. 2025, a čl. V bod 8 '
-                    . 'zákona č. 360/2025 Sb.',
+                    . 'až 4, ve znění účinném do 31. 12. 2025, § 38a odst. 2 a 3 '
+                    . 'a čl. V bod 8 zákona č. 360/2025 Sb.',
+                // Od roku 2026 už zaměstnavatel roční evidenční list nevede;
+                // agenda zůstává jen pro vyjmenované výjimky.
+                'annual_employer_duty' => false,
+                'last_annual_year' => EldpDeadlinePolicy::LAST_ANNUAL_YEAR,
                 'deadline_rulesets' => [
                     EldpDeadlinePolicy::ANNUAL_RULESET,
                     EldpDeadlinePolicy::TERMINATION_RULESET,

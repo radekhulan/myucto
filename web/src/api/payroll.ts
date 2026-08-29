@@ -3251,7 +3251,26 @@ export interface PayrollEldpSupport {
   submission_schema_available: boolean
   stops_at_status: string
   legal_basis: string
+  annual_employer_duty: boolean
+  last_annual_year: number
   deadline_rulesets: string[]
+}
+
+/**
+ * Přípustnost samostatného evidenčního listu pro zvolený vztah a rok.
+ *
+ * `routine` je pravdivé jen u let, kdy roční evidenční list zaměstnavatele
+ * opravdu existoval. Od roku 2026 je každá povolená cesta výjimka, kterou
+ * spouští událost (skončení zaměstnání, výzva úřadu), ne konec roku.
+ */
+export interface PayrollEldpEligibility {
+  allowed: boolean
+  routine: boolean
+  reason: string
+  rule: string
+  employment_end_date: string | null
+  authority_request_available: boolean
+  last_annual_year: number
 }
 
 export type PayrollEldpAuthorityStatus = 'submitted' | 'accepted'
@@ -5629,6 +5648,7 @@ export const payrollApi = {
     api.get<{
       statement: PayrollEldpStatement | null
       supported: PayrollEldpSupport
+      eligibility: PayrollEldpEligibility
       manual_completion: PayrollEldpManualCompletionOverview | null
     }>('/payroll/submissions/eldp', { params })
       .then(response => response.data),

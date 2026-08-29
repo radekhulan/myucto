@@ -231,7 +231,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
     public function testYearFrom2026IsAssembledByCsszUnlessTransitionalRuleApplies(): void
     {
         $this->expectException(EldpValidationException::class);
-        $this->expectExceptionMessage('sestavuje evidenční list ČSSZ');
+        $this->expectExceptionMessage('nevyhotovuje ani nepředkládá');
         (new EldpAnnualStatementBuilder())->build(
             self::SUPPLIER_ID,
             self::EMPLOYMENT_ID,

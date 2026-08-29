@@ -338,11 +338,27 @@ oddělené řetězce i idempotenci.
 
 ## 68.10 Evidenční list důchodového pojištění
 
-Samostatný ELDP se od roku 2026 běžně nesestavuje: ČSSZ jej vytváří z JMHZ.
-V aplikaci jej připravte jen pro starší roky, při přechodném skončení účasti
-před 1. dubnem 2026 nebo na výzvu ČSSZ/ÚSSZ. U výzvy zaškrtněte příslušné
-potvrzení a zadejte skutečné datum jejího doručení; od tohoto dne běží lhůta
-osmi dnů.
+**Evidenční list už není roční povinnost.** Od roku 2026 jej zaměstnavatel
+nevyhotovuje ani nepředkládá: údaje pro důchodové pojištění sděluje jednotným
+měsíčním hlášením a evidenční list z nich sestaví ČSSZ (§ 38 odst. 1 a 2 zákona
+č. 582/1991 Sb. ve znění zákona č. 360/2025 Sb.). Zaměstnanci je dostupný na
+ePortálu ČSSZ (§ 39 odst. 1). Žádný úkon „vygeneruj a odešli ELDP za rok" tedy
+na konci roku nečekejte — aplikace jej nenabízí a přípravu za takový rok
+odmítne.
+
+Tiskopis ale zrušen nebyl a v aplikaci jej připravíte ve třech výjimkách:
+
+- za období **před 1. lednem 2026**, na které se použije dřívější znění zákona,
+- u zaměstnání **skončených před 1. dubnem 2026**, na která dopadá přechodné
+  ustanovení,
+- **na výzvu ČSSZ/ÚSSZ** podle § 38a odst. 2 a 3 — uplynula-li lhůta pro měsíční
+  nebo opravné hlášení, anebo nelze-li z nahlášených údajů evidenční list
+  sestavit. U výzvy zaškrtněte příslušné potvrzení a zadejte skutečné datum
+  jejího doručení; od tohoto dne běží lhůta osmi dnů.
+
+Nad formulářem vždy stojí věta, jestli evidenční list pro zvolený rok a pracovní
+vztah vůbec vzniká, a proč. Není-li přípustný, tlačítko přípravy zůstane
+nedostupné.
 
 Přijde-li výzva ještě v průběhu vykazovaného roku a pracovní vztah trvá,
 aplikace sestaví list jen do posledního měsíce, za který existuje aktuální
