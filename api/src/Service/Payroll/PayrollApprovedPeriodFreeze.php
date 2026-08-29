@@ -18,6 +18,16 @@ use MyInvoice\Infrastructure\Database\Connection;
  * Hranicí je KONEC měsíce posledního schváleného období, ne jeho začátek —
  * schválená mzda pokrývá celý měsíc, takže zásah kamkoliv do něj by tiše měnil
  * podklad už vyplacené mzdy.
+ *
+ * Běh OTEVŘENÝ K OPRAVĚ (`correction_pending`, `reopened`) se do hranice
+ * nepočítá. Jeho schválená revize je pořád ve stavu `approved` — na
+ * `superseded` ji přepne teprve schválení revize opravné — takže bez téhle
+ * výjimky by účetní otevřela mzdu k opravě a evidence by jí zůstala zamčená,
+ * tedy přesně to, co chtěla opravit, by opravit nešlo.
+ *
+ * Hranice je jediné datum, ne stav per měsíc: je-li otevřený starší běh, ale
+ * novější zůstává schválený, drží zámek dál ten novější. Je to záměr — měnit
+ * podklad srpna pod schváleným zářím by rozbilo i září.
  */
 final class PayrollApprovedPeriodFreeze
 {
@@ -32,7 +42,9 @@ final class PayrollApprovedPeriodFreeze
                JOIN payroll_runs run
                  ON run.supplier_id = revision.supplier_id
                 AND run.id = revision.run_id
-              WHERE revision.supplier_id = ? AND revision.status = 'approved'"
+              WHERE revision.supplier_id = ?
+                AND revision.status = 'approved'
+                AND run.status NOT IN ('correction_pending', 'reopened')"
         );
         $statement->execute([$supplierId]);
         $value = $statement->fetchColumn();
