@@ -14,11 +14,10 @@ const lock = await readFile(new URL('components/SessionLockOverlay.vue', src), '
 const client = await readFile(new URL('api/client.ts', src), 'utf8')
 
 test('shared manifest persists the audited client surface and legacy aliases', () => {
-  // 36 = 35 auditovaných + self-service `isds-gateway-callback` (viz commit, který
-  // routu do manifestu přidal). Je to brána proti nechtěnému rozšíření klientské
-  // plochy, ne konstanta — s každou novou routou se čísla vědomě posouvají.
-  assert.equal(manifest.routes.length, 36)
-  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 36)
+  // Přesný počet je brána proti nechtěnému rozšíření klientské plochy, ne
+  // konstanta — s každou novou auditovanou routou se vědomě posouvá.
+  assert.equal(manifest.routes.length, 37)
+  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 37)
   assert.deepEqual(
     manifest.routes.slice(-3).map(route => route.name),
     ['data-exchange', 'admin-export', 'admin-import'],

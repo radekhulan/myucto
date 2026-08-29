@@ -24,9 +24,9 @@ final class ClientRoutePolicyTest extends TestCase
         $names = array_column($routes, 'name');
         $patterns = array_column($routes, 'path_pattern');
 
-        self::assertCount(36, $routes);
-        self::assertCount(36, array_unique($names));
-        self::assertCount(36, array_unique($patterns));
+        self::assertCount(37, $routes);
+        self::assertCount(37, array_unique($names));
+        self::assertCount(37, array_unique($patterns));
         self::assertContains('data-exchange', $names);
         self::assertContains('admin-export', $names);
         self::assertContains('admin-import', $names);
@@ -58,6 +58,7 @@ final class ClientRoutePolicyTest extends TestCase
             '/portal',
             '/portal/document-requests',
             '/portal/purchase-invoice-submissions',
+            '/portal/settings',
             '/clients',
             '/clients/new',
             '/clients/42',
@@ -200,6 +201,10 @@ final class ClientRoutePolicyTest extends TestCase
             ['POST', '/api/purchase-invoices/7/transition'],
             ['POST', '/api/recurring/7/run'],
             ['GET', '/api/settings'],
+            ['GET', '/api/settings/client/email-profiles'],
+            ['POST', '/api/settings/client/email-profiles'],
+            ['PUT', '/api/settings/client/branding'],
+            ['POST', '/api/settings/client/branding/profiles/7/logo'],
             ['PUT', '/api/user/preferences/navigation'],
         ] as [$method, $path]) {
             self::assertTrue($this->policy->allowsApiRequest($method, $path), "$method $path");
@@ -223,6 +228,9 @@ final class ClientRoutePolicyTest extends TestCase
             ['POST', '/api/admin/import'],
             ['GET', '/api/auth/tokens'],
             ['POST', '/api/settings'],
+            ['PUT', '/api/settings/supplier'],
+            ['POST', '/api/settings/email-profiles'],
+            ['POST', '/api/settings/email-branding/logo'],
         ] as [$method, $path]) {
             self::assertFalse($this->policy->allowsApiRequest($method, $path), "$method $path");
         }

@@ -8,7 +8,11 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\BrandingProfileRepository;
+use MyInvoice\Security\OperationalSettingsAccess;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Branding\BrandingProfileValidation;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\SupplierLogoConverter;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -23,10 +27,17 @@ final class BrandingProfilesAction
         private readonly BrandingProfileRepository $profiles,
         private readonly SupplierLogoConverter $logoConverter,
         private readonly InvoicePdfRenderer $invoicePdf,
+        private readonly ActivityLogger $logger,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     public function list(Request $request, Response $response): Response
     {
+        // Původní staff/demo GET zůstává kompatibilní. Klientská role však smí
+        // profilová data číst až se stejným WRITE právem, které vyžadují mutace.
+        if (RequestAuthorization::isClientType($request) && !$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat branding.', 403);
+        }
         $supplierId = $this->supplierId($request);
         if ($supplierId <= 0) return Json::error($response, 'no_supplier', 'Žádný supplier scope.', 400);
         return Json::ok($response, $this->profiles->listForSupplier($supplierId));
@@ -46,12 +57,13 @@ final class BrandingProfilesAction
 
     public function create(Request $request, Response $response): Response
     {
-        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         $supplierId = $this->supplierId($request);
         if ($supplierId <= 0) return Json::error($response, 'no_supplier', 'Žádný supplier scope.', 400);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $body = (array) ($request->getParsedBody() ?? []);
         $errors = BrandingProfileValidation::validate($body);
+        $errors = array_merge($errors, $this->emailProfileErrors($supplierId, $body));
         if ($errors !== []) return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         try {
             $id = $this->profiles->create($supplierId, $body);
@@ -61,12 +73,15 @@ final class BrandingProfilesAction
             }
             throw $e;
         }
-        return Json::ok($response, $this->profiles->findForSupplier($id, $supplierId), 201);
+        $profile = $this->profiles->findForSupplier($id, $supplierId);
+        $this->invoicePdf->invalidateDraftsBySupplier($supplierId);
+        $this->log($request, 'branding_profile.created', $id, ['name' => $profile['name'] ?? null]);
+        return Json::ok($response, $profile, 201);
     }
 
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         $supplierId = $this->supplierId($request);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $id = (int) ($args['id'] ?? 0);
@@ -75,6 +90,7 @@ final class BrandingProfilesAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $errors = BrandingProfileValidation::validate($body, true);
+        $errors = array_merge($errors, $this->emailProfileErrors($supplierId, $body));
         if ($errors !== []) return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         try {
             $this->profiles->update($id, $supplierId, $body);
@@ -84,23 +100,29 @@ final class BrandingProfilesAction
             }
             throw $e;
         }
-        return Json::ok($response, $this->profiles->findForSupplier($id, $supplierId));
+        $profile = $this->profiles->findForSupplier($id, $supplierId);
+        $this->invoicePdf->invalidateDraftsBySupplier($supplierId);
+        $this->log($request, 'branding_profile.updated', $id, ['fields' => array_keys($body)]);
+        return Json::ok($response, $profile);
     }
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         $supplierId = $this->supplierId($request);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $id = (int) ($args['id'] ?? 0);
+        $existing = $this->profiles->findForSupplier($id, $supplierId);
         $deleted = $this->profiles->delete($id, $supplierId);
         if (!$deleted) return Json::error($response, 'not_found', 'Brandingový profil nenalezen.', 404);
+        $this->invoicePdf->invalidateDraftsBySupplier($supplierId);
+        $this->log($request, 'branding_profile.deleted', $id, ['name' => $existing['name'] ?? null]);
         return Json::ok($response, ['deleted' => true]);
     }
 
     public function setDefault(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         $supplierId = $this->supplierId($request);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $id = (int) ($args['id'] ?? 0);
@@ -109,12 +131,13 @@ final class BrandingProfilesAction
         }
         $profile = $this->profiles->findForSupplier($id, $supplierId);
         $this->invoicePdf->invalidateDraftsBySupplier($supplierId);
+        $this->log($request, 'branding_profile.default_changed', $id, ['name' => $profile['name'] ?? null]);
         return Json::ok($response, $profile);
     }
 
     public function uploadLogo(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         $supplierId = $this->supplierId($request);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $id = (int) ($args['id'] ?? 0);
@@ -144,12 +167,18 @@ final class BrandingProfilesAction
         } finally {
             @unlink($tmpPath);
         }
-        return Json::ok($response, $this->profiles->findForSupplier($id, $supplierId));
+        $profile = $this->profiles->findForSupplier($id, $supplierId);
+        $this->invoicePdf->invalidateDraftsBySupplier($supplierId);
+        $this->log($request, 'branding_profile.logo_uploaded', $id, [
+            'width' => $result['width'] ?? null,
+            'height' => $result['height'] ?? null,
+        ]);
+        return Json::ok($response, $profile);
     }
 
     public function deleteLogo(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         $supplierId = $this->supplierId($request);
         if (($gate = $this->requireEnabled($response, $supplierId)) !== null) return $gate;
         $id = (int) ($args['id'] ?? 0);
@@ -157,7 +186,10 @@ final class BrandingProfilesAction
             return Json::error($response, 'not_found', 'Brandingový profil nenalezen.', 404);
         }
         // Soubor záměrně nemažeme: vystavené faktury jej mohou mít ve snapshotu.
-        return Json::ok($response, $this->profiles->findForSupplier($id, $supplierId));
+        $profile = $this->profiles->findForSupplier($id, $supplierId);
+        $this->invoicePdf->invalidateDraftsBySupplier($supplierId);
+        $this->log($request, 'branding_profile.logo_deleted', $id, []);
+        return Json::ok($response, $profile);
     }
 
     /**
@@ -199,9 +231,39 @@ final class BrandingProfilesAction
         return (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
     }
 
-    private function isAdmin(Request $request): bool
+    /** @param array<string,mixed> $body @return array<string,list<string>> */
+    private function emailProfileErrors(int $supplierId, array $body): array
+    {
+        if (!array_key_exists('email_profile_id', $body)
+            || $body['email_profile_id'] === null
+            || $body['email_profile_id'] === ''
+        ) {
+            return [];
+        }
+        $profileId = (int) $body['email_profile_id'];
+        if ($profileId > 0 && $this->profiles->hasActiveEmailProfile($supplierId, $profileId)) return [];
+
+        return ['email_profile_id' => ['Vybraný e-mailový profil není aktivní v aktuální firmě.']];
+    }
+
+    private function canManage(Request $request): bool
+    {
+        return OperationalSettingsAccess::branding($request);
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function log(Request $request, string $action, int $profileId, array $payload): void
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        return ($user['role'] ?? '') === 'admin';
+        $this->logger->log(
+            $action,
+            isset($user['id']) ? (int) $user['id'] : null,
+            'branding_profile',
+            $profileId,
+            $payload,
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'),
+            $this->supplierId($request),
+        );
     }
 }

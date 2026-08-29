@@ -11,6 +11,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\OperationalSettingsAccess;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
@@ -48,8 +49,8 @@ final class EmailBrandingAction
     /** POST /api/settings/email-branding/logo */
     public function uploadLogo(Request $request, Response $response): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin smí měnit branding.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         }
 
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
@@ -117,8 +118,8 @@ final class EmailBrandingAction
     /** DELETE /api/settings/email-branding/logo */
     public function deleteLogo(Request $request, Response $response): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin smí měnit branding.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění měnit branding.', 403);
         }
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         if ($sid <= 0) {
@@ -153,8 +154,8 @@ final class EmailBrandingAction
         // druhá vrstva. Demo smí pouze read-only náhled a logo cesta se validuje níže.
         $demoCanRead = DemoReadOnlyMiddleware::enabled($request)
             && RequestAuthorization::allows($request, 'settings.branding', AccessLevel::READ);
-        if (!$this->isAdmin($request) && !$demoCanRead) {
-            return Json::error($response, 'forbidden', 'Pouze admin smí prohlížet branding.', 403);
+        if (!$this->canManage($request) && !$demoCanRead) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění prohlížet branding.', 403);
         }
         $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         if ($sid <= 0) {
@@ -312,9 +313,9 @@ TWIG;
             ->withHeader('Cache-Control', 'no-store');
     }
 
-    private function isAdmin(Request $request): bool
+    private function canManage(Request $request): bool
     {
-        return RequestAuthorization::allows($request, 'settings.branding', AccessLevel::WRITE);
+        return OperationalSettingsAccess::branding($request);
     }
 
     private function defaultProfileId(int $supplierId): ?int

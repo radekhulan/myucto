@@ -334,6 +334,23 @@ export interface BrandingProfile {
   is_default: boolean
 }
 
+/** Úzký supplier-scoped výřez, který lze delegovat klientské roli. */
+export interface OperationalBrandingSettings {
+  id: number
+  company_name: string
+  display_name: string | null
+  email: string | null
+  phone: string | null
+  web: string | null
+  tagline: string | null
+  email_branding_enabled: boolean
+  email_accent_color: string
+  pdf_logo_show_name: boolean
+  branding_profiles_enabled: boolean
+  logo_path: string | null
+  has_email_logo?: boolean
+}
+
 export interface CurrencyAccount {
   id: number
   code: string
@@ -629,6 +646,8 @@ export interface EmailProfile {
   created_at: string
   updated_at: string
   deleted_at: string | null
+  /** false jen v klientském allowlistu pro sendmail/S/MIME profil spravovaný staff rolí. */
+  client_manageable?: boolean
 }
 
 export interface EmailProfilePayload {
@@ -826,6 +845,9 @@ export interface PdfSignatureOutputSettingsBatchResult {
 export const settingsApi = {
   getSupplier: () => api.get<Supplier>('/settings/supplier').then(r => r.data),
   updateSupplier: (payload: Partial<Supplier>) => api.put<Supplier>('/settings/supplier', payload).then(r => r.data),
+  getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
+  updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
+    api.put<OperationalBrandingSettings>('/settings/client/branding', payload).then(r => r.data),
   // E2: při total > 0 přesměruje FE do průvodce; přímé uložení jistí BE 409 backfill_required.
   getModeSwitchPreview: () => api.get<ModeSwitchPreview>('/settings/mode-switch-preview').then(r => r.data),
 
@@ -912,59 +934,65 @@ export const settingsApi = {
   deleteUnit: (id: number) => api.delete(`/settings/units/${id}`).then(r => r.data),
 
   // Email branding (M16)
-  listEmailProfiles: () =>
-    api.get<EmailProfile[]>('/settings/email-profiles').then(r => r.data),
-  createEmailProfile: (payload: EmailProfilePayload) =>
-    api.post<EmailProfile>('/settings/email-profiles', payload).then(r => r.data),
-  updateEmailProfile: (id: number, payload: Partial<EmailProfilePayload>) =>
-    api.put<EmailProfile>(`/settings/email-profiles/${id}`, payload).then(r => r.data),
-  testEmailProfile: (id: number) =>
-    api.post<EmailProfileTestResult>(`/settings/email-profiles/${id}/test`, {}).then(r => r.data),
-  testEmailProfileDraft: (payload: EmailProfilePayload, id?: number | null) =>
-    api.post<EmailProfileTestResult>('/settings/email-profiles/test', id ? { ...payload, id } : payload).then(r => r.data),
-  testEmailProfileImapSettings: (payload: Partial<EmailProfilePayload>, id?: number | null) =>
+  listEmailProfiles: (clientScoped = false) =>
+    api.get<EmailProfile[]>(clientScoped ? '/settings/client/email-profiles' : '/settings/email-profiles').then(r => r.data),
+  createEmailProfile: (payload: EmailProfilePayload, clientScoped = false) =>
+    api.post<EmailProfile>(clientScoped ? '/settings/client/email-profiles' : '/settings/email-profiles', payload).then(r => r.data),
+  updateEmailProfile: (id: number, payload: Partial<EmailProfilePayload>, clientScoped = false) =>
+    api.put<EmailProfile>(clientScoped ? `/settings/client/email-profiles/${id}` : `/settings/email-profiles/${id}`, payload).then(r => r.data),
+  testEmailProfile: (id: number, clientScoped = false) =>
+    api.post<EmailProfileTestResult>(clientScoped ? `/settings/client/email-profiles/${id}/test` : `/settings/email-profiles/${id}/test`, {}).then(r => r.data),
+  testEmailProfileDraft: (payload: EmailProfilePayload, id?: number | null, clientScoped = false) =>
+    api.post<EmailProfileTestResult>(clientScoped ? '/settings/client/email-profiles/test' : '/settings/email-profiles/test', id ? { ...payload, id } : payload).then(r => r.data),
+  testEmailProfileImapSettings: (payload: Partial<EmailProfilePayload>, id?: number | null, clientScoped = false) =>
     api.post<EmailProfileImapFoldersResult>(
-      id ? `/settings/email-profiles/${id}/imap-test` : '/settings/email-profiles/imap-test',
+      id
+        ? (clientScoped ? `/settings/client/email-profiles/${id}/imap-test` : `/settings/email-profiles/${id}/imap-test`)
+        : (clientScoped ? '/settings/client/email-profiles/imap-test' : '/settings/email-profiles/imap-test'),
       payload,
     ).then(r => r.data),
-  browseEmailProfileImapFolders: (payload: Partial<EmailProfilePayload>, id?: number | null) =>
+  browseEmailProfileImapFolders: (payload: Partial<EmailProfilePayload>, id?: number | null, clientScoped = false) =>
     api.post<EmailProfileImapFoldersResult>(
-      id ? `/settings/email-profiles/${id}/folders` : '/settings/email-profiles/folders',
+      id
+        ? (clientScoped ? `/settings/client/email-profiles/${id}/folders` : `/settings/email-profiles/${id}/folders`)
+        : (clientScoped ? '/settings/client/email-profiles/folders' : '/settings/email-profiles/folders'),
       payload,
     ).then(r => r.data),
-  deleteEmailProfile: (id: number) =>
-    api.delete<{ deleted: boolean }>(`/settings/email-profiles/${id}`).then(r => r.data),
+  deleteEmailProfile: (id: number, clientScoped = false) =>
+    api.delete<{ deleted: boolean }>(clientScoped ? `/settings/client/email-profiles/${id}` : `/settings/email-profiles/${id}`).then(r => r.data),
 
-  uploadEmailLogo: (file: File) => {
+  uploadEmailLogo: (file: File, clientScoped = false) => {
     const fd = new FormData()
     fd.append('file', file)
     return api.post<{ logo_path: string; width: number; height: number }>(
-      '/settings/email-branding/logo',
+      clientScoped ? '/settings/client/branding/logo' : '/settings/email-branding/logo',
       fd,
       { headers: { 'Content-Type': 'multipart/form-data' } },
     ).then(r => r.data)
   },
-  deleteEmailLogo: () => api.delete('/settings/email-branding/logo').then(r => r.data),
+  deleteEmailLogo: (clientScoped = false) =>
+    api.delete(clientScoped ? '/settings/client/branding/logo' : '/settings/email-branding/logo').then(r => r.data),
 
-  listBrandingProfiles: () =>
-    api.get<BrandingProfile[]>('/settings/branding-profiles').then(r => r.data),
-  createBrandingProfile: (payload: Partial<BrandingProfile>) =>
-    api.post<BrandingProfile>('/settings/branding-profiles', payload).then(r => r.data),
-  updateBrandingProfile: (id: number, payload: Partial<BrandingProfile>) =>
-    api.put<BrandingProfile>(`/settings/branding-profiles/${id}`, payload).then(r => r.data),
-  deleteBrandingProfile: (id: number) =>
-    api.delete<{ deleted: boolean }>(`/settings/branding-profiles/${id}`).then(r => r.data),
-  setDefaultBrandingProfile: (id: number) =>
-    api.post<BrandingProfile>(`/settings/branding-profiles/${id}/default`, {}).then(r => r.data),
-  uploadBrandingProfileLogo: (id: number, file: File) => {
+  listBrandingProfiles: (clientScoped = false) =>
+    api.get<BrandingProfile[]>(clientScoped ? '/settings/client/branding/profiles' : '/settings/branding-profiles').then(r => r.data),
+  createBrandingProfile: (payload: Partial<BrandingProfile>, clientScoped = false) =>
+    api.post<BrandingProfile>(clientScoped ? '/settings/client/branding/profiles' : '/settings/branding-profiles', payload).then(r => r.data),
+  updateBrandingProfile: (id: number, payload: Partial<BrandingProfile>, clientScoped = false) =>
+    api.put<BrandingProfile>(clientScoped ? `/settings/client/branding/profiles/${id}` : `/settings/branding-profiles/${id}`, payload).then(r => r.data),
+  deleteBrandingProfile: (id: number, clientScoped = false) =>
+    api.delete<{ deleted: boolean }>(clientScoped ? `/settings/client/branding/profiles/${id}` : `/settings/branding-profiles/${id}`).then(r => r.data),
+  setDefaultBrandingProfile: (id: number, clientScoped = false) =>
+    api.post<BrandingProfile>(clientScoped ? `/settings/client/branding/profiles/${id}/default` : `/settings/branding-profiles/${id}/default`, {}).then(r => r.data),
+  uploadBrandingProfileLogo: (id: number, file: File, clientScoped = false) => {
     const fd = new FormData()
     fd.append('file', file)
-    return api.post<BrandingProfile>(`/settings/branding-profiles/${id}/logo`, fd, {
+    const path = clientScoped ? `/settings/client/branding/profiles/${id}/logo` : `/settings/branding-profiles/${id}/logo`
+    return api.post<BrandingProfile>(path, fd, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
-  deleteBrandingProfileLogo: (id: number) =>
-    api.delete<BrandingProfile>(`/settings/branding-profiles/${id}/logo`).then(r => r.data),
+  deleteBrandingProfileLogo: (id: number, clientScoped = false) =>
+    api.delete<BrandingProfile>(clientScoped ? `/settings/client/branding/profiles/${id}/logo` : `/settings/branding-profiles/${id}/logo`).then(r => r.data),
 
   getPdfSigningDiagnostics: () =>
     api.get<PdfSigningDiagnostics>('/settings/pdf-signing/diagnostics').then(r => r.data),
@@ -1071,8 +1099,8 @@ export const settingsApi = {
     api.get<{ items: NaceCode[] }>('/settings/nace-codes', { params: { q, limit } }).then(r => r.data.items),
 
   // Vrací HTML string — frontend ho pak nacpe do iframe.srcdoc (obejde X-Frame-Options DENY).
-  emailPreviewHtml: (locale: 'cs' | 'en' = 'cs', brandingProfileId: number | null = null) =>
-    api.get<string>('/settings/email-branding/preview', {
+  emailPreviewHtml: (locale: 'cs' | 'en' = 'cs', brandingProfileId: number | null = null, clientScoped = false) =>
+    api.get<string>(clientScoped ? '/settings/client/branding/preview' : '/settings/email-branding/preview', {
       params: { locale, ...(brandingProfileId !== null ? { branding_profile_id: brandingProfileId } : {}) },
       responseType: 'text',
       transformResponse: [(d) => d],

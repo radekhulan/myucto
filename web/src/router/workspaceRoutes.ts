@@ -9,6 +9,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Vyžádání chybějících dokladů (Fáze F, audit 2026-07) — klientský portál.
       { path: 'portal/document-requests', name: 'portal-document-requests', component: () => import('@/pages/portal/DocumentRequests.vue'), meta: {  } },
       { path: 'portal/purchase-invoice-submissions', name: 'portal-purchase-invoice-submissions', component: () => import('@/pages/portal/PurchaseInvoiceSubmissions.vue'), meta: { requiresSupplier: true } },
+      { path: 'portal/settings', name: 'portal-company-settings', component: () => import('@/pages/portal/ClientCompanySettings.vue'), meta: { requiresSupplier: true } },
       { path: 'clients',                name: 'clients',        component: () => import('@/pages/clients/ClientList.vue'), meta: {  } },
       { path: 'clients/new',            name: 'client-new',     component: () => import('@/pages/clients/ClientForm.vue'), meta: { requiresSupplier: true } },
       { path: 'clients/:id(\\d+)',      name: 'client-detail',  component: () => import('@/pages/clients/ClientDetail.vue'), meta: {  } },

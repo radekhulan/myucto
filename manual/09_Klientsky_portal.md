@@ -13,7 +13,8 @@ které se po zaúčtování uzamknou proti dalším úpravám.
 > Client je naopak externí osoba (majitel firmy, na kterou účetní vede agendu),
 > která **smí vystavovat a upravovat vlastní doklady**, ale nevidí nic z účetnictví,
 > banky, reportů ani nastavení systému a nemůže sáhnout na doklad, který už účetní
-> zaúčtovala.
+> zaúčtovala. Vybrané provozní nastavení vlastní firmy dostane pouze tehdy, když
+> má jeho klientská role oprávnění **Nastavení firmy** na úrovni **Zápis**.
 
 ## 9.1 Kdo roli client dostane a jak
 
@@ -39,7 +40,7 @@ Uživatelé** (stejný formulář jako u ostatních rolí, viz [§ 92.2 Uživate
 
 ## 9.2 Menu klienta — jen zlomek aplikace
 
-Po přihlášení nabídne menu klientovi jen pět sekcí: **Přehled**
+Po přihlášení nabídne menu běžnému klientovi pět sekcí: **Přehled**
 (portál, domovská stránka), **Prodej** (vydané faktury + pravidelná fakturace),
 **Nákup** (přijaté faktury), **Kontakty** (klienti/dodavatelé) a **Dokumenty**
 s položkami **Předat doklady účetní** a **Chybějící doklady**
@@ -47,7 +48,7 @@ s položkami **Předat doklady účetní** a **Chybějící doklady**
 Na desktopu jsou sekce v horní liště s popup položkami, na mobilu v nabídce
 **☰**. Nápovědu otevírá kontextová ikona **?** v horní liště.
 Cokoliv jiného v aplikaci existuje — účetnictví, banka, sklad, e-shop, reporty,
-Grafy, kniha jízd, DMS dokumenty, nastavení, administrace uživatelů — klient v menu
+Grafy, kniha jízd, DMS dokumenty, systémové nastavení, administrace uživatelů — klient v menu
 vůbec nevidí a při pokusu dostat se tam přímo přes adresu URL ho systém přesměruje
 zpátky na portál. Toto omezení je vynucené na dvou místech zároveň (frontend
 i API), takže ho nejde obejít ani ruční úpravou adresy v prohlížeči.
@@ -69,6 +70,33 @@ například **platební příkazy** (bankovní ABO/KPC soubory a ověřování �
 e-mailové schránky účetní**, **zakázky** ani **DMS dokumenty** k přijatým fakturám.
 Sklad a e-shop, daňová evidence, účetní deník a bankovní výpisy jsou pro klienta
 zavřené úplně.
+
+### 9.2.1 Delegované nastavení firmy
+
+Samostatná role **Client Admin** není potřeba. Superadmin může vytvořit nebo
+duplikovat běžnou roli typu **client** a u položky **Nastavení firmy** zvolit
+**Zápis**. Klient pak v nové sekci **Firma → Nastavení firmy** spravuje pouze
+výslovně povolené provozní oblasti aktuální firmy:
+
+- odesílací profily, odesílatele, Reply-To, DKIM a supplier-scoped SMTP/IMAP,
+- branding komunikace, logo, barvy, patičky a brandingové profily.
+
+Úroveň **Pouze čtení** tuto sekci nezobrazí. Zápis zároveň neotevře původní
+administrátorskou stránku nastavení ani obecný endpoint dodavatele. Klient proto
+nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH,
+účetní režim, integrace, přístupové údaje AI, uživatele ani role. Systémový `sendmail`
+a profily s kryptografickým S/MIME podpisem zůstávají ve správě administrátora.
+
+SMTP a IMAP hesla se po uložení už nikdy nevracejí do prohlížeče; rozhraní ukáže
+jen informaci, zda je heslo nastavené. Změny i testovací odeslání se zapisují do
+historie akcí bez tajných hodnot a požadavky podléhají stejnému rate limitu jako
+ostatní mutace. Všechny operace používají firmu z ověřeného kontextu — ID firmy
+zaslané v těle požadavku rozsah nerozšíří.
+
+Roli lze přiřadit jako přepis jen u jedné firmy. Tentýž uživatel tak může mít ve
+firmě A klientskou roli s **Nastavení firmy = Zápis**, zatímco ve firmě B zůstane
+u běžné klientské role. Po přepnutí firmy se menu i oprávnění ihned přepočítají;
+stejně se chová klientská vlastní doména.
 
 ## 9.3 Co portál (Přehled) zobrazuje
 

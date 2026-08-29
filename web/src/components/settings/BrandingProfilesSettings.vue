@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type BrandingProfile, type EmailProfile, type Supplier } from '@/api/settings'
+import { settingsApi, type BrandingProfile, type EmailProfile, type OperationalBrandingSettings } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const toast = useToast()
-const props = defineProps<{ enabled: boolean; supplier: Supplier | null }>()
+const props = withDefaults(defineProps<{
+  enabled: boolean
+  supplier: OperationalBrandingSettings | null
+  clientScoped?: boolean
+}>(), {
+  clientScoped: false,
+})
 const emit = defineEmits<{
   (event: 'changed'): void
   (event: 'update:enabled', value: boolean): void
@@ -37,15 +43,16 @@ const emptyProfile = (): Partial<BrandingProfile> => ({
 
 async function load() {
   const [loadedProfiles, loadedEmailProfiles] = await Promise.all([
-    settingsApi.listBrandingProfiles(), settingsApi.listEmailProfiles().catch(() => [] as EmailProfile[]),
+    settingsApi.listBrandingProfiles(props.clientScoped),
+    settingsApi.listEmailProfiles(props.clientScoped).catch(() => [] as EmailProfile[]),
   ])
   profiles.value = loadedProfiles
-  emailProfiles.value = loadedEmailProfiles.filter(profile => profile.is_active)
+  emailProfiles.value = loadedEmailProfiles.filter(profile => profile.is_active && profile.client_manageable !== false)
 }
 
 async function openEmailPreview(profile: BrandingProfile, locale: 'cs' | 'en' = 'cs') {
   try {
-    const html = await settingsApi.emailPreviewHtml(locale, profile.id)
+    const html = await settingsApi.emailPreviewHtml(locale, profile.id, props.clientScoped)
     emailPreview.value = { profile, locale, html }
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
@@ -57,7 +64,7 @@ async function changeEmailPreviewLocale(locale: 'cs' | 'en') {
 
 async function setDefault(profile: BrandingProfile) {
   try {
-    await settingsApi.setDefaultBrandingProfile(profile.id)
+    await settingsApi.setDefaultBrandingProfile(profile.id, props.clientScoped)
     await load(); emit('changed'); toast.success(t('settings.branding_profiles.default_changed'))
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
@@ -74,8 +81,8 @@ async function save() {
   }
   saving.value = true
   try {
-    if (editing.value.id) await settingsApi.updateBrandingProfile(editing.value.id, editing.value)
-    else await settingsApi.createBrandingProfile(editing.value)
+    if (editing.value.id) await settingsApi.updateBrandingProfile(editing.value.id, editing.value, props.clientScoped)
+    else await settingsApi.createBrandingProfile(editing.value, props.clientScoped)
     editing.value = null
     await load()
     emit('changed')
@@ -88,7 +95,7 @@ async function save() {
 async function remove(profile: BrandingProfile) {
   if (!confirm(t('settings.branding_profiles.delete_confirm', { name: profile.name }))) return
   try {
-    await settingsApi.deleteBrandingProfile(profile.id)
+    await settingsApi.deleteBrandingProfile(profile.id, props.clientScoped)
     await load()
     emit('changed')
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
@@ -104,7 +111,7 @@ async function uploadLogo(profile: BrandingProfile, event: Event) {
     return
   }
   try {
-    await settingsApi.uploadBrandingProfileLogo(profile.id, file)
+    await settingsApi.uploadBrandingProfileLogo(profile.id, file, props.clientScoped)
     await load()
     emit('changed')
   } catch (e: any) {
@@ -115,7 +122,7 @@ async function uploadLogo(profile: BrandingProfile, event: Event) {
 async function deleteLogo(profile: BrandingProfile) {
   if (!confirm(t('settings.branding_logo_remove_confirm'))) return
   try {
-    await settingsApi.deleteBrandingProfileLogo(profile.id)
+    await settingsApi.deleteBrandingProfileLogo(profile.id, props.clientScoped)
     await load()
     emit('changed')
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
@@ -135,7 +142,8 @@ async function toggleModule(event: Event) {
   }
   togglingModule.value = true
   try {
-    await settingsApi.updateSupplier({ branding_profiles_enabled: next })
+    if (props.clientScoped) await settingsApi.updateClientBranding({ branding_profiles_enabled: next })
+    else await settingsApi.updateSupplier({ branding_profiles_enabled: next })
     emit('update:enabled', next)
     if (next) await load()
     emit('changed')

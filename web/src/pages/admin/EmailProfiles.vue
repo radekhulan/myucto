@@ -15,6 +15,9 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const props = withDefaults(defineProps<{ clientScoped?: boolean }>(), {
+  clientScoped: false,
+})
 
 /**
  * H-02 — spravovaná instalace: odesílá hosting, obálku určuje jeho MTA a na ní
@@ -226,8 +229,8 @@ async function load() {
   loading.value = true
   try {
     const [profileRows, signingRows] = await Promise.all([
-      settingsApi.listEmailProfiles(),
-      settingsApi.listSigningProfiles(),
+      settingsApi.listEmailProfiles(props.clientScoped),
+      props.clientScoped ? Promise.resolve([] as SigningProfile[]) : settingsApi.listSigningProfiles(),
     ])
     profiles.value = profileRows
     signingProfiles.value = signingRows
@@ -310,7 +313,7 @@ function editProfile(profile: EmailProfile) {
   draft.reply_to_email = profile.reply_to_email || ''
   draft.reply_to_name = profile.reply_to_name || ''
   draft.reply_to_enabled = profile.reply_to_enabled
-  draft.signing_profile_id = profile.signing_profile_id
+  draft.signing_profile_id = profile.signing_profile_id ?? null
   draft.dkim_domain = profile.dkim_domain || ''
   draft.dkim_selector = profile.dkim_selector || ''
   draft.dkim_enabled = profile.dkim_enabled
@@ -349,7 +352,7 @@ function editProfile(profile: EmailProfile) {
 }
 
 function payload(): EmailProfilePayload {
-  return {
+  const data: EmailProfilePayload = {
     name: draft.name,
     code: draft.code,
     from_email: draft.from_email,
@@ -390,6 +393,11 @@ function payload(): EmailProfilePayload {
     is_default: draft.is_default,
     is_active: draft.is_active,
   }
+  if (props.clientScoped) {
+    delete data.signing_profile_id
+    delete data.sendmail_command
+  }
+  return data
 }
 
 function imapBrowsePayload(): Partial<EmailProfilePayload> {
@@ -430,9 +438,9 @@ async function saveProfile() {
   try {
     const data = payload()
     if (editingId.value === null) {
-      await settingsApi.createEmailProfile(data)
+      await settingsApi.createEmailProfile(data, props.clientScoped)
     } else {
-      await settingsApi.updateEmailProfile(editingId.value, data)
+      await settingsApi.updateEmailProfile(editingId.value, data, props.clientScoped)
     }
     showForm.value = false
     resetDraft()
@@ -451,7 +459,7 @@ async function deleteProfile(profile: EmailProfile) {
   if (!window.confirm(t('settings.email_profile_delete_confirm', { name: profile.name }))) return
   deletingId.value = profile.id
   try {
-    await settingsApi.deleteEmailProfile(profile.id)
+    await settingsApi.deleteEmailProfile(profile.id, props.clientScoped)
     profiles.value = profiles.value.filter(row => row.id !== profile.id)
     toast.success(t('settings.email_profile_deleted'))
   } catch (e: any) {
@@ -464,7 +472,7 @@ async function deleteProfile(profile: EmailProfile) {
 async function testProfile(profile: EmailProfile) {
   testingId.value = profile.id
   try {
-    const result = await settingsApi.testEmailProfile(profile.id)
+    const result = await settingsApi.testEmailProfile(profile.id, props.clientScoped)
     toast.success(t('settings.email_profile_test_sent', { email: result.sent_to.join(', ') }))
     if (result.imap_append?.status === 'failed') {
       toast.error(imapAppendText(result.imap_append))
@@ -487,7 +495,7 @@ async function testDraftProfile() {
   testingDraft.value = true
   draftTestFeedback.value = null
   try {
-    const result = await settingsApi.testEmailProfileDraft(payload(), editingId.value)
+    const result = await settingsApi.testEmailProfileDraft(payload(), editingId.value, props.clientScoped)
     const recipients = result.sent_to.join(', ')
     draftTestFeedback.value = {
       status: 'success',
@@ -519,7 +527,7 @@ async function browseImapFolders() {
   browsingImapFolders.value = true
   imapFolderOptions.value = []
   try {
-    const result = await settingsApi.browseEmailProfileImapFolders(imapBrowsePayload(), editingId.value)
+    const result = await settingsApi.browseEmailProfileImapFolders(imapBrowsePayload(), editingId.value, props.clientScoped)
     imapFolderOptions.value = result.folders ?? []
     if (imapFolderOptions.value.length > 0) {
       toast.success(t('settings.email_profile_imap_folders_loaded', { count: imapFolderOptions.value.length }))
@@ -545,7 +553,7 @@ async function testImapSettings() {
 
   testingImapSettings.value = true
   try {
-    await settingsApi.testEmailProfileImapSettings(imapBrowsePayload(), editingId.value)
+    await settingsApi.testEmailProfileImapSettings(imapBrowsePayload(), editingId.value, props.clientScoped)
     toast.success(t('settings.email_profile_imap_test_ok', { folder: draft.imap_folder || 'Sent' }))
   } catch (e: any) {
     toast.error(
@@ -734,7 +742,7 @@ function certificateCommonName(subject: string | null | undefined): string | nul
           {{ t('settings.email_profile_from_name') }}
           <input v-model="draft.from_name" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" />
         </label>
-        <label class="block text-xs font-medium text-neutral-600">
+        <label v-if="!props.clientScoped" class="block text-xs font-medium text-neutral-600">
           {{ t('settings.email_profile_signing_profile') }}
           <select v-model="draft.signing_profile_id" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
             <option :value="null">{{ t('settings.email_profile_signing_none') }}</option>
@@ -811,7 +819,7 @@ function certificateCommonName(subject: string | null | undefined): string | nul
               -->
               <option value="global">{{ t('settings.email_profile_transport_global') }}</option>
               <option value="smtp">{{ t('settings.email_profile_transport_smtp') }}</option>
-              <option value="sendmail">{{ t('settings.email_profile_transport_sendmail') }}</option>
+              <option v-if="!props.clientScoped" value="sendmail">{{ t('settings.email_profile_transport_sendmail') }}</option>
             </select>
           </label>
           <p v-if="transportLocked" class="mt-1.5 flex gap-1.5 text-xs text-neutral-500">
@@ -1051,7 +1059,7 @@ function certificateCommonName(subject: string | null | undefined): string | nul
               <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_name') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_from') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_reply_to') }}</th>
-              <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_signing_profile') }}</th>
+              <th v-if="!props.clientScoped" class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_signing_profile') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_dkim') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_transport') }}</th>
               <th class="px-3 py-2 text-left font-medium">{{ t('settings.email_profile_imap_sent') }}</th>
@@ -1076,7 +1084,7 @@ function certificateCommonName(subject: string | null | undefined): string | nul
                 </template>
                 <span v-else class="text-neutral-400">{{ t('settings.email_profile_reply_to_disabled') }}</span>
               </td>
-              <td class="px-3 py-2">{{ signingProfileLabel(profile) }}</td>
+              <td v-if="!props.clientScoped" class="px-3 py-2">{{ signingProfileLabel(profile) }}</td>
               <td class="px-3 py-2">
                 <template v-if="profile.dkim_enabled">
                   <div>{{ profile.dkim_domain }}</div>
@@ -1109,17 +1117,22 @@ function certificateCommonName(subject: string | null | undefined): string | nul
                 </div>
               </td>
               <td class="px-3 py-2 text-right whitespace-nowrap">
-                <button type="button" @click="testProfile(profile)" :disabled="testingId === profile.id"
-                  class="cursor-pointer text-neutral-600 hover:text-neutral-800 disabled:opacity-50">
-                  {{ testingId === profile.id ? t('common.loading') : t('settings.email_profile_test') }}
-                </button>
-                <button type="button" @click="editProfile(profile)" class="cursor-pointer ml-3 text-primary-600 hover:text-primary-700">
-                  {{ t('common.edit') }}
-                </button>
-                <button type="button" @click="deleteProfile(profile)" :disabled="deletingId === profile.id"
-                  class="cursor-pointer ml-3 text-danger-600 hover:text-danger-700 disabled:opacity-50">
-                  {{ deletingId === profile.id ? t('common.loading') : t('common.delete') }}
-                </button>
+                <template v-if="profile.client_manageable !== false">
+                  <button type="button" @click="testProfile(profile)" :disabled="testingId === profile.id"
+                    class="cursor-pointer text-neutral-600 hover:text-neutral-800 disabled:opacity-50">
+                    {{ testingId === profile.id ? t('common.loading') : t('settings.email_profile_test') }}
+                  </button>
+                  <button type="button" @click="editProfile(profile)" class="cursor-pointer ml-3 text-primary-600 hover:text-primary-700">
+                    {{ t('common.edit') }}
+                  </button>
+                  <button type="button" @click="deleteProfile(profile)" :disabled="deletingId === profile.id"
+                    class="cursor-pointer ml-3 text-danger-600 hover:text-danger-700 disabled:opacity-50">
+                    {{ deletingId === profile.id ? t('common.loading') : t('common.delete') }}
+                  </button>
+                </template>
+                <span v-else class="text-neutral-500" :title="t('settings.email_profile_managed_by_staff_hint')">
+                  {{ t('settings.email_profile_managed_by_staff') }}
+                </span>
               </td>
             </tr>
           </tbody>

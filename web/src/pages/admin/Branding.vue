@@ -1,16 +1,19 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier } from '@/api/settings'
+import { settingsApi, type OperationalBrandingSettings } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import BrandingProfilesSettings from '@/components/settings/BrandingProfilesSettings.vue'
 
 const { t } = useI18n()
+const props = withDefaults(defineProps<{ clientScoped?: boolean }>(), {
+  clientScoped: false,
+})
 const toast = useToast()
 const { blockDemoMutation } = useDemoMode()
-const supplier = ref<Supplier | null>(null)
+const supplier = ref<OperationalBrandingSettings | null>(null)
 const loading = ref(true)
 const previewLocale = ref<'cs' | 'en'>('cs')
 const previewHtml = ref('')
@@ -22,7 +25,7 @@ let colorTimer: ReturnType<typeof setTimeout> | null = null
 async function bumpPreview() {
   if (!supplier.value) return
   try {
-    previewHtml.value = await settingsApi.emailPreviewHtml(previewLocale.value)
+    previewHtml.value = await settingsApi.emailPreviewHtml(previewLocale.value, null, props.clientScoped)
   } catch (e: any) {
     previewHtml.value = `<pre style="color:red">${e?.message || 'Preview failed'}</pre>`
   }
@@ -31,7 +34,9 @@ async function bumpPreview() {
 async function load() {
   loading.value = true
   try {
-    supplier.value = await settingsApi.getSupplier()
+    supplier.value = props.clientScoped
+      ? await settingsApi.getClientBranding()
+      : await settingsApi.getSupplier()
     await bumpPreview()
     setTimeout(() => { watching = true }, 0)
   } finally {
@@ -47,11 +52,14 @@ async function saveBranding(silent = false) {
     return
   }
   try {
-    const updated = await settingsApi.updateSupplier({
+    const payload = {
       email_branding_enabled: supplier.value.email_branding_enabled,
       email_accent_color: supplier.value.email_accent_color,
       pdf_logo_show_name: supplier.value.pdf_logo_show_name,
-    })
+    }
+    const updated = props.clientScoped
+      ? await settingsApi.updateClientBranding(payload)
+      : await settingsApi.updateSupplier(payload)
     supplier.value = { ...supplier.value, ...updated }
     if (!silent) toast.success(t('common.saved'))
     await bumpPreview()
@@ -75,7 +83,7 @@ async function onLogoSelected(ev: Event) {
   }
   logoUploading.value = true
   try {
-    const result = await settingsApi.uploadEmailLogo(file)
+    const result = await settingsApi.uploadEmailLogo(file, props.clientScoped)
     supplier.value.logo_path = result.logo_path
     supplier.value.has_email_logo = true
     toast.success(t('settings.branding_logo_uploaded'))
@@ -92,7 +100,7 @@ async function removeLogo() {
   if (blockDemoMutation()) return
   if (!supplier.value || !window.confirm(t('settings.branding_logo_remove_confirm'))) return
   try {
-    await settingsApi.deleteEmailLogo()
+    await settingsApi.deleteEmailLogo(props.clientScoped)
     supplier.value.logo_path = null
     supplier.value.has_email_logo = false
     toast.success(t('settings.branding_logo_removed'))
@@ -124,7 +132,12 @@ onMounted(load)
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <template v-else-if="supplier">
-    <BrandingProfilesSettings v-model:enabled="supplier.branding_profiles_enabled" :supplier="supplier" @changed="load" />
+    <BrandingProfilesSettings
+      v-model:enabled="supplier.branding_profiles_enabled"
+      :supplier="supplier"
+      :client-scoped="props.clientScoped"
+      @changed="load"
+    />
 
     <section class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm mt-5">
       <div class="flex flex-wrap items-center justify-between gap-3 mb-5">

@@ -63,6 +63,16 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/settings/currencies', 'settings.bank_accounts', AccessLevel::WRITE],
             ['GET', '/api/settings/email-branding/preview', 'settings.branding', AccessLevel::READ],
             ['POST', '/api/settings/email-branding/logo', 'settings.branding', AccessLevel::WRITE],
+            // Klientsky delegovatelná provozní nastavení mají vlastní přesný allowlist.
+            // Nikdy nesmí propadnout na široké settings.company.write, které otevírá
+            // i daňové, účetní a právně významné údaje dodavatele.
+            ['GET', '/api/settings/client/email-profiles', 'settings.company', AccessLevel::WRITE],
+            ['POST', '/api/settings/client/email-profiles', 'settings.company', AccessLevel::WRITE],
+            ['POST', '/api/settings/client/email-profiles/7/imap-test', 'settings.company', AccessLevel::WRITE],
+            ['GET', '/api/settings/client/branding', 'settings.company', AccessLevel::WRITE],
+            ['PUT', '/api/settings/client/branding', 'settings.company', AccessLevel::WRITE],
+            ['POST', '/api/settings/client/branding/profiles/7/logo', 'settings.company', AccessLevel::WRITE],
+            ['PUT', '/api/settings/supplier', 'settings.company.write', AccessLevel::WRITE],
             ['GET', '/api/settings/accounting-activation/status', 'settings.company', AccessLevel::READ],
             ['POST', '/api/settings/accounting-activation/start', 'accounting.periods.manage', AccessLevel::WRITE],
             ['GET', '/api/price-list-items', 'invoices', AccessLevel::READ],

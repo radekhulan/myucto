@@ -237,6 +237,14 @@ pro klientský portál; interní účetnictví, banka a globální správa se ji
 nepovolí. Systémová role **Superadmin** je uzamčená, nelze ji deaktivovat,
 smazat ani upravit její matici a jako jediná smí spravovat uživatele a role.
 
+U klientské role má položka **Nastavení firmy** záměrně užší význam než interní
+právo **Měnit nastavení firmy**. Úroveň **Zápis** otevře v klientském menu pouze
+supplier-scoped odesílací profily a branding; neotevře právní, daňové ani účetní
+údaje dodavatele. Díky přepisu role u konkrétní firmy lze stejného uživatele
+nechat spravovat provozní nastavení firmy A a ve firmě B mu ponechat běžný
+klientský přístup. Podrobný rozsah popisuje
+[§ 9.2.1 Delegované nastavení firmy](09_Klientsky_portal.md#921-delegovane-nastaveni-firmy).
+
 Předávání originálů používá záměrně oddělená práva. Klientské
 **Předávat doklady účetní** dovolí pouze vložit a sledovat vlastní podání aktuální
 firmy. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat —

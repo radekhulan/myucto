@@ -73,7 +73,7 @@ const routes: RouteRecordRaw[] = [
 
 const routePermissions: Record<string, [PermissionKey, AccessLevel?]> = {
   home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
-  'portal-purchase-invoice-submissions': ['documents.submit'],
+  'portal-purchase-invoice-submissions': ['documents.submit'], 'portal-company-settings': ['settings.company', 'write'],
   clients: ['clients'], 'client-new': ['clients.create', 'write'], 'client-detail': ['clients'], 'client-edit': ['clients', 'write'],
   projects: ['projects'], 'project-new': ['projects.create', 'write'], 'project-detail': ['projects'], 'project-edit': ['projects', 'write'],
   invoices: ['invoices'], 'invoice-new': ['invoices.create', 'write'], 'invoice-detail': ['invoices'], 'invoice-edit': ['invoices', 'write'],

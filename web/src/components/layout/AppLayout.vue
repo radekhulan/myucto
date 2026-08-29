@@ -26,7 +26,7 @@ import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
 import WorkspaceLayoutToggle from '@/components/workspace/WorkspaceLayoutToggle.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import PaneActivityScope from '@/components/workspace/PaneActivityScope.vue'
-import type { PermissionKey } from '@/security/permissions'
+import type { AccessLevel, PermissionKey } from '@/security/permissions'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { useToast } from '@/composables/useToast'
 import { formatShortcut, useKeyboardShortcuts, type ShortcutAction } from '@/composables/useKeyboardShortcuts'
@@ -125,6 +125,7 @@ interface NavItem {
   newTo?: string
   permission?: PermissionKey
   additionalPermissions?: PermissionKey[]
+  access?: AccessLevel
   newPermission?: PermissionKey
   badge?: number
   dividerBefore?: boolean
@@ -278,8 +279,8 @@ const ICONS = {
 }
 
 const navSections = computed<NavSection[]>(() => {
-  // Role client (Epic F6): samostatný, minimální nav — Přehled (portál), Fakturace,
-  // Nákupy, Kontakty, Nápověda. Vše ostatní skryto (BE stejně deny-by-default).
+  // Role client (Epic F6): samostatný, minimální nav. Sekce Firma se přidá jen
+  // při `settings.company = WRITE`; vše ostatní drží BE deny-by-default.
   if (clientExperience.value) {
     return filterNavigation([
       { key: 'dashboard', title: t('nav.dashboard'), accent: 'teal', items: [{ to: '/portal', label: t('nav.portal'), icon: ICONS.dashboard }] },
@@ -317,6 +318,18 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/portal/purchase-invoice-submissions', label: t('nav.submit_documents'), icon: ICONS.documents, permission: 'documents.submit' as PermissionKey },
           { to: '/portal/document-requests', label: t('nav.document_requests'), icon: ICONS.requestDoc, permission: 'documents.submit' as PermissionKey },
         ],
+      },
+      {
+        key: 'company',
+        title: t('nav.section_company'),
+        accent: 'primaryDeep',
+        items: [{
+          to: '/portal/settings',
+          label: t('nav.company_settings'),
+          icon: ICONS.settings,
+          permission: 'settings.company' as PermissionKey,
+          access: 'write',
+        }],
       },
     ])
   }
@@ -795,7 +808,7 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
       if (item.to.startsWith('/admin/branding')) return auth.isDemo ? auth.canRead('settings.branding') : auth.canWrite('settings.branding')
       if (item.to.startsWith('/admin/electronic-signatures')) return auth.canWrite('settings.signing')
       if (item.to.startsWith('/admin/databox')) return auth.canWrite('settings.signing')
-      const allowed = permission ? auth.canRead(permission) : auth.isSuperadmin
+      const allowed = permission ? auth.can(permission, item.access ?? 'read') : auth.isSuperadmin
       return allowed && (item.additionalPermissions?.every(required => auth.canRead(required)) ?? true)
     }),
   })).filter(section => section.items.length > 0)

@@ -78,6 +78,16 @@ final class BrandingProfileRepository
         return $row === false ? null : $this->cast($row);
     }
 
+    public function hasActiveEmailProfile(int $supplierId, int $emailProfileId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM email_profiles
+              WHERE supplier_id = ? AND id = ? AND deleted_at IS NULL AND is_active = 1'
+        );
+        $stmt->execute([$supplierId, $emailProfileId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function create(int $supplierId, array $data): int
     {
         $normalized = $this->normalize($data);

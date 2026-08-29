@@ -458,6 +458,7 @@
     "payroll_erasure": "Výmaz osobních údajů",
     "payroll_benefit_baskets": "Koše benefitů",
     "settings": "Nastavení",
+    "company_settings": "Nastavení firmy",
     "branding": "Branding",
     "supplier_current": "Dodavatel",
     "suppliers": "Dodavatelé",
@@ -14396,6 +14397,11 @@
     "field_balance": "Disponibilní zůstatek"
   },
   "settings": {
+    "client_company_settings_title": "Nastavení firmy",
+    "client_company_settings_hint": "Správa odesílacích profilů a vzhledu komunikace aktuální firmy. Účetní, daňové, právní a systémové nastavení zůstává ve správě účetní.",
+    "client_company_settings_tabs": "Sekce nastavení firmy",
+    "email_profile_managed_by_staff": "Spravuje účetní",
+    "email_profile_managed_by_staff_hint": "Profil používá systémový sendmail nebo kryptografický podpis a může jej změnit pouze správce instalace.",
     "branding_profiles": {
       "title": "Brandingové profily",
       "hint": "Volitelné identity pro různá loga, názvy a kontaktní údaje. Právní údaje dodavatele zůstávají stejné.",

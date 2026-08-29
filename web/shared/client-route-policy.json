@@ -5,6 +5,7 @@
     { "name": "portal", "path_pattern": "^/portal/?$", "kind": "permission", "permission": "profile", "access": "read" },
     { "name": "portal-document-requests", "path_pattern": "^/portal/document-requests/?$", "kind": "permission", "permission": "documents.submit", "access": "read" },
     { "name": "portal-purchase-invoice-submissions", "path_pattern": "^/portal/purchase-invoice-submissions/?$", "kind": "permission", "permission": "documents.submit", "access": "read" },
+    { "name": "portal-company-settings", "path_pattern": "^/portal/settings/?$", "kind": "permission", "permission": "settings.company", "access": "write" },
 
     { "name": "clients", "path_pattern": "^/clients/?$", "kind": "permission", "permission": "clients", "access": "read" },
     { "name": "client-new", "path_pattern": "^/clients/new/?$", "kind": "permission", "permission": "clients.create", "access": "write" },

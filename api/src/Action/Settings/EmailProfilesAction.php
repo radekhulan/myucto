@@ -10,7 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\EmailProfileRepository;
-use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\OperationalSettingsAccess;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Branding\AccentColor;
@@ -58,21 +58,28 @@ final class EmailProfilesAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
         }
 
-        return Json::ok($response, $this->profiles->listProfiles($this->supplierId($request)));
+        $profiles = array_map(
+            fn (array $profile): array => $this->profileForResponse($request, $profile),
+            $this->profiles->listProfiles($this->supplierId($request)),
+        );
+        return Json::ok($response, $profiles);
     }
 
     public function create(Request $request, Response $response): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
         }
 
         $supplierId = $this->supplierId($request);
         $body = (array) ($request->getParsedBody() ?? []);
+        if (($restricted = $this->denyClientRestrictedFields($request, $response, $body)) !== null) {
+            return $restricted;
+        }
         if (($locked = $this->denyCustomTransport($response, $body)) !== null) {
             return $locked;
         }
@@ -104,22 +111,29 @@ final class EmailProfilesAction
             'signing_profile_id' => $profile['signing_profile_id'] ?? null,
         ]);
 
-        return Json::ok($response, $profile, 201);
+        return Json::ok($response, $this->profileForResponse($request, $profile), 201);
     }
 
     public function update(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
         }
 
         $supplierId = $this->supplierId($request);
         $profileId = (int) ($args['id'] ?? 0);
-        if ($this->profiles->findProfile($supplierId, $profileId) === null) {
+        $current = $this->profiles->findProfile($supplierId, $profileId);
+        if ($current === null) {
             return Json::error($response, 'not_found', 'E-mailový profil nenalezen.', 404);
+        }
+        if (($restricted = $this->denyClientRestrictedProfile($request, $response, $current)) !== null) {
+            return $restricted;
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        if (($restricted = $this->denyClientRestrictedFields($request, $response, $body)) !== null) {
+            return $restricted;
+        }
         if (($locked = $this->denyCustomTransport($response, $body)) !== null) {
             return $locked;
         }
@@ -154,13 +168,13 @@ final class EmailProfilesAction
             'signing_profile_id' => $profile['signing_profile_id'] ?? null,
         ]);
 
-        return Json::ok($response, $profile);
+        return Json::ok($response, $this->profileForResponse($request, $profile));
     }
 
     public function test(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
         }
 
         $supplierId = $this->supplierId($request);
@@ -169,14 +183,17 @@ final class EmailProfilesAction
         if ($profile === null) {
             return Json::error($response, 'not_found', 'E-mailový profil nenalezen.', 404);
         }
+        if (($restricted = $this->denyClientRestrictedProfile($request, $response, $profile)) !== null) {
+            return $restricted;
+        }
 
         return $this->sendProfileTest($request, $response, $profile, $profileId, false);
     }
 
     public function testDraft(Request $request, Response $response): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
         }
 
         $supplierId = $this->supplierId($request);
@@ -190,6 +207,9 @@ final class EmailProfilesAction
             ? (array) $body['profile']
             : $body;
         unset($profileData['id'], $profileData['profile_id'], $profileData['profile']);
+        if (($restricted = $this->denyClientRestrictedFields($request, $response, $profileData)) !== null) {
+            return $restricted;
+        }
 
         try {
             $profile = $this->profiles->profileForDraftTest($supplierId, $profileData, $profileId);
@@ -201,14 +221,20 @@ final class EmailProfilesAction
         } catch (\Throwable) {
             return Json::error($response, 'validation_failed', 'Testovací e-mailový profil se nepodařilo připravit.', 400);
         }
+        if (($restricted = $this->denyClientRestrictedProfile($request, $response, $profile)) !== null) {
+            return $restricted;
+        }
 
         return $this->sendProfileTest($request, $response, $profile, $profileId, true);
     }
 
     public function browseImapFolders(Request $request, Response $response, array $args = []): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
+        }
+        if (($restricted = $this->denyClientRestrictedImapProfile($request, $response, $args)) !== null) {
+            return $restricted;
         }
 
         try {
@@ -225,8 +251,11 @@ final class EmailProfilesAction
 
     public function testImapSettings(Request $request, Response $response, array $args = []): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
+        }
+        if (($restricted = $this->denyClientRestrictedImapProfile($request, $response, $args)) !== null) {
+            return $restricted;
         }
 
         try {
@@ -247,14 +276,8 @@ final class EmailProfilesAction
     private function imapProbeSettings(Request $request, array $args = []): array
     {
         $supplierId = $this->supplierId($request);
-        $profileId = isset($args['id']) ? (int) $args['id'] : null;
+        $profileId = $this->imapProfileId($request, $args);
         $body = (array) ($request->getParsedBody() ?? []);
-        if ($profileId === null && isset($body['id']) && (int) $body['id'] > 0) {
-            $profileId = (int) $body['id'];
-        }
-        if ($profileId === null && isset($body['profile_id']) && (int) $body['profile_id'] > 0) {
-            $profileId = (int) $body['profile_id'];
-        }
 
         $profileData = isset($body['profile']) && is_array($body['profile'])
             ? (array) $body['profile']
@@ -266,19 +289,37 @@ final class EmailProfilesAction
 
     private function imapProbeError(Request $request, Response $response, array $args, \InvalidArgumentException $e): Response
     {
-        $body = (array) ($request->getParsedBody() ?? []);
-        $profileId = isset($args['id']) ? (int) $args['id'] : null;
-        if ($profileId === null && isset($body['id']) && (int) $body['id'] > 0) {
-            $profileId = (int) $body['id'];
-        }
-        if ($profileId === null && isset($body['profile_id']) && (int) $body['profile_id'] > 0) {
-            $profileId = (int) $body['profile_id'];
-        }
+        $profileId = $this->imapProfileId($request, $args);
         if ($profileId !== null && $this->profiles->findProfile($this->supplierId($request), $profileId) === null) {
             return Json::error($response, 'not_found', 'E-mailový profil nenalezen.', 404);
         }
 
         return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+    }
+
+    private function denyClientRestrictedImapProfile(
+        Request $request,
+        Response $response,
+        array $args,
+    ): ?Response {
+        if (!RequestAuthorization::isClientType($request)) return null;
+
+        $profileId = $this->imapProfileId($request, $args);
+        if ($profileId === null) return null;
+        $profile = $this->profiles->findProfile($this->supplierId($request), $profileId);
+        if ($profile === null) return null;
+
+        return $this->denyClientRestrictedProfile($request, $response, $profile);
+    }
+
+    private function imapProfileId(Request $request, array $args): ?int
+    {
+        if (isset($args['id']) && (int) $args['id'] > 0) return (int) $args['id'];
+
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (isset($body['id']) && (int) $body['id'] > 0) return (int) $body['id'];
+        if (isset($body['profile_id']) && (int) $body['profile_id'] > 0) return (int) $body['profile_id'];
+        return null;
     }
 
     /**
@@ -356,8 +397,8 @@ final class EmailProfilesAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!$this->isAdmin($request)) {
-            return Json::error($response, 'forbidden', 'Pouze admin.', 403);
+        if (!$this->canManage($request)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění spravovat e-mailové profily.', 403);
         }
 
         $supplierId = $this->supplierId($request);
@@ -365,6 +406,9 @@ final class EmailProfilesAction
         $profile = $this->profiles->findProfile($supplierId, $profileId);
         if ($profile === null) {
             return Json::error($response, 'not_found', 'E-mailový profil nenalezen.', 404);
+        }
+        if (($restricted = $this->denyClientRestrictedProfile($request, $response, $profile)) !== null) {
+            return $restricted;
         }
 
         $brandingNames = $this->profiles->brandingProfileUsages($supplierId, $profileId);
@@ -392,9 +436,83 @@ final class EmailProfilesAction
         return isset($user['id']) ? (int) $user['id'] : null;
     }
 
-    private function isAdmin(Request $request): bool
+    private function canManage(Request $request): bool
     {
-        return RequestAuthorization::allows($request, 'settings.company.write', AccessLevel::WRITE);
+        return OperationalSettingsAccess::emailProfiles($request);
+    }
+
+    /**
+     * Elektronické podpisy a lokální sendmail nejsou součástí klientsky
+     * delegovaného nastavení. Kontrola je v akci, ne jen ve formuláři.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function denyClientRestrictedFields(Request $request, Response $response, array $body): ?Response
+    {
+        if (!RequestAuthorization::isClientType($request)) return null;
+
+        if (array_key_exists('signing_profile_id', $body)) {
+            return Json::error(
+                $response,
+                'field_not_delegable',
+                'Elektronické podepisování není součástí delegovaného nastavení firmy.',
+                403,
+            );
+        }
+        if (array_key_exists('sendmail_command', $body)
+            || strtolower(trim((string) ($body['transport_type'] ?? ''))) === 'sendmail'
+        ) {
+            return Json::error(
+                $response,
+                'field_not_delegable',
+                'Lokální sendmail není součástí delegovaného nastavení firmy.',
+                403,
+            );
+        }
+        return null;
+    }
+
+    /**
+     * Profily napojené na systémový sendmail nebo kryptografické S/MIME identity
+     * zůstávají ve správě staff role. Klient je vidí v seznamu, ale nemůže je
+     * testovat, měnit ani smazat.
+     *
+     * @param array<string,mixed> $profile
+     */
+    private function denyClientRestrictedProfile(Request $request, Response $response, array $profile): ?Response
+    {
+        if (!RequestAuthorization::isClientType($request)) return null;
+
+        if (($profile['signing_profile_id'] ?? null) !== null
+            || strtolower((string) ($profile['transport_type'] ?? 'global')) === 'sendmail'
+        ) {
+            return Json::error(
+                $response,
+                'profile_not_delegable',
+                'Tento pokročilý e-mailový profil může spravovat pouze správce instalace.',
+                403,
+            );
+        }
+        return null;
+    }
+
+    /**
+     * @param array<string,mixed>|null $profile
+     * @return array<string,mixed>|null
+     */
+    private function profileForResponse(Request $request, ?array $profile): ?array
+    {
+        if ($profile === null || !RequestAuthorization::isClientType($request)) return $profile;
+
+        $profile['client_manageable'] = ($profile['signing_profile_id'] ?? null) === null
+            && strtolower((string) ($profile['transport_type'] ?? 'global')) !== 'sendmail';
+        unset(
+            $profile['signing_profile_id'],
+            $profile['signing_profile_name'],
+            $profile['signing_profile_code'],
+            $profile['sendmail_command'],
+        );
+        return $profile;
     }
 
     /**

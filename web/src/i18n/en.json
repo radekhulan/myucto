@@ -458,6 +458,7 @@
     "payroll_erasure": "Erasure of personal data",
     "payroll_benefit_baskets": "Benefit baskets",
     "settings": "Settings",
+    "company_settings": "Company settings",
     "branding": "Branding",
     "supplier_current": "Supplier",
     "suppliers": "Suppliers",
@@ -14396,6 +14397,11 @@
     "field_balance": "Available balance"
   },
   "settings": {
+    "client_company_settings_title": "Company settings",
+    "client_company_settings_hint": "Manage sending profiles and communication branding for the current company. Accounting, tax, legal and system settings remain with your accountant.",
+    "client_company_settings_tabs": "Company settings sections",
+    "email_profile_managed_by_staff": "Managed by accountant",
+    "email_profile_managed_by_staff_hint": "This profile uses system sendmail or a cryptographic signature and can only be changed by the installation administrator.",
     "branding_profiles": {
       "title": "Branding profiles",
       "hint": "Optional identities for different logos, names and contact details. The supplier's legal details remain unchanged.",

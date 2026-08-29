@@ -32,6 +32,8 @@ final class RbacHttpRoleMatrixTest extends TestCase
     private array $roleIds = [];
     /** @var list<int> */
     private array $clientIds = [];
+    /** @var list<int> */
+    private array $emailProfileIds = [];
     /** @var list<string> */
     private array $sessionTokens = [];
 
@@ -58,6 +60,10 @@ final class RbacHttpRoleMatrixTest extends TestCase
         $pdo = $this->db->pdo();
         foreach ($this->sessionTokens as $token) {
             try { $this->sessions->destroy($token); } catch (\Throwable) {}
+        }
+        if ($this->emailProfileIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($this->emailProfileIds), '?'));
+            $pdo->prepare("DELETE FROM email_profiles WHERE id IN ({$placeholders})")->execute($this->emailProfileIds);
         }
         if ($this->clientIds !== []) {
             $placeholders = implode(',', array_fill(0, count($this->clientIds), '?'));
@@ -101,6 +107,9 @@ final class RbacHttpRoleMatrixTest extends TestCase
         $staffModuleAllowed = $tenantBaseAllowed && ($roleType === 'staff' || $isSuperadmin);
         $clientModuleAllowed = $tenantBaseAllowed;
         $writeAllowed = $tenantBaseAllowed && $level === 2;
+        $staffSettingsWriteAllowed = $tenantBaseAllowed
+            && $level === 2
+            && ($roleType === 'staff' || $isSuperadmin);
 
         foreach ([
             ['GET', '/api/invoices', null, $clientModuleAllowed],
@@ -110,6 +119,9 @@ final class RbacHttpRoleMatrixTest extends TestCase
             ['GET', '/api/accounting/journal', null, $staffModuleAllowed],
             ['GET', '/api/reports/dph-book?year=2025', null, $staffModuleAllowed],
             ['GET', '/api/settings/supplier', null, $clientModuleAllowed],
+            ['GET', '/api/settings/client/email-profiles', null, $writeAllowed],
+            ['GET', '/api/settings/client/branding', null, $writeAllowed],
+            ['PUT', '/api/settings/supplier', [], $staffSettingsWriteAllowed],
             ['POST', '/api/invoices/999999/send', [], $writeAllowed],
             ['POST', '/api/purchase-invoices', [], $writeAllowed],
         ] as [$method, $path, $body, $allowed]) {
@@ -135,6 +147,67 @@ final class RbacHttpRoleMatrixTest extends TestCase
         }
     }
 
+    public function testClientCompanyWriteUsesOnlyTheOperationalSettingsAllowlist(): void
+    {
+        $readerId = $this->createUser('client_operational_settings_read', 'client', 1, true);
+        $readerSession = $this->createSession($readerId);
+        $readerProfiles = $this->request('GET', '/api/settings/branding-profiles', $readerSession);
+        self::assertSame(403, $readerProfiles->getStatusCode());
+        self::assertSame('forbidden', $this->json($readerProfiles)['error']['code'] ?? null);
+
+        $userId = $this->createUser('client_operational_settings', 'client', 2, true);
+        $session = $this->createSession($userId);
+        $secret = '__TEST_SMTP_SECRET_' . bin2hex(random_bytes(8));
+        $code = 'client-' . bin2hex(random_bytes(5));
+
+        $created = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST client delegated profile',
+            'code' => $code,
+            'from_email' => 'delegated@example.test',
+            'transport_type' => 'global',
+            'smtp_password' => $secret,
+            'is_default' => false,
+            'is_active' => true,
+        ]);
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $createdBody = $this->json($created);
+        $profileId = (int) ($createdBody['id'] ?? 0);
+        self::assertGreaterThan(0, $profileId);
+        $this->emailProfileIds[] = $profileId;
+        self::assertArrayNotHasKey('smtp_password', $createdBody);
+        self::assertArrayNotHasKey('imap_password', $createdBody);
+        self::assertArrayNotHasKey('signing_profile_id', $createdBody);
+        self::assertTrue($createdBody['client_manageable'] ?? false);
+
+        $audit = $this->db->pdo()->prepare(
+            'SELECT payload FROM activity_log WHERE user_id = ? AND action = ? ORDER BY id DESC LIMIT 1'
+        );
+        $audit->execute([$userId, 'email_profile.created']);
+        self::assertStringNotContainsString($secret, (string) $audit->fetchColumn());
+
+        $sendmail = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST forbidden sendmail',
+            'code' => $code . '-sendmail',
+            'from_email' => 'delegated@example.test',
+            'transport_type' => 'sendmail',
+            'sendmail_command' => '/usr/sbin/sendmail -bs',
+        ]);
+        self::assertSame(403, $sendmail->getStatusCode());
+        self::assertSame('field_not_delegable', $this->json($sendmail)['error']['code'] ?? null);
+
+        $broad = $this->request('PUT', '/api/settings/supplier', $session, [
+            'company_name' => '__TEST forbidden legal change',
+        ]);
+        self::assertSame(403, $broad->getStatusCode());
+        self::assertSame('forbidden_permission', $this->json($broad)['error']['code'] ?? null);
+
+        $brandingMassAssignment = $this->request('PUT', '/api/settings/client/branding', $session, [
+            'company_name' => '__TEST forbidden branding change',
+        ]);
+        self::assertSame(403, $brandingMassAssignment->getStatusCode());
+        self::assertSame('field_not_delegable', $this->json($brandingMassAssignment)['error']['code'] ?? null);
+    }
+
     private function createUser(string $variant, string $roleType, int $level, bool $hasSupplier): int
     {
         if ($variant === 'superadmin') {
@@ -146,7 +219,7 @@ final class RbacHttpRoleMatrixTest extends TestCase
             $this->roleIds[] = $roleId;
             $keys = $roleType === 'client'
                 ? ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'settings.company']
-                : ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'documents', 'bank', 'accounting', 'reports', 'settings.company'];
+                : ['clients', 'clients.create', 'invoices', 'invoices.send', 'purchase_invoices', 'purchase_invoices.create', 'documents', 'bank', 'accounting', 'reports', 'settings.company', 'settings.company.write', 'settings.branding'];
             $insert = $this->db->pdo()->prepare('INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, ?, ?)');
             foreach ($keys as $key) $insert->execute([$roleId, $key, $level]);
         }

@@ -62,6 +62,7 @@ use MyInvoice\Action\Admin\RoleAdminAction;
 use MyInvoice\Action\Admin\SupplierSearchAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
 use MyInvoice\Action\Settings\BrandingProfilesAction;
+use MyInvoice\Action\Settings\ClientBrandingSettingsAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
@@ -2408,6 +2409,30 @@ final class Routes
         $app->post   ('/api/settings/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
         $app->put    ('/api/settings/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
         $app->delete ('/api/settings/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
+        // Klientský allowlist používá stejné supplier-scoped akce, ale vlastní URL.
+        // RoutePermissionMap na těchto aliasových cestách vyžaduje settings.company WRITE.
+        $app->get    ('/api/settings/client/email-profiles',       [EmailProfilesAction::class, 'list']);
+        $app->post   ('/api/settings/client/email-profiles',       [EmailProfilesAction::class, 'create']);
+        $app->post   ('/api/settings/client/email-profiles/test',  [EmailProfilesAction::class, 'testDraft']);
+        $app->post   ('/api/settings/client/email-profiles/imap-test', [EmailProfilesAction::class, 'testImapSettings']);
+        $app->post   ('/api/settings/client/email-profiles/folders', [EmailProfilesAction::class, 'browseImapFolders']);
+        $app->post   ('/api/settings/client/email-profiles/{id:[0-9]+}/test', [EmailProfilesAction::class, 'test']);
+        $app->post   ('/api/settings/client/email-profiles/{id:[0-9]+}/imap-test', [EmailProfilesAction::class, 'testImapSettings']);
+        $app->post   ('/api/settings/client/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
+        $app->put    ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
+        $app->delete ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
+        $app->get    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'get']);
+        $app->put    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'update']);
+        $app->get    ('/api/settings/client/branding/preview', [EmailBrandingAction::class, 'preview']);
+        $app->post   ('/api/settings/client/branding/logo', [EmailBrandingAction::class, 'uploadLogo']);
+        $app->delete ('/api/settings/client/branding/logo', [EmailBrandingAction::class, 'deleteLogo']);
+        $app->get    ('/api/settings/client/branding/profiles', [BrandingProfilesAction::class, 'list']);
+        $app->post   ('/api/settings/client/branding/profiles', [BrandingProfilesAction::class, 'create']);
+        $app->put    ('/api/settings/client/branding/profiles/{id:[0-9]+}', [BrandingProfilesAction::class, 'update']);
+        $app->delete ('/api/settings/client/branding/profiles/{id:[0-9]+}', [BrandingProfilesAction::class, 'delete']);
+        $app->post   ('/api/settings/client/branding/profiles/{id:[0-9]+}/default', [BrandingProfilesAction::class, 'setDefault']);
+        $app->post   ('/api/settings/client/branding/profiles/{id:[0-9]+}/logo', [BrandingProfilesAction::class, 'uploadLogo']);
+        $app->delete ('/api/settings/client/branding/profiles/{id:[0-9]+}/logo', [BrandingProfilesAction::class, 'deleteLogo']);
         $app->get    ('/api/settings/branding-profiles',                 [BrandingProfilesAction::class, 'list']);
         $app->post   ('/api/settings/branding-profiles',                 [BrandingProfilesAction::class, 'create']);
         $app->put    ('/api/settings/branding-profiles/{id:[0-9]+}',     [BrandingProfilesAction::class, 'update']);

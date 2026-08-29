@@ -233,6 +233,9 @@
       "purchase_invoice",
       "purchase_submissions"
     ],
+    "portal-company-settings": [
+      "settings"
+    ],
     "clients": [
       "purchase_invoice"
     ],

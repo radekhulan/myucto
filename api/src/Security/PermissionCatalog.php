@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-08-domains-document-submissions-health-evidence-v1';
+    public const VERSION = '2026-08-client-company-settings-health-evidence-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -152,9 +152,11 @@ final class PermissionCatalog
                 'key' => $key,
                 'group' => $group,
                 'label' => $label,
-                'description' => str_contains($key, '.')
-                    ? 'Povoluje akci „' . $label . '“.'
-                    : 'Zpřístupňuje modul „' . $label . '“.',
+                'description' => $key === 'settings.company'
+                    ? 'Čtení zpřístupní firemní kontext; zápis klientské roli otevře pouze delegované provozní nastavení (odesílací profily a branding), nikoli daňové ani právní údaje.'
+                    : (str_contains($key, '.')
+                        ? 'Povoluje akci „' . $label . '“.'
+                        : 'Zpřístupňuje modul „' . $label . '“.'),
                 'role_types' => $types,
                 'kind' => str_contains($key, '.') ? 'action' : 'module',
             ];
