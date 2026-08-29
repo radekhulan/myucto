@@ -220,6 +220,61 @@ final class JmhzOfficialSourceMonitorTest extends TestCase
         );
     }
 
+    /**
+     * Verze písemností EPO nehlídalo do 29. 8. 2026 nic.
+     *
+     * ⚠️ Nová verze mění `verzePis` v obálce. Podání se starou verzí projde NAŠÍ
+     * validací proti starému XSD a odmítne ho až podatelna — chyba se tedy
+     * projeví až u ostrého podání na straně úřadu.
+     *
+     * Řádky nejsou odkazy: tabulka naviguje přes `onclick`, a `resolveUrl()`
+     * navíc zahazuje query string, takže zkratku je nutné číst ze surové adresy.
+     */
+    public function testEpoStructureVersionBumpIsReported(): void
+    {
+        $page = static fn (string $version): string => '<html><body><table><tbody>'
+            . '<tr onclick="location.href=\'https://adisspr.mfcr.cz:443/dpr/adis/'
+            . 'idpr_pub/epo2_info/popis_struktury_detail.faces?zkratka=DPZVD6\'">'
+            . '<td>DPZVD6</td><td>Vyúčtování daně ze závislé činnosti</td>'
+            . '<td>' . $version . '</td><td>10.1.2024</td></tr>'
+            . '</tbody></table></body></html>';
+
+        $monitor = new JmhzOfficialSourceMonitor(
+            $this->epoSources(),
+            static fn (string $url, int $maxBytes): string => $page('09.03.01'),
+        );
+        $first = $monitor->monitor($this->statePath());
+        self::assertTrue($first['baseline_created']);
+        self::assertSame(1, $first['sources'][0]['document_count']);
+
+        $monitor = new JmhzOfficialSourceMonitor(
+            $this->epoSources(),
+            static fn (string $url, int $maxBytes): string => $page('09.04.01'),
+        );
+        $second = $monitor->monitor($this->statePath());
+
+        self::assertTrue($second['changed']);
+        $change = $second['changes'][0];
+        self::assertSame('DPZVD6', $change['document_key']);
+        self::assertSame('09.03.01', $change['old_version']);
+        self::assertSame('09.04.01', $change['new_version']);
+    }
+
+    /** @return array<string,array<string,mixed>> */
+    private function epoSources(): array
+    {
+        return [
+            'mfcr-epo-structures' => [
+                'label' => 'Finanční správa — popisy struktur EPO',
+                'index_url' => 'https://adisspr.mfcr.cz/dpr/adis/idpr_pub/epo2_info/popis_struktury_seznam.faces',
+                'index_format' => 'epo_structures',
+                'document_hosts' => ['adisspr.mfcr.cz'],
+                'document_path_prefixes' => ['/dpr/adis/idpr_pub/epo2_info/'],
+                'document_extensions' => [],
+            ],
+        ];
+    }
+
     /** @return array<string,array<string,mixed>> */
     private function articleSources(): array
     {

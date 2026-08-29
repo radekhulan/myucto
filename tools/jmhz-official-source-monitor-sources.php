@@ -41,6 +41,20 @@ return [
         'document_path_prefixes' => ['/web/cz/-/'],
         'document_extensions' => [],
     ],
+    /*
+     * Verze písemností EPO. Pro JMHZ máme monitor, pro finanční správu do 29. 8.
+     * 2026 NIC — XSD se stahují jen na vyžádání a novou verzi si nikdo nevšiml.
+     * Nová verze mění `verzePis` v obálce; podání se starou projde naší validací
+     * proti starému XSD a odmítne ho až podatelna, tedy až u ostrého podání.
+     */
+    'mfcr-epo-structures' => [
+        'label' => 'Finanční správa — popisy struktur EPO',
+        'index_url' => 'https://adisspr.mfcr.cz/dpr/adis/idpr_pub/epo2_info/popis_struktury_seznam.faces',
+        'index_format' => 'epo_structures',
+        'document_hosts' => ['adisspr.mfcr.cz'],
+        'document_path_prefixes' => ['/dpr/adis/idpr_pub/epo2_info/'],
+        'document_extensions' => [],
+    ],
     'cssz-jmhz-eportal' => [
         'label' => 'ePortál ČSSZ — Jednotné měsíční hlášení zaměstnavatele',
         'index_url' => 'https://eportal.cssz.cz/web/portal/-/sluzby/jednotne-mesicni-hlaseni-zamestnavatele',

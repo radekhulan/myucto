@@ -103,7 +103,7 @@ final class JmhzOfficialSourceMonitor
             $hosts = $source['document_hosts'] ?? null;
             $prefixes = $source['document_path_prefixes'] ?? null;
             $extensions = $source['document_extensions'] ?? null;
-            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api', 'article_list'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
+            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'mpsv_api', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
                 throw new RuntimeException("Monitor oficiálních zdrojů JMHZ má neplatný zdroj {$id}.");
             }
             $this->assertHttpsUrl($indexUrl, []);
@@ -112,7 +112,7 @@ final class JmhzOfficialSourceMonitor
             // Seznam článků příponu nemá a mít nesmí: `isOfficialArticleUrl()`
             // filtruje jen hostitele a prefix cesty. Prázdný výčet by u ostatních
             // formátů znamenal, že neprojde nic, proto je povolený jen tady.
-            $validatedExtensions = $indexFormat === 'article_list'
+            $validatedExtensions = in_array($indexFormat, ['article_list', 'epo_structures'], true)
                 ? []
                 : $this->validateStringList($extensions, "Zdroj {$id} má neplatnou příponu dokumentu.", '/\A[a-z0-9]{2,8}\z/D');
             $this->assertHttpsUrl($indexUrl, [$this->host($indexUrl)]);
@@ -166,10 +166,12 @@ final class JmhzOfficialSourceMonitor
             $documents = $this->extractMpsvDocuments($page, $source);
         } elseif ($source['index_format'] === 'article_list') {
             $documents = $this->extractArticles($index, $source);
+        } elseif ($source['index_format'] === 'epo_structures') {
+            $documents = $this->extractEpoStructures($index, $source);
         } else {
             $documents = $this->extractDocuments($index, $source);
         }
-        if ($source['index_format'] !== 'article_list') {
+        if (!in_array($source['index_format'], ['article_list', 'epo_structures'], true)) {
             // Články se po jednom NESTAHUJÍ. Jde o provozní oznámení, kde je
             // signálem to, že přibyla položka — a stránka článku nese menu,
             // patičku a další volatilní obsah, takže by se hlásila změna
@@ -188,6 +190,98 @@ final class JmhzOfficialSourceMonitor
             'index_url' => $source['index_url'],
             'documents' => $documents,
         ];
+    }
+
+    /**
+     * Seznam struktur EPO — písemnost a JEJÍ VERZE.
+     *
+     * ⚠️ Na rozdíl od JMHZ nehlídalo verze písemností finanční správy nic: XSD se
+     * stahují jen na vyžádání (`cmd/download-xsd.sh`). Nová verze přitom mění
+     * `verzePis` v obálce a podání se starou verzí projde NAŠÍ validací proti
+     * starému XSD — odmítne ho až podatelna. Chyba by se tedy projevila až na
+     * straně úřadu a u ostrého podání.
+     *
+     * Verze není v textu odkazu, ale v řádku tabulky vedle něj, takže se bere
+     * text celého řádku. Klíčem je zkratka písemnosti: nová verze tedy nevypadá
+     * jako přibylá položka, ale jako změna té stávající.
+     *
+     * @param array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>,api_slug?:string,documentation_title?:string} $source
+     * @return list<array{key:string,title:string,version:?string,url:string,sha256?:string,byte_length?:int}>
+     */
+    private function extractEpoStructures(string $html, array $source): array
+    {
+        $dom = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        try {
+            if (!$dom->loadHTML(
+                '<?xml encoding="UTF-8">' . $html,
+                LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING,
+            )) {
+                throw new RuntimeException("Index {$source['index_url']} není platné HTML.");
+            }
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        // ⚠️ Řádky NEJSOU odkazy. Tabulka naviguje přes `onclick="location.href='…'"`
+        // na `<tr>`, takže XPath na `//a[@href]` nenajde nic — první pokus vrátil
+        // nula písemností právě proto.
+        $nodes = (new DOMXPath($dom))->query('//tr[@onclick]');
+        if ($nodes === false) {
+            throw new RuntimeException("Index {$source['index_url']} nelze prohledat.");
+        }
+
+        $structures = [];
+        foreach ($nodes as $node) {
+            $onclick = (string) ($node->attributes?->getNamedItem('onclick')?->nodeValue ?? '');
+            if (preg_match("#location\.href='([^']+)'#", $onclick, $link) !== 1) {
+                continue;
+            }
+            $url = $this->resolveUrl($source['index_url'], $link[1]);
+            if (!$this->isOfficialArticleUrl($url, $source)) {
+                continue;
+            }
+            // Zkratka se čte ze SUROVÉHO odkazu: `resolveUrl()` query string
+            // zahazuje, takže z kanonické adresy už ji vytáhnout nejde.
+            if (preg_match('/zkratka=([A-Z0-9]{4,10})/', $link[1], $matches) !== 1) {
+                continue;
+            }
+            $code = $matches[1];
+            if (isset($structures[$code])) {
+                continue;
+            }
+            // Buňky se spojují oddělovačem: `textContent` je slepí dohromady
+            // („DPZVD6Vyúčtování…09.03.0110.1.2024") a hlášení o změně by pak
+            // nešlo přečíst.
+            $cells = [];
+            foreach ($node->childNodes as $cell) {
+                $text = $this->normalizeText((string) $cell->textContent);
+                if ($text !== '') {
+                    $cells[] = $text;
+                }
+            }
+            $title = implode(' · ', $cells);
+            if ($title === '') {
+                continue;
+            }
+            // Bez ``: verze bývá nalepená na název písemnosti, takže hranice
+            // slova mezi „R" a „0" nevznikne.
+            $version = preg_match('/([0-9]{2}\.[0-9]{2}\.[0-9]{2})/', $title, $found) === 1
+                ? $found[1]
+                : null;
+            $structures[$code] = [
+                'key' => $code,
+                'title' => $title,
+                'version' => $version,
+                'url' => $url,
+                'sha256' => hash('sha256', $title),
+                'byte_length' => strlen($title),
+            ];
+        }
+        ksort($structures, SORT_STRING);
+
+        return array_values($structures);
     }
 
     /**
