@@ -901,15 +901,6 @@ const actions = computed<ActionItem[]>(() => [
           <p v-if="jmhzOptionsFailed" class="text-xs text-danger-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.options_failed') }}</p>
           <p v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" class="text-xs text-warning-700 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_evidence.temporary_assignment_blocker') }}</p>
         </fieldset>
-        <fieldset data-test="jmhz-ordinary-profile" class="grid grid-cols-1 gap-3 rounded-md border border-warning-500/30 bg-warning-50 p-3 sm:col-span-2 lg:col-span-4">
-          <legend class="px-1 text-xs font-semibold text-warning-800">{{ t('payroll.people.jmhz_ordinary_profile.title') }}</legend>
-          <p class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_ordinary_profile.hint') }}</p>
-          <label v-for="field in ordinaryProfileFields" :key="field.key" class="flex items-start gap-2 text-sm text-neutral-700">
-            <input v-model="termsForm[field.key]" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-warning-600 focus:ring-warning-500">
-            <span>{{ t(`payroll.people.jmhz_ordinary_profile.${field.label}`) }}</span>
-          </label>
-          <p class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_ordinary_profile.monthly_hint') }}</p>
-        </fieldset>
         <div class="text-xs text-neutral-600">
           <label class="block">{{ t('payroll.people.cz_isco_code') }}</label>
           <CzIscoPicker v-model="termsForm.cz_isco_code" class="mt-1" />
@@ -919,7 +910,7 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_mode') }}<select v-model="termsForm.social_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.health_mode') }}<select v-model="termsForm.health_insurance_participation" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option></select></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.tax_regime_label') }}<select v-model="termsForm.tax_regime" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option></select></label>
-        <label v-if="needsOtherWithholdingStatement" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.other_withholding_eligibility_label') }}<select v-model="termsForm.other_withholding_eligibility" data-test="other-withholding-eligibility" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','eligible','ineligible']" :key="state" :value="state">{{ t(`payroll.people.other_withholding_eligibility.${state}`) }}</option></select><span class="mt-1 block text-neutral-500">{{ t('payroll.people.other_withholding_eligibility_hint') }}</span></label>
+        <label v-if="needsOtherWithholdingStatement" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-2">{{ t('payroll.people.other_withholding_eligibility_label') }}<select v-model="termsForm.other_withholding_eligibility" data-test="other-withholding-eligibility" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="state in ['unverified','eligible','ineligible']" :key="state" :value="state">{{ t(`payroll.people.other_withholding_eligibility.${state}`) }}</option></select><span class="mt-1 block text-neutral-500">{{ t('payroll.people.other_withholding_eligibility_hint') }}</span></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.foreign_country') }}<input v-model="termsForm.foreign_legislation_country_code" maxlength="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm uppercase"></label>
         <label class="text-xs text-neutral-600">{{ t('payroll.people.a1_certificate_until') }}<input v-model="termsForm.a1_certificate_until" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
         <!--
@@ -933,6 +924,15 @@ const actions = computed<ActionItem[]>(() => [
         <label class="text-xs text-neutral-600">{{ t('payroll.people.social_part_time_discount_label') }}<select v-model="termsForm.social_part_time_discount_reason" data-test="social-part-time-discount-reason" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><option v-for="reason in ['none','age_55_plus','child_care_under_10','dependent_close_person_care','study_under_26','retraining_jobseeker','disabled_person','under_21']" :key="reason" :value="reason">{{ t(`payroll.people.social_part_time_discount_reason.${reason}`) }}</option></select></label>
         <label v-if="termsForm.social_part_time_discount_reason !== 'none'" class="text-xs text-neutral-600">{{ t('payroll.people.social_part_time_discount_notified_on') }}<input v-model="termsForm.social_part_time_discount_notified_on" type="date" data-test="social-part-time-discount-notified-on" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_part_time_discount_notified_on_hint') }}</span></label>
         <label v-if="termsForm.social_part_time_discount_reason !== 'none'" class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.social_part_time_discount_evidence') }}<input v-model="termsForm.social_part_time_discount_evidence" maxlength="190" data-test="social-part-time-discount-evidence" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"><span class="mt-1 block text-neutral-500">{{ t('payroll.people.social_part_time_discount_evidence_hint') }}</span></label>
+        <fieldset data-test="jmhz-ordinary-profile" class="grid grid-cols-1 gap-x-4 gap-y-3 rounded-md sm:grid-cols-2 lg:grid-cols-4 items-start border border-warning-500/30 bg-warning-50 p-3 sm:col-span-2 lg:col-span-4">
+          <legend class="px-1 text-xs font-semibold text-warning-800">{{ t('payroll.people.jmhz_ordinary_profile.title') }}</legend>
+          <p class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_ordinary_profile.hint') }}</p>
+          <label v-for="field in ordinaryProfileFields" :key="field.key" class="flex items-start gap-2 text-sm text-neutral-700">
+            <input v-model="termsForm[field.key]" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-warning-600 focus:ring-warning-500">
+            <span>{{ t(`payroll.people.jmhz_ordinary_profile.${field.label}`) }}</span>
+          </label>
+          <p class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-4">{{ t('payroll.people.jmhz_ordinary_profile.monthly_hint') }}</p>
+        </fieldset>
         </div>
       </details>
       <div class="mt-4 flex flex-wrap justify-end gap-2">
