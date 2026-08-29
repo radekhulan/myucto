@@ -342,16 +342,21 @@ final class GarnishmentCalculator
             : 0;
 
         $firstNet = $this->carveEmployerFee($this->reverseFirstPoolOrder($claims), $first, $fee);
-        $carvedFromFirst = self::sumExactly($first) - self::sumExactly($firstNet);
-        $secondNet = $this->carveEmployerFee(
-            $this->reverseSecondPoolOrder($claims),
-            $second,
-            $fee - $carvedFromFirst,
-        );
+
+        // Paušál se bere VÝHRADNĚ z první třetiny: § 279 odst. 1 věta čtvrtá
+        // o. s. ř. ho uspokojuje „před všemi ostatními pohledávkami z první
+        // třetiny zbytku čisté mzdy" a § 280 odst. 2 vypočítává, co se platí
+        // z druhé třetiny, taxativně — náhrada nákladů plátce mezi tím není.
+        //
+        // Dřív se nedokrytý zbytek dobíral z druhé třetiny, aby nárok nepropadl.
+        // Jenže druhá třetina patří přednostním pohledávkám: zaplatilo by ho
+        // výživné, které tam má přednost, a povinný by dostal totéž. Nárok se
+        // proto o nedokrytou část krátí.
+        $fee = self::sumExactly($first) - self::sumExactly($firstNet);
 
         return [
             'first' => $firstNet,
-            'second' => $secondNet,
+            'second' => $second,
             'fee' => $fee,
             'withheld' => $withheld,
         ];
@@ -446,33 +451,6 @@ final class GarnishmentCalculator
         return array_reverse($this->priorities->resolve($claims));
     }
 
-    /**
-     * Obrácené pořadí uspokojování z druhé třetiny: nejdřív ostatní přednostní
-     * od konce, teprve pak výživné od poslední kategorie.
-     *
-     * @param list<DeductionClaim> $claims
-     * @return list<list<DeductionClaim>>
-     */
-    private function reverseSecondPoolOrder(array $claims): array
-    {
-        $groups = array_reverse($this->priorities->resolve(array_values(array_filter(
-            $claims,
-            static fn (DeductionClaim $claim): bool =>
-                $claim->category === ClaimCategory::OtherPriority,
-        ))));
-
-        foreach (array_reverse(ClaimCategory::maintenanceCategories()) as $category) {
-            $group = array_values(array_filter(
-                $claims,
-                static fn (DeductionClaim $claim): bool => $claim->category === $category,
-            ));
-            if ($group !== []) {
-                $groups[] = $group;
-            }
-        }
-
-        return $groups;
-    }
 
     /**
      * @param list<DeductionClaim> $claims

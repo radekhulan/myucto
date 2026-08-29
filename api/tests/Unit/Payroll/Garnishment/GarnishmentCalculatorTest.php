@@ -547,10 +547,18 @@ final class GarnishmentCalculatorTest extends TestCase
 
     /**
      * Měsíc, kdy celou srážku spolkne výživné z druhé třetiny a na první
-     * třetinu vůbec nedojde. Paušál se ukrojí z výživného — jinak by nárok
-     * podle § 270 odst. 3 o. s. ř. zanikl, přestože plátce srážky prováděl.
+     * třetinu vůbec nedojde. Paušál za takový měsíc NENÁLEŽÍ.
+     *
+     * § 279 odst. 1 věta čtvrtá o. s. ř. ho uspokojuje „před všemi ostatními
+     * pohledávkami z první třetiny zbytku čisté mzdy" a § 280 odst. 2 určuje
+     * taxativně, co se hradí z druhé třetiny — náhrada nákladů plátce mezi tím
+     * není. Ukrojit ji z výživného by znamenalo platit náklady plátce z peněz,
+     * na které má přednost oprávněný, a otevřelo by to žalobu podle § 292.
+     *
+     * Zaměstnance to nestojí nic navíc: sráží se pořád stejných 2 000 Kč,
+     * jen z nich nic nezůstane plátci.
      */
-    public function testEmployerFeeIsCarvedFromMaintenanceWhenFirstThirdStaysUnused(): void
+    public function testEmployerFeeLapsesWhenTheFirstThirdStaysUnused(): void
     {
         $result = $this->calculate(4_000_000, [
             $this->statutoryClaim(
@@ -562,10 +570,38 @@ final class GarnishmentCalculatorTest extends TestCase
         ]);
 
         self::assertSame(200_000, $result->totalWithheldMinorUnits);
-        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
-        self::assertSame(195_000, $result->allocationFor('maintenance')?->secondPoolMinorUnits);
+        self::assertSame(0, $result->employerFlatFeeMinorUnits);
+        self::assertSame(200_000, $result->allocationFor('maintenance')?->secondPoolMinorUnits);
         self::assertSame(0, $result->allocationFor('maintenance')?->firstPoolMinorUnits);
         self::assertSame(3_800_000, $result->employeePaymentMinorUnits);
+    }
+
+    /**
+     * Doplněk k předchozímu: jakmile na první třetinu dojde, paušál se z ní
+     * bere PŘED výživným — tam přednost má. Nárok tedy nepropadá vždycky,
+     * když je ve hře výživné, jen když je první třetina prázdná.
+     */
+    public function testEmployerFeeOutranksMaintenanceInsideTheFirstThird(): void
+    {
+        $result = $this->calculate(4_000_000, [
+            $this->statutoryClaim(
+                'maintenance',
+                ClaimCategory::CurrentMaintenance,
+                2_000_000,
+                maintenanceWeightMinorUnits: 2_000_000,
+            ),
+        ]);
+
+        $allocation = $result->allocationFor('maintenance');
+        self::assertNotNull($allocation);
+        // Druhá třetina je vyčerpaná, výživné sahá i do první — a tam ho
+        // paušál předchází.
+        self::assertGreaterThan(0, $allocation->firstPoolMinorUnits);
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
+        self::assertSame(
+            $result->totalWithheldMinorUnits,
+            $allocation->totalMinorUnits + $result->employerFlatFeeMinorUnits,
+        );
     }
 
     /**
