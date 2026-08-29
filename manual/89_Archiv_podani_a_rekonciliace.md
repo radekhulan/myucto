@@ -21,7 +21,31 @@ Samostatnou obrazovku otevřeš v **Nástroje → EPO podání a archív**. Zobr
 vygenerované snapshoty, výsledek lokální validace, historii předání do EPO,
 uložené důkazní dokumenty a stav podání.
 
-### 89.1.1 Kdy jde snapshot smazat
+### 89.1.1 Filtr, hledání a stránkování
+
+Seznam se **stránkuje po padesáti záznamech** a filtr stavu, výběr výkazu
+i hledání pracují **nad celým archivem**, ne jen nad zobrazenou stránkou. Dřív
+obrazovka natáhla prvních sto záznamů a filtrovala jen mezi nimi, takže kdo si
+vybral „zamítnuté", viděl prázdno, i když zamítnuté podání měl - jen bylo starší
+než těch sto. Obrazovka takhle uživateli lhala, a proto se to změnilo.
+
+- **Stav** nabízí staženo, odesláno, přijato a zamítnuto, případně vše.
+- **Výkaz** se plní ze skutečně existujících typů v archivu, ne z toho, co
+  dorazilo na stránku.
+- **Hledání** se párá s podací značkou, otiskem, kódem výkazu a rokem období,
+  tedy se skutečnými údaji záznamu, ne s přeloženými popisky na obrazovce.
+  Píše se s krátkou prodlevou, takže se výsledek dohledá sám.
+
+Změna filtru i hledání tě vždy vrátí na první stránku. Záznamy jsou řazené od
+nejnovějšího.
+
+> 🛈 Pozn: **Souhrnné dlaždice nahoře jsou vědomě jiné číslo než počet ve
+> stránkování.** Počet u stránkování odpovídá tomu, co jsi vyfiltroval; dlaždice
+> se počítají nad celým viditelným archivem, protože slouží k navigaci. Kdyby se
+> počítaly ze stránky, tvrdily by „2 problémy", i když jich je třicet o dvě
+> stránky dál; kdyby se vázaly na filtr, ztratily by smysl.
+
+### 89.1.2 Kdy jde snapshot smazat
 
 Mazání blokuje jen to, co prokazatelně odešlo:
 

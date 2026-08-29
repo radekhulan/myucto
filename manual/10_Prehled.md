@@ -223,7 +223,7 @@ ji znovu nezměníš.
 průběžně skládaná fronta věcí, které čekají na tvůj zásah, s odznakem počtu.
 Vidí ho každý, kdo smí zapisovat (readonly roli je skrytý úplně).
 
-Widget kombinuje až deset typů položek, každá se zobrazí jen když má co hlásit:
+Widget kombinuje víc typů položek, každá se zobrazí jen když má co hlásit:
 
 | Položka | Kdy se objeví | Vede na |
 |---|---|---|
@@ -237,6 +237,7 @@ Widget kombinuje až deset typů položek, každá se zobrazí jen když má co 
 | Termín DPH / KH | Blíží se nebo uplynul termín podání | [Výkazy DPH](36_Vykazy_DPH.md) |
 | Souhrnné hlášení za uplynulý měsíc | Termín SH | [Souhrnné hlášení](39_Souhrnne_hlaseni.md) |
 | Kontaktuj neaktivní klienty | Klienti bez aktivity delší dobu (churn risk) | [Zisk](11_Zisk.md) |
+| **Odešli měsíční hlášení** | Připravené měsíční hlášení (JMHZ) čeká na odeslání ČSSZ, viz [§ 10.10.3](#10103-odesli-mesicni-hlaseni) | [Podání a hlášení](68_Podani_a_hlaseni.md) |
 
 Každá položka má menu se **skrytím** (na den / týden / natrvalo / historicky) —
 pokud si něco odklikneš, dole se objeví odkaz **„Obnovit skrytá (N)"**, kterým
@@ -274,6 +275,26 @@ a deníkem, položka se zobrazí se závažností **vysoká** a počtem nálezů
 popisku. Klik — na hlavním řádku i na kterémkoli štítku rozpadu — vede vždy na
 [Účetní deník](45_Ucetni_denik.md); appka nemá samostatnou stránku s výpisem
 jednotlivých nálezů; ty najdeš jen přes CLI (viz § 45.10).
+
+### 10.10.3 Odešli měsíční hlášení
+
+Objeví se, jakmile je měsíční hlášení zaměstnavatele (JMHZ) **připravené
+k odeslání** na ČSSZ a nikdo je neodeslal. Má závažnost **vysokou** a v popisku
+počet takových podání; klik vede na obrazovku mzdových podání.
+
+Odeslání zůstává na výslovném potvrzení člověka a je to tak správně: je to
+právní úkon přičitatelný zaměstnavateli a poslední okamžik, kdy si někdo může
+všimnout, že je něco špatně. Automatické odeslání by tenhle okamžik vzalo.
+Zapomenout na něj ale znamená propásnout lhůtu do 20. dne následujícího měsíce,
+a to je chyba, která se sama ničím neprojeví. Proto hlášení visí mezi úkoly
+tak dlouho, dokud je skutečně neodešleš.
+
+Položka **zmizí odesláním, ne přijetím** - na protokol z ČSSZ se nečeká, ten
+sleduješ dál v [Podání a hlášení](68_Podani_a_hlaseni.md). Nabízí se jen ostré
+prostředí a jen kanál ČSSZ: testovací podání nikdo podávat nemusí a podání na
+portál zdravotní pojišťovny aplikace odeslat neumí, protože žádná ze sedmi
+pojišťoven nemá zveřejněné strojové rozhraní. Vyzývat k úkonu, který se odsud
+udělat nedá, by bylo horší než mlčet.
 
 ## 10.11 Průvodce prvním nastavením
 

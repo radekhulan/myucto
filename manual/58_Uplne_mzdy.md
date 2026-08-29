@@ -230,7 +230,10 @@ Na přelomu roku nebo při roční uzávěrce zejména:
    kteří splňují podmínky a doložili podklady;
 5. připravte zákonná potvrzení a evidenční výstupy v rozsahu, který aplikace
    označuje jako podporovaný; u ruční kontroly výsledek před vydáním ověřte;
-6. projděte [retenční lhůty](76_Retencni_lhuty.md), zákonná zadržení a žádosti
+6. podejte obě roční
+   [vyúčtování daně](68_Podani_a_hlaseni.md#6813-vyuctovani-zalohove-a-srazkove-dane),
+   zálohové i srážkové; jsou to dvě samostatná podání s různou lhůtou;
+7. projděte [retenční lhůty](76_Retencni_lhuty.md), zákonná zadržení a žádosti
    o [výmaz osobních údajů](77_Vymaz_osobnich_udaju.md). Samotný konec roku
    není důvodem ke smazání mzdových podkladů.
 

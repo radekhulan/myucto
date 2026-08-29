@@ -302,7 +302,91 @@ podávacího XML. V těchto případech přepiš údaje do formuláře instituce
 - **Daň z příjmů PO:** dle účetního období (řádně 1. 4., s auditem/poradcem 1. 7.)
 - **Přehledy pojistného OSVČ:** do **1 měsíce** po lhůtě pro daňové přiznání.
 
-## 38.12 Rozsah a co ještě není
+## 38.12 Oznámení o příjmech plynoucích do zahraničí a zajištění daně
+
+Platí-li firma daňovému nerezidentovi příjem ze zdrojů v České republice, vzniká
+vedle vlastní srážky ještě samostatná oznamovací povinnost. MyÚčto pro ni
+připraví dvě písemnosti:
+
+- **Oznámení o příjmech plynoucích do zahraničí** podle § 38da (tiskopis
+  25 5478). Podává se za každý jednotlivý příjem a každý druh příjmu zvlášť,
+  nikoli souhrnně za rok. U licenčních poplatků, dividend a úroků se oznamuje
+  i tehdy, když je příjem od daně osvobozený nebo když smlouva o zamezení
+  dvojímu zdanění přiznává zdanění druhému státu.
+- **Hlášení plátce daně o provedení srážky zajištění daně** podle § 38e
+  (tiskopis 25 5544). Podává se ke každému zajištění daně sraženému poplatníkovi,
+  který není daňovým rezidentem státu EU ani EHP, a to z příjmu, který srážkové
+  dani nepodléhá.
+
+> ⚠️ Pozor: **ani jedna z těchto písemností není mzdové podání.** Týkají se plateb
+> do zahraničí, typicky licenčních poplatků, dividend, úroků nebo odměn za služby,
+> a s výplatní listinou nemají nic společného. Mzdový modul zdaňuje srážkovou daní
+> jedině příjmy podle § 6 odst. 4, a ty jsou z oznamovací povinnosti výslovně
+> vyloučené (§ 38da odst. 5 písm. b)). Zajištění daně se ze záloh na příjem ze
+> závislé činnosti nesráží vůbec (§ 38e odst. 1 poslední věta). Číselník druhů
+> příjmu proto pro závislou činnost žádný kód nemá. Obrazovka je z téhož důvodu
+> dostupná i firmě, která mzdy vůbec nevede: kdo platí licenční poplatek do třetí
+> země, má povinnost stejně.
+
+**Kde to najdeš.** Obrazovka je na adrese `/reports/foreign-income`; v menu na ni
+zatím nevede položka, dostaneš se na ni přímým odkazem nebo z archivu podání,
+kde se oba tiskopisy řadí do složky **Příjmy nerezidentů**. Ke čtení stačí
+oprávnění pro sestavy, ke stažení XML navíc právo exportovat.
+
+**Údaje zadáváš ručně, a je to záměr.** Aplikace tyto platby nikde neeviduje:
+z mezd nevznikají a přijaté doklady srážkovou daň ani zajištění nenesou. Cokoli
+by se tu odvozovalo, by znamenalo podat nepravdivé oznámení, proto je formulář
+prázdný. Sám doplní jen to, co skutečně ví:
+
+- větu o plátci z údajů firmy,
+- cílový finanční úřad podle nastaveného kódu FÚ; není-li vyplněný, dosadí se
+  FÚ pro Prahu 1 a podání dostane varování, ať kód ověříš,
+- skupinu druhu příjmu podle vybraného kódu z číselníku,
+- kontroly proti tiskopisu a validaci proti XSD.
+
+Vyplňuje se poplatník, tedy typ (fyzická osoba, obchodní společnost, sdružení,
+jiná právnická osoba, státní nebo mezinárodní organizace, ostatní), jméno nebo
+název, daňová identifikace ve státě rezidence a adresa. **Stát daňové rezidence
+je povinný a nesmí být Česká republika** - jde z definice o nerezidenta.
+U fyzické osoby musí být uvedeno buď datum narození, nebo daňová identifikace.
+
+U oznámení podle § 38da se dále zadává druh příjmu ze zveřejněného číselníku,
+sazba daně, způsob úhrady, datum úhrady **nebo** rok úhrady (právě jedno z toho),
+částky, kurz a jeden odvod sražené daně. Nulovou sazbu, tedy osvobozený příjem,
+formulář přijme jen u licenčních poplatků, dividend a úroků; u osvobozeného
+příjmu se naopak odvody nevyplňují. U hlášení podle § 38e se zadává druh
+zdanitelného příjmu volným textem, sazba zajištění (1 %, 10 %, odkaz na § 16
+nebo § 21, případně nula jen v následném hlášení), příjem před srážkou,
+zajištěná částka a rozhodná data. Zajištění se zaokrouhluje na celé koruny
+nahoru.
+
+**Co aplikace nehlídá.** Osvobozené úroky se oznamují až od okamžiku, kdy jejich
+úhrn za kalendářní měsíc přesáhne 300 000 Kč (§ 38da odst. 5 písm. a)). Aplikace
+takový úhrn nevede, protože platby do zahraničí neeviduje, takže limit posoudíš
+sám a pod ním oznámení prostě nezakládáš. Nehlídá ani lhůty: oznámení se podává
+ve lhůtě pro odvod sražené daně, u osvobozeného příjmu do 31. ledna
+následujícího roku. Tyto tiskopisy proto nemají řádek v daňovém kalendáři.
+**Vyúčtování zajištění daně se nepodává vůbec** (§ 38e odst. 12).
+
+**Výstup a odeslání.** Tlačítko **Vygenerovat a stáhnout XML** vytvoří jedno
+podání k jedné platbě, uloží je do archivu podání i s otiskem a stáhne. Odtud
+pokračuješ stejně jako u ostatních písemností EPO, tedy asistovaným nebo přímým
+podáním; postup je v kapitole
+[EPO podání, archív a daňová rekonciliace](89_Archiv_podani_a_rekonciliace.md).
+Obrazovka sama nevede seznam ani koncepty: každé odeslání formuláře je jedno
+hotové podání, historii hledej v archivu. Na uzávěrku DPH se tato podání
+nenavazují, protože se týkají jednotlivé platby.
+
+Nesrovnalosti, které podání nezablokují, se uloží jako varování, například
+následné hlášení bez data zjištění důvodů nebo bez poznámky, ke které původní
+písemnosti patří, chybějící odvod u neosvobozeného příjmu, nebo úhrn odvodů
+odlišný od sražené daně. Přečti si je před odesláním.
+
+Formulář zatím neumí víc odvodů sražené daně v jednom oznámení, byť je tiskopis
+připouští, a nepracuje s řádky 27a a 27b (příjem navýšený o povinné pojistné).
+Nevytváří textovou přílohu ani zástupce; takový případ dokonči v EPO.
+
+## 38.13 Rozsah a co ještě není
 
 Pokrývá **řádné, opravné i dodatečné** přiznání DPPO (s.r.o./a.s., kalendářní rok i
 **hospodářský rok**, česká rezidence) a DPFO (OSVČ § 7 automaticky; § 6 z potvrzení

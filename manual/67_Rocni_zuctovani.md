@@ -37,6 +37,14 @@ Ověřte úplnost roku, souběhy plátců, podepsané dokumenty a platná pravid
 
 Osobní a vztahové údaje jsou v [kapitole 58k](69_Zamestnanci.md), účinná pravidla v [58q](75_Legislativni_pravidla_mezd.md), promítnutí výsledku v [mzdovém běhu](63_Mzdove_behy.md) a doklad v [58h](66_Dokumenty_a_vystupy.md).
 
+Vyplacený **doplatek na daňovém bonusu** z ročního zúčtování se do rozpočtu
+firmy nevrátí sám: pokud vyplacené bonusy převýšily sražené zálohy, požádej
+o rozdíl finanční úřad, viz
+[Žádost o poukázání chybějící částky na daňovém bonusu](68_Podani_a_hlaseni.md#6814-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu).
+Zda zaměstnanec prohlášení k dani vůbec podepsal, se nastavuje jen v zákonné
+evidenci osoby, viz
+[§ 69.8.4](69_Zamestnanci.md#6984-prohlaseni-k-dani-ma-jedine-misto).
+
 
 
 ## 67.8 Podrobný pracovní postup a kontroly

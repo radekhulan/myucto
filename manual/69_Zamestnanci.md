@@ -188,7 +188,8 @@ Pod běžnými údaji zaměstnance je sekce **Zákonná evidence osoby**. Vede p
 skutečnosti, ze kterých vychází zákonný výpočet:
 
 - **prohlášení poplatníka k dani** — rozhoduje, zda se uplatní měsíční slevy
-  a zvýhodnění, nebo se sráží daň bez nich;
+  a zvýhodnění, nebo se sráží daň bez nich; podrobně v
+  [§ 69.8.4](#6984-prohlaseni-k-dani-ma-jedine-misto);
 - **daňová rezidence** — rezident, nerezident (se zemí), nebo neověřeno;
 - **příslušnost k sociálnímu pojištění** včetně formuláře A1 u zahraničního
   režimu;
@@ -244,6 +245,16 @@ nezapíše — původní záznam se ukončí posledním uzavřeným dnem a nová
 skutečnost vznikne jako nový záznam od dalšího měsíce. Doplnit dosud chybějící
 záznam do uzavřeného období naopak jde; nic tím nepřepisuje.
 
+Uzamčený řádek proto nemá jen zašedlá pole, ale dvě akce. **Změnit od** s datem
+prvního dne následujícího měsíce ukončí platný záznam na hranici zmrazení a
+rovnou založí jeho novou verzi, kterou upravíš. **Otevřít mzdu k opravě** je
+pro případ, kdy se změna musí projevit už v uzavřeném měsíci: spustí korekční
+tok a otevře **všechny** běhy, které tu hranici drží. Otevřít jen jeden by
+hranici neposunulo, protože ji určuje nejpozdější z nich. Tlačítko se nabídne
+jen tam, kde ho server přijme a kde na to máš oprávnění; do historie běhu se
+zapíše důvod „Oprava zákonné evidence osoby". Panel nad historií vždy ukazuje,
+do kterého dne je historie uzavřená schválenou mzdou.
+
 Celá sekce se ukládá jedním tlačítkem **Uložit**. Čtení stačí obecné oprávnění
 pro mzdy, zápis vyžaduje **Spravovat zaměstnance** (`payroll.person.write`) —
 evidence je vedená na osobě, ne na jednotlivém pracovním vztahu.
@@ -265,6 +276,46 @@ Sekce upozorňuje na oprávnění, jejichž platnost skončila nebo skončí do
 30 dnů. Čtenář mezd bez oprávnění k Dokumentům uvidí věcnou historii a
 upozornění, nikoli odkaz na podklad. Zápis vyžaduje současně právo
 **Spravovat zaměstnance** a právo číst firemní Dokumenty.
+
+### 69.8.4 Prohlášení k dani má jediné místo
+
+Prohlášení poplatníka k dani se nastavuje **výhradně v zákonné evidenci osoby**,
+v sekci **Prohlášení poplatníka k dani**. Na kartě pracovního vztahu už není
+zaškrtávátko, jen popsaný řádek se stavem a odkazem **Nastavit v zákonné
+evidenci**, který cílový panel rovnou otevře.
+
+Proč to stojí za pozornost: dřív šel tentýž údaj měnit i na kartě vztahu, ve
+formuláři nové verze smluvních podmínek. Obě místa se rozcházela a mzdový běh na
+to padal blokátorem o konfliktu prohlášení. Rozejít se přitom musela: prohlášení
+se podepisuje i odvolává kdykoli v průběhu vztahu, kdežto smluvní podmínky jsou
+verze smlouvy, kterou kvůli podpisu nikdo neverzuje. Nově se hodnota na kartě
+vztahu **odvozuje** z evidence, mzdový snímek i měsíční hlášení berou hodnotu ze
+stejného zdroje, a blokátor tím zmizel. Na kartě vztahu tedy vidíš stav, ale
+měníš ho jinde.
+
+Stavy jsou čtyři a rozlišuj je:
+
+| Stav | Co znamená |
+|---|---|
+| Podepsáno | prohlášení platí, měsíční slevy a zvýhodnění se uplatní |
+| Nepodepsáno | vědomě zapsané „nepodepsal", daň se sráží bez slev |
+| Neověřeno | zapsané, ale nedoložené; osoba jde do ručního posouzení |
+| Nezadáno | v evidenci k danému měsíci není žádný záznam |
+
+**Nezadáno není totéž co Nepodepsáno**, i když se počítá stejně opatrně: bez
+záznamu se prohlášení bere jako nepodepsané, protože podle § 38k odst. 4 zákona
+o daních z příjmů se bez prohlášení měsíční sleva uplatnit nesmí a za nesraženou
+zálohu ručí plátce (§ 38s). Dřív karta chybějící evidenci ukazovala jako
+„nepodepsáno", takže nebylo poznat, jestli to někdo rozhodl, nebo jen zapomněl.
+
+Evidence se vede **po celých měsících** s platností od a do, řady na sebe musí
+navazovat a otevřený smí zůstat vždy jen jeden záznam. Vyhodnocuje se ke dni,
+který nastavíš v hlavičce panelu. Bez podepsaného prohlášení se v daném měsíci
+neuplatní žádná měsíční sleva ani daňové zvýhodnění na dítě. Dva současně účinné
+záznamy panel odmítne jako vzájemný konflikt; jde ale o kontrolu dvou
+překrývajících se záznamů u tebe, ne o detekci prohlášení u jiného
+zaměstnavatele - do cizí firmy aplikace nevidí, souběh u víc plátců si musíš
+ohlídat sám.
 
 ## 69.9 Pracovní vztah a předkontace
 
@@ -321,13 +372,13 @@ nepřepíše. Historie drží zejména:
 - uzavření smlouvy, plánovaný a skutečný nástup a dobu určitou;
 - úvazek, týdenní hodiny, místo práce, pravidelné pracoviště, CZ-ISCO a druh
   činnosti;
-- mzdovou účtárnu, pojistnou účast, A1 a cizí předpisy, rizikovou práci,
-  daňový režim a prohlášení k dani;
+- mzdovou účtárnu, pojistnou účast, A1 a cizí předpisy, rizikovou práci
+  a daňový režim;
 - příznak primárního pracovního vztahu a důvod změny.
 
 Formulář nové verze podmínek je rozdělený na dvě části. Nahoře je jen to, co se
 běžně mění: účinnost, plánovaný nástup, **mzdová účtárna**, týdenní hodiny,
-úvazek, data smlouvy, příznak primárního vztahu, prohlášení k dani a nepovinný
+úvazek, data smlouvy, příznak primárního vztahu a nepovinný
 důvod změny. Zbytek — evidence pro JMHZ, režimy sociálního a zdravotního
 pojištění, daňový režim, cizí předpisy, sazbová kategorie § 5a a sleva § 7a —
 je ve sbalené části **Další údaje**; ta se sama otevře jen u vztahu, kde už je

@@ -41,6 +41,13 @@ měsíční hlášení zaměstnavatele ČSSZ a součinnost exekutorům. **Daňov
 jdou přes EPO**, ne datovkou; podání odeslané datovkou nedostane potvrzení
 s podacím číslem, jen dodejku.
 
+Vedle brány umí MyÚčto odeslat datovou zprávu i přímo, ale výhradně v **živé
+relaci, kterou uživatel právě sám schválil** Mobilním klíčem eGovernmentu nebo
+SMS kódem. Systémový certifikát firmy ani uložené heslo odesílání neotevírají a
+vypršelá relace se sama neobnovuje. Podrobnosti a chování při chybě popisuje
+kapitola
+[Datová schránka](93_Datova_schranka.md#9342-odeslani-primo-z-aplikace-v-relaci-mobilniho-klice).
+
 Ruční načtení inboxu v **Firma → Datová schránka** má v aplikaci čtyři volby:
 
 - **Mobilní klíč eGovernmentu** — jméno, komunikační kód (heslo aplikace)
@@ -132,14 +139,57 @@ OST, 10 nebo SPEC. Navazující akce A5 až A8 jsou dostupné pouze pro variantu
 OST; u variant 10 a SPEC je aplikace odmítne ještě před schválením události.
 
 Úplný podklad zadáte na kartě pracovního vztahu v části **Registrace vztahu na
-ČSSZ → Autoritativní profil REGZEC A1**. Profil obsahuje rozhodné datum a druh
-činnosti, trvalou adresu, variantní údaje pracovního místa a podle situace také
-daňovou rezidenci, zdravotní pojišťovnu, vzdělání, důchodové skutečnosti a údaje
-cizince. Vyplňujte pouze údaje doložené personálními podklady. Server před
-uložením zkontroluje variantu OST, 10 nebo SPEC a všechny její povinné vazby;
-neúplný profil neuloží. Každé úspěšné uložení vytvoří novou šifrovanou verzi,
-starší verzi nepřepisuje. Náhled a podání pak zmrazí přesné ID verze i její
-otisk, takže pozdější oprava profilu už hotové podání nezmění.
+ČSSZ → Autoritativní profil REGZEC A1**, tlačítkem **Doplnit profil**. Profil
+obsahuje rozhodné datum a druh činnosti, trvalou adresu, variantní údaje
+pracovního místa a podle situace také daňovou rezidenci, zdravotní pojišťovnu,
+vzdělání, důchodové skutečnosti a údaje cizince. Vyplňujte pouze údaje doložené
+personálními podklady. Server před uložením zkontroluje variantu OST, 10 nebo
+SPEC a všechny její povinné vazby; neúplný profil neuloží. Každé úspěšné uložení
+vytvoří novou šifrovanou verzi, starší verzi nepřepisuje. Náhled a podání pak
+zmrazí přesné ID verze i její otisk, takže pozdější oprava profilu už hotové
+podání nezmění.
+
+Profil se vyplňuje **formulářem rozděleným do sekcí** (trvalý pobyt, adresa
+pobytu v ČR, kontaktní adresa, daňová rezidence, pracovní vztah, zdravotní
+pojištění, důchod, zahraniční legislativa, doklad totožnosti, přístup na trh
+práce a přílohy). Které sekce se zobrazí, určuje varianta podání a občanství:
+u varianty 10 odpadá daňová rezidence, zdravotní pojišťovna i doplňující
+skutečnosti, u varianty OST naopak přibývá kontaktní adresa, důchod, zahraniční
+legislativa a vzdělání, a u cizince navíc doklad totožnosti a přístup na trh
+práce. Variantu aplikace odvodí z druhu činnosti a bližšího určení vztahu a
+napíše ji nad formulář; ručně se nevolí. Úplný JSON zůstal dostupný jako
+read-only náhled **Zobrazit, co odesíláme**.
+
+Server **předvyplní, co o osobě a vztahu ví k datu nástupu**, a u každé takové
+hodnoty napíše drobným písmem, odkud pochází: z adres osoby, ze zákonné evidence,
+z identifikátorů, z identity, z pracovního oprávnění, nebo ze sjednaných
+podmínek vztahu. Účetní tedy hodnoty **potvrzuje, nepřepisuje**. Dvě odvození
+stojí za zapamatování: adresa bydliště ve státě rezidence se převezme z trvalé
+adresy jen tehdy, když se země shodují, a zdravotní pojišťovna se předvyplní jen
+tehdy, je-li v evidenci označená jako ověřená. Jinak se obojí hlásí jako
+chybějící.
+
+Chybějící údaje se hlásí konkrétně, nikoli domýšlejí. Nahoře je souhrn **Co
+aplikace o osobě nevede** a u každého dotčeného pole je místo zdroje žlutá
+poznámka, **která rovnou říká, kde se údaj doplňuje** - třeba na kartě osoby
+v Adresách nebo v Zákonné evidenci, případně na kartě vztahu. Údaje, které
+aplikace nevede vůbec (číslo popisné zvlášť, typ a číslo dokladu totožnosti,
+typ zahraničního daňového identifikátoru, postavení zaměstnance, režim práce,
+vzdělání, průkaz osoby se zdravotním postižením, důchodové údaje a povolení
+k práci), o sobě řeknou právě to a vyžádají si ruční opis z personálního
+podkladu. Průkaz OZP pro registr přitom není totéž co sleva ZTP/P z daňových
+nároků; aplikace je vědomě nezaměňuje.
+
+> ⚠️ Pozor: **uložení profilu nikdy nezapíše nic do karty osoby ani do karty
+> pracovního vztahu.** Profil je snímek k datu registrace, ne editor kmenových
+> dat. Změníte-li tedy v profilu například adresu, opravili jste podklad
+> k registraci, nikoli evidenci osoby - tu je potřeba opravit zvlášť. Z téhož
+> důvodu se snímek sám neaktualizuje, když se kmenová data později změní;
+> rozdíl se jen ukáže v bloku **Snímek se rozešel s kmenovými daty** s výpisem
+> „ve snímku X, v kmenových datech Y". Ukládá se jedním tlačítkem **Uložit
+> ověřenou verzi** za celý profil; opakované uložení beze změny novou verzi
+> nezaloží. Tlačítkem **Vrátit návrh z kmenových dat** se formulář vrátí
+> k předvyplněnému stavu.
 
 Při ukončovací akci REGZEC A2 aplikace prověří také všechna dotčená období od
 ledna 2026 do měsíce skončení. Pokud byla mzda za některý měsíc opravena,
@@ -289,6 +339,87 @@ zmizí z pozornosti, zůstane ale vidět jako vyřízená) nebo **odložit** na
 zvolený termín s povinně vyplněným důvodem; po uplynutí termínu se znovu
 vrátí mezi otevřené. Jakmile podání skutečně dojde k výsledku (přijato,
 zrušeno v termínu), položka automaticky zmizí jako vyřešená.
+
+### 68.8.2 Hlášení změn do registru pojištěnců (A3)
+
+Změní-li se u přihlášené osoby nebo u jejího pracovního vztahu údaj, který
+zaměstnavatel do registru pojištěnců hlásí, má na jeho ohlášení **osm
+kalendářních dnů** (§ 19 odst. 5 zákona č. 323/2025 Sb.). Dřív na to nic
+neupozorňovalo. Nově aplikace změnu sama najde a nabídne hotový návrh
+ke schválení.
+
+**Kde se návrhy objeví.** Na kartě pracovního vztahu v části **Registrace vztahu
+na ČSSZ** v žlutém bloku **Změny k ohlášení**. Blok se zobrazí jen tehdy, když
+je co hlásit. U každého návrhu je, o kterou povinnost jde, termín, věta
+**Změnilo se: …** se seznamem dotčených skupin údajů a odkaz na právní pramen.
+Konkrétní staré a nové hodnoty se u citlivých údajů (rodné číslo, evidenční
+a variabilní číslo pojištěnce, daňový identifikátor, číslo dokladu totožnosti)
+nikdy nezobrazují ani neukládají; u nich se hlásí pouze to, že se změnily.
+
+**Kdy detekce běží.** Vždy, když otevřete registrační kartu člověka nebo
+přepnete prostředí, a hromadně za celou firmu při otevření přehledu termínů.
+Lhůta tedy vzniká, i když kartu vůbec neotevřete. Nic se nespouští při samotném
+uložení údaje, takže po opravě karty se návrh objeví až při nejbližším
+přepočtu.
+
+> ⚠️ Pozor: **změna úvazku ani mzdy se takto nehlásí.** Stanovená i sjednaná
+> týdenní doba, měsíční mzda, hodinová sazba, mzdové složky, odpracované
+> a neodpracované hodiny, přesčasy i daňové údaje jsou měsíční atributy hlášení.
+> Projeví se samy v nejbližším měsíčním hlášení a **žádnou osmidenní lhůtu
+> nespouštějí**. Aplikace na ně proto vědomě neupozorňuje: planý poplach
+> u položky, která termín nemá, je horší než ticho, protože si na něj účetní
+> zvykne a přestane číst i to upozornění pravé.
+
+**Změna zdravotní pojišťovny vyrábí dvě povinnosti.** Vedle registrační akce
+vůči ČSSZ vzniká samostatné oznámení zdravotním pojišťovnám podle § 10 odst. 1
+písm. b) zákona č. 48/1997 Sb. Měsíční hlášení tu druhou povinnost
+**nenahrazuje**. Obě mají vlastní řádek i vlastní termín. Přestup se navíc
+hlásí oběma pojišťovnám, odcházející i přijímající, a protože aplikace sama
+neurčí směr přestupu, tuhle povinnost jedním kliknutím podat nelze; splňte ji
+v oficiálním kanálu a návrh potom uzavřete ručně. U dohod o provedení práce
+a o pracovní činnosti není lhůta vůči pojišťovně osmidenní, ale do 20. dne
+následujícího měsíce, a neposouvá se na pracovní den.
+
+**Schválení je jedno kliknutí.** Tlačítko **Ohlásit změnu** se nabídne jen
+u návrhu, který datová věta skutečně unese. Neptá se na důvod ani na potvrzení:
+obsah je celý odvozený z porovnání, není co doplňovat. Před založením události
+se stav ještě jednou přepočítá, aby se neohlásilo něco, co už mezitím někdo
+vrátil zpátky. Rozhodným datem je **den detekce**, protože lhůta běží ode dne,
+kdy se zaměstnavatel o změně dozvěděl.
+
+Schválením ale **nic neodchází**. Vznikne registrační událost; podání se z ní
+připravuje samostatným krokem a odeslání na ČSSZ je krok další. Postup
+odesílání je stejný jako u prvotní registrace.
+
+Datová věta A3 nese v tomto vydání jen část katalogu: **titul před jménem,
+doručovací adresu, daňovou rezidenci a kód zdravotní pojišťovny**. Změna jména,
+adresy pobytu, důchodu, profese, místa výkonu práce a další se proto ohlásí
+větou „Tenhle údaj datová věta A3 v aplikaci nenese - podejte ho jinou cestou
+a návrh pak uzavřete ručně." Nález se nezahazuje: povinnost i lhůta existují
+dál a zůstávají vidět. Jedním kliknutím nelze podat ani vymazání hodnoty, ani
+neúplnou doručovací adresu, ani vznik či zánik příslušnosti k cizím předpisům,
+který má vlastní akci.
+
+Ruční uzavření návrhu tlačítkem vedle **vyžaduje důvod** (1 až 500 znaků). Je to
+jediná stopa, proč se touto cestou nehlásilo, takže ji napište věcně.
+
+Návrh po marném uplynutí lhůty **nezmizí**. Zůstává otevřený a v přehledu
+termínů se ukáže jako po termínu s počtem dnů; prokliknete se z něj rovnou na
+kartu člověka. Pohne-li se stav dál, starý otevřený návrh se uzavře jako
+nahrazený, nikdy se nemaže, aby lhůta, která existovala, zůstala dohledatelná.
+
+Detekce má dvě hranice, které je dobré znát:
+
+- **Bez odeslané prvotní registrace se nedetekuje nic.** Porovnává se proti
+  poslednímu skutečně odeslanému podání, protože nemá smysl hlásit změnu údaje,
+  který úřad ještě nemá. Samotný uložený profil A1 jako základ nestačí.
+- **Porovnávají se jen údaje, které nese i to poslední podání.** Údaj, který
+  v něm nebyl, se jako změna neohlásí. Aplikace zvlášť vypisuje i hlásitelné
+  údaje, u kterých srovnávací základ nemá (variabilní symbol zaměstnavatele,
+  název zaměstnavatele, ID PPV přidělované ČSSZ a nositel pojištění v cizině),
+  aby byla mezera vidět.
+
+Testovací a produkční prostředí mají návrhy oddělené a nemíchají se.
 
 ## 68.9 Storno a obsahová oprava JMHZ
 
@@ -445,3 +576,124 @@ povinnosti, referenci platby a DMS dokument jako neměnný důkaz. Zápis je
 výslovné potvrzení uživatele; MyÚčto správnost výpočtu ani provedení platby
 automaticky neověřuje. Absence automatizace neznamená, že povinnost zanikla
 nebo ji nahradilo JMHZ.
+
+## 68.13 Vyúčtování zálohové a srážkové daně
+
+Za uplynulý rok podává plátce správci daně dvě samostatná vyúčtování, ne jedno
+se dvěma přílohami:
+
+- **Vyúčtování daně z příjmů ze závislé činnosti** (§ 38j odst. 4 ZDP, tiskopis
+  25 5459). Lhůta jsou dva měsíce po skončení roku, elektronicky do 20. března.
+- **Vyúčtování daně vybírané srážkou podle zvláštní sazby** (§ 38d ZDP, tiskopis
+  25 5466). Lhůta jsou tři měsíce po skončení roku.
+
+Ani jednu lhůtu nelze prodloužit. Aplikace je vypisuje jako text; do daňového
+kalendáře ani do přehledu mzdových termínů se nepromítají.
+
+> 🛈 Pozn: Za rok 2026 se obojí podává běžným způsobem. Teprve od období 2027
+> nahradí vyúčtování zálohové daně hlášení k záloze v měsíčním hlášení, takže
+> tuhle cestu je potřeba ještě jednu sezónu.
+
+**Kde to je.** Na přehledu mezd, panel **Vyúčtování daně**, pod ročním
+zúčtováním a roční uzávěrkou. Vybíráš rok (výchozí je loňský) a typ vyúčtování:
+řádné, řádné opravné, dodatečné nebo dodatečné opravné. U obou dodatečných
+variant se navíc zadává datum zjištění důvodů (§ 141 odst. 5 daňového řádu).
+Víc se ručně vyplnit nedá: **žádnou částku ani řádek nelze přepsat**, podklad
+je jen průmět schválených mzdových běhů.
+
+Panel ukazuje tři dlaždice (zálohy, které měly být sraženy, skutečně odvedeno
+finančnímu úřadu, srážková daň celkem), tabulku po měsících, přílohu č. 1 se
+seznamem obcí místa výkonu práce a blok varování. Nejsou v něm žádná jména ani
+osobní identifikátory. Měsíc bez schváleného mzdového běhu **není měsíc s
+nulami** - řádek se prostě nevytvoří a dostaneš na to varování. Pokud v takovém
+měsíci mzdy byly, schval je nejdřív.
+
+Podklad je vždy zmrazený výsledek schválených revizí, nikdy nový výpočet.
+Do přílohy č. 1 se počítají zaměstnanci podle obce místa výkonu práce k 1. 12.;
+komu obec u vztahu chybí, ten se do přílohy nedostane a aplikace to spočítá do
+varování. Okres se dopočítá z číselníku obcí, a co číselník nepokrývá, zůstane
+prázdné.
+
+**Co se záměrně negeneruje, a proč.** Věz to dopředu, ať to nehledáš:
+
+- **Příloha č. 2 pro nerezidenty.** Vyžaduje číslo dokladu totožnosti, jeho typ
+  a typ zahraničního daňového identifikátoru. Tyto údaje aplikace o osobě
+  nevede, takže by příloha byla poloprázdná a nepravdivá. Místo ní vzniká
+  varování s počtem evidovaných nerezidentů a výzvou doplnit přílohu ručně
+  v EPO.
+- **Přílohy č. 3 a 4 podle § 38i.** Modul opravy neeviduje jako samostatný
+  záznam „měsíc chybný, měsíc opravy, částka" - opravuje se přepočtem revize.
+  Prázdná příloha je pravdivá, vymyšlená by nebyla. Totéž platí pro obdobnou
+  přílohu u srážkové daně (§ 38d odst. 8).
+- **Částky předepsané k přímé úhradě.** To je rozhodnutí správce daně, které
+  aplikace nezná; příslušný sloupec proto zůstává nulový.
+- **Řádky „finanční úřad na žádost vrátil, převedl nebo použil"** podle § 35d
+  odst. 5 a 9 zůstávají nulové ze stejného důvodu.
+- **Rozdíl u dodatečného vyúčtování** se nepočítá: musel by být znám obsah
+  původního podání jako celku, ne jen dnešní stav mezd. U dodatečné varianty se
+  navíc vynechává část II. a dva sloupce části I.
+
+**Výstup.** Dvě samostatná tlačítka stáhnou dvě XML pro EPO. Každé stažení se
+archivuje s otiskem a najdeš ho v přehledu podání ve složce **Vyúčtování daně
+ze závislé činnosti**; stažení nikdy neposune daňový zámek. Odtud pokračuješ
+asistovaným nebo přímým podáním na EPO stejně jako u ostatních daňových
+písemností, viz
+[EPO podání, archív a daňová rekonciliace](89_Archiv_podani_a_rekonciliace.md).
+
+Podání se nesestaví vůbec, když za rok není ani jeden schválený mzdový běh,
+nebo když úhrn skutečně odvedené daně vyjde záporně - to znamená špatně
+spárované platby finančnímu úřadu, oprav je dřív. Varování se zobrazí i tehdy,
+když je příloha č. 1 prázdná, když firma nemá vyplněný finanční úřad (dosadí se
+FÚ pro Prahu 1 a je potřeba ho ověřit), a když zaokrouhlení na celé koruny
+zbylo přes.
+
+## 68.14 Žádost o poukázání chybějící částky na daňovém bonusu
+
+Vyplatí-li zaměstnavatel na daňových bonusech víc, než kolik ten měsíc srazil
+na zálohách, rozdíl doplácí ze svého. Aby se mu vrátil, musí o něj finanční
+úřad požádat; samo se to nestane a peníze do té doby leží u státu. Jde
+o dobrovolné podání: podává je plátce tehdy, když chce své peníze zpátky.
+
+Formuláře jsou dva a mají vlastní tiskopis:
+
+| Písemnost | Právní základ | Čeho se týká |
+|---|---|---|
+| Žádost podle § 35d odst. 5 | měsíční daňové bonusy | bonusy vyplacené v daném měsíci |
+| Žádost podle § 35d odst. 9 | doplatek z ročního zúčtování | doplatek na bonusu vyplacený z ročního zúčtování |
+
+**Obě žádosti se vážou na měsíc, ne na rok.** I doplatek z ročního zúčtování,
+protože rozhodné je datum jeho skutečné výplaty a záloha, proti které se
+započítává, je měsíční. Doplatek vyplacený v březnu a doplatek z opravné revize
+v červnu jsou proto dvě samostatné žádosti, i když jde o tentýž zdaňovací rok.
+
+Podklad je zmrazený výsledek schválených mzdových revizí za daný měsíc, sečtený
+přes všechny mzdové účtárny firmy; žádost jde na jeden finanční úřad za celou
+firmu. Druhý výpočet nevzniká. Rozdělení mezi obě žádosti potřebovalo pravidlo,
+které zákon nedává, a je zvolené takto: **sražené zálohy kryjí nejdřív měsíční
+bonusy, zbytek doplatky**. Obě žádosti musí dát dohromady přesně tu částku,
+kterou aplikace zaúčtovala jako pohledávku za finančním úřadem; nesouhlas
+by podání zastavil. V jedenácti měsících v roce, kdy se roční zúčtování
+nevyplácí, na pořadí stejně nezáleží.
+
+Vyžaduje se zapnuté vedení mezd, oprávnění ke mzdovým sestavám a k exportu.
+Žádost se nesestaví, když za měsíc není schválený mzdový běh s vypočtenou daní,
+ani když bonusy zálohy nepřevýšily, tedy když není o co žádat. Chybí-li u běhu
+datum výplaty, aplikace **nedosadí konec měsíce** a vrátí varování: rozhodné
+datum musí být skutečný den výplaty bonusu. Je-li v měsíci víc běhů, použije se
+poslední datum výplaty. Vnitřně se počítá v haléřích, tiskopis chce celé
+koruny, a zbytek po zaokrouhlení se hlásí varováním, ne tiše zahazuje.
+
+Aplikace **záměrně neurčuje, kam peníze poslat, ani zda je započíst proti
+vlastním nebo cizím nedoplatkům**. To jsou rozhodnutí plátce, ne výpočet, a
+vymyslet je by znamenalo tvrdit volbu, kterou nikdo neudělal. Vynechání těchto
+částí znamená běžnou výplatu na účet plátce. Aplikace také nehlídá lhůtu pro
+podání a žádost sama od sebe nenavrhuje; k prošlému měsíci se musíš vrátit sám.
+
+Výstupem je XML pro EPO. Archivuje se se stejným otiskem jako ostatní daňová
+podání a v přehledu podání je najdeš ve složce **Daňové bonusy**. Se
+[Vyúčtováním daně](#6813-vyuctovani-zalohove-a-srazkove-dane) nemá žádost
+společný formulář ani přílohu; jsou to samostatná podání, byť se stejnými
+částkami vyplacených bonusů v pozadí.
+
+> 🛈 Pozn: Samostatná obrazovka pro žádost zatím není. Připravená písemnost se
+> zakládá přes rozhraní a hotové XML uvidíš v přehledu daňových podání.

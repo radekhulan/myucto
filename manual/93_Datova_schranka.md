@@ -83,7 +83,51 @@ Pokud je pro zvolené prostředí aktivní brána:
 
 Samotné přesměrování ani návrat na callback není potvrzením odeslání. Pokud je výsledek neurčitý, zprávu neposílejte znovu, dokud neověříte stav v datové schránce.
 
-### 93.4.2 Ruční odeslání
+### 93.4.2 Odeslání přímo z aplikace v relaci Mobilního klíče
+
+Vedle brány umí MyÚčto odeslat datovou zprávu **přímo**, ale jen za jedné
+podmínky: musí to udělat **v živé relaci, kterou jste právě sám schválil**.
+Prakticky to znamená přihlášení **Mobilním klíčem eGovernmentu** (jméno,
+komunikační kód a potvrzení konkrétní relace v mobilu) nebo **SMS kódem**.
+Potvrzení člověka je tady součástí přihlášení, takže odeslání v takové relaci
+není odeslání bez jeho vědomí.
+
+> ⚠️ Pozor: **systémový certifikát firmy ani uložené heslo odesílání
+> neotevírají.** U obou by u odeslání nikdo nestál, proto je odesílací cesta pro
+> ně uzavřená a aplikace odmítne dřív, než cokoli opustí server, větou, že
+> odeslat lze jen v relaci potvrzené v Mobilním klíči nebo SMS kódem. Pro
+> **čtení** schránky zůstávají certifikát i heslo použitelné dál; mění se jen
+> odesílání. Zahájené, ale nedokončené přihlášení Mobilním klíčem se za živou
+> relaci nepovažuje.
+
+**Vypršelá relace se sama neobnovuje.** Skončí-li platnost během akce, aplikace
+odeslání zastaví a vyzve Vás, ať se přihlásíte znovu a akci zopakujete. Novou
+relaci si sama nevyrobí, protože by to nebyla ta, kterou jste schválil. Je to
+bezpečná chyba: ISDS odmítne už v přihlášení, takže je **prokazatelné, že zpráva
+neodešla**, a zopakování nehrozí duplicitou. Naproti tomu přerušené spojení
+uprostřed odesílání je stav „nevím" - aplikace ho označí za nejistý, sama
+neopakuje a upozorní, ať zprávu neposíláte znovu ručně, dokud se stav
+nedohledá.
+
+Relace nikde neleží uložená: žije jen po dobu jednoho požadavku, je vázaná na
+firmu, uživatele a prostředí a po použití se zahazuje. Uložit lze nanejvýš
+přihlašovací profil Mobilního klíče, ne samotnou relaci.
+
+Před odesláním aplikace ověří schránku příjemce a odmítne znepřístupněnou,
+zrušenou nebo vyřazenou. Proti dvojímu odeslání se nejdřív dohledá, jestli
+zpráva se stejnou spisovou značkou už v posledních dvou dnech neodešla; pokud
+ano, druhá se neposílá a vrátí se identifikátor té první.
+
+Po odeslání dostanete **ID datové zprávy**. **Doručenka se nestahuje sama** ani
+na pozadí: podání zůstane ve stavu odesláno bez doručenky, dokud ji sám
+nenahrajete, nebo dokud ručně nenačtete příchozí zprávy. Doručení do schránky
+příjemce navíc pořád nevypovídá o tom, jak úřad podání vyřídil.
+
+> 🛈 Pozn: V tomto vydání je přímé odeslání zapnuté v jádře aplikace, ale
+> obrazovka, která do něj živou relaci předá, teprve přijde. Do té doby Vás
+> potvrzení podání dovede na bránu ISDS nebo na ruční postup níž.
+
+### 93.4.3 Ruční odeslání
 
 Když brána není dostupná, zůstává ruční postup:
 
