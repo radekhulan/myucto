@@ -12,15 +12,33 @@ function responseFilename(disposition: string | undefined, fallback: string): st
   return disposition?.match(/filename="?([^";]+)"?/i)?.[1] ?? fallback
 }
 
-export async function downloadApiFile(url: string, fallbackFilename = 'export.xml'): Promise<void> {
-  const requestUrl = url.startsWith('/api/') ? url.slice(4) : url
-  const response = await api.get<Blob>(requestUrl, { responseType: 'blob' })
-  const objectUrl = URL.createObjectURL(response.data)
+function saveBlob(data: Blob, disposition: string | undefined, fallback: string): void {
+  const objectUrl = URL.createObjectURL(data)
   const link = document.createElement('a')
   link.href = objectUrl
-  link.download = responseFilename(response.headers['content-disposition'], fallbackFilename)
+  link.download = responseFilename(disposition, fallback)
   document.body.appendChild(link)
   link.click()
   link.remove()
   URL.revokeObjectURL(objectUrl)
+}
+
+export async function downloadApiFile(url: string, fallbackFilename = 'export.xml'): Promise<void> {
+  const requestUrl = url.startsWith('/api/') ? url.slice(4) : url
+  const response = await api.get<Blob>(requestUrl, { responseType: 'blob' })
+  saveBlob(response.data, response.headers['content-disposition'], fallbackFilename)
+}
+
+/**
+ * Totéž POSTem — pro podání, jejichž věcná část je tak rozsáhlá, že se do query
+ * stringu nevejde, a navíc nese osobní údaje, které do URL nepatří.
+ */
+export async function downloadApiFilePost(
+  url: string,
+  payload: unknown,
+  fallbackFilename = 'export.xml',
+): Promise<void> {
+  const requestUrl = url.startsWith('/api/') ? url.slice(4) : url
+  const response = await api.post<Blob>(requestUrl, payload, { responseType: 'blob' })
+  saveBlob(response.data, response.headers['content-disposition'], fallbackFilename)
 }
