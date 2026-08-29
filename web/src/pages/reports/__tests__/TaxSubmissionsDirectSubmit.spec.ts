@@ -128,7 +128,16 @@ function submission(attempts: EpoAttempt[]): TaxSubmission {
 }
 
 async function mountWith(attempts: EpoAttempt[]) {
-  m.list.mockResolvedValue([submission(attempts)])
+  m.list.mockResolvedValue({
+    data: [submission(attempts)],
+    meta: {
+      total: 1,
+      limit: 50,
+      offset: 0,
+      stats: { total: 1, waiting: 0, submitted: 0, problems: 0 },
+      form_codes: ['dphdp3'],
+    },
+  })
   const wrapper = mount(TaxSubmissions)
   await flushPromises()
   const vm = wrapper.vm as unknown as {

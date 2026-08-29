@@ -170,6 +170,35 @@ export interface TaxSubmission {
   vat_clearing?: VatClearingOutcome | null
 }
 
+export interface TaxSubmissionStats {
+  total: number
+  waiting: number
+  submitted: number
+  problems: number
+}
+
+export interface TaxSubmissionListParams {
+  status?: SubmissionStatus | 'all'
+  form_code?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
+export interface TaxSubmissionListResponse {
+  data: TaxSubmission[]
+  meta: {
+    /** Počet řádků odpovídajících filtru — základ stránkování. */
+    total: number
+    limit: number
+    offset: number
+    /** Souhrn nad celým viditelným archivem, ne nad stránkou ani filtrem. */
+    stats: TaxSubmissionStats
+    /** Kódy výkazů v archivu — nabídka filtru nesmí záviset na načtené stránce. */
+    form_codes: string[]
+  }
+}
+
 export interface VatClearingOutcome {
   status: string
   reason?: string | null
@@ -305,7 +334,16 @@ function sid(): string {
 }
 
 export const epoSubmissionsApi = {
-  list: () => api.get<TaxSubmission[]>('/reports/submissions').then(r => r.data),
+  list: (params: TaxSubmissionListParams = {}) =>
+    api.get<TaxSubmissionListResponse>('/reports/submissions', {
+      params: {
+        status: params.status && params.status !== 'all' ? params.status : undefined,
+        form_code: params.form_code && params.form_code !== 'all' ? params.form_code : undefined,
+        q: params.q?.trim() || undefined,
+        limit: params.limit,
+        offset: params.offset || undefined,
+      },
+    }).then(r => r.data),
 
   settings: () => api.get<EpoSettings>('/reports/submissions/settings').then(r => r.data),
 

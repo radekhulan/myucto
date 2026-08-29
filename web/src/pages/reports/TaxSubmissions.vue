@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -12,7 +12,9 @@ import {
   type EpoReceiptHint,
   type EpoReceiptSummary,
   type EpoSigningCredential,
+  type SubmissionStatus,
   type TaxSubmission,
+  type TaxSubmissionStats,
 } from '@/api/epoSubmissions'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
@@ -35,6 +37,7 @@ import {
 } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PaginationBar from '@/components/ui/PaginationBar.vue'
 
 defineProps<{ embedded?: boolean }>()
 
@@ -47,8 +50,16 @@ const items = ref<TaxSubmission[]>([])
 const loading = ref(false)
 const error = ref('')
 const search = ref('')
-const statusFilter = ref('all')
+const statusFilter = ref<SubmissionStatus | 'all'>('all')
 const formFilter = ref('all')
+const page = ref(1)
+const perPage = 50
+/** Počet řádků odpovídajících filtru (celý archiv, ne stránka). */
+const total = ref(0)
+/** Souhrn nad celým viditelným archivem — počítá ho server, ne načtená stránka. */
+const stats = ref<TaxSubmissionStats>({ total: 0, waiting: 0, submitted: 0, problems: 0 })
+/** Kódy výkazů v archivu pro nabídku filtru; nezávisí na aktuální stránce. */
+const formCodes = ref<string[]>([])
 const expandedId = ref<number | null>(null)
 const handoffBusy = ref<Set<number>>(new Set())
 const uploadBusy = ref(false)
@@ -192,39 +203,16 @@ const credentialStepUpMissing = computed(() => {
   return ''
 })
 
-const filtered = computed(() => {
-  const needle = search.value.trim().toLocaleLowerCase()
-  return items.value.filter((item) => {
-    if (statusFilter.value !== 'all' && item.status !== statusFilter.value) return false
-    if (formFilter.value !== 'all' && item.form_code !== formFilter.value) return false
-    if (!needle) return true
-    return [
-      formCodeLabel(item.form_code),
-      periodLabel(item),
-      item.submission_ref ?? '',
-      item.xml_sha256,
-    ].some(value => value.toLocaleLowerCase().includes(needle))
-  })
-})
+/**
+ * Filtrování i hledání dělá server (viz `epoSubmissionsApi.list`), takže `items`
+ * UŽ JE výsledek filtru. Klientský filtr nad stránkou by po zavedení stránkování
+ * lhal stejně jako dřív: sáhl by jen na načtených pár desítek řádků.
+ */
+const filtered = computed(() => items.value)
 
-const formOptions = computed(() => {
-  const codes = [...new Set(items.value.map(item => item.form_code))]
-  return codes.sort().map(code => ({ code, label: formCodeLabel(code) }))
-})
-
-const stats = computed(() => ({
-  total: items.value.length,
-  waiting: items.value.filter(item =>
-    !['submitted', 'accepted'].includes(item.status)
-    && latestAttempt(item)?.status === 'awaiting_confirmation',
-  ).length,
-  submitted: items.value.filter(item => ['submitted', 'accepted'].includes(item.status)).length,
-  problems: items.value.filter(item =>
-    item.validation_status === 'failed'
-    || item.attempts.some(attempt => attempt.status === 'failed')
-    || item.artifacts.some(artifact => artifact.verification_status === 'invalid'),
-  ).length,
-}))
+const formOptions = computed(() =>
+  formCodes.value.map(code => ({ code, label: formCodeLabel(code) })),
+)
 
 const folderOptions = computed(() => {
   const byId = new Map(folders.value.map(folder => [folder.id, folder]))
@@ -245,18 +233,59 @@ const folderOptions = computed(() => {
     .sort((a, b) => a.label.localeCompare(b.label, locale.value))
 })
 
+/** Odpovědi si číslujeme: pomalejší dřívější požadavek nesmí přepsat novější. */
+let loadSeq = 0
+
 async function load(showLoader = true) {
   if (showLoader) loading.value = true
   error.value = ''
+  const seq = ++loadSeq
   try {
-    items.value = await epoSubmissionsApi.list()
+    const result = await epoSubmissionsApi.list({
+      status: statusFilter.value,
+      form_code: formFilter.value,
+      q: search.value,
+      limit: perPage,
+      offset: (page.value - 1) * perPage,
+    })
+    if (seq !== loadSeq) return
+    items.value = result.data
+    total.value = result.meta.total
+    stats.value = result.meta.stats
+    formCodes.value = result.meta.form_codes
+    // Smazání posledního řádku stránky nesmí nechat uživatele stát na prázdnu.
+    if (items.value.length === 0 && page.value > 1) {
+      page.value = Math.max(1, Math.ceil(result.meta.total / perPage))
+      await load(false)
+      return
+    }
     reconcileHandoffLinks()
   } catch (e) {
+    if (seq !== loadSeq) return
     error.value = apiErrorMessage(e)
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
+
+/** Změna filtru vždy vrací na první stránku — jinak by uživatel skončil za koncem výpisu. */
+watch([statusFilter, formFilter], () => {
+  page.value = 1
+  void load(false)
+})
+
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(search, () => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    page.value = 1
+    void load(false)
+  }, 300)
+})
+
+watch(page, () => {
+  void load(false)
+})
 
 function toggleDetail(item: TaxSubmission) {
   expandedId.value = expandedId.value === item.id ? null : item.id
@@ -1592,6 +1621,8 @@ onMounted(async () => {
           </div>
         </button>
       </div>
+
+      <PaginationBar v-model:page="page" :per-page="perPage" :total="total" />
     </template>
 
     <section v-if="selected" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">

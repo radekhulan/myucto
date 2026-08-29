@@ -334,25 +334,178 @@ final class TaxSubmissionRepository
         return $prior !== null ? (int) $prior['id'] : null;
     }
 
+    /** Stavy životního cyklu snapshotu — hodnoty ENUM sloupce `tax_submissions.status`. */
+    public const LIST_STATUSES = ['draft', 'generated', 'downloaded', 'submitted', 'accepted', 'rejected'];
+
     /**
-     * Seznam záznamů per tenant. Vrátí bez `xml_content` (jen metadata) pro list view.
+     * Podmínky seznamu podání sdílené mezi stránkou, jejím součtem a souhrny.
      *
+     * `allowed_form_codes` je licenční omezení, ne uživatelský filtr: bez licence
+     * se ukazují jen bezplatné výkazy. Musí být tady v SQL, ne až v PHP nad
+     * načtenou stránkou — jinak by stránkování vracelo krátké stránky a celkový
+     * počet by lhal o tom, kolik toho uživatel vlastně uvidí.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string,1:list<mixed>}
+     */
+    private function listConditions(int $supplierId, array $filters): array
+    {
+        // ⚠️ `t.supplier_id = ?` sem ZÁMĚRNĚ nepatří. Tenant predikát musí být
+        // doslova v každém statementu, jinak ho `TenantPredicateTest` nevidí —
+        // a brána, která se dá obejít interpolací pomocné metody, nechrání nic.
+        $where = [];
+        $params = [];
+
+        $allowed = $filters['allowed_form_codes'] ?? null;
+        if (is_array($allowed)) {
+            if ($allowed === []) {
+                return [' AND 0 = 1', []];
+            }
+            $where[] = 't.form_code IN (' . implode(',', array_fill(0, count($allowed), '?')) . ')';
+            $params = array_merge($params, array_values($allowed));
+        }
+
+        $status = trim((string) ($filters['status'] ?? ''));
+        if ($status !== '') {
+            $where[] = 't.status = ?';
+            $params[] = $status;
+        }
+
+        $formCode = trim((string) ($filters['form_code'] ?? ''));
+        if ($formCode !== '') {
+            $where[] = 't.form_code = ?';
+            $params[] = $formCode;
+        }
+
+        $q = trim((string) ($filters['q'] ?? ''));
+        if ($q !== '') {
+            // Hledá se nad skutečnými sloupci, ne nad přeloženými popisky: kód výkazu
+            // pokrývá i hledání „dph", rok pokrývá hledání podle období. Kdyby hledání
+            // zůstalo v prohlížeči, prohledávalo by jen aktuální stránku.
+            $like = '%' . addcslashes($q, '%_\\') . '%';
+            $where[] = '(t.submission_ref LIKE ? OR t.xml_sha256 LIKE ? OR t.form_code LIKE ? '
+                . "OR CAST(t.period_year AS CHAR) LIKE ?)";
+            $params = array_merge($params, [$like, $like, $like, $like]);
+        }
+
+        return [$where === [] ? '' : ' AND ' . implode(' AND ', $where), $params];
+    }
+
+    /**
+     * Stránka seznamu per tenant. Vrátí bez `xml_content` (jen metadata) pro list view.
+     *
+     * @param array<string,mixed> $filters status|form_code|q|allowed_form_codes
      * @return list<array<string,mixed>>
      */
-    public function list(int $supplierId, int $limit = 100): array
+    public function list(int $supplierId, array $filters = [], int $limit = 50, int $offset = 0): array
     {
+        [$whereSql, $params] = $this->listConditions($supplierId, $filters);
+        $limit = max(1, min(500, $limit));
+        $offset = max(0, $offset);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id, supplier_id, form_code, period_year, period_month, period_quarter, form_variant,
-                    xml_size_bytes, xml_sha256, validation_status,
-                    status, submitted_at, submission_ref, submitted_by,
-                    validation_errors, summary_json, generated_by, generated_at, notes
-               FROM tax_submissions
-              WHERE supplier_id = ?
-           ORDER BY generated_at DESC
-              LIMIT ?"
+            "SELECT t.id, t.supplier_id, t.form_code, t.period_year, t.period_month, t.period_quarter,
+                    t.form_variant, t.xml_size_bytes, t.xml_sha256, t.validation_status,
+                    t.status, t.submitted_at, t.submission_ref, t.submitted_by,
+                    t.validation_errors, t.summary_json, t.generated_by, t.generated_at, t.notes
+               FROM tax_submissions t
+              WHERE t.supplier_id = ?{$whereSql}
+           ORDER BY t.generated_at DESC, t.id DESC
+              LIMIT {$limit} OFFSET {$offset}"
         );
-        $stmt->execute([$supplierId, $limit]);
+        $stmt->execute([$supplierId, ...$params]);
         return array_map(fn ($r) => $this->normalize($r), $stmt->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Kolik řádků filtru odpovídá celkem — bez toho nejde vykreslit stránkování.
+     *
+     * @param array<string,mixed> $filters
+     */
+    public function countList(int $supplierId, array $filters = []): int
+    {
+        [$whereSql, $params] = $this->listConditions($supplierId, $filters);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*) FROM tax_submissions t WHERE t.supplier_id = ?{$whereSql}"
+        );
+        $stmt->execute([$supplierId, ...$params]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Souhrnné dlaždice nad CELÝM archivem, který uživatel vidí (tedy s licenčním
+     * omezením, ale bez stavového/výkazového filtru a bez hledání).
+     *
+     * PROČ ne per stránka a ne per filtr: dlaždice jsou navigace, ne součet výpisu.
+     * Počítat je z načtené stránky by po zavedení stránkování lhalo („2 problémy",
+     * když jich je 30 o dvě stránky dál). Vázat je na filtr je stejně bezcenné —
+     * po volbě „zamítnuté" by dlaždice „podáno" vždy ukazovala nulu. Uživatel se
+     * z nich potřebuje dozvědět, co ho v archivu čeká, a teprve pak si to filtrem
+     * najít; počet aktuálního výpisu říká `meta.total` u stránkování.
+     *
+     * @param array<string,mixed> $filters bere v potaz jen `allowed_form_codes`
+     * @return array{total:int,waiting:int,submitted:int,problems:int}
+     */
+    public function listStats(int $supplierId, array $filters = []): array
+    {
+        [$whereSql, $params] = $this->listConditions(
+            $supplierId,
+            ['allowed_form_codes' => $filters['allowed_form_codes'] ?? null],
+        );
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT
+                COUNT(*) AS total,
+                SUM(t.status IN ('submitted','accepted')) AS submitted,
+                SUM(
+                    t.status NOT IN ('submitted','accepted')
+                    AND (SELECT a.status
+                           FROM tax_submission_attempts a
+                          WHERE a.supplier_id = t.supplier_id AND a.tax_submission_id = t.id
+                       ORDER BY a.id DESC
+                          LIMIT 1) = 'awaiting_confirmation'
+                ) AS waiting,
+                SUM(
+                    t.validation_status = 'failed'
+                    OR EXISTS (SELECT 1 FROM tax_submission_attempts a
+                                WHERE a.supplier_id = t.supplier_id AND a.tax_submission_id = t.id
+                                  AND a.status = 'failed')
+                    OR EXISTS (SELECT 1
+                                 FROM tax_submission_artifacts ar
+                                 JOIN documents d ON d.id = ar.document_id AND d.deleted_at IS NULL
+                                WHERE ar.supplier_id = t.supplier_id AND ar.tax_submission_id = t.id
+                                  AND ar.verification_status = 'invalid')
+                ) AS problems
+               FROM tax_submissions t
+              WHERE t.supplier_id = ?{$whereSql}"
+        );
+        $stmt->execute([$supplierId, ...$params]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        return [
+            'total'     => (int) ($row['total'] ?? 0),
+            'waiting'   => (int) ($row['waiting'] ?? 0),
+            'submitted' => (int) ($row['submitted'] ?? 0),
+            'problems'  => (int) ($row['problems'] ?? 0),
+        ];
+    }
+
+    /**
+     * Kódy výkazů, které archiv skutečně obsahuje — nabídka filtru se nesmí
+     * odvozovat z načtené stránky, jinak by po stránkování zmizely volby.
+     *
+     * @param array<string,mixed> $filters bere v potaz jen `allowed_form_codes`
+     * @return list<string>
+     */
+    public function listFormCodes(int $supplierId, array $filters = []): array
+    {
+        [$whereSql, $params] = $this->listConditions(
+            $supplierId,
+            ['allowed_form_codes' => $filters['allowed_form_codes'] ?? null],
+        );
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT t.form_code FROM tax_submissions t"
+            . " WHERE t.supplier_id = ?{$whereSql} ORDER BY t.form_code"
+        );
+        $stmt->execute([$supplierId, ...$params]);
+        return array_map(static fn ($v): string => (string) $v, $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: []);
     }
 
     public function find(int $id, int $supplierId): ?array

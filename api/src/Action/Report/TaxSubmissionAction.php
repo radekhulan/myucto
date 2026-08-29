@@ -53,17 +53,57 @@ final class TaxSubmissionAction
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
-        $rows = $this->epo->enrich($this->repo->list($supplierId), $supplierId);
+        $query = $request->getQueryParams();
+
+        $status = trim((string) ($query['status'] ?? ''));
+        // Neznámý stav je chyba klienta, ne důvod k tichému vypsání všeho:
+        // uživatel by dostal plný seznam v domnění, že se filtruje.
+        if ($status !== '' && $status !== 'all'
+            && !in_array($status, TaxSubmissionRepository::LIST_STATUSES, true)
+        ) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                'Neplatný stav podání (status): ' . implode(', ', TaxSubmissionRepository::LIST_STATUSES) . '.',
+                422,
+            );
+        }
+        $formCode = strtolower(trim((string) ($query['form_code'] ?? '')));
+        if ($formCode !== '' && $formCode !== 'all' && !preg_match('/^[a-z0-9]{1,20}$/', $formCode)) {
+            return Json::error($response, 'validation_failed', 'Neplatný kód výkazu (form_code).', 422);
+        }
+
+        $limit = min(200, max(1, (int) ($query['limit'] ?? 50)));
+        $offset = max(0, (int) ($query['offset'] ?? 0));
+
         // Bez licence se ukážou jen výkazy bezplatné části. Zbytek se
         // nevypisuje vůbec — nabízet detail, který skončí 403, je horší
-        // než ho neukázat.
-        if (!$this->commercial->isAvailable()) {
-            $rows = array_values(array_filter(
-                $rows,
-                static fn (array $row): bool => TaxSubmissionAccess::isFreeForm($row['form_code'] ?? null),
-            ));
-        }
-        return Json::ok($response, $rows);
+        // než ho neukázat. Omezení jde do SQL, ne nad načtenou stránku:
+        // filtrovat až v PHP by dávalo krátké stránky a špatný celkový počet.
+        $filters = [
+            'status'    => $status === 'all' ? '' : $status,
+            'form_code' => $formCode === 'all' ? '' : $formCode,
+            'q'         => trim((string) ($query['q'] ?? '')),
+            'allowed_form_codes' => $this->commercial->isAvailable()
+                ? null
+                : TaxSubmissionAccess::freeFormCodes(),
+        ];
+
+        // Obohacení běží až nad stránkou, ne nad celým archivem.
+        $rows = $this->epo->enrich($this->repo->list($supplierId, $filters, $limit, $offset), $supplierId);
+
+        return Json::ok($response, [
+            'data' => $rows,
+            'meta' => [
+                'total'      => $this->repo->countList($supplierId, $filters),
+                'limit'      => $limit,
+                'offset'     => $offset,
+                // Dlaždice nahoře popisují celý viditelný archiv, ne aktuální stránku
+                // ani filtr — viz {@see TaxSubmissionRepository::listStats()}.
+                'stats'      => $this->repo->listStats($supplierId, $filters),
+                'form_codes' => $this->repo->listFormCodes($supplierId, $filters),
+            ],
+        ]);
     }
 
     /**
