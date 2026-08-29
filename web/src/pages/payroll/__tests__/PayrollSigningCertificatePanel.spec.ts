@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { defineComponent, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
@@ -202,6 +203,28 @@ describe('PayrollSigningCertificatePanel', () => {
     expect(m.signingProfile).toHaveBeenLastCalledWith('test')
     expect(wrapper.get('[data-test="signing-environment-note"]').text())
       .toContain('payroll.submissions.signing.environment.test_note')
+  })
+
+  // ⚠️ Panel montovaný sám o sobě tuhle chybu neukáže: `defineModel` je bez
+  // vazby na rodiče lokální ref, takže se zápis přečte hned. V aplikaci ho
+  // rodič váže přes `v-model:environment` a hodnota dorazí až v dalším ticku
+  // — dotaz pak odešel se starým prostředím a pomohlo až ruční Obnovit.
+  it('přepnutí prostředí načte volbu znovu i pod v-model rodiče', async () => {
+    m.signingProfile.mockResolvedValue(view())
+
+    const parent = defineComponent({
+      components: { PayrollSigningCertificatePanel },
+      setup: () => ({ environment: ref('production') }),
+      template: '<PayrollSigningCertificatePanel v-model:environment="environment" />',
+    })
+
+    const wrapper = mount(parent)
+    await flushPromises()
+
+    await wrapper.get('[data-test="signing-environment-test"]').trigger('click')
+    await flushPromises()
+
+    expect(m.signingProfile).toHaveBeenLastCalledWith('test')
   })
 
   it('bez step-up důkazu neuloží a řekne proč', async () => {

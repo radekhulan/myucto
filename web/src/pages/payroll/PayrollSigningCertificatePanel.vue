@@ -10,7 +10,7 @@
  * Prostředí je proto vidět jako první věc: testovací certifikát bývá jiný než
  * produkční a záměna se pozná až z protokolu ČSSZ, tedy typicky po termínu.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -251,12 +251,19 @@ async function load() {
   }
 }
 
-async function switchEnvironment(next: PayrollSigningEnvironment) {
+function switchEnvironment(next: PayrollSigningEnvironment) {
   if (next === environment.value || busy.value) return
   environment.value = next
-  resetStepUp()
-  await load()
 }
+
+// Načítá se AŽ z watcheru, ne hned po zápisu do modelu. `environment` je
+// `defineModel` nad propem rodiče, takže se čtení bezprostředně po zápisu
+// ještě trefí do staré hodnoty — dotaz by odešel se starým prostředím a
+// pomohlo by až ruční Obnovit. Stejný vzor mají i sousední panely.
+watch(environment, () => {
+  resetStepUp()
+  void load()
+})
 
 async function save() {
   if (!canWrite.value || selectedCredentialId.value === null) return
@@ -341,7 +348,7 @@ onMounted(load)
           data-test="signing-reload"
           :class="btnOutline('neutral')"
           :disabled="busy"
-          @click="load"
+          @click="load()"
         >
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.cycle" />
