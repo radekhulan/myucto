@@ -79,4 +79,61 @@ describe('payroll REGZEC event API', () => {
       payload,
     )
   })
+
+  /**
+   * Přepočet detekce je POST, ne GET: zakládá návrhy povinností s běžící
+   * osmidenní lhůtou, takže to není bezpečná operace, kterou by směl
+   * zopakovat prefetch prohlížeče.
+   */
+  it('recomputes reportable-change detection through POST', async () => {
+    m.get.mockResolvedValueOnce({ data: {} })
+    m.post.mockResolvedValueOnce({
+      data: {
+        as_of: '2026-08-29',
+        reason_code: null,
+        proposals: [{ id: 7, duty_kind: 'regzec_change', fileable: true }],
+        without_baseline: {},
+      },
+    })
+
+    const detection = await payrollApi.detectEmploymentRegistrationChanges(5, 'production')
+
+    expect(detection.proposals[0].id).toBe(7)
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/submissions/registration/5/changes',
+      { environment: 'production' },
+    )
+    expect(m.get).not.toHaveBeenCalled()
+  })
+
+  /** Ohlášení je jedno kliknutí — posílá se jen prostředí, žádný formulář. */
+  it('files a detected change with a single call', async () => {
+    m.post.mockResolvedValueOnce({ data: { event: { id: 42 }, proposal_id: 7 } })
+
+    await expect(payrollApi.fileEmploymentRegistrationChange(5, 7))
+      .resolves.toEqual({ event: { id: 42 }, proposal_id: 7 })
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/submissions/registration/5/changes/7/file',
+      { environment: 'test' },
+    )
+  })
+
+  /**
+   * Ruční vyřízení vyžaduje důvod: nesplněná zákonná lhůta, která zmizí
+   * bez vysvětlení, je horší než nesplněná lhůta, která je vidět.
+   */
+  it('closes a proposal manually only with a reason', async () => {
+    m.post.mockResolvedValueOnce({ data: { proposal_id: 7, status: 'dismissed' } })
+
+    await payrollApi.dismissEmploymentRegistrationChange(
+      5,
+      7,
+      'Podáno formulářem pojišťovny.',
+      'production',
+    )
+    expect(m.post).toHaveBeenCalledWith(
+      '/payroll/submissions/registration/5/changes/7/dismiss',
+      { environment: 'production', note: 'Podáno formulářem pojišťovny.' },
+    )
+  })
 })

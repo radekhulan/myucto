@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotException;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
@@ -32,8 +33,90 @@ final class PayrollRegistrationAction
     public function __construct(
         private readonly PayrollRegistrationSubmissionService $registrations,
         private readonly PayrollRegistrationIdentityService $identities,
+        private readonly PayrollRegistrationChangeDetectionService $changes,
         private readonly PayrollModuleAccess $access,
     ) {}
+
+    /**
+     * Co se od posledního podání rozešlo a do kdy se to má nahlásit.
+     *
+     * Endpoint je čtecí, ale ZAPISUJE návrhy povinností: detekce je jediné
+     * místo, které o rozejití ví, a kdyby jen vracela seznam, lhůta by nikde
+     * neběžela a po zavření obrazovky by o ní nikdo nevěděl.
+     *
+     * @param array<string,string> $args
+     */
+    public function changeDetection(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => $this->changes->detect(
+            $this->currentSupplierId($request),
+            $this->environment($request),
+            $this->employmentId($args),
+        ));
+    }
+
+    /**
+     * Jedno kliknutí: z návrhu vznikne neměnná registrační událost A3.
+     *
+     * @param array<string,string> $args
+     */
+    public function fileChange(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+
+        return $this->run($response, fn (): array => $this->changes->file(
+            $this->currentSupplierId($request),
+            $this->environment($request),
+            $this->employmentId($args),
+            $this->proposalId($args),
+            $this->userId($request),
+        ), 201);
+    }
+
+    /** @param array<string,string> $args */
+    public function dismissChange(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        $denied = $this->authorize($request, $response, AccessLevel::WRITE);
+        if ($denied !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $note = $body['note'] ?? null;
+        if (!is_string($note)) {
+            return $this->noStore(Json::error(
+                $response,
+                'validation_failed',
+                'Ruční vyřízení vyžaduje důvod.',
+                422,
+            ));
+        }
+
+        return $this->run($response, fn (): array => $this->changes->dismiss(
+            $this->currentSupplierId($request),
+            $this->environment($request),
+            $this->employmentId($args),
+            $this->proposalId($args),
+            $this->userId($request),
+            $note,
+        ));
+    }
 
     /**
      * Nácvik: co by se podalo a do kdy. Nic nezakládá, nic neodesílá.
@@ -315,6 +398,19 @@ final class PayrollRegistrationAction
         if (preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
             throw new \InvalidArgumentException(
                 'employmentId musí být kladné celé číslo.',
+            );
+        }
+
+        return (int) $value;
+    }
+
+    /** @param array<string,string> $args */
+    private function proposalId(array $args): int
+    {
+        $value = $args['proposalId'] ?? '';
+        if (preg_match('/^[1-9][0-9]*$/D', $value) !== 1) {
+            throw new \InvalidArgumentException(
+                'proposalId musí být kladné celé číslo.',
             );
         }
 

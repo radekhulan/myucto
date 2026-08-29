@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Deadline;
 
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -67,7 +69,12 @@ final readonly class PayrollDeadlineOverviewService
      *
      * @var list<string>
      */
-    public const SOURCES = ['submission', 'levy', 'checklist'];
+    public const SOURCES = [
+        'submission',
+        'levy',
+        'checklist',
+        'registration_change',
+    ];
 
     /** Kolik dnů dopředu se termín považuje za „brzy". */
     private const DUE_SOON_DAYS = 5;
@@ -87,6 +94,8 @@ final readonly class PayrollDeadlineOverviewService
     public function __construct(
         private PayrollDeadlineOverviewRepository $repository,
         private PayrollDeadlineAssessmentService $assessments,
+        private PayrollRegistrationChangeProposalRepository $registrationChanges,
+        private PayrollRegistrationChangeDetectionService $changeDetection,
         private ClockInterface $clock,
     ) {}
 
@@ -126,10 +135,23 @@ final readonly class PayrollDeadlineOverviewService
             ->add(new \DateInterval('P' . $horizonDays . 'D'))
             ->format('Y-m-d');
 
+        // Detekce se přepočítá dřív, než se přehled poskládá. Katalog lhůt
+        // dosud jen PŘIPOMÍNAL a neměl vazbu na službu, která povinnost splní:
+        // změnu údaje nikdo nesledoval, takže osmidenní lhůta neměla kde
+        // vzniknout. Přepočet je omezený vodoznakem, takže firma s pěti sty
+        // zaměstnanci zaplatí jeden dotaz, ne pět set dešifrování.
+        try {
+            $this->changeDetection->sweep($supplierId, $environment);
+        } catch (\Throwable) {
+            // Hlídač termínů musí ukázat i to, co ví, když detekce selže.
+            // Prázdný dashboard je horší než dashboard bez jedné sekce.
+        }
+
         $items = [
             ...$this->submissionItems($supplierId, $environment, $from, $to),
             ...$this->levyItems($supplierId, $from, $to),
             ...$this->checklistItems($supplierId, $from, $to),
+            ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
         ];
         usort(
             $items,
@@ -272,6 +294,57 @@ final readonly class PayrollDeadlineOverviewService
                 // `/payroll/employees/{id}` neexistuje — ta cesta byla přepsaná
                 // z názvu tabulky, ne z routeru, takže odkaz z přehledu termínů
                 // vedl na prázdno. Adresa karty člověka je `/payroll/people/{id}`.
+                'path' => '/payroll/people/' . (int) $row['employee_id'],
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Nesplněné registrační povinnosti z detekce změn.
+     *
+     * Položka nese `proposal_id`, takže z přehledu vede proklik rovnou na
+     * tlačítko, které povinnost splní — na rozdíl od checklistové položky
+     * `social_jmhz_change`, která je jen to-do bez vazby na podání.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function registrationChangeItems(
+        int $supplierId,
+        string $environment,
+        string $from,
+        string $to,
+    ): array {
+        $items = [];
+        foreach ($this->registrationChanges->openDeadlines(
+            $supplierId,
+            $environment,
+            $from,
+            $to,
+        ) as $row) {
+            $dueOn = (string) $row['due_on'];
+            $items[] = [
+                'source' => 'registration_change',
+                'reference' => 'payroll_registration_change_proposal:'
+                    . (int) $row['proposal_id'],
+                'title' => (string) $row['duty_kind'],
+                'subject' => (string) $row['full_name'],
+                'period' => null,
+                'due_on' => $dueOn,
+                'phase' => $this->phase($dueOn),
+                'days_to_due' => $this->daysToDue($dueOn),
+                'is_overdue' => $this->phase($dueOn) === 'overdue',
+                'employment_id' => (int) $row['employment_id'],
+                'employee_id' => (int) $row['employee_id'],
+                'proposal_id' => (int) $row['proposal_id'],
+                'action_code' => $row['action_code'] === null
+                    ? null
+                    : (int) $row['action_code'],
+                'detected_on' => (string) $row['detected_on'],
+                'deadline_source' => (string) $row['deadline_source'],
+                'deadline_source_status' => 'statute_verified',
+                'deadline_ruleset_id' => (string) $row['deadline_ruleset_id'],
                 'path' => '/payroll/people/' . (int) $row['employee_id'],
             ];
         }

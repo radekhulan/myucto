@@ -20,11 +20,19 @@ use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceipt;
 use MyInvoice\Service\Payroll\Submission\PayrollVerifiedReceiptFormOutcome;
+use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetector;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationReportableProfileBuilder;
 use MyInvoice\Service\Payroll\Submission\Registration\EmployerRegistrationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistrationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotBuilder;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationInteractionResolver;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSchemaCatalog;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
@@ -1945,7 +1953,28 @@ final class PayrollRegistrationActionTest extends TestCase
             $clock,
         );
 
-        return new PayrollRegistrationAction($service, $this->identities, $access);
+        // Detekce změn běží na týchž zmrazených hodinách jako zbytek Action,
+        // jinak by osmidenní lhůta putovala s reálným datem běhu testu.
+        $changes = new PayrollRegistrationChangeDetectionService(
+            new PayrollRegistrationChangeProposalRepository($this->db),
+            new PayrollRegistrationIdentitySnapshotRepository($this->db),
+            $container->get(PayrollRegistrationIdentitySnapshotService::class),
+            $this->identities,
+            $events,
+            new PayrollRegistrationChangeDetector(),
+            new PayrollRegistrationChangeDeltaPlanner(),
+            new PayrollRegistrationReportableProfileBuilder(),
+            new PayrollEmployeeRegistrationDeadlinePolicy(),
+            new HealthNotificationDeadlinePolicy(),
+            $clock,
+        );
+
+        return new PayrollRegistrationAction(
+            $service,
+            $this->identities,
+            $changes,
+            $access,
+        );
     }
 
     public static function todayAtNoon(): string

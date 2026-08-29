@@ -142,7 +142,9 @@ function itemTitle(item: PayrollDeadlineItem): string {
     ? `payroll.submissions.statutory.agenda.${item.title}`
     : item.source === 'levy'
       ? `payroll.payments.kind.${item.title}`
-      : `payroll.people.checklist.${item.title}`
+      : item.source === 'registration_change'
+        ? `payroll.people.registration.changes.duty_short.${item.title}`
+        : `payroll.people.checklist.${item.title}`
   return te(path) ? t(path) : item.title
 }
 
@@ -159,6 +161,12 @@ function itemLink(item: PayrollDeadlineItem): RouteLocationRaw {
     return { name: 'payroll-people', query: { person: String(item.employee_id) } }
   }
   if (item.source === 'checklist') return { name: 'payroll-people' }
+  // Registrační povinnost z detekce se plní na kartě člověka, kde je
+  // tlačítko „Ohlásit změnu" — proklik na přehled podání by účetní poslal
+  // o obrazovku vedle.
+  if (item.source === 'registration_change' && item.employee_id !== undefined) {
+    return { name: 'payroll-people', query: { person: String(item.employee_id) } }
+  }
   return { name: 'payroll-submissions' }
 }
 

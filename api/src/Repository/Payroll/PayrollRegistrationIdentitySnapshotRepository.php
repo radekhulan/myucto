@@ -255,6 +255,55 @@ final class PayrollRegistrationIdentitySnapshotRepository
     }
 
     /**
+     * Poslední snapshot REGZEC, který pracovní vztah SKUTEČNĚ opustil.
+     *
+     * Tohle je jediný doložitelný výchozí stav pro detekci změn: verzovaný
+     * profil `payroll_registration_a1_profiles` sice hlásitelné údaje nese,
+     * ale nemá `environment` ani vazbu na podání, takže z něj nejde poznat,
+     * jestli daná verze na ČSSZ vůbec doputovala. Porovnávat proti neodeslané
+     * verzi by znamenalo hlásit změnu údaje, který úřad nikdy neviděl.
+     *
+     * Stavy jsou proto zúžené na ty, po kterých už podání odešlo. `draft`,
+     * `ready` ani `rejected` mezi ně nepatří — odmítnuté podání nic
+     * nezaregistrovalo, takže se nemá co měnit.
+     *
+     * @return array{
+     *   id:int,supplier_id:int,environment:string,submission_id:int,
+     *   source_revision_id:int,employee_id:int,employment_id:int,
+     *   agenda_code:string,effective_on:string,schema_reference:string,
+     *   source_manifest_json:string,source_manifest_hash:string,
+     *   snapshot_ciphertext:string,snapshot_fingerprint:string,
+     *   request_fingerprint:string,idempotency_key_hash:string,
+     *   created_by:?int,created_at:string
+     * }|null
+     */
+    public function latestSubmittedForEmployment(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+    ): ?array {
+        return $this->findOne(
+            'SELECT snapshot.*
+               FROM payroll_registration_identity_snapshots snapshot
+               JOIN payroll_submissions submission
+                 ON submission.supplier_id = snapshot.supplier_id
+                AND submission.environment = snapshot.environment
+                AND submission.id = snapshot.submission_id
+              WHERE snapshot.supplier_id = ?
+                AND snapshot.environment = ?
+                AND snapshot.employment_id = ?
+                AND snapshot.agenda_code = \'REGZEC25\'
+                AND submission.status IN (
+                      \'submitted\', \'processing\', \'accepted\',
+                      \'partially_accepted\'
+                    )
+              ORDER BY snapshot.effective_on DESC, snapshot.id DESC
+              LIMIT 1',
+            [$supplierId, $environment, $employmentId],
+        );
+    }
+
+    /**
      * @param array{
      *   supplier_id:int,environment:string,submission_id:int,
      *   source_revision_id:int,employee_id:int,employment_id:int,

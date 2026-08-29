@@ -7,8 +7,19 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetector;
+use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationReportableProfileBuilder;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistrationDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -56,9 +67,24 @@ final class PayrollDeadlineOverviewTest extends TestCase
         $clock->method('now')->willReturn(
             new \DateTimeImmutable('2026-08-20 09:00:00', new \DateTimeZone('Europe/Prague')),
         );
+        $changeProposals = new PayrollRegistrationChangeProposalRepository($this->db);
         $this->service = new PayrollDeadlineOverviewService(
             new PayrollDeadlineOverviewRepository($this->db),
             new PayrollDeadlineAssessmentService($clock),
+            $changeProposals,
+            new PayrollRegistrationChangeDetectionService(
+                $changeProposals,
+                new PayrollRegistrationIdentitySnapshotRepository($this->db),
+                $container->get(PayrollRegistrationIdentitySnapshotService::class),
+                $container->get(PayrollRegistrationIdentityService::class),
+                $container->get(PayrollRegistrationEventService::class),
+                new PayrollRegistrationChangeDetector(),
+                new PayrollRegistrationChangeDeltaPlanner(),
+                new PayrollRegistrationReportableProfileBuilder(),
+                new PayrollEmployeeRegistrationDeadlinePolicy(),
+                new HealthNotificationDeadlinePolicy(),
+                $clock,
+            ),
             $clock,
         );
 
@@ -124,6 +150,49 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame(-17, $items[0]['days_to_due']);
         self::assertTrue($items[0]['is_overdue']);
         self::assertSame(1, $overview['summary']['overdue']);
+    }
+
+    /**
+     * Katalog termínů dosud jen PŘIPOMÍNAL a neměl vazbu na službu, která
+     * povinnost splní: změnu údaje nikdo nesledoval, takže osmidenní lhůta
+     * (§ 19 odst. 5 zákona č. 323/2025 Sb.) neměla kde vzniknout. Návrh
+     * z detekce musí být v přehledu vidět i s proklikem na jeho splnění.
+     */
+    public function testDetectedRegistrationChangeIsReportedAsADeadline(): void
+    {
+        if (!$this->db->hasTable('payroll_registration_change_proposals')) {
+            $this->markTestSkipped('Migrace detekce registračních změn neproběhla.');
+        }
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_registration_change_proposals
+                (supplier_id, employee_id, employment_id, environment,
+                 duty_kind, action_code, baseline_fingerprint,
+                 current_fingerprint, detected_on, due_on,
+                 deadline_ruleset_id, deadline_source, findings_json)
+             VALUES (?, ?, ?, "production", "regzec_change", 3, ?, ?,
+                     "2026-08-10", "2026-08-18",
+                     "cz-regzec-follow-up-2026-04.v1",
+                     "§ 19 odst. 5 zákona č. 323/2025 Sb.", "{}")',
+        )->execute([
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentId,
+            str_repeat('a', 64),
+            str_repeat('f', 64),
+        ]);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $items = $this->itemsOfSource($overview, 'registration_change');
+
+        self::assertCount(1, $items);
+        self::assertSame('overdue', $items[0]['phase']);
+        self::assertSame('2026-08-18', $items[0]['due_on']);
+        self::assertSame('regzec_change', $items[0]['title']);
+        self::assertArrayHasKey('proposal_id', $items[0]);
+        self::assertSame(
+            '/payroll/people/' . $this->employeeId,
+            $items[0]['path'],
+        );
     }
 
     public function testItemWithoutDerivedDeadlineIsNotReported(): void
