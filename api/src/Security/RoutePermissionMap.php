@@ -210,6 +210,10 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/close$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/reports/annual/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        // Žádosti o daňový bonus (§ 35d odst. 5 a 9). Náhled je mzdová sestava;
+        // stažení XML navíc prochází `reports.export` kontrolou v Action, protože
+        // vzniklý soubor je EPO podání a archivuje se mezi ostatní.
+        ['GET', '#^/api/payroll/reports/tax-bonus-request(/preview)?$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/offices/[0-9]+/registrations$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/offices/[0-9]+/registrations$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],
@@ -291,6 +295,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::READ],
         ['GET', '#^/api/payroll/submissions/registration/[0-9]+/a2-evidence-candidates$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration/[0-9]+/events$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Detekce změn hlásitelných do registru pojištěnců je WRITE i u prostého
+        // přepočtu: zakládá návrhy povinností s běžící osmidenní lhůtou.
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+/changes$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+/changes/[0-9]+/file$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/registration/[0-9]+/changes/[0-9]+/dismiss$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/registration-transport/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/registration-transport/[0-9]+/poll$#', 'payroll.submissions', AccessLevel::WRITE],

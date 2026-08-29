@@ -3767,6 +3767,45 @@
             "registration": {
                 "title": "Registrace vztahu na ČSSZ",
                 "description": "Přihlášení i následné změny pracovního vztahu v registru pojištěnců. Nové události A2–A8 se nejprve schválí jako neměnný zdroj a až potom připraví k odeslání.",
+                "changes": {
+                    "title": "Změny k ohlášení",
+                    "description": "Údaje, které se rozešly s tím, co bylo naposledy podáno. Ohlásit se musí do 8 dnů ode dne, kdy jste se o změně dozvěděli.",
+                    "changed": "Změnilo se: {fields}.",
+                    "due": "Termín {date}",
+                    "manual_only": "Tenhle údaj datová věta A3 v aplikaci nenese — podejte ho jinou cestou a návrh pak uzavřete ručně.",
+                    "file": "Ohlásit změnu",
+                    "dismiss": "Vyřídit ručně",
+                    "dismiss_note": "Čím jste povinnost splnili",
+                    "dismiss_confirm": "Uzavřít",
+                    "load_failed": "Detekci změn se nepodařilo načíst.",
+                    "file_failed": "Změnu se nepodařilo ohlásit.",
+                    "dismiss_failed": "Návrh se nepodařilo uzavřít.",
+                    "duty": {
+                        "regzec_change": "Registr pojištěnců ({action})",
+                        "health_insurer_change": "Oznámení zdravotní pojišťovně"
+                    },
+                    "duty_short": {
+                        "regzec_change": "Změna do registru pojištěnců",
+                        "health_insurer_change": "Změna zdravotní pojišťovny"
+                    },
+                    "group": {
+                        "identity": "jméno a údaje o osobě",
+                        "identifiers": "osobní identifikátory",
+                        "proof_identity": "doklad totožnosti",
+                        "tax_residency": "daňová rezidence",
+                        "permanent_address": "adresa pobytu",
+                        "contact_address": "doručovací adresa",
+                        "czech_residence_address": "adresa přechodného pobytu",
+                        "foreign_residence_address": "zahraniční adresa bydliště",
+                        "health": "zdravotní stav",
+                        "education": "nejvyšší dosažené vzdělání",
+                        "health_insurance": "zdravotní pojišťovna",
+                        "foreign_worker": "přístup cizince na trh práce",
+                        "foreign_legislation": "příslušnost k cizím předpisům",
+                        "pension": "důchod",
+                        "employment": "údaje o zaměstnání"
+                    }
+                },
                 "action_preview": "Zjistit, co se podá",
                 "action_prepare": "Připravit podání",
                 "action_done": "Podání je připravené",
@@ -5317,7 +5356,8 @@
                 "source": {
                     "submission": "Podání",
                     "levy": "Odvod",
-                    "checklist": "Lhůta u člověka"
+                    "checklist": "Lhůta u člověka",
+                    "registration_change": "Změna k ohlášení"
                 }
             },
             "operational_health": {

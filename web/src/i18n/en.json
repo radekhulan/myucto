@@ -3767,6 +3767,45 @@
             "registration": {
                 "title": "ČSSZ relation registration",
                 "description": "Initial registration and subsequent changes to the insured relation. New A2–A8 events are first approved as an immutable source and only then prepared for dispatch.",
+                "changes": {
+                    "title": "Changes to report",
+                    "description": "Details that no longer match what was last filed. They must be reported within 8 days of the day you learned about the change.",
+                    "changed": "Changed: {fields}.",
+                    "due": "Due {date}",
+                    "manual_only": "The A3 data message in this build does not carry this detail — file it another way and then close the proposal manually.",
+                    "file": "Report the change",
+                    "dismiss": "Handle manually",
+                    "dismiss_note": "How you met the obligation",
+                    "dismiss_confirm": "Close",
+                    "load_failed": "Change detection could not be loaded.",
+                    "file_failed": "The change could not be reported.",
+                    "dismiss_failed": "The proposal could not be closed.",
+                    "duty": {
+                        "regzec_change": "Insured register ({action})",
+                        "health_insurer_change": "Health insurer notification"
+                    },
+                    "duty_short": {
+                        "regzec_change": "Change to the insured register",
+                        "health_insurer_change": "Health insurer change"
+                    },
+                    "group": {
+                        "identity": "name and personal details",
+                        "identifiers": "personal identifiers",
+                        "proof_identity": "identity document",
+                        "tax_residency": "tax residency",
+                        "permanent_address": "residence address",
+                        "contact_address": "delivery address",
+                        "czech_residence_address": "temporary residence address",
+                        "foreign_residence_address": "foreign residence address",
+                        "health": "health condition",
+                        "education": "highest education attained",
+                        "health_insurance": "health insurer",
+                        "foreign_worker": "foreign worker labour-market access",
+                        "foreign_legislation": "foreign legislation applicability",
+                        "pension": "pension",
+                        "employment": "employment details"
+                    }
+                },
                 "action_preview": "See what will be filed",
                 "action_prepare": "Prepare the filing",
                 "action_done": "Filing is ready",
@@ -5317,7 +5356,8 @@
                 "source": {
                     "submission": "Filing",
                     "levy": "Levy",
-                    "checklist": "Per-person deadline"
+                    "checklist": "Per-person deadline",
+                    "registration_change": "Change to report"
                 }
             },
             "operational_health": {

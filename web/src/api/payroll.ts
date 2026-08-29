@@ -2199,6 +2199,7 @@ export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
   | 'awaiting_result' | 'action_required'
 
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
+  | 'registration_change'
 
 export interface PayrollDeadlineItem {
   source: PayrollDeadlineSource
@@ -2218,7 +2219,15 @@ export interface PayrollDeadlineItem {
   submission_status?: string | null
   remaining_minor?: number
   employee_id?: number
+  employment_id?: number
   checklist_phase?: string
+  /** Návrh registrační povinnosti z detekce změn — proklik vede na jeho splnění. */
+  proposal_id?: number
+  action_code?: number | null
+  detected_on?: string
+  deadline_source?: string | null
+  deadline_source_status?: string | null
+  deadline_ruleset_id?: string
 }
 
 export interface PayrollDeadlineOverview {
@@ -2935,6 +2944,50 @@ export interface PayrollRegistrationEvent {
   approved_at: string
   consumed: boolean
   created: boolean
+}
+
+/**
+ * Druh povinnosti, kterou detekce našla.
+ *
+ * Změna kódu zdravotní pojišťovny vyrábí OBĚ: hlášení do registru pojištěnců
+ * i oznámení pojišťovnám podle § 10 odst. 1 písm. b) zákona č. 48/1997 Sb.
+ * JMHZ tu druhou nenahrazuje.
+ */
+export type PayrollRegistrationChangeDuty = 'regzec_change' | 'health_insurer_change'
+
+export interface PayrollRegistrationChangeFinding {
+  path: string
+  group: string
+  action_code: number
+  /** Hodnoty citlivých údajů se z API nevracejí — `from`/`to` jsou pak `null`. */
+  sensitive: boolean
+  from: string | null
+  to: string | null
+}
+
+export interface PayrollRegistrationChangeProposal {
+  id: number
+  duty_kind: PayrollRegistrationChangeDuty
+  action_code: number | null
+  status: string
+  detected_on: string
+  due_on: string
+  deadline_source: string
+  deadline_ruleset_id: string
+  findings: PayrollRegistrationChangeFinding[]
+  changes: Record<string, unknown>
+  unsupported: { path: string; reason_code: string }[]
+  /** Dá se splnit jedním kliknutím jako událost A3. */
+  fileable: boolean
+  created: boolean
+}
+
+export interface PayrollRegistrationChangeDetection {
+  as_of: string
+  reason_code: string | null
+  proposals: PayrollRegistrationChangeProposal[]
+  /** Hlásitelné údaje, ke kterým aplikace nemá zmrazený výchozí stav. */
+  without_baseline: Record<string, string>
 }
 
 export interface PayrollRegistrationPensionPeriodInput {
@@ -5214,6 +5267,36 @@ export const payrollApi = {
     `/payroll/submissions/registration/${employmentId}/a1-profile`,
     payload,
   ).then(response => response.data.profile),
+  /**
+   * Přepočet detekce změn hlásitelných do registru pojištěnců.
+   *
+   * POST, ne GET: přepočet zakládá návrhy povinností s běžící osmidenní
+   * lhůtou, takže to není bezpečná operace, kterou by směl zopakovat prefetch.
+   */
+  detectEmploymentRegistrationChanges: (
+    employmentId: number,
+    environment: PayrollJmhzTransportEnvironment = 'test',
+  ) => api.post<PayrollRegistrationChangeDetection>(
+    `/payroll/submissions/registration/${employmentId}/changes`,
+    { environment },
+  ).then(response => response.data),
+  fileEmploymentRegistrationChange: (
+    employmentId: number,
+    proposalId: number,
+    environment: PayrollJmhzTransportEnvironment = 'test',
+  ) => api.post<{ event: PayrollRegistrationEvent; proposal_id: number }>(
+    `/payroll/submissions/registration/${employmentId}/changes/${proposalId}/file`,
+    { environment },
+  ).then(response => response.data),
+  dismissEmploymentRegistrationChange: (
+    employmentId: number,
+    proposalId: number,
+    note: string,
+    environment: PayrollJmhzTransportEnvironment = 'test',
+  ) => api.post<{ proposal_id: number; status: string }>(
+    `/payroll/submissions/registration/${employmentId}/changes/${proposalId}/dismiss`,
+    { environment, note },
+  ).then(response => response.data),
   employmentRegistrationEvents: (
     employmentId: number,
     environment: PayrollJmhzTransportEnvironment = 'test',

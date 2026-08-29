@@ -14,6 +14,8 @@ import {
   type PayrollRegistrationSubmission,
   type PayrollRegistrationA1Profile,
   type PayrollRegistrationA1ProfilePayload,
+  type PayrollRegistrationChangeDetection,
+  type PayrollRegistrationChangeProposal,
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
@@ -35,6 +37,12 @@ const environment = ref<PayrollJmhzTransportEnvironment>('test')
 const transport = ref<PayrollJmhzTransportPoll | null>(null)
 const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
 const transportMessage = ref('')
+const changeDetection = ref<PayrollRegistrationChangeDetection | null>(null)
+const changesBusy = ref(false)
+const changeError = ref('')
+const proposalBusy = ref<number | null>(null)
+const dismissOpenFor = ref<number | null>(null)
+const dismissNotes = ref<Record<number, string>>({})
 const events = ref<PayrollRegistrationEvent[]>([])
 const eventsBusy = ref(false)
 const eventSaving = ref(false)
@@ -596,6 +604,124 @@ async function saveEvent(): Promise<void> {
   }
 }
 
+/**
+ * Detekce změn hlásitelných do registru pojištěnců.
+ *
+ * Přepočet běží při otevření karty a po přepnutí prostředí. Není to jen čtení:
+ * zakládá návrhy povinností s běžící osmidenní lhůtou, což je přesně ten
+ * okamžik, kdy se zaměstnavatel o změně dozvídá (§ 19 odst. 5 zákona
+ * č. 323/2025 Sb.).
+ */
+async function loadChangeDetection(): Promise<void> {
+  if (!props.canWrite) return
+  changesBusy.value = true
+  changeError.value = ''
+  try {
+    changeDetection.value = await payrollApi.detectEmploymentRegistrationChanges(
+      props.employmentId,
+      environment.value,
+    )
+  } catch (exception) {
+    changeError.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.changes.load_failed'),
+    )
+  } finally {
+    changesBusy.value = false
+  }
+}
+
+async function fileProposal(proposalId: number): Promise<void> {
+  proposalBusy.value = proposalId
+  changeError.value = ''
+  try {
+    await payrollApi.fileEmploymentRegistrationChange(
+      props.employmentId,
+      proposalId,
+      environment.value,
+    )
+    await Promise.all([loadChangeDetection(), loadEvents()])
+  } catch (exception) {
+    changeError.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.changes.file_failed'),
+    )
+  } finally {
+    proposalBusy.value = null
+  }
+}
+
+async function dismissProposal(proposalId: number): Promise<void> {
+  const note = (dismissNotes.value[proposalId] ?? '').trim()
+  if (note === '') return
+  proposalBusy.value = proposalId
+  changeError.value = ''
+  try {
+    await payrollApi.dismissEmploymentRegistrationChange(
+      props.employmentId,
+      proposalId,
+      note,
+      environment.value,
+    )
+    delete dismissNotes.value[proposalId]
+    dismissOpenFor.value = null
+    await loadChangeDetection()
+  } catch (exception) {
+    changeError.value = apiErrorMessage(
+      exception,
+      t('payroll.people.registration.changes.dismiss_failed'),
+    )
+  } finally {
+    proposalBusy.value = null
+  }
+}
+
+function proposalTitle(proposal: PayrollRegistrationChangeProposal): string {
+  return proposal.duty_kind === 'health_insurer_change'
+    ? t('payroll.people.registration.changes.duty.health_insurer_change')
+    : t('payroll.people.registration.changes.duty.regzec_change', {
+        action: `A${proposal.action_code ?? 3}`,
+      })
+}
+
+/** Souhrn „co se změnilo" — konkrétní položky, ne jen „něco". */
+function proposalSummary(proposal: PayrollRegistrationChangeProposal): string {
+  const groups = [...new Set(proposal.findings.map(finding => finding.group))]
+  return groups
+    .map(group => t(`payroll.people.registration.changes.group.${group}`))
+    .join(', ')
+}
+
+function proposalActions(
+  proposal: PayrollRegistrationChangeProposal,
+): ActionItem[] {
+  return [
+    {
+      key: `registration-change-file-${proposal.id}`,
+      label: t('payroll.people.registration.changes.file'),
+      icon: 'send',
+      tier: 'primary',
+      variant: 'primary',
+      show: proposal.fileable,
+      disabled: !props.canWrite || proposalBusy.value !== null,
+      loading: proposalBusy.value === proposal.id,
+      run: () => { void fileProposal(proposal.id) },
+    },
+    {
+      key: `registration-change-dismiss-${proposal.id}`,
+      label: t('payroll.people.registration.changes.dismiss'),
+      icon: 'check',
+      tier: 'secondary',
+      disabled: !props.canWrite || proposalBusy.value !== null,
+      run: () => {
+        dismissOpenFor.value = dismissOpenFor.value === proposal.id
+          ? null
+          : proposal.id
+      },
+    },
+  ]
+}
+
 watch(selectedEventId, resetPreparedFiling)
 watch(eventInteraction, () => {
   resetEventForm()
@@ -607,9 +733,13 @@ watch(employmentType, value => {
 watch(environment, async () => {
   selectedEventId.value = null
   resetPreparedFiling()
-  await loadEvents()
+  await Promise.all([loadEvents(), loadChangeDetection()])
 })
-onMounted(() => Promise.all([loadEvents(), loadA1Profile()]))
+onMounted(() => Promise.all([
+  loadEvents(),
+  loadA1Profile(),
+  loadChangeDetection(),
+]))
 
 async function run(action: 'preview' | 'prepare'): Promise<void> {
   busy.value = true
@@ -864,6 +994,79 @@ async function copyXml(): Promise<void> {
           {{ a1ProfileError }}
         </p>
       </div>
+    </div>
+
+    <div
+      v-if="changeDetection && (changeDetection.proposals.length > 0 || changeError)"
+      class="mt-4 rounded-lg border border-warning-300 bg-warning-50 p-3"
+      data-test="registration-changes"
+    >
+      <h4 class="text-sm font-semibold text-neutral-900">
+        {{ t('payroll.people.registration.changes.title') }}
+      </h4>
+      <p class="mt-1 text-xs text-neutral-700">
+        {{ t('payroll.people.registration.changes.description') }}
+      </p>
+      <ul class="mt-3 space-y-3">
+        <li
+          v-for="proposal in changeDetection.proposals"
+          :key="proposal.id"
+          class="rounded-md border border-neutral-200 bg-surface p-3"
+          :data-test="`registration-change-${proposal.id}`"
+        >
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <span class="text-sm font-medium text-neutral-900">
+              {{ proposalTitle(proposal) }}
+            </span>
+            <span class="text-xs text-neutral-600">
+              {{ t('payroll.people.registration.changes.due', {
+                date: formatDate(proposal.due_on),
+              }) }}
+            </span>
+          </div>
+          <p class="mt-1 text-xs text-neutral-700" data-test="registration-change-summary">
+            {{ t('payroll.people.registration.changes.changed', {
+              fields: proposalSummary(proposal),
+            }) }}
+          </p>
+          <p class="mt-1 text-xs text-neutral-500">
+            {{ proposal.deadline_source }}
+          </p>
+          <p
+            v-if="!proposal.fileable"
+            class="mt-1 text-xs text-warning-800"
+            data-test="registration-change-manual"
+          >
+            {{ t('payroll.people.registration.changes.manual_only') }}
+          </p>
+          <ActionBar :actions="proposalActions(proposal)" />
+          <div v-if="dismissOpenFor === proposal.id" class="mt-2 flex flex-wrap gap-2">
+            <input
+              v-model="dismissNotes[proposal.id]"
+              type="text"
+              maxlength="500"
+              class="min-w-0 flex-1 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+              :placeholder="t('payroll.people.registration.changes.dismiss_note')"
+              :data-test="`registration-change-note-${proposal.id}`"
+            >
+            <button
+              type="button"
+              :class="btnFilled('primary')"
+              :disabled="!(dismissNotes[proposal.id] ?? '').trim() || proposalBusy !== null"
+              :data-test="`registration-change-dismiss-confirm-${proposal.id}`"
+              @click="dismissProposal(proposal.id)"
+            >
+              {{ t('payroll.people.registration.changes.dismiss_confirm') }}
+            </button>
+          </div>
+        </li>
+      </ul>
+      <p v-if="changesBusy" class="mt-2 text-xs text-neutral-500">
+        {{ t('common.loading') }}
+      </p>
+      <p v-if="changeError" class="mt-2 text-xs text-danger-700" data-test="registration-changes-error">
+        {{ changeError }}
+      </p>
     </div>
 
     <div class="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3" data-test="registration-events">

@@ -937,6 +937,14 @@ final class Routes
             );
             $g->get('/runs', [PayrollRunsAction::class, 'list']);
             $g->get('/reports/annual/{year:[0-9]{4}}', [PayrollAnnualReportAction::class, 'show']);
+            // Žádosti o poukázání chybějící částky na daňovém bonusu
+            // (§ 35d odst. 5 = DPZMB1, odst. 9 = DPZDB1). Vyplacené bonusy nad
+            // rámec sražených záloh doplácí zaměstnavatel ze svého a bez téhle
+            // žádosti mu ty peníze zůstanou u státu.
+            $g->get('/reports/tax-bonus-request/preview',
+                [\MyInvoice\Action\Payroll\TaxBonusRequestAction::class, 'preview']);
+            $g->get('/reports/tax-bonus-request',
+                [\MyInvoice\Action\Payroll\TaxBonusRequestAction::class, 'download']);
             // Roční uzávěrka mzdových běhů je úmyslně samostatná od ročního
             // zúčtování daně zaměstnanců; všechna mutace jsou session-only.
             $g->get('/year-close/{year:[0-9]{4}}', [PayrollYearCloseAction::class, 'get']);
@@ -1335,6 +1343,22 @@ final class Routes
             $g->post(
                 '/submissions/registration/{employmentId:[0-9]+}/events',
                 [PayrollRegistrationAction::class, 'approveEvent'],
+            );
+            // Detekce změn hlásitelných do registru pojištěnců. Metoda je POST,
+            // ne GET: přepočet zakládá návrhy povinností s běžící osmidenní
+            // lhůtou, a to není bezpečná operace, kterou by směl zopakovat
+            // prefetch prohlížeče.
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/changes',
+                [PayrollRegistrationAction::class, 'changeDetection'],
+            );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/changes/{proposalId:[0-9]+}/file',
+                [PayrollRegistrationAction::class, 'fileChange'],
+            );
+            $g->post(
+                '/submissions/registration/{employmentId:[0-9]+}/changes/{proposalId:[0-9]+}/dismiss',
+                [PayrollRegistrationAction::class, 'dismissChange'],
             );
             $g->post(
                 '/submissions/registration-transport/{submissionId:[0-9]+}',
