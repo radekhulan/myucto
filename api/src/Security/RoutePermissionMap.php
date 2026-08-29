@@ -214,6 +214,9 @@ final class RoutePermissionMap
         // stažení XML navíc prochází `reports.export` kontrolou v Action, protože
         // vzniklý soubor je EPO podání a archivuje se mezi ostatní.
         ['GET', '#^/api/payroll/reports/tax-bonus-request(/preview)?$#', 'payroll.reports', AccessLevel::READ],
+        // Roční vyúčtování zálohové (DPZVD6) a srážkové daně (DPSVD2) —
+        // stejné dělení jako u žádostí: náhled je sestava, stažení je podání.
+        ['GET', '#^/api/payroll/reports/tax-statement(/preview)?$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/settings/offices/[0-9]+/registrations$#', 'payroll.settings', AccessLevel::READ],
         ['POST', '#^/api/payroll/settings/offices/[0-9]+/registrations$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/runs$#', 'payroll', AccessLevel::READ],

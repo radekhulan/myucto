@@ -521,6 +521,7 @@ final class TaxSubmissionDocumentService
             'dppdp9' => 'DPPO',
             'ossei1' => 'OSS',
             'dpzmb1', 'dpzdb1' => 'Daňové bonusy',
+            'dpzvd6', 'dpsvd2' => 'Vyúčtování daně ze závislé činnosti',
             default => strtoupper($formCode),
         };
     }

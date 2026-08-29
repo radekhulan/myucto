@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\TaxBonus;
 
 use MyInvoice\Service\Report\EpoEnvelope;
-use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
+use MyInvoice\Service\Report\EpoPayerBlockBuilder;
 
 /**
  * Generátor EPO XML žádostí o poukázání chybějící částky na daňovém bonusu.
@@ -53,7 +53,7 @@ final class TaxBonusRequestXmlBuilder
 
     /**
      * @param array<string,mixed> $supplier Řádek dodavatele z
-     *        {@see EpoSupplierBlockBuilder::loadSupplier()}.
+     *        {@see \MyInvoice\Service\Report\EpoSupplierBlockBuilder::loadSupplier()}.
      * @param array{verze_sw?:string,verze_pis?:string,zad_typ?:string,kc_ponech?:int} $meta
      * @return array{xml:string,warnings:list<string>}
      */
@@ -115,79 +115,16 @@ final class TaxBonusRequestXmlBuilder
         $root->appendChild($vetaD);
 
         // ── VetaP — identifikace plátce daně ────────────────────────────────
+        // `VetaP` téhle rodiny NENÍ ta z DPH/KH/SH; společný plnič je proto
+        // {@see EpoPayerBlockBuilder}, ne {@see EpoSupplierBlockBuilder}.
+        // `sest_email` znají jen vyúčtování, žádosti o bonus ho v XSD nemají.
         $vetaP = $dom->createElement('VetaP');
-        $this->fillVetaP($vetaP, $supplier);
+        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, false);
         $root->appendChild($vetaP);
 
         return [
             'xml' => (string) $dom->saveXML(),
             'warnings' => array_values(array_unique($warnings)),
         ];
-    }
-
-    /**
-     * `VetaP` žádostí DPZ NENÍ ta z DPH/KH/SH, proto sem nesmí
-     * {@see EpoSupplierBlockBuilder::fillVetaP()}: ta emituje `c_ufo`, `stat`,
-     * `email` i `c_telef`, které schémata DPZMB1/DPZDB1 neznají, a podání by
-     * na nich spadlo. Sdílejí se jen normalizační primitiva, kde je hodnota
-     * stejná bez ohledu na tiskopis.
-     *
-     * @param array<string,mixed> $supplier
-     */
-    private function fillVetaP(\DOMElement $vetaP, array $supplier): void
-    {
-        $vetaP->setAttribute('dic', EpoSupplierBlockBuilder::normalizeDic(
-            isset($supplier['dic']) ? (string) $supplier['dic'] : null,
-        ));
-        $isPravnickaOsoba = ($supplier['taxpayer_type'] ?? null) === 'po';
-        $vetaP->setAttribute('typ_ds', $isPravnickaOsoba ? 'P' : 'F');
-
-        if ($isPravnickaOsoba) {
-            $vetaP->setAttribute('zkrobchjm', (string) ($supplier['company_name'] ?? ''));
-        } else {
-            $jmeno = trim((string) ($supplier['opr_jmeno'] ?? ''));
-            $prijmeni = trim((string) ($supplier['opr_prijmeni'] ?? ''));
-            if ($jmeno === '' || $prijmeni === '') {
-                [$jmeno, $prijmeni] = EpoSupplierBlockBuilder::splitPersonName(
-                    (string) ($supplier['company_name'] ?? ''),
-                );
-            }
-            $vetaP->setAttribute('jmeno', $jmeno);
-            $vetaP->setAttribute('prijmeni', $prijmeni !== '' ? $prijmeni : $jmeno);
-        }
-
-        [$ulice, $cpop, $corient] = EpoSupplierBlockBuilder::parseStreet($supplier);
-        $vetaP->setAttribute('ulice', $ulice);
-        if ($cpop !== '') {
-            $vetaP->setAttribute('c_pop', $cpop);
-        }
-        if ($corient !== '') {
-            $vetaP->setAttribute('c_orient', $corient);
-        }
-        $vetaP->setAttribute('naz_obce', (string) ($supplier['city'] ?? ''));
-        $vetaP->setAttribute(
-            'psc',
-            preg_replace('/\s/', '', (string) ($supplier['zip'] ?? '')) ?? '',
-        );
-
-        if (!empty($supplier['workplace_code'])) {
-            $vetaP->setAttribute('c_pracufo', (string) $supplier['workplace_code']);
-        }
-        foreach (['opr_jmeno', 'opr_prijmeni', 'opr_postaveni'] as $key) {
-            if (!empty($supplier[$key])) {
-                $vetaP->setAttribute($key, (string) $supplier[$key]);
-            }
-        }
-        if (!empty($supplier['sest_jmeno'])) {
-            $vetaP->setAttribute('sest_jmeno', (string) $supplier['sest_jmeno']);
-            if (!empty($supplier['sest_prijmeni'])) {
-                $vetaP->setAttribute('sest_prijmeni', (string) $supplier['sest_prijmeni']);
-            }
-        }
-        if (!empty($supplier['sest_telefon'])) {
-            $vetaP->setAttribute('sest_telef', EpoSupplierBlockBuilder::normalizePhone(
-                (string) $supplier['sest_telefon'],
-            ));
-        }
     }
 }

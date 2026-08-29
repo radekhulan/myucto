@@ -95,7 +95,7 @@ final class EpoSubmissionXmlComparator
     {
         $known = [
             'dphdp3', 'dphkh1', 'dphshv', 'dpfdp5', 'dpfdp7', 'dppdp9', 'ossei1',
-            'dpzmb1', 'dpzdb1',
+            'dpzmb1', 'dpzdb1', 'dpzvd6', 'dpsvd2',
         ];
         foreach ((new \DOMXPath($dom))->query('//*') ?: [] as $node) {
             $name = strtolower((string) $node->localName);

@@ -17,6 +17,7 @@ import PayrollEmployeeCards from '@/pages/payroll/PayrollEmployeeCards.vue'
 import PayrollGuide from '@/pages/payroll/PayrollGuide.vue'
 import PayrollSetupGuide from '@/pages/payroll/PayrollSetupGuide.vue'
 import PayrollAnnualReportPanel from '@/pages/payroll/PayrollAnnualReportPanel.vue'
+import PayrollTaxStatementPanel from '@/pages/payroll/PayrollTaxStatementPanel.vue'
 import PayrollDeadlinesPanel from '@/pages/payroll/PayrollDeadlinesPanel.vue'
 import PayrollOperationalHealthPanel from '@/pages/payroll/PayrollOperationalHealthPanel.vue'
 import PayrollYearClosePanel from '@/pages/payroll/PayrollYearClosePanel.vue'
@@ -425,6 +426,8 @@ onMounted(load)
         <PayrollYearClosePanel :initial-year="Number(currentPeriod.slice(0, 4))" />
 
         <PayrollAnnualReportPanel :initial-year="Number(currentPeriod.slice(0, 4))" />
+
+        <PayrollTaxStatementPanel :initial-year="Number(currentPeriod.slice(0, 4))" />
 
         <PayrollEmployeeCards :period="currentPeriod" />
       </div>

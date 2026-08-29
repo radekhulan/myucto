@@ -30,11 +30,13 @@ final class TaxSubmissionAccess
      * vědomě — výchozí odpověď je „placené".
      *
      * Ze stejného důvodu tu nejsou `dpzmb1` ani `dpzdb1` (žádosti o poukázání
-     * chybějící částky na daňovém bonusu, § 35d odst. 5 a 9): staví se výhradně
-     * ze zmrazených výsledků mzdového běhu a celé `/api/payroll` je za licencí.
-     * Bezplatný zákazník nemá data, ze kterých by je bylo možné sestavit, takže
-     * uvolnit sem jejich XML by nikomu nic neodemklo — jen rozostřilo dělicí
-     * čáru mezi bezplatnou a placenou částí.
+     * chybějící částky na daňovém bonusu, § 35d odst. 5 a 9) a stejně tak
+     * `dpzvd6` ani `dpsvd2` (roční vyúčtování zálohové a srážkové daně,
+     * § 38j odst. 4 a § 38d): všechny čtyři se staví výhradně ze zmrazených
+     * výsledků mzdového běhu a celé `/api/payroll` je za licencí. Bezplatný
+     * zákazník nemá data, ze kterých by je bylo možné sestavit, takže uvolnit
+     * sem jejich XML by nikomu nic neodemklo — jen rozostřilo dělicí čáru mezi
+     * bezplatnou a placenou částí.
      *
      * @var list<string>
      */

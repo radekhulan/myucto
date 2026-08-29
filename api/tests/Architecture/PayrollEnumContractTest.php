@@ -89,6 +89,12 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService::DUTY_KINDS',
         'payroll.ts::PayrollDeadlineSource'
             => 'const:MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService::SOURCES',
+        // Roční vyúčtování daně: typ vyúčtování je `vdadpz_typ` / `dapdps_forma`
+        // z EPO schémat, kód písemnosti rozhoduje o tom, které XML se generuje.
+        'payroll.ts::PayrollTaxStatementVariant'
+            => 'const:MyInvoice\Service\Payroll\TaxStatement\DependentActivityStatement::TYPY',
+        'payroll.ts::PayrollTaxStatementForm'
+            => 'const:MyInvoice\Service\Payroll\TaxStatement\TaxStatementService::FORMS',
         'payrollRulesets.ts::PayrollRulesetOutlookSeverity'
             => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook::SEVERITIES',
         'payroll.ts::PayrollForeignPermitKind'

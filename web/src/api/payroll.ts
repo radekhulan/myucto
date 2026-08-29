@@ -3562,6 +3562,87 @@ export interface PayrollAnnualReport {
   months: PayrollAnnualReportMonth[]
 }
 
+/* ── Roční vyúčtování daně (DPZVD6, DPSVD2) ───────────────────────────────── */
+
+/** Typ vyúčtování: řádné, řádné-opravné, dodatečné, dodatečné-opravné. */
+export type PayrollTaxStatementVariant = 'B' | 'O' | 'D' | 'E'
+
+export type PayrollTaxStatementForm = 'dpzvd6' | 'dpsvd2'
+
+/** Část I. vyúčtování zálohové daně — sloupce v celých korunách. */
+export interface PayrollDependentActivityMonth {
+  month: number
+  headcount: number
+  advance_due: number
+  advance_withheld: number
+  prescribed: number
+  annual_overpayment: number
+  bonus_paid: number
+  /** Sl. 8 = sl. 4 + sl. 5. */
+  adjustments: number
+  /** Sl. 9 = sl. 1 − sl. 3 − sl. 4 − sl. 5; může být záporná. */
+  settled_amount: number
+  correction_difference: number
+  remitted: number
+}
+
+export interface PayrollTaxStatementWorkplace {
+  municipality_code: string | null
+  municipality_name: string | null
+  district_name: string | null
+  headcount: number
+}
+
+export interface PayrollDependentActivityStatement {
+  form_code: 'dpzvd6'
+  year: number
+  variant: PayrollTaxStatementVariant
+  months: PayrollDependentActivityMonth[]
+  total: Omit<PayrollDependentActivityMonth, 'month' | 'headcount'>
+  annual_overpayment_total: number
+  annual_bonus_top_up_total: number
+  overpayment_payouts: { month: number; amount: number }[]
+  workplaces: PayrollTaxStatementWorkplace[]
+  /** Nenulový počet = povinná příloha č. 2, kterou aplikace neumí naplnit. */
+  non_resident_count: number
+  warnings: string[]
+}
+
+/** Část I. vyúčtování srážkové daně — částky v HALÉŘÍCH (schéma má 2 des. místa). */
+export interface PayrollWithholdingTaxMonth {
+  month: number
+  tax_due_minor: number
+  tax_withheld_minor: number
+  due_with_return_minor: number
+  declaration_linked_minor: number
+  prescribed_minor: number
+  /** Sl. 8a = sl. 1 − sl. 7. */
+  settled_amount_minor: number
+  correction_difference_minor: number
+  remitted_minor: number
+}
+
+export interface PayrollWithholdingTaxStatement {
+  form_code: 'dpsvd2'
+  year: number
+  variant: PayrollTaxStatementVariant
+  /** 772 = příjmy fyzických osob, 771 = právnických. */
+  income_kind: string
+  months: PayrollWithholdingTaxMonth[]
+  total: Omit<PayrollWithholdingTaxMonth, 'month'>
+  /** Ř. 5 části II. = odvedeno − mělo být sraženo. Záporná = zbývá doplatit. */
+  balance_minor: number
+  warnings: string[]
+}
+
+export interface PayrollTaxStatementPreview {
+  year: number
+  statements: {
+    dpzvd6: PayrollDependentActivityStatement
+    dpsvd2: PayrollWithholdingTaxStatement
+  }
+}
+
 /* ── Roční zúčtování záloh a daňového zvýhodnění (§ 38ch ZDP) ─────────────── */
 
 /** Požádal poplatník o roční zúčtování? `unknown` NENÍ „nepožádal". */
@@ -5682,6 +5763,25 @@ export const payrollApi = {
   annualReport: (year: number) =>
     api.get<{ report: PayrollAnnualReport }>(`/payroll/reports/annual/${year}`)
       .then(response => response.data.report),
+  /**
+   * Podklad obou ročních vyúčtování naráz — DPZVD6 i DPSVD2 čerpají z jednoho
+   * zmrazeného výsledku, takže je nemá smysl tahat dvěma dotazy.
+   */
+  taxStatementPreview: (year: number, variant: PayrollTaxStatementVariant = 'B') =>
+    api.get<PayrollTaxStatementPreview>('/payroll/reports/tax-statement/preview', {
+      params: { year, variant },
+    }).then(response => response.data),
+  /** URL ke stažení XML jedné písemnosti; stahuje se přes `downloadApiFile`. */
+  taxStatementXmlUrl: (
+    year: number,
+    form: PayrollTaxStatementForm,
+    variant: PayrollTaxStatementVariant = 'B',
+    discoveredOn?: string,
+  ) => {
+    const params = new URLSearchParams({ year: String(year), form, variant })
+    if (discoveredOn) params.set('d_zjist', discoveredOn)
+    return `/payroll/reports/tax-statement?${params.toString()}`
+  },
   generatePayrollSheet: (employeeId: number, year: number) =>
     api.post<PayrollDocument>(
       `/payroll/people/${employeeId}/documents/payroll-sheet/${year}`,

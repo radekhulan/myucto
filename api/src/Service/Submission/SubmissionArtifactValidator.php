@@ -70,6 +70,8 @@ final readonly class SubmissionArtifactValidator
         'OSVC25' => 'osvc25',
         'DPZMB1' => 'dpzmb1',
         'DPZDB1' => 'dpzdb1',
+        'DPZVD6' => 'dpzvd6',
+        'DPSVD2' => 'dpsvd2',
     ];
 
     public function __construct(

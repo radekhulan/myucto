@@ -945,6 +945,13 @@ final class Routes
                 [\MyInvoice\Action\Payroll\TaxBonusRequestAction::class, 'preview']);
             $g->get('/reports/tax-bonus-request',
                 [\MyInvoice\Action\Payroll\TaxBonusRequestAction::class, 'download']);
+            // Roční vyúčtování daně ze závislé činnosti (DPZVD6, § 38j odst. 4)
+            // a daně vybírané srážkou (DPSVD2, § 38d). Dvě samostatná podání
+            // s vlastní lhůtou, ne jedno se dvěma přílohami.
+            $g->get('/reports/tax-statement/preview',
+                [\MyInvoice\Action\Payroll\TaxStatementAction::class, 'preview']);
+            $g->get('/reports/tax-statement',
+                [\MyInvoice\Action\Payroll\TaxStatementAction::class, 'download']);
             // Roční uzávěrka mzdových běhů je úmyslně samostatná od ročního
             // zúčtování daně zaměstnanců; všechna mutace jsou session-only.
             $g->get('/year-close/{year:[0-9]{4}}', [PayrollYearCloseAction::class, 'get']);

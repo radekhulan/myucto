@@ -123,6 +123,12 @@ final class PayrollAgendaGroupCatalog
         // peníze zpátky. Do panelů mzdových povinností nepatří.
         'DPZMB1',
         'DPZDB1',
+        // Roční vyúčtování zálohové (§ 38j odst. 4) a srážkové daně (§ 38d).
+        // Mzdová data je živí a lhůta je tvrdá, ale je to podání správci daně,
+        // ne mzdová povinnost vůči ČSSZ či pojišťovně — do panelů mzdových
+        // povinností proto nepatří o nic víc než přiznání k DPH.
+        'DPZVD6',
+        'DPSVD2',
     ];
 
     /**
