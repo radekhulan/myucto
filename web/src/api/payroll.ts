@@ -1107,6 +1107,23 @@ export interface PayrollTimeBatchCell {
 }
 
 /**
+ * Jeden zápis docházky z řádkového editoru.
+ *
+ * Proti buňce mřížky přibývá jen § 117: mřížka edituje výhradně hodinové
+ * kategorie (`regular`, `overtime`), takže ztížené prostředí se zadává jen tady.
+ */
+export interface PayrollTimeEntryPayload extends PayrollTimeBatchCell {
+  /**
+   * § 117 — počet ztěžujících vlivů PRÁVĚ TOHOTO zápisu. `null` znamená „nic se
+   * neliší od obvyklého stavu pracoviště", takže se použije počet ze zásady
+   * vztahu (`payroll_employment_surcharge_policies.difficult_environment_factors`).
+   * Server hodnotu přijme jen u kategorie `difficult_environment` — násobit
+   * noční nebo víkendový příplatek počtem vlivů zákon nedovoluje.
+   */
+  difficulty_factor_count?: number | null
+}
+
+/**
  * Proč se odmítla PRÁVĚ TAHLE buňka. `index` míří do pole `cells` požadavku,
  * takže se chyba dá pověsit na konkrétní políčko, ne na celou tabulku.
  */
@@ -1588,6 +1605,33 @@ export interface PayrollEmploymentSurchargePolicyPayload extends Record<string, 
   difficult_environment_rate_bp: number | null
   agreement_reference: string | null
   note: string | null
+}
+
+/**
+ * Oprava OTEVŘENÉ verze zásady.
+ *
+ * `valid_from` tu chybí schválně: účinnost je hranice proti předchozí, uzavřené
+ * verzi, jejíž konec je z ní odvozený. Jiná účinnost znamená novou verzi, ne
+ * opravu — server hodnotu z těla ignoruje.
+ */
+export interface PayrollEmploymentSurchargePolicyUpdatePayload extends Record<string, unknown> {
+  overtime_mode: PayrollSurchargeCompensationMode
+  holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
+  difficult_environment_factors: number | null
+  overtime_rate_bp: number | null
+  holiday_rate_bp: number | null
+  night_rate_bp: number | null
+  weekend_rate_bp: number | null
+  difficult_environment_rate_bp: number | null
+  agreement_reference: string | null
+  note: string | null
+  row_version: number
+}
+
+/** Ukončení platnosti otevřené verze; zásada se nemaže, jen se uzavře. */
+export interface PayrollEmploymentSurchargePolicyClosePayload extends Record<string, unknown> {
+  valid_to: string
+  row_version: number
 }
 
 /** Co o druhu příplatku říká ZÁKON — proti tomu se sjednané odchylky měří. */
@@ -5412,6 +5456,22 @@ export const payrollApi = {
     `/payroll/employments/${employmentId}/surcharge-policies`,
     payload,
   ).then(response => response.data.policy),
+  updateEmploymentSurchargePolicy: (
+    employmentId: number,
+    policyId: number,
+    payload: PayrollEmploymentSurchargePolicyUpdatePayload,
+  ) => api.put<{ policy: PayrollEmploymentSurchargePolicy }>(
+    `/payroll/employments/${employmentId}/surcharge-policies/${policyId}`,
+    payload,
+  ).then(response => response.data.policy),
+  closeEmploymentSurchargePolicy: (
+    employmentId: number,
+    policyId: number,
+    payload: PayrollEmploymentSurchargePolicyClosePayload,
+  ) => api.post<{ policy: PayrollEmploymentSurchargePolicy }>(
+    `/payroll/employments/${employmentId}/surcharge-policies/${policyId}/close`,
+    payload,
+  ).then(response => response.data.policy),
 
   employmentDimensions: (employmentId: number) =>
     api.get<{ dimensions: PayrollEmploymentDimension[] }>(`/payroll/employments/${employmentId}/dimensions`)
@@ -5758,7 +5818,7 @@ export const payrollApi = {
   saveShift: (payload: Record<string, unknown>) =>
     api.post<{ shift: PayrollShift; month: PayrollTimeMonthState }>('/payroll/time/shifts', payload)
       .then(response => response.data),
-  saveTimeEntry: (payload: Record<string, unknown>) =>
+  saveTimeEntry: (payload: PayrollTimeEntryPayload) =>
     api.post<{ entry: PayrollTimeEntry; month: PayrollTimeMonthState }>('/payroll/time/entries', payload)
       .then(response => response.data),
   /**

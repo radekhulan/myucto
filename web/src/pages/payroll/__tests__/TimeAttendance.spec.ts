@@ -5,6 +5,7 @@ const m = vi.hoisted(() => ({
   routeQuery: {} as Record<string, string | string[]>,
   routerReplace: vi.fn(),
   timeMonth: vi.fn(),
+  saveTimeEntry: vi.fn(),
   saveTimeEntryBatch: vi.fn(),
   previewTimeImport: vi.fn(),
   importTime: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     timeMonth: m.timeMonth,
+    saveTimeEntry: m.saveTimeEntry,
     saveTimeEntryBatch: m.saveTimeEntryBatch,
     previewTimeImport: m.previewTimeImport,
     importTime: m.importTime,
@@ -130,6 +132,105 @@ describe('TimeAttendance', () => {
     })
     m.reopenTimeMonth.mockResolvedValue({})
     m.approveTimeMonth.mockResolvedValue({})
+    m.saveTimeEntry.mockResolvedValue({})
+  })
+
+  /**
+   * § 117 — počet ztěžujících vlivů jednoho zápisu. Backend sloupec i validaci
+   * má od migrace 1625, ale formulář pole nenabízel, takže se příplatek za
+   * ztížené prostředí vždycky počítal jen z obvyklého počtu na zásadě vztahu.
+   */
+  async function openRowEditor(wrapper: ReturnType<typeof mount>) {
+    const add = wrapper.findAll('button').filter(button => button.text() === 'payroll.time.add')
+    await add[1].trigger('click')
+    await flushPromises()
+  }
+
+  it('nabídne počet ztěžujících vlivů jen u ztíženého prostředí', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await openRowEditor(wrapper)
+
+    const field = '[data-test="time-editor-difficulty-factors"]'
+    expect(wrapper.find(field).exists()).toBe(false)
+
+    const selects = wrapper.get('[data-test="time-record-form"]').findAll('select')
+    const categorySelect = selects[1]
+    await categorySelect.setValue('difficult_environment')
+    await flushPromises()
+    expect(wrapper.find(field).exists()).toBe(true)
+
+    await categorySelect.setValue('night')
+    await flushPromises()
+    expect(wrapper.find(field).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('pošle počet ztěžujících vlivů, a bez vyplnění pošle null', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await openRowEditor(wrapper)
+
+    const categorySelect = wrapper.get('[data-test="time-record-form"]').findAll('select')[1]
+    await categorySelect.setValue('difficult_environment')
+    await flushPromises()
+
+    await wrapper.get('[data-test="time-record-save"]').trigger('submit')
+    await flushPromises()
+    expect(m.saveTimeEntry).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        category: 'difficult_environment',
+        difficulty_factor_count: null,
+      }),
+    )
+
+    await openRowEditor(wrapper)
+    await wrapper.get('[data-test="time-record-form"]').findAll('select')[1]
+      .setValue('difficult_environment')
+    await flushPromises()
+    await wrapper.get('[data-test="time-editor-difficulty-factors"]').setValue('3')
+    await wrapper.get('[data-test="time-record-save"]').trigger('submit')
+    await flushPromises()
+    expect(m.saveTimeEntry).toHaveBeenLastCalledWith(
+      expect.objectContaining({ difficulty_factor_count: 3 }),
+    )
+    wrapper.unmount()
+  })
+
+  it('mimo rozsah § 117 uložení zablokuje a řekne proč', async () => {
+    m.timeMonth.mockResolvedValue({
+      items: [row(12, 'Syntetická osoba A')],
+      total: 1,
+      limit: 25,
+      offset: 0,
+    })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await openRowEditor(wrapper)
+
+    await wrapper.get('[data-test="time-record-form"]').findAll('select')[1]
+      .setValue('difficult_environment')
+    await flushPromises()
+    await wrapper.get('[data-test="time-editor-difficulty-factors"]').setValue('300')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="time-record-save"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="time-record-save-blocked"]').text())
+      .toContain('payroll.time.editor.blocked_difficulty_factors')
+    expect(m.saveTimeEntry).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   /**

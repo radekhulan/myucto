@@ -10,6 +10,8 @@ vi.mock('@/api/payroll', () => ({
   payrollApi: {
     employmentSurchargePolicies: vi.fn(),
     createEmploymentSurchargePolicy: vi.fn(),
+    updateEmploymentSurchargePolicy: vi.fn(),
+    closeEmploymentSurchargePolicy: vi.fn(),
   },
 }))
 
@@ -138,6 +140,10 @@ beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response())
   vi.mocked(payrollApi.createEmploymentSurchargePolicy).mockResolvedValue(policy())
+  vi.mocked(payrollApi.updateEmploymentSurchargePolicy)
+    .mockResolvedValue({ ...policy(), row_version: 2 })
+  vi.mocked(payrollApi.closeEmploymentSurchargePolicy)
+    .mockResolvedValue({ ...policy(), valid_to: '2026-06-30', row_version: 3 })
 })
 
 describe('EmploymentSurchargePolicyPanel', () => {
@@ -235,6 +241,97 @@ describe('EmploymentSurchargePolicyPanel', () => {
     expect(wrapper.find('[data-test="surcharge-policy-current"]').text()).toContain('2026-01-01')
     expect(wrapper.find('[data-test="surcharge-policy-statutory"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="surcharge-policy-empty"]').exists()).toBe(false)
+  })
+
+  /*
+   * Hranice mezi opravou a přepisem historie. Panel dosud uměl jen zakládat,
+   * takže překlep v sazbě se „opravoval" novou verzí od dalšího dne a v historii
+   * po sobě nechal den se sazbou, kterou nikdo nesjednal.
+   */
+  it('opraví otevřenou verzi s optimistickým zámkem a účinnost nechá být', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([policy()]))
+    const wrapper = await mountPanel()
+
+    await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
+    const validFrom = wrapper.get('[data-test="surcharge-policy-valid-from"]')
+    expect((validFrom.element as HTMLInputElement).value).toBe('2026-01-01')
+    expect(validFrom.attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-test="surcharge-policy-rate-overtime"]').setValue('35')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.updateEmploymentSurchargePolicy).toHaveBeenCalledWith(
+      10,
+      5,
+      expect.objectContaining({ overtime_rate_bp: 3500, row_version: 1 }),
+    )
+    // Účinnost se opravou neposílá — je to hranice proti předchozí verzi.
+    expect(vi.mocked(payrollApi.updateEmploymentSurchargePolicy).mock.calls[0][2])
+      .not.toHaveProperty('valid_from')
+    expect(payrollApi.createEmploymentSurchargePolicy).not.toHaveBeenCalled()
+    expect(payrollApi.closeEmploymentSurchargePolicy).not.toHaveBeenCalled()
+  })
+
+  it('ukončí platnost jedním Uložit a použije verzi z odpovědi opravy', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([policy()]))
+    const wrapper = await mountPanel()
+
+    await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
+    await wrapper.find('[data-test="surcharge-policy-valid-to"]').setValue('2026-06-30')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.closeEmploymentSurchargePolicy).toHaveBeenCalledWith(10, 5, {
+      valid_to: '2026-06-30',
+      row_version: 2,
+    })
+  })
+
+  it('konec platnosti před začátkem zablokuje ještě před odesláním', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([policy()]))
+    const wrapper = await mountPanel()
+
+    await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
+    await wrapper.find('[data-test="surcharge-policy-valid-to"]').setValue('2025-12-31')
+
+    const save = wrapper.get('[data-test="surcharge-policy-save"]')
+    expect(save.attributes('disabled')).toBeDefined()
+    expect(save.attributes('title')).toContain('payroll.people.surcharge_policy.valid_to_invalid')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+    expect(payrollApi.updateEmploymentSurchargePolicy).not.toHaveBeenCalled()
+  })
+
+  it('bez otevřené verze opravu vůbec nenabídne a řekne proč', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies)
+      .mockResolvedValue(response([{ ...policy(), valid_to: '2026-05-31' }]))
+    const wrapper = await mountPanel()
+
+    const edit = wrapper.get('[data-test="surcharge-policy-edit"]')
+    expect(edit.attributes('disabled')).toBeDefined()
+    expect(edit.attributes('title'))
+      .toContain('payroll.people.surcharge_policy.edit_blocked_no_open')
+  })
+
+  it('odmítnutí kvůli historii i konflikt verze vysvětlí a přenačte stav', async () => {
+    vi.mocked(payrollApi.employmentSurchargePolicies).mockResolvedValue(response([policy()]))
+    vi.mocked(payrollApi.updateEmploymentSurchargePolicy).mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: { error: { code: 'surcharge_policy_history_locked', message: 'nelze' } },
+      },
+    })
+    const wrapper = await mountPanel()
+
+    await wrapper.find('[data-test="surcharge-policy-edit"]').trigger('click')
+    await wrapper.find('[data-test="surcharge-policy-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="surcharge-policy-error"]').text())
+      .toContain('payroll.people.surcharge_policy.history_locked_error')
+    expect(payrollApi.employmentSurchargePolicies).toHaveBeenCalledTimes(2)
   })
 
   it('bez práva zápisu je přidání zašedlé a důvod je vidět', async () => {

@@ -30,6 +30,16 @@
  * SERVER: tlačítko Uložit se kvůli tomu neblokuje a hláška ze serveru se
  * nenahrazuje vlastní — jinak by tu byly dvě autority a jedna z nich by
  * dřív nebo později lhala.
+ *
+ * ── Oprava vs. přepis historie ──────────────────────────────────────────────
+ *
+ * Opravit jde jediná verze — ta OTEVŘENÁ (`valid_to === null`), a jen její
+ * OBSAH. Uzavřená verze už nějaký měsíc odměnila a mzdový list na ni ukazuje;
+ * změnit jí zpětně sazbu by znamenalo, že doklad tvrdí něco jiného, než z čeho
+ * vznikl. Datum účinnosti se neopravuje ani u otevřené verze: je to hranice
+ * proti předchozí verzi, jejíž konec je z něj dopočítaný. Jiná účinnost = nová
+ * verze. Konec platnosti se v témže formuláři jen DOPLŇUJE (zásada se nemaže,
+ * uzavírá se) a server hlídá, ať nevznikne díra ani překryv.
  */
 import { computed, onMounted, ref } from 'vue'
 import { isAxiosError } from 'axios'
@@ -39,6 +49,7 @@ import {
   type PayrollEmploymentSurchargePolicies,
   type PayrollEmploymentSurchargePolicy,
   type PayrollEmploymentSurchargePolicyPayload,
+  type PayrollEmploymentSurchargePolicyUpdatePayload,
   type PayrollSurchargeCompensationMode,
   type PayrollSurchargeKind,
   type PayrollSurchargeKindInfo,
@@ -106,6 +117,12 @@ function localDate(): string {
 
 interface PolicyForm {
   valid_from: string
+  /**
+   * Konec platnosti se zadává jen při OPRAVĚ a jen se doplňuje. Prázdno u
+   * otevřené verze znamená „platí dál"; vyplněné datum ji uzavře přes vlastní
+   * operaci, protože ukončení má jiná pravidla než změna obsahu.
+   */
+  valid_to: string
   overtime_mode: PayrollSurchargeCompensationMode
   holiday_mode: Exclude<PayrollSurchargeCompensationMode, 'included_in_wage'>
   difficult_environment_factors: string | number
@@ -122,6 +139,7 @@ interface PolicyForm {
 function newForm(): PolicyForm {
   return {
     valid_from: localDate(),
+    valid_to: '',
     overtime_mode: 'surcharge',
     holiday_mode: 'compensatory_time_off',
     difficult_environment_factors: '',
@@ -138,6 +156,9 @@ function newForm(): PolicyForm {
 }
 
 const form = ref<PolicyForm>(newForm())
+/** `null` = zakládá se nová verze; číslo = opravuje se otevřená verze s tímhle id. */
+const editingId = ref<number | null>(null)
+const editingVersion = ref(0)
 
 /**
  * Procenta z formuláře na bázové body (25 % = 2500).
@@ -189,13 +210,24 @@ const factorsValid = computed(() => {
 })
 
 const validFromValid = computed(() => /^\d{4}-\d{2}-\d{2}$/.test(form.value.valid_from))
-const valid = computed(() => validFromValid.value && factorsValid.value)
+/**
+ * Konec platnosti nesmí předcházet začátku. Server to hlídá taky (a hlídá navíc
+ * návaznost na další verzi, kterou prohlížeč neuvidí), tohle je jen včasná věta
+ * místo kolečka přes síť.
+ */
+const validToValid = computed(() => {
+  const raw = form.value.valid_to.trim()
+  if (raw === '') return true
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) && raw >= form.value.valid_from
+})
+const valid = computed(() => validFromValid.value && factorsValid.value && validToValid.value)
 
 const saveDisabled = computed(() => saving.value || !valid.value)
 const saveDisabledReason = computed(() => {
   if (saving.value) return ''
   if (!validFromValid.value) return t('payroll.people.surcharge_policy.valid_from_required')
   if (!factorsValid.value) return t('payroll.people.surcharge_policy.factors_invalid')
+  if (!validToValid.value) return t('payroll.people.surcharge_policy.valid_to_invalid')
   return ''
 })
 
@@ -206,6 +238,17 @@ const addDisabledReason = computed(() => (props.canWrite
 /** Verze bez konce platnosti je ta, která se právě používá. */
 const currentPolicy = computed(() => policies.value.find(policy => policy.valid_to === null) ?? null)
 const historyPolicies = computed(() => policies.value.filter(policy => policy.valid_to !== null))
+
+/*
+ * Opravovat jde jen otevřená verze. Uzavřená už odměnila nějaký měsíc a mzdový
+ * list na ni ukazuje — tlačítko, které by ji nabídlo k úpravě, by končilo
+ * odmítnutím ze serveru.
+ */
+const editDisabledReason = computed(() => {
+  if (!props.canWrite) return t('payroll.people.surcharge_policy.no_permission')
+  if (!currentPolicy.value) return t('payroll.people.surcharge_policy.edit_blocked_no_open')
+  return ''
+})
 
 function modeLabel(mode: PayrollSurchargeCompensationMode): string {
   return t(`payroll.people.surcharge_policy.modes.${mode}`)
@@ -222,27 +265,54 @@ function policyRatePercent(
   return toPercent(policy[entry.field] as number | null)
 }
 
+/** Obsah sjednání z uložené verze do formuláře; účinnost si volající řeší sám. */
+function fillFrom(policy: PayrollEmploymentSurchargePolicy) {
+  form.value.overtime_mode = policy.overtime_mode
+  form.value.holiday_mode = policy.holiday_mode
+  form.value.difficult_environment_factors = policy.difficult_environment_factors === null
+    ? ''
+    : String(policy.difficult_environment_factors)
+  for (const entry of RATE_FIELDS) {
+    form.value.rates[entry.kind] = policyRatePercent(policy, entry)
+  }
+  form.value.agreement_reference = policy.agreement_reference ?? ''
+  form.value.note = policy.note ?? ''
+}
+
 function openNew() {
   form.value = newForm()
+  editingId.value = null
+  editingVersion.value = 0
   const current = currentPolicy.value
   if (current) {
     // Nová verze vychází z té platné — zásada se nepřepisuje, přibývá vedle ní,
     // takže uživatel typicky mění jednu položku a zbytek chce zachovat.
-    form.value.overtime_mode = current.overtime_mode
-    form.value.holiday_mode = current.holiday_mode
-    form.value.difficult_environment_factors = current.difficult_environment_factors === null
-      ? ''
-      : String(current.difficult_environment_factors)
-    for (const entry of RATE_FIELDS) {
-      form.value.rates[entry.kind] = policyRatePercent(current, entry)
-    }
-    form.value.agreement_reference = current.agreement_reference ?? ''
+    fillFrom(current)
+    form.value.note = ''
   } else if (statutoryDefault.value) {
     form.value.overtime_mode = statutoryDefault.value.overtime_mode
     if (statutoryDefault.value.holiday_mode !== 'included_in_wage') {
       form.value.holiday_mode = statutoryDefault.value.holiday_mode
     }
   }
+  saveError.value = ''
+  showValidation.value = false
+  editorOpen.value = true
+}
+
+/**
+ * Oprava otevřené verze. `valid_from` se ukáže, ale needituje — je to hranice
+ * proti předchozí, uzavřené verzi, jejíž konec je z něj dopočítaný.
+ */
+function openEdit() {
+  const current = currentPolicy.value
+  if (!current) return
+  form.value = newForm()
+  form.value.valid_from = current.valid_from
+  form.value.valid_to = ''
+  fillFrom(current)
+  editingId.value = current.id
+  editingVersion.value = current.row_version
   saveError.value = ''
   showValidation.value = false
   editorOpen.value = true
@@ -271,8 +341,7 @@ async function save() {
   saving.value = true
   try {
     const factors = String(form.value.difficult_environment_factors ?? '').trim()
-    const payload: PayrollEmploymentSurchargePolicyPayload = {
-      valid_from: form.value.valid_from,
+    const agreed = {
       overtime_mode: form.value.overtime_mode,
       holiday_mode: form.value.holiday_mode,
       difficult_environment_factors: factors === '' ? null : Number(factors),
@@ -284,7 +353,36 @@ async function save() {
       agreement_reference: form.value.agreement_reference.trim() || null,
       note: form.value.note.trim() || null,
     }
-    await payrollApi.createEmploymentSurchargePolicy(props.employmentId, payload)
+
+    const policyId = editingId.value
+    if (policyId === null) {
+      const payload: PayrollEmploymentSurchargePolicyPayload = {
+        valid_from: form.value.valid_from,
+        ...agreed,
+      }
+      await payrollApi.createEmploymentSurchargePolicy(props.employmentId, payload)
+    } else {
+      const payload: PayrollEmploymentSurchargePolicyUpdatePayload = {
+        ...agreed,
+        row_version: editingVersion.value,
+      }
+      const updated = await payrollApi.updateEmploymentSurchargePolicy(
+        props.employmentId,
+        policyId,
+        payload,
+      )
+      const validTo = form.value.valid_to.trim()
+      if (validTo !== '') {
+        // Ukončení je vlastní operace s vlastními pravidly (díra, překryv), ale
+        // pro uživatele je to jedno Uložit. Verze se bere z odpovědi opravy —
+        // ta ji právě zvedla, takže původní hodnota by narazila na zámek.
+        await payrollApi.closeEmploymentSurchargePolicy(props.employmentId, policyId, {
+          valid_to: validTo,
+          row_version: updated.row_version,
+        })
+      }
+    }
+
     editorOpen.value = false
     toast.success(t('payroll.people.surcharge_policy.saved'))
     // Předchozí verze dostala uzavřenou platnost na serveru — historii je proto
@@ -294,7 +392,18 @@ async function save() {
     const code = apiCode(error)
     saveError.value = code === 'surcharge_policy_exists'
       ? t('payroll.people.surcharge_policy.exists_error')
-      : (apiMessage(error) || t('payroll.people.surcharge_policy.save_failed'))
+      : code === 'surcharge_policy_history_locked'
+        ? t('payroll.people.surcharge_policy.history_locked_error')
+        : code === 'row_version_conflict'
+          ? t('payroll.people.surcharge_policy.conflict_error')
+          : (apiMessage(error) || t('payroll.people.surcharge_policy.save_failed'))
+    // Po konfliktu i po odmítnutí kvůli historii je stav na obrazovce zastaralý;
+    // bez přenačtení by druhý pokus narazil na tentýž zámek.
+    if (code === 'row_version_conflict' || code === 'surcharge_policy_history_locked') {
+      await load()
+      const current = currentPolicy.value
+      editingVersion.value = current && current.id === editingId.value ? current.row_version : 0
+    }
   } finally {
     saving.value = false
   }
@@ -319,19 +428,38 @@ onMounted(load)
       <h4 class="text-sm font-semibold text-neutral-900">
         {{ t('payroll.people.surcharge_policy.title') }}
       </h4>
-      <button
-        type="button"
-        data-test="surcharge-policy-add"
-        :class="btnOutlineSm('accent')"
-        :disabled="!canWrite"
-        :title="disabledTitle(!canWrite, addDisabledReason)"
-        @click="openNew"
-      >
-        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path :d="ICONS.plus" />
-        </svg>
-        {{ t('payroll.people.surcharge_policy.add') }}
-      </button>
+      <div class="flex flex-wrap gap-2">
+        <!--
+          Opravit jde jen otevřená verze — u uzavřené je tlačítko zašedlé i
+          s důvodem, ne skryté: jinak by uživatel hledal, kde se překlep opravuje.
+        -->
+        <button
+          type="button"
+          data-test="surcharge-policy-edit"
+          :class="btnOutlineSm('neutral')"
+          :disabled="editDisabledReason !== ''"
+          :title="disabledTitle(editDisabledReason !== '', editDisabledReason)"
+          @click="openEdit"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.edit" />
+          </svg>
+          {{ t('payroll.people.surcharge_policy.edit') }}
+        </button>
+        <button
+          type="button"
+          data-test="surcharge-policy-add"
+          :class="btnOutlineSm('accent')"
+          :disabled="!canWrite"
+          :title="disabledTitle(!canWrite, addDisabledReason)"
+          @click="openNew"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.plus" />
+          </svg>
+          {{ t('payroll.people.surcharge_policy.add') }}
+        </button>
+      </div>
     </div>
     <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.surcharge_policy.hint') }}</p>
     <p v-if="addDisabledReason" :class="[BTN_DISABLED_NOTE, 'mt-1']">{{ addDisabledReason }}</p>
@@ -418,9 +546,15 @@ onMounted(load)
       @submit.prevent="save"
     >
       <h5 class="text-xs font-semibold text-neutral-900">
-        {{ t('payroll.people.surcharge_policy.new_title') }}
+        {{ editingId === null
+          ? t('payroll.people.surcharge_policy.new_title')
+          : t('payroll.people.surcharge_policy.edit_title') }}
       </h5>
-      <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.people.surcharge_policy.new_hint') }}</p>
+      <p class="mt-1 text-xs text-neutral-500">
+        {{ editingId === null
+          ? t('payroll.people.surcharge_policy.new_hint')
+          : t('payroll.people.surcharge_policy.edit_hint') }}
+      </p>
 
       <div v-if="saveError" data-test="surcharge-policy-error" class="mt-2 rounded-md bg-danger-50 px-3 py-2 text-xs text-danger-700" role="alert">
         {{ saveError }}
@@ -433,9 +567,28 @@ onMounted(load)
             v-model="form.valid_from"
             data-test="surcharge-policy-valid-from"
             type="date"
+            :disabled="!canWrite || editingId !== null"
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100"
+          >
+          <span v-if="editingId !== null" class="mt-1 block text-neutral-500">
+            {{ t('payroll.people.surcharge_policy.valid_from_locked') }}
+          </span>
+        </label>
+        <!--
+          Konec platnosti se jen DOPLŇUJE, a jen u opravy. Zásada se nemaže;
+          uzavřít ji je jediný způsob, jak sjednání ukončit.
+        -->
+        <label v-if="editingId !== null" class="text-xs text-neutral-600">
+          {{ t('payroll.people.surcharge_policy.valid_to') }}
+          <input
+            v-model="form.valid_to"
+            data-test="surcharge-policy-valid-to"
+            type="date"
+            :min="form.valid_from"
             :disabled="!canWrite"
             class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
           >
+          <span class="mt-1 block text-neutral-500">{{ t('payroll.people.surcharge_policy.valid_to_hint') }}</span>
         </label>
         <label class="text-xs text-neutral-600">
           {{ t('payroll.people.surcharge_policy.factors') }}

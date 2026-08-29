@@ -404,6 +404,8 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/settings/dimensions/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/surcharge-policies$#', 'payroll.employment.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/surcharge-policies$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['PUT', '#^/api/payroll/employments/[0-9]+/surcharge-policies/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/employments/[0-9]+/surcharge-policies/[0-9]+/close$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/dimensions$#', 'payroll.employment.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/dimensions$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/employments/[0-9]+/dimensions/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],

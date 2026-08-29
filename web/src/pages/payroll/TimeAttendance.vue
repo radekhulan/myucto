@@ -91,6 +91,26 @@ const importOpen = ref(false)
 const recordType = ref<'entry' | 'shift'>('entry')
 const employmentId = ref<number | null>(null)
 const category = ref<PayrollTimeCategory>('regular')
+/**
+ * § 117 — počet ztěžujících vlivů PRÁVĚ TOHOTO zápisu.
+ *
+ * Prázdno není nula: znamená „u tohoto dne se od obvyklého stavu pracoviště nic
+ * neliší", takže se posílá `null` a rozhoduje obvyklý počet ze zásady vztahu.
+ * Pole se nabízí jen u ztíženého prostředí — násobit noční nebo víkendový
+ * příplatek počtem vlivů zákon nedovoluje a server takový zápis odmítne.
+ */
+const difficultyFactorCount = ref<number | ''>('')
+const difficultyFactorsVisible = computed(() =>
+  recordType.value === 'entry' && category.value === 'difficult_environment')
+const difficultyFactorsValid = computed(() => {
+  if (!difficultyFactorsVisible.value) return true
+  const raw = difficultyFactorCount.value
+  if (raw === '') return true
+  return Number.isInteger(raw) && raw >= 1 && raw <= 255
+})
+// Přepnutím kategorie pole zmizí; kdyby si hodnotu drželo, „uložit a další den"
+// by ji po návratu ke ztíženému prostředí tiše obnovilo u jiného dne.
+watch([category, recordType], () => { difficultyFactorCount.value = '' })
 /*
  * Proč nejde uložit záznam docházky, resp. použít import. Obojí vrací `null`,
  * když akce jde spustit — zašedlé tlačítko bez věty je slepá ulička.
@@ -98,6 +118,7 @@ const category = ref<PayrollTimeCategory>('regular')
 const recordBlockedReason = computed<string | null>(() => {
   if (!selected.value) return t('payroll.time.editor.blocked_no_employment')
   if (!startsAt.value || !endsAt.value) return t('payroll.time.editor.blocked_no_range')
+  if (!difficultyFactorsValid.value) return t('payroll.time.editor.blocked_difficulty_factors')
   return null
 })
 const importBlockedReason = computed<string | null>(() =>
@@ -377,7 +398,15 @@ async function saveRecord(keepOpen = false) {
         publish: publish.value,
       })
     } else {
-      await payrollApi.saveTimeEntry({ ...common, category: category.value })
+      await payrollApi.saveTimeEntry({
+        ...common,
+        category: category.value,
+        // Prázdno se posílá jako `null`, ne jako nula: dosavadní chování
+        // (rozhoduje obvyklý počet vlivů na zásadě vztahu) tím zůstává beze změny.
+        difficulty_factor_count: difficultyFactorsVisible.value && difficultyFactorCount.value !== ''
+          ? difficultyFactorCount.value
+          : null,
+      })
     }
     toast.success(t('payroll.time.saved'))
     lastEditorTimes.value = {
@@ -1850,6 +1879,24 @@ onMounted(() => {
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.standby') }}</span>
           <input v-model.number="standbyMinutes" type="number" min="0" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
         </label>
+        <!--
+          § 117 se nabízí JEN u ztíženého prostředí. U noční práce ani o víkendu
+          zákon násobení příplatku počtem vlivů nezná, takže pole, které by tam
+          šlo vyplnit, by vedlo jen na odmítnutí ze serveru.
+        -->
+        <label v-if="difficultyFactorsVisible" class="block">
+          <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll.time.editor.difficulty_factors') }}</span>
+          <input
+            v-model.number="difficultyFactorCount"
+            data-test="time-editor-difficulty-factors"
+            type="number"
+            min="1"
+            max="255"
+            step="1"
+            class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"
+          >
+          <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.time.editor.difficulty_factors_hint') }}</span>
+        </label>
       </div>
       <div v-if="recordType === 'shift'" class="mt-4 flex flex-wrap gap-5">
         <label class="inline-flex items-center gap-2 text-sm"><input v-model="remoteWork" type="checkbox"> {{ t('payroll.time.editor.remote') }}</label>
@@ -1861,7 +1908,7 @@ onMounted(() => {
             <button
               type="button"
               :class="btnOutline('neutral')"
-              :disabled="saving || !selected || !startsAt || !endsAt"
+              :disabled="saving || recordBlockedReason !== null"
               :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
               data-test="time-record-save-next"
               @click="saveRecordAndContinue"
@@ -1872,7 +1919,7 @@ onMounted(() => {
             <button
               type="submit"
               :class="btnFilled('primary')"
-              :disabled="saving || !selected || !startsAt || !endsAt"
+              :disabled="saving || recordBlockedReason !== null"
               :title="disabledTitle(recordBlockedReason !== null, recordBlockedReason)"
               data-test="time-record-save"
             >

@@ -1578,6 +1578,17 @@ final class Routes
                 '/employments/{id:[0-9]+}/surcharge-policies',
                 [PayrollEmploymentSurchargePolicyAction::class, 'create'],
             );
+            // Oprava překlepu v OTEVŘENÉ verzi a ukončení její platnosti.
+            // Uzavřenou ani překrytou verzi tyhle routy nepustí — mzdy spočítané
+            // podle ní na ni dál ukazují.
+            $g->put(
+                '/employments/{id:[0-9]+}/surcharge-policies/{policyId:[0-9]+}',
+                [PayrollEmploymentSurchargePolicyAction::class, 'update'],
+            );
+            $g->post(
+                '/employments/{id:[0-9]+}/surcharge-policies/{policyId:[0-9]+}/close',
+                [PayrollEmploymentSurchargePolicyAction::class, 'close'],
+            );
             $g->get('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'list']);
             $g->post('/employments/{id:[0-9]+}/dimensions', [PayrollEmploymentDimensionAction::class, 'create']);
             $g->put(

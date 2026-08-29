@@ -228,4 +228,228 @@ final class PayrollSurchargeRepository
             throw $e;
         }
     }
+
+    /** @return array<string,mixed>|null */
+    public function findPolicy(int $supplierId, int $employmentId, int $policyId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT *
+               FROM payroll_employment_surcharge_policies
+              WHERE supplier_id = ? AND employment_id = ? AND id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, $policyId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false
+            ? null
+            : PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
+    }
+
+    /**
+     * Oprava OTEVŘENÉ a zároveň POSLEDNÍ verze zásady.
+     *
+     * Mění se jen obsah sjednání (režimy, sazby, počet vlivů, odkaz, poznámka).
+     * `valid_from` ani `valid_to` sem nepatří — kde přesně vede hranice mezi
+     * opravou a přepisem historie a proč, popisuje
+     * {@see PayrollSurchargePolicyHistoryLockedException}.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public function updatePolicy(
+        int $supplierId,
+        int $employmentId,
+        int $policyId,
+        array $data,
+        int $expectedVersion,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $current = $this->lockPolicy($supplierId, $employmentId, $policyId);
+            $currentVersion = (int) $current['row_version'];
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollSurchargePolicyConflictException($currentVersion);
+            }
+            $this->assertOpenTail($supplierId, $employmentId, $current);
+
+            $stmt = $pdo->prepare(
+                'UPDATE payroll_employment_surcharge_policies
+                    SET overtime_mode = ?,
+                        holiday_mode = ?,
+                        difficult_environment_factors = ?,
+                        overtime_rate_bp = ?,
+                        holiday_rate_bp = ?,
+                        night_rate_bp = ?,
+                        weekend_rate_bp = ?,
+                        difficult_environment_rate_bp = ?,
+                        agreement_reference = ?,
+                        note = ?,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND employment_id = ? AND id = ? AND row_version = ?'
+            );
+            $stmt->execute([
+                $data['overtime_mode'] ?? 'surcharge',
+                $data['holiday_mode'] ?? 'compensatory_time_off',
+                $data['difficult_environment_factors'] ?? null,
+                $data['overtime_rate_bp'] ?? null,
+                $data['holiday_rate_bp'] ?? null,
+                $data['night_rate_bp'] ?? null,
+                $data['weekend_rate_bp'] ?? null,
+                $data['difficult_environment_rate_bp'] ?? null,
+                $data['agreement_reference'] ?? null,
+                $data['note'] ?? null,
+                $supplierId,
+                $employmentId,
+                $policyId,
+                $expectedVersion,
+            ]);
+            if ($stmt->rowCount() !== 1) {
+                throw new PayrollSurchargePolicyConflictException($currentVersion);
+            }
+            $row = $this->findPolicy($supplierId, $employmentId, $policyId)
+                ?? throw new \RuntimeException('Upravenou zásadu příplatků se nepodařilo načíst.');
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $row;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Ukončení platnosti otevřené verze.
+     *
+     * Zásada nemá „mazání": co platilo, platilo. Konec platnosti je jediný
+     * způsob, jak sjednání ukončit — po něm se od následujícího dne vrací
+     * zákonný výchozí stav, tedy u svátku náhradní volno a u ztíženého
+     * prostředí chybějící podklad.
+     *
+     * @return array<string,mixed>
+     */
+    public function closePolicy(
+        int $supplierId,
+        int $employmentId,
+        int $policyId,
+        string $validTo,
+        int $expectedVersion,
+    ): array {
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $current = $this->lockPolicy($supplierId, $employmentId, $policyId);
+            $currentVersion = (int) $current['row_version'];
+            if ($currentVersion !== $expectedVersion) {
+                throw new PayrollSurchargePolicyConflictException($currentVersion);
+            }
+            $validFrom = (string) $current['valid_from'];
+            if ($current['valid_to'] !== null) {
+                throw new PayrollSurchargePolicyHistoryLockedException(
+                    'Tahle verze zásady příplatků už má konec platnosti. '
+                    . 'Posunout ho zpětně by změnilo období, podle kterého se počítaly hotové mzdy.',
+                );
+            }
+            if ($validTo < $validFrom) {
+                throw new \InvalidArgumentException(
+                    'Konec platnosti nesmí předcházet začátku platnosti zásady.'
+                );
+            }
+
+            // Díra ani překryv: mezi dvěma verzemi nesmí zbýt den bez zásady ani
+            // den se dvěma. Nástupkyně u otevřené verze vzniknout nemá
+            // (`savePolicy()` jí předtím konec dopočítá), ale kdyby ji tam
+            // zanechal starší zápis, ticho by znamenalo dva dny se dvěma zásadami.
+            $next = $pdo->prepare(
+                'SELECT MIN(valid_from)
+                   FROM payroll_employment_surcharge_policies
+                  WHERE supplier_id = ? AND employment_id = ? AND valid_from > ?'
+            );
+            $next->execute([$supplierId, $employmentId, $validFrom]);
+            $nextValidFrom = $next->fetchColumn();
+            if (is_string($nextValidFrom) && $nextValidFrom !== '') {
+                $required = (new \DateTimeImmutable($nextValidFrom))
+                    ->modify('-1 day')
+                    ->format('Y-m-d');
+                if ($validTo !== $required) {
+                    throw new \InvalidArgumentException(
+                        'Na tuhle verzi navazuje další zásada od ' . $nextValidFrom
+                        . ', takže její platnost musí skončit ' . $required . '.'
+                    );
+                }
+            }
+
+            $stmt = $pdo->prepare(
+                'UPDATE payroll_employment_surcharge_policies
+                    SET valid_to = ?,
+                        row_version = row_version + 1
+                  WHERE supplier_id = ? AND employment_id = ? AND id = ? AND row_version = ?'
+            );
+            $stmt->execute([$validTo, $supplierId, $employmentId, $policyId, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) {
+                throw new PayrollSurchargePolicyConflictException($currentVersion);
+            }
+            $row = $this->findPolicy($supplierId, $employmentId, $policyId)
+                ?? throw new \RuntimeException('Ukončenou zásadu příplatků se nepodařilo načíst.');
+
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $row;
+        } catch (\Throwable $e) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /** @return array<string,mixed> */
+    private function lockPolicy(int $supplierId, int $employmentId, int $policyId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, valid_from, valid_to, row_version
+               FROM payroll_employment_surcharge_policies
+              WHERE supplier_id = ? AND employment_id = ? AND id = ?
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employmentId, $policyId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            throw new PayrollSurchargePolicyNotFoundException();
+        }
+
+        return PayrollTimeValue::row($row, 'payroll_employment_surcharge_policy');
+    }
+
+    /** @param array<string,mixed> $policy */
+    private function assertOpenTail(int $supplierId, int $employmentId, array $policy): void
+    {
+        if ($policy['valid_to'] !== null) {
+            throw new PayrollSurchargePolicyHistoryLockedException();
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_employment_surcharge_policies
+              WHERE supplier_id = ? AND employment_id = ? AND valid_from > ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $employmentId, (string) $policy['valid_from']]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new PayrollSurchargePolicyHistoryLockedException();
+        }
+    }
 }

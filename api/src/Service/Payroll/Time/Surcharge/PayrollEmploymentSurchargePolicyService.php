@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time\Surcharge;
 
+use MyInvoice\Repository\Payroll\PayrollSurchargePolicyNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollSurchargeRepository;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 
@@ -112,6 +113,89 @@ final class PayrollEmploymentSurchargePolicyService
         ?int $userId,
     ): array {
         $validFrom = self::date($input['valid_from'] ?? null, 'valid_from');
+
+        $id = $this->repository->savePolicy(
+            $supplierId,
+            $employmentId,
+            $validFrom,
+            $this->agreedFields($input, $validFrom),
+            $userId,
+        );
+
+        $policies = $this->repository->policiesForEmployment($supplierId, $employmentId);
+        foreach ($policies as $policy) {
+            if ((int) ($policy['id'] ?? 0) === $id) {
+                return $policy;
+            }
+        }
+
+        throw new \RuntimeException('Uloženou zásadu příplatků se nepodařilo načíst.');
+    }
+
+    /**
+     * Oprava obsahu existující verze.
+     *
+     * Účinnost (`valid_from`) se z těla požadavku VĚDOMĚ nebere, ani když ji
+     * klient pošle: je to hranice proti předchozí, uzavřené verzi, jejíž
+     * `valid_to` je z ní odvozené. Sada pravidel se proto vybírá podle data,
+     * které verze UŽ MÁ — kogentní podlaha se musí měřit proti zákonu účinnému
+     * v době sjednání, ne v době opravy.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function update(
+        int $supplierId,
+        int $employmentId,
+        int $policyId,
+        array $input,
+    ): array {
+        $existing = $this->repository->findPolicy($supplierId, $employmentId, $policyId)
+            ?? throw new PayrollSurchargePolicyNotFoundException();
+        $validFrom = self::date($existing['valid_from'] ?? null, 'valid_from');
+
+        return $this->repository->updatePolicy(
+            $supplierId,
+            $employmentId,
+            $policyId,
+            $this->agreedFields($input, $validFrom),
+            self::rowVersion($input),
+        );
+    }
+
+    /**
+     * Ukončení platnosti otevřené verze.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function close(
+        int $supplierId,
+        int $employmentId,
+        int $policyId,
+        array $input,
+    ): array {
+        return $this->repository->closePolicy(
+            $supplierId,
+            $employmentId,
+            $policyId,
+            self::date($input['valid_to'] ?? null, 'valid_to'),
+            self::rowVersion($input),
+        );
+    }
+
+    /**
+     * Ověřený obsah sjednání pro zápis do databáze.
+     *
+     * Doménový objekt se postaví VŽDYCKY, ať jde o novou verzi nebo o opravu —
+     * kdyby se kogentní podlaha kontrolovala jen při zakládání, dala by se
+     * podlezená sazba dostat do databáze opravou hned po uložení.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    private function agreedFields(array $input, string $validFrom): array
+    {
         $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $validFrom);
 
         $overtime = self::mode($input['overtime_mode'] ?? null, 'overtime_mode');
@@ -139,34 +223,36 @@ final class PayrollEmploymentSurchargePolicyService
         // obejít z API, byla by celá kontrola jen dekorace.
         PayrollSurchargePolicy::agreed($overtime, $holiday, $factors, $rates, $ruleset);
 
-        $id = $this->repository->savePolicy(
-            $supplierId,
-            $employmentId,
-            $validFrom,
-            [
-                'overtime_mode' => $overtime->value,
-                'holiday_mode' => $holiday->value,
-                'difficult_environment_factors' => $factors,
-                'overtime_rate_bp' => $rates[PayrollSurchargeKind::Overtime->value],
-                'holiday_rate_bp' => $rates[PayrollSurchargeKind::Holiday->value],
-                'night_rate_bp' => $rates[PayrollSurchargeKind::Night->value],
-                'weekend_rate_bp' => $rates[PayrollSurchargeKind::Weekend->value],
-                'difficult_environment_rate_bp' =>
-                    $rates[PayrollSurchargeKind::DifficultEnvironment->value],
-                'agreement_reference' => self::nullableString($input, 'agreement_reference', 191),
-                'note' => self::nullableString($input, 'note', 500),
-            ],
-            $userId,
-        );
+        return [
+            'overtime_mode' => $overtime->value,
+            'holiday_mode' => $holiday->value,
+            'difficult_environment_factors' => $factors,
+            'overtime_rate_bp' => $rates[PayrollSurchargeKind::Overtime->value],
+            'holiday_rate_bp' => $rates[PayrollSurchargeKind::Holiday->value],
+            'night_rate_bp' => $rates[PayrollSurchargeKind::Night->value],
+            'weekend_rate_bp' => $rates[PayrollSurchargeKind::Weekend->value],
+            'difficult_environment_rate_bp' =>
+                $rates[PayrollSurchargeKind::DifficultEnvironment->value],
+            'agreement_reference' => self::nullableString($input, 'agreement_reference', 191),
+            'note' => self::nullableString($input, 'note', 500),
+        ];
+    }
 
-        $policies = $this->repository->policiesForEmployment($supplierId, $employmentId);
-        foreach ($policies as $policy) {
-            if ((int) ($policy['id'] ?? 0) === $id) {
-                return $policy;
-            }
+    /** @param array<string,mixed> $input */
+    private static function rowVersion(array $input): int
+    {
+        $value = filter_var(
+            $input['row_version'] ?? null,
+            FILTER_VALIDATE_INT,
+            ['options' => ['min_range' => 1]],
+        );
+        if (!is_int($value)) {
+            throw new \InvalidArgumentException(
+                'row_version musí být kladné celé číslo verze, kterou má úprava přepsat.'
+            );
         }
 
-        throw new \RuntimeException('Uloženou zásadu příplatků se nepodařilo načíst.');
+        return $value;
     }
 
     private static function mode(mixed $value, string $field): PayrollSurchargeCompensationMode
