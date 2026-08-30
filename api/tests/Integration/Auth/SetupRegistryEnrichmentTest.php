@@ -108,7 +108,7 @@ final class SetupRegistryEnrichmentTest extends TestCase
         $pdo->prepare(
             'INSERT INTO supplier (company_name, street, city, zip, country_id, ic, dic, is_vat_payer, email, taxpayer_type, accounting_mode, default_currency_id, default_vat_rate_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 0, 0)'
-        )->execute(['Zkouška s.r.o.', 'Testovací 1', 'Plzeň', '30100', $countryId, '00000019', self::DIC, 'zkouska@example.test', $taxpayerType, $mode]);
+        )->execute(['Zkouška s.r.o.', 'Testovací 1', 'Zkušební Lhota', '11111', $countryId, '00000019', self::DIC, 'zkouska@example.test', $taxpayerType, $mode]);
         $id = (int) $pdo->lastInsertId();
         $this->createdSuppliers[] = $id;
 
