@@ -70,6 +70,41 @@ final class PayrollDocumentRepository
         return $row === false ? null : $row;
     }
 
+    /**
+     * Revize, ze které vznikl JIŽ ARCHIVOVANÝ doklad — tedy i taková, kterou
+     * mezitím přebila novější oprava.
+     *
+     * Záměrně to NENÍ {@see approvedRevision()}: ta pouští jen poslední
+     * schválenou revizi, což je správné pro rozhodnutí „smí se z tohohle
+     * vydat doklad", ale nepoužitelné pro předchůdce v řetězu oprav — ten
+     * novější revizi má vždycky, takže by dotaz nevrátil nic a přegenerování
+     * pásky po opravě mzdy by skončilo hláškou o neschválené revizi.
+     * Tady jde výhradně o zjištění pořadí, ne o oprávnění.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function archivedDocumentRevision(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT revision.*, run.period_start
+               FROM payroll_run_revisions revision
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE revision.supplier_id = ?
+                AND revision.run_id = ?
+                AND revision.id = ?
+                AND revision.status IN ("approved", "superseded")
+                AND revision.result_snapshot_hash IS NOT NULL'
+        );
+        $stmt->execute([$supplierId, $runId, $revisionId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $row;
+    }
+
     /** @return array<string,mixed>|null */
     public function approvedAnnualRevision(
         int $supplierId,

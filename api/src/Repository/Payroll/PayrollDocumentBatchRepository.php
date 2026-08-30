@@ -374,9 +374,14 @@ final class PayrollDocumentBatchRepository
                 throw new \RuntimeException('Položku fronty se nepodařilo zamknout.');
             }
             $attempt = $pdo->prepare(
+                // `started_at` se plní výslovně: sloupcový DEFAULT je
+                // `current_timestamp()`, tedy MÍSTNÍ čas serveru, zatímco celá
+                // fronta jinde počítá v UTC. Pokus se pak tvářil, že skončil
+                // dřív, než začal (v létě o dvě hodiny), a doba běhu vycházela
+                // záporně.
                 'INSERT INTO payroll_document_batch_attempts
-                    (supplier_id, batch_id, item_id, attempt_no, lease_token)
-                 VALUES (?, ?, ?, ?, ?)'
+                    (supplier_id, batch_id, item_id, attempt_no, lease_token, started_at)
+                 VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP())'
             );
             $attempt->execute([
                 (int) $row['supplier_id'],

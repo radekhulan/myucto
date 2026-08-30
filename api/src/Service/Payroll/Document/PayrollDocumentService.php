@@ -682,10 +682,15 @@ class PayrollDocumentService
                 }
             }
             if (!$sameRevision) {
-                $previousRevision = $this->requireApprovedRevision(
+                // Předchůdce se hledá bez podmínky „je to poslední schválená
+                // revize" — tu z definice nesplňuje, protože ho přebila právě
+                // ta revize, pro kterou doklad vydáváme.
+                $previousRevision = $this->documents->archivedDocumentRevision(
                     $supplierId,
                     $runId,
                     (int) $previous['revision_id'],
+                ) ?? throw new \RuntimeException(
+                    'Nahrazovaný doklad odkazuje na neznámou mzdovou revizi.',
                 );
                 if ((int) $previousRevision['revision_no'] >= (int) $revision['revision_no']) {
                     throw new \RuntimeException('Superseded payroll document revision is not older.');

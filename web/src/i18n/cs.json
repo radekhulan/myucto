@@ -2259,7 +2259,7 @@
                 "scope_all_hint": "Dokument se vystaví všem zaměstnancům se schváleným výsledkem za rok {year}. Generování běží na serveru, záložku můžete zavřít.",
                 "blocked_no_person": "Nejdřív vyberte osobu, nebo přepněte rozsah na všechny zaměstnance.",
                 "progress": "Hotovo {done} z {total}.",
-                "queued": "Dávka je zařazená do fronty ({count} osob). Můžete stránku zavřít, generování běží dál na serveru.",
+                "queued": "Dávka je zařazená do fronty, počet osob: {count}. Můžete stránku zavřít, generování běží dál na serveru.",
                 "enqueue_failed": "Roční dávku dokumentů se nepodařilo zařadit.",
                 "poll_failed": "Stav roční dávky se nepodařilo načíst.",
                 "server_hint": "běží na serveru",
@@ -4313,7 +4313,7 @@
                 "environment": {
                     "label": "Prostředí",
                     "production": "Produkce",
-                    "test": "Testovací",
+                    "test": "Test",
                     "production_note": "Ostrá podání na ČSSZ. Co je v tomhle seznamu, platí vůči úřadu.",
                     "test_note": "Testovací prostředí ČSSZ. Podání odsud se za splnění povinnosti nepovažuje."
                 },
