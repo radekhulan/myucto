@@ -479,6 +479,10 @@ přepne na firmu a otevře filtrovaný seznam faktur).
 - **Nevynechej Pohoda kódy** pokud plánuješ používat Pohoda XML export.
 - **Per-dodavatel `From:` jméno** je důležitý pro deliverabilitu — klient
   vidí v inboxu „Faktury Vzorové firmy" místo „myucto@server-3.hosting.cz".
-- **Ukázková data se generují jen pro první firmu v instalaci.** Příkaz
-  `php api/bin/sample.php` neumí vybrat jinou firmu; pro další firmy založ
-  syntetická testovací data ručně.
+- **Ukázková data lze generovat do kterékoli firmy, která je ještě prázdná.**
+  `php api/bin/sample.php --list` vypíše firmy i s tím, jestli už mají klienty
+  nebo doklady; `php api/bin/sample.php --supplier=7` pak naplní zvolenou. Je-li
+  firem víc a `--supplier` chybí, skript nehádá a volbu si vyžádá. Firmu, která
+  data už má, generátor odmítne — nejdřív ji vyprázdni
+  (`php api/bin/reset.php --keep-users-supplier`, nebo v aplikaci
+  Nastavení → Odebrat ukázková data).

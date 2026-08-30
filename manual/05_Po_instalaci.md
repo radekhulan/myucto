@@ -41,6 +41,8 @@ php api/bin/migrate.php              # spustí pending migrace
 php api/bin/migrate.php --status     # vypíše stav migrací
 php api/bin/setup.php                # interaktivní úvodní zřízení
 php api/bin/sample.php               # vygeneruje testovací data (po setupu)
+php api/bin/sample.php --list        # vypíše firmy a jestli už data mají
+php api/bin/sample.php --supplier=7  # testovací data do konkrétní prázdné firmy
 php api/bin/reset.php                # smaže všechna user-data (vyžaduje "ANO")
 php api/bin/recompute-stats.php      # přepočítá agregované statistiky
 ```

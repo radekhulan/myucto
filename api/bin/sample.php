@@ -5,10 +5,17 @@ declare(strict_types=1);
 /**
  * SAMPLE DATA — generuje testovací data pro vývoj.
  *
- *   php api/bin/sample.php           # interaktivní potvrzení
- *   php api/bin/sample.php --yes     # bez ptaní
+ *   php api/bin/sample.php                 # interaktivní potvrzení
+ *   php api/bin/sample.php --yes           # bez ptaní
+ *   php api/bin/sample.php --supplier=7    # konkrétní firma
+ *   php api/bin/sample.php --list          # výpis firem a jestli už mají data
  *
- * Vytvoří pro první firmu rozsáhlý syntetický dataset za posledních 12 měsíců:
+ * Bez `--supplier` se vezme jediná firma v databázi. Jakmile je jich víc, skript
+ * nehádá — vypíše je i s tím, která je prázdná, a čeká na explicitní volbu. Dřív
+ * mlčky sáhl po `MIN(id)`, což u instalace s víc firmami nasypalo ukázková data
+ * do té nesprávné.
+ *
+ * Vytvoří pro zvolenou firmu rozsáhlý syntetický dataset za posledních 12 měsíců:
  *   - 24 klientů, 36 zakázek, 120 vydaných faktur a 12 dobropisů
  *   - 12 dodavatelů a 120 přijatých faktur
  *   - 1 pokladna a 7 příjmových/výdajových pokladních dokladů
@@ -42,6 +49,23 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Sample\SampleDataGenerator;
 
 $autoYes = in_array('--yes', $argv, true) || in_array('-y', $argv, true);
+$listOnly = in_array('--list', $argv, true);
+
+// `--supplier=7` i `--supplier 7`; prázdná nebo nečíselná hodnota je chyba, ne tichý pád na null.
+$wantedSupplier = null;
+foreach ($argv as $i => $arg) {
+    if (str_starts_with($arg, '--supplier=')) {
+        $wantedSupplier = substr($arg, strlen('--supplier='));
+    } elseif ($arg === '--supplier') {
+        $wantedSupplier = $argv[$i + 1] ?? '';
+    }
+}
+if ($wantedSupplier !== null && preg_match('/^[1-9]\d*$/', $wantedSupplier) !== 1) {
+    fwrite(STDERR, "[sample] --supplier čeká ID firmy, dostal '{$wantedSupplier}'.\n");
+    fwrite(STDERR, "         Seznam firem: php api/bin/sample.php --list\n");
+    exit(1);
+}
+$wantedSupplierId = $wantedSupplier === null ? null : (int) $wantedSupplier;
 
 $app = Bootstrap::buildApp();
 $container = $app->getContainer();
@@ -52,25 +76,83 @@ $adminId = (int) $pdo->query(
       WHERE r.system_key = 'superadmin' AND r.role_type = 'superadmin' AND r.is_active = 1
         AND u.is_active = 1 ORDER BY u.id LIMIT 1"
 )->fetchColumn();
-$supplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
-if ($adminId === 0 || $supplierId === 0) {
-    fwrite(STDERR, "[sample] Chybí předpoklady (admin: $adminId, supplier: $supplierId).\n");
+
+// Obsazenost počítáme stejnou trojicí jako guard v SampleDataGeneratoru, aby
+// výpis nikdy netvrdil „prázdná" o firmě, kterou generátor vzápětí odmítne.
+$suppliers = $pdo->query(
+    'SELECT s.id, s.company_name,
+            (SELECT COUNT(*) FROM clients           c WHERE c.supplier_id = s.id)
+          + (SELECT COUNT(*) FROM invoices          i WHERE i.supplier_id = s.id)
+          + (SELECT COUNT(*) FROM purchase_invoices p WHERE p.supplier_id = s.id) AS records
+       FROM supplier s ORDER BY s.id'
+)->fetchAll(\PDO::FETCH_ASSOC);
+
+$printSuppliers = static function (array $rows): void {
+    foreach ($rows as $row) {
+        $state = (int) $row['records'] > 0
+            ? sprintf('má data (%d klientů/dokladů)', (int) $row['records'])
+            : 'prázdná — lze generovat';
+        fwrite(STDERR, sprintf("           --supplier=%-4d %-40s %s\n", (int) $row['id'], (string) $row['company_name'], $state));
+    }
+};
+
+if ($listOnly) {
+    if ($suppliers === []) {
+        fwrite(STDERR, "[sample] V databázi není žádná firma. Spusť php api/bin/setup.php\n");
+        exit(1);
+    }
+    fwrite(STDERR, "[sample] Firmy v databázi:\n");
+    $printSuppliers($suppliers);
+    exit(0);
+}
+
+if ($adminId === 0 || $suppliers === []) {
+    fwrite(STDERR, sprintf("[sample] Chybí předpoklady (admin: %d, firem: %d).\n", $adminId, count($suppliers)));
     fwrite(STDERR, "[sample] Spusť nejdřív interaktivní setup:\n         php api/bin/setup.php\n");
     exit(1);
 }
 
-// Guard: sample data se generují JEN do prázdné DB (stejně jako HTTP setup wizard).
+$byId = [];
+foreach ($suppliers as $row) {
+    $byId[(int) $row['id']] = $row;
+}
+
+if ($wantedSupplierId !== null) {
+    if (!isset($byId[$wantedSupplierId])) {
+        fwrite(STDERR, "[sample] Firma #$wantedSupplierId v databázi není. Na výběr je:\n");
+        $printSuppliers($suppliers);
+        exit(1);
+    }
+    $supplier = $byId[$wantedSupplierId];
+} elseif (count($suppliers) === 1) {
+    $supplier = $suppliers[0];
+} else {
+    // Víc firem a žádná volba: netipovat. Dřív se mlčky vzalo MIN(id) a data
+    // spadla do první založené firmy, i když prázdná byla úplně jiná.
+    $count = count($suppliers);
+    fwrite(STDERR, sprintf(
+        "[sample] V databázi jsou %d %s — vyber, do které se má generovat:\n",
+        $count,
+        $count < 5 ? 'firmy' : 'firem'
+    ));
+    $printSuppliers($suppliers);
+    exit(1);
+}
+
+$supplierId = (int) $supplier['id'];
+$supplierName = (string) $supplier['company_name'];
+
+// Guard: sample data se generují JEN do prázdné firmy (stejně jako HTTP setup wizard).
 // Bez něj druhý běh duplikoval klienty/doklady a padal na UNIQUE (cars.registration).
-$guard = $pdo->prepare(
-    'SELECT (SELECT COUNT(*) FROM clients          WHERE supplier_id = ?)
-          + (SELECT COUNT(*) FROM invoices         WHERE supplier_id = ?)
-          + (SELECT COUNT(*) FROM purchase_invoices WHERE supplier_id = ?)'
-);
-$guard->execute([$supplierId, $supplierId, $supplierId]);
-if ((int) $guard->fetchColumn() > 0) {
-    fwrite(STDERR, "[sample] Pro dodavatele #$supplierId už existují klienti nebo doklady —\n");
-    fwrite(STDERR, "         ukázková data lze generovat jen do prázdné DB.\n");
-    fwrite(STDERR, "         Nejdřív je odeber:\n");
+if ((int) $supplier['records'] > 0) {
+    fwrite(STDERR, "[sample] Firma #$supplierId ($supplierName) už má klienty nebo doklady —\n");
+    fwrite(STDERR, "         ukázková data lze generovat jen do prázdné firmy.\n");
+    $empty = array_values(array_filter($suppliers, static fn (array $r): bool => (int) $r['records'] === 0));
+    if ($empty !== []) {
+        fwrite(STDERR, "         Prázdné firmy, do kterých generovat lze:\n");
+        $printSuppliers($empty);
+    }
+    fwrite(STDERR, "         Nebo tuhle nejdřív vyprázdni:\n");
     fwrite(STDERR, "           php api/bin/reset.php --keep-users-supplier   (smaže jen byznys data)\n");
     fwrite(STDERR, "           php api/bin/reset.php                         (úplný reset)\n");
     fwrite(STDERR, "         nebo v aplikaci: Nastavení → Odebrat ukázková data.\n");
@@ -80,7 +162,7 @@ if ((int) $guard->fetchColumn() > 0) {
 echo "================================================\n";
 echo "  MyÚčto.cz — ROZŠÍŘENÁ UKÁZKOVÁ DATA\n";
 echo "================================================\n";
-echo "  Supplier:   #$supplierId\n";
+echo "  Supplier:   #$supplierId ($supplierName)\n";
 echo "  Admin:      #$adminId\n";
 echo "  Vygeneruje: 24 klientů, 12 dodavatelů, 120 vydaných + 120 přijatých faktur,\n";
 echo "              pokladnu se 7 doklady, sklad, e-shopové číselníky, majetek, banku a deník.\n";
