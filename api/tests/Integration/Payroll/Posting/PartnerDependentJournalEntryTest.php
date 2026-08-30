@@ -252,12 +252,17 @@ final class PartnerDependentJournalEntryTest extends TestCase
      * Kontrolní protipól: na VÝCHOZÍ sadě předkontací je zápis ve všech
      * částkách týž, ale příjem společníka končí na 522 a závazek na 366.
      *
-     * Test současně ukazuje, kde nastavovat NENÍ potřeba nic. Účty 342, 365
-     * a 524 zůstaly ve výchozí syntetické podobě a přesto se v deníku objeví
-     * jako 342.200 / 365.100 / 524.100 — {@see \MyInvoice\Service\Accounting\PostingService}
+     * Test současně ukazuje, kde nastavovat NENÍ potřeba nic. Účty 365 a 524
+     * zůstaly ve výchozí syntetické podobě a přesto se v deníku objeví jako
+     * 365.100 / 524.100 — {@see \MyInvoice\Service\Accounting\PostingService}
      * přesměruje syntetiku na její JEDINOU aktivní daňovou analytiku. U 522
      * a 366 žádná analytika není, takže se nepřesměruje nic a rozdíl proti
      * zápisu účetní zůstane.
+     *
+     * Daň už tenhle přesměrovací mechanismus neukazuje: od rozpadu srážkové
+     * daně (Ú-13) je výchozí předkontace rovnou analytika 342.100 (záloha na
+     * daň), takže není co přesměrovávat. Odměna společníka je záloha, ne daň
+     * zvláštní sazbou — proto 342.100, a nikoli 342.200.
      *
      * Bez tohohle testu by z prvního nešlo poznat, které nastavení sedící zápis
      * skutečně drží.
@@ -276,7 +281,7 @@ final class PartnerDependentJournalEntryTest extends TestCase
             [
                 '336.100|credit' => 143_600,
                 '336.200|credit' => 302_400,
-                '342.200|credit' => 67_500,
+                '342.100|credit' => 67_500,
                 '365.100|credit' => 88_600,
                 '366|credit' => 450_000,
                 '366|debit' => 450_000,
@@ -478,6 +483,10 @@ final class PartnerDependentJournalEntryTest extends TestCase
      * Analytiky, které směrná osnova nenese (521.100, 331.100, 342.200, 365.100,
      * 524.100). Bez nich by nastavení mezd ani nešlo uložit — validátor i
      * `PostingService` chtějí účet, který firma v osnově opravdu má.
+     *
+     * Zakládá se idempotentně: 342.200 od rozpadu srážkové daně (Ú-13) šablona
+     * osnovy sype sama, takže slepý INSERT padal na `uq_coa_supplier_code`.
+     * Test potřebuje jen jistotu, že analytika existuje — ne že ji zavedl on.
      */
     private function seedAnalyticAccounts(): void
     {
@@ -486,6 +495,9 @@ final class PartnerDependentJournalEntryTest extends TestCase
             'SELECT id, account_type, normal_side, tax_deductibility
                FROM chart_of_accounts
               WHERE supplier_id = ? AND account_code = ?',
+        );
+        $existing = $pdo->prepare(
+            'SELECT 1 FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?',
         );
         $insert = $pdo->prepare(
             'INSERT INTO chart_of_accounts
@@ -500,6 +512,10 @@ final class PartnerDependentJournalEntryTest extends TestCase
             '365.100' => 'Ostatní dluhy ke společníkům',
             '524.100' => 'Zákonné sociální pojištění',
         ] as $code => $name) {
+            $existing->execute([$this->supplierId, $code]);
+            if ($existing->fetchColumn() !== false) {
+                continue;
+            }
             $parent->execute([$this->supplierId, substr($code, 0, 3)]);
             $row = $parent->fetch(PDO::FETCH_ASSOC);
             self::assertIsArray($row, "Osnova nemá syntetiku " . substr($code, 0, 3) . '.');

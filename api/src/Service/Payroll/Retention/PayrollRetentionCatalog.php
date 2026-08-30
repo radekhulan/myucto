@@ -231,6 +231,7 @@ final class PayrollRetentionCatalog
                 'payroll_generated_documents',
                 'payroll_document_delivery_events',
                 'payroll_document_batch_items',
+                'payroll_annual_document_batch_items',
                 'payroll_annual_document_revisions',
                 'payroll_inputs',
                 'payroll_run_employments',

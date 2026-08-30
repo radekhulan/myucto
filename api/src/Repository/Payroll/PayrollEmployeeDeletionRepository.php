@@ -62,6 +62,7 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_annual_document_revisions',
                 'payroll_annual_document_sources',
                 'payroll_document_batch_items',
+                'payroll_annual_document_batch_items',
             ],
             'code' => 'payroll_employee_has_documents',
             'message' => 'Zaměstnanci už byla vydaná výplatní páska, mzdový list nebo roční '
