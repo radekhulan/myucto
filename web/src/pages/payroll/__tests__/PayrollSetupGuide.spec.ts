@@ -71,7 +71,10 @@ describe('PayrollSetupGuide', () => {
     expect(wrapper.text()).toContain('payroll.setup_guide.title')
 
     const destinations = wrapper.findAll('article a').map(link => link.attributes('data-to'))
-    expect(destinations).toContain('{"name":"payroll-settings","query":{"tab":"employer"}}')
+    // Kroky 1 a 2 sdílejí záložku, rozlišuje je kotva — bez ní průvodce dvakrát
+    // poslal uživatele na začátek téže stránky.
+    expect(destinations).toContain('{"name":"payroll-settings","query":{"tab":"employer"},"hash":"#payroll-employer-offices"}')
+    expect(destinations).toContain('{"name":"payroll-settings","query":{"tab":"employer"},"hash":"#payroll-employer-registration"}')
     expect(destinations).toContain('{"name":"payroll-settings","query":{"tab":"institutions"}}')
     expect(destinations).toContain('{"name":"payroll-settings","query":{"tab":"accounting"}}')
     expect(destinations).toContain('{"name":"payroll-people"}')

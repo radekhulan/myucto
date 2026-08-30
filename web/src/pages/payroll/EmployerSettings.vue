@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -45,9 +45,15 @@ const conflict = ref(false)
 const settings = ref<PayrollEmployerSettings | null>(null)
 const chartAccounts = ref<PayrollAccountOption[]>([])
 type SettingsTab = 'employer' | 'institutions' | 'accounting' | 'policies' | 'dimensions' | 'submissions'
-const initialTab = String(route.query.tab ?? '')
-const activeTab = ref<SettingsTab>(initialTab === 'submissions' ? 'submissions' : 'employer')
 const tabs: SettingsTab[] = ['employer', 'institutions', 'accounting', 'policies', 'dimensions', 'submissions']
+// `?tab=` musí platit pro KAŽDOU záložku, ne jen pro `submissions`. Dokud se
+// ostatní hodnoty tiše zahazovaly, průvodce prvním nastavením posílal kroky
+// „Platební účty institucí", „Předkontace mezd" i „Mzdová politika" na jednu a
+// tutéž úvodní záložku a vypadal rozbitě.
+const initialTab = String(route.query.tab ?? '')
+const activeTab = ref<SettingsTab>(
+  (tabs as string[]).includes(initialTab) ? initialTab as SettingsTab : 'employer',
+)
 
 type AccountKey = PayrollAccountKey
 type FormOffice = PayrollEmployerSettings['offices'][number] & {
@@ -461,7 +467,17 @@ function accountHelp(key: AccountKey): string {
   return payrollAccount(chartAccounts.value, form.accounts[key])?.name ?? ''
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // Skok na kotvu až po načtení: sekce se vykreslí teprve s daty, takže hned
+  // po připojení komponenty by cíl v DOM ještě nebyl a odkaz z průvodce by
+  // skončil na začátku stránky.
+  await nextTick()
+  const target = route.hash.slice(1)
+  if (target !== '') {
+    document.getElementById(target)?.scrollIntoView({ block: 'start' })
+  }
+})
 </script>
 
 <template>
@@ -559,6 +575,7 @@ onMounted(load)
 
       <section
         v-if="activeTab === 'employer'"
+        id="payroll-employer-registration"
         class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
       >
         <div class="mb-5">
@@ -650,6 +667,7 @@ onMounted(load)
 
       <section
         v-if="activeTab === 'employer'"
+        id="payroll-employer-offices"
         class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
       >
         <div class="mb-5 flex flex-wrap items-start justify-between gap-3">

@@ -80,8 +80,8 @@ const GROUPS: Group[] = [
     key: 'employer',
     accent: 'payroll',
     steps: [
-      { id: 'employer',      to: { name: 'payroll-settings', query: { tab: 'employer' } },     visible: () => auth.canRead('payroll.settings') },
-      { id: 'registrations', to: { name: 'payroll-settings', query: { tab: 'employer' } },     visible: () => auth.canRead('payroll.settings') },
+      { id: 'employer',      to: { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' },      visible: () => auth.canRead('payroll.settings') },
+      { id: 'registrations', to: { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-registration' }, visible: () => auth.canRead('payroll.settings') },
       { id: 'institutions',  to: { name: 'payroll-settings', query: { tab: 'institutions' } }, visible: () => auth.canRead('payroll.settings') },
       { id: 'posting',       to: { name: 'payroll-settings', query: { tab: 'accounting' } },   visible: () => auth.canRead('payroll.settings') },
       { id: 'policies',      to: { name: 'payroll-settings', query: { tab: 'policies' } },     visible: () => auth.canRead('payroll.settings') },

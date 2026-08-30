@@ -246,6 +246,35 @@ describe('EmployerSettings — účtová osnova', () => {
     wrapper.unmount()
   })
 
+  /**
+   * Průvodce prvním nastavením posílá jednotlivé kroky na konkrétní záložku.
+   * Dokud `?tab=` platilo jen pro `submissions`, spadly „Platební účty
+   * institucí", „Předkontace mezd" i „Mzdová politika" na úvodní záložku a
+   * průvodce vypadal, že kliká pořád na totéž.
+   */
+  it.each([
+    ['institutions', 1],
+    ['accounting', 2],
+    ['policies', 3],
+    ['dimensions', 4],
+  ])('otevře záložku %s podle query', async (tab, index) => {
+    m.routeQuery = { tab }
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.findAll('[role="tab"]')[index]!.attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('neznámou záložku z query ignoruje a zůstane na výchozí', async () => {
+    m.routeQuery = { tab: 'neexistuje' }
+
+    const wrapper = await mountPage()
+
+    expect(wrapper.findAll('[role="tab"]')[0]!.attributes('aria-selected')).toBe('true')
+    wrapper.unmount()
+  })
+
   it('načte i neaktivní účty pro validaci a nabízí jen aktivní účet správného typu', async () => {
     const wrapper = await mountPage()
     await openAccounting(wrapper)
