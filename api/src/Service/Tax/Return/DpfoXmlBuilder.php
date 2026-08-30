@@ -34,7 +34,7 @@ final class DpfoXmlBuilder
     /** field → Veta (int Kč jako string; da_dan16 se řeší zvlášť). */
     private const VETA_O = ['kc_prij6', 'kc_zd6', 'kc_zd6p', 'kc_zd7', 'kc_zakldan8', 'kc_zd9', 'kc_zd10', 'kc_uhrn', 'kc_ztrata2', 'kc_zakldan', 'kc_zakldan23'];
     private const VETA_S_INT = ['kc_op15_8', 'kc_op28_5', 'kc_op15_12', 'kc_op15_13', 'kc_op15_inpr', 'kc_op15_pece', 'kc_odcelk', 'kc_zdsniz', 'kc_zdzaokr'];
-    private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
+    private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'da_slezap', 'da_celod13', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
 
     /**
      * @param array<string,mixed> $supplier

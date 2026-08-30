@@ -312,6 +312,15 @@ final class DpfoReturnCalculator
             'kc_zdsniz' => $this->i($baseAfter15),
             'kc_zdzaokr' => (float) $roundedBase,
             'da_dan16' => round($tax16, 2), // 2 desetinná místa dle XSD
+            // ř.58 a ř.60 oddílu 4. Zjištěno pokusem proti zkušebnímu EPO 30. 8. 2026:
+            // `da_dan16` samo nestačí, EPO hlásilo „daň podle § 16 má být vyplněna"
+            // i s ním. ř.58 přebírá daň z ř.57, nebo — máme-li Přílohu 3 — částku
+            // z jejího ř.330; tu zatím neumíme, takže se přenáší ř.57 a EPO na to
+            // má vlastní kontrolu („Příloha č.3 není vyplněna a hodnota ř.58 se
+            // nerovná hodnotě ř.57"). ř.60 je táž daň zaokrouhlená na celé koruny
+            // nahoru.
+            'da_slezap' => round($tax16, 2),
+            'da_celod13' => (float) (int) ceil($tax16),
             'kc_op15_1a' => $this->i($creditTaxpayer),
             'kc_op15_1c' => $this->i($creditSpouse),
             'kc_op15_1d' => $this->i($creditDisability12),

@@ -506,4 +506,18 @@ final class DpfoReturnCalculatorTest extends TestCase
         $r = $this->calcRun([]);
         self::assertNull($r['bank_account']);
     }
+
+    /**
+     * ř.58 a ř.60 oddílu 4. Zjištěno pokusem proti zkušebnímu EPO 30. 8. 2026:
+     * se samotným `da_dan16` úřad hlásil „daň podle § 16 zákona má být vyplněna"
+     * i „daň celkem zaokrouhlená na celé Kč nahoru má být vyplněna". Teprve
+     * s těmito dvěma atributy obě výtky zmizely.
+     */
+    public function testSection4CarriesTaxToLines58And60(): void
+    {
+        $r = $this->calcRun(['activities' => [['income' => 480000.0, 'expense_mode' => 'pausal', 'expense_rate' => 60]]]);
+
+        self::assertSame($r['fields']['da_dan16'], $r['fields']['da_slezap']);
+        self::assertSame((float) (int) ceil($r['fields']['da_dan16']), $r['fields']['da_celod13']);
+    }
 }
