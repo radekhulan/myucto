@@ -20,7 +20,10 @@ use PDO;
  */
 final class InvoiceRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
 
     /**
      * Cache existence sloupce income_tax_exempt (migrace 0087). Instalace nasazená
@@ -1473,18 +1476,25 @@ final class InvoiceRepository
         //   Klasifikační kód: CZ klient → '1'/'2'/'3' (tuzemsko podle sazby)
         //                     EU klient s 0% → '22' (služby), non-EU s 0% → '26' (vývoz)
         $metaStmt = $pdo->prepare(
-            'SELECT i.reverse_charge, i.discount_percent, i.language, co.iso2
+            'SELECT i.reverse_charge, i.discount_percent, i.language, co.iso2,
+                    COALESCE(i.tax_date, i.issue_date) AS doc_date
                FROM invoices i
                JOIN clients c    ON c.id  = i.client_id
                JOIN countries co ON co.id = c.country_id
               WHERE i.id = ?'
         );
         $metaStmt->execute([$invoiceId]);
-        $meta = $metaStmt->fetch(PDO::FETCH_ASSOC) ?: ['reverse_charge' => 0, 'discount_percent' => 0, 'language' => 'cs', 'iso2' => 'CZ'];
+        $meta = $metaStmt->fetch(PDO::FETCH_ASSOC) ?: ['reverse_charge' => 0, 'discount_percent' => 0, 'language' => 'cs', 'iso2' => 'CZ', 'doc_date' => null];
         $reverseCharge = (bool) $meta['reverse_charge'];
         $countryIso = (string) ($meta['iso2'] ?? 'CZ');
         $discountPercent = self::clampDiscountPercent($meta['discount_percent'] ?? 0);
         $language = (string) ($meta['language'] ?? 'cs');
+        // Základní sazba pro ROK DOKLADU z číselníku daňových konstant — určuje, kdy sazba
+        // na řádku znamená „tuzemská základní" (ř. 1) a kdy sníženou (ř. 2). Shodně
+        // s přijatou stranou ({@see PurchaseInvoiceRepository::replaceItems()}); natvrdo
+        // 21 by po změně § 47 ZDPH tiše přeřadilo celý doklad na špatný řádek přiznání.
+        $docYear = !empty($meta['doc_date']) ? (int) substr((string) $meta['doc_date'], 0, 4) : (int) date('Y');
+        $standardRate = $this->taxConstants->vatRateStandard($docYear);
 
         // Slevu agregujeme po (vat_rate_id, vat_rate_snapshot, code) — báze = součet
         // round(qty*price, 2) jednotlivých řádků (stejné zaokrouhlení jako InvoiceMath).
@@ -1516,6 +1526,7 @@ final class InvoiceRepository
                     $reverseCharge,
                     $countryIso,
                     (string) ($item['unit'] ?? '') ?: null,
+                    $standardRate,
                 ),
             };
             $assetId = self::positiveIdOrNull($item['asset_id'] ?? null);
@@ -1779,15 +1790,20 @@ final class InvoiceRepository
      * položky (`$unit`): fyzikální míra (kg/l/m…) → '20', časová (h/den…) → '22';
      * bez signálu ('ks'/neznámé) statistický default '22'. Sdílená logika s
      * VatClassificationDefaulter::classifyUnitsGoodsVsServices.
+     *
+     * `$standardRate` je základní sazba § 47 ZDPH pro ROK DOKLADU z číselníku daňových
+     * konstant ({@see TaxConstantsRepository::vatRateStandard()}) a NEMÁ výchozí hodnotu
+     * ZÁMĚRNĚ: dřívější default 21 znamenal, že volající, který kontext roku nepředal,
+     * dostal tiše správnou odpověď jen do nejbližší změny sazby — a pak by přeřadil
+     * plnění na špatný řádek přiznání, aniž by cokoli spadlo. Povinný parametr nutí
+     * každé nové volání sáhnout do číselníku; hlídá to `SaleClassificationRateSourceTest`.
      */
     public static function defaultSaleClassificationCode(
         float $rate,
         bool $reverseCharge,
-        ?string $clientCountryIso2 = null,
-        ?string $unit = null,
-        // Základní sazba pro rok dokladu (číselník daňových konstant). Default 21 drží
-        // zpětnou kompatibilitu pro volání bez kontextu (CLI backfill, staré testy).
-        float $standardRate = 21.0,
+        ?string $clientCountryIso2,
+        ?string $unit,
+        float $standardRate,
     ): ?string {
         $r = (int) round($rate);
         $std = (int) round($standardRate);

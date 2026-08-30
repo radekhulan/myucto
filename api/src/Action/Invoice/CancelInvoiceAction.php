@@ -10,6 +10,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
 use MyInvoice\Service\Accounting\Cash\CashException;
@@ -56,6 +57,7 @@ final class CancelInvoiceAction
         private readonly AdvanceCycleLock $cycleLock,
         private readonly InvoiceAssetSaleService $assetSale,
         private readonly CashSettlementService $cashSettlement,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -321,6 +323,23 @@ final class CancelInvoiceAction
             ? $sourcePeriod
             : null;
 
+        // Auto-klasifikace legacy položek bez kódu potřebuje kontext dokladu: základní sazbu
+        // § 47 ZDPH pro ROK DOBROPISU (vystavuje se k CURDATE(), viz INSERT níž) a zemi
+        // odběratele. Natvrdo 21 by po změně sazby přeřadilo plnění na špatný řádek přiznání
+        // a chybějící země by zahraničnímu klientovi dosadila tuzemský kód.
+        $standardRate = $this->taxConstants->vatRateStandard((int) date('Y'));
+        $clientCountryIso2 = null;
+        if (!empty($invoice['client_id'])) {
+            $countryStmt = $pdo->prepare(
+                'SELECT co.iso2 FROM clients c
+              LEFT JOIN countries co ON co.id = c.country_id
+                  WHERE c.id = ?'
+            );
+            $countryStmt->execute([(int) $invoice['client_id']]);
+            $iso = strtoupper(trim((string) ($countryStmt->fetchColumn() ?: '')));
+            $clientCountryIso2 = $iso !== '' ? $iso : null;
+        }
+
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
@@ -379,6 +398,9 @@ final class CancelInvoiceAction
                     ?? \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode(
                         (float) $item['vat_rate_snapshot'],
                         (bool) ($invoice['reverse_charge'] ?? false),
+                        $clientCountryIso2,
+                        (string) ($item['unit'] ?? '') ?: null,
+                        $standardRate,
                     );
                 $params = [
                     $creditNoteId,

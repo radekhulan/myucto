@@ -8,6 +8,7 @@ use DOMDocument;
 use DOMElement;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 
 /**
  * Stereo for Windows DocumentPack exporter for issued invoices.
@@ -27,7 +28,10 @@ final class StereoXmlExporter
         ?StereoVatTypeResolver $vatTypeResolver = null,
     ) {
         $this->dataResolver = $dataResolver ?? new InvoiceExportDataResolver($db);
-        $this->vatTypeResolver = $vatTypeResolver ?? new StereoVatTypeResolver();
+        // Resolver potřebuje číselník daňových konstant (základní sazba pro rok dokladu).
+        // Volitelné class-parametry PHP-DI neautowiruje, takže se repozitář sestaví
+        // z už injektovaného Connection — stejná instance, žádná další vazba v kontejneru.
+        $this->vatTypeResolver = $vatTypeResolver ?? new StereoVatTypeResolver(new TaxConstantsRepository($db));
     }
 
     /**

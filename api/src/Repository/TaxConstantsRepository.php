@@ -124,6 +124,17 @@ final class TaxConstantsRepository
     }
 
     /**
+     * Přirážka k repo sazbě ČNB u zákonného úroku z prodlení (NV č. 351/2013 Sb., § 2),
+     * v procentních bodech. Roky mimo číselník spadnou na nejbližší známý rok — přirážka
+     * je 8 bodů beze změny od 1. 7. 2013, tedy pro celou dobu, kterou pokrývají repo sazby.
+     */
+    public function penaltyRepoSurchargePoints(int $year): float
+    {
+        return (float) ($this->forYear($year)['penalty_repo_surcharge_points']
+            ?? \MyInvoice\Service\Penalty\PenaltyInterestCalculator::SURCHARGE_POINTS);
+    }
+
+    /**
      * Práh pro bucket "základní vs snížená sazba" (EPO formuláře mají právě dva
      * sloupce zakl_dane1/zakl_dane2) = střed mezi sazbami daného roku. Pro 21/12 %
      * je to 16,5 — řadí korektně i historickou sníženou 15 % (< 16,5 → snížená),

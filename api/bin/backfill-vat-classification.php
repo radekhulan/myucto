@@ -33,6 +33,11 @@ $force  = in_array('--force', $argv, true);
 $app = \MyInvoice\Bootstrap::buildApp();
 $container = $app->getContainer();
 $pdo = $container->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo();
+// Základní sazba § 47 ZDPH podle ROKU DOKLADU z číselníku daňových konstant — backfill
+// sahá do historie, takže dnešní sazba je pro starý doklad špatná odpověď (symetricky
+// s backfill-vat-classification-invoices.php na vystavené straně).
+$taxConstants = $container->get(\MyInvoice\Repository\TaxConstantsRepository::class);
+$standardRateByYear = [];
 
 // JOIN přes vendor → země pro správný code (EU → '24', non-EU → '25', CZ → '40'/'41' atd.)
 // Bez --force: jen NULL řádky. S --force: všechny (porovná derived vs current, přepíše rozdíly).
@@ -40,6 +45,7 @@ $whereCode = $force ? "" : "AND pii.vat_classification_code IS NULL";
 $stmt = $pdo->query(
     "SELECT pii.id, pii.purchase_invoice_id, pii.vat_rate_snapshot, pii.vat_classification_code AS current_code,
             pi.supplier_id, pi.vendor_invoice_number, pi.status, pi.reverse_charge,
+            COALESCE(pi.tax_date, pi.issue_date) AS doc_date,
             co.iso2 AS vendor_country
        FROM purchase_invoice_items pii
        JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
@@ -68,10 +74,13 @@ $skipped = 0;
 foreach ($items as $it) {
     $rate = (float) $it['vat_rate_snapshot'];
     $current = $it['current_code'];
+    $docYear = !empty($it['doc_date']) ? (int) substr((string) $it['doc_date'], 0, 4) : (int) date('Y');
+    $standardRateByYear[$docYear] ??= $taxConstants->vatRateStandard($docYear);
     $derived = \MyInvoice\Repository\PurchaseInvoiceRepository::defaultClassificationCode(
         $rate,
         (bool) $it['reverse_charge'],
         (string) $it['vendor_country'],
+        $standardRateByYear[$docYear],
     );
 
     // Pokud derived == current, nic neměníme (i s --force)

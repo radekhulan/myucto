@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Import;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\ProjectRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
@@ -151,6 +152,7 @@ final class InvoiceImportService
         private readonly VatRateResolver $vatRateResolver,
         private readonly OssRateCodebook $codebook,
         private readonly OssItemPlanner $planner,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     /**
@@ -1557,6 +1559,12 @@ final class InvoiceImportService
                         $reverseCharge,
                         $this->classificationCountry($client, $rate),
                         $unit !== '' ? $unit : null,
+                        // Základní sazba § 47 ZDPH pro ROK DUZP importovaného dokladu, ne
+                        // pro dnešek: import běžně nese doklady z minulého období a natvrdo
+                        // 21 by po změně sazby přeřadil plnění na špatný řádek přiznání.
+                        $this->taxConstants->vatRateStandard(
+                            (int) substr((string) ($taxDate ?: date('Y-m-d')), 0, 4)
+                        ),
                     );
             }
 

@@ -479,6 +479,20 @@ return [
     // `delivery_channel = 'employee_portal'` s potvrzeným `delivery_verified_on`,
     // volba osoby `secure_delivery_channel = 'portal'` a existující primární e-mail.
     'payroll' => [
+        // ⚠️ OSTRÝ MZDOVÝ PROVOZ. Výchozí `false` drží mzdy v testovacím režimu:
+        // výpočty, doklady a podání do testovacího prostředí fungují, ale
+        // ZAMČENÉ zůstávají mzdové platební příkazy a ostré transporty na ČSSZ,
+        // zdravotní pojišťovny a finanční správu.
+        //
+        // `true` je odemkne VŠECHNY. Je to vědomé rozhodnutí provozovatele, ne
+        // konfigurační drobnost: od té chvíle odcházejí podání úřadům doopravdy
+        // a platební příkazy míří na skutečné účty. Zapínat jen na instalaci,
+        // kde to má někdo otestovat nebo ostře používat — a vědět o tom.
+        //
+        // Stav se propisuje do `/api/payroll/module/state` (klíč `released`),
+        // takže je v aplikaci vidět, jestli je brána otevřená.
+        'production_released' => false,
+
         'secure_delivery' => [
             'enabled'                      => false,  // hlavní vypínač odchozí cesty k zaměstnanci
             'link_ttl_days'                => 30,     // jak dlouho odkaz žije (1–90)

@@ -47,6 +47,7 @@ final class DphBookBuilderTest extends TestCase
             $conn,
             new Section74bCorrectionRepository($conn),
             new ActivityLogger($conn),
+            $taxConstants,
         );
         $this->builder = new DphBookBuilder($conn, new VatLedgerService($conn, $taxConstants), $taxConstants, $this->section74b);
     }

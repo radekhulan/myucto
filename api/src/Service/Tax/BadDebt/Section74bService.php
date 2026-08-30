@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\BadDebt;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Section74bCorrectionRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\ActivityLogger;
 
 /**
@@ -61,6 +62,7 @@ final class Section74bService
         private readonly Connection $db,
         private readonly Section74bCorrectionRepository $ledger,
         private readonly ActivityLogger $logger,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     /**
@@ -327,12 +329,6 @@ final class Section74bService
     }
 
     /**
-     * Práh rozdělení sazby DPH na ř. 40 (základní 21 %) vs. ř. 41 (snížená 12 %). §74b se
-     * uplatní od 1. 1. 2025, kdy existují jen sazby 21 % a 12 % — práh 16,5 % je čistě odděluje.
-     */
-    private const BASIC_RATE_THRESHOLD = 16.5;
-
-    /**
      * EVIDOVANÉ korekce §74b za dané zdaňovací období, rozpadlé podle sazby DPH — podklad pro
      * napojení do DPHDP3 (ř. 34 + ř. 40/41) a KH (B.2, zdph_44='P'). Čte LEDGER (ne dry-run):
      * korekce se do přiznání promítne teprve po vědomém "zaevidování období" ({@see recordAging()}).
@@ -364,6 +360,14 @@ final class Section74bService
         $oprDluz = 0.0;
         $byInvoice = [];
         $bucketCache = [];
+        // Práh dělící ř. 40 (základní sazba) od ř. 41 (snížená) se NEURČUJE konstantou, ale
+        // odvozuje ze sazeb daného roku — střed mezi základní a sníženou
+        // ({@see TaxConstantsRepository::vatBucketThreshold()}, tentýž zdroj jako DPHDP3
+        // a KH). Natvrdo 16,5 platilo jen „dokud existují 21 a 12"; po změně kterékoli
+        // sazby by tiše zařadilo korekci na špatný řádek. Rok bere z OBDOBÍ korekce, ne
+        // z roku původního dokladu — sazba na řádku je snapshot dokladu, ale řádek
+        // přiznání se plní ve formuláři TOHOTO období.
+        $bucket = $this->taxConstants->vatBucketThreshold($year);
 
         foreach ($movements as $m) {
             $claimed  = (float) $m['claimed_deduction_vat'];
@@ -383,7 +387,7 @@ final class Section74bService
             foreach ($bucketCache[$invoiceId] as $bk) {
                 $baseCorr = round($bk['base'] * $fraction, 2);
                 $vatCorr  = round($bk['claimed_vat'] * $fraction, 2);
-                if ($bk['rate'] >= self::BASIC_RATE_THRESHOLD) {
+                if ($bk['rate'] >= $bucket) {
                     $b21 += $baseCorr; $v21 += $vatCorr;
                 } else {
                     $b12 += $baseCorr; $v12 += $vatCorr;

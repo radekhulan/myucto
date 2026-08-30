@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Penalty;
 
 use DateTimeImmutable;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Penalty\PenaltyInterestCalculator;
 use MyInvoice\Service\Penalty\RepoRateProvider;
 use PHPUnit\Framework\TestCase;
@@ -29,7 +30,12 @@ final class PenaltyInterestCalculatorTest extends TestCase
                 return $this->rates[$date->format('Y-m-d')] ?? null;
             }
         };
-        return new PenaltyInterestCalculator($provider);
+        // Přirážka je roční daňová konstanta; testy fixují 8 bodů podle § 2 NV 351/2013,
+        // aby ověřovaly VÝPOČET, ne obsah číselníku.
+        $taxConstants = $this->createStub(TaxConstantsRepository::class);
+        $taxConstants->method('penaltyRepoSurchargePoints')->willReturn(8.0);
+
+        return new PenaltyInterestCalculator($provider, $taxConstants);
     }
 
     public function testSingleHalfYearNonLeap(): void

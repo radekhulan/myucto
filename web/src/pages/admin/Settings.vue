@@ -48,8 +48,8 @@ function syncSupplierStore(s: Supplier) {
 
 const supplier = ref<Supplier | null>(null)
 const loading = ref(true)
-type SettingsTab = 'company' | 'documents' | 'accounting' | 'advanced'
-const tabs: SettingsTab[] = ['company', 'documents', 'accounting', 'advanced']
+type SettingsTab = 'company' | 'documents' | 'accounting'
+const tabs: SettingsTab[] = ['company', 'documents', 'accounting']
 // Na záložku se dá odkázat zvenčí (?tab=accounting) — odjinud v aplikaci sem
 // vedou rady typu „zapněte účetnictví v Nastavení", a ty musí skončit u toho
 // přepínače, ne na první záložce.
@@ -59,8 +59,14 @@ const tabs: SettingsTab[] = ['company', 'documents', 'accounting', 'advanced']
 // z jiné záložky TÉHOŽ Nastavení neudělal nic — routa se nemění, komponenta se
 // nepřemountuje a jednorázové čtení při setupu už dávno proběhlo.
 function tabFromQuery(q: unknown): SettingsTab {
-  const v = String(q ?? '') as SettingsTab
-  return tabs.includes(v) ? v : 'company'
+  const v = String(q ?? '')
+  // Záložka „Pokročilé" zanikla a její obsah je dole v „Daně a účetnictví".
+  // Starý odkaz proto nesmí spadnout na výchozí kartu firmy — poslal by
+  // uživatele úplně jinam, než kam mířil.
+  if (v === 'advanced') {
+    return 'accounting'
+  }
+  return tabs.includes(v as SettingsTab) ? v as SettingsTab : 'company'
 }
 const tab = ref<SettingsTab>(tabFromQuery(router.currentRoute.value.query.tab))
 
@@ -1535,7 +1541,7 @@ function vatCollisionLabel(c: VatStatusCollision): string {
       </section>
 
       <!-- Pohoda XML export config (volitelné) — samostatný box -->
-      <section v-if="tab === 'advanced'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+      <section v-if="tab === 'accounting'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-4">{{ t('settings.pohoda_section') }}</h2>
         <div>
           <h3 class="sr-only">{{ t('settings.pohoda_section') }}</h3>
@@ -1567,7 +1573,7 @@ function vatCollisionLabel(c: VatStatusCollision): string {
       </section>
 
       <!-- Ukázková data — jen pokud nějaká evidovaná existují (issue #162) -->
-      <section v-if="tab === 'advanced' && sampleStatus?.has" class="bg-surface border border-warning-500/40 rounded-lg p-5 shadow-sm">
+      <section v-if="tab === 'accounting' && sampleStatus?.has" class="bg-surface border border-warning-500/40 rounded-lg p-5 shadow-sm">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-warning-600 mb-2">{{ t('settings.sample_data.title') }}</h2>
         <p class="text-sm text-neutral-600 mb-1">{{ t('settings.sample_data.description') }}</p>
         <p v-if="sampleSummaryLine" class="text-xs text-neutral-500 mb-4">{{ t('settings.sample_data.contains') }}: {{ sampleSummaryLine }}</p>

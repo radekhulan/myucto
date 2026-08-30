@@ -5451,6 +5451,7 @@
         "income_tax": "Záloha na daň ze závislé činnosti",
         "withholding_tax": "Srážková daň ze závislé činnosti",
         "other_deductions": "Ostatní srážky ze mzdy",
+        "enforcement_deductions": "Exekuční a insolvenční srážky",
         "partner_settlement": "Zápočet na účet společníka",
         "risky_savings": "Povinné spoření u rizikové práce",
         "employee_receivable": "Pohledávka za zaměstnancem",
@@ -5538,7 +5539,8 @@
         "risky_savings": "Zákonný příspěvek zaměstnavatele na spoření na stáří u rizikové práce (4 % vyměřovacího základu od 1. 1. 2026). Zaměstnanci se nevyplácí, posílá se penzijní společnosti — proto zákonný sociální náklad (527) proti jinému závazku (379), ne pojistné na 336.",
         "employee_receivable": "Kam se překlopí záporná čistá mzda — typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",
         "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
-        "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou."
+        "travel_expense": "Cestovní náhrada je náhrada výdaje podle části sedmé zákoníku práce, ne odměna za práci — do mzdových nákladů nepatří. Protiúčtem zůstává závazkový účet pracovního vztahu, protože se náhrada vyplácí spolu se mzdou.",
+        "enforcement_deductions": "Srážky nařízené soudem, exekutorem nebo insolvenčním správcem. Oddělené od ostatních srážek proto, že se u nich vede pořadí pohledávek a posílají se jinému příjemci než dobrovolné srážky — na společném účtu se saldo obou skupin slije a nejde dohledat."
       }
     },
     "status": {
@@ -14344,7 +14346,6 @@
     "tab_company": "Údaje firmy",
     "tab_documents": "Fakturace",
     "tab_accounting": "Daně a účetnictví",
-    "tab_advanced": "Pokročilé",
     "documents_section": "Fakturace a e-maily",
     "supplier": "Dodavatel",
     "currencies_banks": "Měny + bankovní účty",

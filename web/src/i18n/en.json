@@ -5451,6 +5451,7 @@
         "income_tax": "Advance income tax on employment",
         "withholding_tax": "Withholding tax on employment",
         "other_deductions": "Other payroll deductions",
+        "enforcement_deductions": "Garnishment and insolvency deductions",
         "partner_settlement": "Set-off against shareholder account",
         "risky_savings": "Risk-work retirement savings",
         "employee_receivable": "Receivable from the employee",
@@ -5538,7 +5539,8 @@
         "risky_savings": "Statutory employer contribution to retirement savings for risk work (4% of the assessment base from 1 January 2026). It is not paid to the employee but remitted to the pension company, so it is a statutory social expense (527) against other payables (379), not insurance on 336.",
         "employee_receivable": "Where a negative net wage is reclassified — typically health insurance topped up to the minimum assessment base in a month with no cash income. The employee owes the employer, so this is a receivable (335), not a payable.",
         "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
-        "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage."
+        "travel_expense": "A travel allowance reimburses an expense under Part Seven of the Labour Code; it is not remuneration for work and does not belong in wage expenses. The contra account stays the payable account of the employment relationship, because the allowance is paid together with the wage.",
+        "enforcement_deductions": "Deductions ordered by a court, a bailiff or an insolvency administrator. Kept apart from other deductions because they carry a claim ranking and go to a different recipient than voluntary deductions — on a shared account the two balances merge and cannot be traced."
       }
     },
     "status": {
@@ -14344,7 +14346,6 @@
     "tab_company": "Company details",
     "tab_documents": "Invoicing",
     "tab_accounting": "Tax and accounting",
-    "tab_advanced": "Advanced",
     "documents_section": "Invoicing and emails",
     "supplier": "Supplier",
     "currencies_banks": "Currencies + bank accounts",

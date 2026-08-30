@@ -65,7 +65,7 @@ final class InvoiceImportReportTest extends TestCase
     {
         self::assertSame(
             '1',
-            InvoiceRepository::defaultSaleClassificationCode(23.0, false, $country, 'kg'),
+            InvoiceRepository::defaultSaleClassificationCode(23.0, false, $country, 'kg', 21.0),
             'polských 23 % dostane tuzemský kód „1" se zemí i bez ní — kód místo plnění neřeší',
         );
     }
@@ -84,7 +84,7 @@ final class InvoiceImportReportTest extends TestCase
 
         self::assertNull($country, 'B2C spotřebitel bez DIČ zemi do klasifikace nedostane');
         self::assertNull(
-            InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg'),
+            InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg', 21.0),
             'kód „20" by doklad poslal do souhrnného hlášení, ačkoli odběratel DIČ nemá',
         );
     }
@@ -112,7 +112,7 @@ final class InvoiceImportReportTest extends TestCase
         $country = $this->call('classificationCountry', $business, 0.0);
 
         self::assertSame('PL', $country);
-        self::assertSame($expected, InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, $unit));
+        self::assertSame($expected, InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, $unit, 21.0));
     }
 
     /**
@@ -125,9 +125,9 @@ final class InvoiceImportReportTest extends TestCase
         $country = $this->call('classificationCountry', new OssClientContext('US', false, null), 0.0);
 
         self::assertSame('US', $country);
-        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg'));
-        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'h'));
-        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'ks'));
+        self::assertSame('26', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'kg', 21.0));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'h', 21.0));
+        self::assertSame('26s', InvoiceRepository::defaultSaleClassificationCode(0.0, false, $country, 'ks', 21.0));
     }
 
     /** Neznámá země se nedomýšlí ani tady — `defaultSaleClassificationCode` má vlastní default. */

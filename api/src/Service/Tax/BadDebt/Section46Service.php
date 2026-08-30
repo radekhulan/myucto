@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\BadDebt;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Section46CorrectionRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\ActivityLogger;
 
 /**
@@ -74,13 +75,11 @@ final class Section46Service
     /** Právní důvody podle § 46 odst. 1. */
     public const LEGAL_GROUNDS = ['insolvency', 'execution', 'death', 'liquidation', 'small_receivable'];
 
-    /** Práh oddělující základní sazbu (ř. 1) od snížené (ř. 2). */
-    private const BASIC_RATE_THRESHOLD = 16.5;
-
     public function __construct(
         private readonly Connection $db,
         private readonly Section46CorrectionRepository $ledger,
         private readonly ActivityLogger $logger,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     /**
@@ -296,6 +295,14 @@ final class Section46Service
         $oprVerit = 0.0;
         $byInvoice = [];
         $bucketCache = [];
+        // Práh dělící ř. 1 (základní sazba) od ř. 2 (snížená) se NEURČUJE konstantou, ale
+        // odvozuje ze sazeb daného roku — střed mezi základní a sníženou
+        // ({@see TaxConstantsRepository::vatBucketThreshold()}, stejný zdroj jako přiznání
+        // a KH). Natvrdo 16,5 platilo jen „dokud existují 21 a 12": po změně kterékoli
+        // sazby by mlčky zařadilo plnění na špatný řádek. Rok bere z OBDOBÍ korekce,
+        // ne z roku původního dokladu — sazba na řádku je snapshot dokladu, ale řádek
+        // přiznání se plní ve formuláři TOHOTO období.
+        $bucket = $this->taxConstants->vatBucketThreshold($year);
 
         foreach ($movements as $m) {
             $outputVat = (float) $m['output_vat'];
@@ -314,7 +321,7 @@ final class Section46Service
             foreach ($bucketCache[$invoiceId] as $bk) {
                 $baseCorr = round($bk['base'] * $fraction, 2);
                 $vatCorr  = round($bk['vat'] * $fraction, 2);
-                if ($bk['rate'] >= self::BASIC_RATE_THRESHOLD) {
+                if ($bk['rate'] >= $bucket) {
                     $b21 += $baseCorr; $v21 += $vatCorr;
                 } else {
                     $b12 += $baseCorr; $v12 += $vatCorr;

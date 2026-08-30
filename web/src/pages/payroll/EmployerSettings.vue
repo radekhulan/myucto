@@ -420,6 +420,7 @@ const ACCOUNT_ROW_HINTS: ReadonlySet<string> = new Set([
   'non_deductible_benefit',
   'travel_expense',
   'withholding_tax',
+  'enforcement_deductions',
 ])
 
 function accountRowHint(key: string): string {

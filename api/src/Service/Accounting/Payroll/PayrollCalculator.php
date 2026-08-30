@@ -11,6 +11,14 @@ namespace MyInvoice\Service\Accounting\Payroll;
  * `$c` = roční konstanty z {@see \MyInvoice\Repository\TaxConstantsRepository::forExactYear()},
  * mzdové sazby v podklíči `payroll`.
  *
+ * ── Odkud jsou mzdové hodnoty ───────────────────────────────────────────────
+ * Sazby pojistného a zálohové daně (`payroll`), minimální mzda, měsíční hranice
+ * § 38h odst. 2 a rozhodný příjem pocházejí pro ročníky s mzdovým rulesetem
+ * z NĚJ — {@see \MyInvoice\Service\Tax\TaxConstants::withPayrollRulesetConstants()}
+ * je do roční sady zrcadlí, takže modul Mzdy i tahle starší rekapitulace počítají
+ * z jedné sady čísel. Dřív měl každý svoji a nic je nedrželo pohromadě. Rozhraní
+ * se tím nemění: pořád se čte z `$c`, jen za těmi čísly stojí jiný zdroj.
+ *
  * ── Proč se počítá a neukládá do šablony ────────────────────────────────────
  * Doplatek zdravotního pojištění do minimálního vyměřovacího základu závisí na
  * minimální mzdě, takže se každý rok mění. Šablona s pevnými částkami by po
@@ -425,6 +433,11 @@ final class PayrollCalculator
      * `credit_taxpayer` a `child_credits` v {@see \MyInvoice\Service\Tax\TaxConstants}
      * jsou ROČNÍ částky (slouží i DPFO výpočtu OSVČ) — u závislé činnosti se uplatňují
      * měsíčně jako 1/12 (§38h odst. 4 ZDP), proto dělení tady.
+     *
+     * Právě proto tyhle dvě konstanty zůstaly v `TaxConstants` a nezrcadlí se
+     * z mzdového rulesetu jako sazby: čte je i daňová část a jejich per-klíč
+     * override je živá funkce číselníku. Že nesou tutéž zákonnou částku jako
+     * měsíční parametry rulesetu, hlídá `TaxConstantsPayrollRatesMatchRulesetTest`.
      *
      * @param array<string,mixed> $c roční konstanty (TaxConstantsRepository::forExactYear)
      * @return array{taxpayer:int, children:int, total:int}

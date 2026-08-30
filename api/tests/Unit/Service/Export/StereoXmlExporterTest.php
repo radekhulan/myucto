@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Unit\Service\Export;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Export\StereoVatTypeResolver;
 use MyInvoice\Service\Export\StereoXmlExporter;
 use PHPUnit\Framework\TestCase;
 
@@ -19,7 +21,11 @@ final class StereoXmlExporterTest extends TestCase
         $repo = (new \ReflectionClass(InvoiceRepository::class))->newInstanceWithoutConstructor();
         /** @var Connection $db */
         $db = (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor();
-        $this->exporter = new StereoXmlExporter($repo, $db);
+        // Auto-klasifikace legacy řádku bez kódu sahá pro základní sazbu do číselníku
+        // daňových konstant — testovací Connection nemá PDO, takže resolver dostane stub.
+        $tax = $this->createStub(TaxConstantsRepository::class);
+        $tax->method('vatRateStandard')->willReturn(21.0);
+        $this->exporter = new StereoXmlExporter($repo, $db, null, new StereoVatTypeResolver($tax));
     }
 
     public function testLineNetUsesTaxableBaseWithoutVat(): void

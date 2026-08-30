@@ -4,32 +4,37 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Export;
 
+use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
+
 /**
  * Resolves MyInvoice VAT classification codes to Stereo TypeOfVAT metadata.
  *
- * First iteration is intentionally hard-coded. The source of truth is the
- * invoice item classification; invoice header and conservative sale defaults
- * are used only as fallbacks.
+ * Zdrojem pravdy je klasifikace položky, hlavička dokladu je fallback. Chybí-li
+ * obojí (legacy řádky), dopočítá se stejným defaultem jako všude jinde —
+ * {@see InvoiceRepository::defaultSaleClassificationCode()}. Vlastní kopie té
+ * logiky tu BÝVALA (prahy `>= 21` a `5..15` natvrdo) a fungovala jen náhodou:
+ * dvě sazby, ze kterých snížená 12 % spadla do 5–15. Druhá kopie klasifikace je
+ * horší než zadrátovaná konstanta, protože se rozejde tiše — proto se sem
+ * nevrací a základní sazba se bere z číselníku podle roku dokladu.
  */
 final class StereoVatTypeResolver
 {
     /** @var array<string, string> */
     private const TYPE_OF_VAT_BY_CLASSIFICATION_CODE = [
         '1' => 'U',      // Tuzemské plnění, základní sazba
+        '1M' => 'U',     // Totéž + prodej dlouhodobého majetku (§ 76/4 — jen koeficient)
         '2' => 'U',      // Tuzemské plnění, snížená sazba
+        '2M' => 'U',     // Totéž + prodej dlouhodobého majetku
         '3' => 'UO',     // Tuzemské osvobozené plnění
         '20' => 'IDZ',   // Dodání zboží do jiného členského státu
         '22' => 'UVSP',  // Poskytnutí služby s místem plnění mimo tuzemsko
         '25S' => 'URP',  // Tuzemský režim přenesení daňové povinnosti
         '26' => 'UV',    // Vývoz zboží
+        '26S' => 'UVSP', // Služba s místem plnění mimo tuzemsko, 3. země (§ 9/1, ř. 26)
     ];
 
-    /** @var list<string> */
-    private const EU_COUNTRIES = [
-        'AT', 'BE', 'BG', 'HR', 'CY', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU',
-        'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI',
-        'ES', 'SE',
-    ];
+    public function __construct(private readonly TaxConstantsRepository $taxConstants) {}
 
     /**
      * @param array<string,mixed> $invoice
@@ -146,34 +151,34 @@ final class StereoVatTypeResolver
     {
         return $this->nonEmptyString($item['vat_classification_code'] ?? null)
             ?? $this->nonEmptyString($invoice['vat_classification_code'] ?? null)
-            ?? $this->defaultSaleClassificationCode(
-                (float) ($item['vat_rate_snapshot'] ?? 0),
-                !empty($invoice['reverse_charge']),
-                $this->clientCountryIso2($invoice),
-            );
+            ?? $this->defaultSaleClassificationCode($invoice, $item);
     }
 
-    private function defaultSaleClassificationCode(float $vatRate, bool $reverseCharge, string $clientCountryIso2): string
+    /**
+     * Sdílený default, jen s Stereo-specifickým doplňkem pro nulovou sazbu u tuzemského
+     * odběratele: sdílená klasifikace tam vrací NULL (nulový řádek nemusí být osvobozené
+     * plnění § 51 — může to být přeúčtování, náhrada škody nebo plnění mimo předmět daně).
+     * Stereo ale potřebuje JEDEN Typ DPH na celý doklad, takže `null` by tady neznamenalo
+     * „nevíme", ale tvrdý pád exportu ({@see resolveDocument()}). Konzervativní 'UO'
+     * odpovídá tomu, co exportér posílal doteď; přesnější zařazení si uživatel zadá kódem
+     * na položce, který má stejně přednost.
+     *
+     * @param array<string,mixed> $invoice
+     * @param array<string,mixed> $item
+     */
+    private function defaultSaleClassificationCode(array $invoice, array $item): string
     {
-        $rate = (int) round($vatRate);
-        $country = strtoupper($clientCountryIso2) ?: 'CZ';
-        $isForeign = $country !== 'CZ';
-        $isEu = in_array($country, self::EU_COUNTRIES, true);
+        $docDate = $this->nonEmptyString($invoice['tax_date'] ?? null)
+            ?? $this->nonEmptyString($invoice['issue_date'] ?? null);
+        $year = $docDate !== null ? (int) substr($docDate, 0, 4) : (int) date('Y');
 
-        if ($reverseCharge && !$isForeign) {
-            return '25s';
-        }
-        if ($isForeign && $rate === 0) {
-            return $isEu ? '22' : '26';
-        }
-        if ($rate >= 21) {
-            return '1';
-        }
-        if ($rate >= 5 && $rate <= 15) {
-            return '2';
-        }
-
-        return '3';
+        return InvoiceRepository::defaultSaleClassificationCode(
+            (float) ($item['vat_rate_snapshot'] ?? 0),
+            !empty($invoice['reverse_charge']),
+            $this->clientCountryIso2($invoice),
+            $this->nonEmptyString($item['unit'] ?? null),
+            $this->taxConstants->vatRateStandard($year),
+        ) ?? '3';
     }
 
     /**

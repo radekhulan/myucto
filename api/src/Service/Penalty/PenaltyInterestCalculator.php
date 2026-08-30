@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Penalty;
 
 use DateTimeImmutable;
+use MyInvoice\Repository\TaxConstantsRepository;
 
 /**
  * Výpočet zákonného úroku z prodlení dle nařízení vlády č. 351/2013 Sb.
@@ -28,10 +29,22 @@ use DateTimeImmutable;
  */
 final class PenaltyInterestCalculator
 {
-    /** Zákonná přirážka k repo sazbě v procentních bodech (NV 351/2013, § 2). */
+    /**
+     * Zákonná přirážka k repo sazbě v procentních bodech (NV 351/2013, § 2) — pouze
+     * DOKUMENTOVANÝ FALLBACK pro rok, který číselník daňových konstant nezná.
+     *
+     * Živá hodnota je klíč `penalty_repo_surcharge_points`
+     * ({@see \MyInvoice\Repository\TaxConstantsRepository::penaltyRepoSurchargePoints()}),
+     * aby ji šlo po novele nařízení opravit číselníkem jako každou jinou roční konstantu.
+     * Repo sazby samotné jsou v DB (`cnb_repo_rates`) už dávno; přirážka do kódu nepatřila,
+     * protože špatná hodnota znamená špatnou částku penále na dokladu, který jde klientovi.
+     */
     public const SURCHARGE_POINTS = 8.0;
 
-    public function __construct(private readonly RepoRateProvider $rates) {}
+    public function __construct(
+        private readonly RepoRateProvider $rates,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
 
     /**
      * @param ?DateTimeImmutable $accrualFrom Volitelný posun počátku ÚČTOVÁNÍ dnů (ne sazby) —
@@ -65,13 +78,24 @@ final class PenaltyInterestCalculator
         $due   = $dueDate->setTime(0, 0);
         $asOf  = $asOf->setTime(0, 0);
 
+        // Prodlení běží ode dne následujícího po splatnosti.
+        $delayStart = $due->modify('+1 day');
+
+        // Sazba i přirážka se FIXUJÍ k pololetí, ve kterém prodlení VZNIKLO — jedna
+        // hodnota pro celou dobu prodlení (viz doc-block třídy), NEmění se se segmenty ani
+        // posunem $accrualFrom (ten mění jen počátek účtování dnů, ne sazbu).
+        $halfStart = $this->halfYearStart($delayStart);
+        // Přirážka je roční daňová konstanta (§ 2 NV 351/2013), ne hodnota v kódu —
+        // číselník ji po novele nařízení opraví bez releasu, stejně jako repo sazby v DB.
+        $surcharge = $this->taxConstants->penaltyRepoSurchargePoints((int) $halfStart->format('Y'));
+
         $base = [
             'principal'        => $principal,
             'due_date'         => $due->format('Y-m-d'),
             'as_of'            => $asOf->format('Y-m-d'),
             'total_days'       => 0,
             'total_interest'   => 0.0,
-            'surcharge_points' => self::SURCHARGE_POINTS,
+            'surcharge_points' => $surcharge,
             'segments'         => [],
         ];
 
@@ -80,13 +104,6 @@ final class PenaltyInterestCalculator
             return $base;
         }
 
-        // Prodlení běží ode dne následujícího po splatnosti.
-        $delayStart = $due->modify('+1 day');
-
-        // Sazba se FIXUJE k pololetí, ve kterém prodlení VZNIKLO — jedna hodnota
-        // pro celou dobu prodlení (viz doc-block třídy), NEmění se se segmenty ani
-        // posunem $accrualFrom (ten mění jen počátek účtování dnů, ne sazbu).
-        $halfStart = $this->halfYearStart($delayStart);
         $repo = $this->rates->rateOn($halfStart);
         if ($repo === null) {
             throw new \DomainException(
@@ -94,7 +111,7 @@ final class PenaltyInterestCalculator
                     . 'doplňte ji v číselníku repo sazeb.'
             );
         }
-        $annual = $repo + self::SURCHARGE_POINTS;
+        $annual = $repo + $surcharge;
 
         $cursor = $delayStart;
         if ($accrualFrom !== null) {

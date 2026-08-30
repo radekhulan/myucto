@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax;
 
 use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 
 /**
  * Roční daňové konstanty (CZ) — referenční DEFAULTY / fallback.
@@ -28,6 +29,26 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 final class TaxConstants
 {
     /**
+     * Roky, pro které existuje mzdový ruleset ({@see CzechPayrollRulesets}).
+     * Pro ně je zdrojem mzdových hodnot ruleset, ne {@see self::TABLE}.
+     */
+    private const RULESET_YEARS = [2025, 2026];
+
+    /**
+     * Zástupná hodnota v {@see self::TABLE} pro klíč, jehož číslo drží mzdový
+     * ruleset ({@see self::withPayrollRulesetConstants()}).
+     *
+     * Proč zástupce a ne prostě chybějící klíč: pořadí klíčů v sadě musí být
+     * napříč ročníky stejné (hlídá `TaxConstantsTest`) a určuje i pořadí polí
+     * v číselníkovém editoru. Doplněný klíč by se přilepil na konec a ročník
+     * s rulesetem by měl jiné pořadí než ročník bez něj.
+     *
+     * Druhý důvod je fail-loud: kdyby zrcadlení neproběhlo, projde dál tenhle
+     * řetězec — ne tiše nesprávné číslo, se kterým by se spočítala mzda.
+     */
+    private const FROM_PAYROLL_RULESET = '@payroll-ruleset';
+
+    /**
      * Konstanty pro daný rok. Neznámý rok se nesmí tiše počítat hodnotami jiného
      * období; chybějící sadu musí doplnit release nebo explicitní DB override.
      *
@@ -44,15 +65,16 @@ final class TaxConstants
     }
 
     /**
-     * Doplní odvozené klíče (`pausal_annual` z `pausal_monthly` a hranici srážkové
-     * daně z DPP z mzdového rulesetu). Voláno i repository po sloučení s DB
-     * override, aby uložená roční částka nemohla přebít měsíční rozvrh.
+     * Doplní odvozené klíče (`pausal_annual` z `pausal_monthly`, mzdové sazby
+     * a měsíční hranice z mzdového rulesetu). Voláno i repository po sloučení
+     * s DB override, aby uložená roční částka nemohla přebít měsíční rozvrh.
      *
      * @param array<string, mixed> $constants
      * @return array<string, mixed>
      */
     public static function withDerived(array $constants, int $year): array
     {
+        $constants = self::withPayrollRulesetConstants($constants, $year);
         $constants = self::withDppWithholdingThreshold($constants, $year);
         $segments = PausalSchedule::normalize($constants['pausal_monthly'] ?? []);
         if ($segments === []) {
@@ -75,6 +97,159 @@ final class TaxConstants
         $constants['pausal_monthly'] = $segments;
         $constants['pausal_annual']  = PausalSchedule::annual($year, $segments);
         return $constants;
+    }
+
+    /**
+     * Mzdové sazby a měsíční hranice ze závislé činnosti (§ 6 ZDP) pro roky,
+     * které pokrývá mzdový ruleset — JEDINÝ zdroj pravdy pro tyhle hodnoty.
+     *
+     * ── Proč to tady je ────────────────────────────────────────────────────────
+     * Mzda se počítala ze DVOU nezávislých sad. Modul Mzdy čte ruleset
+     * ({@see CzechPayrollRulesets}), starší mzdová rekapitulace
+     * ({@see \MyInvoice\Service\Accounting\Payroll\PayrollCalculator}) četla
+     * literály z {@see self::TABLE}: minimální mzdu, měsíční hranici progrese
+     * § 38h odst. 2, rozhodný příjem a celý blok sazeb pojistného a zálohové
+     * daně. Dnes shodou okolností sedí; nic ale nebránilo tomu, aby se po
+     * legislativní změně doplnila jen jedna sada a táž mzda se podle použité
+     * cesty spočítala jinak. Sync test hlídal jen dvě sazby zaměstnavatele.
+     *
+     * Ruleset je administrovatelný a doložený zdroji, takže vyhrává on. Tahle
+     * metoda jeho hodnoty ZRCADLÍ, nekopíruje — v `self::TABLE` pro pokryté
+     * roky žádné takové číslo není, takže se nemá co rozejít. Vzor i vědomá
+     * omezení jsou tytéž jako u {@see self::withDppWithholdingThreshold()}:
+     * čte se VÝCHOZÍ sada z kódu (ne override z `payroll_rulesets`) a případný
+     * override z tabulky `tax_constants` se pro pokryté roky ignoruje záměrně —
+     * dvě administrátorské cesty k téže sazbě by vrátily přesně ten rozpor,
+     * který tahle změna odstraňuje. Administruje se v Mzdy → Legislativní pravidla.
+     *
+     * Rok 2024 ruleset nemá a hodnoty si drží sám v {@see self::TABLE}
+     * ({@see self::PAYROLL_2024}) — historické měsíce se přepočtem nesmí hnout.
+     *
+     * ── Co se sem ZÁMĚRNĚ nepřenáší ────────────────────────────────────────────
+     * `social_max_base`, `credit_taxpayer`, `child_credits`, `credit_spouse`,
+     * `spouse_income_limit` a `child_bonus_min_income` čte i daňová část (DPFO
+     * a přehledy OSVČ, {@see DpfoCalculator}, {@see Return\DpfoReturnCalculator},
+     * {@see Return\SocialInsuranceCalculator}) a per-klíč override v tabulce
+     * `tax_constants` je u nich živá, testovaná funkce. Přesměrovat je na mzdový
+     * ruleset by ten override tiše zabilo, a to u konstant, které s výplatou
+     * nesouvisí. Zůstávají tedy v `self::TABLE` a jejich shodu s rulesetem
+     * hlídá `TaxConstantsPayrollRatesMatchRulesetTest`.
+     *
+     * @param array<string, mixed> $constants
+     * @return array<string, mixed>
+     */
+    private static function withPayrollRulesetConstants(array $constants, int $year): array
+    {
+        $derived = self::rulesetPayrollConstants($year);
+        if ($derived !== null) {
+            // array_replace drží pozici existujícího klíče — zástupci
+            // v `self::TABLE` proto zachovají pořadí sady.
+            $constants = array_replace($constants, $derived);
+        }
+        self::assertRulesetPlaceholdersResolved($constants, $year);
+
+        return $constants;
+    }
+
+    /**
+     * Zástupce, kterého nikdo nenahradil, znamená ročník bez mzdového rulesetu —
+     * počítat s ním nelze a tiše ho přeskočit už vůbec ne.
+     *
+     * @param array<string, mixed> $constants
+     */
+    private static function assertRulesetPlaceholdersResolved(array $constants, int $year): void
+    {
+        foreach ($constants as $key => $value) {
+            $unresolved = $value === self::FROM_PAYROLL_RULESET
+                || (is_array($value) && in_array(self::FROM_PAYROLL_RULESET, $value, true));
+            if ($unresolved) {
+                throw new \DomainException(
+                    'Sada ' . $year . ' čeká u klíče `' . $key . '` hodnotu z mzdového rulesetu, '
+                    . 'ten ale pro tento rok neexistuje.',
+                );
+            }
+        }
+    }
+
+    /**
+     * Mzdové konstanty roku z rulesetu, nebo `null` pro roky bez něj.
+     *
+     * Peněžní parametry rulesetu jsou v setinách (minor units), `self::TABLE`
+     * je vede v celých korunách — převod je proto explicitní a celočíselný,
+     * aby se z 2 240 000 haléřů nestal float 22400.0 a nezměnil typ, na kterém
+     * visí `assertSame` v testech i `(int)` přetypování v kalkulátoru.
+     *
+     * @return array<string, mixed>|null
+     */
+    private static function rulesetPayrollConstants(int $year): ?array
+    {
+        /** @var array<int, array<string, mixed>|null> $cache */
+        static $cache = [];
+        if (array_key_exists($year, $cache)) {
+            return $cache[$year];
+        }
+
+        $cache[$year] = null;
+        if (!in_array($year, self::RULESET_YEARS, true)) {
+            return null;
+        }
+
+        $date = sprintf('%04d-01-01', $year);
+        $provider = CzechPayrollRulesets::provider();
+        $incomeTax = $provider->forDate(PayrollRulesetDomain::IncomeTax, $date);
+        $social = $provider->forDate(PayrollRulesetDomain::SocialInsurance, $date);
+        $health = $provider->forDate(PayrollRulesetDomain::HealthInsurance, $date);
+        $employment = $provider->forDate(PayrollRulesetDomain::EmploymentThresholds, $date);
+
+        $cache[$year] = [
+            // § 3 odst. 6 z. č. 592/1992 Sb. — minimálním vyměřovacím základem
+            // zaměstnance je minimální mzda; ruleset ji vede jako základní sazbu
+            // pro čtyřicetihodinový týden.
+            'minimum_wage' => self::rulesetMoneyCzk($employment, 'minimum_wage.monthly_40h_week'),
+            // § 38h odst. 2 ZDP — měsíční hranice 23% sazby (3× průměrná mzda).
+            'advance_tax_high_threshold' => self::rulesetMoneyCzk($incomeTax, 'advance.high_threshold.monthly'),
+            // § 6 odst. 1 písm. a) z. č. 187/2006 Sb. — rozhodný příjem; v rulesetu
+            // je to týž parametr pod jménem zaměstnání malého rozsahu (§ 7).
+            'sickness_participation_threshold' => self::rulesetMoneyCzk($social, 'participation.small_scale.minimum'),
+            'payroll' => [
+                'employee_social' => self::rulesetRate($social, 'employee.rate.ordinary'),
+                'employee_health' => self::rulesetRate($health, 'employee.rate'),
+                // Sazba § 7 odst. 1 PÍSM. a) — ostatní zaměstnanci. Kategorie b) a c)
+                // starší modul nemá čím doložit a brát je odsud nesmí.
+                'employer_social' => self::rulesetRate($social, 'employer.rate.ordinary'),
+                'employer_health' => self::rulesetRate($health, 'employer.rate'),
+                'health_total'    => self::rulesetRate($health, 'total.rate'),
+                'advance_tax'     => self::rulesetRate($incomeTax, 'advance.low_rate'),
+                'advance_tax_high' => self::rulesetRate($incomeTax, 'advance.high_rate'),
+            ],
+        ];
+
+        return $cache[$year];
+    }
+
+    /** Peněžní parametr rulesetu v celých korunách (ruleset je vede v setinách). */
+    private static function rulesetMoneyCzk(PayrollRulesetVersion $version, string $key): int|float
+    {
+        $value = $version->parameter($key);
+        if ($value->type !== 'money_minor' || !is_int($value->value)) {
+            throw new \DomainException(
+                'Mzdový ruleset ' . $version->id . ' nenese peněžní parametr `' . $key . '`.',
+            );
+        }
+
+        return $value->value % 100 === 0 ? intdiv($value->value, 100) : $value->value / 100;
+    }
+
+    private static function rulesetRate(PayrollRulesetVersion $version, string $key): float
+    {
+        $value = $version->parameter($key);
+        if ($value->type !== 'decimal_rate' || !is_string($value->value)) {
+            throw new \DomainException(
+                'Mzdový ruleset ' . $version->id . ' nenese sazbu `' . $key . '`.',
+            );
+        }
+
+        return (float) $value->value;
     }
 
     /**
@@ -138,7 +313,7 @@ final class TaxConstants
         }
 
         $cache[$year] = null;
-        if (in_array($year, [2025, 2026], true)) {
+        if (in_array($year, self::RULESET_YEARS, true)) {
             $ruleset = CzechPayrollRulesets::provider()->forDate(
                 PayrollRulesetDomain::IncomeTax,
                 sprintf('%04d-01-01', $year),
@@ -163,40 +338,33 @@ final class TaxConstants
     }
 
     /**
-     * Sazby pojistného a zálohové daně ze závislé činnosti (§6 ZDP). Od 1. 1. 2024
-     * beze změny pro 2024–2026, proto jedna sdílená sada — jakmile se některý rok
-     * rozejde, rozkopíruj ji do dotčeného roku v {@see self::TABLE}.
+     * Sazby pojistného a zálohové daně ze závislé činnosti (§6 ZDP) pro rok 2024.
      *
      *  - `employee_social` 7,1 % = 6,5 % důchodové (§7 z. 589/1992) + 0,6 % nemocenské,
      *    které zaměstnanci platí nově od 1. 1. 2024 (novela z. 349/2023 Sb.)
      *  - `employee_health` 4,5 % / `employer_health` 9,0 %, dohromady `health_total`
      *    13,5 % z vyměřovacího základu (§2 z. 592/1992)
-     *  - `employer_social` 24,8 % (§7 odst. 1 písm. a) z. 589/1992)
+     *  - `employer_social` 24,8 % — sazba § 7 odst. 1 PÍSM. a), ostatní zaměstnanci
      *  - `advance_tax` 15 % / `advance_tax_high` 23 % — progresivní zálohová daň
      *    (§38h odst. 2 ZDP). Vyšší sazbou se daní jen ČÁST základu nad měsíční hranicí
-     *    `advance_tax_high_threshold`, ne celý základ. Hranice je měsíční (3× průměrná
-     *    mzda), proto sedí v {@see self::TABLE} u konkrétního roku, ne tady.
+     *    `advance_tax_high_threshold`, ne celý základ.
      *
-     * ── Proč tu `employer_social` zůstává, když je totéž v mzdovém rulesetu ─────
-     * Konzumentem téhle sady je JEDINĚ {@see \MyInvoice\Service\Accounting\Payroll\PayrollCalculator},
-     * tedy starší modul mzdové rekapitulace (§ 6 ZDP) mimo modul Mzdy. Ten počítá
-     * jednu mzdu jednou sazbou a víc kategorií zaměstnavatele podle § 5a odst. 1
-     * z. č. 589/1992 Sb. neumí ani zadat: nemá zaměstnance, nemá vztahy, nemá
-     * evidenci zařazení. `employer_social` je proto sazba PÍSMENE a) — ostatní
-     * zaměstnanci — a nic jiného.
+     * ── Proč jen 2024 ──────────────────────────────────────────────────────────
+     * Do 8/2026 se tahle sada sdílela pro 2024–2026 a byla druhou, nezávislou
+     * kopií toho, co drží mzdový ruleset. Pro roky, které ruleset pokrývá, ji
+     * proto nahradilo zrcadlení ({@see self::withPayrollRulesetConstants()}).
+     * Rok 2026 ruleset má, rok 2024 ne a mít nebude — je uzavřený a jeho
+     * výsledky jsou porovnané s reálným deníkem účetní, takže si hodnoty drží
+     * sám. Kdyby ruleset někdy přibyl i pro 2024, tahle konstanta zmizí.
      *
-     * Přesměrovat ji na mzdový ruleset by nebyla konsolidace, ale změna výpočtu
-     * v modulu, který účtuje a jehož výsledky jsou uzavřené proti reálnému deníku
-     * účetní. Sazba 29,8 % (písm. b) ani 27,8 % (písm. c) se sem stejně dostat
-     * nemůže — modul nemá čím kategorii doložit a hádat ji je horší než ji neznat
-     * ({@see \MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory::Unverified}).
-     * Kdo potřebuje kategorie, slevu § 7a nebo strop § 15a per zaměstnanec, musí
-     * použít modul Mzdy; tahle sazba na to není a nikdy nebyla.
-     *
-     * Co se hlídat MUSÍ, je rozejití obou zdrojů u té jedné společné sazby —
-     * to dělá `TaxConstantsPayrollRatesMatchRulesetTest`.
+     * Kategorie § 5a odst. 1 písm. b) 29,8 % a písm. c) 27,8 % se sem dostat
+     * NESMÍ: starší modul mzdové rekapitulace nemá zaměstnance ani evidenci
+     * zařazení, takže kategorii nemá čím doložit a hádat ji je horší než ji
+     * neznat ({@see \MyInvoice\Service\Payroll\SocialInsurance\SocialEmployerRateCategory::Unverified}).
+     * Kdo potřebuje kategorie, slevu § 7a nebo strop § 15a per zaměstnanec,
+     * musí použít modul Mzdy. Hlídá to `TaxConstantsPayrollRatesMatchRulesetTest`.
      */
-    private const PAYROLL_2024_PLUS = [
+    private const PAYROLL_2024 = [
         'employee_social' => 0.071,
         'employee_health' => 0.045,
         'employer_social' => 0.248,
@@ -228,7 +396,7 @@ final class TaxConstants
             'child_credits'   => [15204, 22320, 27840],
             'child_bonus_min' => 100,
             'minimum_wage' => 18900,
-            'payroll' => self::PAYROLL_2024_PLUS,
+            'payroll' => self::PAYROLL_2024,
             // §38h odst. 2: 3× průměrná mzda měsíčně = social_max_base / 16 (48× ročně).
             'advance_tax_high_threshold' => 131901, // 3 × 43 967
 
@@ -271,6 +439,13 @@ final class TaxConstants
             'vat_limit_low'  => 2000000,
             'vat_limit_high' => 2000000,
             'vat_rate_standard' => 21.0,
+            // NV č. 351/2013 Sb., § 2 — zákonný úrok z prodlení = 2týdenní repo sazba ČNB
+            // platná k prvnímu dni pololetí, v němž prodlení VZNIKLO, ZVÝŠENÁ o tolik
+            // procentních bodů. Repo sazby jsou v číselníku (`cnb_repo_rates`) a přirážka
+            // patří vedle nich: jde přímo do částky penále na dokladu pro klienta, takže
+            // špatná hodnota = špatně vyfakturovaný úrok. V kódu zůstává jen dokumentovaný
+            // fallback {@see \MyInvoice\Service\Penalty\PenaltyInterestCalculator::SURCHARGE_POINTS}.
+            'penalty_repo_surcharge_points' => 8.0,
             // § 99a odst. 1 ZDPH — obrat za předcházející kalendářní rok, do kterého
             // si plátce může zvolit čtvrtletní zdaňovací období.
             'vat_quarterly_turnover_limit' => 15000000,
@@ -366,9 +541,12 @@ final class TaxConstants
             'credit_ztpp'          => 16140,
             'child_credits'   => [15204, 22320, 27840], // 1., 2., 3.+ dítě (3.+ se opakuje)
             'child_bonus_min' => 100,
-            'minimum_wage' => 20800,
-            'payroll' => self::PAYROLL_2024_PLUS,
-            'advance_tax_high_threshold' => 139671, // 3 × 46 557 (= social_max_base / 16)
+            // Mzdové hodnoty drží pro rok 2025 mzdový ruleset a doplní je
+            // {@see self::withDerived()} — druhá kopie tady byla druhou
+            // nezávislou sadou pro tutéž mzdu.
+            'minimum_wage' => self::FROM_PAYROLL_RULESET,
+            'payroll' => self::FROM_PAYROLL_RULESET,
+            'advance_tax_high_threshold' => self::FROM_PAYROLL_RULESET,
 
             'child_bonus_min_income' => 124800,
             'spouse_income_limit' => 68000,
@@ -417,6 +595,13 @@ final class TaxConstants
             'vat_limit_low'  => 2000000,
             'vat_limit_high' => 2536500,
             'vat_rate_standard' => 21.0,
+            // NV č. 351/2013 Sb., § 2 — zákonný úrok z prodlení = 2týdenní repo sazba ČNB
+            // platná k prvnímu dni pololetí, v němž prodlení VZNIKLO, ZVÝŠENÁ o tolik
+            // procentních bodů. Repo sazby jsou v číselníku (`cnb_repo_rates`) a přirážka
+            // patří vedle nich: jde přímo do částky penále na dokladu pro klienta, takže
+            // špatná hodnota = špatně vyfakturovaný úrok. V kódu zůstává jen dokumentovaný
+            // fallback {@see \MyInvoice\Service\Penalty\PenaltyInterestCalculator::SURCHARGE_POINTS}.
+            'penalty_repo_surcharge_points' => 8.0,
             // § 99a odst. 1 ZDPH — obrat za předcházející kalendářní rok, do kterého
             // si plátce může zvolit čtvrtletní zdaňovací období.
             'vat_quarterly_turnover_limit' => 15000000,  // základní sazba § 47 ZDPH
@@ -462,8 +647,10 @@ final class TaxConstants
             // (a tím i důchodovém) pojištění vzniká až při jeho DOSAŽENÍ; pod ním jde
             // o zaměstnání malého rozsahu (§ 7) a sociální pojistné se neodvádí vůbec.
             // Odvozeno jako 1/10 průměrné mzdy zaokrouhlená dolů na celých 500 Kč;
-            // `sickness_min_monthly_base` výš je přesně jeho dvojnásobek.
-            'sickness_participation_threshold' => 4500,
+            // `sickness_min_monthly_base` výš je přesně jeho dvojnásobek. Samotnou
+            // částku drží mzdový ruleset (`participation.small_scale.minimum`) —
+            // viz {@see self::withPayrollRulesetConstants()}.
+            'sickness_participation_threshold' => self::FROM_PAYROLL_RULESET,
             // Dary — stropy odpočtu (§20/8 PO, §15/1 FO); 2020–2026 zvýšeno na 30 %
             'donation_cap_po_pct' => 0.30,  // §20/8 — dočasné zvýšení do 2026
             'donation_cap_fo_pct' => 0.30,  // §15/1 — dtto
@@ -523,9 +710,11 @@ final class TaxConstants
             'credit_ztpp'          => 16140,
             'child_credits'   => [15204, 22320, 27840],
             'child_bonus_min' => 100,
-            'minimum_wage' => 22400,
-            'payroll' => self::PAYROLL_2024_PLUS,
-            'advance_tax_high_threshold' => 146901, // 3 × 48 967 (= social_max_base / 16)
+            // Mzdové hodnoty drží pro rok 2026 mzdový ruleset a doplní je
+            // {@see self::withDerived()}.
+            'minimum_wage' => self::FROM_PAYROLL_RULESET,
+            'payroll' => self::FROM_PAYROLL_RULESET,
+            'advance_tax_high_threshold' => self::FROM_PAYROLL_RULESET,
 
             'child_bonus_min_income' => 134400,
             'spouse_income_limit' => 68000,
@@ -566,6 +755,13 @@ final class TaxConstants
             'vat_limit_low'  => 2000000,
             'vat_limit_high' => 2536500,
             'vat_rate_standard' => 21.0,
+            // NV č. 351/2013 Sb., § 2 — zákonný úrok z prodlení = 2týdenní repo sazba ČNB
+            // platná k prvnímu dni pololetí, v němž prodlení VZNIKLO, ZVÝŠENÁ o tolik
+            // procentních bodů. Repo sazby jsou v číselníku (`cnb_repo_rates`) a přirážka
+            // patří vedle nich: jde přímo do částky penále na dokladu pro klienta, takže
+            // špatná hodnota = špatně vyfakturovaný úrok. V kódu zůstává jen dokumentovaný
+            // fallback {@see \MyInvoice\Service\Penalty\PenaltyInterestCalculator::SURCHARGE_POINTS}.
+            'penalty_repo_surcharge_points' => 8.0,
             // § 99a odst. 1 ZDPH — obrat za předcházející kalendářní rok, do kterého
             // si plátce může zvolit čtvrtletní zdaňovací období.
             'vat_quarterly_turnover_limit' => 15000000,
@@ -597,8 +793,10 @@ final class TaxConstants
             // (a tím i důchodovém) pojištění vzniká až při jeho DOSAŽENÍ; pod ním jde
             // o zaměstnání malého rozsahu (§ 7) a sociální pojistné se neodvádí vůbec.
             // Odvozeno jako 1/10 průměrné mzdy zaokrouhlená dolů na celých 500 Kč;
-            // `sickness_min_monthly_base` výš je přesně jeho dvojnásobek.
-            'sickness_participation_threshold' => 4500,
+            // `sickness_min_monthly_base` výš je přesně jeho dvojnásobek. Samotnou
+            // částku drží mzdový ruleset (`participation.small_scale.minimum`) —
+            // viz {@see self::withPayrollRulesetConstants()}.
+            'sickness_participation_threshold' => self::FROM_PAYROLL_RULESET,
             'donation_cap_po_pct' => 0.30,
             'donation_cap_fo_pct' => 0.30,
             'donation_min_fo'     => 1000,

@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\PaymentDueResolver;
@@ -42,6 +43,7 @@ final class BulkReissueAction
         private readonly InvoiceCalculator $calc,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -119,12 +121,20 @@ final class BulkReissueAction
         }
 
         $client = null;
+        // Země odběratele patří ke stejnému dotazu — auto-klasifikace níž ji potřebuje,
+        // aby klon legacy položky bez kódu nedostal tuzemský kód pro zahraničního klienta.
+        $clientCountryIso2 = null;
         if (!empty($source['client_id'])) {
             $stmt = $this->db->pdo()->prepare(
-                'SELECT payment_due_default, payment_due_unit FROM clients WHERE id = ?'
+                'SELECT c.payment_due_default, c.payment_due_unit, co.iso2
+                   FROM clients c
+              LEFT JOIN countries co ON co.id = c.country_id
+                  WHERE c.id = ?'
             );
             $stmt->execute([(int) $source['client_id']]);
             $client = $stmt->fetch(\PDO::FETCH_ASSOC) ?: null;
+            $iso = strtoupper(trim((string) ($client['iso2'] ?? '')));
+            $clientCountryIso2 = $iso !== '' ? $iso : null;
         }
 
         $stmt = $this->db->pdo()->prepare(
@@ -136,6 +146,13 @@ final class BulkReissueAction
         $dueDate = PaymentDueResolver::dueDate($issueDate, $project, $client, $supplier);
 
         $taxDate = $type === 'proforma' ? null : $issueDate;
+
+        // Klon vzniká k NOVÉMU datu, takže i „základní sazba" v auto-klasifikaci se bere
+        // podle roku KLONU, ne zdrojové faktury — přišpendlené sazby položek stejně musí
+        // být platné k DUZP klonu (VatRateValidityGuard níž).
+        $standardRate = $this->taxConstants->vatRateStandard(
+            (int) substr($taxDate ?? $issueDate, 0, 4)
+        );
 
         $pdo = $this->db->pdo();
 
@@ -235,6 +252,9 @@ final class BulkReissueAction
                     ?? \MyInvoice\Repository\InvoiceRepository::defaultSaleClassificationCode(
                         (float) $item['vat_rate_snapshot'],
                         (bool) ($source['reverse_charge'] ?? false),
+                        $clientCountryIso2,
+                        (string) ($item['unit'] ?? '') ?: null,
+                        $standardRate,
                     );
                 $params = [
                     $newId,
