@@ -3611,7 +3611,9 @@
             "employer_obstacle_verified": "Zaměstnavatel (překážka doložena)",
             "unverified": "Neověřeno"
           }
-        }
+        },
+        "edit_section": "Upravit",
+        "edit_section_aria": "Upravit: {section}"
       },
       "foreign_permits": {
         "title": "Pobytová a pracovní oprávnění",
@@ -4068,7 +4070,10 @@
             "permit_identifier": "Číslo rozhodnutí",
             "permit_from": "Povolení od",
             "permit_to": "Povolení do"
-          }
+          },
+          "health_insurance_select": "Vyberte zdravotní pojišťovnu",
+          "health_insurance_no_results": "Žádná pojišťovna neodpovídá",
+          "health_insurance_unknown": "{code} — kód mimo číselník pojišťoven"
         },
         "agenda": {
           "PREZEC26": "Částečné přihlášení před nástupem",
@@ -18900,7 +18905,19 @@
       "uploadReceipt": "Nahrát doručenku",
       "receiptAttached": "Doručenka je připojená ({at}).",
       "receiptUnverified": "podpis doručenky zatím neověřujeme",
-      "manualDispatch": "Odesláno ručně z vaší datové schránky. Doručenku zatím nemáme."
+      "manualDispatch": "Odesláno ručně z vaší datové schránky. Doručenku zatím nemáme.",
+      "mobileKey": {
+        "action": "Odeslat Mobilním klíčem",
+        "intro": "Podání odejde přímo z aplikace v relaci, kterou potvrdíte v Mobilním klíči. Relace žije pár minut a platí jen pro tohle odeslání.",
+        "username": "Uživatelské jméno ISDS",
+        "code": "Komunikační kód / heslo pro aplikaci",
+        "codeHint": "Samostatný kód nastavený pro přístup externí aplikace, ne heslo do datové schránky.",
+        "useSaved": "Použít uložené přihlášení této firmy",
+        "credentialsRequired": "Vyplňte uživatelské jméno a komunikační kód.",
+        "request": "Požádat o potvrzení v klíči",
+        "sent": "Podání bylo odesláno datovou schránkou.",
+        "notDispatched": "Relace byla potvrzena, ale podání se neodeslalo. Zkontrolujte stav podání."
+      }
     },
     "manual": {
       "title": "Co udělat teď",

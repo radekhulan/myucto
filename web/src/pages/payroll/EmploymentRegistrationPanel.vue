@@ -21,8 +21,10 @@ import {
 } from '@/api/payroll'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
 import { formatDate } from '@/composables/useFormat'
+import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 
 const props = defineProps<{
   employmentId: number
@@ -234,6 +236,27 @@ const a1InputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surfac
   + ' disabled:bg-neutral-100'
 const a1SectionClass = 'rounded-md border border-neutral-200 p-3'
 const a1GridClass = 'mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-3'
+
+/**
+ * Nabídka zdravotních pojišťoven pro REGZEC.
+ *
+ * Číselník má jen platné pojišťovny, jenže v datech můžou být kódy zaniklých
+ * (nebo prostě přepsaných) institucí. Kdyby nabídka uměla jen číselník,
+ * našeptávač by uloženou hodnotu ukázal jako prázdno a první uložení karty by
+ * ji tiše zahodilo. Legacy kód se proto do nabídky přidá navíc a je označený,
+ * aby bylo poznat, že v číselníku není.
+ */
+const a1InsurerOptions = computed(() => {
+  const options = healthInsurerOptions()
+  const current = a1Form.value.health_insurance_code?.trim() ?? ''
+  if (current !== '' && !isHealthInsurerCode(current)) {
+    options.push({
+      value: current,
+      label: t('payroll.people.registration.a1.health_insurance_unknown', { code: current }),
+    })
+  }
+  return options
+})
 
 const a1AddressFields: {
   key: keyof PayrollRegistrationA1Address
@@ -1658,13 +1681,17 @@ async function copyXml(): Promise<void> {
               <span :class="a1LabelClass">
                 {{ t('payroll.people.registration.a1.health_insurance_code') }}
               </span>
-              <input
-                v-model="a1Form.health_insurance_code"
-                type="text"
-                :class="a1InputClass"
+              <SearchableSelect
+                class="mt-1"
+                :model-value="a1Form.health_insurance_code || null"
+                :options="a1InsurerOptions"
+                :placeholder="t('payroll.people.registration.a1.health_insurance_select')"
+                :no-results-label="t('payroll.people.registration.a1.health_insurance_no_results')"
                 :disabled="a1Busy"
+                accent="payroll"
                 data-test="a1-health-insurance-code"
-              >
+                @update:model-value="a1Form.health_insurance_code = $event"
+              />
               <span
                 v-if="a1NoteText('health_insurance_code')"
                 :class="a1NoteClass('health_insurance_code')"

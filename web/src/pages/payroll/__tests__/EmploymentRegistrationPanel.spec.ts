@@ -152,6 +152,13 @@ function a1View(overrides: Record<string, unknown> = {}) {
   }
 }
 
+function insurerInput(wrapper: ReturnType<typeof mountPanel>): HTMLInputElement {
+  return wrapper
+    .get('[data-test="a1-health-insurance-code"]')
+    .get('input[role="combobox"]')
+    .element as HTMLInputElement
+}
+
 function mountPanel(canWrite = true) {
   return mount(EmploymentRegistrationPanel, {
     props: { employmentId: 5, canWrite },
@@ -245,8 +252,7 @@ describe('EmploymentRegistrationPanel', () => {
     expect(wrapper.find('[data-test="registration-a1-json"]').exists()).toBe(false)
     expect((wrapper.get('[data-test="a1-permanent-city"]').element as HTMLInputElement).value)
       .toBe('Praha')
-    expect((wrapper.get('[data-test="a1-health-insurance-code"]').element as HTMLInputElement).value)
-      .toBe('111')
+    expect(insurerInput(wrapper).value).toContain('111')
     const missing = wrapper.get('[data-test="registration-a1-missing"]').text()
     expect(missing).toContain('permanent_address.house_number')
     expect(missing).toContain('Aplikace vede adresu jedním řádkem včetně čísla.')
@@ -277,8 +283,68 @@ describe('EmploymentRegistrationPanel', () => {
 
     const diverged = wrapper.get('[data-test="registration-a1-diverged"]').text()
     expect(diverged).toContain('health_insurance_code')
-    expect((wrapper.get('[data-test="a1-health-insurance-code"]').element as HTMLInputElement).value)
-      .toBe('201')
+    expect(insurerInput(wrapper).value).toContain('201')
+  })
+
+  /**
+   * Kód pojišťovny se vybírá z číselníku, ne píše rukou — na server ale musí
+   * odejít pořád jen ten kód jako řetězec.
+   */
+  it('sends the insurer code picked from the codebook', async () => {
+    m.saveA1Profile.mockResolvedValue({
+      ...a1Suggested(),
+      health_insurance_code: '205',
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    const picker = wrapper.get('[data-test="a1-health-insurance-code"]').get('input[role="combobox"]')
+    await picker.trigger('focus')
+    await picker.setValue('205')
+    await picker.trigger('keydown', { key: 'Enter' })
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      health_insurance_code: '205',
+    }))
+  })
+
+  /**
+   * Zaniklá pojišťovna v číselníku není. Našeptávač ji přesto musí ukázat a
+   * uložit beze změny — jinak by první otevření karty starý kód tiše smazalo.
+   */
+  it('keeps a legacy insurer code that is not in the codebook', async () => {
+    const legacy = { ...a1Suggested(), health_insurance_code: '999' }
+    m.a1Profile.mockResolvedValue({
+      profile: null,
+      draft: { ...a1View().draft, suggested: legacy },
+    })
+    m.saveA1Profile.mockResolvedValue({
+      ...legacy,
+      row_version: 1,
+      reference_hash: 'a'.repeat(64),
+      created_at: '2026-08-14 10:00:00',
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+
+    expect(insurerInput(wrapper).value).toContain('999')
+
+    await wrapper.get('[data-test="registration-a1-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveA1Profile).toHaveBeenCalledWith(5, expect.objectContaining({
+      health_insurance_code: '999',
+    }))
   })
 
   it('shows the deadline window and which form will be filed', async () => {

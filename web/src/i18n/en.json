@@ -3611,7 +3611,9 @@
             "employer_obstacle_verified": "Employer (obstacle documented)",
             "unverified": "Unverified"
           }
-        }
+        },
+        "edit_section": "Edit",
+        "edit_section_aria": "Edit: {section}"
       },
       "foreign_permits": {
         "title": "Residence and work permits",
@@ -4068,7 +4070,10 @@
             "permit_identifier": "Decision number",
             "permit_from": "Permit from",
             "permit_to": "Permit to"
-          }
+          },
+          "health_insurance_select": "Select a health insurer",
+          "health_insurance_no_results": "No insurer matches",
+          "health_insurance_unknown": "{code} — code outside the insurer codebook"
         },
         "agenda": {
           "PREZEC26": "Partial pre-start registration",
@@ -18900,7 +18905,19 @@
       "uploadReceipt": "Upload delivery receipt",
       "receiptAttached": "Delivery receipt attached ({at}).",
       "receiptUnverified": "we do not verify the receipt signature yet",
-      "manualDispatch": "Sent manually from your data box. No delivery receipt yet."
+      "manualDispatch": "Sent manually from your data box. No delivery receipt yet.",
+      "mobileKey": {
+        "action": "Send with Mobile Key",
+        "intro": "The submission is sent straight from the app in a session you confirm in the Mobile Key app. The session lives a few minutes and covers only this dispatch.",
+        "username": "ISDS user name",
+        "code": "Communication code / application password",
+        "codeHint": "A separate code set up for external application access, not your data box password.",
+        "useSaved": "Use the credentials stored for this company",
+        "credentialsRequired": "Fill in the user name and the communication code.",
+        "request": "Ask for confirmation in the key",
+        "sent": "The submission was sent through the data box.",
+        "notDispatched": "The session was confirmed but the submission was not sent. Check its state."
+      }
     },
     "manual": {
       "title": "What to do now",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -65,6 +65,12 @@ import {
  *    od prvního dne po hranici zmrazení, nebo se otevře k opravě mzda, která
  *    hranici drží — obojí přímo odsud, protože jinak uživatel jen čte, že něco
  *    nejde, a nedozví se, jak to udělat.
+ *
+ * Sbalená historie ale nesmí schovat editaci: u každé sekce je proto vlastní
+ * „Upravit" přímo vedle hodnoty, kterou uživatel čte — rozbalí tu sekci,
+ * zapne editaci a postaví kurzor do prvního pole. Společné „Upravit evidenci"
+ * dole rozbalí všechny sekce, aby po kliknutí bylo vidět, do čeho se píše.
+ * Ukládá se pořád jedním tlačítkem dole; per-sekci se neukládá.
  *
  * Běžný český zaměstnanec ale nemá co vyplňovat: „Přidat záznam" rovnou
  * nabídne rezidenta CZ, český sociální i zdravotní režim a pojišťovnu, u které
@@ -268,6 +274,51 @@ function historyOpen(section: StatutorySectionSpec): boolean {
 
 function onHistoryToggle(section: StatutorySectionSpec, event: Event) {
   historyToggled[section.key] = (event.target as HTMLDetailsElement).open
+}
+
+/** Vrátí zobrazení k počítanému výchozímu stavu (viz `historyOpen`). */
+function resetSectionToggles() {
+  for (const key of Object.keys(historyToggled)) delete historyToggled[key]
+}
+
+const sectionElements: Record<string, HTMLElement | null> = {}
+
+function setSectionRef(key: string, element: unknown) {
+  sectionElements[key] = element instanceof HTMLElement ? element : null
+}
+
+/** Kurzor rovnou do prvního pole, které jde v sekci vyplnit. */
+async function focusSection(key: string) {
+  await nextTick()
+  const field = sectionElements[key]?.querySelector<HTMLElement>(
+    'input:not([disabled]), select:not([disabled])',
+  )
+  field?.focus()
+}
+
+/**
+ * „Upravit evidenci" musí něco UDĚLAT.
+ *
+ * Pole leží uvnitř sbalených boxů „Historie a záznamy"; samotné přepnutí
+ * `editing` proto u vyplněné sekce nezměnilo nic, co by uživatel viděl —
+ * jen se dole vyměnila tlačítka. Vstup do editace tedy zároveň rozbalí
+ * všechny sekce, aby bylo vidět, do čeho se píše.
+ */
+function startEditing() {
+  editing.value = true
+  for (const section of SECTIONS) historyToggled[section.key] = true
+}
+
+/**
+ * Cesta „chci změnit tenhle údaj" → vstupní pole na jedno kliknutí: tlačítko
+ * u sekce zapne editaci, rozbalí právě tu sekci a postaví kurzor do prvního
+ * pole. Ukládá se dál jedním společným Uložit dole — per-sekci se neukládá,
+ * server bere celý cílový stav jedním zápisem.
+ */
+function editSection(section: StatutorySectionSpec) {
+  historyToggled[section.key] = true
+  editing.value = true
+  void focusSection(section.key)
 }
 
 /** Doklad je nepovinný — rozbalí se jen tam, kde už něco nese. */
@@ -484,6 +535,7 @@ async function load() {
 function cancel() {
   editing.value = false
   saveError.value = ''
+  resetSectionToggles()
   if (evidence.value) hydrate(evidence.value)
 }
 
@@ -507,6 +559,7 @@ async function save() {
       sections,
     }))
     editing.value = false
+    resetSectionToggles()
     toast.success(t('payroll.people.statutory_evidence.saved'))
   } catch (exception) {
     // Server jmenuje konkrétní důvod (překryv, díra v řadě, chybějící doklad,
@@ -520,8 +573,8 @@ async function save() {
   }
 }
 
-watch(() => props.personId, () => { editing.value = false; void load() })
-watch(effectiveOn, () => { editing.value = false; void load() })
+watch(() => props.personId, () => { editing.value = false; resetSectionToggles(); void load() })
+watch(effectiveOn, () => { editing.value = false; resetSectionToggles(); void load() })
 onMounted(() => {
   void load()
   void loadDefaultHealthInsurerCode().then((code) => { employerInsurerCode.value = code })
@@ -606,6 +659,7 @@ onMounted(() => {
             :key="section.key"
             class="rounded-md border border-neutral-200"
             :data-test="`section-${section.key}`"
+            :ref="element => setSectionRef(section.key, element)"
           >
             <!--
               Přehled stavu je jediný řádek a stojí NAD historií: „co teď platí"
@@ -621,22 +675,43 @@ onMounted(() => {
                   {{ t(`payroll.people.statutory_evidence.section_hint.${section.key}`) }}
                 </p>
               </div>
-              <p class="shrink-0 text-right" :data-test="`current-${section.key}`">
-                <span
-                  class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-                  :class="summaryIsBlocking(section)
-                    ? 'bg-warning-100 text-warning-800'
-                    : 'bg-success-50 text-success-800'"
-                >{{ summaryLabel(section) }}</span>
-                <span v-if="summaryDetail(section)" class="mt-0.5 block text-xs text-neutral-600">
-                  {{ summaryDetail(section) }}
-                </span>
-                <span class="mt-0.5 block text-xs text-neutral-500">
-                  {{ summaryFrom(section)
-                    ? t('payroll.people.statutory_evidence.current_from', { day: summaryFrom(section) })
-                    : t('payroll.people.statutory_evidence.current_none') }}
-                </span>
-              </p>
+              <div class="flex shrink-0 items-start gap-2">
+                <p class="text-right" :data-test="`current-${section.key}`">
+                  <span
+                    class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+                    :class="summaryIsBlocking(section)
+                      ? 'bg-warning-100 text-warning-800'
+                      : 'bg-success-50 text-success-800'"
+                  >{{ summaryLabel(section) }}</span>
+                  <span v-if="summaryDetail(section)" class="mt-0.5 block text-xs text-neutral-600">
+                    {{ summaryDetail(section) }}
+                  </span>
+                  <span class="mt-0.5 block text-xs text-neutral-500">
+                    {{ summaryFrom(section)
+                      ? t('payroll.people.statutory_evidence.current_from', { day: summaryFrom(section) })
+                      : t('payroll.people.statutory_evidence.current_none') }}
+                  </span>
+                </p>
+                <!--
+                  Editaci je potřeba nabídnout TAM, kde uživatel čte hodnotu,
+                  kterou chce změnit. Jediné tlačítko dole panel jen přepnulo do
+                  editace, ale pole zůstala schovaná ve sbalené historii.
+                -->
+                <button
+                  v-if="canWrite && !editing"
+                  type="button"
+                  :class="btnOutlineSm('primary')"
+                  :disabled="saving"
+                  :aria-label="t('payroll.people.statutory_evidence.edit_section_aria', {
+                    section: t(`payroll.people.statutory_evidence.section.${section.key}`),
+                  })"
+                  :data-test="`edit-${section.key}`"
+                  @click="editSection(section)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                  {{ t('payroll.people.statutory_evidence.edit_section') }}
+                </button>
+              </div>
             </div>
 
             <details
@@ -948,7 +1023,7 @@ onMounted(() => {
             type="button"
             :class="btnOutline('primary')"
             data-test="start-statutory-evidence"
-            @click="editing = true"
+            @click="startEditing"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
             {{ t('payroll.people.statutory_evidence.edit') }}

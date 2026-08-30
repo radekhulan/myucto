@@ -216,9 +216,10 @@ function filledEvidence(): PayrollStatutoryEvidence {
   })
 }
 
-async function mounted(canWrite = true) {
+async function mounted(canWrite = true, attach = false) {
   const wrapper = mount(PayrollPersonStatutoryEvidencePanel, {
     props: { personId: 17, canWrite },
+    ...(attach ? { attachTo: document.body } : {}),
   })
   await flushPromises()
   return wrapper
@@ -272,6 +273,90 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
 
     expect(wrapper.find('[data-test="start-statutory-evidence"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="statutory-evidence-save"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="edit-tax_declarations"]').exists()).toBe(false)
+  })
+
+  /**
+   * Regrese: „Upravit evidenci" jen přepínalo `editing`, jenže pole leží uvnitř
+   * sbalené historie — u vyplněné sekce se po kliknutí nestalo nic viditelného.
+   */
+  it('Upravit evidenci rozbalí sekce, ne jen vymění tlačítka dole', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted()
+
+    // Vyplněná a neblokující sekce je při čtení sbalená…
+    expect(wrapper.get('[data-test="history-tax_declarations"]').attributes('open'))
+      .toBeUndefined()
+
+    await wrapper.get('[data-test="start-statutory-evidence"]').trigger('click')
+
+    // …a po vstupu do editace je vidět, do čeho se píše.
+    expect(wrapper.get('[data-test="history-tax_declarations"]').attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-test="history-health_coverages"]').attributes('open')).toBeDefined()
+    expect(wrapper.get('[data-test="tax_declarations-0-effective_to"]').attributes('disabled'))
+      .toBeUndefined()
+    expect(wrapper.find('[data-test="add-tax_declarations"]').exists()).toBe(true)
+  })
+
+  it('Upravit u sekce otevře právě ji a postaví kurzor do pole', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted(true, true)
+
+    await wrapper.get('[data-test="edit-tax_declarations"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="history-tax_declarations"]').attributes('open')).toBeDefined()
+    expect(wrapper.find('[data-test="statutory-evidence-save"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="section-tax_declarations"]').element
+      .contains(document.activeElement)).toBe(true)
+    // V editaci už tlačítko u sekce nepřekáží — režim je zapnutý pro celý panel.
+    expect(wrapper.find('[data-test="edit-tax_declarations"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('změna otevřená ze sekce se uloží jedním společným tlačítkem dole', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted()
+
+    await wrapper.get('[data-test="edit-tax_residences"]').trigger('click')
+    await wrapper.get('[data-test="add-tax_residences"]').trigger('click')
+
+    expect(wrapper.findAll('[data-test="statutory-evidence-save"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-test^="save-"]')).toHaveLength(0)
+
+    await wrapper.get('[data-test="statutory-evidence-save"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.saveStatutoryEvidence).toHaveBeenCalledTimes(1)
+    expect(savedRow('tax_residences')).toMatchObject({ residence: 'czech-resident' })
+    expect(mocks.success).toHaveBeenCalled()
+  })
+
+  it('otevřená sekce s uzavřenou historií dál drží pravidlo o nové verzi', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted()
+
+    await wrapper.get('[data-test="edit-tax_declarations"]').trigger('click')
+
+    expect(wrapper.get('[data-test="tax_declarations-0-effective_from"]').attributes('disabled'))
+      .toBeDefined()
+    expect(wrapper.find('[data-test="remove-tax_declarations-0"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="change-from-tax_declarations"]').exists()).toBe(true)
+  })
+
+  it('Zrušit vrátí sekce zpět do sbaleného stavu', async () => {
+    mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
+    const wrapper = await mounted()
+
+    await wrapper.get('[data-test="start-statutory-evidence"]').trigger('click')
+    expect(wrapper.get('[data-test="history-tax_declarations"]').attributes('open')).toBeDefined()
+
+    const buttons = wrapper.findAll('button')
+    await buttons.find(button => button.text().includes('common.cancel'))!.trigger('click')
+
+    expect(wrapper.get('[data-test="history-tax_declarations"]').attributes('open'))
+      .toBeUndefined()
+    expect(wrapper.find('[data-test="start-statutory-evidence"]').exists()).toBe(true)
   })
 
   it('nový záznam běžného českého případu je rovnou platný podle pravidel serveru', async () => {
