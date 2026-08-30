@@ -53,6 +53,8 @@ final class TaxReturnService
         private readonly FinancialStatementService $statements,
         private readonly EntityCategoryService $categories,
         private readonly AccountingSupplierSettingsRepository $supplierSettings,
+        // Zastoupení daňovým poradcem (§29/2 DŘ) do dan_por/pln_moc — viz representationMeta().
+        private readonly TaxRepresentationService $representation,
     ) {}
 
     private const TYPES = ['fo', 'po'];
@@ -245,8 +247,11 @@ final class TaxReturnService
                 throw new TaxReturnException('epo_business_validation_failed', implode(' ', $businessErrors), 422);
             }
             $supplier = $this->loadSupplier($supplierId);
+            // Finalizace probíhá PRÁVĚ TEĎ (finalized_at = NOW() níže) — zastoupení
+            // se čte k dnešku, ne k datu žádného předchozího řádku.
             $meta = ['verze_sw' => $this->loadAppVersion() ?? '0']
-                + $this->amendmentXmlMeta($type, $variant, $computation['result']);
+                + $this->amendmentXmlMeta($type, $variant, $computation['result'])
+                + $this->representationMeta($supplierId, null);
             $snapshotXml = $this->dpfoXml->build($supplier, $year, $computation['result'], $meta)['xml'];
             $xsd = $this->xmlValidator->validate($snapshotXml, 'dpfdp7');
             if ($xsd['status'] !== 'passed') {
@@ -748,8 +753,10 @@ final class TaxReturnService
         $row = $this->returns->find($supplierId, $year, $type, $variant, $seq);
         $inputs = $row !== null ? (array) $row['inputs'] : [];
         $computation = $this->compute($supplierId, $year, $type, $inputs, $variant);
+        // Pracovní náhled, nic zmrazené — zastoupení k dnešku (viz representationMeta()).
         $meta = ['verze_sw' => $this->loadAppVersion() ?? '0']
-            + $this->amendmentXmlMeta($type, $variant, $computation['result']);
+            + $this->amendmentXmlMeta($type, $variant, $computation['result'])
+            + $this->representationMeta($supplierId, null);
         $built = $this->dpfoXml->build($this->loadSupplier($supplierId), $year, $computation['result'], $meta);
         $businessErrors = $this->dpfoBusinessValidator->validate($computation['result'], $computation['podklady']);
         $xsd = $this->xmlValidator->validate($built['xml'], 'dpfdp7');
@@ -806,9 +813,17 @@ final class TaxReturnService
 
         $appendixWarnings = [];
         if ($type === 'po') {
+            // DPPO se na rozdíl od DPFO nezmrazuje do snapshotu (regeneruje se z $row['inputs']
+            // vždy znovu) — u finálního přiznání proto zastoupení čteme K DATU FINALIZACE
+            // ($row['finalized_at']), ne k dnešku, ať přegenerování starého přiznání nezmění
+            // dan_por podle toho, jestli firma dnes zastoupení má/nemá (viz representationMeta()).
+            $finalizedAt = ($row !== null && $row['status'] === 'final' && !empty($row['finalized_at']))
+                ? (string) $row['finalized_at']
+                : null;
             $meta = ['verze_sw' => $appVersion ?? '0']
                 + $this->periodMeta($computation['podklady']['period'] ?? null, $year)
-                + $amendMeta;
+                + $amendMeta
+                + $this->representationMeta($supplierId, $finalizedAt);
             $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []));
             $appendixWarnings = (array) ($appendix['warnings'] ?? []);
             unset($appendix['warnings']);
@@ -899,6 +914,23 @@ final class TaxReturnService
             $meta['kc_dppiv3'] = $iv1 - $iv2;
         }
         return $meta;
+    }
+
+    /**
+     * Meta pro zastoupení daňovým poradcem (`dan_por`/`pln_moc` + `zast_*`, viz
+     * {@see TaxRepresentationService}). Datum "k čemu" je JEDNO místo pro všechny
+     * volající: u finalizovaného přiznání (`$finalizedAt` != null) stav K DATU
+     * FINALIZACE — jednou zmrazené přiznání nesmí měnit obsah podle toho, jestli
+     * firma dnes (třeba o rok později) pořád má/nemá poradce; u draftu/náhledu
+     * stav K DNEŠKU, protože nic zmrazené ještě není.
+     *
+     * @return array{representation: array<string,mixed>}
+     */
+    private function representationMeta(int $supplierId, ?string $finalizedAt): array
+    {
+        $date = $finalizedAt !== null ? substr($finalizedAt, 0, 10) : date('Y-m-d');
+
+        return ['representation' => $this->representation->at($supplierId, $date)];
     }
 
     /**

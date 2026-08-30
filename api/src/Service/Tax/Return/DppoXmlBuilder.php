@@ -123,7 +123,8 @@ final class DppoXmlBuilder
      * @param array<string,mixed> $supplier row ze supplier (loadSupplier v service)
      * @param array<string,mixed> $calc     výstup DppoReturnCalculator::compute
      * @param array<string,mixed> $meta     verzeSW, typ_dapdpp, dapdpp_forma, typ_zo, typ_popldpp,
-     *   volitelně `poc_zam` (viz {@see buildVetaS} — přebije hodnotu ze $appendix['settings'])
+     *   volitelně `poc_zam` (viz {@see buildVetaS} — přebije hodnotu ze $appendix['settings']),
+     *   volitelně `representation` (výstup {@see TaxRepresentationService::at()}, jinak 'N' bez zástupce)
      * @param array<string,mixed> $appendix Příloha účetní závěrky (Epic DP — VetaUA/UB/UD/UZ,
      *   volitelné): {balance_sheet: array (FinancialStatementService::balanceSheet výstup),
      *   income_statement: array (…::incomeStatement výstup), category: array
@@ -227,10 +228,11 @@ final class DppoXmlBuilder
         }
 
         // dan_por — zpracoval a podává přiznání daňový poradce na plnou moc (§29/2 DŘ)?
-        // Systém plnou moc neeviduje, přiznání staví a podává přímo poplatník přes appku,
-        // proto konstantně 'N' (kdyby bylo 'A', EPO by navíc vyžadovalo údaje o poradci
-        // v I. oddílu, které nemáme).
-        $vetaD->setAttribute('dan_por', 'N');
+        // Čte se z evidence zastoupení (TaxRepresentationService) k datu $meta['representation_date']
+        // (viz TaxReturnService — finalizované přiznání nese stav K TEHDEJŠÍMU DATU, ne
+        // dnešní). Bez evidence (nezastoupená firma) je to konstantně 'N' jako dřív.
+        $representation = (array) ($meta['representation'] ?? ['represented' => false]);
+        $vetaD->setAttribute('dan_por', EpoSupplierBlockBuilder::representationFlag($representation));
 
         // ── VetaF — příloha č. 1 II. oddílu, tabulka B (odpisy) — musí být hotová dřív
         // než se p_pr_2od zapíše na VetaD (počet příloh II. oddílu = kolik z VetaE/F/G
@@ -251,7 +253,7 @@ final class DppoXmlBuilder
         }
 
         // ── VetaP — poplatník (DPPDP9 tvar: rod_c=IČO, zkrobchjm, bez typ_ds/c_ufo) ─
-        $root->appendChild($this->buildVetaP($dom, $supplier));
+        $root->appendChild($this->buildVetaP($dom, $supplier, $representation));
 
         // ── VetaO — řádky II. oddílu ────────────────────────────────────────
         $root->appendChild($this->buildVetaO($dom, $calc, $year, $zdobdDo));
@@ -719,8 +721,11 @@ final class DppoXmlBuilder
         return (int) round($czk / 1000);
     }
 
-    /** @param array<string,mixed> $supplier */
-    private function buildVetaP(\DOMDocument $dom, array $supplier): \DOMElement
+    /**
+     * @param array<string,mixed> $supplier
+     * @param array<string,mixed> $representation výstup {@see TaxRepresentationService::at()}
+     */
+    private function buildVetaP(\DOMDocument $dom, array $supplier, array $representation = ['represented' => false]): \DOMElement
     {
         $vetaP = $dom->createElement('VetaP');
 
@@ -775,16 +780,29 @@ final class DppoXmlBuilder
         if (!empty($supplier['phone'])) {
             $vetaP->setAttribute('c_telef', EpoSupplierBlockBuilder::normalizePhone((string) $supplier['phone']));
         }
-        // Oprávněná osoba (jednatel) — povinné pro EPO podání PO.
-        if (!empty($supplier['opr_jmeno'])) {
-            $vetaP->setAttribute('opr_jmeno', (string) $supplier['opr_jmeno']);
+        // Oprávněná osoba (jednatel) — povinné pro EPO podání PO, ALE JEN když
+        // podepisující osobou není fyzická osoba zástupce (zast_typ='F'): zkušební
+        // EPO to vytýká („Je-li podepisující osobou fyzická osoba, pak se jméno
+        // oprávněné osoby nevyplňuje") a reálné referenční podání se zast_typ='F'
+        // opr_jmeno/opr_prijmeni/opr_postaveni skutečně nemá vůbec — podepisující
+        // osobou je tam poradce (zast_*), ne jednatel (opr_*), oba naráz EPO odmítá.
+        // Zastoupení právnickou osobou (zast_typ='P') opr_* naopak potřebuje —
+        // identifikuje fyzickou osobu, která jménem té poradenské firmy podepisuje.
+        $signerIsRepresentativeNaturalPerson = !empty($representation['represented'])
+            && ($representation['type'] ?? null) === 'F';
+        if (!$signerIsRepresentativeNaturalPerson) {
+            if (!empty($supplier['opr_jmeno'])) {
+                $vetaP->setAttribute('opr_jmeno', (string) $supplier['opr_jmeno']);
+            }
+            if (!empty($supplier['opr_prijmeni'])) {
+                $vetaP->setAttribute('opr_prijmeni', (string) $supplier['opr_prijmeni']);
+            }
+            if (!empty($supplier['opr_postaveni'])) {
+                $vetaP->setAttribute('opr_postaveni', (string) $supplier['opr_postaveni']);
+            }
         }
-        if (!empty($supplier['opr_prijmeni'])) {
-            $vetaP->setAttribute('opr_prijmeni', (string) $supplier['opr_prijmeni']);
-        }
-        if (!empty($supplier['opr_postaveni'])) {
-            $vetaP->setAttribute('opr_postaveni', (string) $supplier['opr_postaveni']);
-        }
+
+        EpoSupplierBlockBuilder::fillRepresentationAttributes($vetaP, $representation);
 
         return $vetaP;
     }

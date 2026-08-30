@@ -61,6 +61,9 @@ final class SettingsAction
         // MZ-03: legacy identifikátory odvodů se u PO nulují jen proti zapnutému mzdovému
         // modulu — s vypnutými Mzdami jsou jediným zdrojem (viz updateSupplier()).
         private readonly \MyInvoice\Service\Payroll\PayrollModuleAccess $payrollAccess,
+        // Zastoupení daňovým poradcem (§29/2 DŘ) — jen ke čtení historie do respondSupplier();
+        // zápis jde přes TaxRepresentationAction (samostatná historizovaná evidence, vzor VH-01).
+        private readonly \MyInvoice\Service\Tax\Return\TaxRepresentationService $taxRepresentation,
     ) {}
 
     /**
@@ -1107,6 +1110,9 @@ final class SettingsAction
             'note' => $item['note'] !== null ? (string) $item['note'] : null,
             'annual_deduction_percent' => (float) $item['annual_deduction_percent'],
         ], $history->fetchAll(\PDO::FETCH_ASSOC) ?: []);
+        // Zastoupení daňovým poradcem (§29/2 DŘ, migrace 1662) — stejný vzor jako
+        // vat_status_history výše, jen bez annual_deduction_percent.
+        $row['tax_representation_history'] = $this->taxRepresentation->history($id);
         // Identifikovaná osoba (§ 6g–6l, issue #94) — doplněk k neplátci.
         $row['is_identified']            = (bool) ($row['is_identified'] ?? false);
         $row['oss_enabled']              = (bool) ($row['oss_enabled'] ?? false);

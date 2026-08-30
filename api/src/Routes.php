@@ -2362,6 +2362,9 @@ final class Routes
         $app->delete ('/api/settings/vat-status-history/{id:[0-9]+}',  [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'delete']);
         // § 6/§ 94 hlídač obratu pro banner Plátcovství DPH (EPIC VH-07).
         $app->get    ('/api/settings/vat-status-history/registration-check', [\MyInvoice\Action\Settings\VatStatusHistoryAction::class, 'registrationCheck']);
+        // Historie zastoupení daňovým poradcem (§29/2 DŘ) — seznam vrací GET /api/settings/supplier.
+        $app->post   ('/api/settings/tax-representation-history',             [\MyInvoice\Action\Settings\TaxRepresentationAction::class, 'save']);
+        $app->delete ('/api/settings/tax-representation-history/{id:[0-9]+}', [\MyInvoice\Action\Settings\TaxRepresentationAction::class, 'delete']);
         $app->get ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'get']);
         $app->put ('/api/settings/ai-assist',               [\MyInvoice\Action\Settings\AiAssistSettingsAction::class, 'put']);
         $app->get ('/api/settings/mode-switch-preview',     [SettingsAction::class, 'modeSwitchPreview']);

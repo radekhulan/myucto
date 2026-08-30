@@ -12,6 +12,7 @@ use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Accounting\UnbookedDocumentsCounter;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
+use MyInvoice\Service\Tax\Return\TaxRepresentationService;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\PayablePredicate;
@@ -49,6 +50,9 @@ final class CrmAggregationService
         // důvodu jako ostatní — ruční konstrukce v testech; produkční binding
         // v Bootstrapu ji dodává. Bez ní se výpočet dělá vždy znovu.
         ?EntityCache $cache = null,
+        // §29/2 DŘ — zastoupení daňovým poradcem posouvá lhůtu DPPO na 1. 7. (§136/2 DŘ),
+        // viz dppoDeadlineFromInput(). Volitelná ze stejného důvodu jako ostatní.
+        private readonly ?TaxRepresentationService $representation = null,
     ) {
         $this->cache = $cache ?? EntityCache::disabled();
     }
@@ -1924,13 +1928,13 @@ final class CrmAggregationService
 
         $prev = $this->safeBalancePreview($supplierId, $prevYear, 'po');
         if ($prev !== null && $prev['balance_due'] > 0.5) {
-            $deadline = $this->dppoDeadlineFromInput($prev['filing_deadline_input'], $y);
+            $deadline = $this->dppoDeadlineFromInput($supplierId, $prev['filing_deadline_input'], $y);
             return $this->buildDppoBalanceDueItem($prev['balance_due'], $deadline, $now, $prevYear);
         }
 
         $current = $this->safeBalancePreview($supplierId, $y, 'po');
         if ($current !== null && $current['balance_due'] > 0.5) {
-            $deadline = $this->dppoDeadlineFromInput($current['filing_deadline_input'], $y + 1);
+            $deadline = $this->dppoDeadlineFromInput($supplierId, $current['filing_deadline_input'], $y + 1);
             return $this->buildDppoBalanceDueItem($current['balance_due'], $deadline, $now, $y);
         }
         return null;
@@ -1950,15 +1954,24 @@ final class CrmAggregationService
     }
 
     /**
-     * Splatnost doplatku = lhůta podání přiznání. Ruční vstup (`filing_deadline`,
-     * typicky s daňovým poradcem — 1. 7.) má přednost; jinak standardní elektronický
-     * termín (~1. 5. roku $filingYear, posunuto z pevného svátku na nejbližší
-     * pracovní den) — stejná logika jako taxCalendarItems().
+     * Splatnost doplatku = lhůta podání přiznání. Ruční vstup (`filing_deadline`) má
+     * VŽDY přednost — účetní ho zadala schválně a lépe zná konkrétní případ. Bez
+     * ručního vstupu: byla-li firma podle evidence zastoupení (TaxRepresentationService)
+     * zastoupena daňovým poradcem k původní (neprodloužené) lhůtě $filingYear-04-01,
+     * platí prodloužená lhůta § 136 odst. 2 DŘ (6 měsíců od konce období = 1. 7.);
+     * jinak standardní elektronický termín (~1. 5., posunuto z pevného svátku na
+     * nejbližší pracovní den) — stejná logika jako taxCalendarItems() (tam se
+     * zastoupení zatím nepromítá, viz docblock u volání).
      */
-    private function dppoDeadlineFromInput(string $manualDeadline, int $filingYear): string
+    private function dppoDeadlineFromInput(int $supplierId, string $manualDeadline, int $filingYear): string
     {
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $manualDeadline) === 1) {
             return $manualDeadline;
+        }
+        if ($this->representation !== null
+            && $this->representation->at($supplierId, sprintf('%04d-04-01', $filingYear))['represented']
+        ) {
+            return $this->nextBusinessDayCz(sprintf('%04d-07-01', $filingYear));
         }
         return $this->nextBusinessDayCz(sprintf('%04d-05-01', $filingYear));
     }
@@ -2306,7 +2319,14 @@ final class CrmAggregationService
             ];
         }
 
-        // Roční termín DPFO/DPPO — standardní termíny (bez "s poradcem", viz docblock).
+        // Roční termín DPFO/DPPO — standardní termíny (papírově/elektronicky). ZÁMĚRNĚ
+        // bez posunu na 1. 7. i při evidovaném zastoupení (na rozdíl od
+        // dppoDeadlineFromInput() u doplatku DPPO výše, kde je to napojené) — tenhle
+        // widget ukazuje dvě samostatné položky (papírově/elektronicky) a přidání
+        // třetí "s poradcem" nebo přepnutí mezi nimi podle evidence je produktové
+        // rozhodnutí (co widget zobrazí komu), ne jen výpočet; ponecháno jako
+        // navazující úkol.
+
         if ($taxpayerType === 'po' || ($taxpayerType === 'fo' && $flatTaxBand === 'none')) {
             $y = (int) $now->format('Y');
             $formCode = $taxpayerType === 'po' ? 'dppdp9' : 'dpfdp5';

@@ -339,6 +339,61 @@ final class EpoSupplierBlockBuilder
         return preg_replace('/[^0-9]/', '', $clean) ?? '';
     }
 
+    /**
+     * `dan_por` (DPPO) / `pln_moc` (DPFO) — „zpracoval a podává přiznání daňový poradce
+     * na plnou moc?" (§ 29 odst. 2 DŘ). Obě VetaD atributy mají stejnou sémantiku a
+     * hodnotovou množinu 'A'/'N', jen jiný název — sdílíme jeden zdroj pravdy.
+     *
+     * @param array{represented:bool,...} $representation výstup {@see \MyInvoice\Service\Tax\Return\TaxRepresentationService::at()}
+     */
+    public static function representationFlag(array $representation): string
+    {
+        return !empty($representation['represented']) ? 'A' : 'N';
+    }
+
+    /**
+     * Vyplní `zast_*` atributy VetaP (DPPDP9/DPFDP7) identifikací daňového poradce.
+     * Beze zbytku vynechá, když firma zastoupena není — přesně dnešní chování ('N'
+     * bez identifikace), jen teď řízené evidencí místo natvrdo.
+     *
+     * `zast_kod` je odvozený, ne uživatelský vstup: 4b = fyzická osoba daňový
+     * poradce/advokát, 4c = právnická osoba vykonávající daňové poradenství — jediné
+     * dvě hodnoty číselníku, které evidence zastoupení daňovým poradcem pokrývá
+     * (číselník má dalších ~10 typů zástupce mimo rozsah této evidence — zákonný
+     * zástupce, dědic apod.).
+     *
+     * @param array{
+     *   represented: bool, type: ?string, first_name: ?string, last_name: ?string,
+     *   company_name: ?string, ico: ?string, ev_number: ?string,
+     * } $representation výstup {@see \MyInvoice\Service\Tax\Return\TaxRepresentationService::at()}
+     */
+    public static function fillRepresentationAttributes(DOMElement $vetaP, array $representation): void
+    {
+        if (empty($representation['represented'])) {
+            return;
+        }
+
+        $type = (string) ($representation['type'] ?? '');
+        $vetaP->setAttribute('zast_typ', $type);
+        $vetaP->setAttribute('zast_kod', $type === 'P' ? '4c' : '4b');
+
+        if ($type === 'P') {
+            $vetaP->setAttribute('zast_nazev', mb_substr((string) ($representation['company_name'] ?? ''), 0, 255));
+            $ico = preg_replace('/\D/', '', (string) ($representation['ico'] ?? '')) ?? '';
+            if ($ico !== '') {
+                $vetaP->setAttribute('zast_ic', $ico);
+            }
+        } else {
+            $vetaP->setAttribute('zast_jmeno', mb_substr((string) ($representation['first_name'] ?? ''), 0, 20));
+            $vetaP->setAttribute('zast_prijmeni', mb_substr((string) ($representation['last_name'] ?? ''), 0, 36));
+        }
+
+        $evNumber = trim((string) ($representation['ev_number'] ?? ''));
+        if ($evNumber !== '') {
+            $vetaP->setAttribute('zast_ev_cislo', mb_substr($evNumber, 0, 36));
+        }
+    }
+
     public static function countryName(string $iso2): ?string
     {
         static $map = [

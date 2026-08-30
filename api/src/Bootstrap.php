@@ -423,6 +423,9 @@ final class Bootstrap
                 // Bez tohohle argumentu spadne služba na průchozí EntityCache::disabled()
                 // a náhled doplatku daně (~450 ms) se počítá při každém načtení znovu.
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
+                // §29/2 DŘ — zastoupení daňovým poradcem posouvá lhůtu DPPO na 1. 7.
+                // (§136/2 DŘ, viz CrmAggregationService::dppoDeadlineFromInput()).
+                $c->get(\MyInvoice\Service\Tax\Return\TaxRepresentationService::class),
             ),
             // Epic F0 — seam pro budoucí shard-routing per supplier; nový účetní kód (F1+)
             // si PDO bere přes forSupplier(), dnes vrací sdílené spojení.

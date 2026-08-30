@@ -109,6 +109,40 @@ export interface VatStatusState {
   suggest_s79?: VatStatusS79Suggest
 }
 
+/** Řádek historie zastoupení daňovým poradcem/advokátem (supplier_tax_representation_history). */
+export interface TaxRepresentationHistoryEntry {
+  id: number
+  effective_from: string
+  represented: boolean
+  /** F = fyzická osoba (daňový poradce/advokát), P = právnická osoba. Jen když represented. */
+  type: 'F' | 'P' | null
+  first_name: string | null
+  last_name: string | null
+  company_name: string | null
+  ico: string | null
+  /** Evidenční číslo v seznamu KDP ČR / ČAK. */
+  ev_number: string | null
+  power_of_attorney_granted_on: string | null
+  note: string | null
+}
+
+export interface TaxRepresentationSavePayload {
+  effective_from: string
+  represented: boolean
+  type?: 'F' | 'P' | null
+  first_name?: string | null
+  last_name?: string | null
+  company_name?: string | null
+  ico?: string | null
+  ev_number?: string | null
+  power_of_attorney_granted_on?: string | null
+  note?: string | null
+}
+
+export interface TaxRepresentationState {
+  tax_representation_history: TaxRepresentationHistoryEntry[]
+}
+
 /** § 6/§ 94 hlídač obratu (VH-07) — GET /settings/vat-status-history/registration-check. */
 export interface VatRegistrationCheck {
   applicable: boolean
@@ -226,6 +260,9 @@ export interface Supplier {
   financial_office_code?: string | null
   workplace_code?: string | null
   cz_nace_code?: string | null
+  // Zastoupení daňovým poradcem (§29/2 DŘ, migrace 1662) — historie k datu, viz
+  // TaxRepresentationHistoryEntry. Promítá se do dan_por (DPPO) / pln_moc (DPFO).
+  tax_representation_history?: TaxRepresentationHistoryEntry[]
   /** Ulozeny CZ-NACE prelozeny pres ciselnik CINNOSTI (read-only, dopocitava backend). */
   cz_nace_resolved?: NaceResolved | null
   data_box_id?: string | null
@@ -803,6 +840,13 @@ export const settingsApi = {
   // § 6/§ 94 hlídač obratu (VH-07) — banner „obrat překročen" v bloku Plátcovství DPH.
   getVatRegistrationCheck: () =>
     api.get<VatRegistrationCheck>('/settings/vat-status-history/registration-check').then(r => r.data),
+
+  // Historie zastoupení daňovým poradcem (§29/2 DŘ) — seznam vrací GET /settings/supplier
+  // (tax_representation_history); zápis/mazání vrací čerstvou historii.
+  saveTaxRepresentation: (payload: TaxRepresentationSavePayload) =>
+    api.post<TaxRepresentationState>('/settings/tax-representation-history', payload).then(r => r.data),
+  deleteTaxRepresentation: (id: number) =>
+    api.delete<TaxRepresentationState>(`/settings/tax-representation-history/${id}`).then(r => r.data),
   getAiAssist: () => api.get<AiAssistSettings>('/settings/ai-assist').then(r => r.data),
   updateAiAssist: (payload: AiAssistUpdate) => api.put<AiAssistSettings>('/settings/ai-assist', payload).then(r => r.data),
 

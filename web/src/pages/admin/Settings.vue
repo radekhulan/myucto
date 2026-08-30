@@ -2,7 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest } from '@/api/settings'
+import { settingsApi, type Supplier, type SelfCopyType, type SelfCopyMode, type NumberSeriesSide, type NaceCode, type NaceResolved, type VatStatusHistoryEntry, type VatStatusCollision, type VatStatusSavePayload, type VatStatusState, type VatRegistrationCheck, type VatStatusS79Suggest, type TaxRepresentationHistoryEntry, type TaxRepresentationSavePayload } from '@/api/settings'
 import { adminApi, type SampleDataStatus } from '@/api/admin'
 import { clientsApi } from '@/api/clients'
 import { useSupplierStore } from '@/stores/supplier'
@@ -687,6 +687,113 @@ function vatCollisionLabel(c: VatStatusCollision): string {
       ? `Q${c.period_quarter}/${c.period_year}`
       : String(c.period_year ?? '')
   return t('settings.vat_status.collision_tax_submission', { form: c.form_code ?? '', period })
+}
+
+// ── Zastoupení daňovým poradcem (§29/2 DŘ) ──────────────────────────────────
+// Stejný vzor jako Plátcovství DPH výše (VH-01): CRUD historie je okamžitá akce
+// přes API, NE součást společného Uložit. Bez retro-guardu (viz migrace 1662 —
+// zastoupení nic neúčtuje, jen dan_por/pln_moc/zast_* v XML přiznání).
+const TAX_REP_BASELINE_DATE = '1900-01-01'
+const taxRepHistory = computed<TaxRepresentationHistoryEntry[]>(() => supplier.value?.tax_representation_history ?? [])
+const taxRepCurrent = computed<TaxRepresentationHistoryEntry | null>(() => {
+  const today = todayIso()
+  const due = taxRepHistory.value.filter(e => e.effective_from <= today)
+  return due.length ? due[due.length - 1] : null
+})
+const taxRepCurrentLabel = computed(() => {
+  const current = taxRepCurrent.value
+  if (!current || !current.represented) return t('settings.tax_representation.state_none')
+  return current.type === 'P'
+    ? (current.company_name ?? '')
+    : `${current.first_name ?? ''} ${current.last_name ?? ''}`.trim()
+})
+
+const taxRepFormOpen = ref(false)
+const taxRepFormEditingId = ref<number | null>(null)
+const taxRepFormDate = ref(todayIso())
+const taxRepFormRepresented = ref(false)
+const taxRepFormType = ref<'F' | 'P'>('F')
+const taxRepFormFirstName = ref('')
+const taxRepFormLastName = ref('')
+const taxRepFormCompanyName = ref('')
+const taxRepFormIco = ref('')
+const taxRepFormEvNumber = ref('')
+const taxRepFormPoaDate = ref('')
+const taxRepFormNote = ref('')
+const taxRepSaving = ref(false)
+
+function openTaxRepForm(entry?: TaxRepresentationHistoryEntry) {
+  taxRepFormEditingId.value = entry?.id ?? null
+  taxRepFormDate.value = entry ? entry.effective_from : todayIso()
+  taxRepFormRepresented.value = entry?.represented ?? false
+  taxRepFormType.value = entry?.type ?? 'F'
+  taxRepFormFirstName.value = entry?.first_name ?? ''
+  taxRepFormLastName.value = entry?.last_name ?? ''
+  taxRepFormCompanyName.value = entry?.company_name ?? ''
+  taxRepFormIco.value = entry?.ico ?? ''
+  taxRepFormEvNumber.value = entry?.ev_number ?? ''
+  taxRepFormPoaDate.value = entry?.power_of_attorney_granted_on ?? ''
+  taxRepFormNote.value = entry?.note ?? ''
+  taxRepFormOpen.value = true
+}
+function closeTaxRepForm() {
+  taxRepFormOpen.value = false
+  taxRepFormEditingId.value = null
+}
+
+function applyTaxRepState(history: TaxRepresentationHistoryEntry[]) {
+  if (!supplier.value) return
+  supplier.value.tax_representation_history = history
+}
+
+async function submitTaxRepForm() {
+  if (blockDemoMutation()) return
+  if (!supplier.value) return
+  const payload: TaxRepresentationSavePayload = {
+    effective_from: taxRepFormDate.value,
+    represented: taxRepFormRepresented.value,
+    ...(taxRepFormRepresented.value ? {
+      type: taxRepFormType.value,
+      first_name: taxRepFormType.value === 'F' ? (taxRepFormFirstName.value.trim() || null) : null,
+      last_name: taxRepFormType.value === 'F' ? (taxRepFormLastName.value.trim() || null) : null,
+      company_name: taxRepFormType.value === 'P' ? (taxRepFormCompanyName.value.trim() || null) : null,
+      ico: taxRepFormType.value === 'P' ? (taxRepFormIco.value.trim() || null) : null,
+      ev_number: taxRepFormEvNumber.value.trim() || null,
+      power_of_attorney_granted_on: taxRepFormPoaDate.value.trim() || null,
+    } : {}),
+    note: taxRepFormNote.value.trim() || null,
+  }
+  taxRepSaving.value = true
+  try {
+    const state = await settingsApi.saveTaxRepresentation(payload)
+    applyTaxRepState(state.tax_representation_history)
+    closeTaxRepForm()
+    toast.success(t('common.saved'))
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    taxRepSaving.value = false
+  }
+}
+
+const taxRepDeleteEntry = ref<TaxRepresentationHistoryEntry | null>(null)
+
+async function confirmTaxRepDelete() {
+  if (blockDemoMutation()) return
+  const entry = taxRepDeleteEntry.value
+  if (!entry) return
+  taxRepSaving.value = true
+  try {
+    const state = await settingsApi.deleteTaxRepresentation(entry.id)
+    applyTaxRepState(state.tax_representation_history)
+    taxRepDeleteEntry.value = null
+    toast.success(t('settings.tax_representation.deleted'))
+  } catch (e: any) {
+    taxRepDeleteEntry.value = null
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    taxRepSaving.value = false
+  }
 }
 
 </script>
@@ -1397,6 +1504,142 @@ function vatCollisionLabel(c: VatStatusCollision): string {
               <input v-model="supplier.workplace_code" type="text" maxlength="8"
                 class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
+            <!-- Zastoupení daňovým poradcem (§29/2 DŘ) — CRUD historie je okamžitá akce
+                 přes API (vzor bloku Plátcovství DPH výše), NE součást společného Uložit. -->
+            <div class="md:col-span-2 border border-neutral-200 rounded-md p-3">
+              <div class="flex items-start justify-between gap-2 flex-wrap">
+                <div>
+                  <p class="text-sm font-medium text-neutral-700">{{ t('settings.tax_representation.title') }}</p>
+                  <p class="text-xs text-neutral-500 mt-0.5">
+                    {{ t('settings.tax_representation.current') }}: <strong class="text-neutral-700">{{ taxRepCurrentLabel }}</strong>
+                  </p>
+                </div>
+                <button type="button" @click="openTaxRepForm()" :class="btnOutline('primary')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                  {{ t('settings.tax_representation.add') }}
+                </button>
+              </div>
+              <p class="text-xs text-neutral-500 mt-1">{{ t('settings.tax_representation.hint') }}</p>
+              <div class="overflow-x-auto mt-3">
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-left text-xs text-neutral-500 border-b border-neutral-200">
+                      <th class="py-1.5 pr-3 font-medium">{{ t('settings.tax_representation.col_from') }}</th>
+                      <th class="py-1.5 pr-3 font-medium">{{ t('settings.tax_representation.col_state') }}</th>
+                      <th class="py-1.5 pr-3 font-medium">{{ t('settings.tax_representation.col_note') }}</th>
+                      <th class="py-1.5 w-20"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="entry in taxRepHistory" :key="entry.id" class="border-b border-neutral-100">
+                      <td class="py-1.5 pr-3 font-mono whitespace-nowrap">
+                        <template v-if="entry.effective_from === TAX_REP_BASELINE_DATE">{{ t('settings.tax_representation.baseline') }}</template>
+                        <template v-else>{{ entry.effective_from }}</template>
+                        <span v-if="entry.effective_from > todayIso()" class="ml-1 text-xs text-warning-600 font-sans">
+                          {{ t('settings.vat_status.future_badge') }}
+                        </span>
+                      </td>
+                      <td class="py-1.5 pr-3">
+                        <template v-if="!entry.represented">{{ t('settings.tax_representation.state_none') }}</template>
+                        <template v-else-if="entry.type === 'P'">{{ entry.company_name }}</template>
+                        <template v-else>{{ entry.first_name }} {{ entry.last_name }}</template>
+                      </td>
+                      <td class="py-1.5 pr-3 text-neutral-500">{{ entry.note || '—' }}</td>
+                      <td class="py-1.5 text-right whitespace-nowrap">
+                        <button type="button" @click="openTaxRepForm(entry)"
+                          class="cursor-pointer p-1 text-neutral-400 hover:text-primary-600" :title="t('common.edit')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                        </button>
+                        <button type="button" @click="taxRepDeleteEntry = entry"
+                          class="cursor-pointer p-1 text-neutral-400 hover:text-danger-600" :title="t('common.delete')">
+                          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+                        </button>
+                      </td>
+                    </tr>
+                    <EmptyState v-if="taxRepHistory.length === 0" dense icon="clipboardCheck" :colspan="4" :title="t('settings.tax_representation.empty')" />
+                  </tbody>
+                </table>
+              </div>
+              <div v-if="taxRepFormOpen" class="mt-3 border-t border-neutral-200 pt-3">
+                <p class="text-xs font-medium text-neutral-700 mb-2">
+                  {{ taxRepFormEditingId === null ? t('settings.tax_representation.form_add_title') : t('settings.tax_representation.form_edit_title') }}
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_date') }}</label>
+                    <input v-model="taxRepFormDate" type="date" :disabled="taxRepFormEditingId !== null"
+                      class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100 disabled:text-neutral-500" />
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_represented') }}</label>
+                    <select v-model="taxRepFormRepresented" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                      <option :value="false">{{ t('settings.tax_representation.state_none') }}</option>
+                      <option :value="true">{{ t('settings.tax_representation.state_represented') }}</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_note') }}</label>
+                    <input v-model="taxRepFormNote" type="text" maxlength="255"
+                      class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                  </div>
+                </div>
+                <template v-if="taxRepFormRepresented">
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_type') }}</label>
+                      <select v-model="taxRepFormType" class="w-full h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
+                        <option value="F">{{ t('settings.tax_representation.type_f') }}</option>
+                        <option value="P">{{ t('settings.tax_representation.type_p') }}</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_ev_number') }}</label>
+                      <input v-model="taxRepFormEvNumber" type="text" maxlength="36"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_poa_date') }}</label>
+                      <input v-model="taxRepFormPoaDate" type="date"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                    </div>
+                  </div>
+                  <div v-if="taxRepFormType === 'F'" class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_first_name') }}</label>
+                      <input v-model="taxRepFormFirstName" type="text" maxlength="20"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_last_name') }}</label>
+                      <input v-model="taxRepFormLastName" type="text" maxlength="36"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                    </div>
+                  </div>
+                  <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_company_name') }}</label>
+                      <input v-model="taxRepFormCompanyName" type="text" maxlength="255"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
+                    </div>
+                    <div>
+                      <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('settings.tax_representation.form_ico') }}</label>
+                      <input v-model="taxRepFormIco" type="text" maxlength="10"
+                        class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                    </div>
+                  </div>
+                </template>
+                <div class="flex justify-end gap-2 mt-3">
+                  <button type="button" @click="closeTaxRepForm" :disabled="taxRepSaving" :class="btnOutline('neutral')">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                    {{ t('common.cancel') }}
+                  </button>
+                  <button type="button" @click="submitTaxRepForm()" :disabled="taxRepSaving" :class="btnFilled('primary')">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                    {{ taxRepSaving ? '…' : t('common.save') }}
+                  </button>
+                </div>
+              </div>
+            </div>
             <!-- U OSVČ jsou to osobní identifikátory a patří sem vždy. U právnické osoby je
                  kanonickým zdrojem mzdový modul — ale jen dokud běží: s vypnutými Mzdami by
                  VS zaměstnavatele neměl kde bydlet, a detekce odvodů v bance i šablony
@@ -1638,6 +1881,26 @@ function vatCollisionLabel(c: VatStatusCollision): string {
           <button type="button" @click="confirmVatDelete()" :disabled="vatSaving" :class="btnFilled('danger')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ vatSaving ? '…' : t('common.delete') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Potvrzení smazání řádku historie zastoupení daňovým poradcem (§29/2 DŘ) -->
+    <div v-if="taxRepDeleteEntry" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-md p-6">
+        <h3 class="text-base font-semibold text-neutral-900">{{ t('settings.tax_representation.delete_confirm_title') }}</h3>
+        <p class="text-sm text-neutral-600 mt-1">
+          {{ t('settings.tax_representation.delete_confirm_text', { date: taxRepDeleteEntry.effective_from }) }}
+        </p>
+        <div class="flex justify-end gap-2 mt-4">
+          <button type="button" @click="taxRepDeleteEntry = null" :disabled="taxRepSaving" :class="btnOutline('neutral')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" @click="confirmTaxRepDelete()" :disabled="taxRepSaving" :class="btnFilled('danger')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ taxRepSaving ? '…' : t('common.delete') }}
           </button>
         </div>
       </div>

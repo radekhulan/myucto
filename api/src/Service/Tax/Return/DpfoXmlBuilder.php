@@ -39,7 +39,8 @@ final class DpfoXmlBuilder
     /**
      * @param array<string,mixed> $supplier
      * @param array<string,mixed> $calc  výstup DpfoReturnCalculator::compute
-     * @param array<string,mixed> $meta
+     * @param array<string,mixed> $meta  volitelně `representation` (výstup {@see TaxRepresentationService::at()},
+     *   jinak 'N' bez zástupce) a `pln_moc` (explicitní přebití, BC)
      * @return array{xml:string,warnings:list<string>}
      */
     public function build(array $supplier, int $year, array $calc, array $meta = []): array
@@ -61,7 +62,12 @@ final class DpfoXmlBuilder
         $vetaD->setAttribute('rok', (string) $year);
         $vetaD->setAttribute('dap_typ', (string) ($meta['dap_typ'] ?? 'B')); // B = řádné
         $vetaD->setAttribute('c_ufo_cil', (string) ($supplier['financial_office_code'] ?: '451'));
-        $vetaD->setAttribute('pln_moc', (string) ($meta['pln_moc'] ?? 'N'));
+        // pln_moc — podal DAP daňový poradce na plnou moc? Čte se z evidence zastoupení
+        // (TaxRepresentationService) k datu $meta['representation_date'], stejně jako
+        // DPPO `dan_por` (viz DppoXmlBuilder — sdílené zdůvodnění datování). Explicitní
+        // $meta['pln_moc'] má přednost (BC pro volající, které si hodnotu dosazují samy).
+        $representation = (array) ($meta['representation'] ?? ['represented' => false]);
+        $vetaD->setAttribute('pln_moc', (string) ($meta['pln_moc'] ?? EpoSupplierBlockBuilder::representationFlag($representation)));
         $vetaD->setAttribute('audit', (string) ($meta['audit'] ?? 'N'));
         $vetaD->setAttribute('zdobd_od', sprintf('1.1.%04d', $year));
         $vetaD->setAttribute('zdobd_do', sprintf('31.12.%04d', $year));
@@ -119,7 +125,7 @@ final class DpfoXmlBuilder
         }
 
         // ── VetaP — poplatník FO ─────────────────────────────────────────────
-        $root->appendChild($this->buildVetaP($dom, $supplier, $warnings));
+        $root->appendChild($this->buildVetaP($dom, $supplier, $warnings, $representation));
 
         // ── VetaO — dílčí základy ────────────────────────────────────────────
         $vetaO = $dom->createElement('VetaO');
@@ -358,8 +364,9 @@ final class DpfoXmlBuilder
     /**
      * @param array<string,mixed> $supplier
      * @param list<string> $warnings
+     * @param array<string,mixed> $representation výstup {@see TaxRepresentationService::at()}
      */
-    private function buildVetaP(\DOMDocument $dom, array $supplier, array &$warnings): \DOMElement
+    private function buildVetaP(\DOMDocument $dom, array $supplier, array &$warnings, array $representation = ['represented' => false]): \DOMElement
     {
         $vetaP = $dom->createElement('VetaP');
 
@@ -412,6 +419,8 @@ final class DpfoXmlBuilder
         if (!empty($supplier['phone'])) {
             $vetaP->setAttribute('c_telef', EpoSupplierBlockBuilder::normalizePhone((string) $supplier['phone']));
         }
+
+        EpoSupplierBlockBuilder::fillRepresentationAttributes($vetaP, $representation);
 
         return $vetaP;
     }
