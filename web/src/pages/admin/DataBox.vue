@@ -1130,14 +1130,29 @@ onUnmounted(clearMobileStatusTimer)
 
     <!-- ─────────────── Přístup ─────────────── -->
     <section v-if="tab === 'access'" class="space-y-5">
-      <div class="grid gap-4 lg:grid-cols-3">
+      <!-- Karty se dřív dělily podle toho, KDE je co uložené (brána, certifikát,
+           příchozí zprávy), takže z nich nešlo poznat, kterou uživatel potřebuje.
+           Teď se dělí podle toho, co chce udělat: přihlásit se ke schránce (platí
+           pro oba směry), nebo použít náhradní cestu přes bránu provozovatele. -->
+      <div class="grid gap-4 lg:grid-cols-2">
         <article class="rounded-lg border border-primary-500/40 bg-primary-50 p-4 shadow-sm">
           <div class="flex flex-wrap items-start justify-between gap-2">
-            <h2 class="font-medium text-neutral-900">{{ t('databox.access.gatewayTitle') }}</h2>
+            <h2 class="font-medium text-neutral-900">{{ t('databox.access.loginTitle') }}</h2>
             <span class="rounded-full bg-success-50 px-2 py-0.5 text-xs font-medium text-success-700">
               {{ t('databox.access.recommended') }}
             </span>
           </div>
+          <p class="mt-2 text-sm text-neutral-600">{{ t('databox.access.loginDescription') }}</p>
+          <ul class="mt-3 space-y-2 text-sm text-neutral-700">
+            <li>{{ t('databox.access.loginMobileKey') }}</li>
+            <li>{{ t('databox.access.loginPassword') }}</li>
+            <li>{{ t('databox.access.loginCertificate') }}</li>
+          </ul>
+          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.loginBoundary') }}</p>
+        </article>
+
+        <article class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+          <h2 class="font-medium text-neutral-900">{{ t('databox.access.gatewayTitle') }}</h2>
           <p class="mt-2 text-sm text-neutral-600">{{ t('databox.access.gatewayDescription') }}</p>
           <p class="mt-3 text-sm text-neutral-700">{{ t('databox.gateway.methodsByIsds') }}</p>
           <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.gatewayBoundary') }}</p>
@@ -1145,23 +1160,6 @@ onUnmounted(clearMobileStatusTimer)
             <span class="h-2.5 w-2.5 rounded-full" :class="gatewayAvailable ? 'bg-success-500' : 'bg-warning-500'" />
             <span>{{ gatewayAvailable ? t('databox.access.gatewayAvailable') : t('databox.access.gatewayUnavailable') }}</span>
           </div>
-        </article>
-
-        <article class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-          <h2 class="font-medium text-neutral-900">{{ t('databox.access.certificateTitle') }}</h2>
-          <p class="mt-2 text-sm text-neutral-500">{{ t('databox.access.certificateDescription') }}</p>
-          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.certificateRecommendedByIsds') }}</p>
-        </article>
-
-        <article class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-          <h2 class="font-medium text-neutral-900">{{ t('databox.access.inboxLoginTitle') }}</h2>
-          <p class="mt-2 text-sm text-neutral-500">{{ t('databox.access.inboxLoginDescription') }}</p>
-          <ul class="mt-3 space-y-2 text-sm text-neutral-700">
-            <li>{{ t('databox.access.inboxMobileKey') }}</li>
-            <li>{{ t('databox.access.inboxPassword') }}</li>
-            <li>{{ t('databox.access.inboxCertificate') }}</li>
-          </ul>
-          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.inboxLoginBoundary') }}</p>
         </article>
       </div>
 
