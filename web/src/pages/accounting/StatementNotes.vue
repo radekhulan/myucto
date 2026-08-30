@@ -7,7 +7,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
-import { btnFilled } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -26,6 +26,7 @@ const error = ref('')
 // „změněno, neuloženo" a tlačítko Uložit svítí jen tam, kde má co uložit.
 const drafts = ref<Record<string, string>>({})
 const savingAll = ref(false)
+const carryingOver = ref(false)
 
 function applyNotes(n: StatementNotes) {
   notes.value = n
@@ -59,6 +60,23 @@ async function load() {
 // Jedno společné Uložit — uloží všechny rozeditované sekce najednou (API je per
 // sekce, takže se PUTuje postupně a aplikuje se poslední vrácený stav). Tlačítko
 // u každé sekce bylo zbytečné klikání.
+// Převzetí loňské přílohy. Přepíše se jen to, co je letos prázdné — vlastní text
+// účetní se nikdy nepřebije — a převzaté sekce si nesou rok původu, dokud je účetní
+// neuloží jako své.
+async function carryOver() {
+  if (!canWrite.value || carryingOver.value) return
+  carryingOver.value = true
+  try {
+    const res = await closingApi.carryOverStatementNotes(periodId)
+    applyNotes(res.notes)
+    toast.success(t('accounting.statement_notes.carried_over_done', { count: res.carried.length }))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    carryingOver.value = false
+  }
+}
+
 async function saveAll() {
   if (!canWrite.value || savingAll.value || dirtyKeys.value.length === 0) return
   savingAll.value = true
@@ -130,6 +148,22 @@ onMounted(load)
         {{ t('accounting.statement_notes.readonly_hint') }}
       </div>
 
+      <!-- Převzetí loňských textů je nabídka, ne automatika: většina přílohy se rok
+           od roku opakuje, ale některá loňská věta už letos platit nemusí. Proto se
+           přebírá jen do prázdných sekcí a převzaté se označí ke kontrole. -->
+      <div v-if="canWrite && notes.carry_over.available > 0"
+        class="rounded-md border border-primary-500/30 bg-primary-50 p-3 flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm text-primary-800">
+          {{ t('accounting.statement_notes.carry_over_offer', {
+            count: notes.carry_over.available,
+            year: notes.carry_over.source_year,
+          }) }}
+        </p>
+        <button type="button" :class="btnOutline('primary')" :disabled="carryingOver" @click="carryOver">
+          {{ t('accounting.statement_notes.carry_over_action', { year: notes.carry_over.source_year }) }}
+        </button>
+      </div>
+
       <div v-for="s in notes.sections" :key="s.key"
         class="bg-surface border rounded-lg p-4 shadow-sm space-y-2"
         :class="s.filled ? 'border-neutral-200' : 'border-warning-500/40'">
@@ -142,6 +176,10 @@ onMounted(load)
               </span>
               <span v-if="scopeBadge(s.scope)" class="text-[11px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">
                 {{ scopeBadge(s.scope) }}
+              </span>
+              <span v-if="s.carried_over_from_year"
+                class="text-[11px] px-1.5 py-0.5 rounded bg-warning-100 text-warning-800">
+                {{ t('accounting.statement_notes.carried_over_badge', { year: s.carried_over_from_year }) }}
               </span>
             </div>
             <p class="text-xs text-neutral-500 mt-0.5">{{ s.legal }}</p>
@@ -161,6 +199,9 @@ onMounted(load)
         ></textarea>
 
         <p v-if="s.auto" class="text-[11px] text-neutral-400">{{ t('accounting.statement_notes.auto_hint') }}</p>
+        <p v-if="s.carried_over_from_year" class="text-[11px] text-warning-700">
+          {{ t('accounting.statement_notes.carried_over_hint', { year: s.carried_over_from_year }) }}
+        </p>
       </div>
 
       <!-- Jedno společné Uložit pro všechny rozeditované sekce — sticky, ať je po

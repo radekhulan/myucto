@@ -652,6 +652,12 @@ export const closingApi = {
     api.get<StatementNotes>(`/accounting/periods/${periodId}/statement-notes`).then(r => r.data),
   saveStatementNote: (periodId: number, section: string, content: string | null) =>
     api.put<StatementNotes>(`/accounting/periods/${periodId}/statement-notes/${section}`, { content }).then(r => r.data),
+  // Převzetí loňských textů. Vědomý krok účetní, ne předvyplnění při načtení stránky —
+  // loňská věta může být letos nepravdivá a příloha je součástí účetní závěrky.
+  carryOverStatementNotes: (periodId: number) =>
+    api.post<{ carried: string[]; notes: StatementNotes }>(
+      `/accounting/periods/${periodId}/statement-notes/carry-over`,
+    ).then(r => r.data),
 }
 
 // ── Příloha k účetní závěrce (§ 18/1/c) ─────────────────────────────────────
@@ -663,6 +669,8 @@ export interface StatementNotesSection {
   auto: boolean
   content: string | null
   filled: boolean
+  /** Rok, ze kterého je text převzatý a účetní ho ještě nepotvrdila. */
+  carried_over_from_year: number | null
 }
 
 export interface StatementNotes {
@@ -672,6 +680,7 @@ export interface StatementNotes {
   sections: StatementNotesSection[]
   missing: string[]
   complete: boolean
+  carry_over: { source_year: number; available: number }
 }
 
 // ── Měkký zámek účtování k datu (B8) ────────────────────────────────────────

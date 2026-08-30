@@ -254,4 +254,51 @@ final class StatementNotesTest extends TestCase
         $sections = array_column($this->notes->build($this->supplierId, $this->periodId)['sections'], null, 'key');
         self::assertSame('Vlastní znění.', $sections['entity_identification']['content']);
     }
+
+    /**
+     * Převzetí loňské přílohy. Vlastní text se nikdy nepřebije a převzatá sekce si
+     * nese rok původu, dokud ji účetní neuloží jako svou — loňská věta může být
+     * letos nepravdivá a příloha je součástí účetní závěrky.
+     */
+    public function testCarryOverFillsOnlyEmptySectionsAndMarksThem(): void
+    {
+        $this->notes->saveSection($this->supplierId, self::YEAR - 1, 'accounting_principles', 'Loňské zásady.', null);
+        $this->notes->saveSection($this->supplierId, self::YEAR - 1, 'valuation_methods', 'Loňské oceňování.', null);
+        $this->notes->saveSection($this->supplierId, self::YEAR, 'valuation_methods', 'Letos jinak.', null);
+
+        $result = $this->notes->carryOverFromPreviousYear($this->supplierId, self::YEAR, null);
+        $sections = array_column($this->notes->build($this->supplierId, $this->periodId)['sections'], null, 'key');
+
+        self::assertSame(['accounting_principles'], $result['copied']);
+        self::assertSame(self::YEAR - 1, $result['source_year']);
+        self::assertSame('Loňské zásady.', $sections['accounting_principles']['content']);
+        self::assertSame(self::YEAR - 1, $sections['accounting_principles']['carried_over_from_year']);
+        // Vlastní letošní text zůstal a převzatý příznak nedostal.
+        self::assertSame('Letos jinak.', $sections['valuation_methods']['content']);
+        self::assertNull($sections['valuation_methods']['carried_over_from_year']);
+    }
+
+    /** Uložením účetní převzatý text potvrdí jako svůj — příznak zmizí. */
+    public function testSavingCarriedOverSectionClearsTheMark(): void
+    {
+        $this->notes->saveSection($this->supplierId, self::YEAR - 1, 'accounting_principles', 'Loňské zásady.', null);
+        $this->notes->carryOverFromPreviousYear($this->supplierId, self::YEAR, null);
+
+        $this->notes->saveSection($this->supplierId, self::YEAR, 'accounting_principles', 'Letošní znění.', null);
+        $sections = array_column($this->notes->build($this->supplierId, $this->periodId)['sections'], null, 'key');
+
+        self::assertNull($sections['accounting_principles']['carried_over_from_year']);
+    }
+
+    /** Nabídka převzetí se hlásí jen tehdy, když je co převzít. */
+    public function testCarryOverOfferCountsOnlyMissingSections(): void
+    {
+        self::assertSame(0, $this->notes->build($this->supplierId, $this->periodId)['carry_over']['available']);
+
+        $this->notes->saveSection($this->supplierId, self::YEAR - 1, 'accounting_principles', 'Loňské zásady.', null);
+
+        $r = $this->notes->build($this->supplierId, $this->periodId);
+        self::assertSame(1, $r['carry_over']['available']);
+        self::assertSame(self::YEAR - 1, $r['carry_over']['source_year']);
+    }
 }

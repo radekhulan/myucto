@@ -9924,6 +9924,11 @@
       }
     },
     "statement_notes": {
+      "carry_over_offer": "You filled in the notes last year — {count} sections can be carried over from {year}. Only sections that are empty this year get filled.",
+      "carry_over_action": "Carry over from {year}",
+      "carried_over_done": "Carried over {count} sections. Review them and change whatever no longer holds.",
+      "carried_over_badge": "carried over from {year}",
+      "carried_over_hint": "This text was carried over from {year} and you have not confirmed it yet. Check that it still holds — saving marks it as yours.",
       "title": "Notes to the financial statements",
       "subtitle": "§ 18(1)(c) of the Accounting Act, § 39/39a/39b of Decree 500/2002 Coll. The set of sections depends on the entity category and statutory audit. Sections are stored per fiscal year — they can be completed even for a closed period.",
       "back_to_package": "Back to the closing package",

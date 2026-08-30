@@ -174,7 +174,11 @@ final class StatementNotesService
         $fiscalYear = (int) $period['fiscal_year'];
         $category = $this->categoryFor($supplierId, $periodId);
         $scopes = self::scopesFor($category, $this->isAudited($supplierId));
-        $stored = $this->stored($supplierId, $fiscalYear);
+        $storedRows = $this->storedRows($supplierId, $fiscalYear);
+        $stored = [];
+        foreach ($storedRows as $key => $row) {
+            $stored[$key] = $row['content'];
+        }
         $auto = $this->autoValues($supplierId, $fiscalYear, $category);
 
         $sections = [];
@@ -198,7 +202,22 @@ final class StatementNotesService
                 'auto'    => $def['auto'],
                 'content' => $content,
                 'filled'  => $filled,
+                // Rok, ze kterého je text převzatý a účetní ho ještě nepotvrdila.
+                'carried_over_from_year' => $storedRows[$key]['carried_over_from_year'] ?? null,
             ];
+        }
+
+        // Nabídka převzetí: má smysl jen tehdy, když loni něco vyplněného je a letos
+        // je aspoň jedna neautomatická sekce prázdná.
+        $previous = $this->storedRows($supplierId, $fiscalYear - 1);
+        $carryOverAvailable = 0;
+        foreach ($previous as $key => $row) {
+            if (!isset(self::SECTIONS[$key]) || self::SECTIONS[$key]['auto'] || trim($row['content']) === '') {
+                continue;
+            }
+            if (trim((string) ($stored[$key] ?? '')) === '') {
+                $carryOverAvailable++;
+            }
         }
 
         return [
@@ -209,6 +228,10 @@ final class StatementNotesService
             'sections'       => $sections,
             'missing'        => $missing,
             'complete'       => $missing === [],
+            'carry_over'     => [
+                'source_year' => $fiscalYear - 1,
+                'available'   => $carryOverAvailable,
+            ],
         ];
     }
 
@@ -245,8 +268,61 @@ final class StatementNotesService
         return $frozen;
     }
 
-    /** Uloží (nebo smaže prázdný) text sekce. */
-    public function saveSection(int $supplierId, int $fiscalYear, string $key, ?string $content, ?int $userId): void
+    /**
+     * Převezme texty přílohy z předchozího účetního období.
+     *
+     * Nový rok se u přílohy z velké části opakuje — sídlo, právní forma, způsoby
+     * oceňování, odpisové metody — a přepisovat to ručně nemá smysl. Převzetí je ale
+     * VĚDOMÝ krok účetní, ne tiché předvyplnění při otevření stránky: loňská věta
+     * („v průběhu roku došlo k fúzi", „účetní jednotka nemá závazky po splatnosti")
+     * může být letos nepravdivá a příloha je součástí účetní závěrky.
+     *
+     * Proto se drží tři pravidla:
+     *   1) přepisuje se jen to, co je letos PRÁZDNÉ — vlastní text účetní se nikdy
+     *      nepřebije,
+     *   2) převzatá sekce si nese rok původu, aby účetní poznala, co ještě neprošla,
+     *   3) jakmile ji uloží, příznak zmizí a text je její.
+     *
+     * Automaticky předvyplňované sekce (název, sídlo, kategorie) se nepřebírají —
+     * ty se odvozují z dat a loňská hodnota by je jen zastarale zmrazila.
+     *
+     * @return array{copied:list<string>,source_year:int,available:int}
+     */
+    public function carryOverFromPreviousYear(int $supplierId, int $fiscalYear, ?int $userId): array
+    {
+        $sourceYear = $fiscalYear - 1;
+        $previous = $this->storedRows($supplierId, $sourceYear);
+        $current = $this->storedRows($supplierId, $fiscalYear);
+
+        $copied = [];
+        foreach ($previous as $key => $row) {
+            if (!isset(self::SECTIONS[$key]) || self::SECTIONS[$key]['auto']) {
+                continue;
+            }
+            $existing = $current[$key]['content'] ?? '';
+            if (trim($existing) !== '' || trim($row['content']) === '') {
+                continue;
+            }
+            $this->saveSection($supplierId, $fiscalYear, $key, $row['content'], $userId, $sourceYear);
+            $copied[] = $key;
+        }
+
+        return ['copied' => $copied, 'source_year' => $sourceYear, 'available' => count($previous)];
+    }
+
+    /**
+     * Uloží text sekce. `$carriedOverFromYear` vyplňuje jen převzetí z minulého roku
+     * ({@see carryOverFromPreviousYear()}); ruční uložení ho vždy shodí na null, čímž
+     * účetní text potvrdí jako svůj.
+     */
+    public function saveSection(
+        int $supplierId,
+        int $fiscalYear,
+        string $key,
+        ?string $content,
+        ?int $userId,
+        ?int $carriedOverFromYear = null,
+    ): void
     {
         if (!isset(self::SECTIONS[$key])) {
             throw new \InvalidArgumentException('Neznámá sekce přílohy: ' . $key);
@@ -262,10 +338,11 @@ final class StatementNotesService
         }
 
         $this->db->pdo()->prepare(
-            'INSERT INTO statement_notes (supplier_id, fiscal_year, section_key, content, updated_by)
-             VALUES (?, ?, ?, ?, ?)
-             ON DUPLICATE KEY UPDATE content = VALUES(content), updated_by = VALUES(updated_by)'
-        )->execute([$supplierId, $fiscalYear, $key, $content, $userId]);
+            'INSERT INTO statement_notes (supplier_id, fiscal_year, section_key, content, updated_by, carried_over_from_year)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE content = VALUES(content), updated_by = VALUES(updated_by),
+                                     carried_over_from_year = VALUES(carried_over_from_year)'
+        )->execute([$supplierId, $fiscalYear, $key, $content, $userId, $carriedOverFromYear]);
     }
 
     /**
@@ -290,13 +367,30 @@ final class StatementNotesService
     /** @return array<string,string> */
     private function stored(int $supplierId, int $fiscalYear): array
     {
+        $out = [];
+        foreach ($this->storedRows($supplierId, $fiscalYear) as $key => $row) {
+            $out[$key] = (string) $row['content'];
+        }
+
+        return $out;
+    }
+
+    /** @return array<string,array{content:string,carried_over_from_year:?int}> */
+    private function storedRows(int $supplierId, int $fiscalYear): array
+    {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT section_key, content FROM statement_notes WHERE supplier_id = ? AND fiscal_year = ?'
+            'SELECT section_key, content, carried_over_from_year
+               FROM statement_notes WHERE supplier_id = ? AND fiscal_year = ?'
         );
         $stmt->execute([$supplierId, $fiscalYear]);
         $out = [];
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
-            $out[(string) $r['section_key']] = (string) $r['content'];
+            $out[(string) $r['section_key']] = [
+                'content' => (string) $r['content'],
+                'carried_over_from_year' => $r['carried_over_from_year'] !== null
+                    ? (int) $r['carried_over_from_year']
+                    : null,
+            ];
         }
 
         return $out;

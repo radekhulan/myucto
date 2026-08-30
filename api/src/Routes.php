@@ -1929,6 +1929,8 @@ final class Routes
                 [\MyInvoice\Action\Accounting\Reports\StatementNotesAction::class, 'get']);
             $g->put('/periods/{id:[0-9]+}/statement-notes/{section:[a-z0-9_]+}',
                 [\MyInvoice\Action\Accounting\Reports\StatementNotesAction::class, 'save']);
+            $g->post('/periods/{id:[0-9]+}/statement-notes/carry-over',
+                [\MyInvoice\Action\Accounting\Reports\StatementNotesAction::class, 'carryOver']);
             // Interní doklad zúčtování DPH (migrace 1332). Primární spouštěč je PODÁNÍ
             // přiznání (VatClearingTrigger); tohle je ruční cesta z agendy DPH s náhledem
             // před zápisem. GET = náhled (accounting READ), POST = zaúčtování (journal.post).

@@ -82,4 +82,40 @@ final class StatementNotesAction
 
         return Json::ok($response, $this->notes->build($supplierId, $periodId));
     }
+
+    /**
+     * Převzetí textů přílohy z minulého roku.
+     *
+     * Je to POST, ne součást GET: příloha je součástí účetní závěrky a loňská věta
+     * může být letos nepravdivá, takže převzetí musí být vědomý krok účetní, ne tiché
+     * předvyplnění při otevření stránky. Vlastní text se nikdy nepřepisuje.
+     */
+    public function carryOver(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        if (!RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0) ?: null;
+        $periodId = (int) ($args['id'] ?? 0);
+
+        try {
+            $data = $this->notes->build($supplierId, $periodId);
+            $result = $this->notes->carryOverFromPreviousYear($supplierId, (int) $data['fiscal_year'], $userId);
+        } catch (\Throwable $e) {
+            return $this->mapError($response, $e, 'Přílohu se nepodařilo převzít z minulého roku');
+        }
+
+        $this->logger->log('accounting.statement_notes_carried_over', $userId, 'accounting_period', $periodId, [
+            'source_year' => $result['source_year'],
+            'sections'    => $result['copied'],
+        ]);
+
+        return Json::ok($response, [
+            'carried' => $result['copied'],
+            'notes'   => $this->notes->build($supplierId, $periodId),
+        ]);
+    }
 }

@@ -9924,6 +9924,11 @@
       }
     },
     "statement_notes": {
+      "carry_over_offer": "Loni jste přílohu vyplnili — {count} sekcí lze převzít z roku {year}. Přepíše se jen to, co je letos prázdné.",
+      "carry_over_action": "Převzít z roku {year}",
+      "carried_over_done": "Převzato {count} sekcí. Projděte je a upravte, co už letos neplatí.",
+      "carried_over_badge": "převzato z {year}",
+      "carried_over_hint": "Text je převzatý z roku {year} a zatím jste ho nepotvrdili. Zkontrolujte, že platí i letos — uložením se označí jako váš.",
       "title": "Příloha k účetní závěrce",
       "subtitle": "§ 18 odst. 1 písm. c) ZoÚ, § 39/39a/39b vyhlášky 500/2002 Sb. Rozsah sekcí se odvíjí od kategorie účetní jednotky a povinného auditu. Sekce se ukládají k fiskálnímu roku — doplnit je lze i u uzavřeného období.",
       "back_to_package": "Zpět na uzávěrkový balíček",
