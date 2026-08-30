@@ -4298,6 +4298,7 @@
         "replacement": "Relationship to JMHZ",
         "transport": "Transport from MyÚčto",
         "transport_not_supported": "Not implemented",
+        "transport_isds": "Data box, from MyÚčto",
         "record_evidence": "Record receipt",
         "agenda": {
           "NEMPRI": "Employer notice of an employee benefit claim",
@@ -4321,14 +4322,19 @@
         },
         "reason": {
           "nempri_legacy_variant_not_supported": "The pre-2025 NEMPRI variant is not supported by this workflow. Use the period-specific procedure and do not mark anything as fulfilled here.",
-          "nempri_only_partially_in_jmhz": "JMHZ only absorbed part of the data. NEMPRI remains a separate action and must not be switched off automatically.",
+          "nempri_only_partially_in_jmhz": "JMHZ only absorbed part of the data, so NEMPRI remains a separate action and must not be switched off automatically. MyÚčto builds the data message, validates it against the pinned XSD and can send it through the data box; the VREP/APEP channel is not open for this agenda.",
+          "nempri_standalone_prepared": "NEMPRI is a standalone obligation for this period. MyÚčto builds the data message, validates it against the pinned XSD and can send it through the data box; the VREP/APEP channel is not open for this agenda.",
           "nempri_standalone_manual": "NEMPRI is a standalone obligation for this period. An accountant must complete both its content and submission in an official channel.",
-          "hzupn_remains_standalone": "HZUPN remains a standalone report alongside JMHZ. MyÚčto neither generates nor transmits its data message.",
+          "hzupn_remains_standalone": "HZUPN remains a standalone report alongside JMHZ. MyÚčto builds the data message, validates it against the pinned XSD and can send it through the data box; the VREP/APEP channel is not open for this agenda.",
           "eldp_historic_preparation_available": "A historic ELDP can be prepared on its dedicated tab. This overview does not duplicate its data or status.",
           "eldp_jmhz_default_on_demand_exception": "From 2026, ordinary ELDP data comes from JMHZ, but historic and on-demand scenarios remain. Preparation is available on the dedicated tab.",
           "accident_insurance_calculation_output_liability_not_supported": "Assessment-base and rate calculation, assessment, output and payment liability for statutory accident insurance are not implemented. JMHZ does not replace the obligation. MyÚčto can only preserve evidence of an externally verified amount and an actually completed payment."
         },
         "workflow": {
+          "record_sickness_case": "Record the sickness case on the Sickness benefits tab — the report is built from it.",
+          "prepare_nempri_submission": "Prepare the NEMPRI data message and have it validated against the pinned XSD.",
+          "prepare_hzupn_submission": "Prepare the HZUPN data message and have it validated against the pinned XSD.",
+          "send_via_data_box": "Send it through the data box (Payroll → Data box). You get a delivery note back, not a numbered confirmation.",
           "verify_case_and_source_data": "Verify the specific case, relevant period and source data, including earnings and shifts, outside this P0 overview.",
           "submit_in_official_channel": "Complete and submit the report through a verified official ČSSZ channel.",
           "store_official_receipt_in_company_dms": "Store the real receipt or protocol as a company-scoped DMS document.",

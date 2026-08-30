@@ -99,6 +99,26 @@ describe('PayrollStatutoryObligationsPanel', () => {
     expect(accident.find('button').exists()).toBe(true)
   })
 
+  // Panel dřív psal „Není implementován" u všech agend bez ohledu na to, co
+  // vrátí katalog. NEMPRI a HZUPN přitom umí odejít datovkou.
+  it('names the data box when the agenda can be transported', async () => {
+    const data = matrix()
+    data.agendas[0]!.transport_capability = 'isds'
+    m.overview.mockResolvedValue(data)
+
+    const wrapper = mount(PayrollStatutoryObligationsPanel, {
+      props: { environment: 'production' },
+      global: { stubs: { SearchableSelect: SearchableSelectStub } },
+    })
+    await flushPromises()
+
+    const nempri = wrapper.get('[data-test="statutory-agenda-NEMPRI"]')
+    expect(nempri.text()).toContain('payroll.submissions.statutory.transport_isds')
+    expect(nempri.text()).not.toContain('payroll.submissions.statutory.transport_not_supported')
+    expect(wrapper.get('[data-test="statutory-agenda-STATUTORY_ACCIDENT_INSURANCE"]').text())
+      .toContain('payroll.submissions.statutory.transport_not_supported')
+  })
+
   it('records evidence only after explicit confirmation', async () => {
     const wrapper = mount(PayrollStatutoryObligationsPanel, {
       props: { environment: 'production' },

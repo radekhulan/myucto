@@ -4289,7 +4289,7 @@
       "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
       "statutory": {
         "title": "Nemocenské a další zákonné povinnosti",
-        "description": "Pravdivá matice rozsahu pro zvolené období. NEMPRI a HZUPN se nyní vyřizují ručně v oficiálním kanálu; MyÚčto uchová jen neměnnou vazbu na skutečnou doručenku v DMS. Nic zde samo neodesílá.",
+        "description": "Pravdivá matice rozsahu pro zvolené období. U každé povinnosti je vidět, co za vás MyÚčto udělá a co musíte dokončit jinde. Nic se odsud neodešle samo — odeslání vždy potvrzujete vy.",
         "environment": "Prostředí",
         "period": "Období",
         "matrix_version": "Matice {version} · SHA-256 {hash}",
@@ -4298,6 +4298,7 @@
         "replacement": "Vztah k JMHZ",
         "transport": "Transport z MyÚčta",
         "transport_not_supported": "Není implementován",
+        "transport_isds": "Datovou schránkou z MyÚčta",
         "record_evidence": "Zapsat doručenku",
         "agenda": {
           "NEMPRI": "Oznámení zaměstnavatele o žádosti o dávku",
@@ -4321,15 +4322,20 @@
         },
         "reason": {
           "nempri_legacy_variant_not_supported": "Historická varianta NEMPRI do roku 2024 není tímto workflow podporována. Použijte dobový postup a nic zde neoznačujte jako splněné.",
-          "nempri_only_partially_in_jmhz": "JMHZ převzalo jen část údajů. NEMPRI zůstává samostatným úkonem a nelze je automaticky vypnout.",
+          "nempri_only_partially_in_jmhz": "JMHZ převzalo jen část údajů, NEMPRI zůstává samostatným úkonem a nelze je automaticky vypnout. MyÚčto datovou větu sestaví, zvaliduje proti připnutému XSD a umí ji odeslat datovou schránkou; kanál VREP/APEP pro tuhle agendu otevřený není.",
+          "nempri_standalone_prepared": "NEMPRI je pro toto období samostatná povinnost. MyÚčto datovou větu sestaví, zvaliduje proti připnutému XSD a umí ji odeslat datovou schránkou; kanál VREP/APEP pro tuhle agendu otevřený není.",
           "nempri_standalone_manual": "NEMPRI je pro toto období samostatná povinnost. Obsah i odeslání musí účetní dokončit v oficiálním kanálu.",
-          "hzupn_remains_standalone": "HZUPN zůstává samostatným hlášením i vedle JMHZ. MyÚčto negeneruje ani neodesílá jeho datovou větu.",
+          "hzupn_remains_standalone": "HZUPN zůstává samostatným hlášením i vedle JMHZ. MyÚčto datovou větu sestaví, zvaliduje proti připnutému XSD a umí ji odeslat datovou schránkou; kanál VREP/APEP pro tuhle agendu otevřený není.",
           "eldp_historic_preparation_available": "Historický ELDP lze připravit v samostatné záložce. Tento přehled jeho data ani stav neduplikuje.",
           "eldp_jmhz_default_on_demand_exception": "Od roku 2026 vychází běžný ELDP z JMHZ, ale historický a on-demand scénář zůstává. Příprava je v samostatné záložce.",
           "accident_insurance_calculation_output_liability_not_supported": "Výpočet základu a sazby, předpis, výstup ani platební závazek zákonného úrazového pojištění nejsou implementované. Povinnost není nahrazena JMHZ. MyÚčto dovolí pouze doložit externě ověřenou částku a skutečně provedenou úhradu."
         },
         "workflow": {
           "verify_case_and_source_data": "Ověřte konkrétní případ, rozhodné období a podklady včetně příjmů a směn mimo tento P0 přehled.",
+          "record_sickness_case": "Zapište případ pracovní neschopnosti na záložce Dávky nemocenského — z něj se hlášení sestavuje.",
+          "prepare_nempri_submission": "Připravte datovou větu NEMPRI a nechte ji zvalidovat proti připnutému XSD.",
+          "prepare_hzupn_submission": "Připravte datovou větu HZUPN a nechte ji zvalidovat proti připnutému XSD.",
+          "send_via_data_box": "Odešlete ji datovou schránkou (Mzdy → Datová schránka). Zpátky přijde dodejka, ne potvrzení s podacím číslem.",
           "submit_in_official_channel": "Vyplňte a odešlete podání v ověřeném oficiálním kanálu ČSSZ.",
           "store_official_receipt_in_company_dms": "Uložte skutečnou doručenku nebo protokol jako firemní dokument do DMS.",
           "record_receipt_evidence": "Teprve potom zapište níže referenci a DMS dokument jako důkaz ručního splnění.",

@@ -278,8 +278,9 @@ watch(period, load)
           </div>
           <div>
             <dt class="text-neutral-500">{{ t('payroll.submissions.statutory.transport') }}</dt>
-            <dd class="mt-0.5 font-medium text-danger-700">
-              {{ t('payroll.submissions.statutory.transport_not_supported') }}
+            <dd class="mt-0.5 font-medium"
+              :class="agenda.transport_capability === 'isds' ? 'text-neutral-800' : 'text-danger-700'">
+              {{ t(`payroll.submissions.statutory.transport_${agenda.transport_capability === 'isds' ? 'isds' : 'not_supported'}`) }}
             </dd>
           </div>
         </dl>
