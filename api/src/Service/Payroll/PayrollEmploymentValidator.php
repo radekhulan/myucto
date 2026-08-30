@@ -285,7 +285,12 @@ final class PayrollEmploymentValidator
                 $effectiveFrom,
             );
         }
+        // Provenience se zapisuje jen tam, kde připnuté číselníky na období
+        // sahají. U vztahu staršího než JMHZ žádná neexistuje a vymýšlet ji by
+        // znamenalo tvrdit, že se hodnota ověřila proti něčemu, co pro tu dobu
+        // není.
         $externalCodebook = $municipalityCode === null
+            || !$this->jmhzEvidence->externalCodebooksCover($effectiveFrom)
             ? null
             : $this->jmhzEvidence->externalCodebookProvenance($effectiveFrom);
 

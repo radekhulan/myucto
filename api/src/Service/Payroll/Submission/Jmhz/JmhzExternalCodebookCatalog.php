@@ -354,6 +354,25 @@ final class JmhzExternalCodebookCatalog
         return $this->loaded[$overlayKey] = ['manifest' => $decoded, 'entries' => $entries];
     }
 
+    /**
+     * Sahá připnutá sada číselníků na tohle datum?
+     *
+     * Není to totéž co „je hodnota platná". JMHZ začalo platit až 2026 a
+     * číselníky k němu nemají dřívější stav — pro rok 2025 tedy není co
+     * ověřovat, ne že by ověření selhalo. Kdo se ptá na období mimo pokrytí,
+     * má kontrolu přeskočit, ne uživatele zastavit: dokud se z těch dat
+     * nesestavuje podání, nemá nedostupnost číselníku žádný následek.
+     */
+    public function coversDate(string $validOn): bool
+    {
+        try {
+            $this->packageForDate($validOn);
+            return true;
+        } catch (JmhzCodebookUnavailableException|\InvalidArgumentException) {
+            return false;
+        }
+    }
+
     /** @return array{manifest:array{manifest_sha256:string,payload:array<string,mixed>},entries:array<string,array<string,array<string,mixed>>>} */
     private function packageForDate(string $validOn): array
     {

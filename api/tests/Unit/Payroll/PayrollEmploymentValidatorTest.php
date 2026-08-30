@@ -156,11 +156,18 @@ final class PayrollEmploymentValidatorTest extends TestCase
             $futureResult['jmhz_external_codebook_manifest_sha256'],
         );
 
+        // Vztah starší než JMHZ se ULOŽIT MUSÍ. Číselníky k JMHZ nemají stav
+        // před rokem 2026, takže u nástupu v roce 2025 není co ověřit — je to
+        // mezera v našich datech, ne v zákazníkových, a ten s ní nemůže udělat
+        // nic. Dřív tady letěla výjimka a zaměstnance nešlo uložit vůbec.
         $past = $future;
         $past['effective_from'] = '2025-12-31';
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('nejsou pro datum');
-        $this->validator()->terms($past);
+        $pastResult = $this->validator()->terms($past);
+        self::assertSame('554782', $pastResult['jmhz_workplace_municipality_code']);
+        // Provenience zůstává prázdná: tvrdit ověření proti číselníku, který pro
+        // tu dobu neexistuje, by byl doklad o něčem, co se nestalo.
+        self::assertNull($pastResult['jmhz_external_codebook_manifest_sha256']);
+        self::assertNull($pastResult['jmhz_external_codebook_overlay_key']);
     }
 
     public function testRejectsPartialWorkplaceAndUnknownApzCode(): void

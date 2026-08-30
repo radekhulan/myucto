@@ -35,6 +35,15 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         string $termEffectiveOn,
     ): void
     {
+        // Období, na které připnuté číselníky nesahají, se NEOVĚŘUJE. JMHZ platí
+        // od roku 2026 a starší stav číselníků neexistuje — u vztahu, který začal
+        // dřív, tedy není co ověřit. Dokud se tu házela chyba, nešlo uložit
+        // zaměstnance s nástupem v roce 2025 a zákazník s tím nemohl udělat nic:
+        // je to mezera v našich datech, ne v jeho. Fail-closed zůstává tam, kam
+        // patří — při sestavení podání, kde se hodnoty do JMHZ opravdu odesílají.
+        if (!$this->externalCodebooks->coversDate($termEffectiveOn)) {
+            return;
+        }
         try {
             $this->externalCodebooks->requireKnownMunicipality(
                 $municipalityCode,
@@ -156,6 +165,12 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         } catch (JmhzCodebookUnavailableException $e) {
             throw new \InvalidArgumentException($e->getMessage(), 0, $e);
         }
+    }
+
+    /** Sahají připnuté číselníky JMHZ na tohle datum? */
+    public function externalCodebooksCover(string $validOn): bool
+    {
+        return $this->externalCodebooks->coversDate($validOn);
     }
 
     /** @return array{overlay_key:string,manifest_sha256:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,base_spec_manifest_sha256:string} */
