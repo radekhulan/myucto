@@ -37,6 +37,18 @@ final class DpfoXmlBuilder
     private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'da_slezap', 'da_celod13', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
 
     /**
+     * Slevy a měsíční počty, které se při nule vynechávají — viz komentář u jejich
+     * plnění níže. Jde výhradně o položky, jejichž hodnotu EPO kontroluje vzorcem
+     * „počet měsíců × sazba"; součtové a daňové řádky se plní i nulou, protože na
+     * nich naopak stojí křížové kontroly.
+     */
+    private const VETA_D_OMIT_WHEN_ZERO = [
+        'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'kc_manztpp',
+        'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus',
+        'm_manz', 'm_ztpp', 'm_invduch', 'm_cinvduch',
+    ];
+
+    /**
      * @param array<string,mixed> $supplier
      * @param array<string,mixed> $calc  výstup DpfoReturnCalculator::compute
      * @param array<string,mixed> $meta  volitelně `representation` (výstup {@see TaxRepresentationService::at()},
@@ -72,9 +84,22 @@ final class DpfoXmlBuilder
         $vetaD->setAttribute('zdobd_od', sprintf('1.1.%04d', $year));
         $vetaD->setAttribute('zdobd_do', sprintf('31.12.%04d', $year));
         foreach (self::VETA_D_FIELDS as $f) {
-            if (array_key_exists($f, $fields)) {
-                $vetaD->setAttribute($f, $this->int($fields[$f]));
+            if (!array_key_exists($f, $fields)) {
+                continue;
             }
+            // Nulovou slevu a nulový počet měsíců do podání NEPOSÍLÁME.
+            // Zkušební EPO 31. 8. 2026: s `kc_op15_1c="0"` a `m_manz="0"` (nulová
+            // sleva na manžela za nula měsíců) hlásilo, že ř.65a neodpovídá vzorci
+            // „počet měsíců × 2 070" — přestože 0 = 0 × 2 070. Po vynechání obou
+            // atributů výtka zmizela a objevila se táž hláška o ř.65b, tedy o dalším
+            // nulovém páru; po vynechání všech nulových slev a měsíců zmizely ř.65a
+            // i ř.72. Úřad nulu nečte jako „nic", ale jako vyplněný údaj, který musí
+            // projít kontrolou — prázdný a chybějící atribut nejsou totéž. Lokální
+            // XSD tuhle třídu chyb nechytí, nulu klidně povolí.
+            if (in_array($f, self::VETA_D_OMIT_WHEN_ZERO, true) && (float) $fields[$f] === 0.0) {
+                continue;
+            }
+            $vetaD->setAttribute($f, $this->int($fields[$f]));
         }
         $family = (array) ($calc['family'] ?? []);
         $spouse = is_array($family['spouse'] ?? null) ? $family['spouse'] : null;

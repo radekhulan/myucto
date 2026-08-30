@@ -168,4 +168,32 @@ final class DpfoXmlBuilderVetaBAndNTest extends TestCase
         self::assertNotFalse($vetaNPos);
         self::assertGreaterThan($vetaUPos, $vetaNPos, 'VetaN musí následovat za VetaU v XSD sekvenci.');
     }
+
+    /**
+     * Nulová sleva se do podání neposílá vůbec.
+     *
+     * Zkušební EPO 31. 8. 2026 hlásilo u nulové slevy na manžela („0 = 0 měsíců
+     * × 2 070"), že ř.65a neodpovídá vzorci. Po vynechání atributů výtka zmizela,
+     * spolu s ř.72. Úřad nulu nečte jako „nic", ale jako vyplněný údaj, který
+     * musí projít kontrolou.
+     */
+    public function testZeroCreditsAreOmittedNotSentAsZero(): void
+    {
+        $xml = $this->build($this->calc())['xml'];
+
+        self::assertStringNotContainsString('kc_op15_1c=', $xml);
+        self::assertStringNotContainsString('m_manz=', $xml);
+        self::assertStringNotContainsString('kc_manztpp=', $xml);
+        // Součtové a daňové řádky se naopak plní i nulou — stojí na nich křížové kontroly.
+        self::assertStringContainsString('uhrn_slevy35ba=', $xml);
+    }
+
+    public function testNonZeroSpouseCreditIsStillSent(): void
+    {
+        $calc = $this->calc(profile: ['spouse_claim' => ['eligible_months' => 12]]);
+        $xml = $this->build($calc)['xml'];
+
+        self::assertStringContainsString('m_manz="12"', $xml);
+        self::assertStringContainsString('kc_op15_1c="24840"', $xml);
+    }
 }
