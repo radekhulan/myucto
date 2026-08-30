@@ -176,7 +176,20 @@ final class AnnualTaxCertificatePaymentEvidenceProvider
                     'Událost platebního důkazu má neplatný směr.',
                 );
             }
-            if ($paymentDate > $cutoffDate) {
+            // Mezní datum se uplatňuje POUZE na příchozí úhradu. Příjem vyplacený
+            // až po 31. lednu do zdaňovacího období nepatří (§ 5 odst. 4 zákona),
+            // takže se `matched` událost za hranicí nezapočítá a závazek zůstane
+            // nedoložený — potvrzení se nevydá.
+            //
+            // Reverzace je ale důkaz OPAČNÉHO směru: banka peníze vrátila, takže
+            // ta dřívější `matched` událost mzdu nevyrovnala. Kdyby se ignorovala
+            // stejným pravidlem, stačilo by, aby se vrácení platby zaúčtovalo
+            // 1. února, a nevyplacená mzda by se na potvrzení objevila jako řádně
+            // vyplacená. Ověřeno simulací: úhrada 15. 2. 2026 vrácená 5. 2. 2027
+            // vydala potvrzení na 40 000 Kč, přestože zaměstnanec nedostal nic.
+            // Reverzace se proto započítává vždy, bez ohledu na datum; směrem ven
+            // je to fail-closed (uzavře cestu, neotevírá ji).
+            if ($eventKind === 'matched' && $paymentDate > $cutoffDate) {
                 continue;
             }
             if (isset($liabilities[$liabilityId]['events'][$matchId])) {

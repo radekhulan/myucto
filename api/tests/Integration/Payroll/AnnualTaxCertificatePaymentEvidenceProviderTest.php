@@ -93,6 +93,150 @@ final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
     }
 
     /**
+     * Vrácená platba je důkaz OPAČNÉHO směru než úhrada: banka peníze poslala
+     * zpátky, takže mzda vyplacená není. Mezní datum § 5 odst. 4 se proto smí
+     * uplatnit jen na `matched` událost. Dokud filtr platil na obě, stačilo, aby
+     * se vrácení zaúčtovalo 1. února, a nevyplacená mzda prošla na potvrzení
+     * jako řádně vyplacená.
+     */
+    public function testCountsBankReversalEvenWhenRecordedAfterTheCutoff(): void
+    {
+        [$connection, $fixture] = $this->fixture('2026-02-15', 42_000_000);
+        try {
+            $this->reverse($connection, $fixture['supplier_id'], '2027-02-05');
+
+            $this->expectException(\DomainException::class);
+            $this->expectExceptionMessage('31. 1. 2027');
+
+            (new AnnualTaxCertificatePaymentEvidenceProvider(
+                $connection,
+            ))->prove(
+                $fixture['supplier_id'],
+                $fixture['employee_id'],
+                $fixture['run_id'],
+                $fixture['revision_id'],
+                42_000_000,
+                '2027-01-31',
+            );
+        } finally {
+            $this->rollback($connection);
+        }
+    }
+
+    public function testReversedAndReissuedPaymentWithinCutoffStillProves(): void
+    {
+        [$connection, $fixture] = $this->fixture('2026-02-15', 42_000_000);
+        try {
+            $this->reverse($connection, $fixture['supplier_id'], '2026-02-16');
+            $this->rematch(
+                $connection,
+                $fixture['supplier_id'],
+                '2026-02-17',
+                42_000_000,
+            );
+
+            $proof = (new AnnualTaxCertificatePaymentEvidenceProvider(
+                $connection,
+            ))->prove(
+                $fixture['supplier_id'],
+                $fixture['employee_id'],
+                $fixture['run_id'],
+                $fixture['revision_id'],
+                42_000_000,
+                '2027-01-31',
+            );
+
+            self::assertSame('2026-02-17', $proof['last_payment_date']);
+            self::assertSame(
+                42_000_000,
+                $proof['liabilities'][0]['settled_minor_units'],
+            );
+            self::assertCount(3, $proof['liabilities'][0]['events']);
+        } finally {
+            $this->rollback($connection);
+        }
+    }
+
+    /** Zaúčtuje vrácení poslední spárované platby k datu `$postedAt`. */
+    private function reverse(
+        Connection $connection,
+        int $supplierId,
+        string $postedAt,
+    ): void {
+        $pdo = $connection->pdo();
+        $source = $pdo->prepare(
+            'SELECT payment_match.id, payment_match.allocation_id,
+                    payment_match.amount_minor
+               FROM payroll_payment_matches payment_match
+              WHERE payment_match.supplier_id = ?
+                AND payment_match.event_kind = "matched"
+              ORDER BY payment_match.id DESC
+              LIMIT 1',
+        );
+        $source->execute([$supplierId]);
+        $row = $source->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        $amountMinor = (int) $row['amount_minor'];
+        $statementId = $this->bankStatement($pdo, $supplierId, 'reversal');
+        $transactionId = $this->bankTransaction(
+            $pdo,
+            $statementId,
+            $postedAt,
+            -$amountMinor,
+        );
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id, source_match_id,
+                 idempotency_key_hash)
+             VALUES (?, ?, "reversed", ?, ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            (int) $row['allocation_id'],
+            -$amountMinor,
+            $statementId,
+            $transactionId,
+            (int) $row['id'],
+            random_bytes(32),
+        ]);
+    }
+
+    /** Znovu odeslaná platba na tutéž alokaci. */
+    private function rematch(
+        Connection $connection,
+        int $supplierId,
+        string $postedAt,
+        int $amountMinor,
+    ): void {
+        $pdo = $connection->pdo();
+        $allocationId = (int) $pdo->query(
+            'SELECT allocation_id FROM payroll_payment_matches
+              WHERE supplier_id = ' . $supplierId . '
+              ORDER BY id DESC LIMIT 1',
+        )->fetchColumn();
+        $statementId = $this->bankStatement($pdo, $supplierId, 'rematch');
+        $transactionId = $this->bankTransaction(
+            $pdo,
+            $statementId,
+            $postedAt,
+            $amountMinor,
+        );
+        $pdo->prepare(
+            'INSERT INTO payroll_payment_matches
+                (supplier_id, allocation_id, event_kind, amount_minor,
+                 bank_statement_id, bank_transaction_id, idempotency_key_hash)
+             VALUES (?, ?, "matched", ?, ?, ?, ?)',
+        )->execute([
+            $supplierId,
+            $allocationId,
+            $amountMinor,
+            $statementId,
+            $transactionId,
+            random_bytes(32),
+        ]);
+    }
+
+    /**
      * @return array{
      *   Connection,
      *   array{supplier_id:int,employee_id:int,run_id:int,revision_id:int}
@@ -316,8 +460,12 @@ final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
         return (int) $pdo->lastInsertId();
     }
 
-    private function bankStatement(PDO $pdo, int $supplierId): int
-    {
+    private function bankStatement(
+        PDO $pdo,
+        int $supplierId,
+        string $discriminator = '',
+    ): int {
+        $key = "synthetic-tax-certificate-{$supplierId}{$discriminator}";
         $pdo->prepare(
             'INSERT INTO bank_statements
                 (supplier_id, file_name, file_hash, account_number,
@@ -325,8 +473,8 @@ final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
              VALUES (?, ?, ?, "1000000005", "0100", "CZK", "2027-02-01")',
         )->execute([
             $supplierId,
-            "synthetic-tax-certificate-{$supplierId}.gpc",
-            hash('sha256', "synthetic-tax-certificate-{$supplierId}"),
+            "{$key}.gpc",
+            hash('sha256', $key),
         ]);
 
         return (int) $pdo->lastInsertId();
@@ -349,7 +497,8 @@ final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
             number_format(-$amountMinor / 100, 2, '.', ''),
             hash(
                 'sha256',
-                "synthetic-tax-certificate-transaction-{$statementId}",
+                "synthetic-tax-certificate-transaction-{$statementId}"
+                . "-{$amountMinor}",
             ),
         ]);
 

@@ -93,7 +93,10 @@ class AnnualTaxCertificateSnapshotBuilder
             $kind,
             $cutoff,
         );
-        if ($months === [] || $lastPaymentDate === null) {
+        if ($months === []
+            || $lastPaymentDate === null
+            || $taxResidence === null
+        ) {
             throw new \DomainException(
                 'Pro zvolený druh potvrzení neexistuje doložený zdanitelný příjem.',
             );
@@ -357,7 +360,7 @@ class AnnualTaxCertificateSnapshotBuilder
      *       effective_to:?string
      *     }>
      *   },
-     *   tax_residence:array{status:string,country_code:string},
+     *   tax_residence:?array{status:string,country_code:string},
      *   disability_tax_credits:list<array{period:string,degree:string}>,
      *   child_claim_months:array<string,array<int,array{order:int,ztp_p:bool}>>,
      *   nonresident_insurance_minor_units:?int
@@ -435,6 +438,7 @@ class AnnualTaxCertificateSnapshotBuilder
                 $storedPerson,
                 $inputPerson,
                 $kind,
+                (int) substr($periodStart, 0, 4),
             );
             $proofHash = null;
             if ($amounts['income_minor_units'] > 0) {
@@ -556,7 +560,13 @@ class AnnualTaxCertificateSnapshotBuilder
                 'monthly_evidence' => $declarationEvidence,
             ];
         }
-        if ($taxResidence === null) {
+        // Rezidence se plní jen z měsíců, které do potvrzení reálně vstoupily.
+        // Když žádný takový není (typicky srážkové potvrzení u někoho, kdo měl
+        // celý rok jen zálohovou daň), není to chybějící rezidence, ale chybějící
+        // příjem daného druhu — a přesně to říká brána `$months === []` ve `build()`.
+        // Dokud se tady házela hláška o rezidenci, účetní dostala u úplně běžného
+        // případu zprávu, která ji poslala hledat neexistující vadu v evidenci osoby.
+        if ($taxResidence === null && $monthList !== []) {
             throw new \DomainException(
                 'Daňové potvrzení nemá doloženou daňovou rezidenci.',
             );
@@ -611,6 +621,7 @@ class AnnualTaxCertificateSnapshotBuilder
         array $person,
         array $inputPerson,
         PayrollDocumentKind $kind,
+        int $periodYear,
     ): array {
         $statutory = $this->object(
             $person['statutory'] ?? null,
@@ -673,7 +684,7 @@ class AnnualTaxCertificateSnapshotBuilder
                 $inputPerson,
                 $kind,
             );
-            $this->assertNoBackpay($inputPerson);
+            $this->assertNoBackpay($inputPerson, $periodYear);
             foreach ([
                 'zdanitelný příjem' => $income,
                 'skutečně sražená daň' => $taxAmount,
@@ -950,8 +961,31 @@ class AnnualTaxCertificateSnapshotBuilder
         return implode(', ', $ranges);
     }
 
-    /** @param array<string,mixed> $inputPerson */
-    private function assertNoBackpay(array $inputPerson): void
+    /**
+     * Brána na dva řádky tiskopisu, které snapshot NEUMÍ naplnit: řádky 4 a 7
+     * (doplatky § 5 odst. 4 zúčtované za minulá období) a řádek 10 (příspěvek
+     * zaměstnavatele na daňově podporované produkty spoření na stáří). Dokud je
+     * neumí, je jediná správná reakce potvrzení nevydat — ne vytisknout nulu.
+     *
+     * Rozpoznává se to ze TŘÍ nezávislých znaků, protože ani jeden sám nestačí:
+     *
+     *  * `component.component_kind` — klíč, který do zmrazeného snapshotu píše
+     *    `PayrollComponentDefinition::snapshot()`. Dřív se tu četlo `kind`,
+     *    a takový klíč ve snapshotu NEEXISTUJE: podmínka byla vždy `null` a celá
+     *    brána byla mrtvá. Prošlo to jen proto, že si ji testy sestavovaly samy
+     *    ve tvaru `['kind' => 'backpay']`, který runtime nikdy nevyrobí.
+     *  * `input.benefit_basket === 'old_age_savings'` — zákonný koš § 6 odst. 9
+     *    písm. m) zmrazený u vstupu. Druh složky si účetní volí volně, takže
+     *    příspěvek na DPS nebo DIP může být klidně `other` nebo `allowance`;
+     *    jediné spolehlivé je právě koš. `benefit_care` naopak koš nemá, proto
+     *    seznam druhů zůstává vedle koše, ne místo něj.
+     *  * `input.source_period_start` z jiného roku — přesně definice řádku 4.
+     *    Doplatek se nemusí jmenovat `backpay`; může přijít jako `bonus` nebo
+     *    `compensation` s obdobím původu v minulém roce.
+     *
+     * @param array<string,mixed> $inputPerson
+     */
+    private function assertNoBackpay(array $inputPerson, int $periodYear): void
     {
         foreach ($this->list(
             $inputPerson['employments'] ?? null,
@@ -968,24 +1002,35 @@ class AnnualTaxCertificateSnapshotBuilder
                     'input.component',
                 );
                 $amount = $this->int($input, 'amount_minor');
-                $componentKind = $component['kind'] ?? null;
-                if ($amount !== 0) {
-                    if ($componentKind === 'backpay') {
-                        throw new \DomainException(
-                            'Doplatek mzdy nelze bez rozlišení původního roku '
-                            . 'správně rozdělit do řádků formuláře.',
-                        );
-                    }
-                    if (in_array($componentKind, [
+                if ($amount === 0) {
+                    continue;
+                }
+                $componentKind = $component['component_kind'] ?? null;
+                $sourcePeriodStart = $input['source_period_start'] ?? null;
+                if ($componentKind === 'backpay'
+                    || (is_string($sourcePeriodStart)
+                        && preg_match(
+                            '/^\d{4}-\d{2}-\d{2}$/D',
+                            $sourcePeriodStart,
+                        ) === 1
+                        && (int) substr($sourcePeriodStart, 0, 4) !== $periodYear)
+                ) {
+                    throw new \DomainException(
+                        'Doplatek mzdy nelze bez rozlišení původního roku '
+                        . 'správně rozdělit do řádků formuláře.',
+                    );
+                }
+                if (($input['benefit_basket'] ?? null) === 'old_age_savings'
+                    || in_array($componentKind, [
                         'benefit_pension',
                         'benefit_care',
                         'risky_savings',
-                    ], true)) {
-                        throw new \DomainException(
-                            'Příspěvek zaměstnavatele na podporovaný produkt '
-                            . 'vyžaduje samostatné mapování řádku 10 formuláře.',
-                        );
-                    }
+                    ], true)
+                ) {
+                    throw new \DomainException(
+                        'Příspěvek zaměstnavatele na podporovaný produkt '
+                        . 'vyžaduje samostatné mapování řádku 10 formuláře.',
+                    );
                 }
             }
         }

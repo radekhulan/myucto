@@ -27,6 +27,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             $person,
             $inputPerson,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
         );
         self::assertSame(10_000_000, $advance['income_minor_units']);
         self::assertSame(1_250_000, $advance['tax_minor_units']);
@@ -38,6 +39,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             $person,
             $inputPerson,
             PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+            2026,
         );
         self::assertSame(2_000_000, $withholding['income_minor_units']);
         self::assertSame(300_000, $withholding['tax_minor_units']);
@@ -54,7 +56,8 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             'monthAmounts',
         );
         $input = self::inputPerson();
-        $input['employments'][0]['inputs'][0]['component']['kind'] = 'backpay';
+        $input['employments'][0]['inputs'][0]['component']['component_kind']
+            = 'backpay';
 
         $this->expectException(\DomainException::class);
         $this->expectExceptionMessage('Doplatek');
@@ -63,7 +66,95 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             self::person(),
             $input,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
         );
+    }
+
+    /**
+     * Druh složky si účetní volí volně, takže příspěvek na doplňkové penzijní
+     * spoření nebo DIP může být klidně `other`. Jediné, co ho spolehlivě
+     * označí, je zákonný koš § 6 odst. 9 písm. m) zmrazený u vstupu — a přesně
+     * ten patří na řádek 10 tiskopisu, který snapshot neumí naplnit.
+     */
+    public function testRejectsOldAgeSavingsBasketRegardlessOfComponentKind(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $input = self::inputPerson();
+        $input['employments'][0]['inputs'][0]['component']['component_kind']
+            = 'other';
+        $input['employments'][0]['inputs'][0]['benefit_basket']
+            = 'old_age_savings';
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('řádku 10');
+        $method->invoke(
+            $builder,
+            self::person(),
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
+        );
+    }
+
+    /**
+     * Doplatek za minulý rok (řádky 4 a 7) se nemusí jmenovat `backpay` —
+     * pozná se podle období původu, ne podle druhu složky.
+     */
+    public function testRejectsPriorYearSourcePeriodOnAnyComponentKind(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $input = self::inputPerson();
+        $input['employments'][0]['inputs'][0]['component']['component_kind']
+            = 'bonus';
+        $input['employments'][0]['inputs'][0]['source_period_start']
+            = '2025-12-01';
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Doplatek');
+        $method->invoke(
+            $builder,
+            self::person(),
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
+        );
+    }
+
+    /** Doplatek v rámci TÉHOŽ roku na řádek 4 nepatří a potvrzení neblokuje. */
+    public function testAcceptsSameYearSourcePeriod(): void
+    {
+        $builder = (new \ReflectionClass(
+            AnnualTaxCertificateSnapshotBuilder::class,
+        ))->newInstanceWithoutConstructor();
+        $method = new \ReflectionMethod(
+            AnnualTaxCertificateSnapshotBuilder::class,
+            'monthAmounts',
+        );
+        $input = self::inputPerson();
+        $input['employments'][0]['inputs'][0]['source_period_start']
+            = '2026-03-01';
+
+        $amounts = $method->invoke(
+            $builder,
+            self::person(),
+            $input,
+            PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
+        );
+
+        self::assertSame(10_000_000, $amounts['income_minor_units']);
     }
 
     public function testRejectsNonCashIncomeWithoutActualReceiptEvidence(): void
@@ -85,6 +176,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             $person,
             self::inputPerson(),
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
         );
     }
 
@@ -107,6 +199,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             self::person(),
             $input,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
         );
     }
 
@@ -130,6 +223,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             self::person(),
             $input,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
         );
     }
 
@@ -160,6 +254,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             $builder,
             $input,
             PayrollDocumentKind::TaxableIncomeAdvanceCertificate,
+            2026,
         );
 
         self::assertSame([
@@ -192,6 +287,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             $builder,
             $input,
             PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+            2026,
         );
 
         self::assertSame([
@@ -221,6 +317,7 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             $builder,
             $input,
             PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+            2026,
         );
     }
 
@@ -274,7 +371,12 @@ final class AnnualTaxCertificateSnapshotBuilderTest extends TestCase
             'employments' => [[
                 'inputs' => [[
                     'amount_minor' => 12_000_000,
-                    'component' => ['kind' => 'monthly_wage'],
+                    'source_period_start' => null,
+                    // Tvar, který do zmrazeného snapshotu reálně píše
+                    // PayrollComponentDefinition::snapshot() — klíč
+                    // `component_kind`, ne `kind`, a koš osvobození vedle
+                    // složky, ne uvnitř ní.
+                    'component' => ['component_kind' => 'base_wage'],
                 ]],
             ]],
         ];
