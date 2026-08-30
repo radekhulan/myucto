@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax\Return;
 
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
 use MyInvoice\Service\Tax\TaxConstants;
@@ -106,9 +107,23 @@ final class DppoXmlBuilder
     ];
 
     /**
+     * Řádky VZZ (druhové členění), které tvoří „roční úhrn čistého obratu" podle § 1d
+     * odst. 2 zákona o účetnictví — VetaS/kc_dpp_i1 (chyba EPO 1703). 'I.' = Tržby
+     * z prodeje výrobků a služeb (účty 601+602), 'II.' = Tržby za prodej zboží (účet 604).
+     * Shodné s {@see \MyInvoice\Service\Accounting\Reports\EntityCategoryService::TURNOVER_CODES}
+     * (601/602/604), který stejnou dvojici řádků používá pro kategorizaci ÚJ podle §1b —
+     * jde o tentýž zákonný pojem. Záměrně NEbereme `checks.net_turnover`/řádek 'OBRAT'
+     * z {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService} — ten je
+     * širší (calc_key sčítá I.–VII., tj. i finanční a ostatní provozní výnosy), a čistému
+     * obratu dle §1d neodpovídá.
+     */
+    private const NET_TURNOVER_ROW_CODES = ['I.', 'II.'];
+
+    /**
      * @param array<string,mixed> $supplier row ze supplier (loadSupplier v service)
      * @param array<string,mixed> $calc     výstup DppoReturnCalculator::compute
-     * @param array<string,mixed> $meta     verzeSW, typ_dapdpp, dapdpp_forma, typ_zo, typ_popldpp
+     * @param array<string,mixed> $meta     verzeSW, typ_dapdpp, dapdpp_forma, typ_zo, typ_popldpp,
+     *   volitelně `poc_zam` (viz {@see buildVetaS} — přebije hodnotu ze $appendix['settings'])
      * @param array<string,mixed> $appendix Příloha účetní závěrky (Epic DP — VetaUA/UB/UD/UZ,
      *   volitelné): {balance_sheet: array (FinancialStatementService::balanceSheet výstup),
      *   income_statement: array (…::incomeStatement výstup), category: array
@@ -196,6 +211,33 @@ final class DppoXmlBuilder
                 (array) $appendix['balance_sheet'],
             );
         }
+
+        // zvl_pr — počet zvláštních příloh: systém žádnou negeneruje (žádný volný text
+        // k řádkům jako ř. 62 II. oddílu), proto konstantně 0, ne odhad. Reálně podané
+        // přiznání ho má také (buď 0, nebo počet, který ručně přidal daňový poradce) —
+        // atribut vyplňuje EPO samo, ale bez explicitní hodnoty ho vytýká jako chybějící.
+        $vetaD->setAttribute('zvl_pr', '0');
+
+        // spoj_zahr — § 23 odst. 7 ZDP, transakce se spojenou osobou (tuzemskou/zahraniční)
+        // z faktur označených clients.related_party (viz DppoReturnDataProvider). 'N', když
+        // se v období žádné takové transakce nevyskytly.
+        $relatedPartyFlag = (string) ($calc['related_party_country_flag'] ?? 'N');
+        if (in_array($relatedPartyFlag, ['N', 'T', 'Z', 'A'], true)) {
+            $vetaD->setAttribute('spoj_zahr', $relatedPartyFlag);
+        }
+
+        // dan_por — zpracoval a podává přiznání daňový poradce na plnou moc (§29/2 DŘ)?
+        // Systém plnou moc neeviduje, přiznání staví a podává přímo poplatník přes appku,
+        // proto konstantně 'N' (kdyby bylo 'A', EPO by navíc vyžadovalo údaje o poradci
+        // v I. oddílu, které nemáme).
+        $vetaD->setAttribute('dan_por', 'N');
+
+        // ── VetaF — příloha č. 1 II. oddílu, tabulka B (odpisy) — musí být hotová dřív
+        // než se p_pr_2od zapíše na VetaD (počet příloh II. oddílu = kolik z VetaE/F/G
+        // se skutečně vygenerovalo; VetaE/G nestavíme, takže 0 nebo 1).
+        $vetaF = $this->buildVetaF($dom, $calc, $warnings);
+        $vetaD->setAttribute('p_pr_2od', (string) ($vetaF !== null ? 1 : 0));
+
         $root->appendChild($vetaD);
 
         if (empty($supplier['financial_office_code'])) {
@@ -214,6 +256,12 @@ final class DppoXmlBuilder
         // ── VetaO — řádky II. oddílu ────────────────────────────────────────
         $root->appendChild($this->buildVetaO($dom, $calc, $year, $zdobdDo));
 
+        // ── VetaF — tabulka B (odpisy), viz buildVetaF; XSD sekvence ji chce hned
+        // za VetaO/VetaU (VetaE), před VetaM.
+        if ($vetaF !== null) {
+            $root->appendChild($vetaF);
+        }
+
         $creditsEntitlement = max(0, (int) round((float) ($calc['summary']['credits_entitlement'] ?? 0)));
         if ($creditsEntitlement > 0) {
             $vetaM = $dom->createElement('VetaM');
@@ -222,6 +270,10 @@ final class DppoXmlBuilder
             $vetaM->setAttribute('kc_dpp_f4', (string) $creditsEntitlement);
             $root->appendChild($vetaM);
         }
+
+        // ── VetaS — poc_zam/kc_dpp_i1/cisobr_mena (chyby EPO 1704+1703, viz buildVetaS).
+        // XSD sekvence: VetaS patří mezi VetaM a VetaUA (za VetaN/VetaQ, které nestavíme).
+        $root->appendChild($this->buildVetaS($dom, $meta, $appendix, $warnings));
 
         // ── Příloha účetní závěrky (Epic DP) — VetaUA (aktiva) + VetaUB (VZZ) +
         // VetaUD (pasiva) + VetaUZ (sbírka listin). XSD sekvence vyžaduje přesně toto
@@ -243,6 +295,13 @@ final class DppoXmlBuilder
                 (array) ($appendix['settings'] ?? []),
                 $supplier,
             ));
+        }
+
+        // ── VetaNP — žádost o vrácení přeplatku (§155 DŘ) — poslední věta před Přílohy,
+        // staví se jen když z přiznání vyjde přeplatek (viz buildVetaNP).
+        $vetaNP = $this->buildVetaNP($dom, $calc, $warnings);
+        if ($vetaNP !== null) {
+            $root->appendChild($vetaNP);
         }
 
         return ['xml' => $dom->saveXML() ?: '', 'warnings' => $warnings];
@@ -274,6 +333,11 @@ final class DppoXmlBuilder
         // uv_rozsah_vzz='P' (plný rozsah) konstantně — appendix generuje VZZ vždy v plném
         // rozsahu bez ohledu na kategorii ÚJ (spec §6.c/§7.c, ověřeno na obou vzorcích).
         $vetaD->setAttribute('uv_rozsah_vzz', 'P');
+        // uv_rozsah — souhrnný rozsah účetních výkazů; oba reálně podaná referenční přiznání
+        // (ověřeno lokálně mimo repo) ho nesou vždy 'P' vedle rozdílného
+        // uv_rozsah_rozv/uv_rozsah_vzz — není to alternativa k nim, EPO chce oba páry
+        // vyplněné zároveň.
+        $vetaD->setAttribute('uv_rozsah', 'P');
 
         $dUv = $this->formatDate($balanceSheet['period']['ends_on'] ?? null);
         if ($dUv !== '') {
@@ -465,6 +529,188 @@ final class DppoXmlBuilder
             $vetaUZ->setAttribute('pr11_email', $email);
         }
         return $vetaUZ;
+    }
+
+    /**
+     * VetaS — příloha K II. oddílu: `poc_zam` (chyba EPO 1704), `kc_dpp_i1` +
+     * `cisobr_mena` (chyba EPO 1703). Zjištěno na reálném podání 30. 8. 2026 — builder
+     * VetaS dřív vůbec nestavěl.
+     *
+     * @param array<string,mixed> $meta     smí nést explicitní `poc_zam` (přednost před
+     *   settings — volající zná přesné číslo pro dané podání)
+     * @param array<string,mixed> $appendix `settings` (AccountingSupplierSettingsRepository::get,
+     *   nese `avg_employees`) a `income_statement` (FinancialStatementService::incomeStatement)
+     * @param list<string>        $warnings
+     */
+    private function buildVetaS(\DOMDocument $dom, array $meta, array $appendix, array &$warnings): \DOMElement
+    {
+        $vetaS = $dom->createElement('VetaS');
+
+        // poc_zam: XSD dokumentace k atributu žádá vyplnění VŽDY, i hodnotou 0 — proto se
+        // atribut nikdy nevynechává (na rozdíl od zbytku VetaO/VetaM). Zdroj čísla systém
+        // nedopočítává (mzdový modul úvazek nenese, viz StatementNotesService::autoValues) —
+        // bere se buď z $meta, nebo z téhož nastavení, které používá i příloha v účetní
+        // závěrce (Účetnictví → Uzávěrka → Příloha v účetní závěrce, sekce „Průměrný
+        // přepočtený počet zaměstnanců").
+        if (array_key_exists('poc_zam', $meta)) {
+            $pocZam = (int) round((float) $meta['poc_zam']);
+        } else {
+            $avgEmployees = $appendix['settings']['avg_employees'] ?? null;
+            if ($avgEmployees !== null) {
+                $pocZam = (int) $avgEmployees;
+            } else {
+                $pocZam = 0;
+                $warnings[] = 'Průměrný přepočtený počet zaměstnanců nebyl nalezen — do přiznání '
+                    . 'se dosadila hodnota 0 (chyba EPO 1704 vyžaduje vyplnění vždy, i nulou). '
+                    . 'Účetní má hodnotu doplnit v Účetnictví → Uzávěrka → Příloha v účetní '
+                    . 'závěrce, sekce „Průměrný přepočtený počet zaměstnanců", a přiznání '
+                    . 'vygenerovat znovu.';
+            }
+        }
+        $vetaS->setAttribute('poc_zam', (string) max(0, $pocZam));
+
+        // cisobr_mena se plní VŽDY, jakmile VetaS existuje: zkušební EPO 30. 8. 2026
+        // vrátilo KRITICKOU chybu „Měna čistého obratu v tabulce K musí být vyplněna"
+        // u věty, která nesla jen poc_zam. Měna tedy nevisí na obratu, ale na existenci
+        // tabulky K. Multi-currency účetnictví zatím nemáme (shodně s VetaD/uv_mena).
+        $vetaS->setAttribute('cisobr_mena', 'CZK');
+
+        // kc_dpp_i1: jen když je k dispozici VZZ (příloha účetní závěrky).
+        $incomeStatement = (array) ($appendix['income_statement'] ?? []);
+        if ($incomeStatement !== []) {
+            $byCode = [];
+            foreach ((array) ($incomeStatement['rows'] ?? []) as $row) {
+                $byCode[(string) $row['row_code']] = $row;
+            }
+            $turnover = 0.0;
+            foreach (self::NET_TURNOVER_ROW_CODES as $rowCode) {
+                $turnover += (float) ($byCode[$rowCode]['amount'] ?? 0.0);
+            }
+            $vetaS->setAttribute('kc_dpp_i1', (string) (int) round($turnover));
+        } else {
+            $warnings[] = 'Roční úhrn čistého obratu (kc_dpp_i1) nebyl vyplněn — příloha účetní '
+                . 'závěrky (výkaz zisku a ztráty) nebyla k dispozici; EPO to vytkne jako chybu '
+                . '1703 „Roční úhrn čistého obratu není naplněn". Ověřte uzavřené účetní období '
+                . 'a přiznání vygenerujte znovu.';
+        }
+
+        return $vetaS;
+    }
+
+    /**
+     * VetaF — příloha č. 1 II. oddílu, tabulka B (odpisy hmotného a nehmotného majetku).
+     * Staví jen řádky, které jde vzít spolehlivě z karet majetku (Epic F3,
+     * {@see DppoReturnDataProvider::depreciationByGroup}): ř. 1–6 = uplatněné daňové
+     * odpisy hmotného majetku podle odpisové skupiny (assets.tax_group 1–6), ř. 10
+     * (kc_dpp_b_onm) = daňové odpisy nehmotného majetku (§32a) a ř. 11 (kc_dppb6_b8) =
+     * celkem tabulka B. Fotovoltaika dle §30b (ř. 9, kc_dpp_b_ohm_30_6) a účetní odpisy
+     * majetku nevymezeného zákonem dle §24/2/v (ř. 12, kc_dpp_b10) systém neeviduje
+     * samostatně — necháváme nevyplněné, ne odhadnuté.
+     *
+     * kc_dppb6_b8 = ř.11 celkem: zkušební EPO bez něj vytýká „Hodnota ř. 11 Př.1/B
+     * II. oddílu není naplněna" i když jsou dílčí řádky 1–10 vyplněné správně; v obou
+     * lokálně ověřených referenčních podáních (mimo repo) nese stejnou hodnotu jako
+     * jediná vyplněná dílčí odpisová skupina, tedy součet, ne jen jeden z řádků.
+     *
+     * @param array<string,mixed> $calc výstup DppoReturnCalculator::compute (nese depreciation_by_group)
+     * @param list<string>        $warnings
+     */
+    private function buildVetaF(\DOMDocument $dom, array $calc, array &$warnings): ?\DOMElement
+    {
+        $byGroup = (array) ($calc['depreciation_by_group'] ?? []);
+        $tangible = (array) ($byGroup['tangible'] ?? []);
+        $intangible = round((float) ($byGroup['intangible'] ?? 0.0), 2);
+        $unclassified = round((float) ($byGroup['unclassified'] ?? 0.0), 2);
+
+        // Řádky 1–6 tabulky B = odpisové skupiny 1–6 (assets.tax_group); XSD nepojmenovává
+        // atributy podle skupiny 1:1 (jen kc_dpp_b6 má "b6" prefix, zbytek kc_dppbN).
+        $groupAttr = [1 => 'kc_dppb1', 2 => 'kc_dppb2', 3 => 'kc_dppb3', 4 => 'kc_dppb4', 5 => 'kc_dppb5', 6 => 'kc_dpp_b6'];
+
+        $vetaF = $dom->createElement('VetaF');
+        $any = false;
+        $total = 0.0;
+        foreach ($groupAttr as $group => $attr) {
+            $amount = round((float) ($tangible[$group] ?? 0.0), 2);
+            if ($amount === 0.0) {
+                continue;
+            }
+            $vetaF->setAttribute($attr, (string) (int) round($amount));
+            $total = round($total + $amount, 2);
+            $any = true;
+        }
+        if ($intangible !== 0.0) {
+            $vetaF->setAttribute('kc_dpp_b_onm', (string) (int) round($intangible));
+            $total = round($total + $intangible, 2);
+            $any = true;
+        }
+        if ($any) {
+            $vetaF->setAttribute('kc_dppb6_b8', (string) (int) round($total));
+        }
+        if ($unclassified !== 0.0) {
+            $warnings[] = 'Daňové odpisy hmotného majetku ' . number_format($unclassified, 0, ',', ' ')
+                . ' Kč nemají na kartě majetku vyplněnou odpisovou skupinu — do přílohy č. 1 II. oddílu '
+                . '(tabulka B, VetaF) se nepromítly. Doplňte odpisovou skupinu na kartě majetku.';
+        }
+
+        return $any ? $vetaF : null;
+    }
+
+    /**
+     * VetaNP — žádost o vrácení přeplatku (§155 daňového řádu). Staví se JEN když z
+     * přiznání vyjde přeplatek (kc_v_4 = -balance_due > 0, viz VetaD výše) — bez ní si
+     * poplatník o vrácení přeplatku vůbec nežádá, přeplatek jen zůstane na osobním
+     * daňovém účtu. Bankovní spojení bere ze STEJNÉHO zdroje jako platební příkazy
+     * ({@see \MyInvoice\Repository\PaymentOrderRepository::payerAccounts} — tabulka
+     * `currencies`, výchozí CZK účet), přes {@see DppoReturnDataProvider::bankAccount}.
+     * Zahraniční účet (zp_vrac='Z') systém nepodporuje — poplatník ho v appce nevede.
+     *
+     * @param array<string,mixed> $calc
+     * @param list<string>        $warnings
+     */
+    private function buildVetaNP(\DOMDocument $dom, array $calc, array &$warnings): ?\DOMElement
+    {
+        $overpayment = (int) round(-(float) ($calc['balance_due'] ?? 0.0));
+        if ($overpayment <= 0) {
+            return null;
+        }
+
+        $account = $calc['bank_account'] ?? null;
+        if (!is_array($account) || empty($account['account_number'])) {
+            $warnings[] = 'Vznikl přeplatek ' . number_format($overpayment, 0, ',', ' ') . ' Kč, ale v Nastavení '
+                . 'firmy chybí výchozí CZK bankovní účet — žádost o jeho vrácení (VetaNP) se do přiznání '
+                . 'nedostala. Bez ní si poplatník o vrácení přeplatku nežádá; doplňte účet a přiznání '
+                . 'vygenerujte znovu.';
+            return null;
+        }
+
+        $accountNumber = (string) $account['account_number'];
+        $prefix = AccountNumberNormalizer::czechAccountPrefix($accountNumber);
+        $base = AccountNumberNormalizer::czechAccountBase($accountNumber);
+        $bankCode = AccountNumberNormalizer::canonicalBankCode(
+            isset($account['bank_code']) ? (string) $account['bank_code'] : null,
+            isset($account['iban']) ? (string) $account['iban'] : null,
+        );
+        if ($base === null || $bankCode === null) {
+            $warnings[] = 'Vznikl přeplatek ' . number_format($overpayment, 0, ',', ' ') . ' Kč, ale výchozí '
+                . 'bankovní účet v Nastavení firmy nejde rozebrat na číslo účtu a kód banky — žádost o jeho '
+                . 'vrácení (VetaNP) se do přiznání nedostala. Ověřte formát účtu v Nastavení firmy.';
+            return null;
+        }
+
+        $vetaNP = $dom->createElement('VetaNP');
+        $vetaNP->setAttribute('zp_vrac', 'U'); // U = na účet v ČR (zahraniční Z appka nevede)
+        if ($prefix !== null) {
+            $vetaNP->setAttribute('zvp_pbu', $prefix);
+        }
+        $vetaNP->setAttribute('zvp_c_komds', $base);
+        $vetaNP->setAttribute('zvp_k_bank', $bankCode);
+        $bankName = trim((string) ($account['bank_name'] ?? ''));
+        if ($bankName !== '') {
+            $vetaNP->setAttribute('zvp_naz_bank', mb_substr($bankName, 0, 30)); // XSD maxLength 30
+        }
+        $vetaNP->setAttribute('kc_preplatek', (string) $overpayment);
+
+        return $vetaNP;
     }
 
     /** Zaokrouhlení Kč (haléře) na celé tisíce Kč — EPO konvence VetaUA/UB/UD (spec §1). */

@@ -53,6 +53,9 @@ final class DppoReturnDataProvider
      *   period: array{id:int,starts_on:string,ends_on:string}|null,
      *   vh: float, non_deductible_costs: float,
      *   depreciation: array{tax:float,accounting:float},
+     *   depreciation_by_group: array{tangible:array<int,float>,intangible:float,unclassified:float},
+     *   related_party_country_flag: 'N'|'T'|'Z'|'A',
+     *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
      *   disposal_nondeductible_residual: float,
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
      *   disposals: list<array<string,mixed>>,
@@ -71,6 +74,9 @@ final class DppoReturnDataProvider
                 'vh' => 0.0,
                 'non_deductible_costs' => 0.0,
                 'depreciation' => ['tax' => 0.0, 'accounting' => 0.0],
+                'depreciation_by_group' => ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0],
+                'related_party_country_flag' => 'N',
+                'bank_account' => $this->bankAccount($supplierId),
                 'disposal_nondeductible_residual' => 0.0,
                 'disposal_tax_increase' => 0.0,
                 'disposal_tax_decrease' => 0.0,
@@ -87,6 +93,9 @@ final class DppoReturnDataProvider
         $vh = $this->profitBeforeTax($supplierId, $startsOn, $endsOn);
         $nonDeductible = $this->nonDeductibleCosts($supplierId, $startsOn, $endsOn);
         $dep = $this->depreciation($supplierId, $year);
+        $depByGroup = $this->depreciationByGroup($supplierId, $year);
+        $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
+        $bankAccount = $this->bankAccount($supplierId);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
         $suggestions = [
@@ -110,6 +119,9 @@ final class DppoReturnDataProvider
             'vh' => $vh,
             'non_deductible_costs' => $nonDeductible,
             'depreciation' => $dep,
+            'depreciation_by_group' => $depByGroup,
+            'related_party_country_flag' => $relatedPartyFlag,
+            'bank_account' => $bankAccount,
             'disposal_nondeductible_residual' => 0.0,
             'disposal_tax_increase' => $disposalIncrease,
             'disposal_tax_decrease' => $disposalDecrease,
@@ -368,6 +380,120 @@ final class DppoReturnDataProvider
     private function nonDeductibleCosts(int $supplierId, string $startsOn, string $endsOn): float
     {
         return $this->nonDeductibleCostsService->sum($supplierId, $startsOn, $endsOn);
+    }
+
+    /**
+     * Uplatněné DAŇOVÉ odpisy za rok rozpadlé podle přílohy č. 1 II. oddílu, tabulka B:
+     * hmotný majetek po odpisové skupině (assets.tax_group 1-6, karty §26-33) a nehmotný
+     * majetek zvlášť (assets.kind='intangible', §32a). `unclassified` = daňové odpisy
+     * hmotného majetku bez vyplněné odpisové skupiny na kartě — do tabulky B se promítnout
+     * nedají, builder z toho udělá varování místo tichého vynechání.
+     *
+     * @return array{tangible: array<int,float>, intangible: float, unclassified: float}
+     */
+    private function depreciationByGroup(int $supplierId, int $fiscalYear): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT a.kind, a.tax_group, COALESCE(SUM(de.amount), 0) AS total
+               FROM depreciation_entries de
+               JOIN assets a ON a.id = de.asset_id
+              WHERE de.supplier_id = ? AND de.kind = \'tax\' AND de.fiscal_year = ?
+              GROUP BY a.kind, a.tax_group'
+        );
+        $stmt->execute([$supplierId, $fiscalYear]);
+        $tangible = [];
+        $intangible = 0.0;
+        $unclassified = 0.0;
+        foreach ($stmt->fetchAll() as $row) {
+            $amount = round((float) $row['total'], 2);
+            if ($amount === 0.0) {
+                continue;
+            }
+            if ((string) $row['kind'] === 'intangible') {
+                $intangible = round($intangible + $amount, 2);
+                continue;
+            }
+            $group = $row['tax_group'] !== null ? (int) $row['tax_group'] : null;
+            if ($group !== null && $group >= 1 && $group <= 6) {
+                $tangible[$group] = round(($tangible[$group] ?? 0.0) + $amount, 2);
+            } else {
+                $unclassified = round($unclassified + $amount, 2);
+            }
+        }
+        return ['tangible' => $tangible, 'intangible' => $intangible, 'unclassified' => $unclassified];
+    }
+
+    /**
+     * § 23 odst. 7 ZDP (VetaD/spoj_zahr) — uskutečnil poplatník transakce se spojenou
+     * osobou (clients.related_party=1) a byla tato osoba tuzemská, nebo zahraniční, nebo
+     * obojí? Vlastní dotaz místo volání {@see \MyInvoice\Service\Tax\RelatedPartyService}
+     * — ta vrací transakce k lidskému náhledu, ne zemi protistrany; přidávat tam sloupec
+     * navíc pro jednoho volajícího by rozšiřovalo cizí rozhraní kvůli DPPO detailu.
+     *
+     * @return 'N'|'T'|'Z'|'A'
+     */
+    private function relatedPartyCountryFlag(int $supplierId, string $startsOn, string $endsOn): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT co.iso2 AS iso2
+               FROM invoices i
+               JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
+               JOIN countries co ON co.id = c.country_id
+              WHERE i.supplier_id = ? AND c.related_party = 1
+                AND i.status NOT IN ('draft','cancelled')
+                AND i.invoice_type IN ('invoice','credit_note','tax_document')
+                AND i.effective_tax_date BETWEEN ? AND ?
+              UNION ALL
+             SELECT co.iso2
+               FROM purchase_invoices p
+               JOIN clients v ON v.id = p.vendor_id AND v.supplier_id = p.supplier_id
+               JOIN countries co ON co.id = v.country_id
+              WHERE p.supplier_id = ? AND v.related_party = 1
+                AND p.status NOT IN ('draft','cancelled')
+                AND p.document_kind IN ('invoice','receipt','credit_note','tax_document')
+                AND p.effective_cost_date BETWEEN ? AND ?"
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn, $supplierId, $startsOn, $endsOn]);
+        $hasDomestic = false;
+        $hasForeign = false;
+        foreach ($stmt->fetchAll() as $row) {
+            if (strtoupper((string) $row['iso2']) === 'CZ') {
+                $hasDomestic = true;
+            } else {
+                $hasForeign = true;
+            }
+        }
+        if ($hasDomestic && $hasForeign) {
+            return 'A';
+        }
+        if ($hasForeign) {
+            return 'Z';
+        }
+        if ($hasDomestic) {
+            return 'T';
+        }
+        return 'N';
+    }
+
+    /**
+     * Výchozí CZK bankovní účet poplatníka (`currencies`, stejný zdroj jako platební
+     * příkazy — {@see \MyInvoice\Repository\PaymentOrderRepository::payerAccounts}) —
+     * jediný podklad, odkud VetaNP (žádost o vrácení přeplatku) může vzít bankovní spojení.
+     *
+     * @return array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
+     */
+    private function bankAccount(int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT account_number, bank_code, bank_name, iban
+               FROM currencies
+              WHERE supplier_id = ? AND code = 'CZK' AND is_active = 1
+           ORDER BY is_default DESC, id
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch();
+        return $row === false ? null : $row;
     }
 
     /** @return array{tax:float,accounting:float} */

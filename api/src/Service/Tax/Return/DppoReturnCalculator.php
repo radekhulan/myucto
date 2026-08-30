@@ -56,6 +56,9 @@ final class DppoReturnCalculator
      *   tax: float, advances_paid: float, balance_due: float,
      *   next_advances: array{regime:string,count:int,amount:float,total:float,note:string},
      *   summary: array<string,float>,
+     *   depreciation_by_group: array{tangible:array<int,float>,intangible:float,unclassified:float},
+     *   related_party_country_flag: 'N'|'T'|'Z'|'A',
+     *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
      *   warnings: list<string>
      * }
      */
@@ -308,6 +311,11 @@ final class DppoReturnCalculator
             'balance_due' => $balanceDue,
             'next_advances' => $nextAdvances,
             'projection' => $projection,
+            // Průchozí podklady z DppoReturnDataProvider pro DppoXmlBuilder (VetaF/VetaD/VetaNP) —
+            // kalkulátor je nepočítá, jen je nese dál, aby builder nemusel dostávat $data zvlášť.
+            'depreciation_by_group' => (array) ($data['depreciation_by_group'] ?? ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0]),
+            'related_party_country_flag' => (string) ($data['related_party_country_flag'] ?? 'N'),
+            'bank_account' => $data['bank_account'] ?? null,
             'summary' => [
                 'rate' => $rate,
                 'vh' => $vh,

@@ -42,7 +42,7 @@ final class DppoReturnDataProviderTest extends TestCase
         $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
             (1,'518','expense','deductible','Ostatní služby'),
             (2,'513','expense','non_deductible','Reprezentace')");
-        $this->pdo->exec('INSERT INTO purchase_invoices VALUES (100,1,0),(101,1,1),(102,1,0)');
+        $this->pdo->exec('INSERT INTO purchase_invoices (id, supplier_id, tax_deductible) VALUES (100,1,0),(101,1,1),(102,1,0)');
 
         $this->plEntry(100, '2025-06-01', 'purchase_invoice', 1, 'debit', 773.50);
         $this->plEntry(101, '2025-06-02', 'purchase_invoice', 1, 'debit', 100.00);
@@ -231,7 +231,7 @@ final class DppoReturnDataProviderTest extends TestCase
     private function asset(int $id, string $number, string $type, float $bookResidual, float $taxResidual, int $expenseAccount): void
     {
         $stmt = $this->pdo->prepare(
-            "INSERT INTO assets VALUES (?,1,?,?,'2025-06-30',?,100000,0,'disposed')"
+            "INSERT INTO assets VALUES (?,1,?,?,'tangible',NULL,'2025-06-30',?,100000,0,'disposed')"
         );
         $stmt->execute([$id, $number, $number, $type]);
         $this->pdo->prepare("INSERT INTO depreciation_entries VALUES (?,1,?,'tax',2025,0,?)")
@@ -252,9 +252,15 @@ final class DppoReturnDataProviderTest extends TestCase
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, name TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');
         $this->pdo->exec('CREATE TABLE journal_entry_lines (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_id INTEGER, account_id INTEGER, side TEXT, amount REAL)');
-        $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER)');
-        $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, disposal_date TEXT, disposal_type TEXT, input_price REAL, opening_tax_amount REAL, status TEXT)');
+        $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER, vendor_id INTEGER, status TEXT, document_kind TEXT, effective_cost_date TEXT, total_without_vat REAL)');
+        $this->pdo->exec('CREATE TABLE assets (id INTEGER PRIMARY KEY, supplier_id INTEGER, inventory_number TEXT, name TEXT, kind TEXT, tax_group INTEGER, disposal_date TEXT, disposal_type TEXT, input_price REAL, opening_tax_amount REAL, status TEXT)');
         $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, amount REAL)');
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
+        // Podklady pro VetaD/spoj_zahr (relatedPartyCountryFlag) a VetaNP (bankAccount) —
+        // v téhle testovací třídě prázdné, gather() je ale pořád volá, tabulky musí existovat.
+        $this->pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, client_id INTEGER, status TEXT, invoice_type TEXT, effective_tax_date TEXT, total_without_vat REAL)');
+        $this->pdo->exec('CREATE TABLE clients (id INTEGER PRIMARY KEY, supplier_id INTEGER, country_id INTEGER, related_party INTEGER)');
+        $this->pdo->exec('CREATE TABLE countries (id INTEGER PRIMARY KEY, iso2 TEXT)');
+        $this->pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, supplier_id INTEGER, code TEXT, account_number TEXT, bank_code TEXT, bank_name TEXT, iban TEXT, is_default INTEGER, is_active INTEGER)');
     }
 }

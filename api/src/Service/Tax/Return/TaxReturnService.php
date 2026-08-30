@@ -804,18 +804,21 @@ final class TaxReturnService
         $appVersion = $this->loadAppVersion();
         $amendMeta = $this->amendmentXmlMeta($type, $variant, $computation['result']);
 
+        $appendixWarnings = [];
         if ($type === 'po') {
             $meta = ['verze_sw' => $appVersion ?? '0']
                 + $this->periodMeta($computation['podklady']['period'] ?? null, $year)
                 + $amendMeta;
             $appendix = $this->buildDppoAppendix($supplierId, (array) ($computation['podklady']['period'] ?? []));
+            $appendixWarnings = (array) ($appendix['warnings'] ?? []);
+            unset($appendix['warnings']);
             $built = $this->dppoXml->build($supplier, $year, $computation['result'], $meta, $appendix);
             $formCode = 'dppdp9';
         }
 
         $summary = $computation['result']['summary'] ?? [];
         $summary['variant'] = $variant;
-        $summary['warnings'] = array_merge($computation['warnings'], $built['warnings']);
+        $summary['warnings'] = array_merge($computation['warnings'], $built['warnings'], $appendixWarnings);
 
         $variantSuffix = $variant === 'radne'
             ? ''
@@ -948,14 +951,25 @@ final class TaxReturnService
      * reálně ověřené vzorky (mikro ÚJ) podávaly VZZ v plném rozsahu, zkrácení je jen
      * dobrovolná volba účetního nad rámec zákonného minima.
      *
+     * Best-effort NEZNAMENÁ tiché: dřív se chybějící/nezdařená příloha jen vynechala
+     * (`return []`), takže přiznání odešlo bez VetaUA/UB/UD/UZ a nikdo se to nedozvěděl,
+     * dokud to EPO nevytklo jako chybu 2602 „Není vložena příloha účetní závěrky" (reálné
+     * podání 30. 8. 2026). Důvod vynechání teď jde ven přes `warnings`, ať to účetní vidí
+     * v UI dřív, než podá.
+     *
      * @param array{id?:int} $period
-     * @return array<string,mixed>
+     * @return array{balance_sheet?:array<string,mixed>,income_statement?:array<string,mixed>,category?:array<string,mixed>,settings?:array<string,mixed>,warnings:list<string>}
      */
     private function buildDppoAppendix(int $supplierId, array $period): array
     {
         $periodId = (int) ($period['id'] ?? 0);
         if ($periodId <= 0) {
-            return [];
+            return ['warnings' => [
+                'Příloha účetní závěrky (VetaUA/UB/UD/UZ) nebyla k přiznání připojena — '
+                . 'chybí navázané účetní období. EPO to při skutečném podání vytkne jako '
+                . 'chybu 2602 „Není vložena příloha účetní závěrky". Vyberte/uzavřete '
+                . 'účetní období v Účetnictví → Uzávěrka a přiznání vygenerujte znovu.',
+            ]];
         }
         try {
             return [
@@ -963,9 +977,16 @@ final class TaxReturnService
                 'income_statement' => $this->statements->incomeStatement($supplierId, $periodId, null, 'full'),
                 'category' => $this->categories->evaluate($supplierId, $periodId),
                 'settings' => $this->supplierSettings->get($supplierId),
+                'warnings' => [],
             ];
-        } catch (\Throwable) {
-            return [];
+        } catch (\Throwable $e) {
+            return ['warnings' => [
+                'Příloha účetní závěrky (VetaUA/UB/UD/UZ) se nepodařilo sestavit ('
+                . $e->getMessage() . ') — EPO to při skutečném podání vytkne jako chybu 2602 '
+                . '„Není vložena příloha účetní závěrky". Ověřte, že je účetní období '
+                . 'uzavřené a výkazy (rozvaha/VZZ) mají platné mapování, a přiznání '
+                . 'vygenerujte znovu.',
+            ]];
         }
     }
 
