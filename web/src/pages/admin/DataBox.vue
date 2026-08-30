@@ -1083,21 +1083,24 @@ onUnmounted(clearMobileStatusTimer)
       <div>
         <h1 class="text-xl font-semibold text-neutral-900">{{ t('databox.title') }}</h1>
         <p class="max-w-4xl text-sm text-neutral-500">{{ t('databox.subtitle') }}</p>
-        <!--
-          Daňová podání z aplikace odcházejí přes EPO, ne datovkou — podtitul to
-          dřív tvrdil obráceně. Datovka je u nich ruční záložní cesta a rozdíl je
-          praktický: přes ni nepřijde potvrzení s podacím číslem, jen dodejka.
-        -->
-        <p class="mt-1 max-w-4xl text-sm text-neutral-500">{{ t('databox.taxNote') }}</p>
-        <p class="mt-1 max-w-4xl text-sm text-neutral-500">
-          {{ t('databox.gatewayLink') }}
-          <RouterLink to="/admin/isds-gateway" class="font-medium text-primary-700 underline">
-            {{ t('databox.gatewayLinkAction') }}
-          </RouterLink>
-        </p>
         <p class="mt-1 text-sm font-medium text-primary-700">
           {{ t('databox.companyScope', { company: supplierStore.currentSupplier?.company_name ?? '—' }) }}
         </p>
+        <!--
+          Tři odstavce pod sebou nikdo nečetl. Podstatné (čí schránka to je)
+          zůstalo nahoře, zbytek je na vyžádání. Daňová podání z aplikace
+          odcházejí přes EPO, ne datovkou — podtitul to dřív tvrdil obráceně.
+        -->
+        <details class="mt-2 max-w-4xl text-sm">
+          <summary class="cursor-pointer text-primary-700 hover:underline">{{ t('databox.howItWorks') }}</summary>
+          <p class="mt-2 text-neutral-500">{{ t('databox.taxNote') }}</p>
+          <p class="mt-2 text-neutral-500">
+            {{ t('databox.gatewayLink') }}
+            <RouterLink to="/admin/isds-gateway" class="font-medium text-primary-700 underline">
+              {{ t('databox.gatewayLinkAction') }}
+            </RouterLink>
+          </p>
+        </details>
       </div>
       <select
         v-model="environment"
@@ -1143,19 +1146,26 @@ onUnmounted(clearMobileStatusTimer)
             </span>
           </div>
           <p class="mt-2 text-sm text-neutral-600">{{ t('databox.access.loginDescription') }}</p>
-          <ul class="mt-3 space-y-2 text-sm text-neutral-700">
-            <li>{{ t('databox.access.loginMobileKey') }}</li>
-            <li>{{ t('databox.access.loginPassword') }}</li>
-            <li>{{ t('databox.access.loginCertificate') }}</li>
-          </ul>
-          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.loginBoundary') }}</p>
+          <dl class="mt-3 space-y-2.5 text-sm">
+            <div v-for="method in ['MobileKey', 'Password', 'Certificate']" :key="method">
+              <dt class="font-medium text-neutral-900">{{ t(`databox.access.login${method}Term`) }}</dt>
+              <dd class="text-neutral-600">{{ t(`databox.access.login${method}Text`) }}</dd>
+            </div>
+          </dl>
+          <details class="mt-3 text-xs">
+            <summary class="cursor-pointer text-primary-700 hover:underline">{{ t('databox.access.whatIsStored') }}</summary>
+            <p class="mt-2 text-neutral-500">{{ t('databox.access.loginBoundary') }}</p>
+          </details>
         </article>
 
         <article class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
           <h2 class="font-medium text-neutral-900">{{ t('databox.access.gatewayTitle') }}</h2>
           <p class="mt-2 text-sm text-neutral-600">{{ t('databox.access.gatewayDescription') }}</p>
           <p class="mt-3 text-sm text-neutral-700">{{ t('databox.gateway.methodsByIsds') }}</p>
-          <p class="mt-3 text-xs text-neutral-500">{{ t('databox.access.gatewayBoundary') }}</p>
+          <details class="mt-3 text-xs">
+            <summary class="cursor-pointer text-primary-700 hover:underline">{{ t('databox.access.whatGoesThrough') }}</summary>
+            <p class="mt-2 text-neutral-500">{{ t('databox.access.gatewayBoundary') }}</p>
+          </details>
           <div class="mt-3 flex items-center gap-2 text-sm">
             <span class="h-2.5 w-2.5 rounded-full" :class="gatewayAvailable ? 'bg-success-500' : 'bg-warning-500'" />
             <span>{{ gatewayAvailable ? t('databox.access.gatewayAvailable') : t('databox.access.gatewayUnavailable') }}</span>
