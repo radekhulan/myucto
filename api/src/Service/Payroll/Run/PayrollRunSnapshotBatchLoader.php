@@ -204,7 +204,7 @@ final class PayrollRunSnapshotBatchLoader
         return $this->grouped($this->fetch(
             'SELECT id, agreement_reference, title, deduction_kind, priority_no,
                     requested_minor, total_limit_minor, withheld_total_minor,
-                    valid_from, valid_to, row_version,
+                    valid_from, valid_to, delivered_on, row_version,
                     employee_id AS ' . self::GROUP_KEY . '
                FROM payroll_deduction_agreements
               WHERE supplier_id = ?

@@ -217,6 +217,11 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollDocumentKind'             => 'enum:MyInvoice\Service\Payroll\Document\PayrollDocumentKind',
         'payroll.ts::PayrollDocumentBatchStatus'      => 'db:payroll_document_batches.status',
         'payroll.ts::PayrollDocumentBatchItemStatus'  => 'db:payroll_document_batch_items.status',
+        // Roční fronta dokumentů: rozsahem je zdaňovací období, ne běh a revize.
+        'payroll.ts::PayrollAnnualDocumentBatchKind'
+            => 'const:MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository::KINDS',
+        'payroll.ts::PayrollAnnualDocumentBatchScope'
+            => 'const:MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository::SCOPES',
         // Způsob skončení vztahu na odděleném potvrzení podle § 313 odst. 2
         // zákoníku práce. Doménu drží doklad, protože právě on ji tiskne.
         'payroll.ts::PayrollTerminationReasonKind'

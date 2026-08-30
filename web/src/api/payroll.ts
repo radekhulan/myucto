@@ -2020,6 +2020,13 @@ export interface PayrollEmployerAccounts {
   social_insurance_credit: string
   health_insurance_credit: string
   income_tax_credit: string
+  /**
+   * Srážková daň zvláštní sazbou (§ 6 odst. 4 a § 36 odst. 2 písm. p) ZDP).
+   * Vlastní účet, ne táž 342 jako záloha: odvádí se jinou platbou, v jiném
+   * termínu a vykazuje jiným hlášením, takže na společném účtu nejde saldo
+   * přiřadit k jedné z obou daní.
+   */
+  withholding_tax_credit: string
   other_deductions_credit: string
   partner_settlement_credit: string
   /**
@@ -2228,7 +2235,7 @@ export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
   | 'awaiting_result' | 'action_required'
 
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
-  | 'registration_change'
+  | 'registration_change' | 'tax_statement'
 
 export interface PayrollDeadlineItem {
   source: PayrollDeadlineSource
@@ -2257,6 +2264,16 @@ export interface PayrollDeadlineItem {
   deadline_source?: string | null
   deadline_source_status?: string | null
   deadline_ruleset_id?: string
+  /** Roční vyúčtování: `dpzvd6` (zálohová daň) nebo `dpsvd2` (srážková). */
+  form_code?: string
+  /** Zdaňovací období, ZA které se vyúčtování podává. */
+  statement_year?: number
+  /** Lhůta bez elektronického prodloužení — u DPZVD6 dřívější než `due_on`. */
+  statutory_due_on?: string
+  /** Prodloužená lhůta při elektronickém podání; DPSVD2 žádnou nemá. */
+  electronic_due_on?: string | null
+  /** U obou vyúčtování `false` — lhůtu prodloužit nelze. */
+  extendable?: boolean
 }
 
 export interface PayrollDeadlineOverview {
@@ -4234,6 +4251,43 @@ export interface PayrollDocumentBatchItem {
   updated_at: string
 }
 
+/**
+ * Roční dávka dokumentů má vlastní frontu: rozsahem je zdaňovací období, ne běh
+ * a revize. Navíc zná `skipped` — osoba, která potvrzení za rok už má, se
+ * nepřegeneruje, protože jeho nahrazení je oprava s povinným důvodem.
+ */
+export type PayrollAnnualDocumentBatchKind =
+  | 'payroll_sheet'
+  | 'taxable_income_advance_certificate'
+  | 'taxable_income_withholding_certificate'
+
+export type PayrollAnnualDocumentBatchScope = 'selected' | 'all'
+
+export type PayrollAnnualDocumentBatchItemStatus =
+  | PayrollDocumentBatchItemStatus
+  | 'skipped'
+
+export interface PayrollAnnualDocumentBatch {
+  id: number
+  tax_year: number
+  document_kind: PayrollAnnualDocumentBatchKind
+  scope: PayrollAnnualDocumentBatchScope
+  status: PayrollDocumentBatchStatus
+  item_count: number
+  succeeded_count: number
+  failed_count: number
+  skipped_count: number
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  updated_at: string
+}
+
+export interface PayrollAnnualDocumentBatchItem
+  extends Omit<PayrollDocumentBatchItem, 'status'> {
+  status: PayrollAnnualDocumentBatchItemStatus
+}
+
 export interface PayrollEmploymentCertificateDeductionEvidence {
   source_claim_id: number
   beneficiary: string
@@ -6111,6 +6165,48 @@ export const payrollApi = {
   retryDocumentBatchItem: (batchId: number, itemId: number) =>
     api.post<{ item: PayrollDocumentBatchItem }>(
       `/payroll/documents/batches/${batchId}/items/${itemId}/retry`,
+      {},
+    ).then(response => response.data.item),
+  /**
+   * Roční dokumenty se ZAŘAZUJÍ, negenerují. Dřív tu byla smyčka jeden
+   * požadavek na zaměstnance; u pěti set lidí spolehlivě spadla na timeoutu
+   * nebo na zavření záložky. Teď jde ven jeden požadavek a běh přežije
+   * i zavřený prohlížeč.
+   */
+  enqueueAnnualDocumentBatch: (
+    kind: PayrollAnnualDocumentBatchKind,
+    year: number,
+    scope: PayrollAnnualDocumentBatchScope,
+    employeeId: number | null,
+  ) => {
+    const routeKind = kind === 'payroll_sheet'
+      ? 'payroll-sheet'
+      : kind === 'taxable_income_advance_certificate'
+        ? 'advance'
+        : 'withholding'
+    return api.post<{ batch: PayrollAnnualDocumentBatch }>(
+      `/payroll/documents/annual-batches/${routeKind}/${year}`,
+      { scope, employee_id: employeeId },
+      {
+        headers: {
+          'Idempotency-Key':
+            `annual-document-batch:${year}:${kind}:${scope}:${employeeId ?? 'all'}`,
+        },
+      },
+    ).then(response => response.data.batch)
+  },
+  annualDocumentBatch: (batchId: number) =>
+    api.get<{ batch: PayrollAnnualDocumentBatch }>(
+      `/payroll/documents/annual-batches/${batchId}`,
+    ).then(response => response.data.batch),
+  annualDocumentBatchItems: (batchId: number, page?: PayrollPageParams) =>
+    api.get<{ items: PayrollAnnualDocumentBatchItem[], total: number }>(
+      `/payroll/documents/annual-batches/${batchId}/items`,
+      { params: pageParams(page) },
+    ).then(response => response.data),
+  retryAnnualDocumentBatchItem: (batchId: number, itemId: number) =>
+    api.post<{ item: PayrollAnnualDocumentBatchItem }>(
+      `/payroll/documents/annual-batches/${batchId}/items/${itemId}/retry`,
       {},
     ).then(response => response.data.item),
   /**

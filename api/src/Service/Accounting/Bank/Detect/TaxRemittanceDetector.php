@@ -8,6 +8,7 @@ use DateTimeImmutable;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Accounting\Payroll\PayrollPostingAccountResolver;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
@@ -32,6 +33,7 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         private readonly PostingRuleRepository $postingRules,
         private readonly PayrollPaymentIdentifierResolver $payrollIdentifiers,
         private readonly PayrollModuleAccess $payrollAccess,
+        private readonly PayrollPostingAccountResolver $payrollAccounts,
     ) {}
 
     public function key(): string
@@ -405,6 +407,38 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         return $this->activeAccountCache[$key];
     }
 
+    /**
+     * Účet, na kterém firmě visí závazek z mzdové rekapitulace, nebo `null`
+     * u operace, která se mzdami nesouvisí.
+     *
+     * Pojistné OSVČ za sebe ({@see OperationType::REMITTANCE_SOCIAL} a
+     * `…_HEALTH`) sem NEPATŘÍ: kryje ho předpis 526/336, ne mzdová
+     * rekapitulace, a kontace mezd o něm nic neví. Stejně tak
+     * {@see OperationType::REMITTANCE_OTHER} — to je nezařazený odvod, u
+     * kterého se neví ani druh, natož účet.
+     */
+    private function payrollLiabilityAccount(int $supplierId, string $operation): ?string
+    {
+        $key = match ($operation) {
+            OperationType::REMITTANCE_SOCIAL_EMPLOYER => 'social',
+            OperationType::REMITTANCE_HEALTH_EMPLOYER => 'health',
+            OperationType::REMITTANCE_PAYROLL => 'advance_tax',
+            OperationType::REMITTANCE_WITHHOLDING => 'withholding_tax',
+            default => null,
+        };
+        if ($key === null) {
+            return null;
+        }
+        $accounts = $this->payrollAccounts->forSupplier($supplierId);
+
+        return match ($key) {
+            'social' => $accounts->socialPayable,
+            'health' => $accounts->healthPayable,
+            'advance_tax' => $accounts->incomeTaxPayable,
+            default => $accounts->withholdingTaxPayable,
+        };
+    }
+
     private function fromRule(
         int $supplierId,
         string $operation,
@@ -420,6 +454,8 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         // Očekávaná MD strana per operace — pojistka proti překlepu v posting_rules (níže se jí
         // kontace ověří a případně přebije). Zaměstnavatelské pojistné jde na 336 stejně jako
         // OSVČ: liší se předpis, který úhradu kryje (524/336 + 331/336 vs. 526/336), ne účet úhrady.
+        // U ODVODŮ ZAMĚSTNAVATELE je tahle syntetika jen poslední záchranou; konkrétní účet
+        // dodává níž kontace mzdové rekapitulace té které firmy.
         $expectedDebit = match ($operation) {
             OperationType::REMITTANCE_SOCIAL, OperationType::REMITTANCE_HEALTH,
             OperationType::REMITTANCE_SOCIAL_EMPLOYER, OperationType::REMITTANCE_HEALTH_EMPLOYER => '336',
@@ -443,6 +479,24 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         if ($expectedDebit === null) {
             return null;
         }
+        // ── Odvod zaměstnavatele musí dosednout na TÝŽ účet, kde visí závazek ──
+        //
+        // Systémové šablony (migrace 1082) zakládaly úhradu odvodů na syntetiku
+        // 336, jenže mzdová rekapitulace účtuje závazek na účet z kontace FIRMY
+        // — od Ú-08 je výchozí 336.100 / 336.200 a od Ú-13 342.100 / 342.200.
+        // Úhrada svedená na syntetiku by závazek nevynulovala: na analytice by
+        // závazek zůstal a na syntetice by vznikl přeplatek, takže by
+        // {@see \MyInvoice\Service\Payroll\Posting\PayrollPostingReconciliationService}
+        // vykazovala rozdíl trvale a nešel by odstranit jinak než ručním
+        // přeúčtováním každého měsíce.
+        //
+        // Bere se {@see PayrollPostingAccountResolver}, ne konstanta: čte
+        // `payroll_employer_settings` a degraduje na účet, který firma v osnově
+        // reálně má. Firma na syntetice tak dostane přesně dosavadní 336 / 342.
+        $payrollDebit = $this->payrollLiabilityAccount($supplierId, $operation);
+        if ($payrollDebit !== null) {
+            $expectedDebit = $payrollDebit;
+        }
         // Pojistka je PREFIXOVÁ, default je KONKRÉTNÍ účet. U DPH se ty dvě věci rozešly:
         // přijatelná je jakákoli analytika 343 (tenant, který si vědomě nechal plochý účet,
         // se nesmí přebít), ale když kontace chybí nebo míří jinam, doplní se 343.900.
@@ -451,6 +505,11 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         $expectedPrefix = $expectedDebit === PostingService::VAT_SETTLEMENT_ACCOUNT
             ? PostingService::VAT_SYNTHETIC
             : $expectedDebit;
+        // U mzdových odvodů je přijatelná jakákoli analytika téže syntetiky —
+        // firemní override v `posting_rules` se přebít nesmí (viz níž).
+        if ($payrollDebit !== null) {
+            $expectedPrefix = substr($payrollDebit, 0, 3);
+        }
         // Degradace na syntetiku, dokud tenant analytiku nemá (nedoběhlá migrace 1323,
         // ručně smazaný účet) — zrcadlo PostingService::vatAccount(). Bez toho by návrh
         // mířil na účet, který v osnově není, a zaúčtování by spadlo na `unknown_account`.
@@ -462,7 +521,17 @@ final class TaxRemittanceDetector implements BankTransactionDetector
         }
         $debit = (string) ($rule['debit_account_code'] ?? '');
         $credit = (string) ($rule['credit_account_code'] ?? '');
-        if (!str_starts_with($debit, $expectedPrefix) || !str_starts_with($credit, '221')) {
+        // GLOBÁLNÍ šablona (`supplier_id IS NULL`) není projevem vůle firmy — je to
+        // seed, který o kontaci mezd nic neví a u odvodů zaměstnavatele by svou
+        // syntetikou přebil účet, na kterém závazek reálně visí. Firemní override
+        // (`supplier_id` = firma) se naopak respektuje dál: kdo si kontaci úhrady
+        // vědomě přepsal, ví, co dělá.
+        $ruleOverridesPayrollAccount = $payrollDebit === null
+            || ($rule['supplier_id'] ?? null) !== null;
+        if (!$ruleOverridesPayrollAccount
+            || !str_starts_with($debit, $expectedPrefix)
+            || !str_starts_with($credit, '221')
+        ) {
             $debit = $expectedDebit;
             $credit = '221';
         }

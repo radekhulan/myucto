@@ -466,9 +466,32 @@ final class PayrollRunStatutoryCalculationService
                 self::nonNegativeInt($agreement, 'requested_minor'),
                 $remaining,
                 true,
+                self::deliveredOn($agreement),
             );
         }
         return $result;
+    }
+
+    /**
+     * Den doručení dohody plátci mzdy ze zmrazeného snímku. Chybějící klíč je
+     * legacy snímek pořízený před nálezem E-03 — čte se jako `null`, tedy
+     * fail-closed pořadí až za pohledávkami se známým dnem doručení.
+     *
+     * @param array<string,mixed> $agreement
+     */
+    private static function deliveredOn(array $agreement): ?string
+    {
+        $value = $agreement['delivered_on'] ?? null;
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value) || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $value) !== 1) {
+            throw new \UnexpectedValueException(
+                'delivered_on musí být datum ve tvaru RRRR-MM-DD.',
+            );
+        }
+
+        return $value;
     }
 
     /** @param list<NetRelationshipIncome> $relationships */

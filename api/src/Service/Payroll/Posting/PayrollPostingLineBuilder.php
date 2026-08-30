@@ -495,7 +495,7 @@ final class PayrollPostingLineBuilder
                 $allocations,
                 $settlementBuckets,
                 $withholdingTax,
-                $accounts['income_tax_credit'],
+                $this->withholdingTaxAccount($accounts, $configuredAccounts),
                 "employee:{$employeeId}:withholding-tax",
                 'Srážková daň ze závislé činnosti',
             );
@@ -794,6 +794,38 @@ final class PayrollPostingLineBuilder
         return ($component['component_kind'] ?? null) === self::TRAVEL_COMPONENT_KIND
             ? $accounts['travel_expense_debit']
             : null;
+    }
+
+    /**
+     * Závazkový účet SRÁŽKOVÉ daně (Ú-13).
+     *
+     * Srážková daň se dosud účtovala na účet zálohové daně a rozlišoval je jen
+     * `allocation_key`, který se do `journal_entry_lines` nepromítá. Saldo 342
+     * tak neslo obě daně slité dohromady, přestože se odvádějí dvěma platbami
+     * (předčíslí 7704 vs. 7720), v jiných termínech a vykazují se jiným
+     * hlášením — rozdíl mezi zůstatkem účtu a odvedenými platbami proto nešlo
+     * přiřadit k jedné z nich.
+     *
+     * Bonus ani doplatek z ročního zúčtování sem NEPATŘÍ: § 35d odst. 9
+     * a § 38ch odst. 5 je vracejí ze záloh, takže snižují závazek na účtu
+     * ZÁLOHOVÉ daně, ne na účtu srážkové.
+     *
+     * @param array<string,string> $accounts doplněná sada předkontací
+     * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
+     */
+    private function withholdingTaxAccount(
+        array $accounts,
+        array $configuredAccounts,
+    ): string {
+        // Snapshot zmrazený dřív, než firma o rozdělení věděla, se musí
+        // zaúčtovat byte-identicky — jinak opakované zaúčtování dřív schválené
+        // revize spadne na kontrolu cílového otisku v PayrollPostingAdapter.
+        return PayrollAccountingDefaults::snapshotAllowsSplit(
+            $configuredAccounts,
+            'withholding_tax_credit',
+        )
+            ? $accounts['withholding_tax_credit']
+            : $accounts['income_tax_credit'];
     }
 
     /**

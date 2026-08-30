@@ -36,7 +36,29 @@ final class PayrollAccountingDefaults
         // doplnila do osnovy migrace 1618.
         'social_insurance_credit' => ['code' => '336.100', 'type' => 'liability'],
         'health_insurance_credit' => ['code' => '336.200', 'type' => 'liability'],
-        'income_tax_credit' => ['code' => '342', 'type' => 'liability'],
+        // Zálohová a srážková daň MAJÍ KAŽDÁ SVOU ANALYTIKU (Ú-13).
+        //
+        // Obě jsou daní ze závislé činnosti a obě se odvádějí témuž správci
+        // daně, jenže jinou platbou (předčíslí 7704 vs. 7720), v jiném termínu
+        // a vykazují se jiným hlášením (vyúčtování § 38j vs. § 38d odst. 3).
+        // Na společné 342 se závazek z obou daní slije a rozdíl mezi saldem
+        // účtu a odvedenými platbami nejde přiřadit k jedné z nich — přestože
+        // platební vrstva obě rozlišuje (`advance_tax` / `withholding_tax`).
+        // V deníku je rozlišoval jen `allocation_key`, který se do
+        // `journal_entry_lines` nepromítá.
+        //
+        // Tvar analytiky drží konvenci osnovy (336.100/336.200, 343.100 …):
+        // třímístná syntetika, tečka, třímístná analytika.
+        //
+        // ⚠ ZPĚTNÁ KOMPATIBILITA — stejně konzervativně jako u 336: tohle je
+        // výchozí hodnota pro NOVĚ zakládanou firmu, ne migrace stávajících.
+        // Firmy s uloženou 342 ji mají dál, zaúčtované revize se nemění
+        // (zmrazený snapshot nese vlastní sadu předkontací) a rozdělení
+        // srážkové daně je navíc v SNAPSHOT_GATED_ACCOUNTS, takže se použije
+        // teprve tehdy, když o něm zmrazený snapshot ví. Obě analytiky doplnila
+        // do osnovy migrace 1648.
+        'income_tax_credit' => ['code' => '342.100', 'type' => 'liability'],
+        'withholding_tax_credit' => ['code' => '342.200', 'type' => 'liability'],
         'other_deductions_credit' => ['code' => '379', 'type' => 'liability'],
         // Protiúčet zápočtu čisté mzdy na účet společníka (331/366 MD / 365 D).
         // Firemní default; konkrétní analytiku (365.100…) drží výplatní pravidlo
@@ -105,6 +127,7 @@ final class PayrollAccountingDefaults
         'employee_receivable_debit',
         'non_deductible_benefit_debit',
         'travel_expense_debit',
+        'withholding_tax_credit',
     ];
 
     /**
@@ -132,6 +155,10 @@ final class PayrollAccountingDefaults
     public const SNAPSHOT_GATED_ACCOUNTS = [
         'non_deductible_benefit_debit',
         'travel_expense_debit',
+        // Srážková daň se odjakživa účtovala na účet zálohové daně. Doplnění
+        // výchozí analytiky by tedy ZMĚNILO zápis částky, která se dosud
+        // účtovala jinam — přesně ten případ, kvůli kterému tenhle seznam je.
+        'withholding_tax_credit',
     ];
 
     /** Výchozí účet klíče, nebo `null` u neznámého klíče. */

@@ -53,6 +53,23 @@ final class PayrollPostingAccountsTest extends TestCase
         self::assertSame('336.100', $defaults->socialPayable);
         self::assertSame('336.200', $defaults->healthPayable);
         self::assertFalse($defaults->insuranceIsPooled(), 'obě instituce mají svou analytiku');
+        // Ú-13: totéž pro daň. Zálohová a srážková se odvádějí dvěma platbami
+        // na různá předčíslí, v jiných termínech a s jiným hlášením — na
+        // společné 342 nešlo saldo přiřadit k jedné z nich.
+        self::assertSame('342.100', $defaults->incomeTaxPayable);
+        self::assertSame('342.200', $defaults->withholdingTaxPayable);
+        self::assertFalse($defaults->taxIsPooled(), 'obě daně mají svou analytiku');
+    }
+
+    /** Kdo si 342 nechá společnou, účtuje obě daně na jeden účet dál. */
+    public function testPooledTaxStaysAvailableAsAnExplicitChoice(): void
+    {
+        $pooled = PayrollPostingAccounts::fromMap([
+            PayrollPostingAccounts::KEY_INCOME_TAX_PAYABLE => '342',
+            PayrollPostingAccounts::KEY_WITHHOLDING_TAX_PAYABLE => '342',
+        ]);
+
+        self::assertTrue($pooled->taxIsPooled());
     }
 
     /** Kdo si 336 nechá společnou, dostane pořád jeden slitý řádek. */

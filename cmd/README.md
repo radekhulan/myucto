@@ -64,7 +64,7 @@ má vždy přednost před oběma.
 | `cron-generate-recurring-invoices.{cmd,sh}` | Generování faktur ze šablon pravidelné fakturace; volitelné rovnou vystavení a odeslání klientovi (`--dry-run`) |
 | `cron-automation-digest.{cmd,sh}` | Ranní souhrn kokpitu Automat podle nastavené hodiny (`--dry-run`, `--hour=N`) |
 | `cron-ai-worker.{cmd,sh}` | Zpracování fronty AI návrhů účtování (`--supplier=N`, `--limit=N`, `--dry-run`) |
-| `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu (`--limit=N`; PowerShell: `-Limit N`) |
+| `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu; táhne i frontu ročních dokumentů (mzdový list, potvrzení o zdanitelných příjmech) — měsíční pásky mají přednost (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-payroll-period-export-worker.{cmd,ps1,sh}` | Asynchronní sestavení mzdového exportu období/roku; durable lease a retry (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí (`--supplier=N`, `--days=N`, `--dry-run`) |
 | `cron-payroll-post.{cmd,sh}` | **1× měsíčně** — zaúčtuje mzdovou rekapitulaci za předchozí měsíc zaměstnancům, kteří mají na kartě „Účtovat automaticky" a vyplněnou pravidelnou hrubou mzdu (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`). Jen podvojné účetnictví; datum zápisu je poslední den účtovaného měsíce |

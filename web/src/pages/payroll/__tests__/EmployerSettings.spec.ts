@@ -95,6 +95,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   social_insurance_credit: '336',
   health_insurance_credit: '336',
   income_tax_credit: '342',
+  withholding_tax_credit: '342',
   other_deductions_credit: '379',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
@@ -303,7 +304,7 @@ describe('EmployerSettings — účtová osnova', () => {
   })
 
   /*
-   * Backend zná 17 předkontací; obrazovka jich do migrace 1614/1618 uměla 12.
+   * Backend zná 18 předkontací; obrazovka jich do migrace 1614/1618 uměla 12.
    * Chybějící pole se navenek NEPROJEVÍ — uložení projde, protože validátor
    * chybějící klíč doplní výchozím účtem. Účetní si ale předkontaci nenastaví
    * a nikdy se nedozví, že podle ní modul účtuje.
@@ -314,6 +315,9 @@ describe('EmployerSettings — účtová osnova', () => {
     ['employee_receivable_debit', '335'],
     ['non_deductible_benefit_debit', '528'],
     ['travel_expense_debit', '512'],
+    // Ú-13: srážková daň má vlastní předkontaci; firma založená dřív ji má
+    // srovnanou na účet zálohové daně, takže se pošle zpátky 342.
+    ['withholding_tax_credit', '342'],
   ] as const)('nabízí předkontaci %s a pošle ji zpět', async (key, code) => {
     const wrapper = await mountPage()
     await openAccounting(wrapper)
@@ -339,7 +343,7 @@ describe('EmployerSettings — účtová osnova', () => {
     await openAccounting(wrapper)
 
     for (const row of ['risky_savings', 'employee_receivable',
-      'non_deductible_benefit', 'travel_expense']) {
+      'non_deductible_benefit', 'travel_expense', 'withholding_tax']) {
       expect(wrapper.find(`[data-account-row-hint="${row}"]`).text())
         .toBe(`payroll.employer.accounting_row_hint.${row}`)
     }

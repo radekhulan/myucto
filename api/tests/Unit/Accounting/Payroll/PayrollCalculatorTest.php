@@ -397,7 +397,11 @@ final class PayrollCalculatorTest extends TestCase
         self::assertSame(1561, $b['net'], '4 500 − 2 939 − 0');
     }
 
-    /** Na 342 patří sražená záloha po slevě, ne hrubá — jinak by přeplácela FÚ. */
+    /**
+     * Na účet zálohové daně patří sražená záloha po slevě, ne hrubá — jinak by
+     * přeplácela FÚ. Výchozí kontace je od Ú-13 analytická (342.100), protože
+     * srážková daň dostala vlastní účet 342.200.
+     */
     public function testLinesPostWithheldAdvanceToTaxAccount(): void
     {
         $c = TaxConstants::forYear(2026);
@@ -407,10 +411,10 @@ final class PayrollCalculatorTest extends TestCase
         $tax = 0.0;
         $debit = $credit = 0.0;
         foreach ($lines as $l) {
-            if ($l['account_code'] === '342') $tax += $l['amount'];
+            if ($l['account_code'] === '342.100') $tax += $l['amount'];
             $l['side'] === 'debit' ? $debit += $l['amount'] : $credit += $l['amount'];
         }
-        self::assertSame(1165.0, $tax, 'na 342 jde záloha po slevě');
+        self::assertSame(1165.0, $tax, 'na 342.100 jde záloha po slevě');
         self::assertSame($debit, $credit, 'zápis musí zůstat vyvážený');
 
         // Na účtu poplatníka zbyde čistá mzda včetně nesražené slevy.

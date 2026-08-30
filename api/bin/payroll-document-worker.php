@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Service\Payroll\Document\PayrollAnnualDocumentBatchQueueService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
 
 $limit = 25;
@@ -36,10 +37,21 @@ try {
     if (!$worker instanceof PayrollDocumentBatchQueueService) {
         throw new RuntimeException('Worker mzdových dokumentů není dostupný.');
     }
+    // Měsíční pásky mají přednost: jsou vázané na výplatní termín, roční
+    // dokumenty na lhůtu v měsících. Roční fronta dostane, co ze stropu zbude,
+    // ale vždy aspoň jeden pokus — jinak by ji rušný měsíc vyhladověl.
+    $monthly = $worker->processAvailable($limit);
+    $annualWorker = $container->get(PayrollAnnualDocumentBatchQueueService::class);
+    if (!$annualWorker instanceof PayrollAnnualDocumentBatchQueueService) {
+        throw new RuntimeException('Worker ročních mzdových dokumentů není dostupný.');
+    }
+    $annual = $annualWorker->processAvailable(
+        max(1, $limit - (int) $monthly['processed']),
+    );
     fwrite(
         STDOUT,
         json_encode(
-            $worker->processAvailable($limit),
+            ['monthly' => $monthly, 'annual' => $annual],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ) . PHP_EOL,
     );

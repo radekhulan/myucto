@@ -131,6 +131,18 @@ final class ChartOfAccountsTemplate
         ['code' => '336.200', 'name' => 'Zúčtování se zdravotními pojišťovnami', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '336'],
         ['code' => '341', 'name' => 'Daň z příjmů', 'type' => 'liability', 'normal_side' => null],
         ['code' => '342', 'name' => 'Ostatní přímé daně', 'type' => 'liability', 'normal_side' => 'credit'],
+        // Rozpad 342 na zálohovou a srážkovou daň ze závislé činnosti (migrace 1648).
+        // Obě jsou daní téhož poplatníka u téhož správce daně, ale odvádějí se DVĚMA
+        // platbami (předčíslí 7704 vs. 7720), v jiných termínech a vykazují se jiným
+        // hlášením (vyúčtování § 38j vs. § 38d odst. 3 ZDP). Na společném účtu se
+        // závazky slijí a rozdíl mezi saldem a odvedenými platbami nejde přiřadit
+        // k jedné z daní.
+        //   342.100  záloha na daň ze závislé činnosti (včetně bonusů a ročního zúčtování)
+        //   342.200  srážková daň zvláštní sazbou
+        // Syntetika 342 v šabloně ZŮSTÁVÁ: firmy, které analytiku nechtějí, na ní
+        // účtují dál a stávající zaúčtované mzdy se nemění.
+        ['code' => '342.100', 'name' => 'Záloha na daň ze závislé činnosti', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '342'],
+        ['code' => '342.200', 'name' => 'Srážková daň ze závislé činnosti', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '342'],
         ['code' => '343', 'name' => 'Daň z přidané hodnoty', 'type' => 'liability', 'normal_side' => null],
         // Rozpad DPH na vstup / výstup / zúčtování (migrace 1323). Účetní vede daň takhle
         // a bez toho nejde na konci období udělat interní doklad, který obrat období převede

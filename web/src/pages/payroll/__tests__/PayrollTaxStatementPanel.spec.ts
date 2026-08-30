@@ -11,6 +11,7 @@ const m = vi.hoisted(() => ({
   download: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
+  routeQuery: {} as Record<string, string>,
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -26,6 +27,9 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
 }))
 vi.mock('@/utils/downloadFile', () => ({ downloadApiFile: m.download }))
+// Panel čte z adresy jen rok z prokliku hlídače termínů; plný router by sem
+// přitáhl celý strom rout kvůli jedné hodnotě v dotazu.
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: m.routeQuery }) }))
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs-CZ' } }),
@@ -105,7 +109,26 @@ function preview(overrides: Record<string, unknown> = {}) {
 describe('PayrollTaxStatementPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.routeQuery = {}
     m.preview.mockResolvedValue(preview())
+  })
+
+  it('opens the year the deadline watcher linked to, not its own default', async () => {
+    // Hlídač termínů posílá rok nepodaného vyúčtování; bez něj by účetní
+    // stáhla XML za jiné období, než na které klikla.
+    m.routeQuery = { taxStatementYear: '2023' }
+    mount(PayrollTaxStatementPanel, { props: { initialYear: 2026 } })
+    await flushPromises()
+
+    expect(m.preview).toHaveBeenCalledWith(2023, 'B')
+  })
+
+  it('ignores a nonsense year in the address', async () => {
+    m.routeQuery = { taxStatementYear: 'letos' }
+    mount(PayrollTaxStatementPanel, { props: { initialYear: 2026 } })
+    await flushPromises()
+
+    expect(m.preview).toHaveBeenCalledWith(2025, 'B')
   })
 
   it('defaults to the previous year, because the statement is filed after the year ends', async () => {

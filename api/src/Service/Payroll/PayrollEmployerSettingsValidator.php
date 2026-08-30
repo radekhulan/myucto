@@ -199,6 +199,20 @@ final class PayrollEmployerSettingsValidator
             // přidání nové předkontace znemožnilo uložit nastavení mezd.
             if ($code === '' && PayrollAccountingDefaults::isOptional($key)) {
                 $code = $definition['code'];
+                // Výchozí účet už nemusí být SYNTETIKA: od Ú-08 (336.100/336.200)
+                // a Ú-13 (342.100/342.200) je analytický. Firma, která analytiku
+                // v osnově nemá, by na doplněné hodnotě spadla na
+                // „Účet 342.200 neexistuje" — a nemohla by uložit nastavení mezd
+                // jen proto, že přibyla nová předkontace, kterou její klient
+                // vůbec neposílá. Degraduje se proto na svou syntetiku, tedy na
+                // přesně dosavadní stav. Zrcadlo
+                // {@see \MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository}.
+                $synthetic = substr($code, 0, 3);
+                if ($synthetic !== $code
+                    && ($available[$code]['is_active'] ?? false) !== true
+                ) {
+                    $code = $synthetic;
+                }
             }
             // Analytika je až 13 znaků za syntetikou, stejně jako
             // PayrollAccountCode::isValid() a zbytek mzdového modulu. Kratší

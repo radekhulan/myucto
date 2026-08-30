@@ -17,6 +17,7 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   social_insurance_credit: 'liability',
   health_insurance_credit: 'liability',
   income_tax_credit: 'liability',
+  withholding_tax_credit: 'liability',
   other_deductions_credit: 'liability',
   partner_settlement_credit: 'liability',
   risky_savings_debit: 'expense',

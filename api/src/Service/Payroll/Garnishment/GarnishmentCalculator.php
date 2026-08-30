@@ -159,15 +159,32 @@ final class GarnishmentCalculator
         }
 
         $claims = $this->activeClaims($input->claims);
+        $agreements = $this->bridgedAgreements($input);
         // Pravidlo čtyř exekucí se počítá z EVIDENCE, ne z pohledávek, na které
         // v tomhle měsíci zbyl zůstatek — viz orderedEnforcementCount().
+        // Dohody se do počtu nezapočítávají: § 279 odst. 4 o. s. ř. mluví
+        // o NAŘÍZENÝCH výkonech rozhodnutí, ne o dobrovolných dohodách.
         $fourRule = $this->fourEnforcementRuleApplies(
             $input->claims,
             $input->pensionEvidence,
             $third,
             $policy,
         );
-        $allocation = $this->allocateClaims($claims, $third, $excess, $fourRule, $policy);
+        $allocation = $this->allocateClaims(
+            $claims,
+            $agreements,
+            $third,
+            $excess,
+            $fourRule,
+            $policy,
+        );
+        if ($allocation['voluntary_reserved'] > 0) {
+            $roundingTrace[] = [
+                'step' => 'voluntary_agreement_priority_reserve',
+                'output_minor_units' => $allocation['voluntary_reserved'],
+                'agreements' => count($agreements),
+            ];
+        }
 
         $allocations = [];
         foreach ($claims as $claim) {
@@ -212,6 +229,15 @@ final class GarnishmentCalculator
      * teprve z toho smí zaměstnavatel uspokojit dobrovolnou dohodu o srážkách
      * ze mzdy (§ 148 odst. 2 zákoníku práce: dohoda se provádí jen za podmínek
      * výkonu rozhodnutí srážkami ze mzdy podle § 276 a násl. OSŘ).
+     *
+     * „Po exekučních srážkách" NEZNAMENÁ „až po nich v pořadí". Dohody
+     * s doloženým dnem doručení plátci mzdy soutěží o obecnou část společně
+     * s exekucemi podle § 280 odst. 5 o. s. ř. ({@see GarnishmentInput::$voluntaryAgreements}),
+     * takže dohoda doručená dřív exekuci ubere a částka, která na ni připadla,
+     * se sem vrátí jako nevyužitá kapacita: vzorec ji nemusí přičítat, protože
+     * do `allocations` — a tím do `generalUsed` — se přemostěné dohody vůbec
+     * nedostanou. Dohoda bez dne doručení se nepřemosťuje a dostane jen zbytek
+     * po exekucích, přesně jako do 8/2026 (nález E-03).
      *
      * Vrací 0, kdykoli výsledek není uzavřený nebo běží schválené oddlužení —
      * fail-closed, protože v takovém případě není jisté, co exekuce ještě vezme.
@@ -299,30 +325,61 @@ final class GarnishmentCalculator
      *   first:array<string,int>,
      *   second:array<string,int>,
      *   fee:int,
-     *   withheld:int
+     *   withheld:int,
+     *   voluntary_reserved:int
      * }
      * @param list<DeductionClaim> $claims
+     * @param list<DeductionClaim> $agreements
      */
     private function allocateClaims(
         array $claims,
+        array $agreements,
         int $third,
         int $excess,
         bool $fourRule,
         EnforcementDeductionPolicy2026 $policy,
     ): array {
         $balances = [];
-        foreach ($claims as $claim) {
+        foreach ([...$claims, ...$agreements] as $claim) {
             $balances[$claim->id] = $claim->outstandingMinorUnits;
         }
 
+        // Druhá třetina patří podle § 280 odst. 1 a 2 o. s. ř. výhradně
+        // přednostním pohledávkám; dohoda o srážkách přednostní být nemůže
+        // (§ 148 odst. 2 zákoníku práce), takže do téhle fáze nevstupuje.
         $priorityCapacity = self::addExactly($third, $excess);
         $second = $this->allocatePriorityClaims($claims, $priorityCapacity, $balances);
         $priorityUsed = self::sumExactly($second);
-        $first = $this->allocateRankedClaims(
-            $claims,
+        // Obecná (nepřednostní) část se rozděluje podle POŘADÍ, a to je podle
+        // § 280 odst. 5 o. s. ř. den doručení plátci mzdy — bez ohledu na to,
+        // jestli je titulem exekuční příkaz, nebo dohoda o srážkách. Dohody
+        // proto soutěží společně s exekucemi; co připadne jim, se ale nesráží
+        // tady, jen se to o ně zmenší (viz níž).
+        $ranked = $this->allocateRankedClaims(
+            [...$claims, ...$agreements],
             self::generalPool($third, $excess, $priorityUsed, $fourRule),
             $balances,
         );
+
+        // Rozdělení výsledku. Částka, kterou si vzaly dohody, NENÍ exekuční
+        // srážkou: nevyplácí ji exekuční jádro ani nevstupuje do `withheld`.
+        // Sráží ji až čistá mzda z kapacity dobrovolných srážek, kterou
+        // {@see self::voluntaryDeductionCapacity()} spočítá jako zbytek obecné
+        // části po exekucích — a ten se o tuhle částku právě zvětšil. Kdyby se
+        // započetla na obou místech, zaměstnanci by se srazila dvakrát.
+        $agreementIds = [];
+        foreach ($agreements as $agreement) {
+            $agreementIds[$agreement->id] = true;
+        }
+        $first = [];
+        $voluntaryReserved = 0;
+        foreach ($ranked as $claimId => $amount) {
+            if (isset($agreementIds[$claimId])) {
+                $voluntaryReserved = self::addExactly($voluntaryReserved, $amount);
+                continue;
+            }
+            $first[$claimId] = $amount;
+        }
 
         // Sražená částka. Paušál ji nezvyšuje ani nesnižuje — jen se z ní bere.
         $withheld = self::addExactly(self::sumExactly($first), $priorityUsed);
@@ -359,7 +416,44 @@ final class GarnishmentCalculator
             'second' => $second,
             'fee' => $fee,
             'withheld' => $withheld,
+            'voluntary_reserved' => $voluntaryReserved,
         ];
+    }
+
+    /**
+     * Dohody o srážkách ze mzdy, které smějí soutěžit o pořadí s exekucemi.
+     *
+     * Filtruje se dvakrát fail-closed:
+     *
+     *  • dohoda BEZ dne doručení plátci mzdy se nepřemosťuje vůbec. § 280
+     *    odst. 5 o. s. ř. odvozuje pořadí právě z něj a bez data by ho dohoda
+     *    neměla čím doložit; {@see EnforcementPriorityResolver} by ji sice
+     *    zařadil až za všechny, ale nechat ji úplně stranou je totéž a je to
+     *    čitelnější — chování legacy dohod tak zůstává beze změny;
+     *  • dohoda, jejíž identifikátor UŽ V REJSTŘÍKU JE, se zahodí. Táž dohoda
+     *    zapsaná i jako pohledávka rejstříku (případ `voluntary_agreement`) se
+     *    sráží a vyplácí exekučním jádrem; kdyby se k ní ještě přemostila,
+     *    ubrala by kapacitu sama sobě a zaměstnanci by se srazila dvakrát.
+     *
+     * @return list<DeductionClaim>
+     */
+    private function bridgedAgreements(GarnishmentInput $input): array
+    {
+        if ($input->voluntaryAgreements === []) {
+            return [];
+        }
+        $registered = [];
+        foreach ($input->claims as $claim) {
+            $registered[$claim->id] = true;
+        }
+
+        return array_values(array_filter(
+            $this->activeClaims($input->voluntaryAgreements),
+            fn (DeductionClaim $agreement): bool =>
+                $agreement->priorityDate !== null
+                && $this->isDate($agreement->priorityDate)
+                && !isset($registered[$agreement->id]),
+        ));
     }
 
     /**

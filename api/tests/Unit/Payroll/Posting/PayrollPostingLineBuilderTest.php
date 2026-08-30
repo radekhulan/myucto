@@ -31,7 +31,7 @@ final class PayrollPostingLineBuilderTest extends TestCase
             '331|debit' => 22_333,
             '336.100|credit' => 190_800,
             '336.200|credit' => 81_000,
-            '342|credit' => 50_000,
+            '342.100|credit' => 50_000,
             '366|credit' => 500_000,
             '366|debit' => 111_667,
             '379|credit' => 15_000,
@@ -949,8 +949,8 @@ final class PayrollPostingLineBuilderTest extends TestCase
         $lineMap = $this->lineMap($preview->lines);
 
         // Záloha je nula, takže na 342 zůstane JEN bonus — a to na straně MD.
-        self::assertSame(30_000, $lineMap['342|debit']);
-        self::assertArrayNotHasKey('342|credit', $lineMap);
+        self::assertSame(30_000, $lineMap['342.100|debit']);
+        self::assertArrayNotHasKey('342.100|credit', $lineMap);
         // Protistrana bonusu jde do závazku mzdy poměrem peněžního příjmu
         // (100 000 : 500 000), takže zaměstnanci se čistá mzda ZVYŠUJE.
         self::assertSame(105_000, $lineMap['331|credit']);
@@ -959,6 +959,64 @@ final class PayrollPostingLineBuilderTest extends TestCase
             $preview->debitTotalMinor,
             $preview->creditTotalMinor,
         );
+    }
+
+    /**
+     * Ú-13: srážková daň má vlastní účet, ne týž jako záloha.
+     *
+     * Do teď obě daně končily na `income_tax_credit` a rozlišoval je jen
+     * `allocation_key`, který se do deníku nepromítá — saldo 342 tak neslo obě
+     * daně slité, přestože se odvádějí dvěma platbami a platební vrstva je
+     * rozlišuje.
+     */
+    public function testWithholdingTaxPostsToItsOwnAccount(): void
+    {
+        $sets = $this->statutorySets();
+        $sets['income_tax']['people'][0]['result_snapshot']['advance_tax'][
+            'tax_after_credits_minor_units'
+        ] = 40_000;
+        $sets['income_tax']['people'][0]['result_snapshot'][
+            'withholding_tax_minor_units'
+        ] = 10_000;
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        )->lines);
+
+        self::assertSame(40_000, $lineMap['342.100|credit'], 'zálohová daň');
+        self::assertSame(10_000, $lineMap['342.200|credit'], 'srážková daň');
+    }
+
+    /**
+     * Zmrazený snapshot, který o rozpadu neví, se musí zaúčtovat BYTE-IDENTICKY
+     * jako dřív — jinak by opakované zaúčtování dřív schválené revize spadlo na
+     * kontrolu cílového otisku v PayrollPostingAdapter. Rozhoduje SUROVÁ sada
+     * předkontací ze snapshotu, ne doplněné výchozí účty.
+     */
+    public function testOlderSnapshotKeepsBothTaxesOnTheAdvanceAccount(): void
+    {
+        $sets = $this->statutorySets();
+        $sets['income_tax']['people'][0]['result_snapshot']['advance_tax'][
+            'tax_after_credits_minor_units'
+        ] = 40_000;
+        $sets['income_tax']['people'][0]['result_snapshot'][
+            'withholding_tax_minor_units'
+        ] = 10_000;
+        $accounts = PayrollAccountingDefaults::codes();
+        unset($accounts['withholding_tax_credit']);
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $sets,
+            $accounts,
+        )->lines);
+
+        self::assertSame(50_000, $lineMap['342.100|credit'], 'obě daně pohromadě');
+        self::assertArrayNotHasKey('342.200|credit', $lineMap);
     }
 
     /**
@@ -1091,7 +1149,7 @@ final class PayrollPostingLineBuilderTest extends TestCase
             '331|debit' => 100_000,
             '336.100|credit' => 190_800,
             '336.200|credit' => 81_000,
-            '342|credit' => 50_000,
+            '342.100|credit' => 50_000,
             '365.100|credit' => 466_000,
             '366|credit' => 500_000,
             '366|debit' => 500_000,

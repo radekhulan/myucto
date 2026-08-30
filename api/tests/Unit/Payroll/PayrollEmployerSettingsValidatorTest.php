@@ -135,6 +135,44 @@ final class PayrollEmployerSettingsValidatorTest extends TestCase
         ];
     }
 
+    /**
+     * Ú-13: starší klient klíč `withholding_tax_credit` vůbec neposílá a
+     * výchozí účet 342.200 firma v osnově mít nemusí. Doplněná analytika by ji
+     * odmítla („Účet 342.200 neexistuje") a firma by nemohla uložit nastavení
+     * mezd jen proto, že přibyla nová předkontace — degraduje se proto na svou
+     * syntetiku, tedy na přesně dosavadní stav.
+     */
+    public function testMissingOptionalAccountDegradesToItsSynthetic(): void
+    {
+        $input = $this->input('205');
+        $input['accounts'] = array_map(
+            static fn (string $code): string => substr($code, 0, 3),
+            $input['accounts'],
+        );
+        unset($input['accounts']['withholding_tax_credit']);
+
+        $result = $this->syntheticOnlyValidator()->validate(1, $input);
+
+        self::assertSame('342', $result['accounts']['withholding_tax_credit']);
+    }
+
+    /** Osnova bez jediné analytiky — stav firmy založené před Ú-08 a Ú-13. */
+    private function syntheticOnlyValidator(): PayrollEmployerSettingsValidator
+    {
+        $accounts = $this->createStub(ChartOfAccountsRepository::class);
+        $map = [];
+        foreach (PayrollAccountingDefaults::ACCOUNTS as $definition) {
+            $map[substr($definition['code'], 0, 3)] = [
+                'id' => 1,
+                'is_active' => true,
+                'account_type' => $definition['type'],
+            ];
+        }
+        $accounts->method('codeToIdMap')->willReturn($map);
+
+        return new PayrollEmployerSettingsValidator($accounts);
+    }
+
     private function validator(): PayrollEmployerSettingsValidator
     {
         $accounts = $this->createStub(ChartOfAccountsRepository::class);

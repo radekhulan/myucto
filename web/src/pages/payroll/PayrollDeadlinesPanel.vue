@@ -144,8 +144,25 @@ function itemTitle(item: PayrollDeadlineItem): string {
       ? `payroll.payments.kind.${item.title}`
       : item.source === 'registration_change'
         ? `payroll.people.registration.changes.duty_short.${item.title}`
-        : `payroll.people.checklist.${item.title}`
+        : item.source === 'tax_statement'
+          ? `payroll.dashboard.deadlines.tax_statement.form.${item.title}`
+          : `payroll.people.checklist.${item.title}`
   return te(path) ? t(path) : item.title
+}
+
+/**
+ * Druhý řádek dlaždice. U ostatních pramenů je to jméno člověka nebo příjemce
+ * odvodu; roční vyúčtování žádné nemá, zato má zdaňovací období — a bez něj by
+ * dvě po sobě jdoucí lhůty za dva různé roky vypadaly stejně. `period` z BE se
+ * použít nedá: přehled ho formátuje jako MĚSÍC.
+ */
+function itemSubject(item: PayrollDeadlineItem): string {
+  if (item.source === 'tax_statement' && item.statement_year !== undefined) {
+    return t('payroll.dashboard.deadlines.tax_statement.subject', {
+      year: item.statement_year,
+    })
+  }
+  return item.subject
 }
 
 /**
@@ -166,6 +183,19 @@ function itemLink(item: PayrollDeadlineItem): RouteLocationRaw {
   // o obrazovku vedle.
   if (item.source === 'registration_change' && item.employee_id !== undefined) {
     return { name: 'payroll-people', query: { person: String(item.employee_id) } }
+  }
+  // Vyúčtování se sestavuje v panelu na mzdovém rozcestníku, ne na vlastní
+  // routě; kotva doveze účetní rovnou k němu, `year` mu rovnou nastaví ten
+  // rok, jehož lhůta hoří — jinak by panel nabídl svůj výchozí a účetní by
+  // stáhla XML za jiné období, než na které klikla.
+  if (item.source === 'tax_statement') {
+    return {
+      name: 'payroll-dashboard',
+      query: item.statement_year === undefined
+        ? {}
+        : { taxStatementYear: String(item.statement_year) },
+      hash: '#payroll-tax-statement',
+    }
   }
   return { name: 'payroll-submissions' }
 }
@@ -386,7 +416,7 @@ defineExpose({ reload: load })
                   </span>
                 </div>
                 <p class="mt-0.5 text-xs break-words text-neutral-500">
-                  {{ item.subject }}
+                  {{ itemSubject(item) }}
                   <template v-if="item.period"> · {{ formatPeriod(item.period) }}</template>
                 </p>
                 <p v-if="amountLabel(item)" class="mt-0.5 font-mono text-xs text-neutral-600">

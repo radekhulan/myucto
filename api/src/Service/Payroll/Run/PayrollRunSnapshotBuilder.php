@@ -1717,6 +1717,12 @@ final class PayrollRunSnapshotBuilder
                 'withheld_total_minor' => (int) $row['withheld_total_minor'],
                 'valid_from' => (string) $row['valid_from'],
                 'valid_to' => $row['valid_to'],
+                // Den doručení dohody plátci mzdy (§ 2045 odst. 2 OZ). Ve
+                // zmrazeném snímku je proto, že z něj plyne POŘADÍ dohody vůči
+                // exekucím podle § 280 odst. 5 o. s. ř. — bez něj by se běh
+                // nedal přepočítat na tentýž rozvrh. `null` = legacy dohoda
+                // zaevidovaná dřív, než se datum ukládalo.
+                'delivered_on' => $row['delivered_on'] ?? null,
                 'row_version' => (int) $row['row_version'],
             ],
             $rows,

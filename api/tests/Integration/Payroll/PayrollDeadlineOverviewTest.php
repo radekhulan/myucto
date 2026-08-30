@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
+use MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
@@ -85,6 +86,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
                 new HealthNotificationDeadlinePolicy(),
                 $clock,
             ),
+            new PayrollTaxStatementDeadlinePolicy(),
             $clock,
         );
 

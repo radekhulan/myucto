@@ -150,6 +150,43 @@ describe('PayrollDeadlinesPanel', () => {
     expect(link('chk')).toEqual({ name: 'payroll-people', query: { person: '42' } })
   })
 
+  it('sends an annual tax statement to its panel with the year it is overdue for', async () => {
+    m.deadlines.mockResolvedValue(overview([
+      item({
+        reference: 'tax_statement:dpzvd6:2025',
+        source: 'tax_statement',
+        title: 'dpzvd6',
+        subject: '586/1992 Sb. § 38j odst. 5 a 7',
+        // Vyuctovani je rocni; mesicni obdobi by v dlazdici lhalo.
+        period: null,
+        due_on: '2026-03-20',
+        phase: 'overdue',
+        days_to_due: -2,
+        is_overdue: true,
+        statement_year: 2025,
+        statutory_due_on: '2026-03-02',
+        electronic_due_on: '2026-03-20',
+        path: '/payroll#payroll-tax-statement',
+      }),
+    ]))
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const tile = wrapper.get('[data-test="payroll-deadline-tax_statement:dpzvd6:2025"]')
+    expect(tile.text()).toContain('payroll.dashboard.deadlines.tax_statement.form.dpzvd6')
+    // Bez roku by dve lhuty za dve obdobi vypadaly stejne.
+    expect(tile.text()).toContain('payroll.dashboard.deadlines.tax_statement.subject:2025')
+    expect(JSON.parse(
+      wrapper.get('[data-test="payroll-deadline-link-tax_statement:dpzvd6:2025"]')
+        .attributes('data-to') ?? '{}',
+    )).toEqual({
+      name: 'payroll-dashboard',
+      query: { taxStatementYear: '2025' },
+      hash: '#payroll-tax-statement',
+    })
+  })
+
   it('falls back to the raw code when a source code has no translation', async () => {
     m.deadlines.mockResolvedValue(overview([
       item({ reference: 'x', source: 'levy', title: 'risky_savings', phase: 'open' }),

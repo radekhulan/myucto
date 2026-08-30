@@ -2256,12 +2256,25 @@
                     "selected": "Za jednu osobu",
                     "all": "Za všechny zaměstnance"
                 },
-                "scope_all_hint": "Dokument se vystaví všem aktivním zaměstnancům za rok {year}. Běh je vázaný na tuhle záložku — nechte ji otevřenou.",
+                "scope_all_hint": "Dokument se vystaví všem zaměstnancům se schváleným výsledkem za rok {year}. Generování běží na serveru, záložku můžete zavřít.",
                 "blocked_no_person": "Nejdřív vyberte osobu, nebo přepněte rozsah na všechny zaměstnance.",
                 "progress": "Hotovo {done} z {total}.",
-                "cancel": "Zastavit",
+                "queued": "Dávka je zařazená do fronty ({count} osob). Můžete stránku zavřít, generování běží dál na serveru.",
+                "enqueue_failed": "Roční dávku dokumentů se nepodařilo zařadit.",
+                "poll_failed": "Stav roční dávky se nepodařilo načíst.",
+                "server_hint": "běží na serveru",
+                "dismiss": "Zavřít zprávu",
+                "retry": "Opakovat",
+                "retry_queued": "Osoba je zařazená k opakování.",
+                "retry_failed": "Opakování se nepodařilo zařadit.",
+                "status": {
+                    "queued": "Čeká ve frontě",
+                    "running": "Generuje se",
+                    "retry_wait": "Čeká na další pokus",
+                    "failed": "Část se nepovedla",
+                    "completed": "Dokončeno"
+                },
                 "item_failed": "Dokument se nepodařilo vystavit.",
-                "targets_failed": "Nepodařilo se načíst seznam zaměstnanců pro hromadné vystavení.",
                 "skipped_title": "Přeskočeno ({count})",
                 "skipped_hint": "Tyto osoby už dokument za rok mají. Nahrazení je oprava s povinným důvodem — vystavte ji jednotlivě.",
                 "failed_title": "Nepodařilo se ({count})"
@@ -5376,7 +5389,8 @@
                 "employer_insurance": "Pojistné hrazené zaměstnavatelem",
                 "social_insurance": "Závazek sociálního pojištění",
                 "health_insurance": "Závazek zdravotního pojištění",
-                "income_tax": "Záloha nebo srážka daně",
+                "income_tax": "Záloha na daň ze závislé činnosti",
+                "withholding_tax": "Srážková daň ze závislé činnosti",
                 "other_deductions": "Ostatní srážky ze mzdy",
                 "partner_settlement": "Zápočet na účet společníka",
                 "risky_savings": "Povinné spoření u rizikové práce",
@@ -5461,6 +5475,7 @@
                 "terminate_hint": "Dimenzi nejde smazat, protože je použitá v historii — ukončete její účinnost nastavením konce platnosti."
             },
             "accounting_row_hint": {
+                "withholding_tax": "Daň zvláštní sazbou podle § 6 odst. 4 ZDP (dohody do limitu bez prohlášení, drobné příjmy). Odvádí se jinou platbou než záloha (předčíslí 7720 místo 7704), v jiném termínu a vykazuje se vlastním hlášením, takže na společném účtu se závazky slijí a saldo proti platbám nejde přiřadit k jedné z daní. Bonus i doplatek z ročního zúčtování patří na účet ZÁLOHY, ne sem — vracejí se ze záloh.",
                 "risky_savings": "Zákonný příspěvek zaměstnavatele na spoření na stáří u rizikové práce (4 % vyměřovacího základu od 1. 1. 2026). Zaměstnanci se nevyplácí, posílá se penzijní společnosti — proto zákonný sociální náklad (527) proti jinému závazku (379), ne pojistné na 336.",
                 "employee_receivable": "Kam se překlopí záporná čistá mzda — typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",
                 "non_deductible_benefit": "Osvobozená část nepeněžního benefitu (rekreace, sport, kultura, zdraví, tištěné knihy). Podle § 25 odst. 1 písm. h) ZDP je nedaňová právě ta OSVOBOZENÁ část; nadlimitní část se zaměstnanci zdaní a nákladem zůstává. Účet 528 se sám propíše do nedaňových nákladů v přiznání k dani z příjmů.",
@@ -5526,7 +5541,15 @@
                     "submission": "Podání",
                     "levy": "Odvod",
                     "checklist": "Lhůta u člověka",
-                    "registration_change": "Změna k ohlášení"
+                    "registration_change": "Změna k ohlášení",
+                    "tax_statement": "Vyúčtování daně"
+                },
+                "tax_statement": {
+                    "form": {
+                        "dpzvd6": "Vyúčtování zálohové daně (DPZVD6)",
+                        "dpsvd2": "Vyúčtování srážkové daně (DPSVD2)"
+                    },
+                    "subject": "za rok {year}"
                 }
             },
             "operational_health": {
@@ -5779,7 +5802,10 @@
         "deductions": {
             "title": "Dohody o srážkách",
             "subtitle": "Zálohy, stravování, spoření, náhrada škody a dobrovolné příspěvky — s pořadím, limitem a účinností.",
-            "priority_hint": "Pořadí zadávej v rozsahu {floor}–{ceiling}. Nižší pásmo je vyhrazené zákonným a exekučním srážkám, dobrovolná dohoda je nikdy nepředběhne ani neobejde chráněnou částku.",
+            "priority_hint": "Pořadí zadávej v rozsahu {floor}–{ceiling}. Uvnitř dohod rozhoduje toto pořadí; vůči exekucím rozhoduje den doručení plátci mzdy. Chráněnou částku dohoda neobejde nikdy.",
+            "delivered_on": "Doručeno plátci mzdy",
+            "delivered_on_hint": "Den, kdy byla dohoda doručena zaměstnavateli. Určuje pořadí dohody vůči exekucím (§ 2045 obč. zák., § 280 odst. 5 o. s. ř.). Bez data se dohoda uspokojí až po všech exekucích.",
+            "delivered_on_missing": "nezadáno",
             "add": "Nová dohoda",
             "employee": "Zaměstnanec",
             "select_employee": "Vyber zaměstnance",

@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\Garnishment\ClaimCategory;
+use MyInvoice\Service\Payroll\Garnishment\DeductionClaim;
+use MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthEvidence;
 use MyInvoice\Service\Payroll\Garnishment\EnforcementPersonMonthRequest;
 use MyInvoice\Service\Payroll\Garnishment\GarnishableIncomeItem;
@@ -142,7 +145,8 @@ final class PayrollRunGarnishmentProcessor
      *     period:string,
      *     payment_date:string,
      *     requires_net_pay:bool,
-     *     evidence:array<int,EnforcementPersonMonthEvidence>
+     *     evidence:array<int,EnforcementPersonMonthEvidence>,
+     *     agreements:array<int,list<DeductionClaim>>
      * }
      */
     private function context(
@@ -151,14 +155,17 @@ final class PayrollRunGarnishmentProcessor
         bool $requiresNetPay = false,
     ): array {
         $evidenceByEmployee = [];
+        $agreementsByEmployee = [];
         foreach (self::rows($snapshot['people'] ?? null, 'snapshot.people') as $person) {
             $employee = self::row($person['employee'] ?? null, 'snapshot.employee');
             $evidence = self::row(
                 $person['enforcement_evidence'] ?? null,
                 'snapshot.enforcement_evidence',
             );
-            $evidenceByEmployee[self::positiveInt($employee, 'id')] =
+            $employeeId = self::positiveInt($employee, 'id');
+            $evidenceByEmployee[$employeeId] =
                 EnforcementPersonMonthEvidence::fromCanonicalArray($evidence);
+            $agreementsByEmployee[$employeeId] = self::bridgedAgreements($person);
         }
 
         return [
@@ -169,7 +176,75 @@ final class PayrollRunGarnishmentProcessor
                 || (($snapshot['schema_version'] ?? null) === 'payroll-run-input.v2'
                     && isset($baseResult['statutory'])),
             'evidence' => $evidenceByEmployee,
+            'agreements' => $agreementsByEmployee,
         ];
+    }
+
+    /**
+     * Dohody o srážkách ze mzdy přeložené do jazyka rozvrhu pořadí.
+     *
+     * NEJSOU to pohledávky rejstříku a exekuční jádro je nesráží — vstupují jen
+     * proto, aby se obecná (nepřednostní) část rozdělila podle § 280 odst. 5
+     * o. s. ř., tedy podle dne doručení plátci mzdy, a exekuce doručená POZDĚJI
+     * než dohoda dostala až druhé místo. Vlastní srážku provádí čistá mzda
+     * z kapacity dobrovolných srážek
+     * ({@see \MyInvoice\Service\Payroll\Net\DeductionPriorityResolver}), takže se
+     * částka nikde nezapočte dvakrát.
+     *
+     * Zůstatek je částka nárokovaná v TOMHLE měsíci, ne celý dluh: dohoda bez
+     * stropu (`total_limit_minor = null`) je opakující se měsíční srážka a víc
+     * než `requested_minor` z ní nikdy vzít nelze. Kdyby se sem dosadil dluh,
+     * dohoda by v prvním měsíci spolkla celou obecnou část.
+     *
+     * Dohoda bez dne doručení se sem nedostane — pořadí by neměla čím doložit
+     * a zůstává jí dosavadní chování, tedy zbytek po exekucích (§ 148 odst. 2
+     * zákoníku práce).
+     *
+     * @param array<string,mixed> $person
+     * @return list<DeductionClaim>
+     */
+    private static function bridgedAgreements(array $person): array
+    {
+        $agreements = $person['deduction_agreements'] ?? null;
+        if ($agreements === null) {
+            return [];
+        }
+        $result = [];
+        foreach (self::rows($agreements, 'snapshot.deduction_agreements') as $agreement) {
+            $deliveredOn = $agreement['delivered_on'] ?? null;
+            if (!is_string($deliveredOn) || $deliveredOn === '') {
+                continue;
+            }
+            $requested = self::int($agreement, 'requested_minor');
+            $limit = $agreement['total_limit_minor'] ?? null;
+            $outstanding = $limit === null
+                ? $requested
+                : max(0, min(
+                    $requested,
+                    self::int($agreement, 'total_limit_minor')
+                        - self::int($agreement, 'withheld_total_minor'),
+                ));
+            if ($outstanding <= 0) {
+                continue;
+            }
+            $result[] = new DeductionClaim(
+                'agreement:' . self::positiveInt($agreement, 'id'),
+                DeductionLegalBasis::VoluntaryAgreement,
+                // Dohoda o srážkách nemůže být přednostní pohledávkou —
+                // § 279 odst. 2 o. s. ř. vypočítává přednostní pohledávky
+                // taxativně a dohoda mezi nimi není.
+                ClaimCategory::NonPriority,
+                $outstanding,
+                $deliveredOn,
+                legalTitleVerified: false,
+                orderOrNoticeDelivered: true,
+                orderIssuedOn: null,
+                priorityClassificationVerified: true,
+                agreementVerified: true,
+            );
+        }
+
+        return $result;
     }
 
     /**
@@ -219,7 +294,8 @@ final class PayrollRunGarnishmentProcessor
      *     period:string,
      *     payment_date:string,
      *     requires_net_pay:bool,
-     *     evidence:array<int,EnforcementPersonMonthEvidence>
+     *     evidence:array<int,EnforcementPersonMonthEvidence>,
+     *     agreements:array<int,list<DeductionClaim>>
      * } $context
      * @param array<string,mixed> $person
      * @return array{0:GarnishmentInput,1:GarnishmentResult,2:GarnishableIncomeResult}
@@ -310,6 +386,7 @@ final class PayrollRunGarnishmentProcessor
             $evidence->protectedAmountOverrideVerified,
             $evidence->claimRegisterEvidenceComplete,
             $evidence->spousePensionEvidence,
+            $context['agreements'][$employeeId] ?? [],
         );
 
         return [$input, $this->calculator->calculate($input), $income];

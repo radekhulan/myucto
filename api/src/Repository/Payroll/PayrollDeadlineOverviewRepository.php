@@ -242,6 +242,124 @@ final readonly class PayrollDeadlineOverviewRepository
         return $this->rows($statement);
     }
 
+    /**
+     * Za která zdaňovací období vůbec vzniká povinnost podat roční vyúčtování.
+     *
+     * Vyúčtování podává „plátce daně, který ve zdaňovacím období zúčtoval nebo
+     * vyplatil příjmy ze závislé činnosti" (§ 38j odst. 4 ZDP) — ne každá firma
+     * se zapnutým modulem. Zástupným důkazem je SCHVÁLENÁ revize mzdového běhu
+     * v daném roce: přesně z ní vyúčtování čerpá
+     * ({@see \MyInvoice\Repository\Payroll\PayrollTaxStatementRepository::monthlyTaxTotals()}),
+     * takže firma bez schváleného běhu by dostala termín k tiskopisu, který
+     * nejde sestavit.
+     *
+     * Sražená daň se vrací zvlášť, protože vyúčtování srážkové daně má smysl
+     * jen tam, kde plátce v roce opravdu srážel — jinak by hlídač připomínal
+     * prázdný tiskopis každé firmě, která zaměstnává jen na HPP.
+     *
+     * @param list<int> $years
+     * @return array<int,array{approved_runs:int,withholding_minor:int}>
+     *         klíčem je zdaňovací období
+     */
+    public function taxStatementBasisYears(int $supplierId, array $years): array
+    {
+        $years = array_values(array_unique(array_map('intval', $years)));
+        if ($years === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT YEAR(run.period_start) AS period_year,
+                    COUNT(*) AS approved_runs,
+                    COALESCE(SUM(CAST(JSON_VALUE(
+                        tax.result_snapshot_json,
+                        "$.withholding_tax_minor_units"
+                    ) AS SIGNED)), 0) AS withholding_minor
+               FROM payroll_runs run
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run.supplier_id
+                AND revision.run_id = run.id
+                AND revision.revision_no = run.current_revision_no
+                AND revision.status = \'approved\'
+          LEFT JOIN payroll_statutory_results tax
+                 ON tax.supplier_id = revision.supplier_id
+                AND tax.revision_id = revision.id
+                AND tax.calculation_kind = \'income_tax\'
+                AND tax.result_status = \'calculated\'
+              WHERE run.supplier_id = ?
+                AND run.period_start >= ?
+                AND run.period_start < ?
+              GROUP BY YEAR(run.period_start)'
+        );
+        $statement->execute([
+            $supplierId,
+            sprintf('%04d-01-01', min($years)),
+            sprintf('%04d-01-01', max($years) + 1),
+        ]);
+
+        $basis = [];
+        foreach ($this->rows($statement) as $row) {
+            $year = (int) $row['period_year'];
+            if (!in_array($year, $years, true)) {
+                continue;
+            }
+            $basis[$year] = [
+                'approved_runs' => (int) $row['approved_runs'],
+                'withholding_minor' => (int) $row['withholding_minor'],
+            ];
+        }
+
+        return $basis;
+    }
+
+    /**
+     * Prokazatelně PODANÁ roční vyúčtování jako `form_code` → seznam období.
+     *
+     * Archivace snímku ({@see \MyInvoice\Service\Report\TaxSubmissionArchiver})
+     * povinnost nesplní — stažené XML může skončit v koši. Termín proto mizí až
+     * ve stavu `submitted`/`accepted`, tedy tam, kde je doložený čas podání
+     * a identifikátor podatelny; stejné měřítko používá i řetězec dodatečných
+     * přiznání. Na variantě nezáleží: řádné, opravné i dodatečné vyúčtování
+     * je podání za tentýž rok.
+     *
+     * @param list<string> $formCodes
+     * @param list<int> $years
+     * @return array<string,list<int>>
+     */
+    public function filedTaxStatementYears(
+        int $supplierId,
+        array $formCodes,
+        array $years,
+    ): array {
+        $years = array_values(array_unique(array_map('intval', $years)));
+        $formCodes = array_values(array_unique(array_map('strval', $formCodes)));
+        if ($years === [] || $formCodes === []) {
+            return [];
+        }
+        $statement = $this->db->pdo()->prepare(
+            'SELECT form_code, period_year
+               FROM tax_submissions
+              WHERE supplier_id = ?
+                AND form_code IN ('
+            . implode(',', array_fill(0, count($formCodes), '?'))
+            . ')
+                AND period_year IN ('
+            . implode(',', array_fill(0, count($years), '?'))
+            . ')
+                AND period_month IS NULL
+                AND period_quarter IS NULL
+                AND status IN (\'submitted\', \'accepted\')
+              GROUP BY form_code, period_year'
+        );
+        $statement->execute([$supplierId, ...$formCodes, ...$years]);
+
+        $filed = [];
+        foreach ($this->rows($statement) as $row) {
+            $filed[(string) $row['form_code']][] = (int) $row['period_year'];
+        }
+
+        return $filed;
+    }
+
     /** @return list<array<string,mixed>> */
     private function rows(\PDOStatement $statement): array
     {

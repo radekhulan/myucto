@@ -24,8 +24,12 @@ final readonly class DeductionAgreementTerms
      * ale samo o sobě NIC nezaručuje — exekuce se počítá v jiném kroku pipeline.
      * Přednost zákonné a exekuční srážky drží až kapacita, kterou dohodám
      * přiděluje `GarnishmentCalculator::voluntaryDeductionCapacity()` (§ 148
-     * odst. 2 zákoníku práce, § 276 a násl. OSŘ): dohoda dostane jen to, co
-     * exekuce nechala v obecné nepřednostní části. Viz MZ-13-W07.
+     * odst. 2 zákoníku práce, § 276 a násl. OSŘ). Od doplnění `deliveredOn`
+     * (nález E-03) to ale není nepodmíněná přednost: dohoda doručená plátci
+     * mzdy DŘÍV než exekuční příkaz soutěží o obecnou nepřednostní část
+     * společně s exekucemi podle § 280 odst. 5 o. s. ř., takže kapacita, kterou
+     * dohody dostanou, může být větší než zbytek po exekucích. `priority_no`
+     * rozhoduje až uvnitř téhož dne doručení. Viz MZ-13-W07.
      */
     public const PRIORITY_FLOOR = 10;
     public const PRIORITY_CEILING = 9999;
@@ -43,6 +47,14 @@ final readonly class DeductionAgreementTerms
         public ?string $validTo,
         public ?string $recipientReference,
         public ?string $note,
+        /**
+         * Den, kdy byla dohoda doručena plátci mzdy (§ 2045 odst. 2 OZ). Od něj
+         * se podle § 148 odst. 2 zákoníku práce ve spojení s § 280 odst. 5
+         * o. s. ř. odvozuje POŘADÍ dohody vůči exekučním pohledávkám.
+         * `null` je legacy stav dohod zaevidovaných dřív, než se den doručení
+         * ukládal — takové se řadí fail-closed až za všechny se známým datem.
+         */
+        public ?string $deliveredOn = null,
     ) {}
 
     /**
@@ -98,6 +110,16 @@ final readonly class DeductionAgreementTerms
         if ($validTo !== null && $validTo < $validFrom) {
             throw new \InvalidArgumentException('Konec účinnosti nesmí předcházet začátku.');
         }
+        // Doručení dohody plátci mzdy nemá k účinnosti srážek pevný vztah:
+        // dohoda může být doručena dřív (typicky týž den, kdy byla uzavřena)
+        // i později. Vylučuje se jen to, co je nesporně chybné — den doručení
+        // po skončení účinnosti, kdy by z něj už nemohlo plynout žádné pořadí.
+        $deliveredOn = self::optionalDate($body['delivered_on'] ?? null, 'delivered_on');
+        if ($deliveredOn !== null && $validTo !== null && $deliveredOn > $validTo) {
+            throw new \InvalidArgumentException(
+                'Den doručení dohody plátci mzdy nesmí následovat až po konci účinnosti.',
+            );
+        }
 
         return new self(
             $reference,
@@ -112,6 +134,7 @@ final readonly class DeductionAgreementTerms
             $validTo,
             self::optionalText($body['recipient_reference'] ?? null, 'recipient_reference', 190),
             self::optionalText($body['note'] ?? null, 'note', 500),
+            $deliveredOn,
         );
     }
 

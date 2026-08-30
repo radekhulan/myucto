@@ -2256,12 +2256,25 @@
                     "selected": "For one person",
                     "all": "For every employee"
                 },
-                "scope_all_hint": "The document is issued for every active employee for {year}. The run is tied to this tab — keep it open.",
+                "scope_all_hint": "The document is issued for every employee with an approved result for {year}. Generation runs on the server, you can close this tab.",
                 "blocked_no_person": "Pick a person first, or switch the scope to every employee.",
                 "progress": "Done {done} of {total}.",
-                "cancel": "Stop",
+                "queued": "The batch is queued ({count} people). You can close the page, generation continues on the server.",
+                "enqueue_failed": "The annual document batch could not be queued.",
+                "poll_failed": "The annual batch status could not be loaded.",
+                "server_hint": "running on the server",
+                "dismiss": "Close report",
+                "retry": "Retry",
+                "retry_queued": "The person is queued for another attempt.",
+                "retry_failed": "The retry could not be queued.",
+                "status": {
+                    "queued": "Queued",
+                    "running": "Generating",
+                    "retry_wait": "Waiting for next attempt",
+                    "failed": "Partly failed",
+                    "completed": "Completed"
+                },
                 "item_failed": "The document could not be issued.",
-                "targets_failed": "The employee list for bulk issuing could not be loaded.",
                 "skipped_title": "Skipped ({count})",
                 "skipped_hint": "These people already have the document for the year. Replacing it is a correction with a mandatory reason — issue that one by one.",
                 "failed_title": "Failed ({count})"
@@ -5376,7 +5389,8 @@
                 "employer_insurance": "Employer-paid insurance",
                 "social_insurance": "Social insurance liability",
                 "health_insurance": "Health insurance liability",
-                "income_tax": "Income tax advance or withholding",
+                "income_tax": "Advance income tax on employment",
+                "withholding_tax": "Withholding tax on employment",
                 "other_deductions": "Other payroll deductions",
                 "partner_settlement": "Set-off against shareholder account",
                 "risky_savings": "Risk-work retirement savings",
@@ -5461,6 +5475,7 @@
                 "terminate_hint": "This dimension cannot be deleted because it is used in history — end its validity by setting a validity end date instead."
             },
             "accounting_row_hint": {
+                "withholding_tax": "Tax at a special rate under § 6(4) of the Income Tax Act (small agreements without a taxpayer declaration). It is remitted by a separate payment (account prefix 7720 instead of 7704), on a different due date and reported separately, so a shared account merges both liabilities and the balance can no longer be matched against the payments. Tax bonuses and annual settlement refunds belong to the ADVANCE tax account, not here.",
                 "risky_savings": "Statutory employer contribution to retirement savings for risk work (4% of the assessment base from 1 January 2026). It is not paid to the employee but remitted to the pension company, so it is a statutory social expense (527) against other payables (379), not insurance on 336.",
                 "employee_receivable": "Where a negative net wage is reclassified — typically health insurance topped up to the minimum assessment base in a month with no cash income. The employee owes the employer, so this is a receivable (335), not a payable.",
                 "non_deductible_benefit": "The tax-exempt part of a non-cash benefit (recreation, sport, culture, health care, printed books). Under Section 25(1)(h) of the Income Tax Act it is precisely the EXEMPT part that is non-deductible; the part above the cap is taxed at the employee and stays deductible. Account 528 flows automatically into non-deductible expenses in the corporate income tax return.",
@@ -5526,7 +5541,15 @@
                     "submission": "Filing",
                     "levy": "Levy",
                     "checklist": "Per-person deadline",
-                    "registration_change": "Change to report"
+                    "registration_change": "Change to report",
+                    "tax_statement": "Tax statement"
+                },
+                "tax_statement": {
+                    "form": {
+                        "dpzvd6": "Advance tax statement (DPZVD6)",
+                        "dpsvd2": "Withholding tax statement (DPSVD2)"
+                    },
+                    "subject": "for {year}"
                 }
             },
             "operational_health": {
@@ -5779,7 +5802,10 @@
         "deductions": {
             "title": "Deduction agreements",
             "subtitle": "Advances, meals, savings, damage compensation and voluntary contributions — with order, limit and validity.",
-            "priority_hint": "Use an order between {floor} and {ceiling}. The lower band is reserved for statutory and enforcement deductions, so a voluntary agreement can never jump ahead of them or bypass the protected amount.",
+            "priority_hint": "Use an order between {floor} and {ceiling}. This order decides between agreements; against garnishments the day of delivery to the payer decides. An agreement never bypasses the protected amount.",
+            "delivered_on": "Delivered to the payer",
+            "delivered_on_hint": "The day the agreement was delivered to the employer. It sets the agreement's rank against garnishments. Without it the agreement is satisfied only after all garnishments.",
+            "delivered_on_missing": "not entered",
             "add": "New agreement",
             "employee": "Employee",
             "select_employee": "Select an employee",

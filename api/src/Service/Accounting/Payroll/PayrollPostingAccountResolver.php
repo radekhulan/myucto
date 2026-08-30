@@ -50,6 +50,12 @@ final class PayrollPostingAccountResolver
         // zálohové daně, `342.200` používají osnovy, které na 342 vedou jen jednu
         // analytiku — zkusí se v tomhle pořadí a vezme se ta, kterou firma má.
         PayrollPostingAccounts::KEY_INCOME_TAX_PAYABLE => ['342.100', '342.200'],
+        // Srážková daň (Ú-13). Pořadí je OBRÁCENÉ proti záloze a je to záměr:
+        // firma, která na 342 vede jedinou analytiku, musí obě daně dál účtovat
+        // na TÝŽ účet jako dosud — jinak by se jí uprostřed roku rozpadlo saldo.
+        // Rozdělí se teprve firma, která má v osnově OBĚ analytiky, protože to
+        // je projev vůle účetní (stejná úvaha jako u 336.100/336.200 v 1618).
+        PayrollPostingAccounts::KEY_WITHHOLDING_TAX_PAYABLE => ['342.200', '342.100'],
     ];
 
     /** @var array<int,PayrollPostingAccounts> */
@@ -131,7 +137,8 @@ final class PayrollPostingAccountResolver
             'SELECT employment_gross_debit_account, employment_gross_credit_account,
                     partner_gross_debit_account, partner_gross_credit_account,
                     employer_insurance_debit_account, social_insurance_credit_account,
-                    health_insurance_credit_account, income_tax_credit_account
+                    health_insurance_credit_account, income_tax_credit_account,
+                    withholding_tax_credit_account
                FROM payroll_employer_settings
               WHERE supplier_id = ?'
         );
@@ -150,6 +157,7 @@ final class PayrollPostingAccountResolver
             PayrollPostingAccounts::KEY_SOCIAL_PAYABLE     => 'social_insurance_credit_account',
             PayrollPostingAccounts::KEY_HEALTH_PAYABLE     => 'health_insurance_credit_account',
             PayrollPostingAccounts::KEY_INCOME_TAX_PAYABLE => 'income_tax_credit_account',
+            PayrollPostingAccounts::KEY_WITHHOLDING_TAX_PAYABLE => 'withholding_tax_credit_account',
         ];
 
         $out = [];

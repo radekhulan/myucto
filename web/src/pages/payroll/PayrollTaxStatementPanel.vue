@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import {
   payrollApi,
@@ -26,8 +27,28 @@ const { t, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 
+/**
+ * Panel se montuje i mimo router (testy, náhledy), kde `useRoute()` vrací
+ * `undefined` — čtení `.query` by ho v takovém případě shodilo. Rok z adresy
+ * je pohodlí navíc, ne podmínka funkčnosti, takže se bez routeru mlčky
+ * přeskočí.
+ */
+const route = useRoute() as ReturnType<typeof useRoute> | undefined
+
+/**
+ * Rok z prokliku hlídače termínů. Přehled lhůt sem posílá přesně ten rok,
+ * jehož vyúčtování je nepodané; bez toho by panel nabídl svůj výchozí a účetní
+ * by stáhla XML za jiné období, než na které klikla. Neplatná hodnota se
+ * ignoruje — dotaz v adrese může přepsat kdokoli.
+ */
+function yearFromRoute(): number | null {
+  const raw = route?.query.taxStatementYear
+  const value = Number(Array.isArray(raw) ? raw[0] : raw)
+  return Number.isInteger(value) && value >= 2010 && value <= 2199 ? value : null
+}
+
 // Vyúčtování se podává po skončení roku, takže výchozí je rok minulý.
-const year = ref(Math.max(2010, props.initialYear - 1))
+const year = ref(yearFromRoute() ?? Math.max(2010, props.initialYear - 1))
 const variant = ref<PayrollTaxStatementVariant>('B')
 const discoveredOn = ref('')
 const data = ref<PayrollTaxStatementPreview | null>(null)
@@ -130,13 +151,32 @@ async function download(form: PayrollTaxStatementForm): Promise<void> {
 }
 
 watch([year, variant], () => void load())
+
+/*
+ * Proklik z hlídače termínů míří na TUTÉŽ stránku (oba panely jsou na mzdovém
+ * rozcestníku), takže se panel nepřemontuje a rok z adresy by se jinak
+ * projevil až po ručním obnovení stránky. Ručně přepsaný rok se nepřepisuje
+ * zpátky — reaguje se jen na změnu dotazu.
+ */
+watch(() => route?.query.taxStatementYear, () => {
+  const requested = yearFromRoute()
+  if (requested !== null) {
+    year.value = requested
+  }
+})
+
 onMounted(load)
 </script>
 
 <template>
+  <!--
+    `id` je cíl kotvy z přehledu mzdových termínů. Panel nemá vlastní routu,
+    takže bez ní by proklik z hlídače skončil na začátku dlouhého rozcestníku.
+  -->
   <section
     v-if="canRead"
-    class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+    id="payroll-tax-statement"
+    class="scroll-mt-4 rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
     data-test="payroll-tax-statement"
   >
     <div class="flex flex-wrap items-start justify-between gap-3">

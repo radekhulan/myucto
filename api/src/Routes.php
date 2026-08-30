@@ -67,6 +67,7 @@ use MyInvoice\Action\Settings\PdfSigningDiagnosticsAction;
 use MyInvoice\Action\Settings\SettingsAction;
 use MyInvoice\Action\Settings\AccountingActivationAction;
 use MyInvoice\Action\Payroll\AnnualTaxCertificateAction;
+use MyInvoice\Action\Payroll\PayrollAnnualDocumentBatchAction;
 use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
 use MyInvoice\Action\Payroll\PayrollAnnualReportAction;
 use MyInvoice\Action\Payroll\PayrollYearCloseAction;
@@ -1069,6 +1070,25 @@ final class Routes
             $g->post(
                 '/documents/batches/{batchId:[0-9]+}/items/{itemId:[0-9]+}/retry',
                 [PayrollDocumentAction::class, 'retryBatchItem'],
+            );
+            // Roční dokumenty (mzdový list, potvrzení o zdanitelných příjmech)
+            // za celou firmu. Rozsahem je zdaňovací období, ne běh a revize —
+            // proto vlastní fronta i vlastní routy.
+            $g->post(
+                '/documents/annual-batches/{kind:payroll-sheet|advance|withholding}/{year:[0-9]{4}}',
+                [PayrollAnnualDocumentBatchAction::class, 'enqueue'],
+            );
+            $g->get(
+                '/documents/annual-batches/{batchId:[0-9]+}',
+                [PayrollAnnualDocumentBatchAction::class, 'detail'],
+            );
+            $g->get(
+                '/documents/annual-batches/{batchId:[0-9]+}/items',
+                [PayrollAnnualDocumentBatchAction::class, 'items'],
+            );
+            $g->post(
+                '/documents/annual-batches/{batchId:[0-9]+}/items/{itemId:[0-9]+}/retry',
+                [PayrollAnnualDocumentBatchAction::class, 'retryItem'],
             );
             $g->get(
                 '/employments/{id:[0-9]+}/documents/exit',

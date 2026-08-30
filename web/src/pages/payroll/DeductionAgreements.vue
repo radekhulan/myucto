@@ -62,6 +62,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'requested', labelKey: 'payroll.deductions.requested' },
   { key: 'withheld', labelKey: 'payroll.deductions.withheld' },
   { key: 'validity', labelKey: 'payroll.deductions.validity' },
+  { key: 'delivered_on', labelKey: 'payroll.deductions.delivered_on', defaultHidden: true },
   { key: 'actions', labelKey: 'common.detail', required: true },
 ]
 const tbl = useTablePrefs('payroll-deduction-agreements', COLUMNS)
@@ -80,6 +81,7 @@ interface AgreementForm {
   limit_czk: string
   valid_from: string
   valid_to: string
+  delivered_on: string
   recipient_reference: string
   note: string
   effective_from: string
@@ -99,6 +101,7 @@ function emptyForm(): AgreementForm {
     limit_czk: '',
     valid_from: today,
     valid_to: '',
+    delivered_on: '',
     recipient_reference: '',
     note: '',
     effective_from: today,
@@ -222,6 +225,7 @@ function fillForm(item: DeductionAgreementDetail) {
     limit_czk: fromMinor(item.total_limit_minor),
     valid_from: item.valid_from,
     valid_to: item.valid_to ?? '',
+    delivered_on: item.delivered_on ?? '',
     recipient_reference: item.recipient_reference ?? '',
     note: item.note ?? '',
     effective_from: today,
@@ -266,6 +270,7 @@ function payloadFromForm() {
     total_limit_minor: toMinor(form.value.limit_czk, false),
     valid_from: form.value.valid_from,
     valid_to: form.value.valid_to || null,
+    delivered_on: form.value.delivered_on || null,
     recipient_reference: form.value.recipient_reference.trim() || null,
     note: form.value.note.trim() || null,
   }
@@ -444,6 +449,7 @@ onMounted(load)
                 <th v-if="tbl.isVisible('requested')" class="px-4 py-3 text-right">{{ t('payroll.deductions.requested') }}</th>
                 <th v-if="tbl.isVisible('withheld')" class="px-4 py-3 text-right">{{ t('payroll.deductions.withheld') }}</th>
                 <th v-if="tbl.isVisible('validity')" class="px-4 py-3">{{ t('payroll.deductions.validity') }}</th>
+                <th v-if="tbl.isVisible('delivered_on')" class="px-4 py-3">{{ t('payroll.deductions.delivered_on') }}</th>
                 <th v-if="tbl.isVisible('actions')" class="px-4 py-3"><span class="sr-only">{{ t('common.detail') }}</span></th>
               </tr>
             </thead>
@@ -466,6 +472,7 @@ onMounted(load)
                 </td>
                 <td v-if="tbl.isVisible('withheld')" class="px-4 py-3 text-right">{{ money(item.withheld_total_minor) }}</td>
                 <td v-if="tbl.isVisible('validity')" class="px-4 py-3 text-neutral-600">{{ item.valid_from }} – {{ item.valid_to || '∞' }}</td>
+                <td v-if="tbl.isVisible('delivered_on')" class="px-4 py-3 text-neutral-600">{{ item.delivered_on || t('payroll.deductions.delivered_on_missing') }}</td>
                 <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
                   <button :class="btnOutlineSm('neutral')" :data-test="`deduction-detail-${item.id}`" @click="openDetail(item)">
                     <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>
@@ -502,6 +509,10 @@ onMounted(load)
               <div>
                 <dt class="text-xs text-neutral-500">{{ t('payroll.deductions.validity') }}</dt>
                 <dd class="break-words">{{ item.valid_from }} – {{ item.valid_to || '∞' }}</dd>
+              </div>
+              <div>
+                <dt class="text-xs text-neutral-500">{{ t('payroll.deductions.delivered_on') }}</dt>
+                <dd>{{ item.delivered_on || t('payroll.deductions.delivered_on_missing') }}</dd>
               </div>
             </dl>
             <button :class="[btnOutline('neutral'), 'mt-4']" @click="openDetail(item)">
@@ -606,6 +617,11 @@ onMounted(load)
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.valid_to') }}
               <input v-model="form.valid_to" type="date" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            </label>
+            <label class="text-xs font-medium text-neutral-600">
+              {{ t('payroll.deductions.delivered_on') }}
+              <input v-model="form.delivered_on" type="date" :disabled="!!detail && detail.withheld_total_minor > 0" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100">
+              <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('payroll.deductions.delivered_on_hint') }}</span>
             </label>
             <label class="text-xs font-medium text-neutral-600">
               {{ t('payroll.deductions.effective_from') }}

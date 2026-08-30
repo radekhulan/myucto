@@ -21,6 +21,7 @@ final class PayrollEmployerSettingsRepository
         'social_insurance_credit' => 'social_insurance_credit_account',
         'health_insurance_credit' => 'health_insurance_credit_account',
         'income_tax_credit' => 'income_tax_credit_account',
+        'withholding_tax_credit' => 'withholding_tax_credit_account',
         'other_deductions_credit' => 'other_deductions_credit_account',
         'partner_settlement_credit' => 'partner_settlement_credit_account',
         'risky_savings_debit' => 'risky_savings_debit_account',
@@ -48,7 +49,9 @@ final class PayrollEmployerSettingsRepository
      * výchozí kontace pojistného ANALYTICKÁ (336.100 / 336.200), aby se závazek
      * vůči ČSSZ a vůči zdravotním pojišťovnám na jednom účtu nevynetoval.
      * Analytiky ale v osnově má jen firma, které se osnova seedovala ze
-     * šablony po migraci 1618 — nebo která si je založila sama.
+     * šablony po migraci 1618 — nebo která si je založila sama. Od Ú-13 platí
+     * totéž pro daň (342.100 záloha / 342.200 srážková, migrace 1648); logika
+     * níž je proto obecná, ne vázaná na konkrétní syntetiku.
      *
      * Nabídnout účet, který firma v osnově nemá, by mělo dva zlé následky:
      *  1. `PayrollEmployerSettingsValidator` uložení nastavení odmítne

@@ -80,6 +80,7 @@ function summary(overrides: Partial<DeductionAgreementSummary> = {}): DeductionA
     remaining_limit_minor: null,
     valid_from: '2026-01-01',
     valid_to: null,
+    delivered_on: null,
     recipient_reference: null,
     note: null,
     row_version: 1,

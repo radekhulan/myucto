@@ -17,6 +17,10 @@ const m = vi.hoisted(() => ({
   documentBatch: vi.fn(),
   documentBatchItems: vi.fn(),
   retryDocumentBatchItem: vi.fn(),
+  enqueueAnnualDocumentBatch: vi.fn(),
+  annualDocumentBatch: vi.fn(),
+  annualDocumentBatchItems: vi.fn(),
+  retryAnnualDocumentBatchItem: vi.fn(),
   downloadPeriodExport: vi.fn(),
   downloadDocument: vi.fn(),
   toastSuccess: vi.fn(),
@@ -46,6 +50,10 @@ vi.mock('@/api/payroll', () => ({
     documentBatch: m.documentBatch,
     documentBatchItems: m.documentBatchItems,
     retryDocumentBatchItem: m.retryDocumentBatchItem,
+    enqueueAnnualDocumentBatch: m.enqueueAnnualDocumentBatch,
+    annualDocumentBatch: m.annualDocumentBatch,
+    annualDocumentBatchItems: m.annualDocumentBatchItems,
+    retryAnnualDocumentBatchItem: m.retryAnnualDocumentBatchItem,
     downloadPeriodExport: m.downloadPeriodExport,
     downloadDocument: m.downloadDocument,
   },
@@ -205,6 +213,84 @@ describe('PayrollDocuments', () => {
       total: 1,
     })
     m.retryDocumentBatchItem.mockResolvedValue({ status: 'queued' })
+    m.enqueueAnnualDocumentBatch.mockResolvedValue({
+      id: 501,
+      tax_year: 2026,
+      document_kind: 'payroll_sheet',
+      scope: 'all',
+      status: 'queued',
+      item_count: 3,
+      succeeded_count: 0,
+      failed_count: 0,
+      skipped_count: 0,
+      created_at: '2026-08-01 08:00:00',
+      started_at: null,
+      completed_at: null,
+      updated_at: '2026-08-01 08:00:00',
+    })
+    m.annualDocumentBatch.mockResolvedValue({
+      id: 501,
+      tax_year: 2026,
+      document_kind: 'payroll_sheet',
+      scope: 'all',
+      status: 'completed',
+      item_count: 3,
+      succeeded_count: 1,
+      failed_count: 1,
+      skipped_count: 1,
+      created_at: '2026-08-01 08:00:00',
+      started_at: '2026-08-01 08:00:01',
+      completed_at: '2026-08-01 08:00:09',
+      updated_at: '2026-08-01 08:00:09',
+    })
+    m.annualDocumentBatchItems.mockResolvedValue({
+      items: [
+        {
+          id: 601,
+          batch_id: 501,
+          employee_id: 31,
+          employee_name: 'Testovací Zaměstnanec',
+          status: 'skipped',
+          attempt_count: 1,
+          available_at: '2026-08-01 08:00:05',
+          document_id: null,
+          last_error_code: 'annual_document_exists',
+          last_error_message: 'Osoba už potvrzení za rok má.',
+          completed_at: '2026-08-01 08:00:05',
+          updated_at: '2026-08-01 08:00:05',
+        },
+        {
+          id: 602,
+          batch_id: 501,
+          employee_id: 32,
+          employee_name: 'Druhá Osoba',
+          status: 'failed',
+          attempt_count: 3,
+          available_at: '2026-08-01 08:00:07',
+          document_id: null,
+          last_error_code: 'render_domain_exception',
+          last_error_message: 'Chybí schválená revize.',
+          completed_at: null,
+          updated_at: '2026-08-01 08:00:07',
+        },
+        {
+          id: 603,
+          batch_id: 501,
+          employee_id: 33,
+          employee_name: 'Třetí Osoba',
+          status: 'succeeded',
+          attempt_count: 1,
+          available_at: '2026-08-01 08:00:09',
+          document_id: 71,
+          last_error_code: null,
+          last_error_message: null,
+          completed_at: '2026-08-01 08:00:09',
+          updated_at: '2026-08-01 08:00:09',
+        },
+      ],
+      total: 3,
+    })
+    m.retryAnnualDocumentBatchItem.mockResolvedValue({ id: 602, status: 'queued' })
     m.listAnnualDocuments.mockResolvedValue({
       year: 2026,
       items: [],
@@ -530,11 +616,11 @@ describe('PayrollDocuments', () => {
   })
 
   /**
-   * X-11: roční dokumenty šly jen po jednom — pro 500 lidí 1500 kliknutí,
-   * zatímco měsíční pásky hromadné dávno jsou. Rozsah „za všechny" projede
-   * stejné tři akce nad celou firmou.
+   * Roční dokumenty za celou firmu jdou do SERVEROVÉ fronty, ne do smyčky
+   * v prohlížeči. Odejde jeden požadavek, ne jeden na zaměstnance — u 500 lidí
+   * to byl rozdíl mezi „hotovo" a timeoutem na zavřené záložce.
    */
-  it('vystaví roční dokument všem aktivním zaměstnancům najednou', async () => {
+  it('roční dokumenty za všechny zařadí do serverové fronty jedním požadavkem', async () => {
     const wrapper = mount(PayrollDocuments)
     await flushPromises()
 
@@ -554,22 +640,60 @@ describe('PayrollDocuments', () => {
     await sheetButton!.trigger('click')
     await flushPromises()
 
-    // Jen aktivní lidé; bývalý zaměstnanec do dávky nepatří.
-    expect(m.generatePayrollSheet).toHaveBeenCalledTimes(2)
-    expect(m.generatePayrollSheet.mock.calls.map(call => call[0])).toEqual([31, 32])
+    expect(m.enqueueAnnualDocumentBatch).toHaveBeenCalledTimes(1)
+    expect(m.enqueueAnnualDocumentBatch)
+      .toHaveBeenCalledWith('payroll_sheet', expect.any(Number), 'all', null)
+    // Nikdo se negeneruje po jednom a seznam osob se kvůli dávce netahá.
+    expect(m.generatePayrollSheet).not.toHaveBeenCalled()
+    expect(m.peopleOptions).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="annual-batch-report"]').text())
       .toContain('payroll.documents.batch_annual.progress')
   })
 
+  /** Zařazení je idempotentní: druhý klik do běžící dávky nic nepošle. */
+  it('druhý klik do rozdělané dávky nezaloží další', async () => {
+    m.annualDocumentBatch.mockResolvedValue({
+      id: 501,
+      tax_year: 2026,
+      document_kind: 'payroll_sheet',
+      scope: 'all',
+      status: 'running',
+      item_count: 3,
+      succeeded_count: 1,
+      failed_count: 0,
+      skipped_count: 0,
+      created_at: '2026-08-01 08:00:00',
+      started_at: '2026-08-01 08:00:01',
+      completed_at: null,
+      updated_at: '2026-08-01 08:00:03',
+    })
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.findAll('nav button')
+      .find(button => button.text() === 'payroll.documents.tabs.annual')!
+      .trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="annual-scope-all"]').trigger('click')
+    const sheetButton = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.documents.generate_payroll_sheet')!
+    await sheetButton.trigger('click')
+    await flushPromises()
+    await sheetButton.trigger('click')
+    await flushPromises()
+
+    expect(m.enqueueAnnualDocumentBatch).toHaveBeenCalledTimes(1)
+    // Rozdělaná dávka se doptává v intervalu; bez odmontování by časovač
+    // přežil test.
+    wrapper.unmount()
+  })
+
   /**
    * Neúspěšný řádek se nesmí ztratit v počtu — dávka ho vypíše jménem
-   * i důvodem, jinak zbývá otevřít 500 lidí a hádat, kdo chybí.
+   * i důvodem, jinak zbývá otevřít 500 lidí a hádat, kdo chybí. Chyba u jednoho
+   * člověka přitom dávku nezhodí: ostatní doběhnou.
    */
-  it('neúspěšné řádky dávky vypíše jménem', async () => {
-    m.generatePayrollSheet.mockImplementation((employeeId: number) =>
-      employeeId === 32
-        ? Promise.reject({ response: { data: { error: { message: 'Chybí schválená revize.' } } } })
-        : Promise.resolve({ id: 41 }))
+  it('neúspěšné řádky dávky vypíše jménem a nabídne opakování', async () => {
     const wrapper = mount(PayrollDocuments)
     await flushPromises()
 
@@ -586,30 +710,18 @@ describe('PayrollDocuments', () => {
     const failures = wrapper.get('[data-test="annual-batch-failures"]')
     expect(failures.text()).toContain('Druhá Osoba')
     expect(failures.text()).toContain('Chybí schválená revize.')
-    expect(failures.text()).not.toContain('Testovací Zaměstnanec')
+    expect(failures.text()).not.toContain('Třetí Osoba')
+
+    await wrapper.get('[data-test="retry-annual-batch-item"]').trigger('click')
+    await flushPromises()
+    expect(m.retryAnnualDocumentBatchItem).toHaveBeenCalledWith(501, 602)
   })
 
   /**
    * Osoba, která dokument za rok už má, se PŘESKOČÍ — nahrazení je oprava
-   * s povinným důvodem. Vypadnout ale musí viditelně, jménem.
+   * s povinným důvodem. O tom rozhoduje server, prohlížeč jen vypíše jméno.
    */
-  it('osobu s hotovým dokumentem přeskočí a řekne to', async () => {
-    m.listAnnualDocuments.mockResolvedValue({
-      year: 2026,
-      items: [{
-        id: 55,
-        employee_id: 31,
-        employee_name: 'Testovací Zaměstnanec',
-        document_kind: 'annual_payroll_sheet',
-        document_revision_no: 1,
-        mime_type: 'application/pdf',
-        suggested_filename: 'mzdovy-list.pdf',
-        file_sha256: 'c'.repeat(64),
-        size_bytes: 1234,
-        created_at: '2026-08-01 08:00:00',
-      }],
-      total: 1,
-    })
+  it('přeskočenou osobu vypíše jménem', async () => {
     const wrapper = mount(PayrollDocuments)
     await flushPromises()
 
@@ -623,8 +735,6 @@ describe('PayrollDocuments', () => {
       .trigger('click')
     await flushPromises()
 
-    expect(m.generatePayrollSheet).toHaveBeenCalledTimes(1)
-    expect(m.generatePayrollSheet).toHaveBeenCalledWith(32, expect.any(Number))
     expect(wrapper.get('[data-test="annual-batch-skipped"]').text())
       .toContain('Testovací Zaměstnanec')
   })

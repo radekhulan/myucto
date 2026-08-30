@@ -47,6 +47,12 @@ export interface DeductionAgreementSummary {
   remaining_limit_minor: number | null
   valid_from: string
   valid_to: string | null
+  /**
+   * Den doručení dohody plátci mzdy (§ 2045 odst. 2 obč. zák.). Určuje POŘADÍ
+   * dohody vůči exekucím podle § 280 odst. 5 o. s. ř. `null` = dohoda
+   * zaevidovaná dřív, než se datum ukládalo; taková se řadí až za exekuce.
+   */
+  delivered_on: string | null
   recipient_reference: string | null
   note: string | null
   row_version: number
@@ -78,6 +84,7 @@ export interface DeductionAgreementVersion {
   withheld_total_minor: number
   valid_from: string
   valid_to: string | null
+  delivered_on: string | null
   effective_from: string
   reason: string | null
   created_at: string
@@ -108,6 +115,7 @@ export interface DeductionAgreementPayload {
   total_limit_minor?: number | null
   valid_from: string
   valid_to?: string | null
+  delivered_on?: string | null
   recipient_reference?: string | null
   note?: string | null
 }

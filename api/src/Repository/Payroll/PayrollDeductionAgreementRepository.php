@@ -29,7 +29,8 @@ final class PayrollDeductionAgreementRepository
         agreement.status, agreement.priority_no, agreement.requested_minor,
         agreement.basis_points, agreement.basis_amount_minor,
         agreement.total_limit_minor, agreement.withheld_total_minor,
-        agreement.valid_from, agreement.valid_to, agreement.recipient_reference,
+        agreement.valid_from, agreement.valid_to, agreement.delivered_on,
+        agreement.recipient_reference,
         agreement.note, agreement.row_version, agreement.version_no,
         agreement.created_at, agreement.updated_at';
 
@@ -162,9 +163,9 @@ final class PayrollDeductionAgreementRepository
                         (supplier_id, employee_id, agreement_reference, title,
                          deduction_kind, status, priority_no, requested_minor,
                          basis_points, basis_amount_minor, total_limit_minor,
-                         valid_from, valid_to, recipient_reference, note,
-                         version_no, created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
+                         valid_from, valid_to, delivered_on, recipient_reference,
+                         note, version_no, created_by, updated_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
                 );
                 $stmt->execute([
                     $supplierId,
@@ -180,6 +181,7 @@ final class PayrollDeductionAgreementRepository
                     $terms->totalLimitMinor,
                     $terms->validFrom,
                     $terms->validTo,
+                    $terms->deliveredOn,
                     $terms->recipientReference,
                     $terms->note,
                     $userId,
@@ -230,6 +232,9 @@ final class PayrollDeductionAgreementRepository
                 );
             }
             $withheld = (int) $current['withheld_total_minor'];
+            $currentDeliveredOn = $current['delivered_on'] === null
+                ? null
+                : (string) $current['delivered_on'];
             if ($withheld > 0
                 && ($terms->deductionKind !== (string) $current['deduction_kind']
                     || $terms->validFrom !== (string) $current['valid_from'])
@@ -237,6 +242,18 @@ final class PayrollDeductionAgreementRepository
                 throw new \DomainException(
                     'Dohoda už byla použita ve schválené mzdě — titul srážky ani '
                     . 'začátek účinnosti už měnit nelze.',
+                );
+            }
+            // Den doručení určuje POŘADÍ dohody vůči exekucím (§ 280 odst. 5
+            // o. s. ř.). Jakmile podle něj proběhla schválená srážka, změna by
+            // zpětně přepsala rozvrh, který už dostali věřitelé — doplnit ho
+            // proto jde jen do dohody, která ještě nic nesrazila. Doplnění
+            // chybějícího data u nesražené dohody je naopak vítané: legacy
+            // dohody bez něj se řadí až za všechny exekuce.
+            if ($withheld > 0 && $terms->deliveredOn !== $currentDeliveredOn) {
+                throw new \DomainException(
+                    'Dohoda už byla použita ve schválené mzdě — den doručení '
+                    . 'plátci mzdy už měnit nelze.',
                 );
             }
             if ($terms->totalLimitMinor !== null && $terms->totalLimitMinor < $withheld) {
@@ -255,7 +272,8 @@ final class PayrollDeductionAgreementRepository
                     SET title = ?, deduction_kind = ?,
                         priority_no = ?, requested_minor = ?, basis_points = ?,
                         basis_amount_minor = ?, total_limit_minor = ?,
-                        valid_from = ?, valid_to = ?, recipient_reference = ?,
+                        valid_from = ?, valid_to = ?, delivered_on = ?,
+                        recipient_reference = ?,
                         note = ?, row_version = row_version + 1,
                         version_no = version_no + 1, updated_by = ?
                   WHERE supplier_id = ? AND id = ? AND row_version = ?'
@@ -270,6 +288,7 @@ final class PayrollDeductionAgreementRepository
                 $terms->totalLimitMinor,
                 $terms->validFrom,
                 $terms->validTo,
+                $terms->deliveredOn,
                 $terms->recipientReference,
                 $terms->note,
                 $userId,
@@ -383,7 +402,7 @@ final class PayrollDeductionAgreementRepository
             'SELECT id, version_no, change_kind, title, deduction_kind, status,
                     priority_no, requested_minor, basis_points, basis_amount_minor,
                     total_limit_minor, withheld_total_minor, valid_from, valid_to,
-                    recipient_reference, note, effective_from, reason,
+                    delivered_on, recipient_reference, note, effective_from, reason,
                     actor_user_id, created_at
                FROM payroll_deduction_agreement_versions
               WHERE supplier_id = ? AND agreement_id = ?
@@ -498,12 +517,12 @@ final class PayrollDeductionAgreementRepository
                 (supplier_id, agreement_id, employee_id, version_no, change_kind,
                  title, deduction_kind, status, priority_no, requested_minor,
                  basis_points, basis_amount_minor, total_limit_minor,
-                 withheld_total_minor, valid_from, valid_to, recipient_reference,
-                 note, effective_from, reason, actor_user_id)
+                 withheld_total_minor, valid_from, valid_to, delivered_on,
+                 recipient_reference, note, effective_from, reason, actor_user_id)
              SELECT supplier_id, id, employee_id, version_no, ?, title,
                     deduction_kind, status, priority_no, requested_minor,
                     basis_points, basis_amount_minor, total_limit_minor,
-                    withheld_total_minor, valid_from, valid_to,
+                    withheld_total_minor, valid_from, valid_to, delivered_on,
                     recipient_reference, note, ?, ?, ?
                FROM payroll_deduction_agreements
               WHERE supplier_id = ? AND id = ?'

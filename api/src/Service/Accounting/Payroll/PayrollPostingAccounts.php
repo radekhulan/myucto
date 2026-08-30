@@ -35,6 +35,13 @@ final class PayrollPostingAccounts
     public const KEY_SOCIAL_PAYABLE     = 'social_insurance_credit';
     public const KEY_HEALTH_PAYABLE     = 'health_insurance_credit';
     public const KEY_INCOME_TAX_PAYABLE = 'income_tax_credit';
+    /**
+     * Srážková daň (§ 36 odst. 2 písm. p) a § 6 odst. 4 ZDP) — vlastní účet,
+     * ne táž 342 jako záloha. Odvádí se jinou platbou, v jiném termínu a
+     * vykazuje jiným hlášením, takže na společném účtu nejde saldo přiřadit
+     * k jedné z obou daní. Viz {@see PayrollAccountingDefaults::ACCOUNTS}.
+     */
+    public const KEY_WITHHOLDING_TAX_PAYABLE = 'withholding_tax_credit';
 
     /** @var list<string> Klíče v pořadí, ve kterém se konfigurace čte i zapisuje. */
     public const KEYS = [
@@ -46,6 +53,7 @@ final class PayrollPostingAccounts
         self::KEY_SOCIAL_PAYABLE,
         self::KEY_HEALTH_PAYABLE,
         self::KEY_INCOME_TAX_PAYABLE,
+        self::KEY_WITHHOLDING_TAX_PAYABLE,
     ];
 
     private function __construct(
@@ -57,6 +65,7 @@ final class PayrollPostingAccounts
         public readonly string $socialPayable,
         public readonly string $healthPayable,
         public readonly string $incomeTaxPayable,
+        public readonly string $withholdingTaxPayable,
     ) {}
 
     /**
@@ -90,6 +99,7 @@ final class PayrollPostingAccounts
             $pick(self::KEY_SOCIAL_PAYABLE),
             $pick(self::KEY_HEALTH_PAYABLE),
             $pick(self::KEY_INCOME_TAX_PAYABLE),
+            $pick(self::KEY_WITHHOLDING_TAX_PAYABLE),
         );
     }
 
@@ -105,6 +115,7 @@ final class PayrollPostingAccounts
             self::KEY_SOCIAL_PAYABLE     => $this->socialPayable,
             self::KEY_HEALTH_PAYABLE     => $this->healthPayable,
             self::KEY_INCOME_TAX_PAYABLE => $this->incomeTaxPayable,
+            self::KEY_WITHHOLDING_TAX_PAYABLE => $this->withholdingTaxPayable,
         ];
     }
 
@@ -128,5 +139,14 @@ final class PayrollPostingAccounts
     public function insuranceIsPooled(): bool
     {
         return $this->socialPayable === $this->healthPayable;
+    }
+
+    /**
+     * Účtuje se zálohová i srážková daň na TÝŽ účet? To je stav VŠECH firem
+     * založených před Ú-13 — rozpad je výchozí jen pro nově zakládané.
+     */
+    public function taxIsPooled(): bool
+    {
+        return $this->incomeTaxPayable === $this->withholdingTaxPayable;
     }
 }

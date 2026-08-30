@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
   payrollApi,
+  type PayrollAnnualDocumentBatch,
+  type PayrollAnnualDocumentBatchItem,
   type PayrollDocument,
   type PayrollDocumentBatch,
   type PayrollDocumentBatchItem,
@@ -67,6 +69,7 @@ const bundleError = ref('')
 const exportingScope = ref<PayrollPeriodExportScope | null>(null)
 let loadSequence = 0
 let batchPollTimer: ReturnType<typeof setTimeout> | null = null
+let annualBatchPollTimer: ReturnType<typeof setTimeout> | null = null
 
 const COLUMNS: ColumnDef[] = [
   { key: 'document', labelKey: 'payroll.documents.document', required: true },
@@ -146,115 +149,152 @@ async function loadFocusPersonName(): Promise<void> {
 /*
  * ─── Roční dokumenty za VÍC lidí ────────────────────────────────────────────
  *
- * Do W29 šly roční dokumenty jen po jednom: tlačítka byla `disabled`, dokud
- * nebyla vybraná právě jedna osoba. Pro 50 lidí je to 50× (vybrat osobu → tři
- * tlačítka), pro 500 pětkrát tolik — a přitom měsíční pásky hromadné dávno jsou.
+ * Do W29 šly roční dokumenty jen po jednom, pak je nahradila smyčka
+ * v prohlížeči: jeden požadavek na zaměstnance, synchronně. U firmy s pěti sty
+ * lidmi to bylo pět set požadavků, které skončily na timeoutu nebo zavřením
+ * záložky — a rozdělaná dávka se ztratila i s tím, co už bylo hotové.
  *
- * Dávka jede z prohlížeče, ne ze serverové fronty jako u měsíčních pásek: každé
- * generování je na serveru samostatná transakce s obsahově odvozeným klíčem
- * archivu, takže opakování nevytvoří duplikát a smyčka nepotřebuje vlastní stav
- * v databázi. Cena je, že běh je vázaný na otevřenou záložku — proto průběh
- * VIDÍ (hotovo/celkem), jde ZASTAVIT a neúspěšné řádky se vypíšou jménem
- * i důvodem, ne jako počet.
+ * Teď jde ven JEDEN požadavek, který dávku zařadí do serverové fronty
+ * (`payroll_annual_document_batches`), a prohlížeč jen sleduje průběh. Běh
+ * přežije zavřený prohlížeč i restart, položky mají vlastní pokusy s odkladem
+ * a neúspěšný řádek jde opakovat jednotlivě.
  *
- * Trvalá serverová fronta po vzoru `ApprovedRevisionDocumentBatchService` je
- * logický další krok (přežila by zavření prohlížeče); chtěla by ale vlastní
- * tabulku dávek pro roční rozsah, protože stávající visí na běhu a revizi.
- *
- * Osoby, které už dokument daného druhu za rok mají, se PŘESKAKUJÍ: jejich
- * nahrazení je oprava (§ opravné potvrzení) a ta má povinný důvod, který za
- * uživatele vymyslet nelze. Vypíšou se jménem, aby bylo jasné, že nezmizely.
+ * Osoby, které už potvrzení daného druhu za rok mají, se PŘESKAKUJÍ (`skipped`):
+ * jejich nahrazení je oprava (§ opravné potvrzení) a ta má povinný důvod, který
+ * za uživatele vymyslet nelze. O tom teď rozhoduje SERVER nad úplnými daty, ne
+ * prohlížeč nad načtenou stránkou. Vypíšou se jménem, aby bylo jasné, že
+ * nezmizely.
  */
 const batchScope = ref<'selected' | 'all'>('selected')
-const batchRunningKind = ref<AnnualGenerationKind | null>(null)
-const batchCancelled = ref(false)
-const batchDone = ref(0)
-const batchTotal = ref(0)
-const batchFailures = ref<Array<{ id: number; name: string; reason: string }>>([])
-const batchSkipped = ref<Array<{ id: number; name: string }>>([])
-const batchCompletedKind = ref<AnnualGenerationKind | null>(null)
+const enqueuingAnnualKind = ref<AnnualGenerationKind | null>(null)
+const annualBatch = ref<PayrollAnnualDocumentBatch | null>(null)
+const annualBatchItems = ref<PayrollAnnualDocumentBatchItem[]>([])
+const retryingAnnualItemId = ref<number | null>(null)
 
-const batchActive = computed(() => batchRunningKind.value !== null)
-
-function resetBatchReport(): void {
-  batchDone.value = 0
-  batchTotal.value = 0
-  batchFailures.value = []
-  batchSkipped.value = []
-  batchCompletedKind.value = null
-}
-
-function cancelBatch(): void {
-  batchCancelled.value = true
-}
-
-/** Cílový seznam osob: buď jedna vybraná, nebo všichni aktivní lidé firmy. */
-async function batchTargets(): Promise<Array<{ id: number; name: string }>> {
-  if (batchScope.value === 'selected') {
-    const employeeId = selectedEmployeeId.value
-    if (employeeId === null) return []
-    return [{
-      id: employeeId,
-      name: focusPersonName.value ?? String(employeeId),
-    }]
-  }
-  const options = await payrollApi.peopleOptions()
-  return options
-    .filter(option => option.is_active)
-    .map(option => ({ id: option.id, name: option.full_name }))
-}
-
+const annualBatchKind = computed<AnnualGenerationKind | null>(() =>
+  annualBatch.value?.document_kind ?? null)
+const annualBatchOpen = computed(() =>
+  annualBatch.value !== null && annualBatch.value.status !== 'completed')
+/** Tlačítka blokuje jen NEDOKONČENÁ dávka; hotová zpráva zůstává vidět. */
+const batchActive = computed(() =>
+  enqueuingAnnualKind.value !== null || annualBatchOpen.value)
+const batchRunningKind = computed<AnnualGenerationKind | null>(() =>
+  enqueuingAnnualKind.value ?? (annualBatchOpen.value ? annualBatchKind.value : null))
+const batchTotal = computed(() => annualBatch.value?.item_count ?? 0)
+const batchDone = computed(() => {
+  const batch = annualBatch.value
+  if (batch === null) return 0
+  return batch.succeeded_count + batch.failed_count + batch.skipped_count
+})
+const batchSkipped = computed(() =>
+  annualBatchItems.value
+    .filter(item => item.status === 'skipped')
+    .map(item => ({ id: item.id, name: item.employee_name })))
 /**
- * Má už osoba dokument toho druhu za rok? Rozhoduje se z NAČTENÉ stránky, takže
- * to není záruka — je to jen levné vynechání toho, co je vidět. Server sám
- * duplikát nevytvoří (klíč archivu je odvozený z obsahu) a opravu si vyžádá
- * odvoláním na existující doklad.
+ * Chyba se hlásí za KAŽDÉHO ČLOVĚKA jménem i důvodem, ne jako počet — to byla
+ * jediná věc, kterou klientská smyčka uměla dobře, a nesmí se ztratit.
  */
-function hasAnnualDocument(employeeId: number, kind: AnnualGenerationKind): boolean {
-  const documentKind = kind === 'payroll_sheet' ? 'annual_payroll_sheet' : kind
-  return annualItems.value.some(item =>
-    item.employee_id === employeeId && item.document_kind === documentKind)
+const batchFailures = computed(() =>
+  annualBatchItems.value
+    .filter(item => item.status === 'failed' || item.status === 'retry_wait')
+    .map(item => ({
+      id: item.id,
+      name: item.employee_name,
+      reason: item.last_error_message
+        ?? t('payroll.documents.batch_annual.item_failed'),
+      retriable: true,
+    })))
+
+function clearAnnualBatchPoll(): void {
+  if (annualBatchPollTimer !== null) clearTimeout(annualBatchPollTimer)
+  annualBatchPollTimer = null
+}
+
+/** Zavře jen zprávu v prohlížeči. Dávka na serveru běží dál. */
+function dismissAnnualBatch(): void {
+  clearAnnualBatchPoll()
+  annualBatch.value = null
+  annualBatchItems.value = []
+}
+
+async function loadAnnualBatchItems(batchId: number): Promise<void> {
+  const items: PayrollAnnualDocumentBatchItem[] = []
+  let nextOffset = 0
+  let total = 1
+  while (nextOffset < total) {
+    const page = await payrollApi.annualDocumentBatchItems(batchId, {
+      limit: 100,
+      offset: nextOffset,
+    })
+    items.push(...page.items)
+    total = page.total
+    nextOffset += page.items.length
+    if (page.items.length === 0) break
+  }
+  if (annualBatch.value?.id === batchId) annualBatchItems.value = items
+}
+
+async function pollAnnualBatch(loadItems = false): Promise<void> {
+  const batchId = annualBatch.value?.id
+  if (!batchId) return
+  clearAnnualBatchPoll()
+  try {
+    const previous = annualBatch.value
+    const current = await payrollApi.annualDocumentBatch(batchId)
+    if (annualBatch.value?.id !== batchId) return
+    annualBatch.value = current
+    const changed = previous === null
+      || previous.status !== current.status
+      || previous.succeeded_count !== current.succeeded_count
+      || previous.failed_count !== current.failed_count
+      || previous.skipped_count !== current.skipped_count
+    if (loadItems || changed) await loadAnnualBatchItems(batchId)
+    if (current.status === 'completed') {
+      await load()
+      return
+    }
+    annualBatchPollTimer = setTimeout(() => void pollAnnualBatch(), 2500)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_annual.poll_failed')))
+  }
 }
 
 async function runAnnualBatch(kind: AnnualGenerationKind): Promise<void> {
   if (batchActive.value || generatingAnnualKind.value !== null) return
-  resetBatchReport()
-  batchCancelled.value = false
-  batchRunningKind.value = kind
+  clearAnnualBatchPoll()
+  annualBatchItems.value = []
+  enqueuingAnnualKind.value = kind
   try {
-    const targets = await batchTargets()
-    batchTotal.value = targets.length
-    for (const target of targets) {
-      if (batchCancelled.value) break
-      if (hasAnnualDocument(target.id, kind)) {
-        batchSkipped.value.push(target)
-        batchDone.value += 1
-        continue
-      }
-      try {
-        if (kind === 'payroll_sheet') {
-          await payrollApi.generatePayrollSheet(target.id, year.value)
-        } else {
-          await payrollApi.generateTaxCertificate(target.id, year.value, kind, {
-            supersedes_document_id: null,
-            correction_reason: null,
-          })
-        }
-      } catch (error) {
-        batchFailures.value.push({
-          id: target.id,
-          name: target.name,
-          reason: apiErrorMessage(error, t('payroll.documents.batch_annual.item_failed')),
-        })
-      }
-      batchDone.value += 1
-    }
-    batchCompletedKind.value = kind
+    annualBatch.value = await payrollApi.enqueueAnnualDocumentBatch(
+      kind,
+      year.value,
+      batchScope.value,
+      batchScope.value === 'selected' ? selectedEmployeeId.value : null,
+    )
+    toast.success(t('payroll.documents.batch_annual.queued', {
+      count: annualBatch.value.item_count,
+    }))
+    await pollAnnualBatch(true)
   } catch (error) {
-    toast.error(apiErrorMessage(error, t('payroll.documents.batch_annual.targets_failed')))
+    annualBatch.value = null
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_annual.enqueue_failed')))
   } finally {
-    batchRunningKind.value = null
-    await load()
+    enqueuingAnnualKind.value = null
+  }
+}
+
+async function retryAnnualBatchItem(itemId: number): Promise<void> {
+  const batchId = annualBatch.value?.id
+  if (!batchId || retryingAnnualItemId.value !== null) return
+  retryingAnnualItemId.value = itemId
+  try {
+    await payrollApi.retryAnnualDocumentBatchItem(batchId, itemId)
+    toast.success(t('payroll.documents.batch_annual.retry_queued'))
+    await pollAnnualBatch(true)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.batch_annual.retry_failed')))
+  } finally {
+    retryingAnnualItemId.value = null
   }
 }
 
@@ -631,7 +671,10 @@ watch(activeTab, () => {
 })
 watch([selectedEmployeeId, year], cancelCorrection)
 onMounted(load)
-onBeforeUnmount(clearBatchPoll)
+onBeforeUnmount(() => {
+  clearBatchPoll()
+  clearAnnualBatchPoll()
+})
 </script>
 
 <template>
@@ -959,31 +1002,47 @@ onBeforeUnmount(clearBatchPoll)
         </p>
         <ActionBar :actions="annualActions" />
       </div>
-      <!-- Průběh dávky: bez něj by 500 lidí bylo jen dlouhé ticho. -->
+      <!--
+        Průběh dávky: bez něj by 500 lidí bylo jen dlouhé ticho. Zdrojem je
+        SERVEROVÁ fronta, takže zpráva mluví pravdu i po znovunačtení stránky
+        a „zavřít" jen schová panel, dávku nezruší.
+      -->
       <section
-        v-if="batchActive || batchCompletedKind"
+        v-if="annualBatch"
         data-test="annual-batch-report"
-        class="mt-4 rounded-lg border border-payroll-500/30 bg-payroll-50 p-4"
+        class="mt-4 rounded-lg border p-4"
+        :class="annualBatch.status === 'completed'
+          ? (annualBatch.failed_count > 0
+            ? 'border-danger-500/30 bg-danger-50'
+            : 'border-success-500/30 bg-success-50')
+          : 'border-payroll-500/30 bg-payroll-50'"
         role="status"
       >
         <div class="flex flex-wrap items-start justify-between gap-3">
-          <p class="text-sm font-medium text-neutral-900">
-            {{ t('payroll.documents.batch_annual.progress', {
-              done: batchDone,
-              total: batchTotal,
-            }) }}
-          </p>
+          <div>
+            <p class="text-sm font-medium text-neutral-900">
+              {{ t('payroll.documents.batch_annual.progress', {
+                done: batchDone,
+                total: batchTotal,
+              }) }}
+            </p>
+            <p class="mt-1 text-xs text-neutral-600">
+              {{ t(`payroll.documents.batch_annual.status.${annualBatch.status}`) }}
+              <template v-if="annualBatchOpen">
+                · {{ t('payroll.documents.batch_annual.server_hint') }}
+              </template>
+            </p>
+          </div>
           <button
-            v-if="batchActive"
             type="button"
-            data-test="annual-batch-cancel"
-            :class="btnOutline('warning')"
-            @click="cancelBatch"
+            data-test="annual-batch-dismiss"
+            :class="btnOutline('neutral')"
+            @click="dismissAnnualBatch"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.x" />
             </svg>
-            {{ t('payroll.documents.batch_annual.cancel') }}
+            {{ t('payroll.documents.batch_annual.dismiss') }}
           </button>
         </div>
         <div class="mt-3 h-2 overflow-hidden rounded-full bg-neutral-200" role="progressbar" :aria-valuemin="0" :aria-valuemax="batchTotal" :aria-valuenow="batchDone">
@@ -1000,8 +1059,22 @@ onBeforeUnmount(clearBatchPoll)
         <div v-if="batchFailures.length" class="mt-3 text-sm text-danger-700" data-test="annual-batch-failures">
           <p class="font-medium">{{ t('payroll.documents.batch_annual.failed_title', { count: batchFailures.length }) }}</p>
           <ul class="mt-1 space-y-1">
-            <li v-for="row in batchFailures" :key="row.id">
-              <span class="font-medium">{{ row.name }}</span> — {{ row.reason }}
+            <li v-for="row in batchFailures" :key="row.id" class="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                <span class="font-medium">{{ row.name }}</span> - {{ row.reason }}
+              </span>
+              <button
+                type="button"
+                data-test="retry-annual-batch-item"
+                :class="btnOutline('warning')"
+                :disabled="retryingAnnualItemId !== null"
+                @click="retryAnnualBatchItem(row.id)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.cycle" />
+                </svg>
+                {{ t('payroll.documents.batch_annual.retry') }}
+              </button>
             </li>
           </ul>
         </div>

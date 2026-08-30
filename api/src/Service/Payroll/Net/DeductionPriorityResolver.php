@@ -25,23 +25,24 @@ namespace MyInvoice\Service\Payroll\Net;
  * nejdřív den doručení, pak `priority`, a uvnitř jedné skupiny se dělí POMĚRNĚ
  * podle nárokovaných částek metodou největších zbytků.
  *
- * ## Co tenhle rozvrh NEŘEŠÍ
+ * ## Rozvrh vůči exekucím je jinde
  *
- * Kapacita, která sem přijde, je už očištěná o exekuční srážky
- * ({@see \MyInvoice\Service\Payroll\Garnishment\GarnishmentCalculator::voluntaryDeductionCapacity()}),
- * takže dohoda dostane vždy až zbytek po exekucích. Pro dohodu doručenou plátci
- * DŘÍV než exekuční příkaz to je málo — podle § 280 odst. 5 má lepší pořadí
- * a měla by se uspokojit před ním (nález E-03). Rozvrh mezi dohodou a exekucí
- * umí jen exekuční jádro, které pořadí podle dne doručení počítá
- * ({@see \MyInvoice\Service\Payroll\Garnishment\EnforcementPriorityResolver}) —
- * a rejstřík pohledávek na to je připravený:
- * {@see \MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis::Agreement}
- * je platný právní titul a `priority_date` nese den doručení. Dohodu s lepším
- * pořadím než exekuce je proto potřeba zavést do rejstříku pohledávek, ne do
- * téhle tabulky. Zbývá k tomu doplnit `delivered_on` do
- * `payroll_deduction_agreements` a přemostění v sestavovači mzdového běhu;
- * dokud to není hotové, `deliveredOn` sem chodí jako `null` a chování je
- * shodné s dřívějším.
+ * Kapacita, která sem přijde, není „zbytek po exekucích" bezpodmínečně. Pořadí
+ * MEZI dohodou a exekucí umí jen exekuční jádro, protože jen ono zná obecnou
+ * nepřednostní část a den doručení každé pohledávky. Dohoda s vyplněným
+ * `delivered_on` se do jeho rozvrhu přemosťuje jako pohledávka s právním titulem
+ * {@see \MyInvoice\Service\Payroll\Garnishment\DeductionLegalBasis::VoluntaryAgreement}
+ * a `priority_date` = den doručení
+ * ({@see \MyInvoice\Service\Payroll\Run\PayrollRunGarnishmentProcessor}), takže
+ * dohoda doručená DŘÍV než exekuční příkaz jí ubere a částka, která na ni
+ * připadla, doteče sem jako větší kapacita
+ * ({@see \MyInvoice\Service\Payroll\Garnishment\GarnishmentCalculator::voluntaryDeductionCapacity()}).
+ * Sráží se ale až tady — do exekuční srážky se přemostěná dohoda nezapočítá,
+ * jinak by ji zaměstnanec zaplatil dvakrát.
+ *
+ * Dohoda BEZ dne doručení se nepřemosťuje a dostane jen to, co exekuce nechaly,
+ * přesně jako do 8/2026 (nález E-03). Zpětná kompatibilita existujících dat
+ * proto stojí na `deliveredOn === null`.
  */
 final class DeductionPriorityResolver
 {

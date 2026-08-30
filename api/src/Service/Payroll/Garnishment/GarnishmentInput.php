@@ -13,6 +13,14 @@ final readonly class GarnishmentInput
      * enforced by an active order in this payroll calculation.
      *
      * @param list<DeductionClaim> $claims
+     * @param list<DeductionClaim> $voluntaryAgreements Dohody o srážkách ze mzdy
+     *   (`payroll_deduction_agreements`) přemostěné do rozvrhu jen kvůli POŘADÍ.
+     *   Nejsou to pohledávky rejstříku: exekuční jádro je nesráží ani nevyplácí,
+     *   sráží je až čistá mzda z kapacity dobrovolných srážek. Do rozvrhu vstupují
+     *   proto, že podle § 148 odst. 2 zákoníku práce ve spojení s § 280 odst. 5
+     *   o. s. ř. soutěží o obecnou nepřednostní část podle dne doručení plátci
+     *   mzdy společně s exekucemi — dohoda doručená dřív musí exekuci ubrat.
+     *   Viz {@see GarnishmentCalculator::voluntaryDeductionCapacity()}.
      */
     public function __construct(
         public string $period,
@@ -31,7 +39,20 @@ final readonly class GarnishmentInput
         public bool $claimRegisterEvidenceComplete,
         public SpousePensionEvidence $spousePensionEvidence =
             SpousePensionEvidence::Unknown,
+        public array $voluntaryAgreements = [],
     ) {
+        foreach ($voluntaryAgreements as $agreement) {
+            if ($agreement->legalBasis !== DeductionLegalBasis::VoluntaryAgreement) {
+                throw new InvalidArgumentException(
+                    'Přemostěná dohoda o srážkách musí mít právní titul dohody.',
+                );
+            }
+            if ($agreement->category->isPriority()) {
+                throw new InvalidArgumentException(
+                    'Dohoda o srážkách nemůže být vedena jako přednostní pohledávka.',
+                );
+            }
+        }
         if ($eligibleDependants < 0) {
             throw new InvalidArgumentException('Eligible dependant count cannot be negative.');
         }
@@ -65,6 +86,7 @@ final readonly class GarnishmentInput
             $this->protectedAmountOverrideVerified,
             $this->claimRegisterEvidenceComplete,
             $this->spousePensionEvidence,
+            $this->voluntaryAgreements,
         );
     }
 
@@ -83,6 +105,12 @@ final readonly class GarnishmentInput
         $claims = $this->claims;
         usort(
             $claims,
+            static fn (DeductionClaim $left, DeductionClaim $right): int =>
+                $left->id <=> $right->id,
+        );
+        $agreements = $this->voluntaryAgreements;
+        usort(
+            $agreements,
             static fn (DeductionClaim $left, DeductionClaim $right): int =>
                 $left->id <=> $right->id,
         );
@@ -124,6 +152,17 @@ final readonly class GarnishmentInput
             ],
             'payment_date' => $this->paymentDate,
             'period' => $this->period,
+            // Klíč chybí, dokud osoba nemá přemostěnou žádnou dohodu — kanonický
+            // tvar vstupu se hashuje a bajtově porovnává (idempotence
+            // `payroll_enforcement_month_results`), takže snímky pořízené před
+            // nálezem E-03 musí zůstat beze změny.
+            ...($agreements === []
+                ? []
+                : ['voluntary_agreements' => array_map(
+                    static fn (DeductionClaim $claim): array =>
+                        $claim->toCanonicalArray(),
+                    $agreements,
+                )]),
         ];
     }
 
@@ -185,6 +224,35 @@ final readonly class GarnishmentInput
             self::bool($evidence, 'protected_amount_override_verified'),
             self::bool($evidence, 'claim_register_complete'),
             self::spousePension($evidence),
+            self::voluntaryAgreements($data),
+        );
+    }
+
+    /**
+     * Snímky pořízené před nálezem E-03 klíč neobsahují — tehdy dohody o pořadí
+     * vůči exekucím nesoutěžily vůbec. Chybějící hodnota je prázdný seznam,
+     * tedy přesně tehdejší chování.
+     *
+     * @param array<string,mixed> $data
+     * @return list<DeductionClaim>
+     */
+    private static function voluntaryAgreements(array $data): array
+    {
+        $value = $data['voluntary_agreements'] ?? null;
+        if ($value === null) {
+            return [];
+        }
+        if (!is_array($value) || !array_is_list($value)) {
+            throw new InvalidArgumentException(
+                'voluntary_agreements must be a list.',
+            );
+        }
+
+        return array_map(
+            static fn (mixed $claim): DeductionClaim => DeductionClaim::fromCanonicalArray(
+                self::row($claim, 'voluntary_agreement'),
+            ),
+            $value,
         );
     }
 

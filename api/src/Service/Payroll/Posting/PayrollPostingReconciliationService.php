@@ -71,6 +71,18 @@ final class PayrollPostingReconciliationService
             'dimension' => null,
             'nature' => 'liability',
         ],
+        /*
+         * Daň ze závislé činnosti — zálohová I srážková, dohromady.
+         *
+         * Od Ú-13 mají obě daně vlastní účet (342.100 / 342.200), takže se
+         * jejich SALDO dá konečně dohledat odděleně. Kategorie zůstává jedna
+         * a je to záměr: páruje se přes LEFT(account_code, 3), takže obě
+         * analytiky spadnou pod 342 a firma, která rozpad nemá (všechny
+         * založené před Ú-13), vidí přesně totéž číslo jako dřív. Dělit
+         * kategorii podle účtu nejde — který účet je která daň, ví teprve
+         * kontace té které firmy, a u zaúčtované revize navíc kontace
+         * ZMRAZENÁ ve snapshotu, ne ta dnešní.
+         */
         'income_tax' => [
             'prefixes' => PayrollPostingAccountPolicy::INCOME_TAX_PREFIXES,
             'dimension' => null,

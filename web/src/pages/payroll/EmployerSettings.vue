@@ -69,6 +69,7 @@ const accountRows: Array<{
   { key: 'social_insurance', debit: null, credit: 'social_insurance_credit' },
   { key: 'health_insurance', debit: null, credit: 'health_insurance_credit' },
   { key: 'income_tax', debit: null, credit: 'income_tax_credit' },
+  { key: 'withholding_tax', debit: null, credit: 'withholding_tax_credit' },
   { key: 'other_deductions', debit: null, credit: 'other_deductions_credit' },
   { key: 'partner_settlement', debit: null, credit: 'partner_settlement_credit' },
   { key: 'risky_savings', debit: 'risky_savings_debit', credit: 'risky_savings_credit' },
@@ -91,7 +92,10 @@ const defaultAccounts: PayrollEmployerAccounts = {
   // syntetikou, nebo s analytikou) tyhle hodnoty vždycky přepíše.
   social_insurance_credit: '336',
   health_insurance_credit: '336',
+  // Totéž platí pro 342.100 / 342.200 z migrace 1648 — obě daně se před
+  // načtením nastavení ukazují na syntetice, kterou má v osnově každá firma.
   income_tax_credit: '342',
+  withholding_tax_credit: '342',
   other_deductions_credit: '379',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
@@ -202,7 +206,10 @@ function fillForm(value: PayrollEmployerSettings) {
   form.payroll_contact_name = value.payroll_contact_name
   form.payroll_contact_email = value.payroll_contact_email
   form.payroll_contact_phone = value.payroll_contact_phone
-  form.accounts = { ...value.accounts }
+  // Sloučení, ne náhrada: server, který novou předkontaci ještě nezná (starší
+  // API proti novějšímu klientovi, nedoběhlá migrace), by jinak nechal klíč
+  // `undefined` a stránka by spadla na prvním našeptávači účtu.
+  form.accounts = { ...defaultAccounts, ...value.accounts }
   formOffices.value = value.offices.map(office => ({ ...office, code_manual: true }))
   showValidation.value = false
 }
@@ -401,6 +408,7 @@ const ACCOUNT_ROW_HINTS: ReadonlySet<string> = new Set([
   'employee_receivable',
   'non_deductible_benefit',
   'travel_expense',
+  'withholding_tax',
 ])
 
 function accountRowHint(key: string): string {

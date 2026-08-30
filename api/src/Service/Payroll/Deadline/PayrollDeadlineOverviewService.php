@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
+use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -33,7 +34,11 @@ use Psr\Clock\ClockInterface;
  * 2. **odvody** — nezaplacené závazky ze splatnosti podle
  *    {@see PayrollLevyDeadlinePolicy} (pojistné, zálohová a srážková daň),
  * 3. **lhůty u lidí** — nevyřízené položky nástupního a výstupního checklistu
- *    s odvozenou zákonnou lhůtou (přihláška ČSSZ, oznámení pojišťovně, ELDP).
+ *    s odvozenou zákonnou lhůtou (přihláška ČSSZ, oznámení pojišťovně, ELDP),
+ * 4. **roční vyúčtování daně** — nepodané DPZVD6 a DPSVD2 se lhůtou podle
+ *    {@see PayrollTaxStatementDeadlinePolicy}. Modul obě vyúčtování uměl
+ *    sestavit i odeslat, ale jejich lhůta žila jen v komentáři a ve větě pod
+ *    panelem — tedy nikde, kde by ji někdo zmeškal včas.
  *
  * ## Co se do něj vědomě nedostane
  *
@@ -74,6 +79,7 @@ final readonly class PayrollDeadlineOverviewService
         'levy',
         'checklist',
         'registration_change',
+        'tax_statement',
     ];
 
     /** Kolik dnů dopředu se termín považuje za „brzy". */
@@ -96,6 +102,7 @@ final readonly class PayrollDeadlineOverviewService
         private PayrollDeadlineAssessmentService $assessments,
         private PayrollRegistrationChangeProposalRepository $registrationChanges,
         private PayrollRegistrationChangeDetectionService $changeDetection,
+        private PayrollTaxStatementDeadlinePolicy $taxStatementDeadlines,
         private ClockInterface $clock,
     ) {}
 
@@ -152,6 +159,7 @@ final readonly class PayrollDeadlineOverviewService
             ...$this->levyItems($supplierId, $from, $to),
             ...$this->checklistItems($supplierId, $from, $to),
             ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
+            ...$this->taxStatementItems($supplierId, $from, $to),
         ];
         usort(
             $items,
@@ -346,6 +354,110 @@ final readonly class PayrollDeadlineOverviewService
                 'deadline_source_status' => 'statute_verified',
                 'deadline_ruleset_id' => (string) $row['deadline_ruleset_id'],
                 'path' => '/payroll/people/' . (int) $row['employee_id'],
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Nepodaná roční vyúčtování daně s termínem v okně.
+     *
+     * Na rozdíl od ostatních pramenů tady NENÍ řádek v evidenci, který by se
+     * dal vypsat: povinnost vzniká ze zákona tím, že firma v roce vyplácela
+     * příjmy ze závislé činnosti, ne tím, že ji někdo někam zapsal. Termín se
+     * proto skládá obráceně — nejdřív se spočítá, které roky mají lhůtu
+     * v okně, a teprve pak se u nich ověřuje podklad a stav podání. Kdyby se
+     * měla povinnost nejdřív materializovat do `payroll_obligations`, znamenalo
+     * by to nový agenda kód, migraci ENUMu a generátor, který jednou za rok
+     * založí dva řádky — a hlavně by termín nevznikl firmě, která si modul
+     * zapne v únoru, tedy přesně té, která ho potřebuje nejvíc.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function taxStatementItems(
+        int $supplierId,
+        string $from,
+        string $to,
+    ): array {
+        /** @var array<string,PayrollTaxStatementDeadlineWindow> $windows */
+        $windows = [];
+        $firstYear = max(
+            PayrollTaxStatementDeadlinePolicy::SUPPORTED_FROM_YEAR,
+            (int) substr($from, 0, 4) - 1,
+        );
+        $lastYear = min(
+            PayrollTaxStatementDeadlinePolicy::SUPPORTED_TO_YEAR,
+            (int) substr($to, 0, 4),
+        );
+        for ($year = $firstYear; $year <= $lastYear; ++$year) {
+            foreach (TaxStatementService::FORMS as $formCode) {
+                $window = $this->taxStatementDeadlines->forYear($formCode, $year);
+                if ($window->dueOn >= $from && $window->dueOn <= $to) {
+                    $windows[$formCode . ':' . $year] = $window;
+                }
+            }
+        }
+        if ($windows === []) {
+            return [];
+        }
+
+        $years = array_values(array_unique(array_map(
+            static fn (PayrollTaxStatementDeadlineWindow $w): int => $w->year,
+            $windows,
+        )));
+        $basis = $this->repository->taxStatementBasisYears($supplierId, $years);
+        $filed = $this->repository->filedTaxStatementYears(
+            $supplierId,
+            TaxStatementService::FORMS,
+            $years,
+        );
+
+        $items = [];
+        foreach ($windows as $window) {
+            $year = $window->year;
+            $yearBasis = $basis[$year] ?? null;
+            if ($yearBasis === null || $yearBasis['approved_runs'] < 1) {
+                continue;
+            }
+            // Vyúčtování srážkové daně podává jen ten, kdo v roce opravdu
+            // srážel. Připomínat prázdný tiskopis firmě, která má samé HPP
+            // s podepsaným prohlášením, je přesně ten druh hlášky, kterou se
+            // obsluha naučí přeskakovat — a s ní i tu vedle.
+            if ($window->formCode === TaxStatementService::FORM_WITHHOLDING_TAX
+                && $yearBasis['withholding_minor'] === 0
+            ) {
+                continue;
+            }
+            if (in_array($year, $filed[$window->formCode] ?? [], true)) {
+                continue;
+            }
+
+            $items[] = [
+                'source' => 'tax_statement',
+                'reference' => 'tax_statement:' . $window->formCode . ':' . $year,
+                'title' => $window->formCode,
+                'subject' => $window->legalReference,
+                // Vyúčtování je ROČNÍ; `period` je v přehledu měsíc a klient ho
+                // tak i formátuje, takže „prosinec 2025" by tvrdil něco jiného
+                // než tiskopis. Rok nese `statement_year`.
+                'period' => null,
+                'due_on' => $window->dueOn,
+                'phase' => $this->phase($window->dueOn),
+                'days_to_due' => $this->daysToDue($window->dueOn),
+                'is_overdue' => $this->phase($window->dueOn) === 'overdue',
+                'form_code' => $window->formCode,
+                'statement_year' => $year,
+                'statutory_due_on' => $window->statutoryDueOn,
+                'electronic_due_on' => $window->electronicDueOn,
+                'extendable' => $window->extendable,
+                'deadline_source' => $window->legalReference,
+                'deadline_source_status' => 'statute_verified',
+                'deadline_ruleset_id' => $window->rulesetId,
+                // Panel vyúčtování žije na mzdovém rozcestníku, ne na vlastní
+                // routě; kotva doveze účetní rovnou k němu, ne na začátek
+                // dlouhé stránky.
+                'path' => '/payroll#payroll-tax-statement',
             ];
         }
 

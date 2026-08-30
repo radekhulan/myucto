@@ -16,7 +16,13 @@ final class PayrollPostingAccountPolicy
     /** @var list<string> */
     public const SOCIAL_HEALTH_INSURANCE_PREFIXES = ['336'];
 
-    /** @var list<string> */
+    /**
+     * Daň ze závislé činnosti. Prefix je SYNTETIKA, takže pokrývá i rozpad
+     * Ú-13 na zálohovou (342.100) a srážkovou (342.200) daň — reconciliace
+     * i ochrana proti kolizní předkontaci fungují na obou analytikách stejně.
+     *
+     * @var list<string>
+     */
     public const INCOME_TAX_PREFIXES = ['342'];
 
     /** @var list<string> */
