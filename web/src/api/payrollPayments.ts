@@ -204,6 +204,15 @@ export interface PayrollPaymentMatch {
   evidence_currency_code: string
   evidence_fact_hash: string
   batch_reference: string | null
+  /**
+   * Jak platba dopadla v deníku (Ú-16). `null` znamená, že je spárování starší
+   * než tahle funkce a o zaúčtování se nikdy nepokusilo — to není totéž co
+   * `skipped`, kde se pokus udělal a neprošel.
+   */
+  posting_status: 'posted' | 'posted_elsewhere' | 'skipped' | 'not_applicable' | null
+  /** Strojový důvod u `skipped`; text pro člověka skládá UI z i18n. */
+  posting_skipped_reason: string | null
+  journal_entry_id: number | null
   liability_kind: string
   /**
    * Směr a měna PŘÍSLUŠNÉ ALOKACE jedou s událostí. Nabídka alokací je od

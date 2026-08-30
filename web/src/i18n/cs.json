@@ -1232,6 +1232,24 @@
         "event": {
           "matched": "Úhrada",
           "reversed": "Reverze"
+        },
+        "posting_title": "Zaúčtování",
+        "posting": {
+          "posted": "Zaúčtováno mzdami",
+          "posted_elsewhere": "Zaúčtováno jinde",
+          "skipped": "Nezaúčtováno",
+          "not_applicable": "Bez deníku",
+          "not_attempted": "Bez pokusu"
+        },
+        "posting_reason": {
+          "cash_document_not_posted": "Pokladní doklad zatím není zaúčtovaný.",
+          "evidence_incomplete": "Doklad o platbě je neúplný.",
+          "liability_not_found": "K platbě se nenašel mzdový závazek.",
+          "liability_posted_elsewhere": "Závazek už zaúčtoval jiný modul.",
+          "revision_snapshot_missing": "Chybí zmrazená kontace mzdové revize.",
+          "zero_amount": "Nulová částka se neúčtuje.",
+          "ambiguous_net_wage_account": "Osoba má poměry na dvou závazkových účtech — rozdělení čisté mzdy určuje mzdový předpis, ne platba.",
+          "bank_entry_id": "Bankovní pohyb už má vlastní účetní zápis."
         }
       },
       "materialize_blocked": "Závazky vzniknou až ze schválené revize mzdového běhu. Nejdřív schvalte revizi za toto období v Mzdových bězích.",

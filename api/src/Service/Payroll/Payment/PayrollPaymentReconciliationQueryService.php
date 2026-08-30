@@ -663,6 +663,9 @@ final class PayrollPaymentReconciliationQueryService
                     liability.direction AS allocation_direction,
                     liability.currency_code AS allocation_currency_code,
                     employee.full_name AS employee_name,
+                    posting.posting_status,
+                    posting.posting_skipped_reason,
+                    posting.journal_entry_id,
                     CASE
                       WHEN payment_match.event_kind = "matched"
                       THEN payment_match.amount_minor + COALESCE((
@@ -697,6 +700,12 @@ final class PayrollPaymentReconciliationQueryService
                LEFT JOIN payroll_employees employee
                  ON employee.supplier_id = liability.supplier_id
                 AND employee.id = liability.employee_id
+          -- Satelit protizápisu (migrace 1660). LEFT JOIN schválně: spárování
+          -- z doby před nasazením Ú-16 tu řádek nemá a znamená to „o zaúčtování
+          -- se nikdy nepokusilo", ne „nepovedlo se".
+          LEFT JOIN payroll_payment_match_postings posting
+                 ON posting.supplier_id = payment_match.supplier_id
+                AND posting.match_id = payment_match.id
               WHERE payment_match.supplier_id = ?
                 AND run.period_start >= ?
                 AND run.period_start < ?'
@@ -787,6 +796,25 @@ final class PayrollPaymentReconciliationQueryService
                 'batch_reference' => self::nullableText(
                     $row,
                     'batch_reference',
+                ),
+                // `null` = spárování je starší než Ú-16, o zaúčtování se nikdy
+                // nepokusilo. Frontend to musí odlišit od `skipped`, jinak by
+                // účetní hledala chybu tam, kde žádná není.
+                'posting_status' => $row['posting_status'] === null
+                    ? null
+                    : self::enum($row, 'posting_status', [
+                        'posted',
+                        'posted_elsewhere',
+                        'skipped',
+                        'not_applicable',
+                    ]),
+                'posting_skipped_reason' => self::nullableText(
+                    $row,
+                    'posting_skipped_reason',
+                ),
+                'journal_entry_id' => self::nullableInteger(
+                    $row,
+                    'journal_entry_id',
                 ),
                 'liability_kind' => self::text(
                     $row,

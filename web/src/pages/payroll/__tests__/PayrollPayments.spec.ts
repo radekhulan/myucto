@@ -1266,4 +1266,79 @@ describe('PayrollPayments', () => {
     expect(m.searchOptions).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="searchable-select-truncated"]').exists()).toBe(false)
   })
+
+  /**
+   * Ú-16: platba si nese, jestli a kým se zaúčtovala. Rozdíl mezi „o zaúčtování
+   * se nikdy nepokusilo" (spárování starší než ta funkce) a „pokus proběhl a
+   * neprošel" musí být na obrazovce vidět — jinak účetní hledá u historických
+   * plateb vadu, která neexistuje.
+   */
+  it('rozlišuje stav zaúčtování platby včetně chybějícího pokusu', async () => {
+    const event = (
+      id: number,
+      posting: {
+        posting_status: 'posted' | 'posted_elsewhere' | 'skipped' | 'not_applicable' | null
+        posting_skipped_reason?: string | null
+      },
+    ) => ({
+      id,
+      allocation_id: 81,
+      liability_id: 41,
+      event_kind: 'matched' as const,
+      source_match_id: null,
+      amount_minor: 10_000,
+      evidence_kind: 'bank' as const,
+      bank_statement_id: 91,
+      bank_transaction_id: 92,
+      cash_document_id: null,
+      actual_payment_date: '2026-08-15',
+      evidence_amount_minor: 10_000,
+      evidence_currency_code: 'CZK',
+      evidence_fact_hash: 'a'.repeat(64),
+      batch_reference: 'payroll-batch:synthetic',
+      liability_kind: 'net_wage',
+      employee_name: 'Syntetická osoba',
+      reversible_minor: 10_000,
+      created_at: '2026-08-15 10:00:00',
+      posting_skipped_reason: null,
+      journal_entry_id: null,
+      ...posting,
+    })
+
+    const base = await m.reconciliation()
+    m.reconciliation.mockResolvedValue({
+      ...base,
+      matches: [
+        event(201, { posting_status: 'posted' }),
+        event(202, { posting_status: 'posted_elsewhere' }),
+        event(203, {
+          posting_status: 'skipped',
+          posting_skipped_reason: 'cash_document_not_posted',
+        }),
+        event(204, { posting_status: null }),
+      ],
+      matches_total: 4,
+      matches_limit: 25,
+      matches_offset: 0,
+      reversible_matches: [],
+    })
+
+    const wrapper = mount(PayrollPayments)
+    await flushPromises()
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await flushPromises()
+
+    // i18n je v téhle sadě mockované na klíče; že klíče existují, hlídá check:i18n.
+    const prefix = 'payroll.payments.settlements.posting'
+    const chip = (id: number) => wrapper.find(`[data-test="payment-posting-${id}"]`).text()
+    expect(chip(201)).toBe(`${prefix}.posted`)
+    expect(chip(202)).toBe(`${prefix}.posted_elsewhere`)
+    expect(chip(203)).toBe(`${prefix}.skipped`)
+    // Historická platba není chyba — nesmí se tvářit jako nezaúčtovaná.
+    expect(chip(204)).toBe(`${prefix}.not_attempted`)
+    expect(chip(204)).not.toBe(chip(203))
+    // Mock i18n překlad nemá, takže se uplatní dokumentovaný fallback: neznámý
+    // kód se ukáže tak, jak přišel, místo aby zmizel.
+    expect(wrapper.text()).toContain('cash_document_not_posted')
+  })
 })

@@ -755,6 +755,28 @@ function kindLabel(kind: string): string {
   return translated === key ? kind : translated
 }
 
+/**
+ * Stav protizápisu v deníku (Ú-16). `null` NENÍ chyba: spárování je starší než
+ * tahle funkce, takže se o zaúčtování nikdy nepokusilo. Kdyby se to slilo se
+ * `skipped`, účetní by u historických plateb hledala vadu, která neexistuje.
+ */
+function postingLabel(status: PayrollPaymentMatch['posting_status']): string {
+  return t(`payroll.payments.settlements.posting.${status ?? 'not_attempted'}`)
+}
+
+function postingChipClass(status: PayrollPaymentMatch['posting_status']): string {
+  if (status === 'posted') return 'bg-success-50 text-success-700'
+  if (status === 'skipped') return 'bg-warning-50 text-warning-700'
+  return 'bg-neutral-100 text-neutral-600'
+}
+
+/** Neznámý kód se ukáže tak, jak přišel — mlčet o něm by skrylo nový stav. */
+function postingReasonLabel(reason: string): string {
+  const key = `payroll.payments.settlements.posting_reason.${reason}`
+  const translated = t(key)
+  return translated === key ? reason : translated
+}
+
 function recipientName(item: PayrollPaymentLiability): string {
   return item.recipient_name
     || item.employee_name
@@ -2167,6 +2189,26 @@ onMounted(load)
                   </dt>
                   <dd class="mt-0.5 text-neutral-800">
                     {{ t(`payroll.payments.recipient.${event.evidence_kind}`) }}
+                  </dd>
+                </div>
+                <div class="col-span-2">
+                  <dt class="text-xs text-neutral-500">
+                    {{ t('payroll.payments.settlements.posting_title') }}
+                  </dt>
+                  <dd class="mt-0.5 flex flex-wrap items-center gap-2">
+                    <span
+                      class="rounded-full px-2 py-1 text-xs font-medium"
+                      :class="postingChipClass(event.posting_status)"
+                      :data-test="`payment-posting-${event.id}`"
+                    >
+                      {{ postingLabel(event.posting_status) }}
+                    </span>
+                    <span
+                      v-if="event.posting_status === 'skipped' && event.posting_skipped_reason"
+                      class="text-xs text-neutral-600"
+                    >
+                      {{ postingReasonLabel(event.posting_skipped_reason) }}
+                    </span>
                   </dd>
                 </div>
               </dl>

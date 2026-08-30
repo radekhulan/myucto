@@ -1232,6 +1232,24 @@
         "event": {
           "matched": "Payment",
           "reversed": "Reversal"
+        },
+        "posting_title": "Journal entry",
+        "posting": {
+          "posted": "Posted by payroll",
+          "posted_elsewhere": "Posted elsewhere",
+          "skipped": "Not posted",
+          "not_applicable": "No journal",
+          "not_attempted": "Not attempted"
+        },
+        "posting_reason": {
+          "cash_document_not_posted": "The cash document is not posted yet.",
+          "evidence_incomplete": "The payment evidence is incomplete.",
+          "liability_not_found": "No payroll liability matches this payment.",
+          "liability_posted_elsewhere": "Another module already posted this liability.",
+          "revision_snapshot_missing": "The frozen posting rules of the payroll revision are missing.",
+          "zero_amount": "A zero amount is not posted.",
+          "ambiguous_net_wage_account": "The person has employments on two liability accounts — the payroll rules decide the split, not the payment.",
+          "bank_entry_id": "The bank movement already has its own journal entry."
         }
       },
       "materialize_blocked": "Liabilities are created from an approved payroll run revision. Approve the revision for this period in Payroll runs first.",
