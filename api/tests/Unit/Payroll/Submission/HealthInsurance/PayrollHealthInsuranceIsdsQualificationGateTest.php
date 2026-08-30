@@ -16,12 +16,6 @@ use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Service/Payroll/PayrollModuleAccess.php',
-    '*/api/src/Repository/Payroll/PayrollModuleStateRepository.php',
-    '*/api/src/Service/Payroll/Submission/HealthInsurance/HealthInsuranceIsdsSubmissionService.php',
-]);
-
 final class PayrollHealthInsuranceIsdsQualificationGateTest extends TestCase
 {
     public function testUnqualifiedHealthInsuranceIsdsEnqueueIsRejected(): void

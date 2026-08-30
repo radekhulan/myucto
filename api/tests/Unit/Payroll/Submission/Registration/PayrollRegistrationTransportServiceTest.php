@@ -14,13 +14,6 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationTranspo
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Repository/Payroll/PayrollSubmissionRepository.php',
-    '*/api/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
-    '*/api/src/Service/Payroll/Submission/Jmhz/JmhzFrozenPayloadReader.php',
-    '*/api/src/Service/Payroll/Submission/Jmhz/Transport/JmhzDispatchService.php',
-]);
-
 final class PayrollRegistrationTransportServiceTest extends TestCase
 {
     private const SUPPLIER = 11;

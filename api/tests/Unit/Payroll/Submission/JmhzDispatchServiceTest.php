@@ -30,12 +30,6 @@ use PHPUnit\Framework\TestCase;
 // sady (viz tests/bootstrap.php), jen se cesty přidávají tady — allowPaths()
 // seznam doplňuje, takže kvůli jedné testovací třídě nemusí růst globální
 // seznam v bootstrapu.
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
-    '*/api/src/Repository/Payroll/PayrollSigningProfileRepository.php',
-    '*/api/src/Service/Payroll/Submission/PayrollSubmissionService.php',
-]);
-
 /**
  * Odesílací cesta JMHZ na VREP. Testuje se proti falešnému VREP (Guzzle
  * MockHandler) a efemérnímu certifikátu vyrobenému v testu — skutečný

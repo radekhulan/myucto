@@ -18,14 +18,6 @@ use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
-    '*/api/src/Service/Payroll/PayrollModuleAccess.php',
-    '*/api/src/Repository/Payroll/PayrollModuleStateRepository.php',
-    '*/api/src/Service/Payroll/Submission/Jmhz/Transport/JmhzDispatchService.php',
-    '*/api/src/Service/Payroll/Submission/Jmhz/Transport/JmhzProtocolExplainer.php',
-]);
-
 final class PayrollJmhzTransportQualificationGateTest extends TestCase
 {
     public function testUnqualifiedProductionJmhzDispatchIsRejected(): void

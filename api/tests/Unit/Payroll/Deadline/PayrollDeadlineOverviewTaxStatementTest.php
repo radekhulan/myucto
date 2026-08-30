@@ -15,14 +15,6 @@ use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Repository/Payroll/PayrollDeadlineOverviewRepository.php',
-    '*/api/src/Repository/Payroll/PayrollRegistrationChangeProposalRepository.php',
-    '*/api/src/Service/Payroll/Submission/PayrollDeadlineAssessmentService.php',
-    '*/api/src/Service/Payroll/Submission/Registration/Change/PayrollRegistrationChangeDetectionService.php',
-    '*/api/src/Repository/Payroll/PayrollSicknessCaseRepository.php',
-]);
-
 /**
  * Roční vyúčtování v hlídači termínů.
  *

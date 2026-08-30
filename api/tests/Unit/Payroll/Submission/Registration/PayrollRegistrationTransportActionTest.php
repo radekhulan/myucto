@@ -16,12 +16,6 @@ use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Service/Payroll/PayrollModuleAccess.php',
-    '*/api/src/Repository/Payroll/PayrollModuleStateRepository.php',
-    '*/api/src/Service/Payroll/Submission/Registration/PayrollRegistrationTransportService.php',
-]);
-
 final class PayrollRegistrationTransportActionTest extends TestCase
 {
     public function testBearerTokenCannotTriggerRegistrationTransport(): void

@@ -20,14 +20,6 @@ use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Service/Submission/Channel/Isds/MobileKeyIsdsAuthenticator.php',
-    '*/api/src/Service/Submission/SubmissionOutboxService.php',
-    '*/api/src/Service/Submission/SubmissionCredentialService.php',
-    '*/api/src/Service/Submission/IsdsMobileCredentialService.php',
-    '*/api/src/Service/ActivityLogger.php',
-]);
-
 /**
  * Odeslání datovkou v relaci potvrzené Mobilním klíčem.
  *

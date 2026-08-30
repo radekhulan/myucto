@@ -24,13 +24,6 @@ use MyInvoice\Service\Signing\PersonalCertificateVaultService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
-\DG\BypassFinals::allowPaths([
-    '*/api/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
-    '*/api/src/Repository/Payroll/PayrollSubmissionRepository.php',
-    '*/api/src/Repository/Payroll/PayrollSigningProfileRepository.php',
-    '*/api/src/Service/Payroll/Submission/PayrollSubmissionService.php',
-]);
-
 /**
  * Dotažení protokolu a uzavření transakce BEZ UŽIVATELE.
  *
