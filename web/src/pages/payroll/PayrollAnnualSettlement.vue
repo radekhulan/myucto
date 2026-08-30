@@ -670,7 +670,7 @@ onMounted(async () => {
             <button
               type="button"
               data-test="annual-settlement-person"
-              class="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
+              class="cursor-pointer flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
               :class="item.employee_id === selectedEmployeeId ? 'bg-primary-50' : ''"
               @click="select(item.employee_id)"
             >

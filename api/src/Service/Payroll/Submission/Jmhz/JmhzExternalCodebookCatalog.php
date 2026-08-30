@@ -82,6 +82,30 @@ final class JmhzExternalCodebookCatalog
         }
     }
 
+    /**
+     * Obec podle kódu, bez porovnání s uloženým názvem.
+     *
+     * Název obce se u pracovního vztahu NEUKLÁDÁ — evidence drží jen kód
+     * (`jmhz_workplace_municipality_code`, migrace 1345) a název je vlastnost
+     * připnutého číselníku. {@see requireMunicipality()} je proto na něco
+     * jiného: ověřuje, že název, který někdo zadal nebo odeslal, sedí s tím
+     * v číselníku. Kdo název jen POTŘEBUJE ZOBRAZIT, se nemá co ptát na shodu.
+     *
+     * @return array<string,mixed>|null `null` = kód v číselníku k datu není
+     */
+    public function findMunicipality(string $code, string $validOn): ?array
+    {
+        try {
+            $package = $this->packageForDate($validOn);
+            $this->assertCovered($package['manifest'], 'obce', $validOn);
+            $entry = $this->codebookEntries($package, 'obce')[$code] ?? null;
+        } catch (JmhzCodebookUnavailableException|JmhzCodebookValueException|\UnexpectedValueException|\JsonException) {
+            return null;
+        }
+
+        return $entry !== null && $this->entryCovers($entry, $validOn) ? $entry : null;
+    }
+
     /** @return array<string,mixed> */
     public function requireMunicipality(string $code, string $name, string $validOn): array
     {

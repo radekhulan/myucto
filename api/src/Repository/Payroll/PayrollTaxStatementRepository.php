@@ -185,15 +185,15 @@ final class PayrollTaxStatementRepository
      *
      * @return list<array{
      *   municipality_code:?string,
-     *   municipality_name:?string,
      *   headcount:mixed
      * }>
      */
     public function workplaceHeadcount(int $supplierId, string $onDate): array
     {
         $statement = $this->db->pdo()->prepare(
+            // Jen kód: název obce evidence vztahu neukládá (migrace 1345 zakládá
+            // kód a zemi, nic víc) a bere se z připnutého číselníku CISOB.
             'SELECT terms.jmhz_workplace_municipality_code AS municipality_code,
-                    MAX(terms.jmhz_workplace_municipality_name) AS municipality_name,
                     COUNT(DISTINCT employment.employee_id) AS headcount
                FROM payroll_employments employment
                JOIN payroll_employment_terms terms
@@ -210,7 +210,7 @@ final class PayrollTaxStatementRepository
         );
         $statement->execute([$onDate, $onDate, $supplierId, $onDate, $onDate]);
 
-        /** @var list<array{municipality_code:?string,municipality_name:?string,headcount:mixed}> $rows */
+        /** @var list<array{municipality_code:?string,headcount:mixed}> $rows */
         $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
         return $rows;

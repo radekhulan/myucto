@@ -685,7 +685,7 @@ watch(requestedByAuthority, value => {
                 v-for="document in confirmationDocuments"
                 :key="document.id"
                 type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-100"
+                class="cursor-pointer block w-full px-3 py-2 text-left text-sm text-neutral-900 hover:bg-neutral-100"
                 data-test="eldp-document-option"
                 @click="chooseConfirmationDocument(document)"
               >

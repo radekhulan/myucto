@@ -612,7 +612,7 @@ onMounted(loadInboxBadge)
             </dl>
             <button
               type="button"
-              class="mt-4"
+              class="cursor-pointer mt-4"
               :class="btnOutline('neutral')"
               :disabled="downloadingId === snapshot.id"
               @click="download(snapshot)"

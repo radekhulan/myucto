@@ -367,7 +367,7 @@ defineExpose({ reload: load })
             <div v-if="canWrite" class="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
-                class="flex-1"
+                class="cursor-pointer flex-1"
                 :class="btnOutline('success')"
                 :disabled="acknowledgingId !== null || item.status === 'acknowledged'"
                 @click="acknowledge(item)"
@@ -379,7 +379,7 @@ defineExpose({ reload: load })
                   ? t('payroll.submissions.inbox.acknowledging')
                   : t('payroll.submissions.inbox.acknowledge') }}
               </button>
-              <button type="button" class="flex-1" :class="btnOutline('warning')" @click="openSnooze(item)">
+              <button type="button" class="cursor-pointer flex-1" :class="btnOutline('warning')" @click="openSnooze(item)">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                   <path :d="ICONS.pause" />
                 </svg>

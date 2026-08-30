@@ -339,7 +339,7 @@ watch([employeeId, period], load, { immediate: true })
           <p v-else-if="documentSearching" class="mt-1 text-xs text-neutral-500">{{ t('common.loading') }}</p>
           <ul v-if="documentCandidates.length" class="absolute z-10 mt-1 max-h-56 w-full overflow-auto rounded-md border border-neutral-200 bg-surface p-1 shadow-lg">
             <li v-for="document in documentCandidates" :key="document.id">
-              <button type="button" class="w-full rounded px-3 py-2 text-left text-sm hover:bg-neutral-50" @click="selectDocument(document)">
+              <button type="button" class="cursor-pointer w-full rounded px-3 py-2 text-left text-sm hover:bg-neutral-50" @click="selectDocument(document)">
                 {{ document.title }}
               </button>
             </li>

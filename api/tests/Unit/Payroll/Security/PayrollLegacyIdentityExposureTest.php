@@ -37,6 +37,12 @@ final class PayrollLegacyIdentityExposureTest extends TestCase
      */
     public function testPayrollReviewScriptRefusesNonTestDatabaseBeforeConnecting(): void
     {
+        // `private/` je gitignorovaná, takže na CI ten skript neexistuje a test
+        // padal na „soubor nelze přečíst". Je to nástroj pro lokální revizi nad
+        // klonem databáze, ne součást instalace — kde není, není co hlídat.
+        if (!is_file(self::root() . '/private/Mzdy/test/run-payroll-review.php')) {
+            self::markTestSkipped('Revizní skript je jen v lokálním private/, v instalaci není.');
+        }
         $script = self::read('private/Mzdy/test/run-payroll-review.php');
 
         $guardPosition = strpos($script, "str_ends_with(\$databaseName, '_test')");

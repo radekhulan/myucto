@@ -1262,6 +1262,7 @@ onMounted(load)
               <button
                 v-for="command in otherStateCommands"
                 :key="command"
+                class="cursor-pointer"
                 :class="commandVariant(command)"
                 :disabled="saving || (documentCommands.has(command) && !canReadDocuments)"
                 :title="documentCommands.has(command) && !canReadDocuments ? t('payroll.enforcement.document_permission_required') : undefined"
@@ -1288,9 +1289,9 @@ onMounted(load)
             <label v-if="documentCommands.has(pendingCommand)" class="relative text-xs font-medium text-neutral-600">
               {{ t('payroll.enforcement.decision_document') }}
               <input v-model="documentQuery" :readonly="selectedDocument !== null" required type="search" autocomplete="off" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" :placeholder="t('payroll.enforcement.decision_document_search')">
-              <button v-if="selectedDocument" type="button" class="absolute right-2 top-7 rounded p-1 text-neutral-400 hover:text-danger-600" :title="t('common.remove')" @click="selectedDocument = null; documentQuery = ''"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg></button>
+              <button v-if="selectedDocument" type="button" class="cursor-pointer absolute right-2 top-7 rounded p-1 text-neutral-400 hover:text-danger-600" :title="t('common.remove')" @click="selectedDocument = null; documentQuery = ''"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg></button>
               <ul v-if="documentCandidates.length" class="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-neutral-200 bg-surface shadow-lg">
-                <li v-for="document in documentCandidates" :key="document.id"><button type="button" class="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-payroll-50" @click="selectDecisionDocument(document)"><span class="truncate">{{ document.title }}</span><span class="shrink-0 text-xs uppercase text-neutral-400">{{ document.doc_type }}</span></button></li>
+                <li v-for="document in documentCandidates" :key="document.id"><button type="button" class="cursor-pointer flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-payroll-50" @click="selectDecisionDocument(document)"><span class="truncate">{{ document.title }}</span><span class="shrink-0 text-xs uppercase text-neutral-400">{{ document.doc_type }}</span></button></li>
               </ul>
             </label>
             <label v-if="reasonCommands.has(pendingCommand)" class="text-xs font-medium text-neutral-600">

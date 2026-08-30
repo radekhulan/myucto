@@ -648,7 +648,7 @@ onMounted(load)
             <button
               v-if="item.latest_submission"
               type="button"
-              class="mt-4"
+              class="cursor-pointer mt-4"
               :class="btnOutline('neutral')"
               :disabled="detailLoadingId !== null"
               data-test="submission-detail-open"

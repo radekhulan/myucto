@@ -790,6 +790,7 @@ onMounted(load)
               v-for="command in visibleCommands(run)"
               :key="command"
               :data-testid="`payroll-run-${run.id}-${command}`"
+              class="cursor-pointer"
               :class="commandClass(run, command)"
               :disabled="saving"
               @click="runCommand(run, command)"
@@ -825,7 +826,7 @@ onMounted(load)
           <p class="flex-1">{{ commandBlockers[run.id] }}</p>
           <button
             type="button"
-            class="shrink-0 rounded p-1 text-warning-600 hover:bg-warning-100"
+            class="cursor-pointer shrink-0 rounded p-1 text-warning-600 hover:bg-warning-100"
             :aria-label="t('common.close')"
             @click="dismissBlocker(run.id)"
           >
@@ -1201,6 +1202,7 @@ onMounted(load)
           </button>
           <button
             type="submit"
+            class="cursor-pointer"
             :class="commandClass(pendingCommand.run, pendingCommand.command)"
             :disabled="saving"
           >

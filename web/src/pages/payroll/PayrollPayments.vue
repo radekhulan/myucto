@@ -1374,7 +1374,7 @@ onMounted(load)
         v-for="tab in (['liabilities', 'batches', 'settlements'] as const)"
         :key="tab"
         type="button"
-        class="whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors"
+        class="cursor-pointer whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors"
         :class="activeTab === tab
           ? 'border-payroll-500 text-payroll-600'
           : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900'"
@@ -1829,7 +1829,7 @@ onMounted(load)
             <button
               v-if="batch.export_format !== 'manual' && auth.canWrite('payroll.payments')"
               type="button"
-              class="mt-4"
+              class="cursor-pointer mt-4"
               :class="btnFilled('primary')"
               :disabled="generatingBatchId !== null"
               @click="generateExport(batch)"
@@ -2046,7 +2046,7 @@ onMounted(load)
               <div class="flex items-end">
                 <button
                   type="submit"
-                  class="w-full sm:w-auto"
+                  class="cursor-pointer w-full sm:w-auto"
                   :class="btnFilled('success')"
                   :disabled="!canMatch || matching"
                 >
@@ -2121,7 +2121,7 @@ onMounted(load)
               <div class="flex items-end">
                 <button
                   type="submit"
-                  class="w-full sm:w-auto"
+                  class="cursor-pointer w-full sm:w-auto"
                   :class="btnFilled('warning')"
                   :disabled="!canReverse || reversing"
                 >

@@ -1781,7 +1781,7 @@ async function copyXml(): Promise<void> {
             </div>
             <button
               type="button"
-              class="mt-2"
+              class="cursor-pointer mt-2"
               :class="btnOutline('neutral')"
               :disabled="a1Busy"
               data-test="a1-restriction-add"
@@ -2403,7 +2403,7 @@ async function copyXml(): Promise<void> {
                   {{ t('common.remove') }}
                 </button>
               </div>
-              <button type="button" class="mt-3" :class="btnOutline('neutral')" @click="addPensionPeriod">
+              <button type="button" class="cursor-pointer mt-3" :class="btnOutline('neutral')" @click="addPensionPeriod">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
                 {{ t('payroll.people.registration.event.add_period') }}
               </button>

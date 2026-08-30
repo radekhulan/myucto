@@ -942,7 +942,7 @@ onBeforeUnmount(() => {
         :key="tab"
         type="button"
         :class="[
-          'whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors',
+          'cursor-pointer whitespace-nowrap border-b-2 px-4 py-3 text-sm font-medium transition-colors',
           activeTab === tab
             ? 'border-payroll-500 text-payroll-600'
             : 'border-transparent text-neutral-600 hover:border-neutral-300 hover:text-neutral-900',
@@ -1074,6 +1074,7 @@ onBeforeUnmount(() => {
           :data-test="`annual-scope-${scope}`"
           :aria-pressed="batchScope === scope"
           :disabled="batchActive"
+          class="cursor-pointer"
           :class="[
             'rounded-full border px-3 py-1.5 text-sm font-medium transition-colors',
             batchScope === scope

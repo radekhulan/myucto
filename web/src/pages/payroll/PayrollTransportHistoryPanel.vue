@@ -1180,7 +1180,7 @@ onMounted(loadVariableSymbols)
               <button
                 v-if="readyGateways[submission.submission_id]"
                 type="button"
-                class="mt-3"
+                class="cursor-pointer mt-3"
                 :class="btnFilled('primary')"
                 :data-test="`transport-ready-gateway-${submission.submission_id}`"
                 @click="continueReadyGateway(submission.submission_id)"

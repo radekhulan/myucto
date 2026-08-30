@@ -1038,6 +1038,7 @@ onMounted(() => {
           <button
             type="button"
             data-testid="quick-surcharges-toggle"
+            class="cursor-pointer"
             :class="tableToolClass(surchargesVisible)"
             :aria-pressed="surchargesVisible"
             aria-controls="quick-surcharge-columns"
@@ -1202,6 +1203,7 @@ onMounted(() => {
                     <button
                       :data-testid="`overtime-mode-hours-${row.employment_id}`"
                       type="button"
+                      class="cursor-pointer"
                       :class="modeButtonClass(row.overtime_mode === 'hours')"
                       :aria-pressed="row.overtime_mode === 'hours'"
                       :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)"
@@ -1209,6 +1211,7 @@ onMounted(() => {
                     >{{ t('payroll.quick_inputs.hours') }}</button>
                     <button
                       type="button"
+                      class="cursor-pointer"
                       :class="modeButtonClass(row.overtime_mode === 'amount')"
                       :aria-pressed="row.overtime_mode === 'amount'"
                       :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)"
@@ -1530,8 +1533,10 @@ onMounted(() => {
                 <span class="mb-1 block text-xs font-medium text-neutral-600">{{ additionalIncomeLabel(row) }}</span>
                 <div class="flex flex-wrap gap-2" role="group" :aria-label="t('payroll.quick_inputs.overtime_mode')">
                   <template v-if="row.overtime_hours_relation_supported">
-                    <button type="button" :class="modeButtonClass(row.overtime_mode === 'hours')" :aria-pressed="row.overtime_mode === 'hours'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
-                    <button type="button" :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
+                    <button type="button" class="cursor-pointer"
+  :class="modeButtonClass(row.overtime_mode === 'hours')" :aria-pressed="row.overtime_mode === 'hours'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !row.overtime_hours_available || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'hours')">{{ t('payroll.quick_inputs.hours') }}</button>
+                    <button type="button" class="cursor-pointer"
+  :class="modeButtonClass(row.overtime_mode === 'amount')" :aria-pressed="row.overtime_mode === 'amount'" :disabled="loading || saving || !canWrite || row.overtime_managed_elsewhere || !editable(row.inputs.overtime)" @click="setOvertimeMode(row, 'amount')">{{ t('payroll.quick_inputs.total_amount') }}</button>
                   </template>
                   <input
                     v-if="row.overtime_hours_relation_supported && row.overtime_mode === 'hours'"

@@ -191,24 +191,26 @@ final class TaxStatementService
             $code = $row['municipality_code'] !== null
                 ? trim((string) $row['municipality_code'])
                 : null;
-            $name = $row['municipality_name'] !== null
-                ? trim((string) $row['municipality_name'])
-                : null;
+            // Název obce ani okres se u vztahu neukládají — evidence drží jen kód
+            // (migrace 1345) a zbytek je vlastnost připnutého číselníku CISOB.
+            // Dokud se název četl z neexistujícího sloupce, tiskopis ho neměl
+            // z čeho vzít a dotaz padal na chybějícím sloupci.
+            $name = null;
             $district = null;
-            if ($code !== null && $code !== '' && $name !== null && $name !== '') {
-                try {
-                    $entry = $this->codebook->requireMunicipality($code, $name, $onDate);
+            if ($code !== null && $code !== '') {
+                $entry = $this->codebook->findMunicipality($code, $onDate);
+                if ($entry !== null) {
+                    $label = trim((string) ($entry['label'] ?? ''));
+                    $name = $label === '' ? null : $label;
                     $metadata = $entry['metadata'] ?? [];
                     if (is_array($metadata) && isset($metadata['district_name'])) {
                         $district = (string) $metadata['district_name'];
                     }
-                } catch (\Throwable) {
-                    $district = null;
                 }
             }
             $places[] = new WorkplaceHeadcount(
                 $code === '' ? null : $code,
-                $name === '' ? null : $name,
+                $name,
                 $district,
                 (int) $row['headcount'],
             );

@@ -263,7 +263,7 @@ watch(selectedCaseId, resetResponse)
               </button>
             </div>
             <div class="mt-2 flex flex-wrap gap-2">
-              <button v-for="period in periods" :key="period" type="button" class="rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-danger-50 hover:text-danger-700" @click="removePeriod(period)">{{ period }} ×</button>
+              <button v-for="period in periods" :key="period" type="button" class="cursor-pointer rounded-full bg-neutral-100 px-2 py-1 text-xs text-neutral-700 hover:bg-danger-50 hover:text-danger-700" @click="removePeriod(period)">{{ period }} ×</button>
             </div>
           </div>
         </div>

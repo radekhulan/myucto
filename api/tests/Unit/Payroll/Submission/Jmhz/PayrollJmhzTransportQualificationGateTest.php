@@ -8,6 +8,7 @@ use MyInvoice\Action\Payroll\PayrollJmhzTransportAction;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
+use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
@@ -20,7 +21,7 @@ use Slim\Psr7\Response;
 \DG\BypassFinals::allowPaths([
     '*/api/src/Repository/Payroll/PayrollSubmissionTransportAttemptRepository.php',
     '*/api/src/Service/Payroll/PayrollModuleAccess.php',
-    '*/api/src/Service/Payroll/PayrollProductionGate.php',
+    '*/api/src/Repository/Payroll/PayrollModuleStateRepository.php',
     '*/api/src/Service/Payroll/Submission/Jmhz/Transport/JmhzDispatchService.php',
     '*/api/src/Service/Payroll/Submission/Jmhz/Transport/JmhzProtocolExplainer.php',
 ]);
@@ -33,11 +34,16 @@ final class PayrollJmhzTransportQualificationGateTest extends TestCase
         $dispatch->expects(self::never())->method('send');
         $access = $this->createStub(PayrollModuleAccess::class);
         $access->method('isEnabled')->willReturn(true);
-        $gate = $this->createMock(PayrollProductionGate::class);
-        $gate->expects(self::once())
-            ->method('assertEnvironmentActive')
-            ->with(11, 'production')
-            ->willThrowException(new PayrollProductionGateException());
+        // SKUTEČNÁ brána, ne mock: `PayrollProductionGate` je final a BypassFinals
+        // odstraňuje `final` jen při načtení třídy. V plné sadě ji stihne načíst
+        // dřívější test, takže `allowPaths()` tady přijde pozdě a zdvojení skončí
+        // na ClassIsFinalException — což se při běhu s `--filter` neprojeví.
+        // Nepotřebujeme ho: brána má `releasedOverride` právě pro tenhle případ
+        // a neuvolněný produkt zamítne produkční prostředí sám.
+        $gate = new PayrollProductionGate(
+            $this->createStub(PayrollModuleStateRepository::class),
+            releasedOverride: false,
+        );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/payroll/submissions/42/transport/send')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 11)

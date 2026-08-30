@@ -215,7 +215,7 @@ onMounted(load)
               v-if="compatibleWorkplaceSuggestion && !form.tax_office_workplace_code"
               type="button"
               data-test="regzel-use-workplace-suggestion"
-              class="mt-2 text-xs font-medium text-payroll-700 underline decoration-payroll-400 underline-offset-2"
+              class="cursor-pointer mt-2 text-xs font-medium text-payroll-700 underline decoration-payroll-400 underline-offset-2"
               @click="form.tax_office_workplace_code = compatibleWorkplaceSuggestion ?? ''"
             >
               {{ t('payroll.regzel.profile.use_workplace_suggestion', { code: compatibleWorkplaceSuggestion }) }}

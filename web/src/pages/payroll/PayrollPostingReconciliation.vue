@@ -273,7 +273,7 @@ onMounted(load)
                   <td class="px-3 py-3 font-medium text-neutral-900">
                     <button
                       type="button"
-                      class="text-left font-medium"
+                      class="cursor-pointer text-left font-medium"
                       :aria-expanded="expandedKey === category.key"
                       :aria-controls="`payroll-reconciliation-desktop-detail-${category.key}`"
                       :data-test="`reconciliation-desktop-toggle-${category.key}`"
@@ -347,7 +347,7 @@ onMounted(load)
             <div class="flex items-start justify-between gap-3">
               <button
                 type="button"
-                class="text-left font-medium text-neutral-900"
+                class="cursor-pointer text-left font-medium text-neutral-900"
                 :aria-expanded="expandedKey === category.key"
                 :aria-controls="`payroll-reconciliation-mobile-detail-${category.key}`"
                 :data-test="`reconciliation-mobile-toggle-${category.key}`"

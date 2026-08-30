@@ -648,7 +648,7 @@ onMounted(() => void load())
               </label>
               <button
                 type="button"
-                class="rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700"
+                class="cursor-pointer rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700"
                 :data-test="`sickness-case-work-day-remove-${index}`"
                 @click="removeWorkInterval(index)"
               >
@@ -657,7 +657,7 @@ onMounted(() => void load())
             </div>
             <button
               type="button"
-              class="rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700"
+              class="cursor-pointer rounded-lg border border-neutral-300 px-3 py-2 text-sm text-neutral-700"
               data-test="sickness-case-work-day-add"
               @click="addWorkInterval()"
             >

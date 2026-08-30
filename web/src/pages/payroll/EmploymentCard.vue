@@ -964,7 +964,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <h4 :class="GROUP_TITLE">{{ t('payroll.people.person_evidence_title') }}</h4>
             <button
               type="button"
-              class="text-xs font-medium text-payroll-700 underline underline-offset-2"
+              class="cursor-pointer text-xs font-medium text-payroll-700 underline underline-offset-2"
               data-test="employment-tax-declaration-link"
               @click="emit('focusStatutoryEvidence')"
             >{{ t('payroll.people.tax_declaration_edit') }}</button>
@@ -1609,7 +1609,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       <button
         v-if="canWrite && registrationPending"
         type="button"
-        class="ml-1 font-medium underline underline-offset-2"
+        class="cursor-pointer ml-1 font-medium underline underline-offset-2"
         :disabled="busy"
         data-test="registration-already-done"
         @click="markRegisteredElsewhere"

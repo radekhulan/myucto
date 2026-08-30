@@ -1237,7 +1237,7 @@ onMounted(async () => {
             </li>
             <li aria-hidden="true">›</li>
             <li>
-              <button type="button" class="hover:text-neutral-700 hover:underline" data-test="breadcrumb-people" @click="backToList">
+              <button type="button" class="cursor-pointer hover:text-neutral-700 hover:underline" data-test="breadcrumb-people" @click="backToList">
                 {{ t('payroll.people.breadcrumbs.people') }}
               </button>
             </li>

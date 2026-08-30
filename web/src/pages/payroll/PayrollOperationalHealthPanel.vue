@@ -254,7 +254,7 @@ onMounted(load)
           {{ t('payroll.dashboard.operational_health.unavailable') }}
         </p>
       </div>
-      <button type="button" class="shrink-0" data-test="operational-health-retry" @click="load">
+      <button type="button" class="cursor-pointer shrink-0" data-test="operational-health-retry" @click="load">
         {{ t('payroll.dashboard.operational_health.retry') }}
       </button>
     </div>

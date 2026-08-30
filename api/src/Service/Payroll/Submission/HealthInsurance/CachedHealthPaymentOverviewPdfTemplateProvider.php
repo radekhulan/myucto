@@ -4,98 +4,54 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
-use GuzzleHttp\Client;
-use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Bootstrap;
 
+/**
+ * Oficiální tiskopis VZP „Přehled o platbě pojistného zaměstnavatele".
+ *
+ * Formulář je připnutý v repozitáři vedle XSD schémat, ne stahovaný z webu.
+ * Dřív se tahal z `vzp.cz` a ukládal do cache; znělo to jako „vždycky aktuální
+ * verze", ve skutečnosti to znamenalo tři věci navíc:
+ *
+ *  * podání i testy závisely na dostupnosti cizího webu — na CI kvůli tomu
+ *    padaly čtyři testy na `zp_vzp_pdf_template_changed`, přestože ověřují
+ *    stavový automat podání, ne bajty tiskopisu;
+ *  * první běh po nasazení chodil ven a mohl selhat v nejhorší chvíli;
+ *  * otisk stejně musel být připnutý v kódu, takže „aktuálnost" byla zdánlivá:
+ *    jakmile VZP formulář změnila, aplikace ho odmítla tak jako tak.
+ *
+ * Nová verze formuláře je proto vědomá změna repozitáře: nahradit soubor,
+ * přepsat {@see VZP_SHA256} a projít testy. Přesně jako u připnutých XSD, kde
+ * je nesoulad otisku záměrná brzda, ne chyba.
+ */
 final class CachedHealthPaymentOverviewPdfTemplateProvider implements HealthPaymentOverviewPdfTemplateProvider
 {
+    /** Původ souboru. Zůstává kvůli doložitelnosti, ke stažení se nepoužívá. */
     public const VZP_URL = 'https://www.vzp.cz/formulare/prehled-o-platbe-pojistneho-zamestnavatele.pdf';
+
     public const VZP_SHA256 = 'c742e17ff44a79236638e5860a13ffff335805fa06a24890c5235b2c1ef322e3';
 
-    private const MAX_BYTES = 5_000_000;
-
-    public function __construct(private readonly ?Client $http = null) {}
+    private const RELATIVE_PATH = 'api/xsd/vzp/prehled-o-platbe-pojistneho-zamestnavatele.pdf';
 
     public function vzpPaymentOverview(): HealthPaymentOverviewPdfTemplate
     {
-        $cachePath = RuntimePaths::storage(
-            'cache/payroll-forms/vzp-ppz-' . self::VZP_SHA256 . '.pdf',
-        );
-        $bytes = is_file($cachePath) ? file_get_contents($cachePath) : false;
-        if (is_string($bytes) && $this->isExpected($bytes)) {
-            return $this->template($bytes);
-        }
-        if (is_file($cachePath)) {
-            @unlink($cachePath);
-        }
-
-        try {
-            $response = ($this->http ?? new Client())->request('GET', self::VZP_URL, [
-                'connect_timeout' => 5.0,
-                'timeout' => 15.0,
-                'http_errors' => true,
-                'headers' => ['Accept' => 'application/pdf'],
-            ]);
-            $length = $response->getHeaderLine('Content-Length');
-            if ($length !== '' && (int) $length > self::MAX_BYTES) {
-                throw new \RuntimeException('Oficiální formulář je neočekávaně velký.');
-            }
-            $bytes = (string) $response->getBody();
-        } catch (\Throwable) {
+        $path = Bootstrap::rootDir() . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, self::RELATIVE_PATH);
+        $bytes = is_file($path) ? file_get_contents($path) : false;
+        if (!is_string($bytes) || $bytes === '') {
             throw new HealthNotificationException(
                 'zp_vzp_pdf_template_unavailable',
-                'Oficiální formulář VZP se nepodařilo bezpečně načíst.',
+                'Oficiální formulář VZP chybí v instalaci (' . self::RELATIVE_PATH . ').',
             );
         }
-
-        if (!$this->isExpected($bytes)) {
+        if (!hash_equals(self::VZP_SHA256, hash('sha256', $bytes))) {
             throw new HealthNotificationException(
                 'zp_vzp_pdf_template_changed',
-                'VZP změnila oficiální PDF formulář. MyÚčto jej odmítlo použít, dokud nebude nová verze ověřena.',
+                'Oficiální formulář VZP neodpovídá připnutému otisku. '
+                . 'Použijte ověřenou verzi souboru, nebo otisk aktualizujte spolu s ním.',
             );
         }
 
-        $directory = dirname($cachePath);
-        if (!is_dir($directory) && !mkdir($directory, 0770, true) && !is_dir($directory)) {
-            throw new HealthNotificationException(
-                'zp_vzp_pdf_template_cache_failed',
-                'Oficiální formulář VZP se nepodařilo uložit do bezpečné cache.',
-            );
-        }
-        $temporary = tempnam($directory, 'vzp-ppz-');
-        if ($temporary === false || file_put_contents($temporary, $bytes, LOCK_EX) !== strlen($bytes)) {
-            if (is_string($temporary)) {
-                @unlink($temporary);
-            }
-            throw new HealthNotificationException(
-                'zp_vzp_pdf_template_cache_failed',
-                'Oficiální formulář VZP se nepodařilo uložit do bezpečné cache.',
-            );
-        }
-        if (!@rename($temporary, $cachePath)) {
-            @unlink($temporary);
-            throw new HealthNotificationException(
-                'zp_vzp_pdf_template_cache_failed',
-                'Oficiální formulář VZP se nepodařilo uložit do bezpečné cache.',
-            );
-        }
-
-        return $this->template($bytes);
-    }
-
-    private function isExpected(string $bytes): bool
-    {
-        return strlen($bytes) <= self::MAX_BYTES
-            && str_starts_with($bytes, '%PDF-')
-            && hash_equals(self::VZP_SHA256, hash('sha256', $bytes));
-    }
-
-    private function template(string $bytes): HealthPaymentOverviewPdfTemplate
-    {
-        return new HealthPaymentOverviewPdfTemplate(
-            $bytes,
-            self::VZP_URL,
-            self::VZP_SHA256,
-        );
+        return new HealthPaymentOverviewPdfTemplate($bytes, self::VZP_URL, self::VZP_SHA256);
     }
 }

@@ -222,13 +222,13 @@ onMounted(() => { void load() })
             {{ t('payroll.people.foreign_permits.document_label') }}
             <input v-model="documentQuery" required autocomplete="off" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-2 py-1 text-sm" :placeholder="t('payroll.people.foreign_permits.document_search_placeholder')" data-test="foreign-permit-document-search" @input="changeDocumentQuery">
             <div v-if="documentCandidates.length" class="absolute z-10 mt-1 w-full overflow-hidden rounded-md border border-neutral-200 bg-surface shadow-lg" data-test="foreign-permit-document-candidates">
-              <button v-for="document in documentCandidates" :key="document.id" type="button" class="block w-full px-3 py-2 text-left text-xs text-neutral-700 hover:bg-neutral-50" @click="chooseDocument(document)">
+              <button v-for="document in documentCandidates" :key="document.id" type="button" class="cursor-pointer block w-full px-3 py-2 text-left text-xs text-neutral-700 hover:bg-neutral-50" @click="chooseDocument(document)">
                 {{ document.title }} · #{{ document.id }}
               </button>
             </div>
             <span v-if="selectedDocument" class="mt-1 flex items-center justify-between gap-2 text-xs text-success-700" data-test="foreign-permit-selected-document">
               {{ selectedDocument.title }} · #{{ selectedDocument.id }}
-              <button type="button" class="text-neutral-600 underline hover:text-neutral-900" @click="clearDocument">{{ t('payroll.people.foreign_permits.document_clear') }}</button>
+              <button type="button" class="cursor-pointer text-neutral-600 underline hover:text-neutral-900" @click="clearDocument">{{ t('payroll.people.foreign_permits.document_clear') }}</button>
             </span>
           </label>
           <p class="text-xs text-neutral-600 sm:col-span-2 lg:col-span-3">{{ t('payroll.people.foreign_permits.document_hint') }}</p>
