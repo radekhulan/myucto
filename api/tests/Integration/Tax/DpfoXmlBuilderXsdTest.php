@@ -342,4 +342,58 @@ final class DpfoXmlBuilderXsdTest extends TestCase
             $result['warnings']
         );
     }
+
+    /**
+     * ř.70 regrese — zkušební EPO 31. 8. 2026: „Oddíl 5/ř.70 - položka se nerovná hodnotě
+     * příslušného vzorce (81300)". `da_slevy` je jen mezisoučet bez vlastního tištěného
+     * řádku a jeho přítomnost kazila EPO kontrolu ř.70 (uhrn_slevy35ba) — builder ho
+     * proto z VETA_D_FIELDS vynechává, i kdyby ho volající v `fields` poslal.
+     */
+    public function testDaSlevyNeverReachesXmlEvenIfPresentInFields(): void
+    {
+        $calc = [
+            'fields' => ['kc_op15_1a' => 30840, 'uhrn_slevy35ba' => 30840, 'da_slevy' => 99999],
+            's7' => ['income' => 0],
+            'family' => [],
+        ];
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+        self::assertStringNotContainsString('da_slevy="', $xml);
+        self::assertStringContainsString('uhrn_slevy35ba="30840"', $xml);
+    }
+
+    /**
+     * ř.77a regrese — zkušební EPO 31. 8. 2026: „Oddíl 5/ř.77a - hodnota položky
+     * neodpovídá výpočtu uvedenému v pokynech k vyplnění DAP. (0)". `kc_db_po_odpd` se
+     * dřív do XML vůbec nedostal (chyběl ve VETA_D_FIELDS); EPO chce i nulovou hodnotu
+     * poslanou výslovně, stejně jako u kc_dan_po_db/kc_dan_celk.
+     */
+    public function testKcDbPoOdpdEmittedEvenAsZero(): void
+    {
+        $calc = [
+            'fields' => ['kc_dan_po_db' => 50460, 'kc_dan_celk' => 50460, 'kc_db_po_odpd' => 0],
+            's7' => ['income' => 0],
+            'family' => [],
+        ];
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+        self::assertStringContainsString('kc_db_po_odpd="0"', $xml);
+    }
+
+    /**
+     * Příloha 1/ř.113 regrese — zkušební EPO 31. 8. 2026: „Příloha 1/ř.113 - hodnota
+     * položky neodpovídá hodnotě příslušného vzorce". EPO si ř.113 (kc_zd7p) dopočítává
+     * ze součtu ř.104-112; ř.104 (kc_hosp_rozd) se dřív do VetaT vůbec nedostal. Builder
+     * ho bere z `s7.before_adjustments` (§7 základ PŘED zvýšením/snížením), ne z
+     * `s7.base` (=kc_zd7p, který úpravy už zahrnuje).
+     */
+    public function testKcHospRozdUsesBeforeAdjustmentsNotFinalBase(): void
+    {
+        $calc = [
+            'fields' => [],
+            's7' => ['income' => 150000, 'expenses' => 90000, 'base' => 75000, 'before_adjustments' => 60000, 'increase' => 20000, 'decrease' => 5000],
+            'family' => [],
+        ];
+        $xml = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+        self::assertStringContainsString('kc_hosp_rozd="60000"', $xml);
+        self::assertStringContainsString('kc_zd7p="75000"', $xml);
+    }
 }

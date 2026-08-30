@@ -520,4 +520,71 @@ final class DpfoReturnCalculatorTest extends TestCase
         self::assertSame($r['fields']['da_dan16'], $r['fields']['da_slezap']);
         self::assertSame((float) (int) ceil($r['fields']['da_dan16']), $r['fields']['da_celod13']);
     }
+
+    /**
+     * ř.70 (uhrn_slevy35ba). Zjištěno bisekcí proti zkušebnímu EPO 31. 8. 2026: EPO hlásilo
+     * „Oddíl 5/ř.70 - položka se nerovná hodnotě příslušného vzorce (81300)" — 81 300 je
+     * uhrn_slevy35ba+da_slevy, což prozradilo, že `da_slevy` (mezisoučet bez vlastního
+     * tištěného řádku) kazí EPO kontrolu ř.70. Po vynechání `da_slevy` z XML výtka zmizela.
+     * Calculator proto `da_slevy` do polí vůbec nedává.
+     */
+    public function testDaSlevyFieldIsNotComputed(): void
+    {
+        $r = $this->calcRun(['s7_base' => 400000]);
+        self::assertArrayNotHasKey('da_slevy', $r['fields']);
+    }
+
+    /**
+     * ř.77a (kc_db_po_odpd). Zjištěno bisekcí proti zkušebnímu EPO 31. 8. 2026: EPO hlásilo
+     * „Oddíl 5/ř.77a - hodnota položky neodpovídá výpočtu uvedenému v pokynech k vyplnění
+     * DAP. (0)" — atribut se dřív do XML vůbec neposílal. ř.77 (kc_dan_po_db) a ř.77a
+     * (kc_db_po_odpd) jsou vzájemně vylučující páry (ř.75−ř.76, resp. ř.76−ř.75, ať je
+     * kladné): `kc_dan_po_db` je už v $taxAfterChildren zezdola ořízlé na 0 díky
+     * `$childCredit = min($taxAfter35ba, $childTotal)`, takže kdykoli vznikne bonus,
+     * taxAfterChildren je právě 0 a ř.77a se rovná celému bonusu — `kc_db_po_odpd` proto
+     * musí být vždy rovno `kc_danbonus` (childBonus), bez bonusu i s ním.
+     */
+    public function testKcDbPoOdpdMirrorsChildBonus(): void
+    {
+        // Bez dětí/bonusu: oba 0, oba PŘÍTOMNÉ (EPO čte nulu jako vyplněný údaj, ne jako "nic").
+        $noBonus = $this->calcRun(['s7_base' => 400000]);
+        self::assertSame(0.0, (float) $noBonus['fields']['kc_danbonus']);
+        self::assertSame(0.0, (float) $noBonus['fields']['kc_db_po_odpd']);
+        self::assertSame(29160.0, (float) $noBonus['fields']['kc_dan_po_db']);
+
+        // S bonusem (nízký základ + 2 děti): kc_dan_po_db klesne na 0, kc_db_po_odpd
+        // převezme celý bonus. `activities` (ne `s7_base`) je nutné, aby se naplnilo
+        // i `s7_income` — bonus se jinak nevyplatí (viz $bonusIncome = s6Income+s7Income
+        // a $bonusIncomeMinimum kontrola v compute()).
+        $withBonus = $this->calcRun(
+            ['activities' => [['income' => 150000.0, 'expense_mode' => 'pausal', 'expense_rate' => 60]]],
+            [],
+            ['children_count' => 2]
+        );
+        self::assertSame($withBonus['fields']['kc_danbonus'], $withBonus['fields']['kc_db_po_odpd']);
+        self::assertSame(0.0, (float) $withBonus['fields']['kc_dan_po_db']);
+        self::assertGreaterThan(0.0, (float) $withBonus['fields']['kc_db_po_odpd']);
+    }
+
+    /**
+     * Příloha 1/ř.113 (kc_zd7p). Zjištěno bisekcí proti zkušebnímu EPO 31. 8. 2026: EPO
+     * hlásilo „Příloha 1/ř.113 - hodnota položky neodpovídá hodnotě příslušného vzorce",
+     * protože si ř.113 dopočítává jako součet ř.104-112, a ř.104 (kc_hosp_rozd, §7 základ
+     * PŘED úpravami zvýšení/snížení) se do XML vůbec neposílal. `s7.before_adjustments`
+     * musí být §7 základ PŘED ř.105/106 (increase/decrease), ne konečné `s7.base`
+     * (=kc_zd7p), jinak by se ř.104+ř.105-ř.106 nerovnalo odeslanému kc_zd7p, kdykoli
+     * jsou úpravy nenulové.
+     */
+    public function testS7BeforeAdjustmentsExcludesIncreaseAndDecrease(): void
+    {
+        $r = $this->calcRun([
+            'activities' => [['income' => 150000.0, 'expense_mode' => 'pausal', 'expense_rate' => 60]],
+            's7_increase' => 20000.0,
+            's7_decrease' => 5000.0,
+        ]);
+        // Základ 150000 - 90000(60% paušál) = 60000 před úpravami; 60000+20000-5000=75000 po nich.
+        self::assertSame(60000.0, (float) $r['s7']['before_adjustments']);
+        self::assertSame(75000.0, (float) $r['s7']['base']);
+        self::assertSame($r['s7']['before_adjustments'] + 20000.0 - 5000.0, $r['s7']['base']);
+    }
 }
