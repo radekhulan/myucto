@@ -289,6 +289,101 @@ final class PayrollHealthNotificationAction
         return Json::ok($response, $result);
     }
 
+    /** @param array{period:string,insurerCode:string} $args */
+    public function prepareBulkNotification(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        try {
+            $body = (array) ($request->getParsedBody() ?? []);
+            $environment = (string) ($body['environment'] ?? 'production');
+            if (!in_array($environment, ['production', 'test'], true)) {
+                return Json::error(
+                    $response,
+                    'invalid_environment',
+                    'Neznámé prostředí podání.',
+                    400,
+                );
+            }
+            $result = $this->service->prepareBulkNotification(
+                $this->currentSupplierId($request),
+                $environment,
+                (string) ($args['period'] ?? ''),
+                (string) ($args['insurerCode'] ?? ''),
+                $this->userId($request),
+            );
+        } catch (HealthNotificationException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /** @param array{period:string,insurerCode:string} $args */
+    public function downloadBulkNotification(
+        Request $request,
+        Response $response,
+        array $args,
+    ): Response {
+        if (!$this->guard($request, $response, AccessLevel::READ, $error)) {
+            return $this->guardFailure($error);
+        }
+
+        try {
+            $artifact = $this->service->bulkNotificationDownload(
+                $this->currentSupplierId($request),
+                (string) ($args['period'] ?? ''),
+                (string) ($args['insurerCode'] ?? ''),
+            );
+        } catch (HealthNotificationException $exception) {
+            return Json::error(
+                $response,
+                $exception->errorCode,
+                $exception->getMessage(),
+                422,
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error(
+                $response,
+                'validation_failed',
+                $exception->getMessage(),
+                422,
+            );
+        }
+
+        $bytes = $artifact['bytes'];
+        $response->getBody()->write($bytes);
+
+        return $response
+            ->withHeader('Content-Type', $artifact['mime_type'])
+            ->withHeader(
+                'Content-Disposition',
+                'attachment; filename="' . $artifact['filename'] . '"',
+            )
+            ->withHeader('X-Content-Type-Options', 'nosniff')
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache')
+            ->withHeader('Content-Length', (string) strlen($bytes))
+            ->withHeader('Content-SHA256', $artifact['sha256']);
+    }
+
     /** @param array<string,mixed> $query */
     private function period(array $query): string
     {

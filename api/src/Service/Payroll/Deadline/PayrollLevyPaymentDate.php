@@ -49,6 +49,7 @@ final class PayrollLevyPaymentDate
         'social_insurance' => PayrollLevyDeadlinePolicy::SOCIAL_INSURANCE,
         'advance_tax' => PayrollLevyDeadlinePolicy::ADVANCE_TAX,
         'withholding_tax' => PayrollLevyDeadlinePolicy::WITHHOLDING_TAX,
+        'statutory_insurance' => PayrollLevyDeadlinePolicy::ACCIDENT_INSURANCE,
     ];
 
     public static function levyForLiabilityKind(string $liabilityKind): ?string

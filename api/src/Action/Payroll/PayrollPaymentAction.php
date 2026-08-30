@@ -10,6 +10,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollEnforcementLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollHealthInsuranceLiabilityMaterializer;
 use MyInvoice\Service\Payroll\Payment\PayrollIncomingRefundReconciliationCommand;
@@ -53,6 +54,7 @@ final class PayrollPaymentAction
         private readonly PayrollInsolvencyLiabilityMaterializer $insolvency,
         private readonly PayrollEnforcementLiabilityMaterializer $enforcement,
         private readonly PayrollRiskySavingsLiabilityMaterializer $riskySavings,
+        private readonly PayrollAccidentInsuranceLiabilityMaterializer $accidentInsurance,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
         private readonly PayrollPaymentBatchBuilder $batchBuilder,
         private readonly PayrollPaymentExportService $exportService,
@@ -1351,6 +1353,12 @@ final class PayrollPaymentAction
                 $revisionId,
                 $userId,
             ),
+            'statutory_insurance' => fn (): array =>
+                $this->accidentInsurance->materialize(
+                    $supplierId,
+                    $revisionId,
+                    $userId,
+                ),
         ] as $liabilityKind => $materialize) {
             try {
                 $result = $this->transaction(

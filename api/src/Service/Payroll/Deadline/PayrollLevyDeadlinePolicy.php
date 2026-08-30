@@ -38,6 +38,7 @@ final class PayrollLevyDeadlinePolicy
     public const ADVANCE_TAX = 'advance_tax';
     public const WITHHOLDING_TAX = 'withholding_tax';
     public const JMHZ_MONTHLY_REPORT = 'jmhz_monthly_report';
+    public const ACCIDENT_INSURANCE = 'accident_insurance';
 
     private const SCHEMA_REFERENCE = 'payroll-levy-deadline-policy.v1';
     private const DAY_OF_MONTH = 'day_of_month';
@@ -130,6 +131,33 @@ final class PayrollLevyDeadlinePolicy
             'repo_reference' => 'manual/58_Uplne_mzdy.md',
             'shift_source' => self::TAX_SHIFT_SOURCE,
             'shift_source_status' => self::REPO_VERIFIED,
+        ],
+        /*
+         * Zákonné pojištění odpovědnosti zaměstnavatele (vyhláška
+         * č. 125/1993 Sb.) je ČTVRTLETNÍ, ne měsíční jako ostatní odvody
+         * v tomhle katalogu. `periodStart` proto NENÍ začátek mzdového
+         * období, ke kterému se pojistné vztahuje, ale začátek POSLEDNÍHO
+         * měsíce čtvrtletí — tedy stejný měsíc, ke kterému
+         * {@see \MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer}
+         * závazek materializuje. Splatnost je do konce měsíce následujícího
+         * po skončení čtvrtletí (§ 12 vyhlášky), což je formálně stejný
+         * výpočet jako u WITHHOLDING_TAX.
+         */
+        self::ACCIDENT_INSURANCE => [
+            'ruleset_id' => 'cz-payroll-levy-deadlines.accident-insurance.v1',
+            'rule' => 'following_month_last_day',
+            'base_event' => 'payroll_quarter_end_period_start',
+            'base_month_offset' => 1,
+            'earliest_day' => null,
+            'due_basis' => self::LAST_DAY_OF_MONTH,
+            'due_day' => null,
+            'due_shift' => self::WORKING_DAY_SHIFT,
+            'effective_from' => '2026-01-01',
+            'source' => '§ 12 vyhlášky č. 125/1993 Sb.',
+            'source_status' => self::EXTERNAL_UNVERIFIED,
+            'repo_reference' => null,
+            'shift_source' => self::ADMINISTRATIVE_SHIFT_SOURCE,
+            'shift_source_status' => self::EXTERNAL_UNVERIFIED,
         ],
         self::JMHZ_MONTHLY_REPORT => [
             'ruleset_id' => 'cz-payroll-levy-deadlines.jmhz-monthly.v1',

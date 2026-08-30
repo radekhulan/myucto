@@ -4,7 +4,10 @@ import { api } from './client'
 // Modul mluví o dvou různých věcech a nesmí je slít:
 //
 // * **HOZ** (hromadné oznámení zaměstnavatele) — oznamovací povinnost z § 10
-//   zákona č. 48/1997 Sb. Aplikace ji umí VYHODNOTIT a připomenout lhůtu.
+//   zákona č. 48/1997 Sb. Aplikace ji umí VYHODNOTIT, připomenout lhůtu a
+//   SESTAVIT za období a pojišťovnu do XML ověřeného proti připnutému XSD —
+//   ke stažení, ne k automatickému odeslání (ISDS frontu HOZ nepoužívá,
+//   viz `HealthInsuranceSubmissionService`, bod 5 docblocku třídy).
 // * **PPZ** (přehled o platbě pojistného) — měsíční přehled podle § 25 odst. 3
 //   zákona č. 592/1992 Sb. Ten aplikace umí i SESTAVIT do odesílatelné podoby
 //   a vydat jako XML ověřené proti připnutému XSD.
@@ -241,6 +244,25 @@ export interface HealthPreparedOverview {
   dispatch: HealthDispatchDescription
 }
 
+/** Výsledek sestavení HOZ. `schema_validated:false` = výhrada (viz PPZ). */
+export interface HealthPreparedBulkNotification {
+  submission_id: number
+  obligation_id: number
+  part_id?: number
+  artifact_id?: number
+  status: string
+  row_version: number
+  insurer_code: string
+  period: string
+  agenda_code: string
+  artifact_sha256: string
+  /** Kolik vět `zmenaZamestance` dávka obsahuje. */
+  changes_count: number
+  created: boolean
+  deadline: HealthDeadlineWindow
+  schema_validated: boolean
+}
+
 export interface HealthIsdsEnqueueResult {
   outbox_id: number
   created: boolean
@@ -309,9 +331,48 @@ export const payrollHealthNotificationApi = {
       `/payroll/submissions/${submissionId}/health-isds/${insurerCode}`,
     ).then(response => response.data),
 
-  // Artefakt se NESTAHUJE odsud. Podání zdravotní pojišťovně leží v téže
+  // Artefakt PPZ se NESTAHUJE odsud. Podání zdravotní pojišťovně leží v téže
   // platformě jako JMHZ, takže stažení jde přes `payrollApi.submissionDetail`
   // + `payrollApi.downloadSubmissionArtifact` — ty už umí jednorázový token
   // z `download-grant` i rozbalení chybové odpovědi doručené jako Blob.
   // Vlastní kopie by se s nimi dřív nebo později rozešla.
+
+  prepareBulkNotification: (
+    period: string,
+    insurerCode: string,
+    environment: 'production' | 'test' = 'production',
+  ) =>
+    api.post<HealthPreparedBulkNotification>(
+      `/payroll/submissions/health-notifications/bulk/${period}/${insurerCode}/prepare`,
+      { environment },
+    ).then(response => response.data),
+
+  /**
+   * HOZ se stahuje přímo — na rozdíl od PPZ nemá souběžnou PDF variantu ani
+   * ISDS přílohu, takže nepotřebuje token z `download-grant`.
+   */
+  downloadBulkNotification: async (
+    period: string,
+    insurerCode: string,
+  ): Promise<void> => {
+    const response = await api.get<Blob>(
+      `/payroll/submissions/health-notifications/bulk/${period}/${insurerCode}/download`,
+      { responseType: 'blob' },
+    )
+    const disposition = response.headers['content-disposition']
+    const matchedFilename = typeof disposition === 'string'
+      ? /filename="([^"]+)"/u.exec(disposition)?.[1]
+      : undefined
+    const objectUrl = URL.createObjectURL(response.data)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = matchedFilename ?? `zp-hoz-${period}-${insurerCode}.xml`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    } finally {
+      URL.revokeObjectURL(objectUrl)
+    }
+  },
 }

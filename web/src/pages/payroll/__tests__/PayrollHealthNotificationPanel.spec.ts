@@ -11,6 +11,8 @@ const m = vi.hoisted(() => ({
   runs: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
+  prepareBulk: vi.fn(),
+  downloadBulk: vi.fn(),
 }))
 
 vi.mock('@/api/dataBox', () => ({
@@ -24,6 +26,8 @@ vi.mock('@/api/payrollHealthNotifications', () => ({
     registerPeriodObligations: m.registerPeriod,
     preparePaymentOverview: m.prepare,
     enqueuePaymentOverviewIsds: m.enqueueIsds,
+    prepareBulkNotification: m.prepareBulk,
+    downloadBulkNotification: m.downloadBulk,
   },
 }))
 
@@ -798,5 +802,119 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(box.exists()).toBe(true)
     expect(box.text()).toContain('haléře')
     expect(box.text()).not.toContain('payroll.health_notifications.prepare.failed')
+  })
+
+  /**
+   * HOZ se sestavuje za období (z filtru nahoře) a pojišťovnu — na rozdíl od
+   * PPZ nemá revizi. Stažení jde přímo přes `downloadBulkNotification`, ne
+   * přes `submissionDetail` + `download-grant` jako u PPZ.
+   */
+  it('sestaví HOZ za období a pojišťovnu a nabídne stažení i u blokující výhrady', async () => {
+    m.prepareBulk.mockResolvedValue({
+      submission_id: 61,
+      obligation_id: 9,
+      part_id: 3,
+      artifact_id: 14,
+      status: 'draft',
+      row_version: 2,
+      insurer_code: '111',
+      period: localPayrollPeriod(),
+      agenda_code: 'HOZ_2026',
+      artifact_sha256: 'a1'.repeat(32),
+      changes_count: 3,
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-03',
+        due_on: '2026-06-11',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 10 zákona č. 48/1997 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: false,
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-bulk-insurer', '111')
+    await flushPromises()
+
+    await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
+    await flushPromises()
+
+    expect(m.prepareBulk).toHaveBeenCalledWith(localPayrollPeriod(), '111')
+
+    const result = wrapper.find('[data-test="health-prepare-bulk-result"]')
+    expect(result.exists()).toBe(true)
+    expect(result.text()).toContain('payroll.health_notifications.prepare_bulk.blocked')
+
+    const download = wrapper.get('[data-test="health-prepare-bulk-download"]')
+    await download.trigger('click')
+    await flushPromises()
+
+    expect(m.downloadBulk).toHaveBeenCalledWith(localPayrollPeriod(), '111')
+  })
+
+  it('u platného HOZ ohlásí platnost a počet vět', async () => {
+    m.prepareBulk.mockResolvedValue({
+      submission_id: 62,
+      obligation_id: 9,
+      part_id: 3,
+      artifact_id: 15,
+      status: 'ready',
+      row_version: 3,
+      insurer_code: '205',
+      period: localPayrollPeriod(),
+      agenda_code: 'HOZ_2026',
+      artifact_sha256: 'b2'.repeat(32),
+      changes_count: 5,
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-03',
+        due_on: '2026-06-11',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 10 zákona č. 48/1997 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: true,
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-bulk-insurer', '205')
+    await flushPromises()
+    await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
+    await flushPromises()
+
+    const result = wrapper.get('[data-test="health-prepare-bulk-result"]')
+    expect(result.text()).toContain('payroll.health_notifications.prepare_bulk.valid')
+    expect(result.text()).toContain('5')
+  })
+
+  it('konkrétní důvod selhání sestavení HOZ se propíše na obrazovku', async () => {
+    m.prepareBulk.mockRejectedValue({
+      response: {
+        data: {
+          error: {
+            message: 'Zaměstnanec (id 4) nemá evidované rodné číslo ani EČP.',
+          },
+        },
+      },
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-bulk-insurer', '111')
+    await flushPromises()
+    await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
+    await flushPromises()
+
+    const box = wrapper.find('[data-test="health-prepare-bulk-error"]')
+    expect(box.exists()).toBe(true)
+    expect(box.text()).toContain('rodné číslo ani EČP')
+    expect(box.text()).not.toContain('payroll.health_notifications.prepare_bulk.failed')
   })
 })

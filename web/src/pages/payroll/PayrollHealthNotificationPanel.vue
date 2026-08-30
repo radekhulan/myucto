@@ -5,8 +5,10 @@
  * Obrazovka stojí na jednom rozhodnutí: **co modul neumí, se říká nahoře, ne
  * až v chybové hlášce.** Portálové API bez doložené obálky nevolá; u
  * pojišťoven s doloženým formátem přílohy ale umí předat PPZ do obecné ISDS
- * fronty, kde odeslání vždy potvrzuje uživatel. HOZ zůstává ruční: aplikace
- * eviduje povinnost a lhůtu, nevydává nedoložený artefakt.
+ * fronty, kde odeslání vždy potvrzuje uživatel. HOZ umí za období a
+ * pojišťovnu sestavit i stáhnout XML ověřené proti připnutému XSD, ale do
+ * ISDS fronty ho nezařazuje — odeslání zůstává ruční (viz
+ * `HealthInsuranceSubmissionService`, bod 5 docblocku třídy).
  *
  * Filtry i stránkování jsou serverové. Půl na půl (filtr u sebe, stránka na
  * serveru) by znamenalo, že počet nahoře popisuje jiný seznam než tabulka.
@@ -22,6 +24,7 @@ import {
   type HealthDutyKind,
   type HealthDutySummary,
   type HealthPreparedOverview,
+  type HealthPreparedBulkNotification,
   type HealthIsdsEnqueueResult,
   type HealthUnresolvedEmployment,
 } from '@/api/payrollHealthNotifications'
@@ -114,6 +117,13 @@ const syncingObligations = ref(false)
 const obligationSyncError = ref('')
 const synchronizedObligationCount = ref<number | null>(null)
 
+const prepareBulkInsurer = ref<string | null>(null)
+const preparingBulk = ref(false)
+const preparedBulk = ref<HealthPreparedBulkNotification | null>(null)
+const prepareBulkError = ref('')
+const downloadingBulk = ref(false)
+const downloadBulkError = ref('')
+
 const currentPage = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
 
 const insurerOptions = computed(() =>
@@ -165,6 +175,12 @@ const canPrepare = computed(() =>
   && prepareRevisionId.value !== null
   && prepareInsurer.value !== null
   && !preparing.value,
+)
+
+const canPrepareBulk = computed(() =>
+  canWrite.value
+  && prepareBulkInsurer.value !== null
+  && !preparingBulk.value,
 )
 
 const preparedChannel = computed(() => {
@@ -280,6 +296,53 @@ async function prepare() {
     )
   } finally {
     preparing.value = false
+  }
+}
+
+async function prepareBulk() {
+  if (prepareBulkInsurer.value === null) return
+  prepareBulkError.value = ''
+  downloadBulkError.value = ''
+  preparedBulk.value = null
+  preparingBulk.value = true
+  try {
+    preparedBulk.value = await payrollHealthNotificationApi.prepareBulkNotification(
+      period.value,
+      prepareBulkInsurer.value,
+    )
+  } catch (exception) {
+    prepareBulkError.value = apiErrorMessage(
+      exception,
+      t('payroll.health_notifications.prepare_bulk.failed'),
+    )
+  } finally {
+    preparingBulk.value = false
+  }
+}
+
+/**
+ * Sestavuje se vždy nanovo ze zdroje, stejně jako `bulkNotificationDownload`
+ * na backendu — funguje tedy i bez předchozího `prepareBulk()`, ale UI ho
+ * nabízí až u výsledku, aby účetní vždy viděla, kolik vět a s jakým stavem
+ * stahuje.
+ */
+async function downloadBulk() {
+  const result = preparedBulk.value
+  if (!result) return
+  downloadBulkError.value = ''
+  downloadingBulk.value = true
+  try {
+    await payrollHealthNotificationApi.downloadBulkNotification(
+      result.period,
+      result.insurer_code,
+    )
+  } catch (exception) {
+    downloadBulkError.value = apiErrorMessage(
+      exception,
+      t('payroll.health_notifications.prepare_bulk.download_failed'),
+    )
+  } finally {
+    downloadingBulk.value = false
   }
 }
 
@@ -452,6 +515,9 @@ watch(period, () => {
   prepareRevisionId.value = null
   synchronizedObligationCount.value = null
   obligationSyncError.value = ''
+  preparedBulk.value = null
+  prepareBulkError.value = ''
+  downloadBulkError.value = ''
   void loadRuns()
 })
 
@@ -1097,6 +1163,132 @@ onMounted(() => {
             {{ isdsBusy
               ? t('payroll.health_notifications.prepare.isds_preparing')
               : t('payroll.health_notifications.prepare.isds_action') }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section
+      class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm sm:p-6"
+      data-test="health-notifications-prepare-bulk"
+    >
+      <h3 class="text-lg font-semibold text-neutral-900">
+        {{ t('payroll.health_notifications.prepare_bulk.title') }}
+      </h3>
+      <p class="mt-1 max-w-3xl text-sm text-neutral-500">
+        {{ t('payroll.health_notifications.prepare_bulk.description') }}
+      </p>
+
+      <div class="mt-5 max-w-sm">
+        <label class="block text-sm font-medium text-neutral-700">
+          {{ t('payroll.health_notifications.prepare_bulk.insurer') }}
+          <SearchableSelect
+            v-model="prepareBulkInsurer"
+            class="mt-1"
+            data-test="health-prepare-bulk-insurer"
+            :options="insurerOptions"
+            :placeholder="t('payroll.health_notifications.prepare_bulk.insurer_placeholder')"
+            accent="payroll"
+          />
+        </label>
+        <button
+          type="button"
+          :class="[btnFilledSm('primary'), 'mt-3']"
+          :disabled="!canPrepareBulk"
+          data-test="health-prepare-bulk-action"
+          @click="prepareBulk"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.doc" />
+          </svg>
+          {{ preparingBulk
+            ? t('payroll.health_notifications.prepare.isds_preparing')
+            : t('payroll.health_notifications.prepare_bulk.action') }}
+        </button>
+      </div>
+
+      <p v-if="!canWrite" class="mt-4 text-sm text-neutral-500">
+        {{ t('payroll.health_notifications.read_only') }}
+      </p>
+
+      <p
+        v-if="prepareBulkError"
+        class="mt-4 rounded-lg border border-danger-500/30 bg-danger-50 p-4 text-sm text-danger-700"
+        role="alert"
+        data-test="health-prepare-bulk-error"
+      >
+        {{ prepareBulkError }}
+      </p>
+
+      <div
+        v-if="preparedBulk"
+        class="mt-4 rounded-lg border p-4"
+        :class="preparedBulk.schema_validated
+          ? 'border-success-500/30 bg-success-50'
+          : 'border-warning-500/40 bg-warning-50'"
+        data-test="health-prepare-bulk-result"
+      >
+        <h4
+          class="text-sm font-semibold"
+          :class="preparedBulk.schema_validated ? 'text-success-800' : 'text-warning-800'"
+        >
+          {{ preparedBulk.schema_validated
+            ? t('payroll.health_notifications.prepare_bulk.valid')
+            : t('payroll.health_notifications.prepare_bulk.blocked') }}
+        </h4>
+        <p class="mt-1 text-sm" :class="preparedBulk.schema_validated ? 'text-success-700' : 'text-warning-800'">
+          {{ preparedBulk.schema_validated
+            ? t('payroll.health_notifications.prepare_bulk.valid_hint', {
+              insurer: preparedBulk.insurer_code,
+              count: preparedBulk.changes_count,
+              due: formatDate(preparedBulk.deadline.due_on),
+            })
+            : t('payroll.health_notifications.prepare_bulk.blocked_hint') }}
+        </p>
+        <dl class="mt-3 grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.status') }}</dt>
+            <dd class="mt-0.5 font-medium text-neutral-900">{{ submissionStatusLabel(preparedBulk.status) }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.changes_count') }}</dt>
+            <dd class="mt-0.5 font-medium text-neutral-900">{{ preparedBulk.changes_count }}</dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.due_on') }}</dt>
+            <dd class="mt-0.5 font-medium text-neutral-900">
+              {{ formatDate(preparedBulk.deadline.due_on) }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-neutral-500">{{ t('payroll.health_notifications.prepare_bulk.fingerprint') }}</dt>
+            <dd class="mt-0.5 break-all font-mono text-[0.7rem] text-neutral-700">
+              {{ preparedBulk.artifact_sha256.slice(0, 16) }}…
+            </dd>
+          </div>
+        </dl>
+        <p
+          v-if="downloadBulkError"
+          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="health-prepare-bulk-download-error"
+        >
+          {{ downloadBulkError }}
+        </p>
+        <div class="mt-3">
+          <button
+            type="button"
+            :class="btnOutlineSm('neutral')"
+            :disabled="downloadingBulk"
+            data-test="health-prepare-bulk-download"
+            @click="downloadBulk"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.download" />
+            </svg>
+            {{ downloadingBulk
+              ? t('payroll.health_notifications.prepare_bulk.downloading')
+              : t('payroll.health_notifications.prepare_bulk.download') }}
           </button>
         </div>
       </div>

@@ -248,6 +248,38 @@ final class PayrollLevyDeadlinePolicyTest extends TestCase
         }
     }
 
+    /**
+     * Q1 2026 (leden–březen) je splatné do konce dubna — `periodStart` je
+     * začátek POSLEDNÍHO měsíce čtvrtletí (březen), stejně jako u ostatních
+     * odvodů v katalogu je to začátek mzdového období, ke kterému se
+     * platba vztahuje.
+     */
+    public function testAccidentInsuranceIsDueTheMonthAfterQuarterEnd(): void
+    {
+        $window = $this->policy->forPeriod(
+            PayrollLevyDeadlinePolicy::ACCIDENT_INSURANCE,
+            '2026-03-01',
+        );
+
+        self::assertSame('2026-04-30', $window->statutoryDueOn);
+        self::assertSame('2026-04-30', $window->dueOn);
+        self::assertFalse($window->isShifted);
+    }
+
+    public function testAccidentInsuranceDueDateShiftsOffAWeekend(): void
+    {
+        // 31. 10. 2026 je sobota.
+        $window = $this->policy->forPeriod(
+            PayrollLevyDeadlinePolicy::ACCIDENT_INSURANCE,
+            '2026-09-01',
+        );
+
+        self::assertSame('2026-10-31', $window->statutoryDueOn);
+        self::assertSame('Sat', $this->weekday($window->statutoryDueOn));
+        self::assertSame('2026-11-02', $window->dueOn);
+        self::assertTrue($window->isShifted);
+    }
+
     private function weekday(string $date): string
     {
         return (new \DateTimeImmutable($date))->format('D');

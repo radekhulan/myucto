@@ -8,7 +8,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class PayrollStatutoryAgendaCatalog
 {
-    public const VERSION = 'mz24-p0.v2';
+    public const VERSION = 'mz24-p0.v3';
     public const CAPABILITIES = [
         'manual_review',
         'prepared_only',
@@ -88,14 +88,14 @@ final class PayrollStatutoryAgendaCatalog
             [
                 'agenda_code' => 'STATUTORY_ACCIDENT_INSURANCE',
                 'replacement_mode' => 'standalone',
-                'capability' => 'manual_review',
+                'capability' => 'prepared_only',
                 'transport_capability' => 'not_supported',
                 'evidence_supported' => true,
-                'reason_code' => 'accident_insurance_calculation_output_liability_not_supported',
+                'reason_code' => 'accident_insurance_calculated_and_materialized',
                 'workflow_codes' => [
-                    'calculate_accident_insurance_externally',
-                    'pay_accident_insurance_externally',
-                    'store_payment_evidence_in_company_dms',
+                    'review_accident_insurance_rate_setting',
+                    'review_accident_insurance_liability',
+                    'pay_accident_insurance_liability',
                     'record_payment_evidence',
                 ],
             ],

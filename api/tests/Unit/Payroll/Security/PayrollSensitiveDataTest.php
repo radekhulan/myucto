@@ -295,6 +295,7 @@ final class PayrollSensitiveDataTest extends TestCase
             PayrollRevealPurpose::DOCUMENT_ANNUAL_TAX_CERTIFICATE,
             PayrollRevealPurpose::DOCUMENT_ANNUAL_SETTLEMENT,
             PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
+            PayrollRevealPurpose::SUBMISSION_HEALTH_BULK_NOTIFICATION,
         ] as $purpose) {
             self::assertTrue(
                 $purpose->isStatutoryOutput(),

@@ -4328,7 +4328,8 @@
           "hzupn_remains_standalone": "HZUPN remains a standalone report alongside JMHZ. MyÚčto builds the data message, validates it against the pinned XSD and can send it through the data box; the VREP/APEP channel is not open for this agenda.",
           "eldp_historic_preparation_available": "A historic ELDP can be prepared on its dedicated tab. This overview does not duplicate its data or status.",
           "eldp_jmhz_default_on_demand_exception": "From 2026, ordinary ELDP data comes from JMHZ, but historic and on-demand scenarios remain. Preparation is available on the dedicated tab.",
-          "accident_insurance_calculation_output_liability_not_supported": "Assessment-base and rate calculation, assessment, output and payment liability for statutory accident insurance are not implemented. JMHZ does not replace the obligation. MyÚčto can only preserve evidence of an externally verified amount and an actually completed payment."
+          "accident_insurance_calculation_output_liability_not_supported": "Assessment-base and rate calculation, assessment, output and payment liability for statutory accident insurance are not implemented. JMHZ does not replace the obligation. MyÚčto can only preserve evidence of an externally verified amount and an actually completed payment.",
+          "accident_insurance_calculated_and_materialized": "MyÚčto calculates the quarterly assessment base from social insurance and assesses the premium using the rate set in Payroll Settings (at least CZK 100). JMHZ does not replace the obligation. MyÚčto does not yet know the statutory rate table by prevailing activity — enter the rate manually from the insurer's assessment."
         },
         "workflow": {
           "record_sickness_case": "Record the sickness case on the Sickness benefits tab — the report is built from it.",
@@ -4343,7 +4344,10 @@
           "calculate_accident_insurance_externally": "Determine the period, assessment base, rate and amount from professionally verified external sources; MyÚčto neither calculates nor validates them.",
           "pay_accident_insurance_externally": "Make the actual payment outside MyÚčto and verify both its amount and the payee identification.",
           "store_payment_evidence_in_company_dms": "Store the payment confirmation or a specific official document as a company-scoped DMS document.",
-          "record_payment_evidence": "Only then record the amount, references and DMS document as immutable manual-completion evidence."
+          "record_payment_evidence": "Only then record the amount, references and DMS document as immutable manual-completion evidence.",
+          "review_accident_insurance_rate_setting": "Check that the company has an up-to-date rate from the insurer's assessment and the insurer's account set up in Institutions.",
+          "review_accident_insurance_liability": "Review the calculated assessment base and assessed premium on the payments list for the last month of the quarter.",
+          "pay_accident_insurance_liability": "Pay the assessed liability the same way as other payroll levies and match the payment against the bank statement."
         },
         "form": {
           "title": "Manual-completion evidence — {agenda}",
@@ -5433,6 +5437,21 @@
           "user_verified": "User verified",
           "imported": "Imported value"
         }
+      },
+      "accident_insurance": {
+        "title": "Statutory employer liability insurance",
+        "subtitle": "Decree No. 125/1993 Coll. The rate depends on the company's prevailing activity (annex 2 of the decree) — MyÚčto does not yet know the NACE rate table, so enter it manually from the insurer's assessment. MyÚčto then calculates the quarterly premium from the social insurance assessment base (at least CZK 100) and assesses it on the payments list.",
+        "rate_source_hint": "Enter the insurer's bank account and variable symbol in the Institution payment accounts section above (type Statutory insurance) — use the same institution code here.",
+        "current": "Current rate: {rate} ‰ ({institution}), effective from {date}.",
+        "not_set": "The statutory accident insurance rate is not set — MyÚčto will not calculate the premium until you enter it.",
+        "effective_from": "Effective from",
+        "institution_code": "Insurer code",
+        "institution_code_hint": "Must match the institution code entered for the Statutory insurance account.",
+        "rate_per_mille": "Rate (‰)",
+        "add_rate": "Add rate",
+        "load_failed": "The statutory accident insurance rate could not be loaded.",
+        "saved": "The statutory accident insurance rate has been saved.",
+        "save_failed": "The statutory accident insurance rate could not be saved."
       },
       "accounting_title": "Automatic posting",
       "accounting_hint": "Postings distinguish employee wages, a partner's dependent income, statutory-office remuneration, insurance, tax and other deductions.",
@@ -6655,7 +6674,7 @@
     },
     "health_notifications": {
       "title": "Health insurer notification duty",
-      "subtitle": "HOZ: the application evaluates deadlines and records obligations for manual completion, but does not yet build or send the notification itself. PPZ: it creates XML and PDF from an approved revision and can place a documented attachment format into the ISDS outbox. The user always confirms the actual send.",
+      "subtitle": "HOZ: the application evaluates deadlines, records obligations in the inbox, and can build and download an XML for a period and insurer, validated against the pinned XSD; sending stays manual. PPZ: it creates XML and PDF from an approved revision and can place a documented attachment format into the ISDS outbox. The user always confirms the actual send.",
       "load_failed": "The notification duty overview could not be loaded.",
       "stale": "The data shown comes from the last successful load. {message}",
       "read_only": "Building a submission requires write access to payroll submissions.",
@@ -6672,7 +6691,7 @@
       "limits": {
         "title": "Electronic filing options",
         "no_transport": "Only PPZ can be placed into the ISDS outbox, and only where the attachment format is documented — shared XML or extractable PDF. The user always explicitly confirms the send.",
-        "manual_delivery": "The application does not yet build or send HOZ. It only records the obligation and deadline; prepare and file the notification manually, then confirm completion in the obligation inbox.",
+        "manual_delivery": "HOZ can be built and downloaded as XML validated against the pinned XSD, but the application does not send it and does not place it into the ISDS outbox. File the downloaded file with the insurer manually and confirm completion in the obligation inbox.",
         "undocumented_codes": "For these duty kinds the pinned schema does not determine a single change code, so none is issued at all: {kinds}. Guessing one would mean filing a record with a code that follows from nothing.",
         "capability_failed": "The insurer channel list could not be loaded. The limits above still apply — they did not disappear, only their detail is missing."
       },
@@ -6778,6 +6797,26 @@
         "isds_unavailable": "A documented attachment format and data box ID are not both available for this insurer. Download the attachment and verify the filing route with the insurer.",
         "isds_failed": "The submission could not be placed into the ISDS outbox.",
         "failed": "The record could not be built."
+      },
+      "prepare_bulk": {
+        "title": "Build the bulk notification (HOZ)",
+        "description": "Builds HOZ for the selected period and insurer from every obligation the employer reports and for which the schema documents a change code — undocumented codes (correction, insurer transfer, data change) are left out of the batch. The XML is validated against the pinned XSD. The application does not place the file into the ISDS outbox or send it — it only issues it for download.",
+        "action": "Build HOZ",
+        "insurer": "Insurer",
+        "insurer_placeholder": "Pick an insurer",
+        "pick_first": "Pick an insurer first.",
+        "valid": "The record is valid",
+        "valid_hint": "The HOZ for insurer {insurer} contains {count} records and passed validation against the pinned XSD. The nearest deadline among the included obligations is {due}.",
+        "blocked": "The record has a blocking issue",
+        "blocked_hint": "The file was produced and can be downloaded, but stayed a draft with an issue at the schema validation stage.",
+        "status": "Submission status",
+        "changes_count": "Record count",
+        "due_on": "Nearest deadline",
+        "fingerprint": "File fingerprint",
+        "download": "Download HOZ",
+        "downloading": "Downloading…",
+        "download_failed": "The HOZ could not be downloaded.",
+        "failed": "The HOZ could not be built."
       }
     },
     "benefit_baskets": {

@@ -301,6 +301,7 @@ final class PayrollPaymentApiTest extends TestCase
                 'insolvency',
                 'enforcement',
                 'risky_savings',
+                'statutory_insurance',
             ],
             array_column($payload['preparation_issues'] ?? [], 'liability_kind'),
         );
@@ -521,6 +522,9 @@ final class PayrollPaymentApiTest extends TestCase
             ),
             $this->container->get(
                 PayrollRiskySavingsLiabilityMaterializer::class,
+            ),
+            $this->container->get(
+                \MyInvoice\Service\Payroll\Payment\PayrollAccidentInsuranceLiabilityMaterializer::class,
             ),
             $this->container->get(PayrollPersonAccountVerificationService::class),
             $this->container->get(PayrollPaymentBatchBuilder::class),

@@ -51,18 +51,18 @@ final class PayrollStatutoryAgendaCatalogTest extends TestCase
         self::assertSame('not_supported', $agendas['NEMPRI']['transport_capability']);
     }
 
-    public function testAccidentInsuranceFailsClosedInsteadOfInventingCalculation(): void
+    public function testAccidentInsuranceIsCalculatedAndMaterializedOnPayments(): void
     {
         $matrix = (new PayrollStatutoryAgendaCatalog())->forPeriod('2026-08');
         $agendas = array_column($matrix['agendas'], null, 'agenda_code');
         $accident = $agendas['STATUTORY_ACCIDENT_INSURANCE'];
 
         self::assertSame('standalone', $accident['replacement_mode']);
-        self::assertSame('manual_review', $accident['capability']);
+        self::assertSame('prepared_only', $accident['capability']);
         self::assertSame('not_supported', $accident['transport_capability']);
         self::assertTrue($accident['evidence_supported']);
         self::assertSame(
-            'accident_insurance_calculation_output_liability_not_supported',
+            'accident_insurance_calculated_and_materialized',
             $accident['reason_code'],
         );
     }

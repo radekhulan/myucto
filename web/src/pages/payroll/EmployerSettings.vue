@@ -20,6 +20,7 @@ import RequiredMark from '@/components/ui/RequiredMark.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { healthInsurerOptions, isHealthInsurerCode } from '@/utils/healthInsurers'
 import HealthInsurerAccounts from './HealthInsurerAccounts.vue'
+import AccidentInsuranceRateSettings from './AccidentInsuranceRateSettings.vue'
 import EmployerPolicies from './EmployerPolicies.vue'
 import PayrollDimensions from './PayrollDimensions.vue'
 import RegzelProfileSettings from './RegzelProfileSettings.vue'
@@ -780,7 +781,10 @@ onMounted(async () => {
         </div>
       </section>
 
-      <HealthInsurerAccounts v-if="activeTab === 'institutions'" :can-write="canWrite" />
+      <template v-if="activeTab === 'institutions'">
+        <HealthInsurerAccounts :can-write="canWrite" />
+        <AccidentInsuranceRateSettings class="mt-6" :can-write="canWrite" />
+      </template>
 
       <section
         v-if="activeTab === 'accounting'"

@@ -2092,6 +2092,21 @@ export interface PayrollOfficeRegistration {
   created_at: string
 }
 
+/**
+ * Sazba zákonného pojištění odpovědnosti zaměstnavatele (vyhláška
+ * č. 125/1993 Sb.). `institution_code` odkazuje na účet pojistitele vedený
+ * v Nastavení mezd → Instituce (`institution_type = 'statutory_insurance'`) —
+ * tam se zadává bankovní účet a variabilní symbol, tady jen sazba a od kdy
+ * platí.
+ */
+export interface PayrollAccidentInsuranceRate {
+  id: number
+  institution_code: string
+  rate_per_mille: string
+  effective_from: string
+  created_at: string
+}
+
 export interface PayrollEmployerSettings {
   supplier_id: number
   row_version: number
@@ -5413,6 +5428,13 @@ export const payrollApi = {
     'effective_from' | 'social_security_variable_symbol' | 'source_reference'>) =>
     api.post<{ registration: PayrollOfficeRegistration }>(`/payroll/settings/offices/${officeId}/registrations`, payload)
       .then(response => response.data.registration),
+  accidentInsuranceRates: () =>
+    api.get<{ rates: PayrollAccidentInsuranceRate[] }>('/payroll/settings/accident-insurance-rates')
+      .then(response => response.data.rates),
+  createAccidentInsuranceRate: (payload: Pick<PayrollAccidentInsuranceRate,
+    'institution_code' | 'rate_per_mille' | 'effective_from'>) =>
+    api.post<{ rate: PayrollAccidentInsuranceRate }>('/payroll/settings/accident-insurance-rates', payload)
+      .then(response => response.data.rate),
   /**
    * `agenda_group` filtruje na SERVERU. Odfiltrovat si skupinu až z přijaté
    * stránky by znamenalo pager počítaný přes všechny agendy nad tabulkou,

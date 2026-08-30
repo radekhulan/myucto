@@ -94,6 +94,7 @@ use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
 use MyInvoice\Action\Payroll\PayrollEmployerPolicyAction;
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
+use MyInvoice\Action\Payroll\PayrollAccidentInsuranceRateAction;
 use MyInvoice\Action\Payroll\PayrollOperationalHealthAction;
 use MyInvoice\Action\Payroll\PayrollOperationalReconciliationAction;
 use MyInvoice\Action\Payroll\PayrollJmhzEmployerAnnualEvidenceAction;
@@ -1622,6 +1623,14 @@ final class Routes
                 [PayrollHealthNotificationAction::class, 'preparePaymentOverview'],
             );
             $g->post(
+                '/submissions/health-notifications/bulk/{period:[0-9]{4}-[0-9]{2}}/{insurerCode:[0-9]{3}}/prepare',
+                [PayrollHealthNotificationAction::class, 'prepareBulkNotification'],
+            );
+            $g->get(
+                '/submissions/health-notifications/bulk/{period:[0-9]{4}-[0-9]{2}}/{insurerCode:[0-9]{3}}/download',
+                [PayrollHealthNotificationAction::class, 'downloadBulkNotification'],
+            );
+            $g->post(
                 '/submissions/{submissionId:[0-9]+}/health-isds/{insurerCode:[0-9]{3}}',
                 [PayrollHealthInsuranceIsdsAction::class, 'enqueue'],
             );
@@ -1655,6 +1664,8 @@ final class Routes
             $g->put('/settings/employer', [PayrollEmployerSettingsAction::class, 'put']);
             $g->get('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'list']);
             $g->post('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'create']);
+            $g->get('/settings/accident-insurance-rates', [PayrollAccidentInsuranceRateAction::class, 'list']);
+            $g->post('/settings/accident-insurance-rates', [PayrollAccidentInsuranceRateAction::class, 'create']);
             $g->get('/settings/policies', [PayrollEmployerPolicyAction::class, 'list']);
             $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
             $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);

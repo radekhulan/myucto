@@ -6,11 +6,15 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
 use MyInvoice\Repository\Payroll\PayrollHealthNotificationRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
+use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\InstitutionAccountType;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Service\Payroll\Submission\PayrollAgendaCorrectionPolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -36,6 +40,17 @@ use Psr\Clock\ClockInterface;
  *    potvrzuje uživatel a firma může výchozího příjemce překrýt.
  * 4. **Stav `ready` znamená „lze odeslat", ne „odesláno".** Přechod dál patří
  *    potvrzenému ISDS transportu; samotné zařazení do fronty stav nemění.
+ * 5. **HOZ se do ISDS fronty NEZAŘAZUJE — a zůstane tak.** ISDS fronta
+ *    ({@see PayrollAgendaCorrectionPolicy}, {@see HealthInsurerChannelCatalog})
+ *    je dnes doložená jen pro PPZ (podklady mluví o „PPPZ"); pro HOZ rešerše
+ *    transportní obálku nedokládá o nic líp, takže by vynucení agendy PPZ
+ *    v {@see \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService::enqueue()}
+ *    znamenalo odeslání datovou zprávou bez dokladu, jak má vypadat příloha.
+ *    Vydání souboru ke stažení naproti tomu takový doklad NEPOTŘEBUJE — formát
+ *    HOZ je doložený tímtéž připnutým XSD jako PPZ, jen jinou strukturou. Proto
+ *    HOZ umí `prepareBulkNotification()`/`bulkNotificationDownload()`, ale ne
+ *    ISDS enqueue; kdyby se pro HOZ někdy dohledala transportní obálka, patří
+ *    rozšíření do `HealthInsuranceIsdsSubmissionService`, ne sem.
  */
 final readonly class HealthInsuranceSubmissionService
 {
@@ -47,10 +62,12 @@ final readonly class HealthInsuranceSubmissionService
 
     public const SOURCE_EVENT_NOTIFICATION = 'payroll_health_notification';
     public const SOURCE_EVENT_OVERVIEW = 'payroll_health_payment_overview';
+    public const SOURCE_EVENT_BULK_NOTIFICATION = 'payroll_health_bulk_notification';
 
     private const CHANNEL = 'health_portal';
     private const SUBJECT_EMPLOYMENT = 'employment';
     private const SUBJECT_RUN = 'payroll_run';
+    private const SUBJECT_EMPLOYER = 'employer';
 
     /** Strop stránky je tvrdý — z URL ho zvednout nejde. */
     public const PERIOD_MAX_LIMIT = 200;
@@ -59,6 +76,8 @@ final readonly class HealthInsuranceSubmissionService
     public function __construct(
         private PayrollHealthNotificationRepository $facts,
         private PayrollInstitutionAccountRepository $institutionAccounts,
+        private PayrollRegistrationIdentityRepository $identities,
+        private PayrollSensitiveData $sensitiveData,
         private HealthNotificationDutyResolver $resolver,
         private HealthNotificationDutyCatalog $duties,
         private HealthNotificationCodeCatalog $codes,
@@ -874,6 +893,265 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
+     * Přímo uživatelsky předatelný artefakt HOZ za JEDNU pojišťovnu a JEDNO
+     * mzdové období. Sestavuje se vždy nanovo ze zdroje, stejně jako
+     * {@see self::paymentOverviewDownload()} — schválně se nečte z uloženého
+     * artefaktu, aby stažení fungovalo i bez toho, že bylo podání dřív
+     * `prepare`nuté.
+     *
+     * @return array{bytes:string,mime_type:string,filename:string,sha256:string}
+     */
+    public function bulkNotificationDownload(
+        int $supplierId,
+        string $period,
+        string $insurerCode,
+    ): array {
+        $payload = $this->bulkNotificationBundle(
+            $supplierId,
+            $period,
+            $insurerCode,
+        )['payload'];
+        $bytes = $this->serializer->serializeBulkNotification($payload);
+        $this->validator->validateBulkNotification($payload, $bytes);
+
+        return [
+            'bytes' => $bytes,
+            'mime_type' => 'application/xml',
+            'filename' => sprintf(
+                'zp-hoz-%s-%s.xml',
+                $period,
+                $insurerCode,
+            ),
+            'sha256' => hash('sha256', $bytes),
+        ];
+    }
+
+    /**
+     * Zmrazí hromadné oznámení HOZ do odesílatelné podoby. Neodesílá — ISDS
+     * frontu HOZ záměrně nepoužívá, viz bod 5 v docblocku třídy.
+     *
+     * @return array<string,mixed>
+     */
+    public function prepareBulkNotification(
+        int $supplierId,
+        string $environment,
+        string $period,
+        string $insurerCode,
+        ?int $createdBy = null,
+    ): array {
+        $bundle = $this->bulkNotificationBundle(
+            $supplierId,
+            $period,
+            $insurerCode,
+        );
+        $payload = $bundle['payload'];
+        $window = $bundle['window'];
+        $xml = $this->serializer->serializeBulkNotification($payload);
+
+        $subjectReference =
+            'health_bulk_notification:' . $period . ':' . $insurerCode;
+        $bounds = $this->periodBounds($period);
+        $sourceHash = hash('sha256', CanonicalJson::encode([
+            'schema_reference' =>
+                'payroll-health-bulk-notification-submission.v1',
+            'period' => $period,
+            'insurer_code' => $insurerCode,
+            'xml_sha256' => hash('sha256', $xml),
+        ]));
+
+        return $this->submissionRepository->transaction(function () use (
+            $supplierId,
+            $environment,
+            $period,
+            $insurerCode,
+            $payload,
+            $xml,
+            $window,
+            $subjectReference,
+            $bounds,
+            $sourceHash,
+            $createdBy,
+        ): array {
+            if (!$this->submissionRepository->lockSupplier($supplierId)) {
+                throw new HealthNotificationException(
+                    'zp_supplier_missing',
+                    'Firma hromadného oznámení nebyla nalezena.',
+                );
+            }
+            $obligation = $this->obligations->register(
+                $supplierId,
+                self::AGENDA_BULK_NOTIFICATION,
+                self::SUBJECT_EMPLOYER,
+                $subjectReference,
+                $bounds['from'],
+                $bounds['to'],
+                'regular',
+                self::CHANNEL,
+                self::SOURCE_EVENT_BULK_NOTIFICATION,
+                $subjectReference,
+                $sourceHash,
+                $window->earliestSubmissionOn,
+                $window->dueOn,
+                $window->calendarBasis,
+                $window->rulesetId,
+                $window->rulesetHash,
+                'health-bulk-notification-obligation:' . $environment . ':'
+                    . $sourceHash,
+                null,
+                $createdBy,
+                null,
+                $environment,
+            );
+            $submission = $this->submissions->prepare(
+                $supplierId,
+                $obligation['id'],
+                'regular',
+                self::CHANNEL,
+                $sourceHash,
+                'health-bulk-notification-submission:' . $environment . ':'
+                    . $sourceHash,
+                null,
+                null,
+                $createdBy,
+                $environment,
+            );
+            if (!$submission['created']) {
+                $artifactId = $this->submissionRepository
+                    ->findOutboundXmlArtifactId(
+                        $supplierId,
+                        $environment,
+                        (int) $submission['id'],
+                    );
+                $artifact = $artifactId === null
+                    ? null
+                    : $this->submissionRepository->findArtifact(
+                        $supplierId,
+                        $artifactId,
+                    );
+                if ($artifact === null) {
+                    throw new HealthNotificationException(
+                        'zp_submission_artifact_missing',
+                        'Dříve připravené hromadné oznámení nemá zmrazený podklad.',
+                    );
+                }
+
+                return [
+                    'submission_id' => (int) $submission['id'],
+                    'obligation_id' => $obligation['id'],
+                    'artifact_id' => $artifactId,
+                    'status' => (string) $submission['status'],
+                    'row_version' => (int) $submission['row_version'],
+                    'insurer_code' => $insurerCode,
+                    'period' => $period,
+                    'agenda_code' => self::AGENDA_BULK_NOTIFICATION,
+                    'artifact_sha256' => (string) $artifact['artifact_sha256'],
+                    'changes_count' => count($payload->changes),
+                    'created' => false,
+                    'deadline' => $window->toArray(),
+                    'schema_validated' => $this->isSchemaValidatedStatus(
+                        (string) $submission['status'],
+                    ),
+                ];
+            }
+
+            $part = $this->submissions->addPart(
+                $supplierId,
+                (int) $submission['id'],
+                (int) $submission['row_version'],
+                'hoz:' . $period . ':' . $insurerCode,
+                self::AGENDA_BULK_NOTIFICATION,
+                $subjectReference,
+                'payroll_period',
+                $subjectReference,
+                $sourceHash,
+            );
+            $xmlArtifact = $this->submissions->storeArtifact(
+                $supplierId,
+                (int) $submission['id'],
+                (int) $part['submission_row_version'],
+                (int) $part['id'],
+                'outbound_xml',
+                'outbound',
+                'application/xml',
+                $xml,
+                HealthInsuranceSchemaCatalog::XSD_VERSION,
+                null,
+                self::CHANNEL,
+                'health-bulk-notification-xml-artifact:' . $environment . ':'
+                    . $sourceHash,
+                $createdBy,
+            );
+            if (!hash_equals(
+                hash('sha256', $xml),
+                (string) $xmlArtifact['artifact_sha256'],
+            )) {
+                throw new HealthNotificationException(
+                    'zp_artifact_mismatch',
+                    'Otisk uloženého artefaktu neodpovídá zmrazené datové větě.',
+                );
+            }
+
+            $rowVersion = (int) $xmlArtifact['submission_row_version'];
+            $status = (string) $submission['status'];
+            $validated = false;
+            try {
+                $this->validator->validateBulkNotification($payload, $xml);
+                $validated = true;
+            } catch (HealthNotificationException $e) {
+                // Bez připnutého XSD se podání nesmí označit za ověřené —
+                // stejná výhrada jako u PPZ (viz bod 2 v docblocku třídy).
+                $issue = $this->submissions->recordIssue(
+                    $supplierId,
+                    (int) $submission['id'],
+                    $rowVersion,
+                    (int) $part['id'],
+                    'blocker',
+                    'xsd',
+                    $e->errorCode,
+                    'payroll_period',
+                    $subjectReference,
+                    ['message' => $e->getMessage()],
+                    $createdBy,
+                );
+                $rowVersion = (int) $issue['submission_row_version'];
+            }
+            if ($validated) {
+                $transition = $this->submissions->transition(
+                    $supplierId,
+                    (int) $submission['id'],
+                    $rowVersion,
+                    'validated',
+                );
+                $ready = $this->submissions->transition(
+                    $supplierId,
+                    (int) $submission['id'],
+                    (int) $transition['row_version'],
+                    'ready',
+                );
+                $rowVersion = (int) $ready['row_version'];
+                $status = (string) $ready['status'];
+            }
+
+            return [
+                'submission_id' => (int) $submission['id'],
+                'obligation_id' => $obligation['id'],
+                'part_id' => (int) $part['id'],
+                'artifact_id' => (int) $xmlArtifact['id'],
+                'status' => $status,
+                'row_version' => $rowVersion,
+                'insurer_code' => $insurerCode,
+                'period' => $period,
+                'agenda_code' => self::AGENDA_BULK_NOTIFICATION,
+                'artifact_sha256' => (string) $xmlArtifact['artifact_sha256'],
+                'changes_count' => count($payload->changes),
+                'created' => true,
+                'deadline' => $window->toArray(),
+                'schema_validated' => $validated,
+            ];
+        });
+    }
+
+    /**
      * Dostupnost přímého portálového API pojišťovny.
      *
      * `assertDispatchable()` je `never` — bez veřejně popsané portálové
@@ -1380,6 +1658,207 @@ final readonly class HealthInsuranceSubmissionService
             parentalLeaveStartedOn: $row['parental_leave_started_on'],
             maternityOrParentalLeaveEndedOn:
                 $row['maternity_or_parental_leave_ended_on'],
+        );
+    }
+
+    /**
+     * Sestaví HOZ pro JEDNU pojišťovnu a JEDNO období z povinností, které
+     * hlásí zaměstnavatel a mají kód změny doložený anotací XSD
+     * ({@see HealthNotificationCodeCatalog::isCodeMappingDocumented()}).
+     * Nedoložené kódy (oprava, přestup, změna údajů) se do dávky nezahrnují —
+     * aplikace pro ně kód vyrobit neumí, ne že by je zapomněla.
+     *
+     * @return array{
+     *   payload:HealthBulkNotificationPayload,
+     *   window:HealthNotificationDeadlineWindow,
+     * }
+     */
+    private function bulkNotificationBundle(
+        int $supplierId,
+        string $period,
+        string $insurerCode,
+    ): array {
+        $this->schemas->assertInsurerCode($insurerCode);
+        $set = $this->periodDutySet($supplierId, $period);
+        if ($set['unresolved'] !== []) {
+            throw new HealthNotificationException(
+                'zp_period_contains_unresolved_employments',
+                sprintf(
+                    'Hromadné oznámení nelze sestavit: u %d pracovních vztahů chybí údaje potřebné k určení zdravotní pojišťovny.',
+                    count($set['unresolved']),
+                ),
+            );
+        }
+
+        $duties = [];
+        $changes = [];
+        foreach ($set['duties'] as $entry) {
+            $duty = $entry['duty'];
+            if (!$duty->reportedByEmployer
+                || $duty->insurerCode !== $insurerCode
+                || !$this->codes->isCodeMappingDocumented($duty->kind)
+            ) {
+                continue;
+            }
+            $duties[] = $duty;
+            $changes[] = $this->changeForDuty($supplierId, $duty);
+        }
+        if ($changes === []) {
+            throw new HealthNotificationException(
+                'zp_bulk_notification_empty',
+                'Za zvolené období a pojišťovnu nevznikla žádná věta hromadného oznámení, kterou aplikace umí kódem doložit.',
+            );
+        }
+        usort(
+            $changes,
+            static fn (
+                HealthNotificationChange $a,
+                HealthNotificationChange $b,
+            ): int => [$a->changedOn, $a->lastName, $a->firstName, $a->insuranceNumber]
+                <=> [$b->changedOn, $b->lastName, $b->firstName, $b->insuranceNumber],
+        );
+
+        return [
+            'payload' => new HealthBulkNotificationPayload(
+                insurerCode: $insurerCode,
+                employer: $this->requireEmployer(
+                    $supplierId,
+                    $insurerCode,
+                    $period . '-01',
+                ),
+                changes: $changes,
+            ),
+            'window' => $this->bulkNotificationWindow($duties),
+        ];
+    }
+
+    /**
+     * Lhůta celé dávky je ta NEJBLIŽŠÍ z lhůt zahrnutých povinností — dávka
+     * smí čekat na doplnění dalších vět jen do dne, kdy propadne ta první.
+     *
+     * @param list<HealthNotificationDuty> $duties
+     */
+    private function bulkNotificationWindow(
+        array $duties,
+    ): HealthNotificationDeadlineWindow {
+        $window = null;
+        foreach ($duties as $duty) {
+            if ($duty->deadline === null) {
+                continue;
+            }
+            if ($window === null || $duty->deadline->dueOn < $window->dueOn) {
+                $window = $duty->deadline;
+            }
+        }
+        if ($window === null) {
+            throw new \LogicException(
+                'Hromadné oznámení bez zahrnuté povinnosti nemá lhůtu.',
+            );
+        }
+
+        return $window;
+    }
+
+    /**
+     * Věta `zmenaZamestance` pro jednu povinnost. Adresa se do věty NEPŘIDÁVÁ
+     * — schéma ji má volitelnou a evidence osoby drží jen spojenou
+     * `street_line`, ne odděleně ulici a číslo popisné jako
+     * {@see HealthEmployerIdentification}; rozdělovat ji odhadem by znamenalo
+     * poslat adresu, která nikdy takhle nebyla zapsaná.
+     */
+    private function changeForDuty(
+        int $supplierId,
+        HealthNotificationDuty $duty,
+    ): HealthNotificationChange {
+        $identity = $this->identities->identityAt(
+            $supplierId,
+            $duty->employeeId,
+            $duty->occurredOn,
+        );
+        $firstName = is_string($identity['first_name'] ?? null)
+            ? trim((string) $identity['first_name'])
+            : '';
+        $lastName = is_string($identity['last_name'] ?? null)
+            ? trim((string) $identity['last_name'])
+            : '';
+        if ($firstName === '' || $lastName === '') {
+            throw new HealthNotificationException(
+                'zp_change_identity_missing',
+                sprintf(
+                    'K %s chybí u zaměstnance (id %d) historická identita se jménem a příjmením — hromadné oznámení bez nich sestavit nelze. Doplňte kartu osoby.',
+                    $duty->occurredOn,
+                    $duty->employeeId,
+                ),
+            );
+        }
+
+        return new HealthNotificationChange(
+            changeCode: $this->codes->codeFor($duty->kind),
+            changedOn: $duty->occurredOn,
+            insuranceNumber: $this->insuranceNumberFor(
+                $supplierId,
+                $duty->employeeId,
+            ),
+            firstName: $firstName,
+            lastName: $lastName,
+        );
+    }
+
+    /**
+     * Číslo pojištěnce: přednostně rodné číslo, náhradou EČP pro cizince bez
+     * přiděleného rodného čísla. Cizinec BEZ obojího (schéma pro něj zná tvar
+     * `[MZ]DDMMYYYY`) tady podporovaný není — chybí spolehlivý zdroj pohlaví
+     * a data narození svázaný přímo s podáním, takže je bezpečnější
+     * srozumitelně selhat, než poslat odhadnuté číslo.
+     */
+    private function insuranceNumberFor(
+        int $supplierId,
+        int $employeeId,
+    ): string {
+        $ecp = null;
+        foreach ($this->identities->identifiers(
+            $supplierId,
+            $employeeId,
+        ) as $stored) {
+            if (!in_array(
+                $stored['identifier_type'],
+                ['birth_number', 'ecp'],
+                true,
+            )) {
+                continue;
+            }
+            $plaintext = $this->sensitiveData->reveal(
+                $stored['value_ciphertext'],
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $supplierId,
+                $stored['id'],
+                PayrollRevealPurpose::SUBMISSION_HEALTH_BULK_NOTIFICATION,
+            );
+            $hash = $this->sensitiveData->lookupHash(
+                $plaintext,
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $supplierId,
+            );
+            if (!hash_equals($stored['value_hash'], $hash)) {
+                throw new \RuntimeException(
+                    'Otisk čísla pojištěnce neodpovídá ciphertextu.',
+                );
+            }
+            if ($stored['identifier_type'] === 'birth_number') {
+                return $plaintext;
+            }
+            $ecp ??= $plaintext;
+        }
+        if ($ecp !== null) {
+            return $ecp;
+        }
+
+        throw new HealthNotificationException(
+            'zp_change_insurance_number_missing',
+            sprintf(
+                'Zaměstnanec (id %d) nemá evidované rodné číslo ani EČP — hromadné oznámení bez čísla pojištěnce sestavit nelze.',
+                $employeeId,
+            ),
         );
     }
 

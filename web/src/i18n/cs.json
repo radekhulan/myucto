@@ -4328,7 +4328,8 @@
           "hzupn_remains_standalone": "HZUPN zůstává samostatným hlášením i vedle JMHZ. MyÚčto datovou větu sestaví, zvaliduje proti připnutému XSD a umí ji odeslat datovou schránkou; kanál VREP/APEP pro tuhle agendu otevřený není.",
           "eldp_historic_preparation_available": "Historický ELDP lze připravit v samostatné záložce. Tento přehled jeho data ani stav neduplikuje.",
           "eldp_jmhz_default_on_demand_exception": "Od roku 2026 vychází běžný ELDP z JMHZ, ale historický a on-demand scénář zůstává. Příprava je v samostatné záložce.",
-          "accident_insurance_calculation_output_liability_not_supported": "Výpočet základu a sazby, předpis, výstup ani platební závazek zákonného úrazového pojištění nejsou implementované. Povinnost není nahrazena JMHZ. MyÚčto dovolí pouze doložit externě ověřenou částku a skutečně provedenou úhradu."
+          "accident_insurance_calculation_output_liability_not_supported": "Výpočet základu a sazby, předpis, výstup ani platební závazek zákonného úrazového pojištění nejsou implementované. Povinnost není nahrazena JMHZ. MyÚčto dovolí pouze doložit externě ověřenou částku a skutečně provedenou úhradu.",
+          "accident_insurance_calculated_and_materialized": "MyÚčto spočítá vyměřovací základ za čtvrtletí ze sociálního pojištění a předepíše pojistné podle sazby zadané v Nastavení mezd (minimálně 100 Kč). Povinnost není nahrazena JMHZ. Sazbu podle přílohy č. 2 vyhlášky zatím MyÚčto nezná — zadejte ji ručně z výměru pojišťovny."
         },
         "workflow": {
           "verify_case_and_source_data": "Ověřte konkrétní případ, rozhodné období a podklady včetně příjmů a směn mimo tento P0 přehled.",
@@ -4343,7 +4344,10 @@
           "calculate_accident_insurance_externally": "Z odborně ověřených externích podkladů určete období, základ, sazbu a částku; MyÚčto je nepočítá ani nekontroluje.",
           "pay_accident_insurance_externally": "Proveďte skutečnou úhradu mimo MyÚčto a ověřte její částku i identifikaci příjemce.",
           "store_payment_evidence_in_company_dms": "Uložte potvrzení úhrady nebo konkrétní oficiální doklad jako firemní dokument do DMS.",
-          "record_payment_evidence": "Teprve potom zapište částku, reference a DMS dokument jako neměnný důkaz ručního splnění."
+          "record_payment_evidence": "Teprve potom zapište částku, reference a DMS dokument jako neměnný důkaz ručního splnění.",
+          "review_accident_insurance_rate_setting": "Ověřte, že má firma v Nastavení mezd doplněnou aktuální sazbu z výměru pojišťovny a účet pojistitele v Instituce.",
+          "review_accident_insurance_liability": "Zkontrolujte spočítaný vyměřovací základ a předepsané pojistné na seznamu plateb za poslední měsíc čtvrtletí.",
+          "pay_accident_insurance_liability": "Uhraďte předepsaný závazek stejným postupem jako ostatní mzdové odvody a spárujte platbu s bankovním výpisem."
         },
         "form": {
           "title": "Důkaz ručního splnění — {agenda}",
@@ -5433,6 +5437,21 @@
           "user_verified": "Ověřeno uživatelem",
           "imported": "Importovaný údaj"
         }
+      },
+      "accident_insurance": {
+        "title": "Zákonné pojištění odpovědnosti zaměstnavatele",
+        "subtitle": "Vyhláška č. 125/1993 Sb. Sazba se odvíjí od převažující činnosti firmy (příloha č. 2 vyhlášky) — MyÚčto číselník sazeb podle NACE zatím nezná, zadejte ji ručně z výměru pojišťovny. MyÚčto z ní čtvrtletně spočítá pojistné z vyměřovacího základu sociálního pojištění (minimálně 100 Kč) a předepíše ho na seznam plateb.",
+        "rate_source_hint": "Bankovní účet a variabilní symbol pojistitele zadejte v sekci Platební účty institucí výše (typ Zákonné pojištění) — kód instituce tam zadaný použijte i tady.",
+        "current": "Aktuální sazba: {rate} ‰ ({institution}), platí od {date}.",
+        "not_set": "Sazba zákonného pojištění odpovědnosti není nastavena — dokud ji nezadáte, MyÚčto pojistné nespočítá.",
+        "effective_from": "Platí od",
+        "institution_code": "Kód pojistitele",
+        "institution_code_hint": "Musí odpovídat kódu instituce zadanému u účtu typu Zákonné pojištění.",
+        "rate_per_mille": "Sazba (‰)",
+        "add_rate": "Přidat sazbu",
+        "load_failed": "Sazbu zákonného pojištění se nepodařilo načíst.",
+        "saved": "Sazba zákonného pojištění byla uložena.",
+        "save_failed": "Sazbu zákonného pojištění se nepodařilo uložit."
       },
       "accounting_title": "Automatické účtování",
       "accounting_hint": "Předkontace rozlišují mzdu zaměstnance, závislý příjem společníka, odměnu za výkon funkce, pojistné, daň a ostatní srážky.",
@@ -6655,7 +6674,7 @@
     },
     "health_notifications": {
       "title": "Oznamovací povinnost vůči zdravotní pojišťovně",
-      "subtitle": "HOZ: aplikace vyhodnotí lhůty a zaeviduje povinnosti pro ruční dokončení, ale zatím nesestavuje ani neodesílá samotné oznámení. PPZ: ze schválené revize vytvoří XML i PDF a doložený formát přílohy může připravit do odchozí fronty ISDS. Samotné odeslání vždy potvrzuje uživatel.",
+      "subtitle": "HOZ: aplikace vyhodnotí lhůty, zaeviduje povinnosti do inboxu a umí za období a pojišťovnu sestavit i stáhnout XML ověřené proti připnutému XSD; odeslání zůstává ruční. PPZ: ze schválené revize vytvoří XML i PDF a doložený formát přílohy může připravit do odchozí fronty ISDS. Samotné odeslání vždy potvrzuje uživatel.",
       "load_failed": "Přehled oznamovacích povinností se nepodařilo načíst.",
       "stale": "Zobrazená data jsou z posledního úspěšného načtení. {message}",
       "read_only": "K sestavení podání je potřeba právo zápisu do mzdových podání.",
@@ -6672,7 +6691,7 @@
       "limits": {
         "title": "Možnosti elektronického podání",
         "no_transport": "Do odchozí fronty ISDS lze připravit pouze PPZ a jen tam, kde je doložený formát přílohy — společné XML nebo vytěžitelné PDF. Odeslání vždy výslovně potvrzuje uživatel.",
-        "manual_delivery": "HOZ aplikace zatím nesestavuje ani neodesílá. Zaeviduje pouze povinnost a lhůtu; oznámení připravte a podejte ručně a splnění potvrďte v inboxu povinností.",
+        "manual_delivery": "HOZ lze sestavit a stáhnout jako XML ověřené proti připnutému XSD, ale aplikace ho neodesílá a do fronty ISDS nezařazuje. Stažený soubor podejte pojišťovně ručně a splnění potvrďte v inboxu povinností.",
         "undocumented_codes": "U těchto druhů povinnosti neplyne z připnutého schématu jediný kód změny, takže se nevydá vůbec: {kinds}. Odhadnout ho by znamenalo podat větu s kódem, který neplyne z ničeho.",
         "capability_failed": "Seznam kanálů pojišťoven se nepodařilo načíst. Omezení výše platí i tak — nezmizela, jen k nim chybí detail."
       },
@@ -6778,6 +6797,26 @@
         "isds_unavailable": "Pro tuto pojišťovnu není současně doložený formát přílohy a ID datové schránky. Stáhněte podklad a ověřte způsob podání u pojišťovny.",
         "isds_failed": "Podání se nepodařilo připravit do ISDS fronty.",
         "failed": "Větu se nepodařilo sestavit."
+      },
+      "prepare_bulk": {
+        "title": "Sestavení hromadného oznámení (HOZ)",
+        "description": "Sestaví HOZ za zvolené období a pojišťovnu ze všech povinností, které hlásí zaměstnavatel a má pro ně schéma doložený kód změny — nedoložené kódy (oprava, přestup, změna údajů) se do dávky nezahrnou. XML se ověří proti připnutému XSD. Aplikace soubor nezařazuje do fronty ISDS ani ho neodesílá — vydá ho jen ke stažení.",
+        "action": "Sestavit HOZ",
+        "insurer": "Pojišťovna",
+        "insurer_placeholder": "Vyberte pojišťovnu",
+        "pick_first": "Nejdřív vyberte pojišťovnu.",
+        "valid": "Věta je platná",
+        "valid_hint": "HOZ pro pojišťovnu {insurer} obsahuje {count} vět a prošel ověřením proti připnutému XSD. Nejbližší lhůta zahrnuté povinnosti je {due}.",
+        "blocked": "Věta má blokující výhradu",
+        "blocked_hint": "Soubor vznikl a lze ho stáhnout, ale zůstal v konceptu s výhradou ve fázi ověření schématu.",
+        "status": "Stav podání",
+        "changes_count": "Počet vět",
+        "due_on": "Nejbližší lhůta",
+        "fingerprint": "Otisk souboru",
+        "download": "Stáhnout HOZ",
+        "downloading": "Stahuji…",
+        "download_failed": "HOZ se nepodařilo stáhnout.",
+        "failed": "HOZ se nepodařilo sestavit."
       }
     },
     "benefit_baskets": {

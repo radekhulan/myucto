@@ -16,6 +16,8 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadl
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -35,9 +37,11 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
     private HealthInsuranceSubmissionService $service;
     private HealthInsuranceSchemaCatalog $schemas;
     private PayrollSubmissionService $submissions;
+    private PayrollSensitiveData $sensitive;
     private int $supplierId;
     private int $revisionId;
     private int $employmentId;
+    private int $employeeId;
 
     protected function setUp(): void
     {
@@ -62,13 +66,16 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         }
         $service = $container->get(HealthInsuranceSubmissionService::class);
         $submissions = $container->get(PayrollSubmissionService::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
         if (!$service instanceof HealthInsuranceSubmissionService
             || !$submissions instanceof PayrollSubmissionService
+            || !$sensitive instanceof PayrollSensitiveData
         ) {
             throw new \RuntimeException('Služby podání nejsou dostupné.');
         }
         $this->service = $service;
         $this->submissions = $submissions;
+        $this->sensitive = $sensitive;
         $this->repository = $container->get(PayrollSubmissionRepository::class);
         $this->schemas = new HealthInsuranceSchemaCatalog();
 
@@ -94,8 +101,11 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
               WHERE id = ?',
         )->execute([$this->supplierId]);
         $employeeId = $this->employee($pdo);
+        $this->employeeId = $employeeId;
         $this->employmentId = $this->employment($pdo, $employeeId);
         $this->coverage($pdo, $employeeId);
+        $this->identity($pdo, $employeeId, 'Jana', 'Nováková');
+        $this->insertIdentifier($pdo, $employeeId, 'birth_number', '9052224321');
         $this->healthInsurerAccount($pdo);
         $this->revisionId = $this->revision($pdo, $employeeId);
         $this->storeResult($employeeId);
@@ -847,6 +857,168 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         }
     }
 
+    /**
+     * Jádro cesty HOZ: povinnost → payload → XML → artefakt → stažení.
+     * Bez připnutého XSD zůstane v `draft` s výhradou, stejně jako PPZ.
+     */
+    public function testBulkNotificationFreezesTheArtefactAndStopsBeforeValidated(): void
+    {
+        $result = $this->service->prepareBulkNotification(
+            $this->supplierId,
+            'production',
+            '2026-03',
+            '111',
+        );
+
+        self::assertTrue($result['created']);
+        self::assertSame('HOZ_2026', $result['agenda_code']);
+        self::assertSame('2026-03', $result['period']);
+        self::assertSame('111', $result['insurer_code']);
+        self::assertSame(1, $result['changes_count']);
+        self::assertSame('2026-03-09', $result['deadline']['due_on']);
+        self::assertGreaterThan(0, $result['artifact_id']);
+        self::assertMatchesRegularExpression(
+            '/^[0-9a-f]{64}$/D',
+            $result['artifact_sha256'],
+        );
+
+        $bundleAvailable = $this->schemas->isBundleAvailable();
+        self::assertSame($bundleAvailable, $result['schema_validated']);
+        self::assertSame(
+            $bundleAvailable ? 'ready' : 'draft',
+            $result['status'],
+        );
+
+        $xml = $this->submissions->artifactBytes(
+            $this->supplierId,
+            (int) $result['artifact_id'],
+        );
+        self::assertStringContainsString(
+            '<hromadneOznameniZamestnavatele',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<kodzmeny>P</kodzmeny>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '<cisloPojistence>9052224321</cisloPojistence>',
+            $xml,
+        );
+        self::assertStringContainsString('<jmeno>Jana</jmeno>', $xml);
+        self::assertStringContainsString('<prijmeni>Nováková</prijmeni>', $xml);
+        self::assertSame($result['artifact_sha256'], hash('sha256', $xml));
+
+        if (!$bundleAvailable) {
+            $issues = $this->db->pdo()->prepare(
+                'SELECT severity, validation_stage, issue_code
+                   FROM payroll_submission_issues
+                  WHERE supplier_id = ? AND submission_id = ?',
+            );
+            $issues->execute([$this->supplierId, $result['submission_id']]);
+            $issue = $issues->fetch(PDO::FETCH_ASSOC);
+            self::assertIsArray($issue);
+            self::assertSame('blocker', $issue['severity']);
+            self::assertSame('xsd', $issue['validation_stage']);
+        }
+    }
+
+    public function testPreparingTheSameBulkNotificationTwiceReplaysInsteadOfDuplicating(): void
+    {
+        $first = $this->service->prepareBulkNotification(
+            $this->supplierId,
+            'production',
+            '2026-03',
+            '111',
+        );
+        $second = $this->service->prepareBulkNotification(
+            $this->supplierId,
+            'production',
+            '2026-03',
+            '111',
+        );
+
+        self::assertTrue($first['created']);
+        self::assertFalse($second['created']);
+        self::assertSame($first['submission_id'], $second['submission_id']);
+        self::assertSame($first['artifact_id'], $second['artifact_id']);
+        self::assertSame($first['artifact_sha256'], $second['artifact_sha256']);
+    }
+
+    public function testBulkNotificationDownloadRebuildsFromSourceWithoutPreparing(): void
+    {
+        $artifact = $this->service->bulkNotificationDownload(
+            $this->supplierId,
+            '2026-03',
+            '111',
+        );
+
+        self::assertSame('application/xml', $artifact['mime_type']);
+        self::assertStringContainsString(
+            '<hromadneOznameniZamestnavatele',
+            $artifact['bytes'],
+        );
+        self::assertSame(
+            $artifact['sha256'],
+            hash('sha256', $artifact['bytes']),
+        );
+    }
+
+    public function testBulkNotificationExcludesInsurerWithoutMatchingDuties(): void
+    {
+        try {
+            $this->service->prepareBulkNotification(
+                $this->supplierId,
+                'production',
+                '2026-03',
+                '205',
+            );
+            self::fail('Pojišťovna bez zahrnuté povinnosti nesmí vyrobit prázdnou dávku.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_bulk_notification_empty', $e->errorCode);
+        }
+    }
+
+    public function testBulkNotificationFailsClosedWithoutIdentityFirstAndLastName(): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        try {
+            $this->service->prepareBulkNotification(
+                $this->supplierId,
+                'production',
+                '2026-03',
+                '111',
+            );
+            self::fail('Bez historické identity nelze sestavit větu HOZ.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_change_identity_missing', $e->errorCode);
+        }
+    }
+
+    public function testBulkNotificationFailsClosedWithoutInsuranceNumber(): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND employee_id = ?',
+        )->execute([$this->supplierId, $this->employeeId]);
+
+        try {
+            $this->service->prepareBulkNotification(
+                $this->supplierId,
+                'production',
+                '2026-03',
+                '111',
+            );
+            self::fail('Bez rodného čísla ani EČP nelze sestavit číslo pojištěnce.');
+        } catch (HealthNotificationException $e) {
+            self::assertSame('zp_change_insurance_number_missing', $e->errorCode);
+        }
+    }
+
     // --- fixtures --------------------------------------------------------
 
     private function insertLegacyObligation(
@@ -961,6 +1133,61 @@ final class PayrollHealthInsuranceSubmissionTest extends TestCase
         )->execute([$this->supplierId, $employeeId, $code]);
 
         return (int) $pdo->lastInsertId();
+    }
+
+    private function identity(
+        PDO $pdo,
+        int $employeeId,
+        string $firstName,
+        string $lastName,
+    ): void {
+        $pdo->prepare(
+            'INSERT INTO payroll_person_identity_history
+                (supplier_id, employee_id, full_name, first_name, last_name,
+                 effective_from)
+             VALUES (?, ?, ?, ?, ?, "2026-01-01")'
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            $firstName . ' ' . $lastName,
+            $firstName,
+            $lastName,
+        ]);
+    }
+
+    private function insertIdentifier(
+        PDO $pdo,
+        int $employeeId,
+        string $type,
+        string $value,
+    ): void {
+        $pdo->prepare(
+            "INSERT INTO payroll_person_identifiers
+                (supplier_id, employee_id, identifier_type,
+                 value_ciphertext, value_hash, value_masked)
+             VALUES (?, ?, ?, 'enc:v2:pending', ?, '')"
+        )->execute([
+            $this->supplierId,
+            $employeeId,
+            $type,
+            random_bytes(32),
+        ]);
+        $id = (int) $pdo->lastInsertId();
+        $field = $type === 'foreign_tax_identifier'
+            ? PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER
+            : PayrollSensitiveField::PERSONAL_IDENTIFIER;
+        $sealed = $this->sensitive->seal($value, $field, $this->supplierId, $id);
+        $pdo->prepare(
+            'UPDATE payroll_person_identifiers
+                SET value_ciphertext = ?, value_hash = ?, value_masked = ?
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([
+            $sealed->ciphertext,
+            $sealed->lookupHash,
+            $sealed->masked,
+            $this->supplierId,
+            $id,
+        ]);
     }
 
     private function coverage(PDO $pdo, int $employeeId): void
