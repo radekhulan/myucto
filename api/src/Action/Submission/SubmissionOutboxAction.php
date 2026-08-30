@@ -10,7 +10,9 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
+use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -29,6 +31,8 @@ final class SubmissionOutboxAction
         private readonly SubmissionOutboxService $outbox,
         private readonly SubmissionCredentialService $credentials,
         private readonly ActivityLogger $logger,
+        private readonly MobileKeyIsdsAuthenticator $mobileKey,
+        private readonly IsdsMobileCredentialService $mobileCredentials,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -123,6 +127,114 @@ final class SubmissionOutboxAction
         }
 
         return Json::ok($response, $result);
+    }
+
+    /**
+     * Zahájí přihlášení Mobilním klíčem pro ODESLÁNÍ konkrétního podání.
+     *
+     * Proč vlastní cesta, a ne `confirm()` s uloženým certifikátem: přímý
+     * transport odesílá výhradně v relaci, kterou člověk právě potvrdil
+     * ({@see \MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport::hasConfirmedSession()}).
+     * Uložený certifikát ani heslo takovou relaci nepředstavují — u nich by
+     * u odeslání nestál nikdo — takže `SessionAwareIsdsTransport` sáhne po
+     * náhradní cestě a podání skončí větou „odešlete si to sami".
+     *
+     * @param array<string,string> $args
+     */
+    public function mobileKeyStart(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        if ((int) ($args['id'] ?? 0) <= 0) {
+            return Json::error($response, 'submission_not_found', 'Podání neexistuje.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $supplierId = SupplierGuard::currentId($request);
+            $userId = $this->userId($request);
+            $environment = (string) ($body['environment'] ?? 'production');
+            $result = ($body['use_saved_credentials'] ?? false) === true
+                ? $this->mobileKey->startWithCredentials(
+                    $supplierId,
+                    $userId,
+                    $environment,
+                    $this->mobileCredentials->unlock($supplierId, $userId, $environment),
+                )
+                : $this->mobileKey->start(
+                    $supplierId,
+                    $userId,
+                    $environment,
+                    (string) ($body['username'] ?? ''),
+                    (string) ($body['communication_code'] ?? ''),
+                );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Ověří potvrzení relace a hned v ní podání odešle.
+     *
+     * Odeslání musí proběhnout TÍMTO voláním, ne dalším: `continue()` průchod
+     * při potvrzení spotřebuje, takže relaci už podruhé vyzvednout nejde.
+     * Rozdělit to na „zjisti stav" a „teď odešli" by znamenalo držet session
+     * cookie někde mezi požadavky — a to je přesně to, co tenhle model
+     * (krátká relace potvrzená člověkem) nechce.
+     *
+     * @param array<string,string> $args
+     */
+    public function mobileKeyConfirm(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        $id = (int) ($args['id'] ?? 0);
+        if ($id <= 0) {
+            return Json::error($response, 'submission_not_found', 'Podání neexistuje.', 404);
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        $flowToken = (string) ($body['flow_token'] ?? '');
+        if ($flowToken === '' || strlen($flowToken) > 8192) {
+            return Json::error($response, 'isds_mobile_flow_invalid', 'Přihlášení Mobilním klíčem není platné. Spusťte ho znovu.', 400);
+        }
+
+        try {
+            $result = $this->mobileKey->continue(
+                $flowToken,
+                $supplierId,
+                $userId,
+                (string) ($body['environment'] ?? 'production'),
+            );
+            $context = $result['context'];
+            if ($context === null) {
+                // Čeká se na potvrzení v mobilu — podání se nedotýkáme.
+                return Json::ok($response, [
+                    'state' => $result['state'],
+                    'description' => $result['description'],
+                    'result' => null,
+                ]);
+            }
+            $sendResult = $this->outbox->confirmAndSend($supplierId, $id, $userId, $context);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'submission_conflict', $e->getMessage(), 409);
+        }
+
+        if ($sendResult['dispatched']) {
+            $this->logger->log('submission_outbox_sent', $userId, 'submission_outbox', $id, null, null, null, $supplierId);
+        }
+
+        return Json::ok($response, [
+            'state' => $result['state'],
+            'description' => $result['description'],
+            'result' => $sendResult,
+        ]);
     }
 
     /**

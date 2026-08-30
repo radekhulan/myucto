@@ -436,6 +436,18 @@ export interface MobileKeyInboxStart {
   expires_at: string
 }
 
+/**
+ * Odeslání datovkou v relaci potvrzené Mobilním klíčem. Stav a odeslání jsou
+ * jedno volání schválně — potvrzení relace se dá vyzvednout jen jednou, takže
+ * kdyby se stav zjišťoval zvlášť, relace by se spotřebovala a odeslat už by
+ * v ní nešlo.
+ */
+export interface MobileKeyOutboxConfirm {
+  state: number
+  description: string
+  result: { row: OutboxSubmission; dispatched: boolean } | null
+}
+
 export interface MobileKeyInboxStatus {
   state: number
   description: string
@@ -668,6 +680,20 @@ export const dataBoxApi = {
 
   mobileKeyInboxStatus: (flowToken: string, environment: string) =>
     api.post<MobileKeyInboxStatus>('/submissions/inbox/mobile-key/status', {
+      flow_token: flowToken,
+      environment,
+    }).then(r => r.data),
+
+  startMobileKeyOutbox: (id: number, environment: string, username: string, communicationCode: string, useSaved = false) =>
+    api.post<MobileKeyInboxStart>(`/submissions/outbox/${id}/mobile-key/start`, {
+      environment,
+      username,
+      communication_code: communicationCode,
+      use_saved_credentials: useSaved,
+    }).then(r => r.data),
+
+  mobileKeyOutboxConfirm: (id: number, flowToken: string, environment: string) =>
+    api.post<MobileKeyOutboxConfirm>(`/submissions/outbox/${id}/mobile-key/confirm`, {
       flow_token: flowToken,
       environment,
     }).then(r => r.data),

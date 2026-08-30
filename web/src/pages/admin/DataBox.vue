@@ -690,6 +690,94 @@ async function finishInboxPoll(result: { stored: number; failed: number; error?:
   await loadAll()
 }
 
+// ── Odeslání datovkou Mobilním klíčem ────────────────────────────────────────
+// Až doteď u ISDS zbývalo jen „označte si to jako odeslané" a člověk musel do
+// datovky sám. Přímý transport ale odesílat umí — jen výhradně v relaci, kterou
+// účetní právě potvrdila v mobilu. Potvrzení se dá vyzvednout JEN JEDNOU, takže
+// odeslání proběhne v témže volání, které to potvrzení vyzvedne.
+const mobileOutboxFor = ref<number | null>(null)
+const mobileOutboxUsername = ref('')
+const mobileOutboxCode = ref('')
+const mobileOutboxUseSaved = ref(false)
+const mobileOutboxFlow = ref('')
+const mobileOutboxStatus = ref('')
+let mobileOutboxTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearMobileOutboxTimer() {
+  if (mobileOutboxTimer !== null) clearTimeout(mobileOutboxTimer)
+  mobileOutboxTimer = null
+}
+
+function openMobileOutbox(row: OutboxSubmission) {
+  clearMobileOutboxTimer()
+  mobileOutboxFor.value = row.id
+  mobileOutboxFlow.value = ''
+  mobileOutboxStatus.value = ''
+  mobileOutboxCode.value = ''
+  mobileOutboxUseSaved.value = savedMobileCredential.value?.saved === true
+  mobileOutboxUsername.value = savedMobileCredential.value?.username ?? ''
+}
+
+function closeMobileOutbox() {
+  clearMobileOutboxTimer()
+  mobileOutboxFor.value = null
+  mobileOutboxFlow.value = ''
+  mobileOutboxStatus.value = ''
+  mobileOutboxCode.value = ''
+}
+
+async function startMobileOutbox(row: OutboxSubmission) {
+  const useSaved = mobileOutboxUseSaved.value && mobileOutboxCode.value === ''
+  if (!useSaved && (mobileOutboxUsername.value.trim() === '' || mobileOutboxCode.value === '')) {
+    toast.error(t('databox.outbox.mobileKey.credentialsRequired'))
+    return
+  }
+  busyId.value = row.id
+  try {
+    const start = await dataBoxApi.startMobileKeyOutbox(
+      row.id,
+      environment.value,
+      useSaved ? '' : mobileOutboxUsername.value.trim(),
+      useSaved ? '' : mobileOutboxCode.value,
+      useSaved,
+    )
+    mobileOutboxFlow.value = start.flow_token
+    mobileOutboxStatus.value = start.description
+    // Kód se v paměti nedrží déle, než je potřeba k jeho odeslání.
+    mobileOutboxCode.value = ''
+    void pollMobileOutbox(row)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busyId.value = null
+  }
+}
+
+async function pollMobileOutbox(row: OutboxSubmission) {
+  if (mobileOutboxFlow.value === '') return
+  try {
+    const status = await dataBoxApi.mobileKeyOutboxConfirm(row.id, mobileOutboxFlow.value, environment.value)
+    mobileOutboxStatus.value = status.description
+    if (status.result) {
+      closeMobileOutbox()
+      if (status.result.dispatched) {
+        toast.success(t('databox.outbox.mobileKey.sent'))
+      } else {
+        toast.warning(t('databox.outbox.mobileKey.notDispatched'))
+      }
+      await loadAll()
+      return
+    }
+    mobileOutboxTimer = setTimeout(() => { void pollMobileOutbox(row) }, 2000)
+  } catch (e) {
+    // Vypršelá nebo zamítnutá relace se NEOBNOVUJE sama: nová relace by nebyla
+    // ta, kterou člověk schválil. Uživatel musí potvrdit znovu vědomě.
+    clearMobileOutboxTimer()
+    mobileOutboxFlow.value = ''
+    toast.error(apiErrorMessage(e))
+  }
+}
+
 async function pollMobileKeyStatus() {
   if (mobileFlowToken.value === '') return
   try {
@@ -1390,6 +1478,53 @@ onUnmounted(clearMobileStatusTimer)
           {{ t('databox.outbox.validationFailed') }}
         </p>
 
+        <!--
+          Odeslání Mobilním klíčem. Kód je „komunikační kód" z portálu ISDS,
+          tedy samostatný kód pro přístup aplikace — NENÍ to heslo do datovky.
+        -->
+        <div
+          v-if="mobileOutboxFor === row.id"
+          class="mt-3 rounded-md border border-primary-200 bg-primary-50/40 p-3"
+          data-test="outbox-mobile-key-form"
+        >
+          <p class="text-sm text-neutral-700">{{ t('databox.outbox.mobileKey.intro') }}</p>
+          <div v-if="mobileOutboxFlow === ''" class="mt-3 grid gap-3 sm:grid-cols-2">
+            <label class="block">
+              <span class="text-sm font-medium">{{ t('databox.outbox.mobileKey.username') }}</span>
+              <input v-model="mobileOutboxUsername" type="text" maxlength="128" autocomplete="off" class="form-input mt-1 w-full" />
+            </label>
+            <label class="block">
+              <span class="text-sm font-medium">{{ t('databox.outbox.mobileKey.code') }}</span>
+              <input v-model="mobileOutboxCode" type="password" maxlength="512" autocomplete="off" class="form-input mt-1 w-full" />
+              <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.outbox.mobileKey.codeHint') }}</span>
+            </label>
+          </div>
+          <label
+            v-if="mobileOutboxFlow === '' && savedMobileCredential?.saved"
+            class="mt-3 flex items-center gap-2 text-sm"
+          >
+            <input v-model="mobileOutboxUseSaved" type="checkbox" />
+            {{ t('databox.outbox.mobileKey.useSaved') }}
+          </label>
+          <p v-if="mobileOutboxStatus" class="mt-3 text-sm text-neutral-700" data-test="outbox-mobile-key-status">
+            {{ mobileOutboxStatus }}
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              v-if="mobileOutboxFlow === ''"
+              type="button"
+              :class="btnFilled('primary')"
+              :disabled="busyId === row.id"
+              @click="startMobileOutbox(row)"
+            >
+              {{ t('databox.outbox.mobileKey.request') }}
+            </button>
+            <button type="button" :class="btnOutline('neutral')" @click="closeMobileOutbox()">
+              {{ t('common.cancel') }}
+            </button>
+          </div>
+        </div>
+
         <!-- „Odeslal jsem to" — ID zprávy je přesný identifikátor, ne formalita. -->
         <div
           v-if="markSentFor === row.id"
@@ -1446,6 +1581,19 @@ onUnmounted(clearMobileStatusTimer)
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
             </svg>
             {{ t('databox.outbox.markSent') }}
+          </button>
+          <button
+            v-if="primaryAction(row) === 'markSent' && mobileOutboxFor !== row.id"
+            type="button"
+            :class="btnFilled('primary')"
+            :disabled="busyId === row.id"
+            data-test="outbox-mobile-key"
+            @click="openMobileOutbox(row)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+            </svg>
+            {{ t('databox.outbox.mobileKey.action') }}
           </button>
           <button
             v-if="primaryAction(row) === 'markSent' && markSentFor !== row.id"

@@ -2419,6 +2419,10 @@ final class Routes
         $app->post   ('/api/submissions/outbox',           [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'enqueue']);
         $app->get    ('/api/submissions/outbox/{id:[0-9]+}/attempts', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'attempts']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/confirm',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'confirm']);
+        // Odeslání datovkou v relaci potvrzené Mobilním klíčem. Stav a odeslání
+        // je JEDEN endpoint schválně: potvrzení se dá vyzvednout jen jednou.
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mobile-key/start',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyStart']);
+        $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyConfirm']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
         // Ruční cesta: uživatel odešle zprávu ze své datové schránky a přinese
