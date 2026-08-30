@@ -84,6 +84,8 @@ use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDiscountIntentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
+use MyInvoice\Action\Payroll\PayrollDocumentDeliveryAction;
+use MyInvoice\Action\Payroll\PublicPayrollDocumentAccessAction;
 use MyInvoice\Action\Payroll\PayrollEldpAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentExitDocumentAction;
 use MyInvoice\Action\Payroll\PayrollEnforcementAction;
@@ -140,6 +142,7 @@ use MyInvoice\Action\Payroll\PayrollRetentionAction;
 use MyInvoice\Action\Payroll\PayrollRulesetAction;
 use MyInvoice\Action\Payroll\PayrollRunValidationOverrideAction;
 use MyInvoice\Action\Payroll\PayrollRunsAction;
+use MyInvoice\Action\Payroll\PayrollSicknessCaseAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionArtifactDownloadAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionDetailAction;
 use MyInvoice\Action\Payroll\PayrollSubmissionInboxAction;
@@ -745,6 +748,19 @@ final class Routes
         $app->post   ('/api/public/work-report/{token:[a-f0-9]{32,128}}/verify',       PublicWorkReportVerifyAction::class);
         $app->get    ('/api/public/domain-verification/{token:[a-f0-9]{64}}', \MyInvoice\Action\Public\DomainVerificationAction::class);
 
+        // Zabezpečený odkaz na osobní mzdový dokument (bez auth; lokátor + jednorázový
+        // kód na známou adresu zaměstnance). Zaměstnanec není uživatel aplikace.
+        // Lokátor je přesně 64 hex znaků — kratší varianty nepřipouštíme, ať se
+        // nedá formát degradovat na hádatelnou délku.
+        $app->get ('/api/public/payroll-document/{token:[a-f0-9]{64}}',
+                   [PublicPayrollDocumentAccessAction::class, 'state']);
+        $app->post('/api/public/payroll-document/{token:[a-f0-9]{64}}/request-code',
+                   [PublicPayrollDocumentAccessAction::class, 'requestCode']);
+        $app->post('/api/public/payroll-document/{token:[a-f0-9]{64}}/verify',
+                   [PublicPayrollDocumentAccessAction::class, 'verify']);
+        $app->get ('/api/public/payroll-document/{token:[a-f0-9]{64}}/download',
+                   [PublicPayrollDocumentAccessAction::class, 'download']);
+
         // Úplné mzdy — samostatný bounded context nezávislý na účetním režimu.
         $app->group('/api/payroll', function ($g) {
             $g->get('/capabilities', PayrollCapabilitiesAction::class);
@@ -1114,6 +1130,18 @@ final class Routes
                 '/documents/{documentId:[0-9]+}/delivery-events',
                 [PayrollDocumentAction::class, 'recordDeliveryEvent'],
             );
+            $g->get(
+                '/documents/{documentId:[0-9]+}/secure-links',
+                [PayrollDocumentDeliveryAction::class, 'list'],
+            );
+            $g->post(
+                '/documents/{documentId:[0-9]+}/secure-links',
+                [PayrollDocumentDeliveryAction::class, 'send'],
+            );
+            $g->delete(
+                '/documents/{documentId:[0-9]+}/secure-links/{linkId:[0-9]+}',
+                [PayrollDocumentDeliveryAction::class, 'revoke'],
+            );
             $g->get('/people', [PayrollPeopleAction::class, 'list']);
             $g->post('/people', [PayrollPeopleAction::class, 'create']);
             $g->get('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'detail']);
@@ -1408,6 +1436,34 @@ final class Routes
             $g->post(
                 '/submissions/registration-transport/{attemptId:[0-9]+}/close',
                 [PayrollRegistrationTransportAction::class, 'close'],
+            );
+            // Případy dávek nemocenského pojištění (NEMPRI, HZUPN).
+            // Dvě podání s vlastními lhůtami podle § 97 zák. č. 187/2006 Sb.
+            // Případ žije i bez podání — lhůta podle odst. 2 běží od 15. dne
+            // trvání neschopnosti bez ohledu na to, jestli si toho někdo všiml.
+            $g->get(
+                '/submissions/sickness-cases',
+                [PayrollSicknessCaseAction::class, 'list'],
+            );
+            $g->post(
+                '/submissions/sickness-cases',
+                [PayrollSicknessCaseAction::class, 'create'],
+            );
+            $g->put(
+                '/submissions/sickness-cases/{caseId:[0-9]+}',
+                [PayrollSicknessCaseAction::class, 'update'],
+            );
+            $g->get(
+                '/submissions/sickness-cases/{caseId:[0-9]+}/preview',
+                [PayrollSicknessCaseAction::class, 'preview'],
+            );
+            $g->post(
+                '/submissions/sickness-cases/{caseId:[0-9]+}/prepare',
+                [PayrollSicknessCaseAction::class, 'prepare'],
+            );
+            $g->post(
+                '/submissions/sickness-cases/{caseId:[0-9]+}/receipt',
+                [PayrollSicknessCaseAction::class, 'receipt'],
             );
             // Oznámení záměru uplatňovat slevu na pojistném (OZUSPOJ).
             // Vlastní podání s vlastní lhůtou: sleva podle § 7a bez doručeného

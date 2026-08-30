@@ -71,6 +71,7 @@ const accountRows: Array<{
   { key: 'income_tax', debit: null, credit: 'income_tax_credit' },
   { key: 'withholding_tax', debit: null, credit: 'withholding_tax_credit' },
   { key: 'other_deductions', debit: null, credit: 'other_deductions_credit' },
+  { key: 'enforcement_deductions', debit: null, credit: 'enforcement_deductions_credit' },
   { key: 'partner_settlement', debit: null, credit: 'partner_settlement_credit' },
   { key: 'risky_savings', debit: 'risky_savings_debit', credit: 'risky_savings_credit' },
   { key: 'employee_receivable', debit: 'employee_receivable_debit', credit: null },
@@ -96,7 +97,11 @@ const defaultAccounts: PayrollEmployerAccounts = {
   // načtením nastavení ukazují na syntetice, kterou má v osnově každá firma.
   income_tax_credit: '342',
   withholding_tax_credit: '342',
+  // Totéž platí pro 379.100 / 379.200 / 379.300 z migrace 1658 — srážky,
+  // exekuce i rizikové spoření se před načtením nastavení ukazují na
+  // syntetice 379, kterou má v osnově každá firma.
   other_deductions_credit: '379',
+  enforcement_deductions_credit: '379',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',

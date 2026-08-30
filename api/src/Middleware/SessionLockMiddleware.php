@@ -61,11 +61,15 @@ final class SessionLockMiddleware implements MiddlewareInterface
             '#^/api/public/invoice/[a-f0-9]{32,128}/pdf$#D',
             '#^/api/public/invoice/[a-f0-9]{32,128}/attachment/[0-9]+$#D',
             '#^/api/public/work-report/[a-f0-9]{32,128}$#D',
+            '#^/api/public/payroll-document/[a-f0-9]{64}$#D',
+            '#^/api/public/payroll-document/[a-f0-9]{64}/download$#D',
         ],
         'POST' => [
             '#^/api/public/approval/[a-f0-9]{32,128}/decide$#D',
             '#^/api/public/work-report/[a-f0-9]{32,128}/request-code$#D',
             '#^/api/public/work-report/[a-f0-9]{32,128}/verify$#D',
+            '#^/api/public/payroll-document/[a-f0-9]{64}/request-code$#D',
+            '#^/api/public/payroll-document/[a-f0-9]{64}/verify$#D',
         ],
     ];
 

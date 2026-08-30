@@ -1,0 +1,31 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">Váš mzdový dokument</h1>
+
+<p style="margin:0 0 16px;">Dobrý den,</p>
+
+<p style="margin:0 0 16px;">
+  je pro Vás připravený osobní mzdový dokument. Otevřete si ho přes zabezpečený odkaz níže —
+  <strong>dokument není přílohou tohoto e-mailu</strong>, aby nezůstal ležet ve schránce.
+</p>
+
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ url }}" style="display:inline-block;background:{{ accent }};color:#fff;font-weight:600;font-size:16px;padding:14px 28px;border-radius:8px;text-decoration:none;">
+    Otevřít dokument
+  </a>
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#7A748C;">
+  Po otevření odkazu si vyžádáte <strong>jednorázový kód</strong>, který přijde na tuto adresu.
+  Bez něj se dokument nezobrazí — samotný odkaz tedy nikomu nestačí.
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#7A748C;">
+  Odkaz je platný do <strong>{{ validUntil }}</strong>.
+</p>
+
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">
+  <strong>Pokud jste žádný dokument nečekali</strong>, e-mail ignorujte a dejte vědět své mzdové účetní.
+</p>
+{% endblock %}

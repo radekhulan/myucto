@@ -1,0 +1,16 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Ověřovací kód
+-------------
+
+Dobrý den,
+
+pro zobrazení Vašeho mzdového dokumentu zadejte tento ověřovací kód:
+
+    {{ code }}
+
+Kód je platný {{ expiresIn|default('10 min') }} a lze ho použít jen jednou.
+
+Pokud jste o kód nežádali, e-mail ignorujte a dejte vědět své mzdové účetní — někdo zná odkaz na Váš dokument.
+{% endblock %}

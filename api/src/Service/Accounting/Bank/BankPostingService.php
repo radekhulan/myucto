@@ -17,6 +17,7 @@ use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Accounting\Bank\Detect\BankDetectorChain;
 use MyInvoice\Service\Accounting\Bank\Detect\DetectionResult;
 use MyInvoice\Service\Accounting\Learning\CorrectionRecorder;
@@ -78,6 +79,20 @@ final class BankPostingService
         private readonly ?LegacyBankPaymentReconciler $legacyPayments = null,
         private readonly ?BankAnalyticResolver $bankAnalytics = null,
         private readonly ?BankPostingPreview $previews = null,
+        /**
+         * Ú-16: pohyb, který si nárokovaly mzdy, nesmí zaúčtovat i banka.
+         *
+         * Stráž existovala jen pro fakturační párování; účtování o ní nevědělo,
+         * takže odvod na předčíslí 0710 mohl detektor zaúčtovat 336/221 i poté,
+         * co týž pohyb zaúčtovala úhrada mzdového závazku — a závazek by se
+         * odúčtoval DVAKRÁT. Mzdy `match_status` záměrně nepřepisují, takže
+         * pohyb jinak vypadá jako nespárovaný a nic jiného by tomu nezabránilo.
+         *
+         * Pořadí nerozhoduje: kdo je první, ten pohyb zaúčtuje, a druhý ho
+         * uvidí ({@see \MyInvoice\Service\Payroll\Payment\PayrollPaymentPostingService}
+         * si cizí zápis poznamená jako `posted_elsewhere`, banka ho přeskočí).
+         */
+        private readonly ?PayrollBankEvidenceGuard $payrollEvidence = null,
     ) {}
 
     /**
@@ -230,6 +245,10 @@ final class BankPostingService
             // 4) ignorovaná tx se neúčtuje.
             if ((string) $tx['match_status'] === 'ignored') {
                 return ['action' => 'skipped', 'reason' => 'ignored'];
+            }
+            // 4b) pohyb spotřebovaný mzdovou platbou účtuje mzdová strana.
+            if ($this->payrollEvidence?->isUsedByPayrollSafely($txId) === true) {
+                return ['action' => 'skipped', 'reason' => 'payroll_payment'];
             }
             $isMatched = in_array((string) $tx['match_status'], ['auto_exact', 'auto_partial', 'manual'], true)
                 || !empty($tx['has_explicit_allocation']);

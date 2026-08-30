@@ -314,6 +314,15 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/submissions/discount-intents$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/discount-intents/[0-9]+/preview$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/discount-intents/[0-9]+/(?:prepare|end|receipt)$#', 'payroll.submissions', AccessLevel::WRITE],
+        // Případy dávek nemocenského pojištění (NEMPRI, HZUPN). `preview` je
+        // READ, ale nese celý obsah datové věty včetně rodného čísla a údajů
+        // o exekuci — proto stejné oprávnění jako zbytek podání, ne obecné
+        // čtení mzdových dat.
+        ['GET', '#^/api/payroll/submissions/sickness-cases$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/sickness-cases$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['PUT', '#^/api/payroll/submissions/sickness-cases/[0-9]+$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/sickness-cases/[0-9]+/preview$#', 'payroll.submissions', AccessLevel::READ],
+        ['POST', '#^/api/payroll/submissions/sickness-cases/[0-9]+/(?:prepare|receipt)$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::READ],
         ['*', '#^/api/payroll/submissions/signing-profile$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-transport$#', 'payroll.submissions', AccessLevel::READ],

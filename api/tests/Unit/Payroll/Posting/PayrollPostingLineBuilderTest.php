@@ -34,7 +34,9 @@ final class PayrollPostingLineBuilderTest extends TestCase
             '342.100|credit' => 50_000,
             '366|credit' => 500_000,
             '366|debit' => 111_667,
-            '379|credit' => 15_000,
+            // Ú-14: dobrovolné srážky a exekuce už nesdílí jedinou 379.
+            '379.100|credit' => 10_000,
+            '379.200|credit' => 5_000,
             '521|debit' => 100_000,
             '522|debit' => 200_000,
             '523|debit' => 300_000,
@@ -45,7 +47,7 @@ final class PayrollPostingLineBuilderTest extends TestCase
         $deductionLines = array_values(array_filter(
             $preview->lines,
             static fn (array $line): bool =>
-                $line['account_code'] === '379'
+                str_starts_with($line['account_code'], '379')
                 && $line['side'] === 'credit',
         ));
         self::assertCount(2, $deductionLines);
@@ -243,10 +245,60 @@ final class PayrollPostingLineBuilderTest extends TestCase
         $lineMap = $this->lineMap($preview->lines);
 
         self::assertSame(4_000, $lineMap['527|debit']);
-        // 10 000 srážka + 5 000 exekuce + 4 000 povinné spoření.
-        self::assertSame(19_000, $lineMap['379|credit']);
+        // Ú-14: tři věcně různé závazky vůči třem věřitelům, tři analytiky.
+        // 10 000 srážka, 5 000 exekuce, 4 000 povinné spoření.
+        self::assertSame(10_000, $lineMap['379.100|credit']);
+        self::assertSame(5_000, $lineMap['379.200|credit']);
+        self::assertSame(4_000, $lineMap['379.300|credit']);
+        self::assertArrayNotHasKey('379|credit', $lineMap);
         self::assertSame($preview->debitTotalMinor, $preview->creditTotalMinor);
         self::assertSame(940_800, $preview->debitTotalMinor);
+    }
+
+    /**
+     * Ú-14, ZPĚTNÁ KOMPATIBILITA: revize zmrazená dřív, než firma o rozpadu 379
+     * věděla, se musí zaúčtovat BYTE-IDENTICKY.
+     *
+     * Snapshot, který klíč `enforcement_deductions_credit` ani
+     * `risky_savings_credit` nenese, nesmí dostat nové analytiky — jinak by
+     * opakované zaúčtování dřív schválené revize spadlo na kontrolu cílového
+     * otisku v PayrollPostingAdapter a reconciliace by u zaúčtovaného období
+     * ukázala rozdíl proti deníku.
+     *
+     * Rizikové spoření se přitom degraduje na DOSLOVNOU historickou '379'
+     * (PayrollAccountingDefaults::PRE_SPLIT_ACCOUNTS), ne na firemní účet
+     * srážek — proto je tu srážkám nastavená vlastní analytika 379.900, na
+     * které spoření skončit NESMÍ.
+     */
+    public function testLegacySnapshotWithoutSplitKeysPostsEverythingOnOneAccount(): void
+    {
+        $accounts = PayrollAccountingDefaults::codes();
+        $accounts['other_deductions_credit'] = '379.900';
+        unset(
+            $accounts['enforcement_deductions_credit'],
+            $accounts['risky_savings_credit'],
+        );
+
+        $result = $this->calculatedResult();
+        $result['statutory']['risky_savings_period_start'] = '2026-06-01';
+        $result['statutory']['risky_savings'] = [
+            $this->riskySavingsRow(101, 4_000),
+        ];
+
+        $lineMap = $this->lineMap($this->builder->build(
+            $this->snapshot(),
+            $result,
+            $this->statutorySets(),
+            $accounts,
+        )->lines);
+
+        // Srážka i exekuce na firemním účtu srážek, přesně jako dosud.
+        self::assertSame(15_000, $lineMap['379.900|credit']);
+        // Spoření na historické konstantě, ne na 379.900 ani na 379.300.
+        self::assertSame(4_000, $lineMap['379|credit']);
+        self::assertArrayNotHasKey('379.100|credit', $lineMap);
+        self::assertArrayNotHasKey('379.200|credit', $lineMap);
+        self::assertArrayNotHasKey('379.300|credit', $lineMap);
     }
 
     /** Nedopočítaný podklad se neúčtuje — schvalování hlídá jiná brána. */
@@ -298,7 +350,7 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
 
         self::assertSame(
-            ['379|credit' => 2_500, '527|debit' => 2_500],
+            ['379.300|credit' => 2_500, '527|debit' => 2_500],
             $this->lineMap($correction->lines),
         );
     }
@@ -1153,7 +1205,8 @@ final class PayrollPostingLineBuilderTest extends TestCase
             '365.100|credit' => 466_000,
             '366|credit' => 500_000,
             '366|debit' => 500_000,
-            '379|credit' => 15_000,
+            '379.100|credit' => 10_000,
+            '379.200|credit' => 5_000,
             '521|debit' => 100_000,
             '522|debit' => 200_000,
             '523|debit' => 300_000,

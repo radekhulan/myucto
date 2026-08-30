@@ -174,6 +174,19 @@ final class ChartOfAccountsTemplate
         ['code' => '366', 'name' => 'Závazky ke společníkům obchodní korporace ze závislé činnosti', 'type' => 'liability', 'normal_side' => 'credit'],
         ['code' => '378', 'name' => 'Jiné pohledávky', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '379', 'name' => 'Jiné závazky', 'type' => 'liability', 'normal_side' => 'credit'],
+        // Rozpad 379 na tři mzdové závazky (migrace 1658). Syntetika nesla dobrovolné
+        // srážky, exekuce i příspěvek na spoření u rizikové práce najednou, přestože
+        // se platí TŘEM různým skupinám věřitelů (oprávněný z dohody o srážkách,
+        // soudní exekutor / insolvenční správce, penzijní společnost). Na společném
+        // účtu se salda slila a zůstatek nešlo odsouhlasit proti žádné z plateb.
+        //   379.100  dobrovolné srážky ze mzdy (§ 146 písm. b) zákoníku práce)
+        //   379.200  exekuční a insolvenční srážky (§ 276 a násl. o. s. ř.)
+        //   379.300  povinný příspěvek na spoření u rizikové práce (z. č. 324/2025 Sb.)
+        // Syntetika 379 v šabloně ZŮSTÁVÁ: firmy, které analytiku nechtějí, na ní
+        // účtují dál a stávající zaúčtované mzdy se nemění.
+        ['code' => '379.100', 'name' => 'Srážky ze mzdy', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
+        ['code' => '379.200', 'name' => 'Exekuční a insolvenční srážky', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
+        ['code' => '379.300', 'name' => 'Spoření u rizikové práce', 'type' => 'liability', 'normal_side' => 'credit', 'parent_code' => '379'],
         ['code' => '381', 'name' => 'Náklady příštích období', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '382', 'name' => 'Komplexní náklady příštích období', 'type' => 'asset', 'normal_side' => 'debit'],
         ['code' => '383', 'name' => 'Výdaje příštích období', 'type' => 'liability', 'normal_side' => 'credit'],

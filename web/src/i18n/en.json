@@ -2321,6 +2321,32 @@
         "average_earnings_statement": "Average earnings certificate",
         "annual_settlement_result": "Annual tax settlement",
         "monthly_bundle": "Monthly ZIP bundle"
+      },
+      "secure_delivery": {
+        "send_link": "Send secure link",
+        "sending_link": "Sending…",
+        "revoke_link": "Revoke link",
+        "revoking": "Revoking…",
+        "revoke_confirm": "Revoke the secure link for {recipient}? The employee will no longer be able to reach the document through it.",
+        "link_sent": "The secure link was queued for sending to {recipient}.",
+        "link_revoked": "The link has been revoked.",
+        "send_failed": "Sending the secure link failed.",
+        "revoke_failed": "Revoking the link failed.",
+        "link_hidden_hint": "Only the employee, in their own inbox, knows the link.",
+        "status": {
+          "not_sent": "Not sent",
+          "sent": "Sent {date}",
+          "picked_up": "Picked up {date}"
+        },
+        "reason": {
+          "secure_delivery_disabled": "Secure delivery is switched off for this company.",
+          "employer_channel_not_portal": "The company's delivery channel is not set to the secure portal.",
+          "employer_channel_unverified": "The secure delivery channel is not verified yet.",
+          "employee_prefers_paper": "The employee is set up for paper delivery.",
+          "recipient_email_missing": "The employee has no e-mail address on file.",
+          "recipient_email_ambiguous": "The employee has more than one possible e-mail and it is not clear which to use.",
+          "document_not_personal": "This document is not a personal employee document."
+        }
       }
     },
     "annual_settlement": {
@@ -4228,7 +4254,8 @@
         "statutory": "Other obligations",
         "other": "Other",
         "inbox": "Inbox",
-        "certificate": "Certificate"
+        "certificate": "Certificate",
+        "sickness": "Sickness benefits"
       },
       "unsupported": "Not supported yet",
       "other_title": "Other recorded obligations",
@@ -4251,7 +4278,7 @@
         "record_evidence": "Record receipt",
         "agenda": {
           "NEMPRI": "Employer notice of an employee benefit claim",
-          "HZUPN": "Employer report at the end of incapacity for work",
+          "HZUPN": "Employer report at the end of incapacity",
           "ELDP": "Pension insurance record sheet",
           "JMHZ25": "Employer's single monthly report",
           "OZUSPOJ": "Notice of intent to claim the insurance discount",
@@ -5551,7 +5578,8 @@
           "levy": "Levy",
           "checklist": "Per-person deadline",
           "registration_change": "Change to report",
-          "tax_statement": "Tax statement"
+          "tax_statement": "Tax statement",
+          "sickness_case": "Sickness benefit"
         },
         "tax_statement": {
           "form": {
@@ -6838,6 +6866,115 @@
       "errors": {
         "loadFailed": "The intents could not be loaded.",
         "actionFailed": "The action could not be completed."
+      }
+    },
+    "sicknessCases": {
+      "title": "Sickness insurance benefit cases",
+      "intro": "For every social event the employer has two separate duties under Section 97 of Act No. 187/2006 Coll.: notify the benefit claim and hand over the data needed to calculate it (NEMPRI), and once the incapacity ends, report the facts that may affect payment of the benefit (HZUPN). For sickness benefit the data are sent without delay after the first 14 days of incapacity have elapsed. The case is therefore recorded on its own and its deadline is tracked even before anyone prepares a submission.",
+      "empty": "No benefit case recorded yet.",
+      "created": "Case created.",
+      "saved": "Case saved.",
+      "prepared": "Submission prepared. Send it from Dispatch status.",
+      "receiptRecorded": "Outcome from the protocol recorded.",
+      "person": "Person",
+      "employment": "Employment",
+      "benefitKind": "Benefit type",
+      "incapacityFrom": "Social event start",
+      "incapacityTo": "Social event end",
+      "osszCode": "District office code",
+      "decisionNumber": "Decision number",
+      "issuedOn": "Report issue date",
+      "payrollPaymentDate": "Payday",
+      "workedOnDecisiveDay": "Worked on the decisive day",
+      "hoursWorked": "Hours worked",
+      "dailyWorkingHours": "Working hours per day",
+      "receivesPension": "Receives a pension",
+      "isStudent": "Is a student",
+      "enforcement": "Wage attachment ordered",
+      "insolvency": "Insolvency",
+      "unpaidLeave": "Unpaid leave",
+      "unpaidLeaveFrom": "Unpaid leave from",
+      "unpaidLeaveTo": "Unpaid leave to",
+      "returnedToWork": "Returned to work",
+      "returnedOn": "Return date",
+      "hoursWorkedLastDay": "Hours worked on the last day of incapacity",
+      "shiftHoursLastDay": "Scheduled hours on the last day of incapacity",
+      "workedFrom": "Worked from",
+      "workedTo": "Worked to",
+      "acceptedOn": "Date delivered to the authority",
+      "rejectionReason": "Rejection reason from the protocol",
+      "sections": {
+        "case": "Case",
+        "employerConfirmation": "Employer confirmation",
+        "endOfIncapacity": "End of incapacity",
+        "workDays": "Days worked during incapacity"
+      },
+      "benefitKinds": {
+        "NEM": "Sickness benefit",
+        "VPM": "Compensatory allowance in pregnancy and maternity",
+        "OPP": "Paternity benefit",
+        "PPM": "Maternity benefit",
+        "OSE": "Care allowance",
+        "DLO": "Long-term care allowance"
+      },
+      "statuses": {
+        "draft": "Draft",
+        "prepared": "Prepared",
+        "submitted": "Sent",
+        "accepted": "Accepted",
+        "rejected": "Rejected",
+        "cancelled": "Cancelled"
+      },
+      "actions": {
+        "create": "Create case",
+        "edit": "Edit",
+        "save": "Save",
+        "cancel": "Discard changes",
+        "previewNempri": "Preview NEMPRI",
+        "prepareNempri": "Prepare NEMPRI",
+        "previewHzupn": "Preview HZUPN",
+        "prepareHzupn": "Prepare HZUPN",
+        "recordAccepted": "Record acceptance",
+        "recordRejected": "Record rejection",
+        "addWorkInterval": "Add interval",
+        "removeWorkInterval": "Remove"
+      },
+      "hints": {
+        "createRequirements": "Select a person, an employment and the social event start date first.",
+        "readOnly": "You do not have write access to payroll submissions.",
+        "benefitKindNotSerializable": "For this benefit the data message also carries the benefit application with details about the child or the cared-for person. Those are filed by the insured person; the employer does not hold them and the app will not invent them — prepare the submission on the authority's portal. The case stays here with its deadline tracked.",
+        "incapacityEndRequired": "The end-of-incapacity report can only be filed once the incapacity has ended. Fill in the end date.",
+        "alreadyPrepared": "The submission is already prepared. Send it from Dispatch status, or file a correction with the decision number.",
+        "receiptDateRequired": "Fill in the date the submission was delivered to the authority, from the protocol.",
+        "rejectionReasonRequired": "Fill in the rejection reason from the protocol.",
+        "endOfIncapacity": "Fill in only after the incapacity has ended. The authority pays the final benefit from these values.",
+        "workDays": "Days on which the employee worked during the incapacity. The authority derives excluded days from them, so the intervals must not overlap."
+      },
+      "errors": {
+        "generic": "The operation could not be completed."
+      }
+    },
+    "employerSettings": {
+      "accounting": {
+        "enforcement_deductions": "Court-ordered and insolvency deductions"
+      }
+    },
+    "postingReconciliation": {
+      "categories": {
+        "other_deductions": "Other deductions (379.100)",
+        "enforcement": "Court-ordered and insolvency deductions (379.200)",
+        "risky_savings": "Mandatory hazardous-work savings (527/379.300)"
+      }
+    },
+    "payment": {
+      "posting": {
+        "title": "Payment journal entry",
+        "posted": "Payment posted as document {documentNo}",
+        "reversed": "Payment reversal posted as document {documentNo}",
+        "skipped_single_entry": "Payment is not posted — the company uses single-entry bookkeeping.",
+        "skipped_no_account": "The payment could not be posted: {reason}. Add the account and match it again.",
+        "unknown_money_account": "The cash/bank account is not in the chart of accounts.",
+        "unknown_liability_account": "The payroll liability account is not in the chart of accounts."
       }
     }
   },
@@ -19112,6 +19249,44 @@
       "completed": "Done",
       "failed": "Failed",
       "cancelled": "Cancelled"
+    }
+  },
+  "payrollDocumentAccess": {
+    "public": {
+      "title": "Payslip",
+      "loading": "Loading…",
+      "link_invalid": "This link is no longer valid",
+      "link_invalid_hint": "This link is no longer valid. Please ask your payroll accountant for a new one.",
+      "auth_title": "Verify access",
+      "recipient_intro": "We will send a verification code to",
+      "send_code": "Send verification code",
+      "sending_code": "Sending…",
+      "why_code_title": "Why do I need a code if the link arrived by e-mail?",
+      "why_code_body": "The link can travel further than your inbox - it may be forwarded, stored in the company mail archive, or opened on a shared computer. The code proves you have live access to that inbox right now.",
+      "code_sent": "We sent the code. Please check your inbox.",
+      "code_label": "Verification code",
+      "code_placeholder": "123456",
+      "code_ttl_hint": "The code is valid for {minutes} min.",
+      "invalid_code": "The code is invalid or has expired.",
+      "verify": "Verify",
+      "verifying": "Verifying…",
+      "resend": "Resend code",
+      "resend_in": "New code in {n} s",
+      "created_at": "Issued",
+      "size": "Size",
+      "download": "Download document",
+      "footer_note": "This document is meant only for you. Save it somewhere safe after downloading.",
+      "kind": {
+        "payslip": "Payslip",
+        "payroll_sheet": "Payroll sheet",
+        "taxable_income_advance_certificate": "Certificate of taxable income (advance tax)",
+        "taxable_income_withholding_certificate": "Certificate of taxable income (withholding tax)",
+        "employment_certificate": "Certificate of employment",
+        "average_earnings_certificate": "Certificate for the labour office",
+        "average_earnings_statement": "Certificate of average earnings",
+        "annual_settlement_result": "Annual advance settlement",
+        "monthly_bundle": "Monthly document bundle"
+      }
     }
   }
 }

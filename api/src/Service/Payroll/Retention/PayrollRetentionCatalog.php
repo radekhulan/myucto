@@ -232,6 +232,7 @@ final class PayrollRetentionCatalog
                 'payroll_document_delivery_events',
                 'payroll_document_batch_items',
                 'payroll_annual_document_batch_items',
+                'payroll_document_access_links',
                 'payroll_annual_document_revisions',
                 'payroll_inputs',
                 'payroll_run_employments',
@@ -394,7 +395,10 @@ final class PayrollRetentionCatalog
             'verified_on' => self::VERIFIED_ON,
             'accounting_relevant' => false,
             'closing_agenda' => false,
-            'employee_tables' => ['payroll_statutory_obligation_evidence'],
+            'employee_tables' => [
+                'payroll_statutory_obligation_evidence',
+                'payroll_sickness_cases',
+            ],
             'employment_tables' => ['payroll_absences'],
             'note' => 'Věta první § 96 ukládá uschovat záznamy o skutečnostech podle § 95 '
                 . 'po dobu 10 kalendářních roků následujících po roce, kterého se týkají, '

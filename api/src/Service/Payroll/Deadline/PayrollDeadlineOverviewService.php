@@ -6,8 +6,12 @@ namespace MyInvoice\Service\Payroll\Deadline;
 
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
+use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessException;
 use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
 use Psr\Clock\ClockInterface;
 
@@ -38,7 +42,14 @@ use Psr\Clock\ClockInterface;
  * 4. **roční vyúčtování daně** — nepodané DPZVD6 a DPSVD2 se lhůtou podle
  *    {@see PayrollTaxStatementDeadlinePolicy}. Modul obě vyúčtování uměl
  *    sestavit i odeslat, ale jejich lhůta žila jen v komentáři a ve větě pod
- *    panelem — tedy nikde, kde by ji někdo zmeškal včas.
+ *    panelem — tedy nikde, kde by ji někdo zmeškal včas,
+ * 5. **dávky nemocenského pojištění** — evidované případy bez doloženého
+ *    podání NEMPRI nebo HZUPN, s lhůtou podle
+ *    {@see \MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy}.
+ *    Vlastní pramen, protože povinnost podle § 97 zák. č. 187/2006 Sb. vzniká
+ *    sociální událostí, ne založením podání: kdyby se termín odvozoval jen
+ *    z `payroll_obligations`, existoval by teprve od okamžiku, kdy někdo klikl
+ *    na Připravit — tedy přesně tehdy, kdy už ho hlídat netřeba.
  *
  * ## Co se do něj vědomě nedostane
  *
@@ -80,6 +91,7 @@ final readonly class PayrollDeadlineOverviewService
         'checklist',
         'registration_change',
         'tax_statement',
+        'sickness_case',
     ];
 
     /** Kolik dnů dopředu se termín považuje za „brzy". */
@@ -103,6 +115,8 @@ final readonly class PayrollDeadlineOverviewService
         private PayrollRegistrationChangeProposalRepository $registrationChanges,
         private PayrollRegistrationChangeDetectionService $changeDetection,
         private PayrollTaxStatementDeadlinePolicy $taxStatementDeadlines,
+        private PayrollSicknessCaseRepository $sicknessCases,
+        private SicknessDeadlinePolicy $sicknessDeadlines,
         private ClockInterface $clock,
     ) {}
 
@@ -160,6 +174,7 @@ final readonly class PayrollDeadlineOverviewService
             ...$this->checklistItems($supplierId, $from, $to),
             ...$this->registrationChangeItems($supplierId, $environment, $from, $to),
             ...$this->taxStatementItems($supplierId, $from, $to),
+            ...$this->sicknessCaseItems($supplierId, $environment, $from, $to),
         ];
         usort(
             $items,
@@ -459,6 +474,99 @@ final readonly class PayrollDeadlineOverviewService
                 // dlouhé stránky.
                 'path' => '/payroll#payroll-tax-statement',
             ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * Lhůty NEMPRI a HZUPN z evidovaných případů dávek.
+     *
+     * Jeden případ může nést až DVĚ nesplněné povinnosti s různými termíny:
+     * oznámení o žádosti o dávku (§ 97 odst. 1 a 2) a hlášení při ukončení
+     * pracovní neschopnosti (§ 97 odst. 3). Vypisují se proto zvlášť — sloučit
+     * je pod jednu položku by znamenalo, že splněné oznámení schová nesplněné
+     * hlášení.
+     *
+     * HZUPN se objeví teprve tehdy, když je znám den skončení neschopnosti;
+     * dřív povinnost neexistuje a politika lhůtu odmítne spočítat. Ostatní
+     * chyby výpočtu (chybějící výplatní den u vyrovnávacího příspěvku) položku
+     * jen přeskočí — hlídač termínů musí ukázat i to, co ví.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function sicknessCaseItems(
+        int $supplierId,
+        string $environment,
+        string $from,
+        string $to,
+    ): array {
+        $items = [];
+        foreach ($this->sicknessCases->openCases($supplierId, $environment) as $row) {
+            $kind = SicknessBenefitKind::tryFrom((string) $row['benefit_kind']);
+            if ($kind === null) {
+                continue;
+            }
+            $incapacityFrom = (string) $row['incapacity_from'];
+            $incapacityTo = $row['incapacity_to'] === null
+                ? null
+                : (string) $row['incapacity_to'];
+            $documents = [
+                'nempri' => [
+                    'agenda' => 'NEMPRI',
+                    'submitted' => $row['nempri_submission_id'] !== null,
+                ],
+                'hzupn' => [
+                    'agenda' => 'HZUPN',
+                    'submitted' => $row['hzupn_submission_id'] !== null,
+                ],
+            ];
+            foreach ($documents as $document => $meta) {
+                if ($meta['submitted']) {
+                    continue;
+                }
+                try {
+                    $window = $document === 'nempri'
+                        ? $this->sicknessDeadlines->forNempri(
+                            $kind,
+                            $incapacityFrom,
+                            $incapacityTo,
+                            $row['payroll_payment_date'] === null
+                                ? null
+                                : (string) $row['payroll_payment_date'],
+                        )
+                        : $this->sicknessDeadlines->forHzupn(
+                            $incapacityFrom,
+                            $incapacityTo,
+                        );
+                } catch (SicknessException) {
+                    continue;
+                }
+                if ($window->dueOn < $from || $window->dueOn > $to) {
+                    continue;
+                }
+                $items[] = [
+                    'source' => 'sickness_case',
+                    'reference' => 'payroll_sickness_case:' . (int) $row['case_id'],
+                    'title' => $meta['agenda'],
+                    'subject' => (string) $row['full_name'],
+                    'period' => null,
+                    'due_on' => $window->dueOn,
+                    'phase' => $this->phase($window->dueOn),
+                    'days_to_due' => $this->daysToDue($window->dueOn),
+                    'is_overdue' => $this->phase($window->dueOn) === 'overdue',
+                    'case_id' => (int) $row['case_id'],
+                    'document_kind' => $document,
+                    'benefit_kind' => $kind->value,
+                    'employment_id' => (int) $row['employment_id'],
+                    'employee_id' => (int) $row['employee_id'],
+                    'status' => (string) $row['status'],
+                    'deadline_source' => $window->legalReference,
+                    'deadline_source_status' => $window->sourceStatus,
+                    'deadline_ruleset_id' => $window->rulesetId,
+                    'path' => '/payroll/submissions',
+                ];
+            }
         }
 
         return $items;

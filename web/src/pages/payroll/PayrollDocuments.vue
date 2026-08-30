@@ -10,14 +10,16 @@ import {
   type PayrollDocumentBatch,
   type PayrollDocumentBatchItem,
   type PayrollDocumentList,
+  type PayrollDocumentSecureLink,
   type PayrollPeriodExportScope,
+  type PayrollSecureDeliveryBlockedReason,
   type PayrollTaxCertificateKind,
   type PayrollTaxCertificateGenerationPayload,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { localPayrollPeriod } from '@/pages/payroll/payrollComponentsUi'
 import PayrollPersonSearchSelect from '@/components/payroll/PayrollPersonSearchSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -463,6 +465,7 @@ async function load(): Promise<void> {
       if (sequence === loadSequence && requestedPeriod === period.value) {
         data.value = loaded
         total.value = loaded.total
+        void loadSecureLinksFor(loaded.items)
       }
     } else if (requestedTab === 'annual') {
       const [loaded] = await Promise.all([
@@ -472,6 +475,7 @@ async function load(): Promise<void> {
       if (sequence === loadSequence && requestedYear === year.value) {
         annualItems.value = loaded.items
         total.value = loaded.total
+        void loadSecureLinksFor(loaded.items)
       }
     }
   } catch (error) {
@@ -661,6 +665,102 @@ async function download(item: PayrollDocument): Promise<void> {
     toast.error(t('payroll.documents.download_failed'))
   } finally {
     downloadingId.value = null
+  }
+}
+
+/*
+ * ─── Zabezpečené doručení osobního dokumentu ───────────────────────────────
+ *
+ * Odkaz i token zná jen zaměstnanec ve své schránce — API je záměrně nevrací
+ * (viz `PayrollDocumentDeliveryAction`), takže tahle stránka o nich nikdy nic
+ * nezobrazí. Ví jen o STAVU: komu (maskovaně) odkaz šel, jestli je živý a jestli
+ * si dokument zaměstnanec sám vyzvedl.
+ *
+ * Odkazy se dotahují jen pro řádky, které je NĚKDY dostaly (`delivery.secure_link_sent_at`)
+ * — u zbytku by dotaz byl zbytečný a stránka by při každém načtení stránkovala
+ * o dávku požadavků navíc.
+ */
+const secureLinksByDocument = ref<Map<number, PayrollDocumentSecureLink[]>>(new Map())
+const sendingSecureLinkDocumentId = ref<number | null>(null)
+const revokingSecureLinkId = ref<number | null>(null)
+
+function liveSecureLink(documentId: number): PayrollDocumentSecureLink | null {
+  const links = secureLinksByDocument.value.get(documentId)
+  return links?.find(link => link.is_live) ?? null
+}
+
+async function loadSecureLinksFor(items: PayrollDocument[]): Promise<void> {
+  const candidates = items.filter(item => item.employee_id !== null && item.delivery?.secure_link_sent_at)
+  await Promise.all(candidates.map(async (item) => {
+    try {
+      const links = await payrollApi.documentSecureLinks(item.id)
+      secureLinksByDocument.value.set(item.id, links)
+    } catch {
+      // Tiché selhání: řádek jen dočasně nenabídne zneplatnění odkazu.
+    }
+  }))
+}
+
+const SECURE_DELIVERY_REASON_KEYS: Record<string, string> = {
+  secure_delivery_disabled: 'payroll.documents.secure_delivery.reason.secure_delivery_disabled',
+  employer_channel_not_portal: 'payroll.documents.secure_delivery.reason.employer_channel_not_portal',
+  employer_channel_unverified: 'payroll.documents.secure_delivery.reason.employer_channel_unverified',
+  employee_prefers_paper: 'payroll.documents.secure_delivery.reason.employee_prefers_paper',
+  recipient_email_missing: 'payroll.documents.secure_delivery.reason.recipient_email_missing',
+  recipient_email_ambiguous: 'payroll.documents.secure_delivery.reason.recipient_email_ambiguous',
+  document_not_personal: 'payroll.documents.secure_delivery.reason.document_not_personal',
+}
+/** Věta, který z přepínačů odeslání blokuje. `null` u neznámého/chybějícího důvodu. */
+function secureDeliveryReasonMessage(reason: PayrollSecureDeliveryBlockedReason | undefined): string | null {
+  if (!reason) return null
+  const key = SECURE_DELIVERY_REASON_KEYS[reason]
+  return key ? t(key) : null
+}
+
+/** Kompaktní stav řádku: "Neodesláno" / "Odesláno <datum>" / "Převzato <datum>". */
+function secureDeliveryStatusText(item: PayrollDocument): string {
+  const delivery = item.delivery
+  if (delivery?.self_downloaded_at) {
+    return t('payroll.documents.secure_delivery.status.picked_up', { date: formatCreated(delivery.self_downloaded_at) })
+  }
+  if (delivery?.secure_link_sent_at) {
+    return t('payroll.documents.secure_delivery.status.sent', { date: formatCreated(delivery.secure_link_sent_at) })
+  }
+  return t('payroll.documents.secure_delivery.status.not_sent')
+}
+
+async function sendSecureLink(item: PayrollDocument): Promise<void> {
+  if (sendingSecureLinkDocumentId.value !== null) return
+  sendingSecureLinkDocumentId.value = item.id
+  try {
+    const result = await payrollApi.sendDocumentSecureLink(item.id)
+    toast.success(t('payroll.documents.secure_delivery.link_sent', { recipient: result.recipient_masked }))
+    const links = await payrollApi.documentSecureLinks(item.id)
+    secureLinksByDocument.value.set(item.id, links)
+  } catch (error: any) {
+    const reason = error?.response?.data?.error?.reason as PayrollSecureDeliveryBlockedReason | undefined
+    toast.error(
+      secureDeliveryReasonMessage(reason)
+      ?? apiErrorMessage(error, t('payroll.documents.secure_delivery.send_failed')),
+    )
+  } finally {
+    sendingSecureLinkDocumentId.value = null
+  }
+}
+
+async function revokeSecureLink(item: PayrollDocument, link: PayrollDocumentSecureLink): Promise<void> {
+  if (revokingSecureLinkId.value !== null) return
+  if (!window.confirm(t('payroll.documents.secure_delivery.revoke_confirm', { recipient: link.recipient_masked }))) return
+  revokingSecureLinkId.value = link.id
+  try {
+    await payrollApi.revokeDocumentSecureLink(item.id, link.id)
+    toast.success(t('payroll.documents.secure_delivery.link_revoked'))
+    const links = await payrollApi.documentSecureLinks(item.id)
+    secureLinksByDocument.value.set(item.id, links)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.documents.secure_delivery.revoke_failed')))
+  } finally {
+    revokingSecureLinkId.value = null
   }
 }
 
@@ -1197,18 +1297,63 @@ onBeforeUnmount(() => {
                 <td v-if="tbl.isVisible('created')" class="whitespace-nowrap px-4 py-3 text-neutral-600">{{ formatCreated(item.created_at) }}</td>
                 <td v-if="tbl.isVisible('size')" class="whitespace-nowrap px-4 py-3 text-right text-neutral-600">{{ formatSize(item.size_bytes) }}</td>
                 <td v-if="tbl.isVisible('actions')" class="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    data-test="download-document"
-                    :class="btnOutline('neutral')"
-                    :disabled="downloadingId !== null"
-                    @click="download(item)"
-                  >
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                      <path :d="ICONS.download" />
-                    </svg>
-                    {{ t('payroll.documents.download') }}
-                  </button>
+                  <div class="flex flex-col items-end gap-1.5">
+                    <button
+                      type="button"
+                      data-test="download-document"
+                      :class="btnOutline('neutral')"
+                      :disabled="downloadingId !== null"
+                      @click="download(item)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path :d="ICONS.download" />
+                      </svg>
+                      {{ t('payroll.documents.download') }}
+                    </button>
+                    <template v-if="item.employee_id !== null">
+                      <p data-test="secure-delivery-status" class="text-xs text-neutral-500">
+                        {{ secureDeliveryStatusText(item) }}
+                      </p>
+                      <div class="flex flex-wrap justify-end gap-1.5">
+                        <button
+                          type="button"
+                          data-test="send-secure-link"
+                          :class="btnOutlineSm('primary')"
+                          :disabled="sendingSecureLinkDocumentId !== null"
+                          @click="sendSecureLink(item)"
+                        >
+                          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path :d="ICONS.send" />
+                          </svg>
+                          {{
+                            sendingSecureLinkDocumentId === item.id
+                              ? t('payroll.documents.secure_delivery.sending_link')
+                              : t('payroll.documents.secure_delivery.send_link')
+                          }}
+                        </button>
+                        <button
+                          v-if="liveSecureLink(item.id)"
+                          type="button"
+                          data-test="revoke-secure-link"
+                          :class="btnOutlineSm('danger')"
+                          :disabled="revokingSecureLinkId !== null"
+                          @click="revokeSecureLink(item, liveSecureLink(item.id)!)"
+                        >
+                          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path :d="ICONS.x" />
+                          </svg>
+                          {{
+                            revokingSecureLinkId === liveSecureLink(item.id)?.id
+                              ? t('payroll.documents.secure_delivery.revoking')
+                              : t('payroll.documents.secure_delivery.revoke_link')
+                          }}
+                        </button>
+                      </div>
+                      <p v-if="liveSecureLink(item.id)" class="max-w-[14rem] text-right text-[11px] text-neutral-400">
+                        {{ t('payroll.documents.secure_delivery.link_hidden_hint') }}
+                      </p>
+                    </template>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -1257,6 +1402,49 @@ onBeforeUnmount(() => {
             </svg>
             {{ t('payroll.documents.download') }}
           </button>
+          <template v-if="item.employee_id !== null">
+            <p data-test="secure-delivery-status" class="mt-3 text-xs text-neutral-500">
+              {{ secureDeliveryStatusText(item) }}
+            </p>
+            <div class="mt-1.5 flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                data-test="send-secure-link"
+                :class="[btnOutlineSm('primary'), 'flex-1 justify-center']"
+                :disabled="sendingSecureLinkDocumentId !== null"
+                @click="sendSecureLink(item)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path :d="ICONS.send" />
+                </svg>
+                {{
+                  sendingSecureLinkDocumentId === item.id
+                    ? t('payroll.documents.secure_delivery.sending_link')
+                    : t('payroll.documents.secure_delivery.send_link')
+                }}
+              </button>
+              <button
+                v-if="liveSecureLink(item.id)"
+                type="button"
+                data-test="revoke-secure-link"
+                :class="[btnOutlineSm('danger'), 'flex-1 justify-center']"
+                :disabled="revokingSecureLinkId !== null"
+                @click="revokeSecureLink(item, liveSecureLink(item.id)!)"
+              >
+                <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path :d="ICONS.x" />
+                </svg>
+                {{
+                  revokingSecureLinkId === liveSecureLink(item.id)?.id
+                    ? t('payroll.documents.secure_delivery.revoking')
+                    : t('payroll.documents.secure_delivery.revoke_link')
+                }}
+              </button>
+            </div>
+            <p v-if="liveSecureLink(item.id)" class="mt-1 text-[11px] text-neutral-400">
+              {{ t('payroll.documents.secure_delivery.link_hidden_hint') }}
+            </p>
+          </template>
         </article>
       </section>
 

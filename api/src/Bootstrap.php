@@ -560,6 +560,25 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Accounting\Bank\LegacyBankPaymentReconciler::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\BankPostingPreview::class),
+                // Ú-16 — pohyb spotřebovaný mzdovou platbou účtuje mzdová
+                // strana; bez explicitní vazby by autowire nullable class-param
+                // nechal null a odvod by se zaúčtoval dvakrát.
+                $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
+            ),
+
+            // Ú-16 — protizápis úhrady mzdového závazku. ?BankAnalyticResolver je
+            // optional class-param, který PHP-DI s useAttributes(false) nevyplní;
+            // bez něj by úhrada seděla na syntetice 221 místo na analytice účtu.
+            \MyInvoice\Service\Payroll\Payment\PayrollPaymentPostingService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Payment\PayrollPaymentPostingService(
+                $c->get(\MyInvoice\Repository\Payroll\PayrollPaymentPostingRepository::class),
+                $c->get(\MyInvoice\Service\Accounting\PostingService::class),
+                $c->get(\MyInvoice\Repository\AccountingModeRepository::class),
+                $c->get(\MyInvoice\Service\Accounting\Bank\BankAnalyticResolver::class),
+            ),
+            // Totéž pro ?PayrollPaymentPostingService v párovací službě.
+            \MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Payroll\Payment\PayrollPaymentReconciliationService(
+                $c->get(\MyInvoice\Repository\Payroll\PayrollPaymentMatchRepository::class),
+                $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentPostingService::class),
             ),
             \MyInvoice\Service\Bank\StatementImporter::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\StatementImporter(
                 $c->get(Connection::class),

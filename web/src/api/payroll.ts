@@ -2027,7 +2027,15 @@ export interface PayrollEmployerAccounts {
    * přiřadit k jedné z obou daní.
    */
   withholding_tax_credit: string
+  /** Dobrovolné srážky ze mzdy (§ 146 písm. b) zákoníku práce). */
   other_deductions_credit: string
+  /**
+   * Exekuční a insolvenční srážky (§ 276 a násl. o. s. ř., § 398 odst. 3 IZ).
+   * Vlastní účet, ne táž 379 jako dobrovolné srážky: peníze jdou soudnímu
+   * exekutorovi nebo insolvenčnímu správci, ne oprávněnému z dohody o srážkách,
+   * takže na společném účtu nejde saldo přiřadit k jedné z obou skupin.
+   */
+  enforcement_deductions_credit: string
   partner_settlement_credit: string
   /**
    * Povinný příspěvek zaměstnavatele na spoření u rizikové práce
@@ -2235,7 +2243,7 @@ export type PayrollDeadlinePhase = 'overdue' | 'due_today' | 'due_soon' | 'open'
   | 'awaiting_result' | 'action_required'
 
 export type PayrollDeadlineSource = 'submission' | 'levy' | 'checklist'
-  | 'registration_change' | 'tax_statement'
+  | 'registration_change' | 'tax_statement' | 'sickness_case'
 
 export interface PayrollDeadlineItem {
   source: PayrollDeadlineSource
@@ -2342,7 +2350,7 @@ export interface PayrollStatutoryAgendaCapabilityItem {
   agenda_code: 'NEMPRI' | 'HZUPN' | 'ELDP' | 'STATUTORY_ACCIDENT_INSURANCE'
   replacement_mode: 'fully_replaced' | 'partially_replaced' | 'standalone' | 'unknown'
   capability: PayrollStatutoryAgendaCapability
-  transport_capability: 'not_supported'
+  transport_capability: 'not_supported' | 'isds'
   evidence_supported: boolean
   reason_code: string
   workflow_codes: string[]
@@ -3606,6 +3614,27 @@ export interface PayrollTaxCertificateGenerationPayload {
   correction_reason: string | null
 }
 
+/**
+ * Souhrn doručení dokumentu — kdy byl předán osobně, kdy si ho účetní sama
+ * stáhla, kdy odešlo externí oznámení a (nově) kdy odešel zabezpečený odkaz
+ * a kdy si ho zaměstnanec sám vyzvedl.
+ *
+ * `self_downloaded_at` NENÍ totéž co `downloaded_at`: `downloaded_at` je
+ * stažení ÚČETNÍ v aplikaci, `self_downloaded_at` je převzetí ZAMĚSTNANCEM
+ * přes zabezpečený odkaz — smysluplná událost „převzato", kterou UI nesmí
+ * s tou první plést.
+ *
+ * Volitelné (`item.delivery`): server ho posílá jen u dokumentu, který má
+ * aspoň jednu doručovací událost.
+ */
+export interface PayrollDocumentDeliverySummary {
+  handed_over_at: string | null
+  downloaded_at: string | null
+  external_notification_at: string | null
+  secure_link_sent_at: string | null
+  self_downloaded_at: string | null
+}
+
 export interface PayrollDocument {
   id: number
   run_id: number | null
@@ -3632,6 +3661,50 @@ export interface PayrollDocument {
   mime_type: 'application/pdf' | 'application/zip'
   suggested_filename: string
   created_at: string
+  delivery?: PayrollDocumentDeliverySummary
+}
+
+/** Stav fronty odeslání zabezpečeného odkazu (viz `PayrollDocumentDeliveryAction`). */
+export type PayrollSecureLinkDispatchState = 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled'
+
+/**
+ * Zabezpečený odkaz na osobní dokument, jak ho vidí ÚČETNÍ — bez tokenu a bez
+ * URL. Samotný odkaz zná jen zaměstnanec ve své schránce, API ho záměrně
+ * nikdy nevrací (viz `PayrollDocumentDeliveryAction`).
+ */
+export interface PayrollDocumentSecureLink {
+  id: number
+  document_id: number
+  employee_id: number
+  recipient_masked: string
+  dispatch_state: PayrollSecureLinkDispatchState
+  attempt_count: number
+  last_error_code: string | null
+  expires_at: string | null
+  sent_at: string | null
+  revoked_at: string | null
+  first_downloaded_at: string | null
+  last_downloaded_at: string | null
+  download_count: number
+  is_live: boolean
+}
+
+/** Důvod, proč server zabezpečené odeslání odmítl (409 `secure_delivery_blocked`). */
+export type PayrollSecureDeliveryBlockedReason =
+  | 'secure_delivery_disabled'
+  | 'employer_channel_not_portal'
+  | 'employer_channel_unverified'
+  | 'employee_prefers_paper'
+  | 'recipient_email_missing'
+  | 'recipient_email_ambiguous'
+  | 'document_not_personal'
+  | string
+
+export interface PayrollDocumentSecureLinkCreateResult {
+  link_id: number
+  created: boolean
+  recipient_masked: string
+  expires_at: string | null
 }
 
 export interface PayrollDocumentRevision {
@@ -6299,6 +6372,24 @@ export const payrollApi = {
       payrollDocument.id,
       payrollDocument.suggested_filename,
     ),
+  /**
+   * Účetní strana zabezpečeného doručení (§ karta zaměstnance a seznam
+   * dokumentů). Odpověď NIKDY nenese token ani URL — to zná jen zaměstnanec
+   * ve své schránce (viz `PayrollDocumentDeliveryAction`).
+   */
+  documentSecureLinks: (documentId: number) =>
+    api.get<{ links: PayrollDocumentSecureLink[] }>(
+      `/payroll/documents/${documentId}/secure-links`,
+    ).then(response => response.data.links),
+  sendDocumentSecureLink: (documentId: number) =>
+    api.post<PayrollDocumentSecureLinkCreateResult>(
+      `/payroll/documents/${documentId}/secure-links`,
+      {},
+    ).then(response => response.data),
+  revokeDocumentSecureLink: (documentId: number, linkId: number) =>
+    api.delete<{ revoked: boolean }>(
+      `/payroll/documents/${documentId}/secure-links/${linkId}`,
+    ).then(response => response.data),
   timeMonth: (
     period: string,
     incomplete = false,

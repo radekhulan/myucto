@@ -6,6 +6,7 @@ require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Service\Payroll\Document\Delivery\PayrollSecureDeliveryService;
 use MyInvoice\Service\Payroll\Document\PayrollAnnualDocumentBatchQueueService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
 
@@ -48,10 +49,20 @@ try {
     $annual = $annualWorker->processAvailable(
         max(1, $limit - (int) $monthly['processed']),
     );
+    // Rozesílka zabezpečených odkazů běží až POSLEDNÍ a vždycky: nemá smysl
+    // posílat odkaz na pásku, která se ještě nevyrenderovala. Sama se drží
+    // zavřená, dokud není zapnutý `payroll.secure_delivery.enabled` — na instanci
+    // bez toho přepínače se nic neodešle, i kdyby ve frontě něco leželo.
+    $deliveryWorker = $container->get(PayrollSecureDeliveryService::class);
+    if (!$deliveryWorker instanceof PayrollSecureDeliveryService) {
+        throw new RuntimeException('Worker doručení mzdových dokumentů není dostupný.');
+    }
+    $delivery = $deliveryWorker->dispatchAvailable($limit);
+
     fwrite(
         STDOUT,
         json_encode(
-            ['monthly' => $monthly, 'annual' => $annual],
+            ['monthly' => $monthly, 'annual' => $annual, 'delivery' => $delivery],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES,
         ) . PHP_EOL,
     );

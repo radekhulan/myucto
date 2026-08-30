@@ -724,7 +724,11 @@ final class PayrollDocumentRepository
     }
 
     /**
-     * @param 'handover'|'downloaded'|'external_notification' $eventType
+     * `$actorUserId` je NULL u událostí zabezpečeného kanálu (odeslání frontou,
+     * převzetí zaměstnancem) — tam aktér není uživatelem aplikace. Sloupec
+     * `recorded_by` je nullable od migrace 1590, typy událostí rozšiřuje 1656.
+     *
+     * @param 'handover'|'downloaded'|'external_notification'|'secure_link_sent'|'secure_link_failed'|'secure_link_revoked'|'self_downloaded' $eventType
      * @return array<string,mixed>
      */
     public function appendDeliveryEvent(
@@ -732,7 +736,7 @@ final class PayrollDocumentRepository
         int $documentId,
         int $employeeId,
         string $eventType,
-        int $actorUserId,
+        ?int $actorUserId,
     ): array {
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_document_delivery_events
@@ -763,7 +767,7 @@ final class PayrollDocumentRepository
 
     /**
      * @param list<int> $documentIds
-     * @return array<int,array{handed_over_at:?string,downloaded_at:?string,external_notification_at:?string}>
+     * @return array<int,array{handed_over_at:?string,downloaded_at:?string,external_notification_at:?string,secure_link_sent_at:?string,self_downloaded_at:?string}>
      */
     public function deliverySummaries(int $supplierId, array $documentIds): array
     {
@@ -776,7 +780,9 @@ final class PayrollDocumentRepository
             'SELECT payroll_document_id,
                     MAX(CASE WHEN event_type = "handover" THEN occurred_at END) AS handed_over_at,
                     MAX(CASE WHEN event_type = "downloaded" THEN occurred_at END) AS downloaded_at,
-                    MAX(CASE WHEN event_type = "external_notification" THEN occurred_at END) AS external_notification_at
+                    MAX(CASE WHEN event_type = "external_notification" THEN occurred_at END) AS external_notification_at,
+                    MAX(CASE WHEN event_type = "secure_link_sent" THEN occurred_at END) AS secure_link_sent_at,
+                    MAX(CASE WHEN event_type = "self_downloaded" THEN occurred_at END) AS self_downloaded_at
                FROM payroll_document_delivery_events
               WHERE supplier_id = ? AND payroll_document_id IN (' . $placeholders . ')
               GROUP BY payroll_document_id',
@@ -788,6 +794,8 @@ final class PayrollDocumentRepository
                 'handed_over_at' => $row['handed_over_at'] === null ? null : (string) $row['handed_over_at'],
                 'downloaded_at' => $row['downloaded_at'] === null ? null : (string) $row['downloaded_at'],
                 'external_notification_at' => $row['external_notification_at'] === null ? null : (string) $row['external_notification_at'],
+                'secure_link_sent_at' => $row['secure_link_sent_at'] === null ? null : (string) $row['secure_link_sent_at'],
+                'self_downloaded_at' => $row['self_downloaded_at'] === null ? null : (string) $row['self_downloaded_at'],
             ];
         }
         return $result;

@@ -46,6 +46,13 @@ final class PayrollProductionGateCoverageTest extends TestCase
             'Action/Payroll/PayrollPaymentAction.php',
             'assertActive',
         ];
+        // Odchozí cesta k zaměstnanci: e-mail se zabezpečeným odkazem na jeho
+        // vlastní výplatní pásku. Odesílá se skutečným lidem na skutečné adresy,
+        // takže patří za tutéž bránu jako platby a podání.
+        yield 'secure payslip delivery to employees' => [
+            'Service/Payroll/Document/Delivery/PayrollSecureDeliveryPolicy.php',
+            'assertActive',
+        ];
     }
 
     #[DataProvider('productionEntrypoints')]

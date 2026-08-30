@@ -23,6 +23,7 @@ final class PayrollEmployerSettingsRepository
         'income_tax_credit' => 'income_tax_credit_account',
         'withholding_tax_credit' => 'withholding_tax_credit_account',
         'other_deductions_credit' => 'other_deductions_credit_account',
+        'enforcement_deductions_credit' => 'enforcement_deductions_credit_account',
         'partner_settlement_credit' => 'partner_settlement_credit_account',
         'risky_savings_debit' => 'risky_savings_debit_account',
         'risky_savings_credit' => 'risky_savings_credit_account',

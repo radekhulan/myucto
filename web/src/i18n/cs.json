@@ -2321,6 +2321,32 @@
         "average_earnings_statement": "Potvrzení o průměrném výdělku",
         "annual_settlement_result": "Roční zúčtování záloh",
         "monthly_bundle": "Měsíční balíček ZIP"
+      },
+      "secure_delivery": {
+        "send_link": "Poslat zabezpečený odkaz",
+        "sending_link": "Odesílám…",
+        "revoke_link": "Zneplatnit odkaz",
+        "revoking": "Ruším…",
+        "revoke_confirm": "Opravdu zneplatnit zabezpečený odkaz pro {recipient}? Zaměstnanec se jím pak už k dokumentu nedostane.",
+        "link_sent": "Zabezpečený odkaz byl zařazen k odeslání na {recipient}.",
+        "link_revoked": "Odkaz byl zneplatněn.",
+        "send_failed": "Odeslání zabezpečeného odkazu se nepovedlo.",
+        "revoke_failed": "Zneplatnění odkazu se nepovedlo.",
+        "link_hidden_hint": "Odkaz zná jen zaměstnanec ve své schránce.",
+        "status": {
+          "not_sent": "Neodesláno",
+          "sent": "Odesláno {date}",
+          "picked_up": "Převzato {date}"
+        },
+        "reason": {
+          "secure_delivery_disabled": "Zabezpečené doručení je pro firmu vypnuté.",
+          "employer_channel_not_portal": "Firma nemá jako způsob doručení nastavený zabezpečený portál.",
+          "employer_channel_unverified": "Kanál zabezpečeného doručení ještě není ověřený.",
+          "employee_prefers_paper": "Zaměstnanec má nastavené doručení v listinné podobě.",
+          "recipient_email_missing": "Zaměstnanec nemá vyplněný e-mail.",
+          "recipient_email_ambiguous": "U zaměstnance je víc možných e-mailů a není jasné, který použít.",
+          "document_not_personal": "Tenhle dokument není osobní dokument zaměstnance."
+        }
       }
     },
     "annual_settlement": {
@@ -4228,7 +4254,8 @@
         "statutory": "Další povinnosti",
         "other": "Ostatní",
         "inbox": "Inbox",
-        "certificate": "Certifikát"
+        "certificate": "Certifikát",
+        "sickness": "Dávky nemocenského"
       },
       "unsupported": "Zatím nepodporováno",
       "other_title": "Ostatní evidované povinnosti",
@@ -5551,7 +5578,8 @@
           "levy": "Odvod",
           "checklist": "Lhůta u člověka",
           "registration_change": "Změna k ohlášení",
-          "tax_statement": "Vyúčtování daně"
+          "tax_statement": "Vyúčtování daně",
+          "sickness_case": "Dávka nemocenského"
         },
         "tax_statement": {
           "form": {
@@ -6838,6 +6866,115 @@
       "errors": {
         "loadFailed": "Záměry se nepodařilo načíst.",
         "actionFailed": "Akci se nepodařilo provést."
+      }
+    },
+    "sicknessCases": {
+      "title": "Případy dávek nemocenského pojištění",
+      "intro": "Zaměstnavatel má u každé sociální události dvě samostatné povinnosti podle § 97 zákona č. 187/2006 Sb.: oznámit žádost o dávku a předat podklady pro výpočet (NEMPRI), a po skončení neschopnosti oznámit skutečnosti, které mohou mít vliv na výplatu dávky (HZUPN). U nemocenského se podklady zasílají neprodleně po uplynutí prvních 14 dnů trvání neschopnosti. Případ se proto eviduje samostatně a lhůta se hlídá i tehdy, když z něj ještě nikdo podání nepřipravil.",
+      "empty": "Zatím tu není žádný případ dávky.",
+      "created": "Případ založen.",
+      "saved": "Případ uložen.",
+      "prepared": "Podání připraveno. Odešlete ho ve Stavu odeslání.",
+      "receiptRecorded": "Výsledek z protokolu zapsán.",
+      "person": "Osoba",
+      "employment": "Pracovní vztah",
+      "benefitKind": "Druh dávky",
+      "incapacityFrom": "Vznik sociální události",
+      "incapacityTo": "Skončení sociální události",
+      "osszCode": "Kód OSSZ",
+      "decisionNumber": "Číslo rozhodnutí",
+      "issuedOn": "Den vystavení hlášení",
+      "payrollPaymentDate": "Den určený pro výplatu mezd",
+      "workedOnDecisiveDay": "V rozhodný den pracoval",
+      "hoursWorked": "Počet odpracovaných hodin",
+      "dailyWorkingHours": "Pracovní doba (hodin)",
+      "receivesPension": "Pobírá důchod",
+      "isStudent": "Je studentem",
+      "enforcement": "Nařízená exekuce srážkami ze mzdy",
+      "insolvency": "Insolvence",
+      "unpaidLeave": "Pracovní volno bez náhrady příjmu",
+      "unpaidLeaveFrom": "Volno bez náhrady od",
+      "unpaidLeaveTo": "Volno bez náhrady do",
+      "returnedToWork": "Vrátil se do práce",
+      "returnedOn": "Den návratu do práce",
+      "hoursWorkedLastDay": "Odpracované hodiny v poslední den neschopnosti",
+      "shiftHoursLastDay": "Pracovní doba v poslední den neschopnosti",
+      "workedFrom": "Pracoval od",
+      "workedTo": "Pracoval do",
+      "acceptedOn": "Den doručení ČSSZ",
+      "rejectionReason": "Důvod odmítnutí z protokolu",
+      "sections": {
+        "case": "Případ",
+        "employerConfirmation": "Potvrzení zaměstnavatele",
+        "endOfIncapacity": "Ukončení neschopnosti",
+        "workDays": "Dny práce v době neschopnosti"
+      },
+      "benefitKinds": {
+        "NEM": "Nemocenské",
+        "VPM": "Vyrovnávací příspěvek v těhotenství a mateřství",
+        "OPP": "Otcovská",
+        "PPM": "Peněžitá pomoc v mateřství",
+        "OSE": "Ošetřovné",
+        "DLO": "Dlouhodobé ošetřovné"
+      },
+      "statuses": {
+        "draft": "Rozpracováno",
+        "prepared": "Připraveno",
+        "submitted": "Odesláno",
+        "accepted": "Přijato ČSSZ",
+        "rejected": "Odmítnuto",
+        "cancelled": "Zrušeno"
+      },
+      "actions": {
+        "create": "Založit případ",
+        "edit": "Upravit",
+        "save": "Uložit",
+        "cancel": "Zrušit úpravy",
+        "previewNempri": "Náhled NEMPRI",
+        "prepareNempri": "Připravit NEMPRI",
+        "previewHzupn": "Náhled HZUPN",
+        "prepareHzupn": "Připravit HZUPN",
+        "recordAccepted": "Zapsat přijetí",
+        "recordRejected": "Zapsat odmítnutí",
+        "addWorkInterval": "Přidat interval",
+        "removeWorkInterval": "Odebrat"
+      },
+      "hints": {
+        "createRequirements": "Nejdřív vyberte osobu, pracovní vztah a den vzniku sociální události.",
+        "readOnly": "K mzdovým podáním nemáte právo zápisu.",
+        "benefitKindNotSerializable": "U této dávky nese datová věta i žádost o dávku s údaji o dítěti nebo ošetřované osobě. Ty podává pojištěnec, zaměstnavatel je nemá a aplikace je nedomýšlí — podání připravte v ePortálu ČSSZ. Případ tu zůstává i s hlídanou lhůtou.",
+        "incapacityEndRequired": "Hlášení při ukončení pracovní neschopnosti se podává až po jejím skončení. Doplňte den skončení.",
+        "alreadyPrepared": "Podání už je připravené. Odešlete ho ve Stavu odeslání, nebo podejte opravné podání s číslem rozhodnutí.",
+        "receiptDateRequired": "Nejdřív doplňte den doručení podání ČSSZ z protokolu.",
+        "rejectionReasonRequired": "Nejdřív doplňte důvod odmítnutí z protokolu.",
+        "endOfIncapacity": "Vyplňte až po skončení neschopnosti. Z těchto údajů ČSSZ vyplácí poslední dávku.",
+        "workDays": "Dny, ve kterých zaměstnanec během neschopnosti pracoval. ČSSZ z nich počítá vyloučené dny, takže intervaly se nesmí překrývat."
+      },
+      "errors": {
+        "generic": "Operaci se nepodařilo dokončit."
+      }
+    },
+    "employerSettings": {
+      "accounting": {
+        "enforcement_deductions": "Exekuční a insolvenční srážky"
+      }
+    },
+    "postingReconciliation": {
+      "categories": {
+        "other_deductions": "Ostatní srážky (379.100)",
+        "enforcement": "Exekuční a insolvenční srážky (379.200)",
+        "risky_savings": "Povinné spoření u rizikové práce (527/379.300)"
+      }
+    },
+    "payment": {
+      "posting": {
+        "title": "Účetní protizápis úhrady",
+        "posted": "Úhrada zaúčtována dokladem {documentNo}",
+        "reversed": "Storno úhrady zaúčtováno dokladem {documentNo}",
+        "skipped_single_entry": "Úhrada se neúčtuje — firma vede daňovou evidenci.",
+        "skipped_no_account": "Úhradu nešlo zaúčtovat: {reason}. Doplňte účet a spárujte znovu.",
+        "unknown_money_account": "Účet peněžního prostředku není v osnově.",
+        "unknown_liability_account": "Závazkový účet mzdového závazku není v osnově."
       }
     }
   },
@@ -19112,6 +19249,44 @@
       "completed": "Hotovo",
       "failed": "Selhalo",
       "cancelled": "Zrušeno"
+    }
+  },
+  "payrollDocumentAccess": {
+    "public": {
+      "title": "Výplatní páska",
+      "loading": "Načítám…",
+      "link_invalid": "Odkaz už není platný",
+      "link_invalid_hint": "Tento odkaz není platný. Požádejte o nový svou mzdovou účetní.",
+      "auth_title": "Ověření přístupu",
+      "recipient_intro": "Ověřovací kód pošleme na adresu",
+      "send_code": "Poslat ověřovací kód",
+      "sending_code": "Odesílám…",
+      "why_code_title": "Proč je potřeba kód, i když odkaz přišel poštou?",
+      "why_code_body": "Odkaz cestuje dál, než jen do vaší schránky - může být přeposlaný, uložený v mailovém archivu firmy nebo otevřený na sdíleném počítači. Kód dokazuje, že máte právě teď živý přístup do schránky, do které odkaz přišel.",
+      "code_sent": "Kód jsme odeslali. Zkontrolujte schránku.",
+      "code_label": "Ověřovací kód",
+      "code_placeholder": "123456",
+      "code_ttl_hint": "Kód je platný {minutes} min.",
+      "invalid_code": "Kód není platný nebo už vypršel.",
+      "verify": "Ověřit",
+      "verifying": "Ověřuji…",
+      "resend": "Poslat kód znovu",
+      "resend_in": "Nový kód za {n} s",
+      "created_at": "Vystaveno",
+      "size": "Velikost",
+      "download": "Stáhnout dokument",
+      "footer_note": "Dokument je určený jen vám. Po stažení si ho uložte na bezpečné místo.",
+      "kind": {
+        "payslip": "Výplatní páska",
+        "payroll_sheet": "Mzdový list",
+        "taxable_income_advance_certificate": "Potvrzení o příjmech se zálohovou daní",
+        "taxable_income_withholding_certificate": "Potvrzení o příjmech se srážkovou daní",
+        "employment_certificate": "Potvrzení o zaměstnání",
+        "average_earnings_certificate": "Potvrzení pro úřad práce",
+        "average_earnings_statement": "Potvrzení o průměrném výdělku",
+        "annual_settlement_result": "Roční zúčtování záloh",
+        "monthly_bundle": "Měsíční balíček dokumentů"
+      }
     }
   }
 }

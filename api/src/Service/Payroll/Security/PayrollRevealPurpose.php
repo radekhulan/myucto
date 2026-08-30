@@ -53,6 +53,14 @@ enum PayrollRevealPurpose: string
     case PERSON_SENSITIVE_REVEAL = 'security:person_sensitive_reveal';
 
     /**
+     * E-mailová adresa zaměstnance pro odeslání zabezpečeného odkazu na jeho
+     * vlastní mzdový dokument. Odhaluje se výhradně uvnitř workeru rozesílky,
+     * v okamžiku sestavení zprávy, a plaintext nikam neputuje — do fronty ani do
+     * logu se ukládá jen otisk a maskovaná podoba.
+     */
+    case DOCUMENT_SECURE_DELIVERY = 'document:secure_delivery';
+
+    /**
      * Je odhalení zákonnou náležitostí dokumentu nebo podání?
      *
      * Rozlišení je tu proto, aby budoucí auditní zápis uměl oddělit systémový

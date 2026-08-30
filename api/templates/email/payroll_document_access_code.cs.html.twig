@@ -1,0 +1,24 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">Ověřovací kód</h1>
+
+<p style="margin:0 0 16px;">Dobrý den,</p>
+
+<p style="margin:0 0 16px;">pro zobrazení <strong>Vašeho mzdového dokumentu</strong> zadejte tento ověřovací kód:</p>
+
+<p style="margin:24px 0;text-align:center;">
+  <span style="display:inline-block;background:{{ accent_soft }};color:#15131D;font-weight:700;font-size:30px;letter-spacing:8px;padding:14px 28px;border-radius:8px;font-family:monospace;">
+    {{ code }}
+  </span>
+</p>
+
+<p style="margin:0 0 8px;font-size:13px;color:#7A748C;">
+  Kód je platný <strong>{{ expiresIn|default('10 min') }}</strong> a lze ho použít jen jednou.
+</p>
+
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">
+  <strong>Pokud jste o kód nežádali</strong>, e-mail ignorujte a dejte vědět své mzdové účetní —
+  někdo zná odkaz na Váš dokument.
+</p>
+{% endblock %}

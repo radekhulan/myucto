@@ -333,6 +333,23 @@ final class RateLimitMiddleware implements MiddlewareInterface
                     (int) ($rl['work_report_public_per_min_per_ip'] ?? 60), 60];
         }
 
+        // Zabezpečený odkaz na mzdový dokument (bez auth, jen lokátor). Limity jsou
+        // přísnější než u výkazu práce, protože za odkazem je výplatní páska:
+        //   * POST = request-code ODESÍLÁ POŠTU na cizí adresu a verify je plocha
+        //     na hádání šestimístného kódu. 5/min/IP; skutečná brzda proti hádání
+        //     je stejně attempt cap na kódu, tohle jen zdražuje distribuovaný pokus.
+        //   * GET  = stav stránky + stažení PDF. Legitimní návštěva je pár requestů,
+        //     ale bezpečnostní skener pošty otevře odkaz taky, takže ne příliš nízko.
+        // Captcha tu nic nekryje — výchozí `captcha.provider = 'none'` propouští vše.
+        if (str_starts_with($path, '/api/public/payroll-document/')) {
+            if ($method === 'POST') {
+                return ['rl:pubpdoc-post:ip:' . $this->ipBucket($ip),
+                        (int) ($rl['payroll_document_public_post_per_min_per_ip'] ?? 5), 60];
+            }
+            return ['rl:pubpdoc:ip:' . $this->ipBucket($ip),
+                    (int) ($rl['payroll_document_public_per_min_per_ip'] ?? 30), 60];
+        }
+
         // ARES / VIES / CRPDPH lookups (per user) — chrání 24h cache před zaplněním
         if (in_array($path, ['/api/clients/lookup-ares', '/api/clients/lookup-vies', '/api/clients/lookup-bank'], true) && $userId > 0) {
             return ['rl:ares:user:' . $userId, (int) ($rl['ares_per_min_per_user'] ?? 30), 60];

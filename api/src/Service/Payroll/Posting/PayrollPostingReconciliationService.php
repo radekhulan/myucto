@@ -21,8 +21,10 @@ use MyInvoice\Service\Payroll\ControlTotals\PayrollControlTotalsService;
  *
  * Kategorie kopírují kontační matici `private/Mzdy/04-UCETNI-MUSTEK.md`:
  * hrubé mzdy (521/522/523), zákonné náklady zaměstnavatele (524), sociální +
- * zdravotní pojištění (336), daň (342), ostatní srážky a exekuce (obě 379,
- * rozlišené analytickou dimenzí MZ-SR-/MZ-EX-) a čistá mzda (331/366).
+ * zdravotní pojištění (336), daň (342), ostatní srážky a exekuce (obě pod
+ * prefixem 379, od Ú-14 na vlastních analytikách 379.100/379.200, u starších
+ * firem dál na společné 379 a rozlišené jen analytickou dimenzí
+ * MZ-SR-/MZ-EX-) a čistá mzda (331/366).
  * K nim přibylo povinné spoření u rizikové práce (527), zápočet čisté mzdy na
  * účet společníka (365) a tři INFORMATIVNÍ řádky, které se záměrně s ničím
  * neporovnávají: nepeněžní plnění bez účetního dopadu, pohledávka za správcem
@@ -105,9 +107,12 @@ final class PayrollPostingReconciliationService
         ],
         /*
          * Povinný příspěvek na spoření u rizikové práce (z. č. 324/2025 Sb.).
-         * Sleduje se NÁKLADOVÁ strana (527), protože závazková 379 je sdílená
-         * s ostatními srážkami a rozlišuje se až analytickou dimenzí, kterou
-         * příspěvek nemá — patří zaměstnavateli, ne zaměstnanci.
+         * Sleduje se NÁKLADOVÁ strana (527). Závazková strana se od Ú-14 sice
+         * dá oddělit (379.300), ale JEN u firmy, která rozpad má: starší firma
+         * účtuje příspěvek dál na společnou 379 a rozlišit ho tam nejde —
+         * analytickou dimenzi `MZ-SR-`/`MZ-EX-` příspěvek nemá, protože patří
+         * zaměstnavateli, ne zaměstnanci. Kategorie proto zůstává na 527, kde
+         * je porovnání platné pro všechny firmy stejně.
          *
          * POZOR: 527 je běžný účet zákonných sociálních nákladů. Firma, která
          * si na 527 zaúčtuje i jinou mzdovou složku vlastní předkontací, uvidí

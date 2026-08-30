@@ -355,6 +355,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       'forgot',
       'invoice-public',
       'login',
+      'payroll-document-access',
       'reset',
       'setup',
       'work-report-tracking',
@@ -376,6 +377,9 @@ describe('sdílená klientská plocha vlastní domény', () => {
       '/reset',
       '/approval/0123456789abcdef0123456789abcdef',
       '/work-report/0123456789abcdef0123456789abcdef',
+      // Zaměstnanec není uživatel aplikace — odkaz na výplatní pásku musí
+      // zůstat mimo autentizovaný manifest, jinak by ho brána poslala na login.
+      '/payroll-document/' + '0123456789abcdef'.repeat(4),
       '/invoice/0123456789abcdef0123456789abcdef',
       '/manual',
       '/manual/generated/search-index.json',

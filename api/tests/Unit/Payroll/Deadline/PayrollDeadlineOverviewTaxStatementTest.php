@@ -6,10 +6,12 @@ namespace MyInvoice\Tests\Unit\Payroll\Deadline;
 
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
+use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
 
@@ -18,6 +20,7 @@ use Psr\Clock\ClockInterface;
     '*/api/src/Repository/Payroll/PayrollRegistrationChangeProposalRepository.php',
     '*/api/src/Service/Payroll/Submission/PayrollDeadlineAssessmentService.php',
     '*/api/src/Service/Payroll/Submission/Registration/Change/PayrollRegistrationChangeDetectionService.php',
+    '*/api/src/Repository/Payroll/PayrollSicknessCaseRepository.php',
 ]);
 
 /**
@@ -109,12 +112,15 @@ final class PayrollDeadlineOverviewTaxStatementTest extends TestCase
         $proposals = $this->createStub(PayrollRegistrationChangeProposalRepository::class);
         $proposals->method('openDeadlines')->willReturn([]);
 
+
         return new PayrollDeadlineOverviewService(
             $repository,
             $this->createStub(PayrollDeadlineAssessmentService::class),
             $proposals,
             $this->createStub(PayrollRegistrationChangeDetectionService::class),
             new PayrollTaxStatementDeadlinePolicy(),
+            $this->sicknessCaseStub(),
+            new SicknessDeadlinePolicy(),
             $clock,
         );
     }
@@ -128,5 +134,14 @@ final class PayrollDeadlineOverviewTaxStatementTest extends TestCase
             $items,
             static fn (array $item): bool => $item['source'] === 'tax_statement',
         ));
+    }
+
+    /** Nemocenské případy do přehledu termínů nepatří — test hlídá vyúčtování daně. */
+    private function sicknessCaseStub(): PayrollSicknessCaseRepository
+    {
+        $stub = $this->createStub(PayrollSicknessCaseRepository::class);
+        $stub->method('openCases')->willReturn([]);
+
+        return $stub;
     }
 }

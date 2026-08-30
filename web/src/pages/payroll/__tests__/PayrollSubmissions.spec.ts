@@ -491,12 +491,13 @@ describe('PayrollSubmissions', () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
 
-    // Deset včetně vlastní záložky pro záměr uplatňovat slevu
-    // (OZUSPOJ) — je to podmínka nároku, ne součást měsíčního hlášení.
-    // „Další povinnosti" vede explicitní NEMPRI/HZUPN/ELDP/úrazovou matici,
-    // zatímco „Ostatní" zůstává záchytná skupina pro neznámé kódy.
+    // Jedenáct: deset dosavadních plus vlastní záložka nemocenských případů.
+    // Vlastní záložku má i záměr uplatňovat slevu (OZUSPOJ) — je to podmínka
+    // nároku, ne součást měsíčního hlášení. „Další povinnosti" vede explicitní
+    // NEMPRI/HZUPN/ELDP/úrazovou matici, zatímco „Ostatní" zůstává záchytná
+    // skupina pro neznámé kódy.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(10)
+    expect(tabs).toHaveLength(11)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     await clickTab(wrapper, 'regzel')
     await flushPromises()

@@ -28,7 +28,7 @@ final class EmailTemplateAction
      * Známé kódy šablon — fix list, ne dynamický.
      * Při přidání nového typu emailu rozšířit zde a v api/templates/email/.
      */
-    private const KNOWN = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code'];
+    private const KNOWN = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
     private const LOCALES = ['cs', 'en'];
 
     public function __construct(
@@ -170,6 +170,8 @@ final class EmailTemplateAction
             'email_profile_test'=> 'Test odesílacího profilu',
             'work_report_link'  => 'Náhled na výkaz práce — MyÚčto.cz',
             'work_report_access_code' => 'Ověřovací kód pro náhled výkazu práce — MyÚčto.cz',
+            'payroll_document_secure_link' => 'Váš mzdový dokument — MyÚčto.cz',
+            'payroll_document_access_code' => 'Ověřovací kód pro mzdový dokument — MyÚčto.cz',
         ];
         $en = [
             'invoice_send'      => 'Invoice {{ invoice.varsymbol }}',
@@ -184,6 +186,8 @@ final class EmailTemplateAction
             'email_profile_test'=> 'Sending profile test',
             'work_report_link'  => 'Work report preview — MyÚčto.cz',
             'work_report_access_code' => 'Verification code for work report preview — MyÚčto.cz',
+            'payroll_document_secure_link' => 'Your payroll document — MyÚčto.cz',
+            'payroll_document_access_code' => 'Verification code for your payroll document — MyÚčto.cz',
         ];
         return ($locale === 'en' ? $en : $cs)[$code] ?? '';
     }

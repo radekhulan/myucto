@@ -138,7 +138,9 @@ async function load(): Promise<void> {
  * to je pořád srozumitelnější než prázdno nebo cesta k překladovému klíči.
  */
 function itemTitle(item: PayrollDeadlineItem): string {
-  const path = item.source === 'submission'
+  // `sickness_case` nese v `title` také `agenda_code` (NEMPRI / HZUPN), takže
+  // se překládá stejným číselníkem jako pramen podání.
+  const path = item.source === 'submission' || item.source === 'sickness_case'
     ? `payroll.submissions.statutory.agenda.${item.title}`
     : item.source === 'levy'
       ? `payroll.payments.kind.${item.title}`
@@ -196,6 +198,11 @@ function itemLink(item: PayrollDeadlineItem): RouteLocationRaw {
         : { taxStatementYear: String(item.statement_year) },
       hash: '#payroll-tax-statement',
     }
+  }
+  // Případ dávky se řeší na vlastní záložce podání; bez `tab` by účetní
+  // skončila na Stavu odeslání a případ si musela najít sama.
+  if (item.source === 'sickness_case') {
+    return { name: 'payroll-submissions-tab', params: { tab: 'sickness' } }
   }
   return { name: 'payroll-submissions' }
 }

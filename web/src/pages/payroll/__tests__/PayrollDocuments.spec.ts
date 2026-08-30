@@ -23,6 +23,9 @@ const m = vi.hoisted(() => ({
   retryAnnualDocumentBatchItem: vi.fn(),
   downloadPeriodExport: vi.fn(),
   downloadDocument: vi.fn(),
+  documentSecureLinks: vi.fn(),
+  sendDocumentSecureLink: vi.fn(),
+  revokeDocumentSecureLink: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -56,6 +59,9 @@ vi.mock('@/api/payroll', () => ({
     retryAnnualDocumentBatchItem: m.retryAnnualDocumentBatchItem,
     downloadPeriodExport: m.downloadPeriodExport,
     downloadDocument: m.downloadDocument,
+    documentSecureLinks: m.documentSecureLinks,
+    sendDocumentSecureLink: m.sendDocumentSecureLink,
+    revokeDocumentSecureLink: m.revokeDocumentSecureLink,
   },
 }))
 
@@ -329,6 +335,14 @@ describe('PayrollDocuments', () => {
       document_kind: 'taxable_income_advance_certificate',
     })
     m.downloadDocument.mockResolvedValue(undefined)
+    m.documentSecureLinks.mockResolvedValue([])
+    m.sendDocumentSecureLink.mockResolvedValue({
+      link_id: 1,
+      created: true,
+      recipient_masked: 'te***@example.com',
+      expires_at: '2026-08-08 00:00:00',
+    })
+    m.revokeDocumentSecureLink.mockResolvedValue({ revoked: true })
     m.downloadPeriodExport.mockResolvedValue({
       id: 91,
       scope: 'monthly',
@@ -773,5 +787,77 @@ describe('PayrollDocuments', () => {
     await flushPromises()
 
     expect(m.downloadDocumentById).toHaveBeenCalledWith(22, 'mzdovy-balicek-2026-07.zip')
+  })
+
+  /**
+   * Osobní dokument (`employee_id` vyplněné) nabídne odeslání zabezpečeného
+   * odkazu; po odeslání a dotažení stavu se objeví i jeho zneplatnění. Odkaz
+   * ani token se nikde v UI neobjeví — API je záměrně nevrací.
+   */
+  it('nabídne odeslání zabezpečeného odkazu a po odeslání jeho zneplatnění', async () => {
+    // Mock dat 21 nemá `delivery.secure_link_sent_at`, takže se odkazy PŘED
+    // odesláním vůbec nedotahují — jediné volání přijde až po kliknutí na
+    // odeslání a vrátí právě založený živý odkaz.
+    m.documentSecureLinks
+      .mockResolvedValueOnce([{
+        id: 5,
+        document_id: 21,
+        employee_id: 31,
+        recipient_masked: 'te***@example.com',
+        dispatch_state: 'sent',
+        attempt_count: 1,
+        last_error_code: null,
+        expires_at: '2026-08-08 00:00:00',
+        sent_at: '2026-08-01 08:00:00',
+        revoked_at: null,
+        first_downloaded_at: null,
+        last_downloaded_at: null,
+        download_count: 0,
+        is_live: true,
+      }])
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    // Dokument bez employee_id (monthly_bundle) žádnou akci nenabízí. Dva
+    // zbylé tlačítka jsou desktopová tabulka + mobilní karta téhož řádku.
+    const sendButtons = wrapper.findAll('[data-test="send-secure-link"]')
+    expect(sendButtons).toHaveLength(2)
+    expect(wrapper.find('[data-test="revoke-secure-link"]').exists()).toBe(false)
+
+    await sendButtons[0].trigger('click')
+    await flushPromises()
+
+    expect(m.sendDocumentSecureLink).toHaveBeenCalledWith(21)
+    expect(m.toastSuccess).toHaveBeenCalledWith(
+      expect.stringContaining('te***@example.com'),
+    )
+
+    const revokeButton = wrapper.get('[data-test="revoke-secure-link"]')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await revokeButton.trigger('click')
+    await flushPromises()
+
+    expect(m.revokeDocumentSecureLink).toHaveBeenCalledWith(21, 5)
+    expect(m.toastSuccess).toHaveBeenCalledWith(
+      'payroll.documents.secure_delivery.link_revoked',
+    )
+  })
+
+  /** 409 `secure_delivery_blocked` se přeloží na srozumitelnou větu podle `reason`. */
+  it('zamítnuté odeslání ukáže důvod podle kódu z backendu', async () => {
+    m.sendDocumentSecureLink.mockRejectedValueOnce({
+      response: { data: { error: { code: 'secure_delivery_blocked', reason: 'recipient_email_missing', message: 'blocked' } } },
+    })
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+
+    await wrapper.get('[data-test="send-secure-link"]').trigger('click')
+    await flushPromises()
+
+    expect(m.toastError).toHaveBeenCalledWith(
+      'payroll.documents.secure_delivery.reason.recipient_email_missing',
+    )
   })
 })

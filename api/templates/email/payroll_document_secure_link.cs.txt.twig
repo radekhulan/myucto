@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Váš mzdový dokument
+-------------------
+
+Dobrý den,
+
+je pro Vás připravený osobní mzdový dokument. Otevřete si ho přes zabezpečený odkaz. Dokument není přílohou tohoto e-mailu, aby nezůstal ležet ve schránce.
+
+    {{ url }}
+
+Po otevření odkazu si vyžádáte jednorázový kód, který přijde na tuto adresu. Bez něj se dokument nezobrazí — samotný odkaz tedy nikomu nestačí.
+
+Odkaz je platný do {{ validUntil }}.
+
+Pokud jste žádný dokument nečekali, e-mail ignorujte a dejte vědět své mzdové účetní.
+{% endblock %}

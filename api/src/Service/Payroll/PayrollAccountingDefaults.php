@@ -59,7 +59,38 @@ final class PayrollAccountingDefaults
         // do osnovy migrace 1648.
         'income_tax_credit' => ['code' => '342.100', 'type' => 'liability'],
         'withholding_tax_credit' => ['code' => '342.200', 'type' => 'liability'],
-        'other_deductions_credit' => ['code' => '379', 'type' => 'liability'],
+        // Ostatní srážky, exekuce a rizikové spoření MAJÍ KAŽDÉ SVOU ANALYTIKU (Ú-14).
+        //
+        // Syntetika 379 nesla dosud TŘI věcně různé závazky vůči TŘEM různým
+        // skupinám věřitelů najednou:
+        //   * dobrovolné srážky ze mzdy (§ 146 písm. b) zákoníku práce) —
+        //     věřitelem je oprávněný z dohody o srážkách,
+        //   * exekuční a insolvenční srážky (§ 276 a násl. o. s. ř.,
+        //     § 398 odst. 3 insolvenčního zákona) — věřitelem je oprávněný
+        //     z exekučního titulu, peníze jdou soudnímu exekutorovi nebo
+        //     insolvenčnímu správci,
+        //   * povinný příspěvek na spoření u rizikové práce
+        //     (z. č. 324/2025 Sb.) — věřitelem je PENZIJNÍ SPOLEČNOST a není
+        //     to vůbec srážka zaměstnanci, je to náklad zaměstnavatele.
+        // Na společném účtu se jejich salda slila a rozdíl mezi zůstatkem 379
+        // a odvedenými platbami nešlo přiřadit ani k jedné skupině — přestože
+        // platební vrstva všechny tři rozlišuje (`liability_kind` = `deduction`
+        // / `enforcement` + `insolvency` / `risky_savings`). V deníku je
+        // rozlišovala jen pseudonymní dimenze `MZ-SR-…` / `MZ-EX-…` ve sloupci
+        // `cost_center`, kterou rizikové spoření nemá vůbec.
+        //
+        // Tvar analytiky drží konvenci osnovy (336.100/336.200, 342.100 …):
+        // třímístná syntetika, tečka, třímístná analytika.
+        //
+        // ⚠ ZPĚTNÁ KOMPATIBILITA — stejně konzervativně jako u 336 (migrace
+        // 1618) a 342 (migrace 1648): tohle je výchozí hodnota pro NOVĚ
+        // zakládanou firmu, ne migrace stávajících. Firma s uloženou 379 ji má
+        // dál, zaúčtované revize se nemění (zmrazený snapshot nese vlastní sadu
+        // předkontací) a obě nové větve jsou navíc v SNAPSHOT_GATED_ACCOUNTS,
+        // takže se použijí teprve tehdy, když o nich zmrazený snapshot ví.
+        // Analytiky doplnila do osnovy migrace 1658.
+        'other_deductions_credit' => ['code' => '379.100', 'type' => 'liability'],
+        'enforcement_deductions_credit' => ['code' => '379.200', 'type' => 'liability'],
         // Protiúčet zápočtu čisté mzdy na účet společníka (331/366 MD / 365 D).
         // Firemní default; konkrétní analytiku (365.100…) drží výplatní pravidlo
         // osoby, viz PayrollPartnerSettlement.
@@ -71,8 +102,15 @@ final class PayrollAccountingDefaults
         // 527 MD (zákonné sociální náklady) proti 379 D (jiný závazek) —
         // 336 sem nepatří, penzijní společnost není institucí sociálního
         // zabezpečení ani zdravotní pojišťovnou.
+        //
+        // Ú-14: závazek vůči penzijní společnosti dostal VLASTNÍ analytiku
+        // 379.300. Na sdílené 379 se mísil se srážkami zaměstnanců, a to
+        // dokonce neviditelně: reconciliace rozlišuje srážky podle dimenze
+        // `MZ-SR-…`/`MZ-EX-…`, kterou příspěvek zaměstnavatele nemá, takže
+        // jeho závazková strana nespadla do ŽÁDNÉ kategorie a kontrolovala se
+        // jen přes nákladovou 527.
         'risky_savings_debit' => ['code' => '527', 'type' => 'expense'],
-        'risky_savings_credit' => ['code' => '379', 'type' => 'liability'],
+        'risky_savings_credit' => ['code' => '379.300', 'type' => 'liability'],
         // Přeplatek na čisté mzdě: zaměstnanci se nedluží, naopak on dluží
         // zaměstnavateli (typicky doplatek ZP do minimálního vyměřovacího
         // základu podle § 3 odst. 10 z. 592/1992 Sb. v měsíci bez peněžního
@@ -128,6 +166,26 @@ final class PayrollAccountingDefaults
         'non_deductible_benefit_debit',
         'travel_expense_debit',
         'withholding_tax_credit',
+        'enforcement_deductions_credit',
+    ];
+
+    /**
+     * Účet, na kterém předkontace {@see SNAPSHOT_GATED_ACCOUNTS} SEDĚLA, než
+     * se rozdělila — pro klíč, jehož dřívějším cílem NEBYL jiný klíč sady.
+     *
+     * Srážková daň (Ú-13) i exekuce (Ú-14) mají sourozence, na kterém dřív
+     * seděly (`income_tax_credit`, resp. `other_deductions_credit`), takže se
+     * u nich degraduje na FIREMNÍ účet toho sourozence. Rizikové spoření
+     * sourozence nemá: účtovalo se na výchozí konstantu '379' bez ohledu na
+     * to, co si firma nastavila u srážek. Degradovat ho na
+     * `other_deductions_credit` by proto u firmy s přenastavenými srážkami
+     * (379.900 a podobně) zápis ZMĚNILO — musí se vracet doslovná historická
+     * hodnota.
+     *
+     * @var array<string,string>
+     */
+    public const PRE_SPLIT_ACCOUNTS = [
+        'risky_savings_credit' => '379',
     ];
 
     /**
@@ -159,6 +217,13 @@ final class PayrollAccountingDefaults
         // výchozí analytiky by tedy ZMĚNILO zápis částky, která se dosud
         // účtovala jinam — přesně ten případ, kvůli kterému tenhle seznam je.
         'withholding_tax_credit',
+        // Ú-14, totéž dvakrát: exekuční srážky se odjakživa účtovaly na účet
+        // ostatních srážek a příspěvek na rizikové spoření na výchozí 379.
+        // Obojí jsou částky, které se DOSUD ÚČTOVALY — doplnění nové analytiky
+        // by tedy změnilo zápis dřív schválené revize a opakované zaúčtování
+        // by spadlo na kontrolu cílového otisku.
+        'enforcement_deductions_credit',
+        'risky_savings_credit',
     ];
 
     /** Výchozí účet klíče, nebo `null` u neznámého klíče. */
@@ -187,6 +252,18 @@ final class PayrollAccountingDefaults
         $value = $configuredAccounts[$key] ?? null;
 
         return is_string($value) && trim($value) !== '';
+    }
+
+    /**
+     * Doslovný účet, na kterém klíč seděl PŘED rozdělením, nebo `null`.
+     *
+     * Vrací se konstanta, ne firemní nastavení: přesně tuhle hodnotu dosadila
+     * {@see self::accounts()} v {@see \MyInvoice\Service\Payroll\Posting\PayrollPostingLineBuilder}
+     * snapshotu, který klíč nenesl, takže jen ona drží zápis byte-identický.
+     */
+    public static function preSplitCode(string $key): ?string
+    {
+        return self::PRE_SPLIT_ACCOUNTS[$key] ?? null;
     }
 
     /** @return array<string,string> */

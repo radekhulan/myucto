@@ -66,6 +66,12 @@ enum AgendaReceiptCapability: string
             'JMHZ', 'JMHZ25', 'REGZEC', 'REGZEC25', 'PREZEC', 'PREZEC26',
             'REGZEL', 'REGZEL26', 'REGZELDOPL25', 'DZMH',
             'OZUSPOJ', 'OZUSPOJ23' => self::ProcessingProtocol,
+            // NEMPRI a HZUPN mají protokol o zpracování se stejným tvarem;
+            // e-podání je ale posíláme datovou schránkou, takže `forChannel()`
+            // z nich udělá DeliveryReceiptOnly. Protokol přijde do schránky
+            // jako samostatná zpráva a naimportovat ho zatím neumíme — dokud
+            // to neplatí, výsledek zadává člověk.
+            'NEMPRI', 'NEMPRI25', 'HZUPN', 'HZUPN20' => self::ProcessingProtocol,
             // EPO vrací potvrzení s podacím číslem — ale jen když jde přes EPO.
             // Totéž podání odeslané datovkou takové potvrzení nedostane.
             'DPHDP3', 'DPHKH1', 'DPHSHV', 'DPPDP9', 'DPFDP5', 'DPFDP7',

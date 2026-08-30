@@ -63,6 +63,9 @@ final class PayrollEmployeeDeletionRepository
                 'payroll_annual_document_sources',
                 'payroll_document_batch_items',
                 'payroll_annual_document_batch_items',
+                // Odkaz na zabezpečené doručení pásky je doklad o tom, komu se
+                // dokument zpřístupnil — patří ke stejné neměnné stopě.
+                'payroll_document_access_links',
             ],
             'code' => 'payroll_employee_has_documents',
             'message' => 'Zaměstnanci už byla vydaná výplatní páska, mzdový list nebo roční '
@@ -83,6 +86,15 @@ final class PayrollEmployeeDeletionRepository
             'code' => 'payroll_employee_has_discount_intent',
             'message' => 'Za zaměstnance je evidovaný záměr uplatňovat slevu na pojistném '
                 . '(OZUSPOJ). Je to doklad k odvedenému pojistnému, takže osobu smazat nelze.',
+        ],
+        // Nemocenský případ je podklad pro dávku, kterou vyplácí ČSSZ, a evidence
+        // úkonu podle § 97 zákona č. 187/2006 Sb. Smazat osobu i s ním by
+        // odstranilo doklad o tom, co a kdy se úřadu předalo.
+        'sickness' => [
+            'tables' => ['payroll_sickness_cases'],
+            'code' => 'payroll_employee_has_sickness_case',
+            'message' => 'Za zaměstnance je evidovaný nemocenský případ (NEMPRI nebo HZUPN). '
+                . 'Je to podklad pro dávku předaný ČSSZ, takže osobu smazat nelze.',
         ],
         'calculation' => [
             'tables' => ['payroll_net_results', 'payroll_statutory_accumulator_openings'],

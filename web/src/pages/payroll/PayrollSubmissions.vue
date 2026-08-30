@@ -16,6 +16,7 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PayrollEldpPanel from './PayrollEldpPanel.vue'
 import PayrollDiscountIntentsPanel from './PayrollDiscountIntentsPanel.vue'
+import PayrollSicknessCasesPanel from './PayrollSicknessCasesPanel.vue'
 import PayrollHealthNotificationPanel from './PayrollHealthNotificationPanel.vue'
 import PayrollSubmissionInboxPanel from './PayrollSubmissionInboxPanel.vue'
 import PayrollSubmissionOverviewPanel from './PayrollSubmissionOverviewPanel.vue'
@@ -27,7 +28,7 @@ import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 
 type SubmissionTab =
-  'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'eldp' | 'health'
+  'transport' | 'regzel' | 'jmhz' | 'discount_intents' | 'sickness' | 'eldp' | 'health'
   | 'statutory' | 'other' | 'inbox' | 'certificate'
 
 const { t } = useI18n()
@@ -53,7 +54,7 @@ const activeTab = ref<SubmissionTab>('transport')
 // zařadit. Bez téhle záložky by taková povinnost nebyla vidět NIKDE — panely
 // filtrují skupinu na serveru, takže by ji ani jeden z nich nenačetl.
 const tabs: SubmissionTab[] = [
-  'transport', 'regzel', 'jmhz', 'discount_intents', 'eldp', 'health',
+  'transport', 'regzel', 'jmhz', 'discount_intents', 'sickness', 'eldp', 'health',
   'statutory', 'other', 'inbox', 'certificate',
 ]
 /*
@@ -360,6 +361,16 @@ onMounted(loadInboxBadge)
     -->
     <PayrollDiscountIntentsPanel
       v-else-if="activeTab === 'discount_intents'"
+      v-model:environment="environment"
+    />
+
+    <!--
+      Případy dávek nemocenského pojištění (NEMPRI, HZUPN) stojí hned za
+      záměrem slevy: obojí je podání mimo měsíční hlášení, které si data
+      obstarává samo a na REGZEL profilu nezávisí.
+    -->
+    <PayrollSicknessCasesPanel
+      v-else-if="activeTab === 'sickness'"
       v-model:environment="environment"
     />
 

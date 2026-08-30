@@ -8,7 +8,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class PayrollStatutoryAgendaCatalog
 {
-    public const VERSION = 'mz24-p0.v1';
+    public const VERSION = 'mz24-p0.v2';
     public const CAPABILITIES = [
         'manual_review',
         'prepared_only',
@@ -34,34 +34,41 @@ final class PayrollStatutoryAgendaCatalog
                 'replacement_mode' => $fromJmhz
                     ? 'partially_replaced'
                     : 'standalone',
+                // Datovou větu NEMPRI25 modul sestaví a zvaliduje proti
+                // připnutému XSD; odeslat ji umí datovou schránkou. Kanál
+                // VREP/APEP zůstává zavřený — identifikátor třídy podání pro
+                // tuhle agendu není v připnutém Podávacím a dotazovacím
+                // protokolu v1.47 uvedený.
                 'capability' => $legacyNempri
                     ? 'not_supported'
-                    : 'manual_review',
-                'transport_capability' => 'not_supported',
+                    : 'prepared_only',
+                'transport_capability' => $legacyNempri
+                    ? 'not_supported'
+                    : 'isds',
                 'evidence_supported' => !$legacyNempri,
                 'reason_code' => $legacyNempri
                     ? 'nempri_legacy_variant_not_supported'
                     : ($fromJmhz
                         ? 'nempri_only_partially_in_jmhz'
-                        : 'nempri_standalone_manual'),
+                        : 'nempri_standalone_prepared'),
                 'workflow_codes' => $legacyNempri ? [] : [
-                    'verify_case_and_source_data',
-                    'submit_in_official_channel',
-                    'store_official_receipt_in_company_dms',
+                    'record_sickness_case',
+                    'prepare_nempri_submission',
+                    'send_via_data_box',
                     'record_receipt_evidence',
                 ],
             ],
             [
                 'agenda_code' => 'HZUPN',
                 'replacement_mode' => 'standalone',
-                'capability' => 'manual_review',
-                'transport_capability' => 'not_supported',
+                'capability' => 'prepared_only',
+                'transport_capability' => 'isds',
                 'evidence_supported' => true,
                 'reason_code' => 'hzupn_remains_standalone',
                 'workflow_codes' => [
-                    'verify_case_and_source_data',
-                    'submit_in_official_channel',
-                    'store_official_receipt_in_company_dms',
+                    'record_sickness_case',
+                    'prepare_hzupn_submission',
+                    'send_via_data_box',
                     'record_receipt_evidence',
                 ],
             ],

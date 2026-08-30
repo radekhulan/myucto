@@ -97,6 +97,7 @@ const defaultAccounts: PayrollEmployerAccounts = {
   income_tax_credit: '342',
   withholding_tax_credit: '342',
   other_deductions_credit: '379',
+  enforcement_deductions_credit: '379',
   partner_settlement_credit: '365',
   risky_savings_debit: '527',
   risky_savings_credit: '379',

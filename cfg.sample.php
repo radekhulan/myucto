@@ -463,6 +463,31 @@ return [
         'invoice_public_per_min_per_ip' => 60,       // veřejná web faktura /api/public/invoice/* (anon DoS: náhled + PDF + přílohy)
         'work_report_public_per_min_per_ip' => 60,       // veřejný náhled výkazu práce (anon DoS)
         'work_report_public_post_per_min_per_ip' => 10,  // request-code (ODESÍLÁ e-mail) + verify (brute force OTP)
+        'payroll_document_public_per_min_per_ip' => 30,      // zabezpečený odkaz na mzdový dokument (stav + stažení PDF)
+        'payroll_document_public_post_per_min_per_ip' => 5,  // request-code (ODESÍLÁ e-mail) + verify; přísnější, za odkazem je výplatní páska
+    ],
+
+    // ── Doručování mzdových dokumentů zaměstnancům ────────────────────────────────
+    // Výplatní páska se zaměstnanci NEPOSÍLÁ jako příloha, ale jako zabezpečený
+    // odkaz: přílohu nelze vzít zpět, odkaz umí expirovat, jde zneplatnit a jeho
+    // převzetí je doložitelné.
+    //
+    // `enabled` je VYPNUTÉ a musí zůstat vypnuté všude, kde nechcete, aby se
+    // skutečným lidem odcházely skutečné e-maily — typicky na vývojové instanci
+    // nad kopií ostrých dat. Je to jen jedna z pěti nezávislých podmínek; dál musí
+    // platit interní release brána, zaměstnavatelská politika
+    // `delivery_channel = 'employee_portal'` s potvrzeným `delivery_verified_on`,
+    // volba osoby `secure_delivery_channel = 'portal'` a existující primární e-mail.
+    'payroll' => [
+        'secure_delivery' => [
+            'enabled'                      => false,  // hlavní vypínač odchozí cesty k zaměstnanci
+            'link_ttl_days'                => 30,     // jak dlouho odkaz žije (1–90)
+            'code_ttl_seconds'             => 600,    // platnost jednorázového kódu (60–3600)
+            'code_resend_cooldown_seconds' => 60,     // pauza mezi vyžádáními kódu (15–600)
+            'max_code_attempts'            => 5,      // chybných pokusů, pak se kód spálí (3–10)
+            'session_ttl_seconds'          => 7200,   // ověřená relace; krátká, prohlížeč bývá sdílený (300–43200)
+            'max_dispatch_attempts'        => 3,      // pokusů o odeslání, pak fronta položku vzdá (1–10)
+        ],
     ],
     'brute_force' => [
         // Progresivní obrana login formuláře. Počítá selhání per (email, IP) v posuvných oknech.

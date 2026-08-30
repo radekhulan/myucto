@@ -49,11 +49,20 @@ final class PayrollPostingAccountPolicy
     /**
      * Rezervované prefixy analytické dimenze srážek a exekucí.
      *
-     * Sloupec `cost_center` deníku nese u srážek pseudonym oprávněného
-     * (`MZ-SR-…`, `MZ-EX-…`), protože samostatné saldokonto per oprávněný
-     * datový model zatím nemá. Reálný kód mzdové dimenze proto tyhle prefixy
-     * mít NESMÍ — jinak by se středisko firmy v reconciliaci vydávalo za
-     * srážku. Hlídá {@see \MyInvoice\Service\Payroll\Settings\PayrollDimensionService}.
+     * Sloupec `cost_center` deníku nese u srážek pseudonym odvozený z klíče
+     * alokace (`MZ-SR-…`, `MZ-EX-…`). Reálný kód mzdové dimenze proto tyhle
+     * prefixy mít NESMÍ — jinak by se středisko firmy v reconciliaci vydávalo
+     * za srážku. Hlídá {@see \MyInvoice\Service\Payroll\Settings\PayrollDimensionService}.
+     *
+     * ⚠ NENÍ to saldokonto per oprávněný a nikdy nebylo: pseudonym se počítá ze
+     * CELÉHO klíče alokace (`employee:{id}:deduction:…:settlement:…`), takže se
+     * liší jak podle zaměstnance, tak podle vypořádacího koše. Dvě srážky
+     * TÉHOŽ oprávněného u dvou zaměstnanců mají dvě různé hodnoty a sečíst je
+     * nejde. Reálně tedy slouží jen k tomu, aby reconciliace odlišila srážku
+     * od exekuce; oddělit salda umí až rozpad účtů z Ú-14
+     * (379.100 / 379.200 / 379.300). Saldokonto per oprávněný pořád chybí —
+     * identita oprávněného se do mzdového VÝSLEDKU vůbec nedostane, žije až
+     * v platební vrstvě (`payroll_payment_liabilities.recipient_reference`).
      *
      * @var list<string>
      */

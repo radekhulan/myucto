@@ -11,7 +11,30 @@ final class PayrollPaymentReconciliationService
 {
     public function __construct(
         private readonly PayrollPaymentMatchRepository $matches,
+        /**
+         * Účetní protizápis úhrady (Ú-16).
+         *
+         * Nepovinný ZÁMĚRNĚ: párování plateb je platební kniha a musí fungovat
+         * i tam, kde účetnictví není (daňová evidence, jednotkové testy platební
+         * vrstvy). Kde služba je, běží UVNITŘ téže transakce jako spárování —
+         * platba a její zápis vznikají společně, jinak by pád jednoho nechal
+         * druhé viset.
+         */
+        private readonly ?PayrollPaymentPostingService $posting = null,
     ) {}
+
+    /**
+     * Zaúčtuje pohyb spárování a výsledek vrátí v načteném řádku.
+     *
+     * Volá se hned po `lockMatch()`, tedy nad ULOŽENÝM řádkem — protizápis
+     * potřebuje `actual_payment_date` a důkazy, které dopočítá až databáze.
+     *
+     * @param array<string,mixed> $stored
+     */
+    private function postMatch(int $supplierId, array $stored, ?int $matchedBy): void
+    {
+        $this->posting?->postForMatch($supplierId, $stored, $matchedBy);
+    }
 
     public function match(
         PayrollPaymentReconciliationCommand $command,
@@ -119,6 +142,7 @@ final class PayrollPaymentReconciliationService
                     'Uložené spárování platby nelze načíst.',
                 );
             }
+            $this->postMatch($command->supplierId, $stored, $command->matchedBy);
 
             return $this->result($stored, false);
         });
@@ -228,6 +252,7 @@ final class PayrollPaymentReconciliationService
                     'Uloženou přijatou mzdovou vratku nelze načíst.',
                 );
             }
+            $this->postMatch($command->supplierId, $stored, $command->matchedBy);
 
             return $this->incomingRefundResult($stored, false);
         });
@@ -367,6 +392,7 @@ final class PayrollPaymentReconciliationService
                     'Uloženou reverzi přijaté mzdové vratky nelze načíst.',
                 );
             }
+            $this->postMatch($command->supplierId, $stored, $command->matchedBy);
 
             return $this->incomingRefundResult($stored, false);
         });
@@ -523,6 +549,7 @@ final class PayrollPaymentReconciliationService
                     'Uloženou reverzi platby nelze načíst.',
                 );
             }
+            $this->postMatch($command->supplierId, $stored, $command->matchedBy);
 
             return $this->result($stored, false);
         });

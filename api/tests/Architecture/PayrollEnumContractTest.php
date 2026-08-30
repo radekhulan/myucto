@@ -184,6 +184,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollPersonSex'            => 'db:payroll_person_identity_history.sex',
         'payroll.ts::PayrollPayoutMethod'         => 'db:payroll_employee_profiles.payout_method',
         'payroll.ts::PayrollSecureDeliveryChannel' => 'db:payroll_employee_profiles.secure_delivery_channel',
+        // Stav rozesílky zabezpečeného odkazu na osobní mzdový dokument. Tabulka
+        // odkazů je zároveň frontou, takže doména stavu žije v jejím sloupci.
+        'payroll.ts::PayrollSecureLinkDispatchState'
+            => 'db:payroll_document_access_links.dispatch_state',
         'payroll.ts::PayrollDependantRelation'    => 'db:payroll_dependants.relation',
         'payroll.ts::PayrollStatutoryEvidenceSection'
             => 'const:MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository::EDITABLE_SECTIONS',
@@ -316,6 +320,19 @@ final class PayrollEnumContractTest extends TestCase
         // z XSD — `2` v požadavku by nikdo nepřečetl jako „ukončit záměr".
         'payrollDiscountIntents.ts::PayrollDiscountIntentSubmissionKind'
             => 'enum:MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojSubmissionKind',
+        // Druh dávky nemocenského pojištění (`dokument/druhDavky`). Hodnoty
+        // jsou přesně enumerace `StDruhDavky` z NEMPRI25.xsd — přeložit je na
+        // hezčí slovo by znamenalo druhé místo, kde se dá splést dávka.
+        'payrollSicknessCases.ts::PayrollSicknessBenefitKind'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind',
+        // Stav případu dávky. Obrazovka podle něj nabízí akce; nová hodnota
+        // bez překladu by nechala řádek bez toho, co s ním dělat.
+        'payrollSicknessCases.ts::PayrollSicknessCaseStatus'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseStatus',
+        // Který ze dvou tiskopisů se z případu staví. NEMPRI a HZUPN jsou dvě
+        // podání s různým právním základem, ne dvě fáze jednoho.
+        'payrollSicknessCases.ts::PayrollSicknessDocumentKind'
+            => 'enum:MyInvoice\Service\Payroll\Submission\Sickness\SicknessDocumentKind',
 
         // Politiky zaměstnavatele
         'payroll.ts::PayrollBusinessDayRule'     => 'policy:payday_business_day_rule',

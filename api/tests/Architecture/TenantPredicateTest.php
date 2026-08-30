@@ -152,6 +152,11 @@ final class TenantPredicateTest extends TestCase
         'expense_classification_rules',
         // §DM (1094_small_assets.sql) — karty evidence drobného majetku (§28/5 ZoÚ).
         'small_assets',
+        // NEMPRI/HZUPN (1654, 1655) — případy dávek nemocenského pojištění.
+        // Řádek nese rodné číslo pojištěnce a údaje o exekuci a insolvenci,
+        // takže únik mezi firmami by byl únik zvlášť citlivých osobních údajů.
+        'payroll_sickness_cases',
+        'payroll_sickness_case_work_days',
     ];
 
     /**

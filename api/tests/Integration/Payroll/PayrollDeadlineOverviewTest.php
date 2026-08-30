@@ -7,10 +7,12 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
+use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy;
+use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDeltaPlanner;
@@ -87,6 +89,8 @@ final class PayrollDeadlineOverviewTest extends TestCase
                 $clock,
             ),
             new PayrollTaxStatementDeadlinePolicy(),
+            new PayrollSicknessCaseRepository($this->db),
+            new SicknessDeadlinePolicy(),
             $clock,
         );
 

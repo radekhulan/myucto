@@ -1301,6 +1301,11 @@ final class Mailer
                 'recurring_draft_reminder' => 'Koncept pravidelné faktury se brzy vystaví — ' . $app,
                 'work_report_link'  => 'Náhled na výkaz práce — ' . $app,
                 'work_report_access_code' => 'Ověřovací kód pro náhled výkazu práce — ' . $app,
+                // Předmět vědomě neuvádí, o jaký dokument jde ani za jaké období:
+                // předmět zprávy vidí i ten, kdo si jen prohlédne notifikaci na
+                // uzamčené obrazovce nebo náhled ve firemní schránce.
+                'payroll_document_secure_link' => 'Váš mzdový dokument — ' . $app,
+                'payroll_document_access_code' => 'Ověřovací kód pro mzdový dokument — ' . $app,
             ],
             'en' => [
                 'password_reset'    => 'Password reset — ' . $app,
@@ -1313,6 +1318,8 @@ final class Mailer
                 'recurring_draft_reminder' => 'Recurring invoice draft will be issued soon — ' . $app,
                 'work_report_link'  => 'Work report preview — ' . $app,
                 'work_report_access_code' => 'Verification code for work report preview — ' . $app,
+                'payroll_document_secure_link' => 'Your payroll document — ' . $app,
+                'payroll_document_access_code' => 'Verification code for your payroll document — ' . $app,
             ],
         ];
         return $subjects[$locale][$code] ?? ($subjects['cs'][$code] ?? $app);

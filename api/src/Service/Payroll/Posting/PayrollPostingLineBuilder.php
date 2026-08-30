@@ -353,6 +353,7 @@ final class PayrollPostingLineBuilder
             $allocations,
             $result,
             $accounts,
+            $configuredAccounts,
             $costCenterByEmployment,
         );
 
@@ -521,7 +522,7 @@ final class PayrollPostingLineBuilder
                 $allocations,
                 $settlementBuckets,
                 $enforcementWithheld,
-                $accounts['other_deductions_credit'],
+                $this->enforcementAccount($accounts, $configuredAccounts),
                 "employee:{$employeeId}:enforcement",
                 'Exekuční a insolvenční srážky',
             );
@@ -826,6 +827,66 @@ final class PayrollPostingLineBuilder
         )
             ? $accounts['withholding_tax_credit']
             : $accounts['income_tax_credit'];
+    }
+
+    /**
+     * Závazkový účet EXEKUČNÍCH a insolvenčních srážek (Ú-14).
+     *
+     * Exekuce se dosud účtovala na týž účet jako dobrovolné srážky ze mzdy
+     * a rozlišovala je jen pseudonymní dimenze `MZ-EX-…`/`MZ-SR-…` ve sloupci
+     * `cost_center`. Věřitel je přitom v obou případech někdo jiný, peníze
+     * jdou jinam (soudní exekutor, insolvenční správce vs. oprávněný z dohody
+     * o srážkách) a exekuční srážka má vlastní pořadí i vlastní zákonný režim
+     * (§ 276 a násl. o. s. ř., § 398 odst. 3 insolvenčního zákona).
+     *
+     * Degradace míří na FIREMNÍ účet ostatních srážek, ne na konstantu:
+     * přesně to dosud dělal `$accounts['other_deductions_credit']`, takže
+     * firma s přenastavenými srážkami dostane touž hodnotu jako dřív.
+     *
+     * @param array<string,string> $accounts doplněná sada předkontací
+     * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
+     */
+    private function enforcementAccount(
+        array $accounts,
+        array $configuredAccounts,
+    ): string {
+        return PayrollAccountingDefaults::snapshotAllowsSplit(
+            $configuredAccounts,
+            'enforcement_deductions_credit',
+        )
+            ? $accounts['enforcement_deductions_credit']
+            : $accounts['other_deductions_credit'];
+    }
+
+    /**
+     * Závazkový účet příspěvku na spoření u RIZIKOVÉ práce (Ú-14).
+     *
+     * Na rozdíl od exekuce tady degradace NEMÍŘÍ na jiný firemní účet:
+     * příspěvek se odjakživa účtoval na výchozí konstantu '379' bez ohledu na
+     * to, co si firma nastavila u srážek — jeho vlastní sloupec
+     * `risky_savings_credit_account` totiž přibyl až s ním samotným. Snapshot
+     * bez klíče proto musí dostat doslovnou historickou hodnotu, jinak by se
+     * firmě s přenastavenými srážkami zápis změnil.
+     *
+     * @param array<string,string> $accounts doplněná sada předkontací
+     * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
+     */
+    private function riskySavingsAccount(
+        array $accounts,
+        array $configuredAccounts,
+    ): string {
+        if (PayrollAccountingDefaults::snapshotAllowsSplit(
+            $configuredAccounts,
+            'risky_savings_credit',
+        )) {
+            return $accounts['risky_savings_credit'];
+        }
+        $preSplit = PayrollAccountingDefaults::preSplitCode('risky_savings_credit');
+
+        return $this->account(
+            $preSplit ?? $accounts['risky_savings_credit'],
+            'risky_savings_credit',
+        );
     }
 
     /**
@@ -1666,12 +1727,14 @@ final class PayrollPostingLineBuilder
      * }> $allocations
      * @param array<string,mixed> $result
      * @param array<string,string> $accounts
+     * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
      * @param array<int,?string> $costCenters employment_id → středisko
      */
     private function addRiskySavings(
         array &$allocations,
         array $result,
         array $accounts,
+        array $configuredAccounts,
         array $costCenters,
     ): void {
         $statutory = $this->object($result['statutory'] ?? null, 'result.statutory');
@@ -1698,7 +1761,7 @@ final class PayrollPostingLineBuilder
                 $allocations,
                 "risky-savings:employment:{$employmentId}",
                 $accounts['risky_savings_debit'],
-                $accounts['risky_savings_credit'],
+                $this->riskySavingsAccount($accounts, $configuredAccounts),
                 $contribution,
                 'Povinný příspěvek na spoření u rizikové práce',
                 $costCenters[$employmentId] ?? null,
