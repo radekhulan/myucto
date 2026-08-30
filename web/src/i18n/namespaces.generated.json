@@ -70,6 +70,7 @@
     "payment_method",
     "payment_order",
     "payroll",
+    "payrollDocumentAccess",
     "payroll_absence",
     "payroll_travel",
     "permissions",
@@ -147,6 +148,7 @@
       "payment_method",
       "payment_order",
       "payroll",
+      "payrollDocumentAccess",
       "payroll_absence",
       "payroll_travel",
       "permissions",
@@ -203,6 +205,9 @@
     ],
     "work-report-tracking": [
       "workReportTracking"
+    ],
+    "payroll-document-access": [
+      "payrollDocumentAccess"
     ],
     "not-found": [
       "errors"
