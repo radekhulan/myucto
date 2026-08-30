@@ -15709,6 +15709,10 @@
       "form_dpfdp5": "Daň z příjmů FO",
       "form_dpfdp7": "Daň z příjmů FO (DPFDP7)",
       "form_dppdp9": "Daň z příjmů PO",
+      "form_dpzvd6": "Vyúčtování zálohové daně (mzdy)",
+      "form_dpsvd2": "Vyúčtování srážkové daně (mzdy)",
+      "origin_payroll": "Mzdy",
+      "channels_hint": "Přes EPO odchází daňová podání a z mezd vyúčtování zálohové a srážkové daně; zpátky přijde potvrzení s podacím číslem, které je dokladem o podání. Ostatní mzdová podání — přehledy a hlášení zdravotním pojišťovnám a měsíční hlášení ČSSZ (JMHZ) — jdou datovou schránkou v Mzdy → Datová schránka a vrací jen dodejku, ne potvrzení s číslem.",
       "period": "Období",
       "generated_at": "Vygenerováno",
       "size": "Velikost",
@@ -18802,10 +18806,10 @@
     },
     "access": {
       "title": "Přístup k datové schránce",
-      "gatewayTitle": "Přihlášení při odeslání přes ISDS",
+      "gatewayTitle": "Odesílání podání z aplikace (odchozí)",
       "recommended": "Doporučeno",
-      "gatewayDescription": "Při každém odeslání Vás MyÚčto přesměruje na oficiální přihlašovací stránku ISDS. Způsob přihlášení vybíráte tam podle možností svého účtu.",
-      "gatewayBoundary": "MyÚčto žádné uživatelské jméno, heslo, bezpečnostní kód ani mobilní klíč nevidí a neukládá.",
+      "gatewayDescription": "Tudy odchází podání, která MyÚčto vytvoří: přehledy a hlášení zdravotním pojišťovnám (HOZ, PPZ), měsíční hlášení zaměstnavatele ČSSZ (JMHZ) jako náhrada za VREP a součinnost exekutorům. Podání připravíte a odešlete na příslušné stránce mezd; sem se nastavuje jen to, jak se u odeslání přihlásíte. Při každém odeslání Vás MyÚčto přesměruje na oficiální přihlašovací stránku ISDS a způsob přihlášení vyberete tam podle možností svého účtu — nic se nastavovat předem nemusí.",
+      "gatewayBoundary": "MyÚčto žádné uživatelské jméno, heslo, bezpečnostní kód ani mobilní klíč nevidí a neukládá. Odeslané zprávy najdete na kartě Odchozí podání, odpovědi úřadů na kartě Příchozí zprávy.",
       "gatewayAvailable": "Odesílací brána je pro zvolené prostředí připravená.",
       "gatewayUnavailable": "Odesílací brána je samostatná služba pouze pro odchozí podání a provozovatel ji pro toto prostředí ještě neaktivoval. Příchozí zprávy můžete načíst nezávisle na ní na kartě Příchozí zprávy.",
       "methods": {
@@ -18957,10 +18961,10 @@
         "title": "Ukládání stažených zpráv",
         "description": "Zvolte kořenovou složku v Dokumentech. Pro každou zprávu MyÚčto automaticky vytvoří rok, měsíc, den a složku s jejím ID.",
         "folder": "Kořen archivu",
-        "root": "Kořen Dokumentů",
+        "root": "Automaticky vytvořit výchozí složku",
         "save": "Uložit umístění",
         "saved": "Umístění příchozích zpráv bylo uloženo.",
-        "pathHint": "Výsledná cesta: kořen / RRRR / MM / DD / ID zprávy. Nastavení je samostatné pro ostrý a testovací provoz."
+        "pathHint": "Výsledná cesta: kořen / RRRR / MM / DD / ID zprávy. Bez vlastní volby založí MyÚčto složku Datová schránka — do kořene Dokumentů zprávy nesype. Nastavení je samostatné pro ostrý a testovací provoz."
       },
       "privacy": {
         "title": "Soukromí stažených zpráv",

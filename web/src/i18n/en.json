@@ -15709,6 +15709,10 @@
       "form_dpfdp5": "Income tax FO",
       "form_dpfdp7": "Income tax FO (DPFDP7)",
       "form_dppdp9": "Income tax PO",
+      "form_dpzvd6": "Advance tax reconciliation (payroll)",
+      "form_dpsvd2": "Withholding tax reconciliation (payroll)",
+      "origin_payroll": "Payroll",
+      "channels_hint": "EPO carries tax submissions and the payroll advance and withholding tax reconciliations; it returns a confirmation with a submission number that proves the filing. The other payroll submissions — health insurer overviews and notifications and the monthly ČSSZ report (JMHZ) — go through the data box in Payroll → Data box and return only a delivery note, not a numbered confirmation.",
       "period": "Period",
       "generated_at": "Generated",
       "size": "Size",
@@ -18802,9 +18806,9 @@
     },
     "access": {
       "title": "Data box access",
-      "gatewayTitle": "Sign in through ISDS when sending",
+      "gatewayTitle": "Sending submissions from the app (outgoing)",
       "recommended": "Recommended",
-      "gatewayDescription": "For every dispatch, MyÚčto redirects you to the official ISDS sign-in page. You choose the sign-in method there from the options enabled for your account.",
+      "gatewayDescription": "This is how submissions created by MyÚčto leave: health insurer overviews and notifications (HOZ, PPZ), the employer monthly report to ČSSZ (JMHZ) as an alternative to VREP, and enforcement cooperation. You prepare and send each submission on its own payroll page; here you only set how you sign in when sending. For every dispatch MyÚčto redirects you to the official ISDS sign-in page and you choose the method there — nothing has to be configured in advance.",
       "gatewayBoundary": "MyÚčto never sees or stores your username, password, security code or Mobile Key.",
       "gatewayAvailable": "The sending gateway is ready for the selected environment.",
       "gatewayUnavailable": "The sending gateway is a separate outgoing-only service and the operator has not activated it for this environment yet. Incoming messages can be fetched independently on the Incoming messages tab.",
@@ -18957,10 +18961,10 @@
         "title": "Downloaded message storage",
         "description": "Choose a root folder in Documents. MyÚčto automatically creates year, month, day and message ID folders for each message.",
         "folder": "Archive root",
-        "root": "Documents root",
+        "root": "Create a default folder automatically",
         "save": "Save location",
         "saved": "The incoming-message location was saved.",
-        "pathHint": "Resulting path: root / YYYY / MM / DD / message ID. Production and test environments have separate settings."
+        "pathHint": "Resulting path: root / YYYY / MM / DD / message ID. Without your own choice MyÚčto creates a Data box folder — messages never land in the Documents root. Production and test environments have separate settings."
       },
       "privacy": {
         "title": "Downloaded-message privacy",

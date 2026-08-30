@@ -15,6 +15,11 @@ final readonly class SubmissionInboxStorageSettingsService
 {
     private const ENVIRONMENTS = ['production', 'test'];
 
+    private const DEFAULT_ROOT_NAMES = [
+        'production' => 'Datová schránka',
+        'test' => 'Datová schránka (testovací provoz)',
+    ];
+
     public function __construct(
         private SubmissionInboxStorageSettingsRepository $repository,
         private DocumentFolderRepository $folders,
@@ -94,12 +99,8 @@ final readonly class SubmissionInboxStorageSettingsService
     ): ?int {
         $this->assertEnvironment($environment);
         $setting = $this->repository->find($supplierId, $environment);
-        if ($setting === null) {
-            return null;
-        }
-
-        $baseFolderId = (int) $setting['base_folder_id'];
-        if ($this->folders->find($baseFolderId, $supplierId) === null) {
+        $baseFolderId = $setting === null ? null : (int) $setting['base_folder_id'];
+        if ($baseFolderId !== null && $this->folders->find($baseFolderId, $supplierId) === null) {
             throw new SubmissionChannelException(
                 'isds_inbox_archive_folder_unavailable',
                 'Nastavená složka archivu příchozí datové schránky už není dostupná. Vyberte jinou složku.',
@@ -115,10 +116,17 @@ final readonly class SubmissionInboxStorageSettingsService
             );
         }
 
-        $segments = ['_bez-data-dodani'];
+        $segments = [];
+        if ($baseFolderId === null) {
+            $segments[] = self::DEFAULT_ROOT_NAMES[$environment];
+        }
         if ($header->deliveredAt !== null) {
             $deliveredAt = $header->deliveredAt->setTimezone(new \DateTimeZone(date_default_timezone_get()));
-            $segments = [$deliveredAt->format('Y'), $deliveredAt->format('m'), $deliveredAt->format('d')];
+            $segments[] = $deliveredAt->format('Y');
+            $segments[] = $deliveredAt->format('m');
+            $segments[] = $deliveredAt->format('d');
+        } else {
+            $segments[] = '_bez-data-dodani';
         }
         $segments[] = $header->externalMessageId;
 

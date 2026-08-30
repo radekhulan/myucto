@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Submission;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionInboxStorageSettingsService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -56,6 +57,62 @@ final class SubmissionInboxStorageSettingsTest extends TestCase
         self::assertSame($testFolderId, $test['base_folder_id']);
         self::assertCount(2, $this->service->list($this->supplierId));
         self::assertSame([], $this->service->list($this->otherSupplierId));
+    }
+
+    public function testUnsetSettingArchivesIntoOwnFolderNotDocumentsRoot(): void
+    {
+        $header = new InboxMessageHeader(
+            'zprava-1',
+            deliveredAt: new \DateTimeImmutable('2026-08-30 09:15:00'),
+        );
+
+        $folderId = $this->service->resolveFolder($this->supplierId, 'production', $header, $this->userId);
+
+        self::assertNotNull($folderId);
+        self::assertSame(
+            ['Datová schránka', '2026', '08', '30', 'zprava-1'],
+            $this->folderPath((int) $folderId),
+        );
+
+        $testFolderId = $this->service->resolveFolder($this->supplierId, 'test', $header, $this->userId);
+        self::assertNotNull($testFolderId);
+        self::assertSame('Datová schránka (testovací provoz)', $this->folderPath((int) $testFolderId)[0]);
+    }
+
+    public function testChosenFolderStaysTheRootWithoutExtraLevel(): void
+    {
+        $chosen = $this->createFolder($this->supplierId, 'Vlastní archiv');
+        $this->service->save($this->supplierId, 'production', $chosen, 0, $this->userId);
+
+        $folderId = $this->service->resolveFolder(
+            $this->supplierId,
+            'production',
+            new InboxMessageHeader('zprava-2', deliveredAt: new \DateTimeImmutable('2026-08-30 09:15:00')),
+            $this->userId,
+        );
+
+        self::assertSame(
+            ['Vlastní archiv', '2026', '08', '30', 'zprava-2'],
+            $this->folderPath((int) $folderId),
+        );
+    }
+
+    /** @return list<string> */
+    private function folderPath(int $folderId): array
+    {
+        $path = [];
+        $current = $folderId;
+        while ($current > 0) {
+            $row = $this->db->pdo()->prepare('SELECT name, parent_id FROM document_folders WHERE id = ?');
+            $row->execute([$current]);
+            $found = $row->fetch();
+            if ($found === false) {
+                break;
+            }
+            array_unshift($path, (string) $found['name']);
+            $current = (int) ($found['parent_id'] ?? 0);
+        }
+        return $path;
     }
 
     public function testForeignAndDeletedFoldersAreRejected(): void

@@ -313,8 +313,19 @@ function formCodeLabel(code: string): string {
     dpfdp5: 'form_dpfdp5',
     dpfdp7: 'form_dpfdp7',
     dppdp9: 'form_dppdp9',
+    dpzvd6: 'form_dpzvd6',
+    dpsvd2: 'form_dpsvd2',
   } as Record<string, string>)[code]
   return key ? t(`reports.submissions.${key}`) : code
+}
+
+// Přehled je společný pro daně i mzdy a z kódu formuláře to účetní nepozná.
+// Vyúčtování závislé činnosti a srážkové daně vzniká ve mzdách, jen odchází
+// touž cestou jako přiznání — proto se odlišuje štítkem, ne vlastní stránkou.
+const PAYROLL_FORMS = new Set(['dpzvd6', 'dpsvd2'])
+
+function isPayrollForm(code: string): boolean {
+  return PAYROLL_FORMS.has(code)
 }
 
 // Písmeno varianty je EPO kód a KAŽDÝ formulář má vlastní sadu — „N" je
@@ -1420,6 +1431,7 @@ onMounted(async () => {
       <div>
         <h1 class="text-2xl font-semibold">{{ t('reports.submissions.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1 max-w-3xl">{{ t('reports.submissions.subtitle') }}</p>
+        <p class="text-sm text-neutral-500 mt-2 max-w-3xl">{{ t('reports.submissions.channels_hint') }}</p>
       </div>
       <div class="flex flex-wrap gap-2">
         <button v-if="canWrite" type="button" :class="btnOutline('primary')" @click="openCredentialModal">
@@ -1548,7 +1560,13 @@ onMounted(async () => {
               :class="{ 'bg-primary-50/50': expandedId === item.id }"
               @click="toggleDetail(item)">
               <td class="px-4 py-3">
-                <div class="font-medium">{{ formCodeLabel(item.form_code) }}</div>
+                <div class="font-medium">
+                  {{ formCodeLabel(item.form_code) }}
+                  <span v-if="isPayrollForm(item.form_code)"
+                  class="ml-2 inline-flex rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                  {{ t('reports.submissions.origin_payroll') }}
+                </span>
+                </div>
                 <div class="text-xs text-neutral-400 mt-0.5">
                   <span class="font-mono">#{{ item.id }}</span>
                   <template v-if="variantLabel(item)"> · {{ variantLabel(item) }}</template>
@@ -1606,7 +1624,13 @@ onMounted(async () => {
           @click="toggleDetail(item)">
           <div class="flex items-start justify-between gap-3">
             <div>
-              <div class="font-medium">{{ formCodeLabel(item.form_code) }}</div>
+              <div class="font-medium">
+                {{ formCodeLabel(item.form_code) }}
+                <span v-if="isPayrollForm(item.form_code)"
+                  class="ml-2 inline-flex rounded-full border border-primary-200 bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+                  {{ t('reports.submissions.origin_payroll') }}
+                </span>
+              </div>
               <div class="text-xs text-neutral-500 mt-1">{{ periodLabel(item) }} · {{ formatDate(item.generated_at) }}</div>
             </div>
             <span :class="['inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', lifecycleClass(item.status)]">

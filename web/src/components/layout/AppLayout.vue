@@ -624,6 +624,14 @@ const navSections = computed<NavSection[]>(() => {
         // Výmaz stojí hned za lhůtami — bez nich nedává smysl —, ale má vlastní
         // právo: číst lhůty smí i ten, kdo nesmí odklepnout nevratné smazání.
         { to: '/payroll/erasure', label: t('nav.payroll_erasure'), icon: ICONS.erasure, permission: 'payroll.erasure' as PermissionKey },
+        // 4) Odesílací cesty. Obě obrazovky byly dřív jinde — datová schránka
+        // ve Firmě, odesílací brána v Systému — a uživatel z toho nepoznal, že
+        // spolu souvisí. Přes ISDS chodí prakticky jen mzdová podání (přehledy
+        // a hlášení zdravotním pojišťovnám, JMHZ jako alternativa k VREP,
+        // součinnost exekutorům), takže patří sem, vedle sebe a v tomhle pořadí:
+        // nejdřív schránka firmy, pak brána, přes kterou zprávy fyzicky odchází.
+        { to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' as PermissionKey, dividerBefore: true },
+        ...(isAdmin ? [{ to: '/admin/isds-gateway', label: t('nav.isds_gateway'), icon: ICONS.documents }] : []),
       ],
     } as NavSection)
   }
@@ -652,9 +660,6 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/profile/api-tokens',          label: t('nav.api_tokens'),      icon: ICONS.api_tokens },
         { to: '/profile/mcp-server',          label: t('nav.mcp_server'),      icon: ICONS.mcp },
         { to: '/document-requests',           label: t('nav.document_requests'), icon: ICONS.requestDoc },
-        // Datová schránka obsluhuje mzdová podání (ČSSZ, zdravotní pojišťovny, JMHZ),
-        // takže s vypnutými mzdami nemá firma co odesílat — položka mizí spolu s nimi.
-        ...(payrollEnabled ? [{ to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' as PermissionKey }] : []),
       ],
     })
     // Systém — globální nastavení a licenční agenda v jednom menu.
@@ -675,7 +680,6 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/admin/emails',           label: t('nav.emails'),          icon: ICONS.email },
         { to: '/admin/activity-log',     label: t('nav.log'),             icon: ICONS.log },
         { to: '/admin/cron-jobs',        label: t('nav.cron_jobs'),       icon: ICONS.cron },
-        { to: '/admin/isds-gateway',     label: t('nav.isds_gateway'),    icon: ICONS.documents },
         { to: '/admin/update',           label: t('nav.updates'),         icon: ICONS.updates },
         ...(isAdmin ? [
           // Hosting — JEN spravovaná (hostovaná) instalace. Na self-hosted se
@@ -712,14 +716,6 @@ const navSections = computed<NavSection[]>(() => {
     // Non-admin role (accountant/readonly) nemá žádnou jinou cestu k vlastním API
     // tokenům — route /profile/api-tokens nemá adminOnly, ale dřív byl jediný
     // sidebar link uvnitř isAdmin bloku výše, takže k němu vedla jen přímá URL.
-    if (payrollEnabled && auth.canWrite('settings.signing')) {
-      sections.push({
-        key: 'company_databox',
-        title: t('nav.section_company'),
-        accent: 'warning',
-        items: [{ to: '/admin/databox', label: t('nav.databox'), icon: ICONS.documents, permission: 'settings.signing' }],
-      })
-    }
     const nonAdminSystemItems: NavItem[] = []
     if (auth.canRead('settings.signing') && accountantSigningProfilesEnabled.value) {
       nonAdminSystemItems.push({ to: '/admin/electronic-signatures', label: t('nav.electronic_signatures'), icon: ICONS.approvals })
