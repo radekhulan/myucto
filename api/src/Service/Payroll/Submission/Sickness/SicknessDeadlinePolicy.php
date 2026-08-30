@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Sickness;
 
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Report\CzechWorkingDays;
 
 /**
@@ -55,6 +57,17 @@ use MyInvoice\Service\Report\CzechWorkingDays;
  *
  * Jediná výjimka je vyrovnávací příspěvek: tam zákon den určuje a okno je
  * `statute_verified`.
+ *
+ * ## Odkud jsou podpůrčí doby a čekací doba
+ *
+ * Prvních 14 dnů trvání DPN (§ 26 odst. 1 a § 97 odst. 2 věta druhá) je TATÁŽ
+ * hodnota, kterou pro náhradu mzdy podle § 192 ZP nese
+ * {@see \MyInvoice\Service\Payroll\Absence\AbsenceRuleset::sicknessWindowCalendarDays()} —
+ * čte se odsud, ne z vlastní konstanty, jinak by se novela lhůty promítla do
+ * výpočtu náhrady, ale ne do termínů tady. Podpůrčí doby otcovské a ošetřovného
+ * (§ 38b odst. 1, § 40 odst. 1) svůj protějšek jinde nemají a bydlí v rulesetu
+ * jako `sickness_benefit.paternity_support_days`, `sickness_benefit.care_support_days`
+ * a `sickness_benefit.care_support_days_lone_carer`.
  */
 final class SicknessDeadlinePolicy
 {
@@ -63,22 +76,17 @@ final class SicknessDeadlinePolicy
     public const SOURCE_STATUTE_VERIFIED = 'statute_verified';
     public const SOURCE_DERIVED_IMMEDIACY = 'derived_immediacy';
 
-    /** § 26 odst. 1 a § 97 odst. 2 věta druhá: prvních 14 dnů trvání DPN. */
-    private const NEM_WAITING_DAYS = 14;
-
-    /** § 38b odst. 1: podpůrčí doba u otcovské činí 2 týdny. */
-    private const OPP_SUPPORT_DAYS = 14;
-
-    /** § 40 odst. 1 písm. a): podpůrčí doba u ošetřovného nejdéle 9 dnů. */
-    private const OSE_SUPPORT_DAYS = 9;
-
-    /** § 40 odst. 1 písm. b): osamělý pojištěnec s dítětem do 16 let. */
-    private const OSE_SUPPORT_DAYS_LONE_CARER = 16;
-
     private const SOURCES = [
         'law' => '§ 97 odst. 1, 2, 3 a 5 zákona č. 187/2006 Sb.',
         'support_periods' => '§ 26 odst. 1, § 38b odst. 1 a § 40 odst. 1 zákona č. 187/2006 Sb.',
     ];
+
+    /**
+     * NENÍ volitelná — {@see \MyInvoice\Tests\Architecture\PayrollRulesetSingleSourceGuardTest}
+     * hlídá, že se PHP-DI nikdy nespokojí s vestavěným rulesetem místo
+     * administrátorského nastavení.
+     */
+    public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /**
      * Lhůta oznámení NEMPRI.
@@ -130,19 +138,23 @@ final class SicknessDeadlinePolicy
                 'next_working_day_after_payday',
                 '§ 97 odst. 5 zákona č. 187/2006 Sb.',
                 self::SOURCE_STATUTE_VERIFIED,
+                AbsenceRuleset::forDate($this->rulesets, $payrollPaymentDate),
             );
         }
 
+        $absence = AbsenceRuleset::forDate($this->rulesets, $incapacityFrom);
+
         [$earliest, $reference] = match ($kind) {
             // § 97 odst. 2 věta druhá: neprodleně PO UPLYNUTÍ prvních 14 dnů,
-            // tedy nejdřív 15. kalendářní den trvání DPN (§ 26 odst. 1).
+            // tedy nejdřív 15. kalendářní den trvání DPN (§ 26 odst. 1). Tatáž
+            // hodnota jako u náhrady mzdy podle § 192 ZP.
             SicknessBenefitKind::Nem => [
-                $from->modify('+' . self::NEM_WAITING_DAYS . ' days'),
+                $from->modify('+' . $absence->sicknessWindowCalendarDays() . ' days'),
                 '§ 97 odst. 2 věta druhá zákona č. 187/2006 Sb.',
             ],
             // § 97 odst. 1 věta čtvrtá + § 38b odst. 1.
             SicknessBenefitKind::Opp => [
-                $from->modify('+' . self::OPP_SUPPORT_DAYS . ' days'),
+                $from->modify('+' . $absence->paternitySupportDays() . ' days'),
                 '§ 97 odst. 1 věta čtvrtá a § 38b odst. 1 zákona č. 187/2006 Sb.',
             ],
             // § 97 odst. 1 věta čtvrtá + § 40 odst. 1. Skončila-li potřeba
@@ -153,8 +165,8 @@ final class SicknessDeadlinePolicy
                 $this->earlier(
                     $from->modify('+' . (
                         $loneCarer
-                            ? self::OSE_SUPPORT_DAYS_LONE_CARER
-                            : self::OSE_SUPPORT_DAYS
+                            ? $absence->careSupportDaysLoneCarer()
+                            : $absence->careSupportDays()
                     ) . ' days'),
                     $end,
                 ),
@@ -175,6 +187,7 @@ final class SicknessDeadlinePolicy
             'immediately',
             $reference,
             self::SOURCE_DERIVED_IMMEDIACY,
+            $absence,
         );
     }
 
@@ -217,6 +230,7 @@ final class SicknessDeadlinePolicy
             'immediately',
             '§ 97 odst. 3 zákona č. 187/2006 Sb.',
             self::SOURCE_DERIVED_IMMEDIACY,
+            AbsenceRuleset::forDate($this->rulesets, $incapacityTo),
         );
     }
 
@@ -226,6 +240,7 @@ final class SicknessDeadlinePolicy
         string $calendarBasis,
         string $legalReference,
         string $sourceStatus,
+        AbsenceRuleset $absence,
     ): SicknessNotificationWindow {
         if ($due < $earliest) {
             // Nemůže nastat u dat, která projdou kontrolami výš, ale kdyby se
@@ -243,7 +258,7 @@ final class SicknessDeadlinePolicy
             $due->format('Y-m-d'),
             $calendarBasis,
             self::RULESET_ID,
-            $this->rulesetHash(),
+            $this->rulesetHash($absence),
             $legalReference,
             $sourceStatus,
         );
@@ -272,15 +287,15 @@ final class SicknessDeadlinePolicy
         return $b < $a ? $b : $a;
     }
 
-    private function rulesetHash(): string
+    private function rulesetHash(AbsenceRuleset $absence): string
     {
         return hash('sha256', CanonicalJson::encode([
             'schema_reference' => 'payroll-sickness-deadline-policy.v1',
             'ruleset_id' => self::RULESET_ID,
-            'nem_waiting_days' => self::NEM_WAITING_DAYS,
-            'opp_support_days' => self::OPP_SUPPORT_DAYS,
-            'ose_support_days' => self::OSE_SUPPORT_DAYS,
-            'ose_support_days_lone_carer' => self::OSE_SUPPORT_DAYS_LONE_CARER,
+            'nem_waiting_days' => $absence->sicknessWindowCalendarDays(),
+            'opp_support_days' => $absence->paternitySupportDays(),
+            'ose_support_days' => $absence->careSupportDays(),
+            'ose_support_days_lone_carer' => $absence->careSupportDaysLoneCarer(),
             'vpm_due' => 'next_working_day_after_payday',
             'immediacy_due' => 'next_czech_working_day_from_earliest',
             'sources' => self::SOURCES,

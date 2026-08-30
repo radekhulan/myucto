@@ -248,6 +248,21 @@ final class TaxOptimizerTest extends TestCase
         self::assertNotNull($pred['defer_advice']);
     }
 
+    /** Popisek prahu musí odpovídat hodnotě z konstant, ne zamrzlému literálu v textu. */
+    public function testCrossingLabelsMatchConstantValues(): void
+    {
+        $c = $this->c;
+        $c['vat_limit_low'] = 3_000_000.0;
+        $c['vat_limit_high'] = 3_540_000.0;
+
+        $pred = $this->opt->predict($this->profile(), 1_000_000, 6, $c);
+        $vatLow = array_values(array_filter($pred['crossings'], fn ($x) => $x['key'] === 'vat_low'))[0];
+        $vatHigh = array_values(array_filter($pred['crossings'], fn ($x) => $x['key'] === 'vat_high'))[0];
+
+        self::assertStringContainsString('3 M', $vatLow['label']);
+        self::assertStringContainsString('3,54 M', $vatHigh['label']);
+    }
+
     /** Vedlejší limit jen při is_secondary; měří se proti ZISKU (60 % paušál → zisk 40 %). */
     public function testPredictSecondarySocialThreshold(): void
     {

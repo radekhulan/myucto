@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Tax\Vat;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 use PDO;
 
 /**
@@ -41,10 +42,16 @@ use PDO;
  */
 final class Section43Service
 {
-    /** § 148 DŘ — lhůta pro stanovení daně, od jejíhož uplynutí už opravit nelze. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok PŮVODNÍHO plnění.
+     */
     public const ASSESSMENT_PERIOD_YEARS = 3;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
 
     /**
      * Součty oprav pro řádky přiznání za období PŮVODNÍHO plnění.
@@ -215,10 +222,13 @@ final class Section43Service
             ? (int) (ceil($periodMonth / 3) * 3)
             : $periodMonth;
 
+        $c = $this->taxConstants->forYear($periodYear);
+        $assessmentYears = (int) ($c['assessment_period_years'] ?? self::ASSESSMENT_PERIOD_YEARS);
+
         $filingDeadline = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $periodYear, $periodEndMonth)))
             ->modify('last day of this month')
             ->modify('+25 days');
-        $deadline = $filingDeadline->modify('+' . self::ASSESSMENT_PERIOD_YEARS . ' years');
+        $deadline = $filingDeadline->modify('+' . $assessmentYears . ' years');
 
         return $deliveredOn > $deadline->format('Y-m-d');
     }

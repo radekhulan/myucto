@@ -95,6 +95,11 @@ final class ClosingService
      * → 100 %; §8c pohledávky do 30 000 Kč nad 12 měsíců → 100 %. Systém návrh jen NABÍZÍ —
      * účetní ho per pohledávka potvrdí/upraví/zamítne (nikdy automatické zaúčtování).
      */
+    /**
+     * Fallback defaulty, když by daný rok neměl v TaxConstants klíč (nemělo by nastat —
+     * primární zdroj je vždy {@see TaxConstantsRepository::forYear()} pro fiskální rok
+     * období). Hodnoty se v čase neměnily, viz `TaxConstants::TABLE`.
+     */
     private const PROVISION_8A_50_MONTHS = 18;
     private const PROVISION_8A_100_MONTHS = 30;
     private const PROVISION_8C_MONTHS = 12;
@@ -1848,6 +1853,12 @@ final class ClosingService
             throw new ClosingException('not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
         }
         $endsOn = (string) $period['ends_on'];
+        $c = $this->taxConstants->forYear((int) $period['fiscal_year']);
+        $months8a50 = (int) ($c['bad_debt_provision_8a_50pct_months'] ?? self::PROVISION_8A_50_MONTHS);
+        $months8a100 = (int) ($c['bad_debt_provision_8a_100pct_months'] ?? self::PROVISION_8A_100_MONTHS);
+        $months8c = (int) ($c['bad_debt_provision_8c_months'] ?? self::PROVISION_8C_MONTHS);
+        $limit8c = (float) ($c['bad_debt_provision_8c_limit'] ?? self::PROVISION_8C_LIMIT);
+        $limitationMonths = (int) ($c['receivable_limitation_warning_months'] ?? self::PROVISION_LIMITATION_MONTHS);
 
         $existingByInvoice = [];
         foreach (($this->stepsMap($supplierId, $periodId)['provisions']['payload']['entries'] ?? []) as $e) {
@@ -1869,12 +1880,14 @@ final class ClosingService
         foreach ($receivables as $r) {
             $dueDate = $r['due_date'];
             $months = $dueDate !== '' ? self::monthsOverdue($dueDate, $endsOn) : 0;
-            $potentiallyTimeBarred = $months >= self::PROVISION_LIMITATION_MONTHS;
+            $potentiallyTimeBarred = $months >= $limitationMonths;
             $pid = $r['partner_id'] !== null ? (int) $r['partner_id'] : 0;
             $debtorTotal = round($remainingByPartner[$pid] ?? $r['remaining'], 2);
             [$section, $pct] = $potentiallyTimeBarred
                 ? [null, 0.0]
-                : self::suggestLegalProvision($r['remaining'], $debtorTotal, $months);
+                : self::suggestLegalProvision(
+                    $r['remaining'], $debtorTotal, $months, $months8a50, $months8a100, $months8c, $limit8c,
+                );
             $suggestedLegal = round($r['remaining'] * $pct, 2);
             $invoiceId = $r['invoice_id'];
             $existing = $existingByInvoice[$invoiceId] ?? null;
@@ -1933,13 +1946,13 @@ final class ClosingService
                 . 'zaúčtuj částku jako účetní (daňově neúčinnou) OP na 559. Účetní každou položku '
                 . 'potvrzuje/upravuje ručně.',
             'rules' => [
-                'legal_8a_50_months' => self::PROVISION_8A_50_MONTHS,
-                'legal_8a_100_months' => self::PROVISION_8A_100_MONTHS,
-                'legal_8c_months' => self::PROVISION_8C_MONTHS,
-                'legal_8c_limit' => self::PROVISION_8C_LIMIT,
+                'legal_8a_50_months' => $months8a50,
+                'legal_8a_100_months' => $months8a100,
+                'legal_8c_months' => $months8c,
+                'legal_8c_limit' => $limit8c,
                 'legal_8c_limit_aggregated_per_debtor' => true,
                 'months_threshold_strict' => true,
-                'limitation_warning_months' => self::PROVISION_LIMITATION_MONTHS,
+                'limitation_warning_months' => $limitationMonths,
             ],
         ];
     }
@@ -2159,15 +2172,22 @@ final class ClosingService
      * @param float $debtorTotal Σ zbývajících pohledávek za týmž dlužníkem (limit §8c)
      * @return array{0: ?string, 1: float}
      */
-    private static function suggestLegalProvision(float $remaining, float $debtorTotal, int $months): array
-    {
-        if ($debtorTotal <= self::PROVISION_8C_LIMIT && $months > self::PROVISION_8C_MONTHS) {
+    private static function suggestLegalProvision(
+        float $remaining,
+        float $debtorTotal,
+        int $months,
+        int $months8a50,
+        int $months8a100,
+        int $months8c,
+        float $limit8c,
+    ): array {
+        if ($debtorTotal <= $limit8c && $months > $months8c) {
             return ['8c', 1.0];
         }
-        if ($months > self::PROVISION_8A_100_MONTHS) {
+        if ($months > $months8a100) {
             return ['8a', 1.0];
         }
-        if ($months > self::PROVISION_8A_50_MONTHS) {
+        if ($months > $months8a50) {
             return ['8a', 0.5];
         }
         return [null, 0.0];

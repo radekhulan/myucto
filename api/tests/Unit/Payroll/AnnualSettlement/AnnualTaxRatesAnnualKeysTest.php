@@ -63,6 +63,26 @@ final class AnnualTaxRatesAnnualKeysTest extends TestCase
     }
 
     /**
+     * `isPayable()` a `isAnnualBonusAmountEligible()` čtou práh z `$rates`
+     * (rulesetu), ne z konstanty — přesnou shodu s ní hlídá gate v
+     * {@see AnnualTaxRates::forRuleset()}, takže tady se ověřuje, že se práh
+     * skutečně bere z předaného objektu, ne odjinud.
+     */
+    public function testThresholdsReadFromTheGivenRatesInsteadOfTheStatuteConstant(): void
+    {
+        $rates = AnnualTaxRates::forRuleset(self::incomeTax());
+
+        self::assertSame(
+            AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
+            $rates->payoutThresholdMinorUnits,
+        );
+        self::assertTrue(AnnualSettlementStatute::isPayable(5_001, $rates));
+        self::assertFalse(AnnualSettlementStatute::isPayable(5_000, $rates));
+        self::assertTrue(AnnualSettlementStatute::isAnnualBonusAmountEligible(10_000, $rates));
+        self::assertFalse(AnnualSettlementStatute::isAnnualBonusAmountEligible(9_999, $rates));
+    }
+
+    /**
      * Práh výplaty je zároveň zákonným číslem v kódu a administrovatelnou
      * hodnotou v rulesetu. Rozejdou-li se, není jasné, které platí — a zúčtování
      * se proto zastaví, místo aby jedno z nich tiše vyhrálo.

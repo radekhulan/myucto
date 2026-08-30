@@ -233,8 +233,14 @@ final class DpfoReturnCalculator
         // Poslední známá daňová povinnost pro zálohy (§ 38a) zahrnuje i daň ze samostatného
         // základu — je to součást stanovené daně, ne položka vedle ní.
         $lastKnownTax = max(0.0, round($taxAfterChildren + $separateTax, 2));
+        // § 38a odst. 5 ZDP — podíl § 6 na celkovém základu: od horní hranice se zálohy
+        // neplatí vůbec, od dolní (ale ne dosahující horní) jen v poloviční výši.
+        $employmentExemptShare = (float) ($c['advance_employment_exempt_share'] ?? 0.50);
+        $employmentHalfShare = (float) ($c['advance_employment_half_share'] ?? 0.15);
         $employmentShare = $totalBase > 0 ? $s6 / $totalBase : 0.0;
-        $advanceFactor = $employmentShare >= 0.50 ? 0.0 : ($employmentShare >= 0.15 ? 0.5 : 1.0);
+        $advanceFactor = $employmentShare >= $employmentExemptShare
+            ? 0.0
+            : ($employmentShare >= $employmentHalfShare ? 0.5 : 1.0);
         $advanceLow = (float) ($c['advance_threshold_low'] ?? 30000);
         $advanceHigh = (float) ($c['advance_threshold_high'] ?? 150000);
         $advanceRegime = $advanceFactor <= 0 || $lastKnownTax <= $advanceLow

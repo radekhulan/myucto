@@ -82,6 +82,42 @@ final class TaxConstantsTest extends TestCase
         }
     }
 
+    /**
+     * Audit 2026-08 kategorie B ("patří do roční sady") — hodnoty přesunuté z PHP
+     * literálů (§8a/§8c ZoR, §46, §23/3/a/12, §38a, §74b, §79, §78/§78a, §148 DŘ,
+     * §30, §110f, §94) musí být pro všechny existující ročníky přítomné a mít
+     * dnes platnou hodnotu (historicky se neměnily).
+     */
+    public function testAuditCategoryBKeysArePresentForAllYears(): void
+    {
+        foreach ([2024, 2025, 2026] as $year) {
+            $c = TaxConstants::forYear($year);
+            self::assertSame(18, $c['bad_debt_provision_8a_50pct_months'], "8a 50% $year");
+            self::assertSame(30, $c['bad_debt_provision_8a_100pct_months'], "8a 100% $year");
+            self::assertSame(12, $c['bad_debt_provision_8c_months'], "8c months $year");
+            self::assertSame(30000, $c['bad_debt_provision_8c_limit'], "8c limit $year");
+            self::assertSame(36, $c['receivable_limitation_warning_months'], "limitation $year");
+            self::assertSame(10000, $c['bad_debt_small_receivable_limit'], "s46 limit $year");
+            self::assertSame(20000, $c['bad_debt_small_receivable_debtor_year_limit'], "s46 debtor limit $year");
+            self::assertSame(6, $c['bad_debt_small_receivable_months'], "s46 months $year");
+            self::assertSame(30, $c['unpaid_liability_aging_months'], "unpaid liability $year");
+            self::assertSame(0.50, $c['advance_employment_exempt_share'], "38a exempt $year");
+            self::assertSame(0.15, $c['advance_employment_half_share'], "38a half $year");
+            self::assertSame(6, $c['s74b_aging_months'], "s74b $year");
+            self::assertSame(12, $c['s79_claim_window_months'], "s79 $year");
+            self::assertSame([5, 10], $c['vat_adjustment_period_years'], "s78 period years $year");
+            self::assertSame(10, $c['vat_adjustment_tolerance_points'], "s78a tolerance $year");
+            self::assertSame(3, $c['assessment_period_years'], "s43/148 $year");
+            self::assertSame(10000, $c['simplified_document_limit_with_vat'], "s30 $year");
+            self::assertSame(10, $c['oss_evidence_retention_years'], "oss retention $year");
+            self::assertSame(10, $c['vat_registration_application_deadline_working_days'], "s94 $year");
+        }
+        // Stejné pořadí klíčů 2024 vs 2025 (viz testVerified2024Values — 2026 se liší
+        // už dnes kvůli mzdovému rulesetu/zrcadlení `dpp_withholding_limit`, nesouvisí
+        // s touhle změnou).
+        self::assertSame(array_keys(TaxConstants::forYear(2025)), array_keys(TaxConstants::forYear(2024)));
+    }
+
     public function testAvailableYearsAndUnknownYearRejection(): void
     {
         self::assertContains(2024, TaxConstants::availableYears());

@@ -10,6 +10,7 @@ use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeDetectionService;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
 use PHPUnit\Framework\TestCase;
@@ -112,7 +113,7 @@ final class PayrollDeadlineOverviewTaxStatementTest extends TestCase
             $this->createStub(PayrollRegistrationChangeDetectionService::class),
             new PayrollTaxStatementDeadlinePolicy(),
             $this->sicknessCaseStub(),
-            new SicknessDeadlinePolicy(),
+            new SicknessDeadlinePolicy(CzechPayrollRulesets::provider()),
             $clock,
         );
     }

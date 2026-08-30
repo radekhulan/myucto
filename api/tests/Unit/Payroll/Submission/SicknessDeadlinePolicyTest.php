@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Absence\AbsenceRuleset;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets;
+use MyInvoice\Service\Payroll\Ruleset\CzechPayrollRulesets2026;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessBenefitKind;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessChannelCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
@@ -19,7 +22,7 @@ final class SicknessDeadlinePolicyTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->policy = new SicknessDeadlinePolicy();
+        $this->policy = new SicknessDeadlinePolicy(CzechPayrollRulesets::provider());
     }
 
     /**
@@ -190,6 +193,24 @@ final class SicknessDeadlinePolicyTest extends TestCase
      * proto zůstává zavřený s vlastním důvodovým kódem, ne obecným
      * „nepodporováno".
      */
+    /**
+     * Čekací doba NEMPRI se nesmí duplikovat vlastní konstantou — musí to být
+     * TATÁŽ hodnota, kterou pro náhradu mzdy podle § 192 ZP nese
+     * {@see AbsenceRuleset::sicknessWindowCalendarDays()}, jinak by se novela
+     * lhůty promítla do výpočtu náhrady, ale ne do termínu tady.
+     */
+    public function testNemWaitingDaysComeFromTheSameRulesetKeyAsWageCompensation(): void
+    {
+        $absence = AbsenceRuleset::forDate(CzechPayrollRulesets2026::provider(), '2026-08-01');
+
+        $window = $this->policy->forNempri(SicknessBenefitKind::Nem, '2026-08-01');
+        $expected = (new \DateTimeImmutable('2026-08-01'))
+            ->modify('+' . $absence->sicknessWindowCalendarDays() . ' days')
+            ->format('Y-m-d');
+
+        self::assertSame($expected, $window->earliestNotificationOn);
+    }
+
     public function testVrepChannelStaysClosedWithNamedReason(): void
     {
         $catalog = new SicknessChannelCatalog();

@@ -8,6 +8,7 @@ use DOMDocument;
 use DOMElement;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 
 /**
  * Money S3 (Seyfor) XML export for issued invoices — the "Faktury vydané"
@@ -47,6 +48,7 @@ final class MoneyS3XmlExporter
     public function __construct(
         private readonly InvoiceRepository $repo,
         Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
         ?InvoiceExportDataResolver $dataResolver = null,
     ) {
         $this->dataResolver = $dataResolver ?? new InvoiceExportDataResolver($db);
@@ -348,10 +350,24 @@ final class MoneyS3XmlExporter
      * Current Czech reduced/standard VAT rates — used only as the fallback for
      * an *unused* Money S3 rate slot (an all-zero document, or one that fills
      * just the other slot). The rates that actually drive bucketing are derived
-     * per-document from the line items, see {@see self::vatBuckets()}.
+     * per-document from the line items, see {@see self::vatBuckets()}. The
+     * actual defaults are read from {@see TaxConstantsRepository::forYear()}
+     * for the current year at export time ({@see self::currentDefaultRates()});
+     * these are only the last-resort fallback if that ever fails.
      */
     private const DEFAULT_REDUCED_VAT_RATE = 12.0;
     private const DEFAULT_STANDARD_VAT_RATE = 21.0;
+
+    /** @return array{0:float,1:float} [reduced, standard] */
+    private function currentDefaultRates(): array
+    {
+        $c = $this->taxConstants->forYear((int) date('Y'));
+
+        return [
+            (float) ($c['vat_rate_reduced'] ?? self::DEFAULT_REDUCED_VAT_RATE),
+            (float) ($c['vat_rate_standard'] ?? self::DEFAULT_STANDARD_VAT_RATE),
+        ];
+    }
 
     /**
      * A lone non-zero rate below this threshold goes to the reduced slot, at or
@@ -406,8 +422,7 @@ final class MoneyS3XmlExporter
         // Assign each present rate to a slot: with two rates the lower is
         // reduced and the higher standard; a lone rate is split by
         // REDUCED_STANDARD_SPLIT so it keeps its natural reduced/standard sense.
-        $reducedRate = self::DEFAULT_REDUCED_VAT_RATE;
-        $standardRate = self::DEFAULT_STANDARD_VAT_RATE;
+        [$reducedRate, $standardRate] = $this->currentDefaultRates();
         $slotOf = [];
         if (count($nonZeroRates) === 2) {
             [$reducedRate, $standardRate] = $nonZeroRates;

@@ -42,6 +42,12 @@ final class OssEvidenceServiceTest extends TestCase
         );
     }
 
+    /** Lhůta se čte z roční sady (volající ji předá) — literál je jen fallback default. */
+    public function testRetentionYearsComesFromExplicitParameterNotLiteral(): void
+    {
+        self::assertSame('2041-12-31', OssEvidenceService::retainUntil('2026-03-15', 15));
+    }
+
     /**
      * Export musí být „za každé jednotlivé plnění" (čl. 63c odst. 3), tedy jeden řádek
      * na záznam, a hlavička musí u každého sloupce nést písmeno bodu čl. 63c — jinak

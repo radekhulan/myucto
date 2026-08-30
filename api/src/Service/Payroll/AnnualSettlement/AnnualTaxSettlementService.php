@@ -281,7 +281,8 @@ final class AnnualTaxSettlementService
                     'settlement_difference_minor' => $result->settlementDifferenceMinorUnits,
                     'payable_minor' => $result->payableMinorUnits,
                     'payout_threshold_minor' =>
-                        AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
+                        $result->trace['rates']['payout_threshold_minor_units']
+                            ?? AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
                     'settled_on' => $today->format('Y-m-d'),
                 ],
                 $actorUserId,

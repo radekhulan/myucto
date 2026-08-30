@@ -162,6 +162,25 @@ final class PayrollLevyDeadlinePolicy
         return $this->forPeriod($levy, $periodStart)->dueOn;
     }
 
+    /**
+     * Den v měsíci, na který připadá odvod, BEZ posunu na pracovní den.
+     *
+     * Slouží jiným politikám, které stejný den v měsíci potřebují jako vstup do
+     * VLASTNÍHO pravidla (např. oznamovací povinnost zdravotní pojišťovně
+     * u DPP/DPČ), aby ho nedržely jako druhou kopii literálu.
+     */
+    public function dueDayOfMonth(string $levy): int
+    {
+        $rule = self::RULES[$levy] ?? null;
+        if ($rule === null || $rule['due_day'] === null) {
+            throw new \InvalidArgumentException(
+                'Druh mzdového odvodu nemá modelovaný pevný den v měsíci.',
+            );
+        }
+
+        return $rule['due_day'];
+    }
+
     public function forPeriod(
         string $levy,
         string $periodStart,

@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Report;
 
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Report\VatClassificationDefaulter;
+use PDO;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -140,5 +143,35 @@ final class VatClassificationDefaulterTest extends TestCase
             'prázdné'               => ['', false],
             'jen jedna číslice'     => ['4', false],
         ];
+    }
+
+    /**
+     * Fallback bez DB kódu se klíčuje AKTUÁLNÍ sazbou roku z konstant, ne zamrzlým
+     * literálem — po legislativní změně sazby se fallback chytí nové hodnoty.
+     */
+    public function testFallbackHeaderRateComesFromTaxConstantsForYear(): void
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE tax_constants (year INTEGER PRIMARY KEY, data TEXT NOT NULL)');
+        $pdo->exec('CREATE TABLE vat_classifications (code TEXT, direction TEXT, vat_rate REAL, is_reverse_charge INTEGER, archived INTEGER, supplier_id INTEGER, display_order INTEGER)');
+        $pdo->exec('CREATE TABLE vat_rates (rate_percent REAL, valid_from TEXT, valid_to TEXT)');
+
+        $config = $this->createStub(\MyInvoice\Infrastructure\Config\Config::class);
+        $conn = new Connection($config);
+        $prop = (new \ReflectionClass($conn))->getProperty('pdo');
+        $prop->setValue($conn, $pdo);
+
+        // Override 2025: sazby posunuté na 22 %/13 %, nikdo je nemá v číselníku.
+        $override = \MyInvoice\Service\Tax\TaxConstants::forYear(2025);
+        $override['vat_rate_standard'] = 22.0;
+        $override['vat_rate_reduced'] = 13.0;
+        $pdo->prepare('INSERT INTO tax_constants (year, data) VALUES (?, ?)')
+            ->execute([2025, json_encode($override)]);
+
+        $defaulter = new VatClassificationDefaulter($conn, new TaxConstantsRepository($conn));
+
+        // Header bez položek → dominantní sazba = standardní sazba roku podání.
+        self::assertSame('1', $defaulter->suggestHeaderForInvoice([], false, 'sale', '2025-06-15'));
     }
 }

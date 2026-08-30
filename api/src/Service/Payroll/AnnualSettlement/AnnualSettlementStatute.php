@@ -28,14 +28,17 @@ use DateTimeImmutable;
  * vzor jako `fiction_days_source` v migraci 1394.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * Peněžní prahy jsou od 8/2026 i v rulesetu — a musí sedět
+ * Peněžní prahy jsou od 8/2026 i v rulesetu — a `isPayable()` i
+ * `isAnnualBonusAmountEligible()` je ČTOU odtud
  * ─────────────────────────────────────────────────────────────────────────────
  * `settlement.payout_threshold` a `bonus.minimum_amount.yearly` v doméně daně
  * z příjmů nesou tatáž dvě čísla jako {@see PAYOUT_THRESHOLD_MINOR_UNITS}
- * a {@see ANNUAL_BONUS_MINIMUM_MINOR_UNITS}. Důvod je administrovatelnost: účetní
- * má vidět všechny roční parametry na jednom místě a novela částky se nemá řešit
- * nasazením. Dvě čísla pro jednu věc jsou ale riziko, takže se jejich shoda
- * ověřuje při každém sestavení sazeb — {@see AnnualTaxRates::forRuleset()}
+ * a {@see ANNUAL_BONUS_MINIMUM_MINOR_UNITS}, ale výpočet čte prahy z
+ * {@see \MyInvoice\Service\Payroll\AnnualSettlement\AnnualTaxRates}, ne
+ * z téhle konstanty přímo — konstanta zůstává jen jako dokumentace zákonného
+ * čísla a jako výchozí hodnota pro volání bez rulesetu (např. přímou stavbu
+ * výsledku v testech). Dvě čísla pro jednu věc jsou riziko, takže se jejich
+ * shoda ověřuje při každém sestavení sazeb — {@see AnnualTaxRates::forRuleset()}
  * zúčtování zastaví, jakmile se rozejdou. Lhůty (15. února, 31. března) v
  * rulesetu NEJSOU: doména `Deadlines` je záměrně `ManualReview`.
  *
@@ -136,16 +139,27 @@ final class AnnualSettlementStatute
 
     /**
      * Přeplatek se vyplácí, jen když je VÍCE než práh (§ 38ch odst. 5:
-     * „činí-li úhrnná výše tohoto přeplatku více než 50 Kč").
+     * „činí-li úhrnná výše tohoto přeplatku více než 50 Kč"). Nerovnost je
+     * OSTRÁ — to je zákonná vlastnost pravidla a v kódu zůstává; SAMOTNÝ práh
+     * se čte z rulesetu přes `$rates`, je-li předaný. Bez něj (přímá stavba
+     * výsledku, např. v testech) platí zákonná konstanta jako dřív.
      */
-    public static function isPayable(int $amountMinorUnits): bool
+    public static function isPayable(int $amountMinorUnits, ?AnnualTaxRates $rates = null): bool
     {
-        return $amountMinorUnits > self::PAYOUT_THRESHOLD_MINOR_UNITS;
+        $threshold = $rates?->payoutThresholdMinorUnits ?? self::PAYOUT_THRESHOLD_MINOR_UNITS;
+
+        return $amountMinorUnits > $threshold;
     }
 
-    public static function isAnnualBonusAmountEligible(int $amountMinorUnits): bool
+    /**
+     * § 35c odst. 3: nerovnost je NEOSTRÁ. Práh se čte z rulesetu přes
+     * `$rates`, je-li předaný — viz {@see isPayable()}.
+     */
+    public static function isAnnualBonusAmountEligible(int $amountMinorUnits, ?AnnualTaxRates $rates = null): bool
     {
-        return $amountMinorUnits >= self::ANNUAL_BONUS_MINIMUM_MINOR_UNITS;
+        $threshold = $rates?->bonusMinimumAmountMinorUnits ?? self::ANNUAL_BONUS_MINIMUM_MINOR_UNITS;
+
+        return $amountMinorUnits >= $threshold;
     }
 
     private static function date(int $year, int $month, int $day): DateTimeImmutable

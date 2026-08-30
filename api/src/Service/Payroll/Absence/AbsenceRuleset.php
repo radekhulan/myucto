@@ -60,6 +60,27 @@ final class AbsenceRuleset
         return $windowFrom->modify('+' . ($this->sicknessWindowCalendarDays() - 1) . ' days');
     }
 
+    /** Podpůrčí doba otcovské podle § 38b odst. 1 z. č. 187/2006 Sb. */
+    public function paternitySupportDays(): int
+    {
+        return $this->integer('sickness_benefit.paternity_support_days');
+    }
+
+    /** Podpůrčí doba ošetřovného podle § 40 odst. 1 písm. a) z. č. 187/2006 Sb. */
+    public function careSupportDays(): int
+    {
+        return $this->integer('sickness_benefit.care_support_days');
+    }
+
+    /**
+     * Podpůrčí doba ošetřovného u osamělého pojištěnce s dítětem do 16 let
+     * podle § 40 odst. 1 písm. b) z. č. 187/2006 Sb.
+     */
+    public function careSupportDaysLoneCarer(): int
+    {
+        return $this->integer('sickness_benefit.care_support_days_lone_carer');
+    }
+
     /** Hranice odpracovaných dnů pro skutečný průměr podle § 355 ZP. */
     public function averageEarningMinimumWorkedDays(): int
     {

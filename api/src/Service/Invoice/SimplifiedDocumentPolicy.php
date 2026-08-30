@@ -35,7 +35,11 @@ namespace MyInvoice\Service\Invoice;
  */
 final class SimplifiedDocumentPolicy
 {
-    /** § 30 odst. 1 — hranice se posuzuje z částky VČETNĚ daně. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see \MyInvoice\Repository\TaxConstantsRepository::forYear()}
+     * pro rok dokladu — volající ho předává jako `$limitWithVat`.
+     */
     public const LIMIT_WITH_VAT = 10000.0;
 
     /**
@@ -52,14 +56,14 @@ final class SimplifiedDocumentPolicy
      *
      * @param array<string,mixed> $invoice hlavička dokladu
      */
-    public static function rejectionReason(array $invoice, ?string $dphdp3Line): ?string
+    public static function rejectionReason(array $invoice, ?string $dphdp3Line, float $limitWithVat = self::LIMIT_WITH_VAT): ?string
     {
         $totalWithVat = abs((float) ($invoice['total_with_vat'] ?? 0));
-        if ($totalWithVat > self::LIMIT_WITH_VAT) {
+        if ($totalWithVat > $limitWithVat) {
             return sprintf(
                 'Zjednodušený daňový doklad lze vystavit jen do %s Kč včetně daně '
                     . '(§ 30 odst. 1 ZDPH); doklad je na %s Kč.',
-                number_format(self::LIMIT_WITH_VAT, 0, ',', ' '),
+                number_format($limitWithVat, 0, ',', ' '),
                 number_format($totalWithVat, 2, ',', ' '),
             );
         }

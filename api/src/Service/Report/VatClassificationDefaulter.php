@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 
 /**
  * Auto-default VAT klasifikační kódy podle (direction, vat_rate, is_reverse_charge).
@@ -27,11 +28,12 @@ use MyInvoice\Infrastructure\Database\Connection;
  */
 final class VatClassificationDefaulter
 {
-    /** Hard-coded fallback (matchne seed v migrace 0037 pro CZ 2025-2026 sazby) */
-    private const FALLBACK_SALE_TUZEMSKO    = ['21.0' => '1',  '12.0' => '2'];
-    // '0.0' => '42' je jen poslední záchrana byRateFallback() pro NEZNÁMOU kladnou sazbu
-    // (např. cizí 19 %) — nulová sazba se sem už nedostane, viz defaultForPurchase().
-    private const FALLBACK_PURCHASE_TUZEMSKO = ['21.0' => '40', '12.0' => '41', '0.0' => '42'];
+    // Fallback mapy pro tuzemské sazby ({@see fallbackSaleTuzemsko()}, {@see
+    // fallbackPurchaseTuzemsko()}) se klíčují AKTUÁLNÍ sazbou roku z {@see
+    // TaxConstantsRepository::forYear()}, ne zamrzlým literálem — matchne seed
+    // v migraci 0037, ale po legislativní změně sazby se chytí nové hodnoty.
+    // '0.0' => '42' u přijaté je jen poslední záchrana byRateFallback() pro NEZNÁMOU
+    // kladnou sazbu (např. cizí 19 %) — nulová sazba se sem už nedostane, viz defaultForPurchase().
     // RC + EU odběratel: statistický default SLUŽBA '22' (§ 9 odst. 1, ř.21) — použije se
     // až když ani jednotky položek, ani CZ-NACE dodavatele nedají signál „zboží" (viz
     // classifyEuReverseChargeSale). Dodání zboží do JČS = '20' (ř.20). Sjednoceno s
@@ -64,7 +66,49 @@ final class VatClassificationDefaulter
     /** @var array<int, bool>|null cache supplier_id → obchoduje se zbožím (dle CZ-NACE) */
     private ?array $naceGoodsCache = null;
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
+
+    /**
+     * {@see FALLBACK_SALE_TUZEMSKO} klíčovaná AKTUÁLNÍ sazbou roku (rok z `$taxDate`,
+     * jinak dnešní), ne zamrzlým literálem — po legislativní změně sazby se fallback
+     * chytí nové hodnoty ze stejné roční sady jako zbytek DPH výpočtu.
+     *
+     * @return array<string,string>
+     */
+    private function fallbackSaleTuzemsko(?string $taxDate): array
+    {
+        $c = $this->taxConstants->forYear($this->fallbackYear($taxDate));
+
+        return [
+            $this->rateKey((float) $c['vat_rate_standard']) => '1',
+            $this->rateKey((float) $c['vat_rate_reduced']) => '2',
+        ];
+    }
+
+    /** @return array<string,string> */
+    private function fallbackPurchaseTuzemsko(?string $taxDate): array
+    {
+        $c = $this->taxConstants->forYear($this->fallbackYear($taxDate));
+
+        return [
+            $this->rateKey((float) $c['vat_rate_standard']) => '40',
+            $this->rateKey((float) $c['vat_rate_reduced']) => '41',
+            '0.0' => '42',
+        ];
+    }
+
+    private function fallbackYear(?string $taxDate): int
+    {
+        return $taxDate !== null ? (int) substr($taxDate, 0, 4) : (int) date('Y');
+    }
+
+    private function rateKey(float $rate): string
+    {
+        return number_format($rate, 1, '.', '');
+    }
 
     /**
      * Default pro vystavenou fakturu (revenue side).
@@ -92,7 +136,7 @@ final class VatClassificationDefaulter
             return null;
         }
         return $this->lookup('sale', $vatRate, false, $taxDate, $supplierId)
-            ?? $this->byRateFallback($vatRate, self::FALLBACK_SALE_TUZEMSKO);
+            ?? $this->byRateFallback($vatRate, $this->fallbackSaleTuzemsko($taxDate));
     }
 
     /**
@@ -141,7 +185,7 @@ final class VatClassificationDefaulter
             return null;
         }
         return $this->lookup('purchase', $vatRate, $reverseCharge, $taxDate, $supplierId)
-            ?? ($reverseCharge ? self::FALLBACK_PURCHASE_REVERSE : $this->byRateFallback($vatRate, self::FALLBACK_PURCHASE_TUZEMSKO));
+            ?? ($reverseCharge ? self::FALLBACK_PURCHASE_REVERSE : $this->byRateFallback($vatRate, $this->fallbackPurchaseTuzemsko($taxDate)));
     }
 
     /**
@@ -280,7 +324,7 @@ final class VatClassificationDefaulter
             $byRate[(string) $rate] += $total;
             if (isset($it['unit']) && (string) $it['unit'] !== '') $units[] = (string) $it['unit'];
         }
-        $dominantRate = 21.0;
+        $dominantRate = (float) $this->taxConstants->forYear($this->fallbackYear($taxDate))['vat_rate_standard'];
         if (!empty($byRate)) {
             arsort($byRate);
             $dominantRate = (float) array_key_first($byRate);

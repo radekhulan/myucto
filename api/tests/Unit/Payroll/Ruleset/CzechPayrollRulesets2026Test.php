@@ -59,7 +59,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '3e92110d94b53a18f28c984cdbcf8ebfe2152ebe92b4ec9c7eabdb312e3057e9';
+    private const EXPECTED_MANIFEST_SHA256 = '76e8c2d90996c11cb6865041822ad072ce94eee406d490cc3cb69b553ab8b20b';
 
     protected function setUp(): void
     {
@@ -388,6 +388,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
                 'average_wage.monthly' => ['money_minor', 4_896_700],
                 'minimum_wage.hourly_40h_week' => ['money_minor', 13_440],
                 'minimum_wage.monthly_40h_week' => ['money_minor', 2_240_000],
+                'minimum_wage.standard_weekly_minutes' => ['integer', 2_400],
                 'overtime.annual.early_warning_basis_points' => ['integer', 8_000],
                 'overtime.averaging.max_weeks' => ['integer', 26],
                 'overtime.averaging.weekly_average_max_minutes' => ['integer', 480],

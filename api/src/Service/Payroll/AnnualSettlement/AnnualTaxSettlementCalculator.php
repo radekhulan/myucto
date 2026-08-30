@@ -215,6 +215,7 @@ final class AnnualTaxSettlementCalculator
         $thresholdMet = $qualifyingIncome >= $rates->bonusMinimumIncomeMinorUnits;
         $amountThresholdMet = AnnualSettlementStatute::isAnnualBonusAmountEligible(
             $bonusCandidate,
+            $rates,
         );
         $bonusEligibilityReason = match (true) {
             !$thresholdMet => 'income_below_threshold',
@@ -260,7 +261,7 @@ final class AnnualTaxSettlementCalculator
         $difference = TaxIntegerMath::add($taxDifference, $bonusDifference);
 
         // 8. Výplata (§ 38ch odst. 5, § 35d odst. 8).
-        $payable = AnnualSettlementStatute::isPayable($difference) ? $difference : 0;
+        $payable = AnnualSettlementStatute::isPayable($difference, $rates) ? $difference : 0;
         $outcome = match (true) {
             $difference < 0 => AnnualSettlementOutcome::UnderpaymentNotWithheld,
             $difference === 0 => AnnualSettlementOutcome::NoDifference,

@@ -70,4 +70,26 @@ final class MinimumWageFloorTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         MinimumWageFloor::forDate(CzechPayrollRulesets2026::provider(), '2026-04-01', 0);
     }
+
+    /**
+     * Stanovená týdenní pracovní doba (§ 79 odst. 1 ZP) se čte z rulesetu
+     * (`minimum_wage.standard_weekly_minutes`), ne z konstanty v kódu — je to
+     * i hranice, od které se přepočet začíná uplatňovat.
+     */
+    public function testStandardWeeklyMinutesComeFromTheRuleset(): void
+    {
+        $version = CzechPayrollRulesets2026::provider()
+            ->forCalculation(
+                \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain::EmploymentThresholds,
+                '2026-04-01',
+            );
+
+        self::assertSame(
+            2_400,
+            $version->parameter('minimum_wage.standard_weekly_minutes')->value,
+        );
+
+        $floor = MinimumWageFloor::fromVersion($version);
+        self::assertSame(2_400, $floor->weeklyMinutes);
+    }
 }

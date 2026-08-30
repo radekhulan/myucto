@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 use PDO;
 
 /**
@@ -43,10 +44,19 @@ use PDO;
  */
 final class Section79Service
 {
-    /** § 79 odst. 1 — nárok jen z plnění pořízeného v období 12 měsíců přede dnem registrace. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok registrace.
+     */
     public const CLAIM_WINDOW_MONTHS = 12;
 
-    public function __construct(private readonly Connection $db) {}
+    /** § 78 odst. 3 ZDPH — lhůta pro úpravu odpočtu u dlouhodobého majetku (roky), fallback. */
+    public const ADJUSTMENT_PERIOD_YEARS = [5, 10];
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
 
     /**
      * Položky s vypočtenou částkou do ř. 45 za dané období.
@@ -111,7 +121,8 @@ final class Section79Service
         if ($vatAmount <= 0) {
             throw new \InvalidArgumentException('Daň na vstupu musí být kladná; znaménko do přiznání určuje druh položky.');
         }
-        if ($assetKind === 'fixed_asset' && !in_array($periodYears, [5, 10], true)) {
+        $allowedPeriodYears = $this->adjustmentPeriodYears((int) substr($acquiredOn, 0, 4));
+        if ($assetKind === 'fixed_asset' && !in_array($periodYears, $allowedPeriodYears, true)) {
             // Bez lhůty by u dlouhodobého majetku nešlo spočítat poměrnou část a tiché
             // dosazení pětiletky by u stavby vrátilo dvojnásobek toho, co má.
             throw new \InvalidArgumentException(
@@ -166,9 +177,11 @@ final class Section79Service
         $effectiveOn = (string) $row['effective_on'];
 
         if ($kind === 'registration') {
-            // § 79 odst. 1 a 2 — okno 12 měsíců přede dnem vzniku plátcovství.
+            // § 79 odst. 1 a 2 — okno tolika měsíců přede dnem vzniku plátcovství.
+            $windowMonths = (int) ($this->taxConstants->forYear((int) substr($effectiveOn, 0, 4))['s79_claim_window_months']
+                ?? self::CLAIM_WINDOW_MONTHS);
             $windowStart = (new \DateTimeImmutable($effectiveOn))
-                ->modify('-' . self::CLAIM_WINDOW_MONTHS . ' months')
+                ->modify('-' . $windowMonths . ' months')
                 ->format('Y-m-d');
             if ($acquiredOn < $windowStart) {
                 return $this->row($row, 0.0, false, sprintf(
@@ -233,6 +246,14 @@ final class Section79Service
         $stmt->execute([$supplierId, $periodFrom, $periodTo]);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /** § 78 odst. 3 ZDPH — přípustné lhůty pro úpravu odpočtu u dlouhodobého majetku (roky). */
+    private function adjustmentPeriodYears(int $year): array
+    {
+        $value = $this->taxConstants->forYear($year)['vat_adjustment_period_years'] ?? self::ADJUSTMENT_PERIOD_YEARS;
+
+        return array_map('intval', (array) $value);
     }
 
     /**

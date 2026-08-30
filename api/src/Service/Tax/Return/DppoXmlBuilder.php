@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
+use MyInvoice\Service\Tax\TaxConstants;
 
 /**
  * Generátor EPO XML formuláře DPPDP9 (daň z příjmů PO) — Epic DP (issue #18).
@@ -206,7 +207,7 @@ final class DppoXmlBuilder
         $root->appendChild($this->buildVetaP($dom, $supplier));
 
         // ── VetaO — řádky II. oddílu ────────────────────────────────────────
-        $root->appendChild($this->buildVetaO($dom, $calc, $zdobdDo));
+        $root->appendChild($this->buildVetaO($dom, $calc, $year, $zdobdDo));
 
         $creditsEntitlement = max(0, (int) round((float) ($calc['summary']['credits_entitlement'] ?? 0)));
         if ($creditsEntitlement > 0) {
@@ -493,7 +494,7 @@ final class DppoXmlBuilder
      * @param array<string,mixed> $calc
      * @param string              $zdobdDo konec zdaňovacího období (dd.mm.rrrr) pro d_hospvysl
      */
-    private function buildVetaO(\DOMDocument $dom, array $calc, string $zdobdDo = ''): \DOMElement
+    private function buildVetaO(\DOMDocument $dom, array $calc, int $year, string $zdobdDo = ''): \DOMElement
     {
         $vetaO = $dom->createElement('VetaO');
 
@@ -522,8 +523,10 @@ final class DppoXmlBuilder
         }
         $rate = (float) ($calc['summary']['rate'] ?? 0);
         if ($rate <= 0) {
-            // odvodit z ř.290/ř.270, jinak default 21
-            $rate = 0.21;
+            // Chybějící/nulová sazba ve $calc znamená volajícího, který přeskočil
+            // DppoReturnCalculator — dosaď sazbu § 21 ZDP platnou pro dané zdaňovací
+            // období z roční sady, ne natvrdo dnešní hodnotu.
+            $rate = self::corporateTaxRateFor($year);
         }
         $vetaO->setAttribute('kc_ii270_280', (string) (int) round($rate * 100));
 
@@ -541,6 +544,24 @@ final class DppoXmlBuilder
         }
 
         return $vetaO;
+    }
+
+    /**
+     * § 21 ZDP sazba DPPO pro dané zdaňovací období — nouzový fallback, kdyby $calc
+     * nenesla dopočtenou sazbu (běžně dodá {@see DppoReturnCalculator}). Builder nemá DB
+     * závislost, čte proto přímo {@see TaxConstants} (bez admin override z `tax_constants`);
+     * rok mimo pokrytou sadu spadne na nejbližší dřívější známý rok, ať fallback nikdy
+     * neshodí generování podání výjimkou.
+     */
+    private static function corporateTaxRateFor(int $year): float
+    {
+        $years = TaxConstants::availableYears();
+        if (!in_array($year, $years, true)) {
+            $below = array_filter($years, static fn (int $y): bool => $y < $year);
+            $year = $below !== [] ? max($below) : min($years);
+        }
+
+        return (float) (TaxConstants::forYear($year)['corporate_tax_rate'] ?? 0.21);
     }
 
     /** ISO YYYY-MM-DD → dd.mm.rrrr (EPO dateInMultiFormat, shodně se zdobd_od/do); '' když neplatné. */

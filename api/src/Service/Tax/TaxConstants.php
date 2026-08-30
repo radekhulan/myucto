@@ -460,6 +460,51 @@ final class TaxConstants
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
             // po jeho překročení se místo plnění přesouvá do státu spotřeby.
             'oss_threshold_eur' => 10000,
+            // § 8a/§ 8c z. 593/1992 Sb. o rezervách — návrh zákonné OP k pohledávkám
+            // (ClosingService krok „opravné položky"): §8a 50 % po 18, 100 % po 30
+            // měsících po splatnosti; §8c malá pohledávka do limitu po 12 měsících;
+            // varování na možné promlčení po 36 měsících.
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            // § 46 odst. 1 písm. f) ZDPH — malá nedobytná pohledávka (věřitelská oprava
+            // základu daně): limit vč. daně, roční strop na dlužníka, lhůta po splatnosti.
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            // § 23 odst. 3 písm. a) bod 12 ZDP — neuhrazený dluh se připočte k základu
+            // daně po tomto počtu měsíců od splatnosti.
+            'unpaid_liability_aging_months' => 30,
+            // § 38a odst. 5 ZDP — podíl příjmů ze závislé činnosti na základu daně: od
+            // tohoto podílu se zálohy neplatí vůbec, od nižšího (ale aspoň tohoto) jen
+            // v poloviční výši.
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            // § 74b ZDPH — korekce odpočtu u neuhrazeného závazku dlužníka po tomto počtu
+            // kalendářních měsíců od měsíce splatnosti (platí od 1. 1. 2025).
+            's74b_aging_months' => 6,
+            // § 79 odst. 1 ZDPH — nárok na odpočet při registraci jen z plnění pořízeného
+            // v okně tolika měsíců přede dnem registrace.
+            's79_claim_window_months' => 12,
+            // § 78 odst. 3 ZDPH — lhůta pro úpravu odpočtu u dlouhodobého majetku (roky).
+            'vat_adjustment_period_years' => [5, 10],
+            // § 78a odst. 3 ZDPH — do tolika procentních bodů rozdílu poměru se odpočet
+            // neupravuje.
+            'vat_adjustment_tolerance_points' => 10,
+            // § 148 DŘ — lhůta pro stanovení daně (roky), po jejímž uplynutí nelze opravu
+            // podle § 43 ZDPH provést.
+            'assessment_period_years' => 3,
+            // § 30 odst. 1 ZDPH — horní hranice částky VČETNĚ daně pro zjednodušený
+            // daňový doklad.
+            'simplified_document_limit_with_vat' => 10000,
+            // § 110f odst. 2 písm. a) ZDPH — uchování evidence OSS (roky od konce
+            // kalendářního roku uskutečnění plnění).
+            'oss_evidence_retention_years' => 10,
+            // § 94 odst. 1 ZDPH (znění od 1. 1. 2025) — lhůta pro podání přihlášky k
+            // registraci DPH po překročení obratu (pracovní dny).
+            'vat_registration_application_deadline_working_days' => 10,
             'corporate_tax_rate' => 0.21,
             'withholding_rate'   => 0.15,
             // § 6 odst. 4 ZDP — dohoda o provedení práce do tohoto měsíčního limitu
@@ -616,6 +661,51 @@ final class TaxConstants
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
             // po jeho překročení se místo plnění přesouvá do státu spotřeby.
             'oss_threshold_eur' => 10000,
+            // § 8a/§ 8c z. 593/1992 Sb. o rezervách — návrh zákonné OP k pohledávkám
+            // (ClosingService krok „opravné položky"): §8a 50 % po 18, 100 % po 30
+            // měsících po splatnosti; §8c malá pohledávka do limitu po 12 měsících;
+            // varování na možné promlčení po 36 měsících.
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            // § 46 odst. 1 písm. f) ZDPH — malá nedobytná pohledávka (věřitelská oprava
+            // základu daně): limit vč. daně, roční strop na dlužníka, lhůta po splatnosti.
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            // § 23 odst. 3 písm. a) bod 12 ZDP — neuhrazený dluh se připočte k základu
+            // daně po tomto počtu měsíců od splatnosti.
+            'unpaid_liability_aging_months' => 30,
+            // § 38a odst. 5 ZDP — podíl příjmů ze závislé činnosti na základu daně: od
+            // tohoto podílu se zálohy neplatí vůbec, od nižšího (ale aspoň tohoto) jen
+            // v poloviční výši.
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            // § 74b ZDPH — korekce odpočtu u neuhrazeného závazku dlužníka po tomto počtu
+            // kalendářních měsíců od měsíce splatnosti (platí od 1. 1. 2025).
+            's74b_aging_months' => 6,
+            // § 79 odst. 1 ZDPH — nárok na odpočet při registraci jen z plnění pořízeného
+            // v okně tolika měsíců přede dnem registrace.
+            's79_claim_window_months' => 12,
+            // § 78 odst. 3 ZDPH — lhůta pro úpravu odpočtu u dlouhodobého majetku (roky).
+            'vat_adjustment_period_years' => [5, 10],
+            // § 78a odst. 3 ZDPH — do tolika procentních bodů rozdílu poměru se odpočet
+            // neupravuje.
+            'vat_adjustment_tolerance_points' => 10,
+            // § 148 DŘ — lhůta pro stanovení daně (roky), po jejímž uplynutí nelze opravu
+            // podle § 43 ZDPH provést.
+            'assessment_period_years' => 3,
+            // § 30 odst. 1 ZDPH — horní hranice částky VČETNĚ daně pro zjednodušený
+            // daňový doklad.
+            'simplified_document_limit_with_vat' => 10000,
+            // § 110f odst. 2 písm. a) ZDPH — uchování evidence OSS (roky od konce
+            // kalendářního roku uskutečnění plnění).
+            'oss_evidence_retention_years' => 10,
+            // § 94 odst. 1 ZDPH (znění od 1. 1. 2025) — lhůta pro podání přihlášky k
+            // registraci DPH po překročení obratu (pracovní dny).
+            'vat_registration_application_deadline_working_days' => 10,
             // ── Daň z příjmů PO (DPPO) + odvody OSVČ — Epic DP (issue #18) ──────
             'corporate_tax_rate' => 0.21,   // §21 ZDP sazba DPPO od 2024
             'withholding_rate'   => 0.15,
@@ -776,6 +866,51 @@ final class TaxConstants
             // služby B2C. Je v EUR (ne v Kč) a je společný pro všechny členské státy;
             // po jeho překročení se místo plnění přesouvá do státu spotřeby.
             'oss_threshold_eur' => 10000,
+            // § 8a/§ 8c z. 593/1992 Sb. o rezervách — návrh zákonné OP k pohledávkám
+            // (ClosingService krok „opravné položky"): §8a 50 % po 18, 100 % po 30
+            // měsících po splatnosti; §8c malá pohledávka do limitu po 12 měsících;
+            // varování na možné promlčení po 36 měsících.
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            // § 46 odst. 1 písm. f) ZDPH — malá nedobytná pohledávka (věřitelská oprava
+            // základu daně): limit vč. daně, roční strop na dlužníka, lhůta po splatnosti.
+            'bad_debt_small_receivable_limit' => 10000,
+            'bad_debt_small_receivable_debtor_year_limit' => 20000,
+            'bad_debt_small_receivable_months' => 6,
+            // § 23 odst. 3 písm. a) bod 12 ZDP — neuhrazený dluh se připočte k základu
+            // daně po tomto počtu měsíců od splatnosti.
+            'unpaid_liability_aging_months' => 30,
+            // § 38a odst. 5 ZDP — podíl příjmů ze závislé činnosti na základu daně: od
+            // tohoto podílu se zálohy neplatí vůbec, od nižšího (ale aspoň tohoto) jen
+            // v poloviční výši.
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            // § 74b ZDPH — korekce odpočtu u neuhrazeného závazku dlužníka po tomto počtu
+            // kalendářních měsíců od měsíce splatnosti (platí od 1. 1. 2025).
+            's74b_aging_months' => 6,
+            // § 79 odst. 1 ZDPH — nárok na odpočet při registraci jen z plnění pořízeného
+            // v okně tolika měsíců přede dnem registrace.
+            's79_claim_window_months' => 12,
+            // § 78 odst. 3 ZDPH — lhůta pro úpravu odpočtu u dlouhodobého majetku (roky).
+            'vat_adjustment_period_years' => [5, 10],
+            // § 78a odst. 3 ZDPH — do tolika procentních bodů rozdílu poměru se odpočet
+            // neupravuje.
+            'vat_adjustment_tolerance_points' => 10,
+            // § 148 DŘ — lhůta pro stanovení daně (roky), po jejímž uplynutí nelze opravu
+            // podle § 43 ZDPH provést.
+            'assessment_period_years' => 3,
+            // § 30 odst. 1 ZDPH — horní hranice částky VČETNĚ daně pro zjednodušený
+            // daňový doklad.
+            'simplified_document_limit_with_vat' => 10000,
+            // § 110f odst. 2 písm. a) ZDPH — uchování evidence OSS (roky od konce
+            // kalendářního roku uskutečnění plnění).
+            'oss_evidence_retention_years' => 10,
+            // § 94 odst. 1 ZDPH (znění od 1. 1. 2025) — lhůta pro podání přihlášky k
+            // registraci DPH po překročení obratu (pracovní dny).
+            'vat_registration_application_deadline_working_days' => 10,
             // ── Daň z příjmů PO (DPPO) + odvody OSVČ — Epic DP (issue #18) ──────
             'corporate_tax_rate' => 0.21,
             'withholding_rate'   => 0.15,

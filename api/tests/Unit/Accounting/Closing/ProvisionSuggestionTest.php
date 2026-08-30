@@ -25,7 +25,7 @@ final class ProvisionSuggestionTest extends TestCase
     {
         $m = new ReflectionMethod(ClosingService::class, 'suggestLegalProvision');
         /** @var array{0: ?string, 1: float} $out */
-        $out = $m->invoke(null, $remaining, $debtorTotal, $months);
+        $out = $m->invoke(null, $remaining, $debtorTotal, $months, 18, 30, 12, 30000.0);
         return $out;
     }
 

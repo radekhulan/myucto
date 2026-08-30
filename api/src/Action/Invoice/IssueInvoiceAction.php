@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
 use MyInvoice\Service\Accounting\Cash\CashSettlementService;
@@ -63,6 +64,7 @@ final class IssueInvoiceAction
         private readonly InvoiceAssetSaleService $assetSale,
         private readonly VatStatusService $vatStatus,
         private readonly CashSettlementService $cashSettlement,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -215,9 +217,12 @@ final class IssueInvoiceAction
             ]);
             $line = $lineStmt->fetchColumn();
 
+            $docYear = (int) substr((string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']), 0, 4);
             $reason = SimplifiedDocumentPolicy::rejectionReason(
                 $invoice,
                 $line === false || $line === null ? null : (string) $line,
+                (float) ($this->taxConstants->forYear($docYear)['simplified_document_limit_with_vat']
+                    ?? SimplifiedDocumentPolicy::LIMIT_WITH_VAT),
             );
             if ($reason !== null) {
                 return Json::error($response, 'simplified_document_not_allowed', $reason, 422);

@@ -19,12 +19,13 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  * pracovní době se hodinová minimální mzda úměrně zvyšuje, aby týdenní výdělek
  * zůstal stejný — proto přepočet 40 h / stanovená týdenní doba. Měsíční minimální
  * mzda se přitom nemění, takže se odvozovat nedá z ní.
+ *
+ * Obecná stanovená týdenní pracovní doba (§ 79 odst. 1 ZP, 40 hodin, tedy
+ * 2 400 minut) vstupuje přímo do přepočtu, a proto se čte z rulesetu
+ * (`minimum_wage.standard_weekly_minutes`), ne z konstanty v kódu.
  */
 final class MinimumWageFloor
 {
-    /** Plná stanovená týdenní pracovní doba podle § 79 odst. 1 ZP v minutách. */
-    public const FULL_WEEKLY_MINUTES = 2_400;
-
     private function __construct(
         public readonly int $hourlyMinor,
         public readonly int $baseHourlyMinor,
@@ -53,19 +54,32 @@ final class MinimumWageFloor
             );
         }
         $base = $parameter->value;
+        $standardWeekly = self::standardWeeklyMinutes($version);
 
-        $weekly = $weeklyMinutes ?? self::FULL_WEEKLY_MINUTES;
+        $weekly = $weeklyMinutes ?? $standardWeekly;
         if ($weekly <= 0 || $weekly > 10_080) {
             throw new InvalidArgumentException('Stanovená týdenní pracovní doba není platná.');
         }
 
         // Delší než čtyřicetihodinový týden zákon nepřipouští (§ 79 odst. 1 ZP);
         // kdyby přesto v datech byl, minimum se nesnižuje.
-        $hourly = $weekly >= self::FULL_WEEKLY_MINUTES
+        $hourly = $weekly >= $standardWeekly
             ? $base
-            : RoundingMode::HalfUp->roundFraction($base * self::FULL_WEEKLY_MINUTES, $weekly);
+            : RoundingMode::HalfUp->roundFraction($base * $standardWeekly, $weekly);
 
         return new self($hourly, $base, $weekly, $version->id);
+    }
+
+    private static function standardWeeklyMinutes(PayrollRulesetVersion $version): int
+    {
+        $parameter = $version->parameter('minimum_wage.standard_weekly_minutes');
+        if ($parameter->type !== 'integer' || !is_int($parameter->value) || $parameter->value <= 0) {
+            throw new \UnexpectedValueException(
+                'Ruleset neobsahuje kladnou stanovenou týdenní pracovní dobu.',
+            );
+        }
+
+        return $parameter->value;
     }
 
     /** @return array<string,mixed> */

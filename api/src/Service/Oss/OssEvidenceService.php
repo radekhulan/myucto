@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Oss;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 
 /**
  * Evidence pro účely zvláštního režimu jednoho správního místa — § 110f ZDPH.
@@ -53,7 +54,10 @@ final class OssEvidenceService
 {
     public const LEGAL_BASIS = '§ 110f ZDPH; čl. 63c nařízení (EU) č. 282/2011';
 
-    /** § 110f odst. 2 písm. a) — 10 let od konce kalendářního roku uskutečnění plnění. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok uskutečnění plnění.
+     */
     public const RETENTION_YEARS = 10;
 
     /**
@@ -70,7 +74,10 @@ final class OssEvidenceService
             . ' zachyceno opravným dokladem, ne důkazem o vrácení věci.',
     ];
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
 
     /**
      * Zapíše evidenci k právě archivovanému OSS podání. Vrací počet zapsaných záznamů.
@@ -149,7 +156,7 @@ final class OssEvidenceService
     {
         $head = [
             'legal_basis'     => self::LEGAL_BASIS,
-            'retention_years' => self::RETENTION_YEARS,
+            'retention_years' => (int) ($this->taxConstants->forYear($year)['oss_evidence_retention_years'] ?? self::RETENTION_YEARS),
             'unsupported'     => self::UNSUPPORTED_POINTS,
             'available'       => $this->isAvailable(),
         ];
@@ -331,11 +338,19 @@ final class OssEvidenceService
      * Čistá a veřejná schválně: totéž datum potřebuje spočítat i případná retenční
      * úloha, a dvě kopie pravidla „+10 let" by se rozešly o hraniční rok.
      */
-    public static function retainUntil(string $supplyDate): string
+    public static function retainUntil(string $supplyDate, int $retentionYears = self::RETENTION_YEARS): string
     {
         $year = (int) substr($supplyDate, 0, 4);
 
-        return sprintf('%04d-12-31', $year + self::RETENTION_YEARS);
+        return sprintf('%04d-12-31', $year + $retentionYears);
+    }
+
+    /** § 110f odst. 2 písm. a) — uchování evidence pro rok PLNĚNÍ dané položky. */
+    private function retentionYears(string $supplyDate): int
+    {
+        $year = (int) substr($supplyDate, 0, 4);
+
+        return (int) ($this->taxConstants->forYear($year)['oss_evidence_retention_years'] ?? self::RETENTION_YEARS);
     }
 
     public function isAvailable(): bool
@@ -493,7 +508,7 @@ final class OssEvidenceService
                     'determined_from'   => 'Země odběratele evidovaná u kontaktu k datu podání.',
                 ],
                 'completeness'          => $completeness,
-                'retain_until'          => self::retainUntil($supplyDate),
+                'retain_until'          => self::retainUntil($supplyDate, $this->retentionYears($supplyDate)),
             ];
         }
 

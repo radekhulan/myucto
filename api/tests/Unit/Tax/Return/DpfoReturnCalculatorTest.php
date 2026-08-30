@@ -404,4 +404,24 @@ final class DpfoReturnCalculatorTest extends TestCase
             static fn (string $w): bool => str_contains($w, '§ 38g odst. 1'),
         )), 'Se zvednutým limitem povinnost nevzniká — hodnota se musí brát z konstant.');
     }
+
+    /** § 38a odst. 5 podíly se berou z konstant, ne z literálu — jinak by je novelizace minula. */
+    public function testAdvanceEmploymentShareThresholdsComeFromTaxConstants(): void
+    {
+        $c = $this->c;
+        $c['advance_employment_exempt_share'] = 0.80; // zvednuto z 0,50
+        $c['advance_employment_half_share'] = 0.60;   // zvednuto z 0,15
+
+        // Podíl §6 na základu je 70 % — s výchozími konstantami (0,50) by zálohy
+        // nevznikaly vůbec (factor 0); se zvednutým prahem 0,80 spadá do pásma
+        // „mezi 0,60 a 0,80" → poloviční záloha (factor 0,5).
+        $r = $this->calc->compute(
+            ['expense_mode' => 'pausal', 'expense_rate' => 60, 's7_income' => 300000, 's7_expenses' => 180000, 's7_base' => 120000],
+            ['s6_employment' => ['income' => 280000, 'withholding' => 0]],
+            [],
+            $c,
+        );
+
+        self::assertSame(0.5, (float) $r['next_advances']['reduction_factor']);
+    }
 }

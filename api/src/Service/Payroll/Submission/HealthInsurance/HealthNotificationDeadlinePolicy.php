@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Report\CzechWorkingDays;
 
 /**
@@ -54,7 +55,6 @@ final class HealthNotificationDeadlinePolicy
     private const BASIS_CALENDAR_DAYS = 'calendar_days';
 
     private const NOTIFICATION_DAYS = 8;
-    private const MONTHLY_DUE_DAY = 20;
 
     /** Posun konce lhůty na nejbližší následující český pracovní den. */
     public const SHIFT_WORKING_DAY = 'next_czech_working_day';
@@ -90,6 +90,19 @@ final class HealthNotificationDeadlinePolicy
         HealthNotificationDutyKind::ParentalLeaveStart,
         HealthNotificationDutyKind::MaternityOrParentalLeaveEnd,
     ];
+
+    private readonly PayrollLevyDeadlinePolicy $levyDeadlines;
+
+    /**
+     * 20. den následujícího měsíce NENÍ vlastní literál — je to TÝŽ den, který
+     * pro odvod zdravotního pojištění drží {@see PayrollLevyDeadlinePolicy}
+     * (`HEALTH_INSURANCE`). Dvě kopie stejného čísla se dřív nebo později
+     * rozejdou; tady se proto jen čte.
+     */
+    public function __construct(?PayrollLevyDeadlinePolicy $levyDeadlines = null)
+    {
+        $this->levyDeadlines = $levyDeadlines ?? new PayrollLevyDeadlinePolicy();
+    }
 
     /** Lhůta hromadného oznámení pro jednu oznamovanou skutečnost. */
     public function forNotification(
@@ -196,7 +209,7 @@ final class HealthNotificationDeadlinePolicy
     public function rulesetHash(): string
     {
         return hash('sha256', self::RULESET_ID . '|'
-            . self::NOTIFICATION_DAYS . '|' . self::MONTHLY_DUE_DAY
+            . self::NOTIFICATION_DAYS . '|' . $this->monthlyDueDay()
             . '|payment_overview_shift=' . self::SHIFT_WORKING_DAY
             // Přidání opravné lhůty je změna sady pravidel, ne jen nová metoda:
             // uložené termíny nesou hash a musí být poznat, podle čeho vznikly.
@@ -235,9 +248,14 @@ final class HealthNotificationDeadlinePolicy
             ->setDate(
                 (int) $nextMonth->format('Y'),
                 (int) $nextMonth->format('n'),
-                self::MONTHLY_DUE_DAY,
+                $this->monthlyDueDay(),
             )
             ->format('Y-m-d');
+    }
+
+    private function monthlyDueDay(): int
+    {
+        return $this->levyDeadlines->dueDayOfMonth(PayrollLevyDeadlinePolicy::HEALTH_INSURANCE);
     }
 
     private function date(string $value): \DateTimeImmutable

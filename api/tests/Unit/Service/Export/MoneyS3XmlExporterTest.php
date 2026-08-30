@@ -6,7 +6,9 @@ namespace MyInvoice\Tests\Unit\Service\Export;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Export\MoneyS3XmlExporter;
+use PDO;
 use PHPUnit\Framework\TestCase;
 
 final class MoneyS3XmlExporterTest extends TestCase
@@ -19,7 +21,16 @@ final class MoneyS3XmlExporterTest extends TestCase
         $repo = (new \ReflectionClass(InvoiceRepository::class))->newInstanceWithoutConstructor();
         /** @var Connection $db */
         $db = (new \ReflectionClass(Connection::class))->newInstanceWithoutConstructor();
-        $this->exporter = new MoneyS3XmlExporter($repo, $db);
+
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE tax_constants (year INTEGER PRIMARY KEY, data TEXT NOT NULL)');
+        $config = $this->createStub(\MyInvoice\Infrastructure\Config\Config::class);
+        $taxConstantsDb = new Connection($config);
+        $prop = (new \ReflectionClass($taxConstantsDb))->getProperty('pdo');
+        $prop->setValue($taxConstantsDb, $pdo);
+
+        $this->exporter = new MoneyS3XmlExporter($repo, $db, new TaxConstantsRepository($taxConstantsDb));
     }
 
     public function testDocumentEnvelopeAndSingleRateBucketsMatchRealSample(): void

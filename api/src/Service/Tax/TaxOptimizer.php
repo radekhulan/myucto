@@ -254,8 +254,8 @@ final class TaxOptimizer
         if ($declared !== 'none' && isset($c['band_ceilings'][$rate][$declared])) {
             $thresholds[] = ['key' => 'band_ceiling', 'label' => 'strop pásma ' . $declared, 'value' => (float) $c['band_ceilings'][$rate][$declared]];
         }
-        $thresholds[] = ['key' => 'vat_low',  'label' => 'limit DPH / paušálu (2 M)', 'value' => (float) $c['vat_limit_low']];
-        $thresholds[] = ['key' => 'vat_high', 'label' => 'okamžitý plátce DPH (2,54 M)', 'value' => (float) $c['vat_limit_high']];
+        $thresholds[] = ['key' => 'vat_low',  'label' => 'limit DPH / paušálu (' . self::formatMillions((float) $c['vat_limit_low']) . ')', 'value' => (float) $c['vat_limit_low']];
+        $thresholds[] = ['key' => 'vat_high', 'label' => 'okamžitý plátce DPH (' . self::formatMillions((float) $c['vat_limit_high']) . ')', 'value' => (float) $c['vat_limit_high']];
 
         $crossings = [];
         foreach ($thresholds as $t) {
@@ -295,6 +295,14 @@ final class TaxOptimizer
             'secondary_social' => $secondarySocial,
             'defer_advice'   => $defer,
         ];
+    }
+
+    /** Popisek limitu v milionech (Kč) — odvozen ze stejné hodnoty, kterou nese `value`. */
+    private static function formatMillions(float $value): string
+    {
+        $formatted = rtrim(rtrim(number_format($value / 1_000_000, 2, ',', ''), '0'), ',');
+
+        return $formatted . ' M';
     }
 
     /**

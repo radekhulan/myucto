@@ -12,6 +12,7 @@ use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Deadline\PayrollTaxStatementDeadlinePolicy;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
@@ -90,7 +91,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
             ),
             new PayrollTaxStatementDeadlinePolicy(),
             new PayrollSicknessCaseRepository($this->db),
-            new SicknessDeadlinePolicy(),
+            new SicknessDeadlinePolicy($container->get(PayrollRulesetProvider::class)),
             $clock,
         );
 

@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationCodeG
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyCatalog;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyKind;
+use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyResolver;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDutyRule;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
@@ -343,6 +344,33 @@ final class HealthNotificationDutyTest extends TestCase
                 . '|payment_overview_shift=next_czech_working_day'),
             $this->deadlines->rulesetHash(),
         );
+    }
+
+    /**
+     * 20. den následujícího měsíce u DPP/DPČ NESMÍ být vlastní literál —
+     * musí to být TÝŽ den, který pro odvod zdravotního pojištění nese
+     * {@see PayrollLevyDeadlinePolicy}. Test staví politiku s vlastní
+     * instancí přes konstruktor, aby dedup ověřil skutečné čtení, ne shodu
+     * dvou nezávislých čísel.
+     */
+    public function testAgreementDueDayComesFromThePayrollLevyDeadlinePolicy(): void
+    {
+        $levyDeadlines = new PayrollLevyDeadlinePolicy();
+        $deadlines = new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationDeadlinePolicy(
+            $levyDeadlines,
+        );
+
+        self::assertSame(
+            $levyDeadlines->dueDayOfMonth(PayrollLevyDeadlinePolicy::HEALTH_INSURANCE),
+            20,
+        );
+
+        $window = $deadlines->forNotification(
+            HealthNotificationDutyKind::EmploymentStart,
+            '2026-03-02',
+            'dpp',
+        );
+        self::assertSame('2026-04-20', $window->dueOn);
     }
 
     public function testPaymentOverviewIsDueOnTheTwentiethOfTheFollowingMonth(): void

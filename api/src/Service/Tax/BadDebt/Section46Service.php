@@ -63,7 +63,10 @@ use MyInvoice\Service\ActivityLogger;
  */
 final class Section46Service
 {
-    /** § 46 odst. 1 písm. f) — malá nedobytná pohledávka: nejvýše tato částka včetně daně. */
+    /**
+     * Fallback defaulty, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok DORUČENÍ opravy.
+     */
     public const SMALL_RECEIVABLE_LIMIT = 10000.0;
 
     /** § 46 odst. 1 písm. f) — roční strop souhrnu malých pohledávek za týmž dlužníkem. */
@@ -385,33 +388,38 @@ final class Section46Service
      */
     private function assertSmallReceivable(int $supplierId, array $c, \DateTimeImmutable $delivered): void
     {
+        $year = (int) $delivered->format('Y');
+        $tc = $this->taxConstants->forYear($year);
+        $limit = (float) ($tc['bad_debt_small_receivable_limit'] ?? self::SMALL_RECEIVABLE_LIMIT);
+        $debtorYearLimit = (float) ($tc['bad_debt_small_receivable_debtor_year_limit'] ?? self::SMALL_RECEIVABLE_DEBTOR_YEAR_LIMIT);
+        $months = (int) ($tc['bad_debt_small_receivable_months'] ?? self::SMALL_RECEIVABLE_MONTHS);
+
         $totalWithVat = round((float) $c['total_with_vat'], 2);
-        if ($totalWithVat > self::SMALL_RECEIVABLE_LIMIT) {
+        if ($totalWithVat > $limit) {
             throw new \RuntimeException(sprintf(
                 'Malá nedobytná pohledávka je podle § 46 odst. 1 písm. f) nejvýše %s Kč včetně daně; doklad má %s Kč.',
-                number_format(self::SMALL_RECEIVABLE_LIMIT, 0, ',', ' '),
+                number_format($limit, 0, ',', ' '),
                 number_format($totalWithVat, 2, ',', ' '),
             ));
         }
 
         $due = new \DateTimeImmutable((string) $c['due_date']);
-        $earliest = $due->modify('+' . self::SMALL_RECEIVABLE_MONTHS . ' months');
+        $earliest = $due->modify('+' . $months . ' months');
         if ($delivered < $earliest) {
             throw new \RuntimeException(sprintf(
                 'Od splatnosti (%s) musí uplynout aspoň %d měsíců — nejdříve %s.',
                 $due->format('j. n. Y'),
-                self::SMALL_RECEIVABLE_MONTHS,
+                $months,
                 $earliest->format('j. n. Y'),
             ));
         }
 
-        $year = (int) $delivered->format('Y');
         $already = $this->ledger->smallReceivableTotalForDebtor($supplierId, (int) $c['client_id'], $year);
         $unpaid = round($totalWithVat * self::unpaidRatio($c), 2);
-        if ($already + $unpaid > self::SMALL_RECEIVABLE_DEBTOR_YEAR_LIMIT) {
+        if ($already + $unpaid > $debtorYearLimit) {
             throw new \RuntimeException(sprintf(
                 'Roční strop malých pohledávek za tímto dlužníkem je %s Kč; letos už opraveno %s Kč, tato oprava je %s Kč.',
-                number_format(self::SMALL_RECEIVABLE_DEBTOR_YEAR_LIMIT, 0, ',', ' '),
+                number_format($debtorYearLimit, 0, ',', ' '),
                 number_format($already, 2, ',', ' '),
                 number_format($unpaid, 2, ',', ' '),
             ));

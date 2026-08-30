@@ -150,7 +150,7 @@ final class VatStatusHistoryAction
         $reg['application_deadline'] = null;
         $reg['application_deadline_basis'] = null;
         if (in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)) {
-            $deadline = VatRegistrationService::applicationDeadline(
+            $deadline = $this->vatRegistration->applicationDeadline(
                 $reg['crossed_low_on'] ?? null,
                 $reg['becomes_payer_on'],
             );

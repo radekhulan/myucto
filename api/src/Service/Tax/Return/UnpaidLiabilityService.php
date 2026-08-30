@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\ActivityLogger;
 
 /**
@@ -38,7 +39,10 @@ use MyInvoice\Service\ActivityLogger;
  */
 final class UnpaidLiabilityService
 {
-    /** § 23/3/a/12: počet měsíců po splatnosti, po jejichž uplynutí se dluh připočte. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro fiskální rok dokladu.
+     */
     public const AGING_MONTHS = 30;
 
     /**
@@ -52,6 +56,7 @@ final class UnpaidLiabilityService
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $logger,
+        private readonly TaxConstantsRepository $taxConstants,
     ) {}
 
     /**
@@ -67,6 +72,7 @@ final class UnpaidLiabilityService
      */
     public function preview(int $supplierId, int $fiscalYear, string $asOf): array
     {
+        $agingMonths = (int) ($this->taxConstants->forYear($fiscalYear)['unpaid_liability_aging_months'] ?? self::AGING_MONTHS);
         $candidates = $this->candidates($supplierId, $asOf);
         $net = $this->netRecordedByInvoice(
             $supplierId,
@@ -85,7 +91,7 @@ final class UnpaidLiabilityService
             $unpaid = round($total * $unpaidRatio, 2);
             $recorded = $net[$invoiceId] ?? 0.0;
 
-            $aged = self::agedBy((string) $c['due_date'], $asOf);
+            $aged = self::agedBy((string) $c['due_date'], $asOf, $agingMonths);
             $target = $aged ? $unpaid : 0.0;
             $delta = round($target - $recorded, 2);
 
@@ -128,14 +134,14 @@ final class UnpaidLiabilityService
                     . 'uznatelný, dluhy v insolvenci, ze smluvních sankcí a z úvěrů a zápůjček; ty se '
                     . 'z účetních dat rozpoznat nedají.',
                 $agedCount,
-                self::AGING_MONTHS,
+                $agingMonths,
             );
         }
 
         return [
             'fiscal_year'    => $fiscalYear,
             'as_of'          => $asOf,
-            'aging_months'   => self::AGING_MONTHS,
+            'aging_months'   => $agingMonths,
             'rows'           => $rows,
             'total_increase' => round($increase, 2),
             'total_decrease' => round($decrease, 2),
@@ -358,10 +364,10 @@ final class UnpaidLiabilityService
         return min(1.0, $remaining / $total);
     }
 
-    /** Uplynulo od splatnosti aspoň {@see AGING_MONTHS} měsíců k rozhodnému dni? */
-    private static function agedBy(string $dueDate, string $asOf): bool
+    /** Uplynulo od splatnosti aspoň `$agingMonths` měsíců k rozhodnému dni? */
+    private static function agedBy(string $dueDate, string $asOf, int $agingMonths): bool
     {
-        $threshold = (new \DateTimeImmutable($dueDate))->modify('+' . self::AGING_MONTHS . ' months');
+        $threshold = (new \DateTimeImmutable($dueDate))->modify('+' . $agingMonths . ' months');
 
         return new \DateTimeImmutable($asOf) >= $threshold;
     }

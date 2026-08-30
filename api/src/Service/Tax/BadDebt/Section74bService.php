@@ -55,7 +55,10 @@ use MyInvoice\Service\ActivityLogger;
  */
 final class Section74bService
 {
-    /** § 74b: počet kalendářních měsíců po měsíci splatnosti, po jejichž uplynutí vzniká korekce. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok korekce.
+     */
     private const AGING_MONTHS = 6;
 
     public function __construct(
@@ -76,6 +79,7 @@ final class Section74bService
      */
     public function previewAging(int $supplierId, int $year, int $month): array
     {
+        $agingMonths = (int) ($this->taxConstants->forYear($year)['s74b_aging_months'] ?? self::AGING_MONTHS);
         $periodEnd = self::monthEnd($year, $month);
         $candidates = $this->fetchCandidates($supplierId, $periodEnd);
 
@@ -111,7 +115,7 @@ final class Section74bService
             $unpaid = max(0.0, $totalWithVat - $realPaid);
             $unpaidRatio = $totalWithVat > 0.0 ? min(1.0, $unpaid / $totalWithVat) : 0.0;
 
-            $aged = self::correctionPeriodYm((string) $c['due_date']) <= $periodYm;
+            $aged = self::correctionPeriodYm((string) $c['due_date'], $agingMonths) <= $periodYm;
             $target = $aged ? round($claimed * $unpaidRatio, 2) : 0.0;
             $delta = round($target - $netCorrected, 2);
 
@@ -299,11 +303,11 @@ final class Section74bService
      * Např. splatnost 2025-01 → 6 následujících měsíců únor–červenec → poslední den lhůty
      * 31. 7. 2025 → korekce za období 2025-07 (M + AGING_MONTHS).
      */
-    private static function correctionPeriodYm(string $dueDate): int
+    private static function correctionPeriodYm(string $dueDate, int $agingMonths): int
     {
         $d = new \DateTimeImmutable($dueDate);
         $dueYm = ((int) $d->format('Y')) * 12 + (int) $d->format('n');
-        return $dueYm + self::AGING_MONTHS;
+        return $dueYm + $agingMonths;
     }
 
     private static function monthEnd(int $year, int $month): string

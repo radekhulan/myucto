@@ -2368,7 +2368,7 @@ final class CrmAggregationService
             if ($reg !== null && $reg['applicable']
                 && in_array($reg['status'], ['exceeded_low', 'exceeded_high'], true)
             ) {
-                $dl = \MyInvoice\Service\Report\VatRegistrationService::applicationDeadline(
+                $dl = $this->vatRegistration->applicationDeadline(
                     $reg['crossed_low_on'] ?? null, $reg['becomes_payer_on']
                 );
                 if ($dl !== null) {

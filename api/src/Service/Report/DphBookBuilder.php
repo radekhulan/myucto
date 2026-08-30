@@ -242,10 +242,11 @@ final class DphBookBuilder
     private function appendSection74bCorrections(array &$sections, int $supplierId, int $year, int $month, string $period): void
     {
         $s74b = $this->section74b->periodCorrectionLines($supplierId, $year, $month, $period);
+        $c = $this->taxConstants->forYear($year);
         foreach ($s74b['invoices'] as $inv) {
             $buckets = [
-                ['40', 21.0, (float) $inv['base21'], (float) $inv['vat21']],
-                ['41', 12.0, (float) $inv['base12'], (float) $inv['vat12']],
+                ['40', (float) $c['vat_rate_standard'], (float) $inv['base21'], (float) $inv['vat21']],
+                ['41', (float) $c['vat_rate_reduced'], (float) $inv['base12'], (float) $inv['vat12']],
             ];
             foreach ($buckets as [$line, $rate, $base, $vat]) {
                 if (round($base, 2) == 0.0 && round($vat, 2) == 0.0) {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\TaxConstantsRepository;
 use PDO;
 
 /**
@@ -44,10 +45,19 @@ use PDO;
  */
 final class VatDeductionAdjustmentService
 {
-    /** § 78a odst. 3 — do 10 procentních bodů se odpočet neupravuje. */
+    /**
+     * Fallback default, kdyby daný rok neměl v TaxConstants klíč (nemělo by nastat).
+     * Primárně se čte {@see TaxConstantsRepository::forYear()} pro rok úpravy.
+     */
     public const RATIO_TOLERANCE_POINTS = 10;
 
-    public function __construct(private readonly Connection $db) {}
+    /** § 78 odst. 3 ZDPH — přípustné lhůty pro úpravu odpočtu (roky), fallback. */
+    public const PERIOD_YEARS = [5, 10];
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly TaxConstantsRepository $taxConstants,
+    ) {}
 
     /**
      * Majetek ve lhůtě úpravy pro daný rok i s vypočtenou úpravou.
@@ -62,6 +72,7 @@ final class VatDeductionAdjustmentService
      */
     public function previewYear(int $supplierId, int $year, ?int $annualCoefficientPct = null): array
     {
+        $tolerance = (int) ($this->taxConstants->forYear($year)['vat_adjustment_tolerance_points'] ?? self::RATIO_TOLERANCE_POINTS);
         $out = [];
         foreach ($this->itemsInPeriod($supplierId, $year) as $row) {
             $originalRatio = (int) $row['original_ratio_pct'];
@@ -77,11 +88,11 @@ final class VatDeductionAdjustmentService
             }
 
             $diff = $currentRatio - $originalRatio;
-            if (abs($diff) <= self::RATIO_TOLERANCE_POINTS) {
+            if (abs($diff) <= $tolerance) {
                 $out[] = $this->row($row, $currentRatio, 0.0, false, false, sprintf(
                     'Rozdíl %+d p. b. nepřesahuje %d — § 78a odst. 3 úpravu nevyžaduje.',
                     $diff,
-                    self::RATIO_TOLERANCE_POINTS,
+                    $tolerance,
                 ));
                 continue;
             }
@@ -131,7 +142,10 @@ final class VatDeductionAdjustmentService
         int $originalRatioPct,
         array $links = [],
     ): int {
-        if (!in_array($periodYears, [5, 10], true)) {
+        $allowedPeriodYears = array_map('intval', (array) (
+            $this->taxConstants->forYear((int) substr($acquiredOn, 0, 4))['vat_adjustment_period_years'] ?? self::PERIOD_YEARS
+        ));
+        if (!in_array($periodYears, $allowedPeriodYears, true)) {
             throw new \InvalidArgumentException('Lhůta úpravy je podle § 78 odst. 3 pět nebo deset let.');
         }
         if ($originalRatioPct < 0 || $originalRatioPct > 100) {

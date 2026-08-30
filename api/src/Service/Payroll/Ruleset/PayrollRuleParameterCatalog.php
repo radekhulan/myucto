@@ -130,6 +130,7 @@ final class PayrollRuleParameterCatalog
             'average_wage.monthly' => 'Průměrná měsíční mzda v národním hospodářství',
             'minimum_wage.hourly_40h_week' => 'Minimální hodinová mzda při 40hodinovém týdnu',
             'minimum_wage.monthly_40h_week' => 'Minimální měsíční mzda při 40hodinovém týdnu',
+            'minimum_wage.standard_weekly_minutes' => 'Stanovená týdenní pracovní doba pro přepočet minimální mzdy',
             'overtime.annual.early_warning_basis_points' => 'Podíl ročního limitu přesčasů, od kterého se upozorňuje předem',
             'overtime.averaging.max_weeks' => 'Nejdelší vyrovnávací období pro průměr přesčasů v týdnech',
             'overtime.averaging.weekly_average_max_minutes' => 'Nejvyšší průměrný týdenní přesčas ve vyrovnávacím období',
@@ -147,6 +148,10 @@ final class PayrollRuleParameterCatalog
             'leave.minimum_continuous_calendar_days' => 'Nejkratší souvislá část dovolené v kalendářních dnech',
             'leave.minimum_worked_week_multiples' => 'Nejmenší počet odpracovaných násobků týdenní doby pro nárok',
             'leave.weeks_per_year' => 'Počet týdnů v roce pro poměrný nárok na dovolenou',
+            'sickness_benefit.care_support_days' => 'Podpůrčí doba ošetřovného v kalendářních dnech',
+            'sickness_benefit.care_support_days_lone_carer' =>
+                'Podpůrčí doba ošetřovného u osamělého pojištěnce s dítětem do 16 let',
+            'sickness_benefit.paternity_support_days' => 'Podpůrčí doba otcovské v kalendářních dnech',
             'surcharge.difficult_environment.basis' =>
                 'Základ příplatku za práci ve ztíženém pracovním prostředí',
             'surcharge.difficult_environment.rate' =>

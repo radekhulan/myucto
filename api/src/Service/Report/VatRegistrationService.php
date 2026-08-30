@@ -136,11 +136,13 @@ final class VatRegistrationService
      * @param ?string $crossedLowOn den překročení 2 000 000 Kč ({@see evaluate} — `crossed_low_on`)
      * @return array{deadline:string, basis:'statutory'|'informative'}|null
      */
-    public static function applicationDeadline(?string $crossedLowOn, ?string $becomesPayerOn): ?array
+    public function applicationDeadline(?string $crossedLowOn, ?string $becomesPayerOn): ?array
     {
         if ($crossedLowOn !== null) {
             $d = new \DateTimeImmutable($crossedLowOn);
-            for ($i = 0; $i < 10; $i++) {
+            $workingDays = (int) ($this->constants->forYear((int) $d->format('Y'))['vat_registration_application_deadline_working_days']
+                ?? 10);
+            for ($i = 0; $i < $workingDays; $i++) {
                 $d = CzechWorkingDays::shiftToWorkingDay($d->modify('+1 day'));
             }
 

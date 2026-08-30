@@ -347,6 +347,10 @@ final class CzechPayrollRulesets2026
                 'average_wage.monthly' => PayrollRuleValue::moneyMinor(4_896_700),
                 'minimum_wage.hourly_40h_week' => PayrollRuleValue::moneyMinor(13_440),
                 'minimum_wage.monthly_40h_week' => PayrollRuleValue::moneyMinor(2_240_000),
+                // § 79 odst. 1 zákoníku práce — obecná stanovená týdenní pracovní
+                // doba je 40 hodin, tedy 2 400 minut; kratší stanovená doba se od ní
+                // odvozuje ({@see \MyInvoice\Service\Payroll\Absence\MinimumWageFloor}).
+                'minimum_wage.standard_weekly_minutes' => PayrollRuleValue::integer(2_400),
                 // § 93 odst. 2 zákoníku práce — nařízený přesčas nesmí přesáhnout
                 // 8 hodin v jednotlivých týdnech a 150 hodin v kalendářním roce.
                 'overtime.ordered.weekly_max_minutes' => PayrollRuleValue::integer(480),
@@ -383,6 +387,14 @@ final class CzechPayrollRulesets2026
                 'leave.minimum_continuous_calendar_days' => PayrollRuleValue::integer(28),
                 'leave.minimum_worked_week_multiples' => PayrollRuleValue::integer(4),
                 'leave.weeks_per_year' => PayrollRuleValue::integer(52),
+                // ── Podpůrčí doby nemocenského pojištění, z. č. 187/2006 Sb. ──────
+                // § 38b odst. 1 — podpůrčí doba u otcovské činí 2 týdny.
+                'sickness_benefit.paternity_support_days' => PayrollRuleValue::integer(14),
+                // § 40 odst. 1 písm. a) — ošetřovné nejdéle 9 kalendářních dnů.
+                'sickness_benefit.care_support_days' => PayrollRuleValue::integer(9),
+                // § 40 odst. 1 písm. b) — u osamělého pojištěnce s dítětem do 16 let
+                // se podpůrčí doba prodlužuje na 16 kalendářních dnů.
+                'sickness_benefit.care_support_days_lone_carer' => PayrollRuleValue::integer(16),
                 // ── Zákonné příplatky ke mzdě, § 114 až § 118 zákoníku práce ──────
                 //
                 // Sazba i ZÁKLAD jsou parametry, ne konstanty v kalkulátoru: § 117

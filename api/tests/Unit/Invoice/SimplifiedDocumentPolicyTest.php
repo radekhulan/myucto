@@ -108,4 +108,22 @@ final class SimplifiedDocumentPolicyTest extends TestCase
             '1',
         ));
     }
+
+    /** Limit se čte z roční sady (volající ho předá) — literál je jen fallback default. */
+    public function testLimitIsTakenFromExplicitParameterNotLiteral(): void
+    {
+        self::assertNull(SimplifiedDocumentPolicy::rejectionReason(
+            ['total_with_vat' => 15_000.0, 'reverse_charge' => 0],
+            '1',
+            20_000.0,
+        ));
+
+        $reason = SimplifiedDocumentPolicy::rejectionReason(
+            ['total_with_vat' => 5_000.0, 'reverse_charge' => 0],
+            '1',
+            4_000.0,
+        );
+        self::assertNotNull($reason);
+        self::assertStringContainsString('4 000', $reason);
+    }
 }

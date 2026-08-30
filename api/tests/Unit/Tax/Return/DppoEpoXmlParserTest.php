@@ -152,4 +152,17 @@ XML;
             self::assertSame('wrong_form', $e->errorCode);
         }
     }
+
+    /**
+     * Chybí-li ve $calc dopočtená sazba (volající obešel DppoReturnCalculator), builder
+     * dosadí sazbu § 21 ZDP z roční sady pro ZADANÝ rok podání, ne natvrdo dnešní default.
+     */
+    public function testFallbackRateComesFromTaxConstantsForGivenYear(): void
+    {
+        $calc = ['lines' => [['line' => '200', 'value' => 100000]], 'summary' => []];
+        $xml = (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc)['xml'];
+
+        $parsed = (new DppoEpoXmlParser())->parse($xml);
+        self::assertSame((float) TaxConstants::forYear(2025)['corporate_tax_rate'] * 100, $parsed['rate_pct']);
+    }
 }

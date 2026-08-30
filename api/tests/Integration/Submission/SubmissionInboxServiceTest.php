@@ -535,7 +535,12 @@ final class SubmissionInboxServiceTest extends TestCase
         self::assertNotNull($stored);
         self::assertNotNull($stored['document_id'], 'Zpráva musí skončit v sekci Dokumenty.');
         self::assertSame('cssz_protocol', $stored['classification']);
-        self::assertNull($this->documentFolderId((int) $stored['document_id']));
+        // Bez vlastní volby kořene se zprávy nesypou do kořene Dokumentů —
+        // archiv si založí vlastní složku, pro testovací provoz oddělenou.
+        self::assertSame(
+            ['Datová schránka (testovací provoz)', '2026', '08', '15', 'DM-779'],
+            $this->folderPath($this->documentFolderId((int) $stored['document_id'])),
+        );
     }
 
     public function testDownloadedMessageUsesConfiguredDeterministicArchivePath(): void
