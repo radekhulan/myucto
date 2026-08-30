@@ -16,7 +16,7 @@ use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
  *   VetaB, VetaT, Vetac, VetaU, VetaN
  *
  * - VetaD: povinné (fixní k_uladis="DPF", dokument="DP7", rok, dap_typ, c_ufo_cil,
- *   pln_moc, audit) + slevy/zvýhodnění/zálohy/doplatek (kc_op15_1a, da_slevy, kc_danbonus,
+ *   pln_moc, audit) + slevy/zvýhodnění/zálohy/doplatek (kc_op15_1a, da_slevy35ba, kc_danbonus,
  *   kc_zbyvpred…).
  * - VetaP: identifikace FO (jmeno/prijmeni, rod_c, dic, adresa).
  * - VetaO: dílčí základy §6–§10 + úhrn + základ daně.
@@ -34,7 +34,11 @@ final class DpfoXmlBuilder
     /** field → Veta (int Kč jako string; da_dan16 se řeší zvlášť). */
     private const VETA_O = ['kc_prij6', 'kc_zd6', 'kc_zd6p', 'kc_zd7', 'kc_zakldan8', 'kc_zd9', 'kc_zd10', 'kc_uhrn', 'kc_ztrata2', 'kc_zakldan', 'kc_zakldan23'];
     private const VETA_S_INT = ['kc_op15_8', 'kc_op28_5', 'kc_op15_12', 'kc_op15_13', 'kc_op15_inpr', 'kc_op15_pece', 'kc_odcelk', 'kc_zdsniz', 'kc_zdzaokr'];
-    private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'da_slezap', 'da_celod13', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
+    // POZOR: `da_slevy` se sem záměrně NEdává (viz DpfoReturnCalculator komentář u
+    // klíče `da_slevy35ba` — zkušební EPO 31. 8. 2026 potvrdilo, že jeho přítomnost
+    // kazí kontrolu ř.70). `kc_db_po_odpd` (ř.77a) je naopak nutné vždy poslat, i jako
+    // 0 — stejný důvod jako u kc_dan_po_db/kc_dan_celk níže.
+    private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'kc_db_po_odpd', 'da_slezap', 'da_celod13', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
 
     /**
      * Slevy a měsíční počty, které se při nule vynechávají — viz komentář u jejich
@@ -139,7 +143,7 @@ final class DpfoXmlBuilder
             $warnings[] = 'Chybí kód finančního úřadu — použit fallback 451; ověřte v Nastavení firmy.';
         }
 
-        // da_slevy je daň PO uplatnění slev (mezisoučet), ne částka slevy na manžela —
+        // da_slevy35ba je daň PO uplatnění slev (mezisoučet), ne částka slevy na manžela —
         // sleva na manžela/manželku samotná je kc_op15_1c (viz DpfoReturnCalculator).
         if ((float) ($fields['kc_op15_1c'] ?? 0) > 0 && $spouse === null) {
             $warnings[] = 'Uplatněna sleva na manžela/manželku (kc_op15_1c), ale chybí jeho identifikace — EPO ji bez identity odmítne, doplňte před podáním.';
@@ -236,6 +240,12 @@ final class DpfoXmlBuilder
         // úhrn §7 je definičně součtem těch samých činností, takže je to táž hodnota.
         $vetaT->setAttribute('celk_pr_prij7', $this->int((float) ($s7['income'] ?? 0)));
         $vetaT->setAttribute('celk_pr_vyd7', $this->int((float) ($s7['expenses'] ?? 0)));
+        // ř.104 (kc_hosp_rozd) — §7 základ PŘED úpravami ř.105/106 (kc_uhzvys/kc_uhsniz
+        // níže). EPO si ř.113 (kc_zd7p) dopočítává ze součtu ř.104–112, ne z odeslaného
+        // kc_zd7p samotného — bez kc_hosp_rozd chybí ř.104 v tom součtu a formule
+        // neprojde, i když kc_zd7p je aritmeticky správné (zkušební EPO 31. 8. 2026,
+        // viz DpfoReturnCalculator::compute komentář u 's7'=>'before_adjustments').
+        $vetaT->setAttribute('kc_hosp_rozd', $this->int((float) ($s7['before_adjustments'] ?? ($s7['base'] ?? 0))));
         $vetaT->setAttribute('kc_zd7p', $this->int((float) ($s7['base'] ?? 0)));
         $vetaT->setAttribute('kc_uhzvys', $this->int((float) ($s7['increase'] ?? 0)));
         $vetaT->setAttribute('kc_uhsniz', $this->int((float) ($s7['decrease'] ?? 0)));

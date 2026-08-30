@@ -311,8 +311,7 @@ final class DppoXmlBuilder
 
     /**
      * Rozšíří VetaD o metadata účetní závěrky (spec §5) — jen když appendix skutečně
-     * generujeme (aditivní, zpětně kompatibilní). Kódy `kat_uj`/`uv_rozsah_rozv` pro
-     * small/medium/large NEJSOU ověřené (spec §7.f) — nastaví se jen pro kategorii 'micro'.
+     * generujeme (aditivní, zpětně kompatibilní).
      *
      * @param array<string,mixed> $category    výstup EntityCategoryService::evaluate()
      * @param array<string,mixed> $settings    výstup AccountingSupplierSettingsRepository::get()
@@ -328,10 +327,33 @@ final class DppoXmlBuilder
         // účetní vyhlášku se nevztahuje možnost žádat o předání do sbírky listin" (2798).
         $vetaD->setAttribute('uv_vyhl', '500');
 
-        if ((string) ($category['category'] ?? '') === 'micro') {
-            $vetaD->setAttribute('kat_uj', 'M');
-            $vetaD->setAttribute('uv_rozsah_rozv', 'M');
+        // Kategorie účetní jednotky podle § 1b zákona o účetnictví. Dřív se plnila jen
+        // u mikro ÚJ s odůvodněním, že kódy pro ostatní velikosti nejsou ověřené —
+        // jenže schéma je má vypsané přímo v dokumentaci atributu (M/L/S/V) a zkušební
+        // EPO bez nich hlásí „Kategorie účetní jednotky musí být vyplněna". Malá,
+        // střední a velká ÚJ tedy podávaly přiznání s prázdnou kategorií.
+        $katUj = match ((string) ($category['category'] ?? '')) {
+            'micro' => 'M',
+            'small' => 'L',
+            'medium' => 'S',
+            'large' => 'V',
+            default => null,
+        };
+        if ($katUj !== null) {
+            $vetaD->setAttribute('kat_uj', $katUj);
         }
+        // Rozsah rozvahy se řídí tím, co jsme SKUTEČNĚ vygenerovali, ne velikostí ÚJ:
+        // P = plný, Z = zkrácený pro malou ÚJ, M = zkrácený pro mikro ÚJ. Povinný audit
+        // nebo ruční volba účetní posunou rozsah na plný i u malé firmy — proto se čte
+        // `scope`, ne `category` (viz EntityCategoryService::evaluate).
+        // Bez `scope` (volající předal jen kategorii) se rozsah odvodí z ní — to je
+        // stav před R11/R12, kdy rozsah kategorii kopíroval.
+        $scope = (string) ($category['scope'] ?? $category['category'] ?? '');
+        $vetaD->setAttribute('uv_rozsah_rozv', match ($scope) {
+            'micro' => 'M',
+            'small' => 'Z',
+            default => 'P',
+        });
         // uv_rozsah_vzz='P' (plný rozsah) konstantně — appendix generuje VZZ vždy v plném
         // rozsahu bez ohledu na kategorii ÚJ (spec §6.c/§7.c, ověřeno na obou vzorcích).
         $vetaD->setAttribute('uv_rozsah_vzz', 'P');

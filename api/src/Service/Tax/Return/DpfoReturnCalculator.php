@@ -327,9 +327,14 @@ final class DpfoReturnCalculator
             'kc_op15_1e1' => $this->i($creditDisability3),
             'kc_op15_1e2' => $this->i($creditZtpp),
             'uhrn_slevy35ba' => $this->i($slevy35ba),
-            'da_slevy' => $this->i($taxAfter35ba),
             // ř. 71/74 — EPO má samostatné atributy pro "daň po slevách §35ba" a "daň po
-            // zvýhodnění §35c" (da_slevy je jen mezisoučet navíc, žádnému řádku neodpovídá).
+            // zvýhodnění §35c". Dřív se tu navíc posílal `da_slevy` (stejná hodnota jako
+            // `da_slevy35ba`) — zkušební EPO 31. 8. 2026 potvrdilo pokusem (bisekcí), že
+            // `da_slevy` je mezisoučet, kterému žádný tištěný řádek neodpovídá, a jeho
+            // přítomnost kazí EPO vlastní kontrolu ř.70 (uhrn_slevy35ba): s `da_slevy`
+            // EPO hlásilo „ř.70 se nerovná vzorci" s nápovědou rovnou součtu
+            // uhrn_slevy35ba+da_slevy; po vynechání `da_slevy` výtka zmizela. Proto se
+            // `da_slevy` do XML vůbec neposílá (viz DpfoXmlBuilder::VETA_D_FIELDS).
             'da_slevy35ba' => $this->i($taxAfter35ba),
             'da_slevy35c' => $this->i($taxAfterChildren),
             'kc_dazvyhod' => $this->i($childTotal),
@@ -337,6 +342,17 @@ final class DpfoReturnCalculator
             'kc_danbonus' => $this->i($childBonus),
             'kc_dan_po_db' => $this->i($taxAfterChildren),
             'kc_dan_celk' => $this->i($taxAfterChildren),
+            // ř.77a — daňový bonus po odpočtu daně (ř.76−ř.75), vzájemně vylučující
+            // protějšek ř.77 (kc_dan_po_db): `$taxAfterChildren` je už zezdola ořízlé
+            // na 0 (viz $childCredit = min($taxAfter35ba, $childTotal) výše), takže kdykoli
+            // vznikne bonus (childTotal > taxAfter35ba), taxAfterChildren je právě 0 a
+            // ř.77a se rovná celému bonusu; jinak je bonus i tenhle atribut 0. Proto
+            // `kc_db_po_odpd` = $childBonus ve všech případech. Zkušební EPO 31. 8. 2026
+            // (bisekce): tenhle atribut se dřív vůbec neposílal (chyběl v
+            // DpfoXmlBuilder::VETA_D_FIELDS) a EPO hlásilo „ř.77a neodpovídá výpočtu
+            // (0)" i když bonus byl 0 — nulu je nutné poslat výslovně, stejně jako u
+            // kc_dan_po_db/kc_dan_celk (viz komentář u VETA_D_OMIT_WHEN_ZERO v builderu).
+            'kc_db_po_odpd' => $this->i($childBonus),
             // Vlastní invalidita/ZTP-P poplatníka (§35ba) — EPO ověřuje ř.66–68 jako
             // počet měsíců × sazba, i když je nárok nulový; bez měsíců formuli neověří.
             'm_invduch' => (float) max(0, min(12, (int) ($profile['disability_12_months'] ?? 0))),
@@ -385,6 +401,13 @@ final class DpfoReturnCalculator
                 'income' => $s7Income,
                 'expenses' => $s7Expenses,
                 'base' => $s7,
+                // ř.104 Přílohy 1 (kc_hosp_rozd) — "rozdíl mezi příjmy a výdaji NEBO výsledek
+                // hospodaření", tj. §7 základ PŘED úpravami (zvýšení/snížení, ř.105/106),
+                // ne konečné `base`/kc_zd7p (to už úpravy zahrnuje). Bez tohoto ř.104 si EPO
+                // ř.113 (kc_zd7p) dopočítává ze součtu ř.104–112 jako 0+ř.105-ř.106+…, což
+                // s odeslaným kc_zd7p nesedí — zkušební EPO 31. 8. 2026 (bisekce) potvrdilo,
+                // že přidání kc_hosp_rozd výtku ř.113 odstraní.
+                'before_adjustments' => $s7BeforeAdjustments,
                 'expense_mode' => (string) ($data['expense_mode'] ?? 'pausal'),
                 'expense_rate' => (int) ($data['expense_rate'] ?? 0),
                 'accounting_mode' => (string) ($data['accounting_mode'] ?? 'tax_evidence'),
