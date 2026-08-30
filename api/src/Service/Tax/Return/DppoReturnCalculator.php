@@ -59,6 +59,7 @@ final class DppoReturnCalculator
      *   depreciation_by_group: array{tangible:array<int,float>,intangible:float,unclassified:float},
      *   related_party_country_flag: 'N'|'T'|'Z'|'A',
      *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
+     *   manual_increase_items_line62: list<array{text:string,amount:float}>,
      *   warnings: list<string>
      * }
      */
@@ -85,6 +86,12 @@ final class DppoReturnCalculator
         $manualDecrease = $this->sumItems($inputs['manual_decrease_items'] ?? []);
         $flatRateTravelAddback = min($manualIncrease, $this->sumFlatRateTravelItems($inputs['manual_increase_items'] ?? []));
         $flatRateTravelDeduction = min($manualDecrease, $this->sumFlatRateTravelItems($inputs['manual_decrease_items'] ?? []));
+        // Ruční položky, které SKUTEČNĚ skončí na ř. 62 (viz $line62Reported níže) —
+        // tj. bez těch, co paušál dopravy přesouvá na ř. 40 (VetaE). Zdroj pro
+        // VetaXmlBuilder::buildVetaR („Zvláštní příloha ř. 62 II. odd.", chyba EPO) —
+        // jeden řádek volného textu na položku, ne souhrn, proto se filtruje tady a ne
+        // až v builderu (jediné místo, které zná pravidlo paušálu dopravy).
+        $line62Items = $this->line62Items($inputs['manual_increase_items'] ?? []);
         $lossCarry = max(0.0, round((float) ($inputs['loss_carryforward'] ?? 0), 2));
         [$donations, $donationWarnings] = $this->resolveDonations($inputs, (float) ($c['donation_min_po'] ?? 2000));
         $warnings = array_merge($warnings, $donationWarnings);
@@ -316,6 +323,7 @@ final class DppoReturnCalculator
             'depreciation_by_group' => (array) ($data['depreciation_by_group'] ?? ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0]),
             'related_party_country_flag' => (string) ($data['related_party_country_flag'] ?? 'N'),
             'bank_account' => $data['bank_account'] ?? null,
+            'manual_increase_items_line62' => $line62Items,
             'summary' => [
                 'rate' => $rate,
                 'vh' => $vh,
@@ -459,6 +467,35 @@ final class DppoReturnCalculator
             }
         }
         return round(max(0.0, $sum), 2);
+    }
+
+    /**
+     * Ruční položky §23, které skutečně skončí na ř. 62 (mimo paušál dopravy — ten
+     * jde na ř. 40, viz $flatRateTravelAddback v compute()). Vrací jen `{text, amount}`
+     * pár na položku (DppoXmlBuilder::buildVetaR z nich staví VetaR — jeden řádek
+     * volného textu na položku, XSD max. 72 znaků).
+     *
+     * @param mixed $items
+     * @return list<array{text:string,amount:float}>
+     */
+    private function line62Items(mixed $items): array
+    {
+        if (!is_array($items)) {
+            return [];
+        }
+        $out = [];
+        foreach ($items as $item) {
+            if (!is_array($item) || $this->isFlatRateTravelItem($item)) {
+                continue;
+            }
+            $amount = round((float) ($item['amount'] ?? 0), 2);
+            $text = trim((string) ($item['text'] ?? ''));
+            if ($amount <= 0.0 && $text === '') {
+                continue;
+            }
+            $out[] = ['text' => $text, 'amount' => $amount];
+        }
+        return $out;
     }
 
     /**

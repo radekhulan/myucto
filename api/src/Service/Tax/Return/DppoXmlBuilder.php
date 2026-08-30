@@ -213,11 +213,11 @@ final class DppoXmlBuilder
             );
         }
 
-        // zvl_pr — počet zvláštních příloh: systém žádnou negeneruje (žádný volný text
-        // k řádkům jako ř. 62 II. oddílu), proto konstantně 0, ne odhad. Reálně podané
-        // přiznání ho má také (buď 0, nebo počet, který ručně přidal daňový poradce) —
-        // atribut vyplňuje EPO samo, ale bez explicitní hodnoty ho vytýká jako chybějící.
-        $vetaD->setAttribute('zvl_pr', '0');
+        // zvl_pr — počet zvláštních příloh (VetaR, viz buildVetaR). Musí odpovídat počtu
+        // SKUTEČNĚ vygenerovaných vět, jinak zkušební EPO hlásí nesoulad — proto se plní
+        // až po sestavení $vetaRList níže, ne odhadem.
+        $vetaRList = $this->buildVetaR($dom, $calc);
+        $vetaD->setAttribute('zvl_pr', (string) count($vetaRList));
 
         // spoj_zahr — § 23 odst. 7 ZDP, transakce se spojenou osobou (tuzemskou/zahraniční)
         // z faktur označených clients.related_party (viz DppoReturnDataProvider). 'N', když
@@ -234,11 +234,12 @@ final class DppoXmlBuilder
         $representation = (array) ($meta['representation'] ?? ['represented' => false]);
         $vetaD->setAttribute('dan_por', EpoSupplierBlockBuilder::representationFlag($representation));
 
-        // ── VetaF — příloha č. 1 II. oddílu, tabulka B (odpisy) — musí být hotová dřív
-        // než se p_pr_2od zapíše na VetaD (počet příloh II. oddílu = kolik z VetaE/F/G
-        // se skutečně vygenerovalo; VetaE/G nestavíme, takže 0 nebo 1).
+        // ── VetaE/VetaF — přílohy č. 1 II. oddílu (tabulka a) a b)) — musí být hotové
+        // dřív než se p_pr_2od zapíše na VetaD (počet příloh II. oddílu = kolik z
+        // VetaE/F/G se skutečně vygenerovalo; VetaG nestavíme).
+        $vetaE = $this->buildVetaE($dom, $calc);
         $vetaF = $this->buildVetaF($dom, $calc, $warnings);
-        $vetaD->setAttribute('p_pr_2od', (string) ($vetaF !== null ? 1 : 0));
+        $vetaD->setAttribute('p_pr_2od', (string) (($vetaE !== null ? 1 : 0) + ($vetaF !== null ? 1 : 0)));
 
         $root->appendChild($vetaD);
 
@@ -258,8 +259,14 @@ final class DppoXmlBuilder
         // ── VetaO — řádky II. oddílu ────────────────────────────────────────
         $root->appendChild($this->buildVetaO($dom, $calc, $year, $zdobdDo));
 
+        // ── VetaE — tabulka a) (rozpad ř. 40), viz buildVetaE; XSD sekvence ji chce
+        // hned za VetaO/VetaU, před VetaF.
+        if ($vetaE !== null) {
+            $root->appendChild($vetaE);
+        }
+
         // ── VetaF — tabulka B (odpisy), viz buildVetaF; XSD sekvence ji chce hned
-        // za VetaO/VetaU (VetaE), před VetaM.
+        // za VetaE, před VetaM.
         if ($vetaF !== null) {
             $root->appendChild($vetaF);
         }
@@ -276,6 +283,13 @@ final class DppoXmlBuilder
         // ── VetaS — poc_zam/kc_dpp_i1/cisobr_mena (chyby EPO 1704+1703, viz buildVetaS).
         // XSD sekvence: VetaS patří mezi VetaM a VetaUA (za VetaN/VetaQ, které nestavíme).
         $root->appendChild($this->buildVetaS($dom, $meta, $appendix, $warnings));
+
+        // ── VetaR — zvláštní (textová) příloha k ř. 62 II. oddílu, viz buildVetaR výše
+        // (zvl_pr už spočítáno na VetaD). XSD sekvence ji chce hned za VetaS, před VetaW
+        // (nestavíme) a VetaUA.
+        foreach ($vetaRList as $vetaR) {
+            $root->appendChild($vetaR);
+        }
 
         // ── Příloha účetní závěrky (Epic DP) — VetaUA (aktiva) + VetaUB (VZZ) +
         // VetaUD (pasiva) + VetaUZ (sbírka listin). XSD sekvence vyžaduje přesně toto
@@ -619,6 +633,77 @@ final class DppoXmlBuilder
         }
 
         return $vetaS;
+    }
+
+    /**
+     * VetaE — příloha č. 1 II. oddílu, tabulka a) (§23/3 písm. b) — rozpad výdajů
+     * neuznávaných za náklady). Jediný atribut `kc_dpp_a12` musí být shodný s ř. 40
+     * II. oddílu (XSD dokumentace, `dppdp9_epo2.xsd`: „Výsledná částka na řádku 13
+     * tabulky musí být shodná s částkou na ř. 40 II. oddílu."), jinak zkušební EPO
+     * hlásí „Hodnota ř. 40 II. oddílu se nerovná hodnotě celkem přílohy A." Staví se
+     * jen když je na ř. 40 nenulová částka (stejné pravidlo jako u `kc_ii50_40` ve
+     * VetaO, viz buildVetaO) — žádná prázdná věta naslepo.
+     *
+     * @param array<string,mixed> $calc výstup DppoReturnCalculator::compute (nese lines)
+     */
+    private function buildVetaE(\DOMDocument $dom, array $calc): ?\DOMElement
+    {
+        $line40 = null;
+        foreach (($calc['lines'] ?? []) as $line) {
+            if ((int) ($line['line'] ?? 0) === 40) {
+                $line40 = (int) round((float) $line['value']);
+                break;
+            }
+        }
+        if ($line40 === null || $line40 === 0) {
+            return null;
+        }
+
+        $vetaE = $dom->createElement('VetaE');
+        $vetaE->setAttribute('kc_dpp_a12', (string) $line40);
+
+        return $vetaE;
+    }
+
+    /**
+     * VetaR — zvláštní (textová) příloha k ř. 62 II. oddílu (§23), jeden řádek na
+     * ruční položku z `manual_increase_items_line62` (viz DppoReturnCalculator::compute
+     * — už vyfiltrované o paušál dopravy, který jde na ř. 40/VetaE). Bez ní zkušební
+     * EPO hlásí „Zvláštní příloha ř. 62 II. odd. není vyplněna." Počet vrácených vět
+     * se promítá do VetaD.zvl_pr (viz build()) — žádné položky = žádná VetaR a
+     * zvl_pr zůstává 0, ne odhad.
+     *
+     * @param array<string,mixed> $calc výstup DppoReturnCalculator::compute
+     * @return list<\DOMElement>
+     */
+    private function buildVetaR(\DOMDocument $dom, array $calc): array
+    {
+        $items = (array) ($calc['manual_increase_items_line62'] ?? []);
+        $elements = [];
+        $poradi = 1;
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $text = trim((string) ($item['text'] ?? ''));
+            $amount = (float) ($item['amount'] ?? 0);
+            if ($text === '' && $amount === 0.0) {
+                continue;
+            }
+            $label = $text !== ''
+                ? $text . ' (' . number_format($amount, 0, ',', ' ') . ' Kč)'
+                : number_format($amount, 0, ',', ' ') . ' Kč';
+
+            $vetaR = $dom->createElement('VetaR');
+            $vetaR->setAttribute('c_radku', '62');
+            $vetaR->setAttribute('t_prilohy', mb_substr($label, 0, 72)); // XSD maxLength 72
+            $vetaR->setAttribute('kod_sekce', '2'); // 2 = II. oddíl (XSD dokumentace)
+            $vetaR->setAttribute('poradi', (string) $poradi);
+            $elements[] = $vetaR;
+            $poradi++;
+        }
+
+        return $elements;
     }
 
     /**
