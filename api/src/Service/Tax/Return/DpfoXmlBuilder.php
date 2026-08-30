@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax\Return;
 
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Report\EpoEnvelope;
 use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
 
@@ -11,7 +12,8 @@ use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
  * Generátor EPO XML formuláře DPFDP7 (daň z příjmů FO) — Epic DP (issue #18).
  *
  * Struktura dle `api/xsd/dpfdp7_epo2.xsd` (bez namespace, xs:sequence — pořadí vět!):
- *   Pisemnost(nazevSW,verzeSW) > DPFDP7(verzePis) > VetaD, VetaP, VetaO, VetaS, VetaT
+ *   Pisemnost(nazevSW,verzeSW) > DPFDP7(verzePis) > VetaD, VetaP, VetaO, VetaS, VetaA,
+ *   VetaB, VetaT, Vetac, VetaU, VetaN
  *
  * - VetaD: povinné (fixní k_uladis="DPF", dokument="DP7", rok, dap_typ, c_ufo_cil,
  *   pln_moc, audit) + slevy/zvýhodnění/zálohy/doplatek (kc_op15_1a, da_slevy, kc_danbonus,
@@ -19,9 +21,11 @@ use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
  * - VetaP: identifikace FO (jmeno/prijmeni, rod_c, dic, adresa).
  * - VetaO: dílčí základy §6–§10 + úhrn + základ daně.
  * - VetaS: §15 nezdanitelné části + daň (da_dan16 se 2 desetinnými místy).
+ * - VetaB: příznaky vložených příloh (priloha1 — Příloha 1 §7, staví se vždy s VetaT).
  * - VetaT: Příloha 1 §7 (kc_prij7, kc_vyd7, kc_zd7p, vyd7proc, pr_sazba).
+ * - VetaN: žádost o vrácení přeplatku (jen když vyjde přeplatek, {@see buildVetaN}).
  *
- * Hodnoty mapuje z výstupu {@see DpfoReturnCalculator} (klíč fields + s7).
+ * Hodnoty mapuje z výstupu {@see DpfoReturnCalculator} (klíč fields + s7 + bank_account).
  */
 final class DpfoXmlBuilder
 {
@@ -169,6 +173,29 @@ final class DpfoXmlBuilder
             $root->appendChild($vetaA);
         }
 
+        // ── VetaB — příznaky vložených příloh ────────────────────────────────
+        // XSD (priloha1, kritická kontrola): "pokud je vyplněna hodnota kc_zd7 věty O,
+        // musí být naplněny položky věty T pro Přílohu č. 1 a položka priloha1 musí
+        // být naplněna hodnotou 1." VetaO.kc_zd7 a VetaT se níže staví VŽDY (ne jen
+        // podmíněně), takže příznak odpovídá tomu, co se do XML skutečně dostává —
+        // ne co by teoreticky mohlo (priloha2/VetaV se nestaví, proto ho neoznačujeme).
+        if (array_key_exists('kc_zd7', $fields)) {
+            $vetaB = $dom->createElement('VetaB');
+            $vetaB->setAttribute('priloha1', '1');
+            $root->appendChild($vetaB);
+        }
+        // Zkušební EPO 30. 8. 2026 (po zavedení VetaB výše) nově hlásí: „Jsou vykázány
+        // příjmy ze ZČ a v tabulce příloh není vloženo potvrzení od zaměstnavatele/ů"
+        // (VetaB.potv_zam) — dřív se to neprojevilo, protože VetaB vůbec neexistovala.
+        // Appka žádné e-přílohy (scan potvrzení) nepřikládá (viz VetaB výše, priloha2/
+        // Prilohy mimo rozsah) — potv_zam=1 bez skutečně vloženého dokladu by byla lež,
+        // proto jen varujeme, ať to poplatník doloží v EPO portálu sám.
+        if ((float) ($fields['kc_prij6'] ?? 0) > 0) {
+            $warnings[] = 'Vykázán příjem ze závislé činnosti (§6) — EPO u něj vyžaduje přiložené '
+                . 'potvrzení od zaměstnavatele (Příloha, VetaB.potv_zam); appka scan/PDF potvrzení '
+                . 'nepřikládá, doplňte ho ručně v portálu EPO před podáním.';
+        }
+
         // ── VetaT — Příloha 1 §7 ─────────────────────────────────────────────
         $vetaT = $dom->createElement('VetaT');
         $vetaT->setAttribute('kc_prij7', $this->int((float) ($s7['income'] ?? 0)));
@@ -258,7 +285,74 @@ final class DpfoXmlBuilder
             $root->appendChild($vetaU);
         }
 
+        // ── VetaN — žádost o vrácení přeplatku (§155 DŘ) — poslední věta, staví se
+        // jen když z přiznání vyjde přeplatek (viz buildVetaN).
+        $vetaN = $this->buildVetaN($dom, $calc, $warnings);
+        if ($vetaN !== null) {
+            $root->appendChild($vetaN);
+        }
+
         return ['xml' => $dom->saveXML() ?: '', 'warnings' => $warnings];
+    }
+
+    /**
+     * VetaN — žádost o vrácení přeplatku (§155 daňového řádu), přesná obdoba DPPO
+     * `VetaNP` ({@see DppoXmlBuilder::buildVetaNP}). Staví se JEN když z přiznání
+     * vyjde přeplatek (kc_zbyvpred záporné, tj. `balance_due` < 0) — bez ní si
+     * poplatník o vrácení přeplatku vůbec nežádá, přeplatek jen zůstane na osobním
+     * daňovém účtu. Bankovní spojení bere ze STEJNÉHO zdroje jako DPPO
+     * ({@see DpfoReturnDataProvider::bankAccount} — tabulka `currencies`, výchozí
+     * CZK účet) — u OSVČ je to týž jediný podnikatelský účet, věcně správný zdroj
+     * i pro vrácení daně FO. Zahraniční účet (zp_vrac='Z') systém nepodporuje —
+     * poplatník ho v appce nevede.
+     *
+     * @param array<string,mixed> $calc
+     * @param list<string>        $warnings
+     */
+    private function buildVetaN(\DOMDocument $dom, array $calc, array &$warnings): ?\DOMElement
+    {
+        $overpayment = (int) round(-(float) ($calc['balance_due'] ?? 0.0));
+        if ($overpayment <= 0) {
+            return null;
+        }
+
+        $account = $calc['bank_account'] ?? null;
+        if (!is_array($account) || empty($account['account_number'])) {
+            $warnings[] = 'Vznikl přeplatek ' . number_format($overpayment, 0, ',', ' ') . ' Kč, ale v Nastavení '
+                . 'firmy chybí výchozí CZK bankovní účet — žádost o jeho vrácení (VetaN) se do přiznání '
+                . 'nedostala. Bez ní si poplatník o vrácení přeplatku nežádá; doplňte účet a přiznání '
+                . 'vygenerujte znovu.';
+            return null;
+        }
+
+        $accountNumber = (string) $account['account_number'];
+        $prefix = AccountNumberNormalizer::czechAccountPrefix($accountNumber);
+        $base = AccountNumberNormalizer::czechAccountBase($accountNumber);
+        $bankCode = AccountNumberNormalizer::canonicalBankCode(
+            isset($account['bank_code']) ? (string) $account['bank_code'] : null,
+            isset($account['iban']) ? (string) $account['iban'] : null,
+        );
+        if ($base === null || $bankCode === null) {
+            $warnings[] = 'Vznikl přeplatek ' . number_format($overpayment, 0, ',', ' ') . ' Kč, ale výchozí '
+                . 'bankovní účet v Nastavení firmy nejde rozebrat na číslo účtu a kód banky — žádost o jeho '
+                . 'vrácení (VetaN) se do přiznání nedostala. Ověřte formát účtu v Nastavení firmy.';
+            return null;
+        }
+
+        $vetaN = $dom->createElement('VetaN');
+        $vetaN->setAttribute('zp_vrac', 'U'); // U = na účet v ČR (zahraniční Z appka nevede)
+        if ($prefix !== null) {
+            $vetaN->setAttribute('zvp_pbu', $prefix);
+        }
+        $vetaN->setAttribute('zvp_c_komds', $base);
+        $vetaN->setAttribute('zvp_k_bank', $bankCode);
+        $bankName = trim((string) ($account['bank_name'] ?? ''));
+        if ($bankName !== '') {
+            $vetaN->setAttribute('zvp_naz_bank', mb_substr($bankName, 0, 30)); // XSD maxLength 30
+        }
+        $vetaN->setAttribute('kc_preplatek', (string) $overpayment);
+
+        return $vetaN;
     }
 
     /**

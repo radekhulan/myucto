@@ -39,7 +39,8 @@ final class DpfoReturnCalculator
      *   s7: array<string,mixed>,
      *   tax: float, advances: float, balance_due: float,
      *   summary: array<string,float>,
-     *   warnings: list<string>
+     *   warnings: list<string>,
+     *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
      * }
      */
     public function compute(array $data, array $inputs, array $profile, array $c): array
@@ -408,6 +409,8 @@ final class DpfoReturnCalculator
                 'loss_applied' => $lossApplied,                // ř. 44 uplatněná ztráta minulých let
                 'year_tax_loss' => max(0.0, round(-$group710, 2)), // ztráta vzniklá v tomto roce (§34)
             ],
+            // Přenos zdroje pro VetaN (žádost o vrácení přeplatku) — {@see DpfoXmlBuilder::buildVetaN}.
+            'bank_account' => $data['bank_account'] ?? null,
             'next_advances' => [
                 'regime' => $advanceRegime,
                 'amount' => $advanceAmount,

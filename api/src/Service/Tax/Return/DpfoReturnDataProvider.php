@@ -53,7 +53,8 @@ final class DpfoReturnDataProvider
      *   s7_income: float, s7_expenses: float, s7_base: float,
      *   expense_mode: string, expense_rate: int,
      *   is_vat_payer: bool, accounting_mode: string,
-     *   warnings: list<string>
+     *   warnings: list<string>,
+     *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
      * }
      */
     public function gather(int $supplierId, int $year, array $inputs = []): array
@@ -146,7 +147,33 @@ final class DpfoReturnDataProvider
             'source_manifest' => (array) ($cash['source_manifest'] ?? []),
             'blocking_issues' => $blockingIssues,
             'warnings' => $warnings,
+            'bank_account' => $this->bankAccount($supplierId),
         ];
+    }
+
+    /**
+     * Výchozí CZK bankovní účet poplatníka (`currencies`, stejný zdroj jako platební
+     * příkazy — {@see \MyInvoice\Repository\PaymentOrderRepository::payerAccounts}) —
+     * jediný podklad, odkud VetaN (žádost o vrácení přeplatku) může vzít bankovní
+     * spojení. Stejná tabulka jako u DPPO ({@see DppoReturnDataProvider::bankAccount})
+     * — u OSVČ je `suppliers`/`currencies` řádek totéž „firemní" konto, které
+     * fyzická osoba v praxi vede jako svůj jediný podnikatelský účet, takže použití
+     * stejného zdroje je u FO věcně správné, ne jen pohodlné.
+     *
+     * @return array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null
+     */
+    private function bankAccount(int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT account_number, bank_code, bank_name, iban
+               FROM currencies
+              WHERE supplier_id = ? AND code = 'CZK' AND is_active = 1
+           ORDER BY is_default DESC, id
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch();
+        return $row === false ? null : $row;
     }
 
     /**

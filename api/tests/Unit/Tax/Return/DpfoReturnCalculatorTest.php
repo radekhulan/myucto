@@ -488,4 +488,22 @@ final class DpfoReturnCalculatorTest extends TestCase
 
         self::assertSame(0.5, (float) $r['next_advances']['reduction_factor']);
     }
+
+    /**
+     * `bank_account` (z {@see \MyInvoice\Service\Tax\Return\DpfoReturnDataProvider::gather})
+     * musí projít výpočtem beze změny — je to jediný zdroj pro VetaN
+     * ({@see \MyInvoice\Service\Tax\Return\DpfoXmlBuilder::buildVetaN}).
+     */
+    public function testBankAccountPassesThroughFromData(): void
+    {
+        $account = ['account_number' => '2000145399', 'bank_code' => '0100', 'bank_name' => 'Test', 'iban' => null];
+        $r = $this->calcRun(['bank_account' => $account]);
+        self::assertSame($account, $r['bank_account']);
+    }
+
+    public function testBankAccountNullWhenMissingFromData(): void
+    {
+        $r = $this->calcRun([]);
+        self::assertNull($r['bank_account']);
+    }
 }
