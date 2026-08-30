@@ -277,17 +277,64 @@ final class DpfoXmlBuilderXsdTest extends TestCase
         );
     }
 
+    // ── EPO zkušební podání 2026-08-30 ───────────────────────────────────────
+
+    /** ř.101/102/113 — Příloha 1 "Celkem" řádek tabulky musí sedět na kc_prij7/kc_vyd7. */
+    public function testCelkPrPrij7AndVydSumTableTotal(): void
+    {
+        $xml = $this->buildXml()['xml'];
+        self::assertStringContainsString('kc_prij7="1000000"', $xml);
+        self::assertStringContainsString('celk_pr_prij7="1000000"', $xml);
+        self::assertStringContainsString('kc_vyd7="600000"', $xml);
+        self::assertStringContainsString('celk_pr_vyd7="600000"', $xml);
+    }
+
+    /** ř.36 — kc_zd6p musí být ve VetaO vedle kc_zd6, jinak EPO hlásí ř.36 ≠ ř.34. */
+    public function testKcZd6pIsEmittedInVetaO(): void
+    {
+        $xml = $this->buildXml()['xml'];
+        self::assertStringContainsString('kc_zd6="300000"', $xml);
+        self::assertStringContainsString('kc_zd6p="300000"', $xml);
+    }
+
+    /** da_dan16 je vždy celé Kč (§16 ZDP se zaokrouhluje nahoru) — bez ".00". */
+    public function testDaDan16HasNoDecimalPoint(): void
+    {
+        $xml = $this->buildXml()['xml'];
+        self::assertMatchesRegularExpression('/da_dan16="[0-9]+"/', $xml);
+        self::assertStringNotContainsString('da_dan16="150000.00"', $xml);
+    }
+
     /** F12: uplatněná sleva na manžela / bonus na děti bez identity → měkký warning. */
+    /**
+     * F12 regrese (EPO test 2026-08-30): da_slevy je daň PO slevách (mezisoučet), ne
+     * částka slevy na manžela — warning se dřív spouštěl u KAŽDÉ nenulové daně, i bez
+     * jakéhokoli nároku na slevu na manžela/manželku.
+     */
+    public function testNonzeroTaxWithoutSpouseCreditProducesNoWarning(): void
+    {
+        $calc = [
+            'fields' => ['da_slevy' => 50460, 'kc_op15_1c' => 0],
+            's7' => ['income' => 0],
+            'family' => [],
+        ];
+        $result = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc);
+        self::assertSame([], array_values(array_filter(
+            $result['warnings'],
+            static fn (string $w): bool => str_contains($w, 'sleva na manžela'),
+        )));
+    }
+
     public function testCreditWithoutIdentityProducesWarning(): void
     {
         $calc = [
-            'fields' => ['da_slevy' => 24840, 'kc_danbonus' => 15204],
+            'fields' => ['kc_op15_1c' => 24840, 'kc_danbonus' => 15204],
             's7' => ['income' => 0],
             'family' => [],
         ];
         $result = (new DpfoXmlBuilder())->build($this->sampleSupplier(), 2025, $calc);
         self::assertContains(
-            'Uplatněna sleva na manžela/manželku (da_slevy), ale chybí jeho identifikace — EPO ji bez identity odmítne, doplňte před podáním.',
+            'Uplatněna sleva na manžela/manželku (kc_op15_1c), ale chybí jeho identifikace — EPO ji bez identity odmítne, doplňte před podáním.',
             $result['warnings']
         );
         self::assertContains(

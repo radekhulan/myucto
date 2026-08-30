@@ -28,9 +28,9 @@ final class DpfoXmlBuilder
     private const VERZE_PIS = '07.01';
 
     /** field → Veta (int Kč jako string; da_dan16 se řeší zvlášť). */
-    private const VETA_O = ['kc_prij6', 'kc_zd6', 'kc_zd7', 'kc_zakldan8', 'kc_zd9', 'kc_zd10', 'kc_uhrn', 'kc_ztrata2', 'kc_zakldan', 'kc_zakldan23'];
+    private const VETA_O = ['kc_prij6', 'kc_zd6', 'kc_zd6p', 'kc_zd7', 'kc_zakldan8', 'kc_zd9', 'kc_zd10', 'kc_uhrn', 'kc_ztrata2', 'kc_zakldan', 'kc_zakldan23'];
     private const VETA_S_INT = ['kc_op15_8', 'kc_op28_5', 'kc_op15_12', 'kc_op15_13', 'kc_op15_inpr', 'kc_op15_pece', 'kc_odcelk', 'kc_zdsniz', 'kc_zdzaokr'];
-    private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred'];
+    private const VETA_D_FIELDS = ['kc_op15_1a', 'kc_op15_1c', 'kc_op15_1d', 'kc_op15_1e1', 'kc_op15_1e2', 'uhrn_slevy35ba', 'da_slevy', 'da_slevy35ba', 'da_slevy35c', 'kc_dazvyhod', 'kc_slevy35c', 'kc_danbonus', 'kc_dan_po_db', 'kc_dan_celk', 'kc_zalzavc', 'kc_zalpred', 'kc_zbyvpred', 'm_invduch', 'm_cinvduch', 'm_ztpp', 'm_manz', 'kc_dztrata', 'kc_manztpp'];
 
     /**
      * @param array<string,mixed> $supplier
@@ -76,10 +76,11 @@ final class DpfoXmlBuilder
             } elseif (!empty($spouse['birth_date'])) {
                 $vetaD->setAttribute('manz_d_nar', $this->formatDate($spouse['birth_date']));
             }
-            $vetaD->setAttribute('m_manz', (string) max(0, min(12, (int) ($spouse['eligible_months'] ?? 0))));
-            if (!empty($spouse['ztpp'])) {
-                $vetaD->setAttribute('m_ztpp', (string) max(0, min(12, (int) ($spouse['eligible_months'] ?? 0))));
-            }
+            // m_manz se plní vždy (viz VETA_D_FIELDS výše, fields['m_manz']), i bez identity —
+            // EPO ověřuje ř.65a jako počet měsíců × sazba nezávisle na tom.
+            // m_ztpp patří poplatníkovi (viz VETA_D_FIELDS výše), ne manželovi/manželce —
+            // ZTP/P manžela zdvojnásobuje kc_op15_1c už v Kč (DpfoCalculator::spouseCreditFromClaim),
+            // XSD pro manžela žádné samostatné pole měsíců ZTP/P nemá.
         }
 
         // Dodatečné/opravné přiznání (dap_typ = O/D/E). U dodatečného (D/E) datum
@@ -103,8 +104,10 @@ final class DpfoXmlBuilder
             $warnings[] = 'Chybí kód finančního úřadu — použit fallback 451; ověřte v Nastavení firmy.';
         }
 
-        if ((float) ($fields['da_slevy'] ?? 0) > 0 && $spouse === null) {
-            $warnings[] = 'Uplatněna sleva na manžela/manželku (da_slevy), ale chybí jeho identifikace — EPO ji bez identity odmítne, doplňte před podáním.';
+        // da_slevy je daň PO uplatnění slev (mezisoučet), ne částka slevy na manžela —
+        // sleva na manžela/manželku samotná je kc_op15_1c (viz DpfoReturnCalculator).
+        if ((float) ($fields['kc_op15_1c'] ?? 0) > 0 && $spouse === null) {
+            $warnings[] = 'Uplatněna sleva na manžela/manželku (kc_op15_1c), ale chybí jeho identifikace — EPO ji bez identity odmítne, doplňte před podáním.';
         }
         if (((float) ($fields['kc_dazvyhod'] ?? 0) > 0 || (float) ($fields['kc_danbonus'] ?? 0) > 0)
             && (array) ($family['children'] ?? []) === []) {
@@ -131,7 +134,9 @@ final class DpfoXmlBuilder
             }
         }
         if (array_key_exists('da_dan16', $fields)) {
-            $vetaS->setAttribute('da_dan16', number_format((float) $fields['da_dan16'], 2, '.', '')); // 2 desetinná místa
+            // XSD dovoluje 2 desetinná místa, ale § 16 ZDP se zaokrouhluje na celé Kč
+            // nahoru (DpfoReturnCalculator::tax16 = ceil(...)) — hodnota je vždy celá.
+            $vetaS->setAttribute('da_dan16', $this->int($fields['da_dan16']));
         }
         $root->appendChild($vetaS);
 
@@ -168,6 +173,11 @@ final class DpfoXmlBuilder
         $vetaT = $dom->createElement('VetaT');
         $vetaT->setAttribute('kc_prij7', $this->int((float) ($s7['income'] ?? 0)));
         $vetaT->setAttribute('kc_vyd7', $this->int((float) ($s7['expenses'] ?? 0)));
+        // ř.101/102 (kc_prij7/kc_vyd7) musí sedět na „Celkem" řádek tabulky B. Druh
+        // činnosti (VetaT.pr_prij7/pr_vyd7 hlavní + Vetac.prijmy7/vydaje7 vedlejší) —
+        // úhrn §7 je definičně součtem těch samých činností, takže je to táž hodnota.
+        $vetaT->setAttribute('celk_pr_prij7', $this->int((float) ($s7['income'] ?? 0)));
+        $vetaT->setAttribute('celk_pr_vyd7', $this->int((float) ($s7['expenses'] ?? 0)));
         $vetaT->setAttribute('kc_zd7p', $this->int((float) ($s7['base'] ?? 0)));
         $vetaT->setAttribute('kc_uhzvys', $this->int((float) ($s7['increase'] ?? 0)));
         $vetaT->setAttribute('kc_uhsniz', $this->int((float) ($s7['decrease'] ?? 0)));

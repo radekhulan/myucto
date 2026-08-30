@@ -261,6 +261,70 @@ final class DpfoReturnCalculatorTest extends TestCase
         self::assertSame(7602.0, (float) $r['summary']['child_credit']);
     }
 
+    // ── EPO zkušební podání 2026-08-30: chybějící atributy pro křížové kontroly ──
+
+    /** ř. 36 (kc_zd6p) musí EPO ověřitelně sedět na ř. 34 (kc_zd6) — od 2021 stejná hodnota. */
+    public function testKcZd6pMirrorsKcZd6(): void
+    {
+        $r = $this->calcRun(['s7_base' => 0], ['s6_employment' => ['income' => 300000]]);
+        self::assertSame(300000.0, (float) $r['fields']['kc_zd6']);
+        self::assertSame(300000.0, (float) $r['fields']['kc_zd6p']);
+    }
+
+    /** ř. 71/74 — samostatné atributy odlišné od da_slevy (což je jen mezisoučet). */
+    public function testDaSlevy35baAndDaSlevy35cFields(): void
+    {
+        $r = $this->calcRun(['s7_base' => 400000]);
+        // Daň 60000 − sleva na poplatníka 30840 = 29160; bez dětí je 35c stejné.
+        self::assertSame(29160.0, (float) $r['fields']['da_slevy35ba']);
+        self::assertSame(29160.0, (float) $r['fields']['da_slevy35c']);
+    }
+
+    /** ř. 66–68 — vlastní invalidita/ZTP-P poplatníka musí EPO vidět jako počet měsíců. */
+    public function testOwnDisabilityMonthsAreExposedForEpoFormulaCheck(): void
+    {
+        $r = $this->calcRun(['s7_base' => 500000], [], [
+            'disability_12_months' => 6,
+            'disability_3_months' => 3,
+            'ztpp_months' => 12,
+        ]);
+        self::assertSame(6.0, (float) $r['fields']['m_invduch']);
+        self::assertSame(3.0, (float) $r['fields']['m_cinvduch']);
+        self::assertSame(12.0, (float) $r['fields']['m_ztpp']);
+
+        // Bez nároku musí být pole přítomná jako explicitní 0 (EPO na chybějící atribut
+        // hlásí "N", i když je nárok nulový a hodnota by formuli stejně vyhověla).
+        $r2 = $this->calcRun(['s7_base' => 500000]);
+        self::assertSame(0.0, (float) $r2['fields']['m_invduch']);
+        self::assertSame(0.0, (float) $r2['fields']['m_cinvduch']);
+        self::assertSame(0.0, (float) $r2['fields']['m_ztpp']);
+    }
+
+    /** ř. 65a/65b — m_manz a kc_manztpp musí být vždy přítomné, i bez nároku na slevu. */
+    public function testSpouseMonthsAndZtppExtraAreExposed(): void
+    {
+        $r = $this->calcRun(['s7_base' => 500000]);
+        self::assertSame(0.0, (float) $r['fields']['m_manz']);
+        self::assertSame(0.0, (float) $r['fields']['kc_manztpp']);
+
+        $r2 = $this->calcRun(['s7_base' => 500000], [], [
+            'spouse_claim' => ['eligible_months' => 12, 'ztpp' => true],
+        ]);
+        self::assertSame(12.0, (float) $r2['fields']['m_manz']);
+        // ZTP/P zdvojnásobuje slevu na manžela (24840 → 49680); "přidaná" polovina = 24840.
+        self::assertSame(24840.0, (float) $r2['fields']['kc_manztpp']);
+    }
+
+    /** ř. 61 (kc_dztrata) — ztráta vzniklá v běžném ZO, EPO chce explicitní 0, ne prázdno. */
+    public function testKcDztrataReflectsYearLoss(): void
+    {
+        $r = $this->calcRun(['s7_base' => -100000]);
+        self::assertSame(100000.0, (float) $r['fields']['kc_dztrata']);
+
+        $r2 = $this->calcRun(['s7_base' => 100000]);
+        self::assertSame(0.0, (float) $r2['fields']['kc_dztrata']);
+    }
+
     // ── § 38g ZDP: povinnost podat přiznání ──────────────────────────────────
     //
     // Systém čísla zná, poplatník povinnost často ne — a nepodané přiznání znamená

@@ -170,6 +170,16 @@ final class DpfoReturnCalculator
         $creditSpouse = $spouseClaim !== null
             ? DpfoCalculator::spouseCreditFromClaim($spouseClaim, $c)
             : (!empty($profile['spouse_credit']) ? (float) ($c['credit_spouse'] ?? 24840) : 0.0);
+        // m_manz (ř.65a) — EPO ověřuje součin počet měsíců × sazba i při nulovém nároku;
+        // legacy vstup bez měsíců (jen spouse_credit=true) znamená celý rok.
+        $spouseMonths = $spouseClaim !== null
+            ? max(0, min(12, (int) ($spouseClaim['eligible_months'] ?? 0)))
+            : (!empty($profile['spouse_credit']) ? 12 : 0);
+        // ř. 65b (kc_manztpp) — ZTP/P u manžela/manželky zdvojnásobuje slevu (viz
+        // DpfoCalculator::spouseCreditFromClaim); EPO chce zvlášť i tu "přidanou" polovinu.
+        $spouseZtppExtra = !empty($spouseClaim['ztpp'] ?? null)
+            ? round((float) ($c['credit_spouse'] ?? 24840) * $spouseMonths / 12, 2)
+            : 0.0;
         $creditDisability12 = round((float) ($c['credit_disability_12'] ?? 2520) * max(0, min(12, (int) ($profile['disability_12_months'] ?? 0))) / 12, 2);
         $creditDisability3 = round((float) ($c['credit_disability_3'] ?? 5040) * max(0, min(12, (int) ($profile['disability_3_months'] ?? 0))) / 12, 2);
         $creditZtpp = round((float) ($c['credit_ztpp'] ?? 16140) * max(0, min(12, (int) ($profile['ztpp_months'] ?? 0))) / 12, 2);
@@ -281,6 +291,9 @@ final class DpfoReturnCalculator
         $fields = [
             'kc_prij6' => $this->i($s6Income),
             'kc_zd6' => $this->i($s6),
+            // ř. 36 — EPO kontroluje ř.36 = ř.34; od 2021 dílčí základ §6 = úhrn příjmů
+            // (superhrubá mzda zrušena), takže obě hodnoty jsou vždy shodné.
+            'kc_zd6p' => $this->i($s6),
             'kc_zd7' => $this->i($s7),
             'kc_zakldan8' => $this->i($s8),
             'kc_zd9' => $this->i($s9),
@@ -305,11 +318,25 @@ final class DpfoReturnCalculator
             'kc_op15_1e2' => $this->i($creditZtpp),
             'uhrn_slevy35ba' => $this->i($slevy35ba),
             'da_slevy' => $this->i($taxAfter35ba),
+            // ř. 71/74 — EPO má samostatné atributy pro "daň po slevách §35ba" a "daň po
+            // zvýhodnění §35c" (da_slevy je jen mezisoučet navíc, žádnému řádku neodpovídá).
+            'da_slevy35ba' => $this->i($taxAfter35ba),
+            'da_slevy35c' => $this->i($taxAfterChildren),
             'kc_dazvyhod' => $this->i($childTotal),
             'kc_slevy35c' => $this->i($childCredit),
             'kc_danbonus' => $this->i($childBonus),
             'kc_dan_po_db' => $this->i($taxAfterChildren),
             'kc_dan_celk' => $this->i($taxAfterChildren),
+            // Vlastní invalidita/ZTP-P poplatníka (§35ba) — EPO ověřuje ř.66–68 jako
+            // počet měsíců × sazba, i když je nárok nulový; bez měsíců formuli neověří.
+            'm_invduch' => (float) max(0, min(12, (int) ($profile['disability_12_months'] ?? 0))),
+            'm_cinvduch' => (float) max(0, min(12, (int) ($profile['disability_3_months'] ?? 0))),
+            'm_ztpp' => (float) max(0, min(12, (int) ($profile['ztpp_months'] ?? 0))),
+            'm_manz' => (float) $spouseMonths,
+            'kc_manztpp' => $this->i($spouseZtppExtra),
+            // ř. 61 — daňová ztráta vzniklá v tomto ZO (záporný ř. 41); EPO chce řádek
+            // vyplněný i jako 0, ne prázdný, jinak formuli nemá s čím srovnat.
+            'kc_dztrata' => $this->i(max(0.0, round(-$group710, 2))),
             'kc_zalzavc' => $this->i($s6Withholding),
             'kc_zalpred' => $this->i($advancesPaid),
             'kc_zbyvpred' => $this->i($balanceDue),
