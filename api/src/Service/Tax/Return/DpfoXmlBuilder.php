@@ -183,9 +183,14 @@ final class DpfoXmlBuilder
         }
         $activities = (array) ($s7['activities'] ?? []);
         $firstActivity = is_array($activities[0] ?? null) ? $activities[0] : [];
-        $nace = EpoSupplierBlockBuilder::normalizeOkec((string) ($firstActivity['nace_code'] ?? $supplier['cz_nace_code'] ?? ''));
+        $naceRaw = (string) ($firstActivity['nace_code'] ?? $supplier['cz_nace_code'] ?? '');
+        $nace = EpoSupplierBlockBuilder::normalizeOkec($naceRaw);
         if ($nace !== null) {
             $vetaT->setAttribute('c_nace', $nace);
+            $naceWarning = EpoSupplierBlockBuilder::okecWarning($naceRaw);
+            if ($naceWarning !== null) {
+                $warnings[] = $naceWarning;
+            }
         } elseif ((float) ($s7['income'] ?? 0) > 0) {
             $warnings[] = 'Chybí nebo neplatný kód NACE u hlavní činnosti — EPO má na c_nace kritickou kontrolu, doplňte před podáním.';
         }
@@ -214,6 +219,10 @@ final class DpfoXmlBuilder
             $activityNace = EpoSupplierBlockBuilder::normalizeOkec((string) ($activity['nace_code'] ?? ''));
             if ($activityNace !== null) {
                 $vetac->setAttribute('c_nace_dal', $activityNace);
+                $activityNaceWarning = EpoSupplierBlockBuilder::okecWarning((string) ($activity['nace_code'] ?? ''));
+                if ($activityNaceWarning !== null) {
+                    $warnings[] = $activityNaceWarning;
+                }
             } elseif ((float) ($activity['income'] ?? 0) > 0) {
                 $warnings[] = 'Chybí nebo neplatný kód NACE u vedlejší činnosti §7 — EPO má na c_nace_dal kritickou kontrolu, doplňte před podáním.';
             }
@@ -249,6 +258,13 @@ final class DpfoXmlBuilder
     private function buildVetaP(\DOMDocument $dom, array $supplier, array &$warnings): \DOMElement
     {
         $vetaP = $dom->createElement('VetaP');
+
+        // Územní pracoviště FÚ. Sdílený EpoSupplierBlockBuilder::fillVetaP() ho plní,
+        // tahle vlastní kopie věty P na něj zapomněla — stejná mezera jako u DPPO,
+        // zkušební EPO ji hlásí jako „Číslo územního pracoviště není vyplněno".
+        if (!empty($supplier['workplace_code'])) {
+            $vetaP->setAttribute('c_pracufo', (string) $supplier['workplace_code']);
+        }
 
         $dic = EpoSupplierBlockBuilder::normalizeDic($supplier['dic'] ?? null);
         if ($dic !== '') {

@@ -408,10 +408,16 @@ final class EpoSupplierBlockBuilder
      * 01.48.00). Ani slepé padování ani žádné padování proto nesedí — jediné
      * správné je dohledání v číselníku, které obojí rozliší.
      *
-     * Kód mimo číselník se NEBLOKUJE (snapshot může zestárnout; EPO na to hlásí
-     * jen propustnou chybu 30). Pozor na platnost: k 1. 1. 2026 se číselník
-     * překlopil na NACE rev. 2.1, takže i správně široký kód může být odmítnut
-     * proto, že expiroval (620900 → od 2026 629000).
+     * Kód mimo číselník se NEBLOKUJE (snapshot může zestárnout). Pozor na
+     * platnost: k 1. 1. 2026 se číselník překlopil na NACE rev. 2.1, takže
+     * i správně široký kód může být odmítnut proto, že expiroval.
+     *
+     * A pozor na váhu té chyby: dřív tu stálo, že EPO hlásí jen propustnou
+     * chybu 30. Neplatí to. Zkušební EPO 30. 8. 2026 i protokol ke skutečně
+     * archivovanému přiznání vrátily KRITICKOU chybu 126 „Číslo hlavní
+     * (převažující) činnosti není v číselníku" — s tou se podání nedá odevzdat
+     * vůbec. Proto {@see describeOkec()}, kterou stavitelé používají k varování;
+     * expirovaný kód se pozná dřív, než ho odmítne úřad.
      *
      * KRATŠÍ NEŽ 4 číslice → null = atribut se VYNECHÁ (c_okec je optional;
      * oddíl z ARES v číselníku není a vyvolal by chybu 30).
@@ -420,5 +426,31 @@ final class EpoSupplierBlockBuilder
     {
         $resolved = EpoOkecCodebook::normalize($raw);
         return $resolved === null ? null : $resolved['code'];
+    }
+
+    /**
+     * Varování k číslu činnosti, nebo null, když je kód v pořádku.
+     *
+     * Vrací hotovou větu pro `warnings` stavitele: účetní se o expirovaném kódu
+     * jinak dozví až z odmítnutého podání, a to je pozdě.
+     */
+    public static function okecWarning(string $raw): ?string
+    {
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return null;
+        }
+        $resolved = EpoOkecCodebook::describe($trimmed);
+        if ($resolved === null) {
+            return 'Číslo hlavní (převažující) činnosti „' . $trimmed . '" není v číselníku CZ-NACE. '
+                . 'EPO podání s neplatným kódem odmítne kritickou chybou 126 — doplňte platný kód v nastavení firmy.';
+        }
+        if (($resolved['status'] ?? '') !== EpoOkecCodebook::STATUS_EXPIRED) {
+            return null;
+        }
+
+        return 'Číslo hlavní (převažující) činnosti ' . $resolved['display'] . ' skončilo platnost '
+            . ($resolved['valid_to'] ?? '?') . ' (číselník se k 1. 1. 2026 překlopil na CZ-NACE rev. 2.1). '
+            . 'EPO takové podání odmítne kritickou chybou 126 — vyberte v nastavení firmy nástupnický kód.';
     }
 }

@@ -72,7 +72,6 @@ final class EpoIdentificationSsotTest extends TestCase
     public function testDppoWritesCatalogueCountryNameNotIsoCode(): void
     {
         foreach ([
-            'CZ' => 'ČESKÁ REPUBLIKA',
             'SK' => 'SLOVENSKO',
             'DE' => 'NĚMECKO',
         ] as $iso2 => $expected) {
@@ -81,6 +80,12 @@ final class EpoIdentificationSsotTest extends TestCase
             self::assertSame($iso2, $vetaP->getAttribute('k_stat'), 'k_stat zůstává ISO2');
             self::assertSame($expected, $vetaP->getAttribute('stat'), 'stat je název z číselníku');
         }
+
+        // Tuzemská PO stát nevyplňuje vůbec — zkušební EPO to 30. 8. 2026 vytklo
+        // jako propustnou chybu 300 „Kód státu vyplňují pouze zahraniční právnické osoby".
+        $domestic = $this->buildDppoVetaP(['country_iso2' => 'CZ']);
+        self::assertFalse($domestic->hasAttribute('k_stat'));
+        self::assertFalse($domestic->hasAttribute('stat'));
     }
 
     /** Neznámý stát: atribut je optional → radši vynechat než poslat neplatnou hodnotu. */

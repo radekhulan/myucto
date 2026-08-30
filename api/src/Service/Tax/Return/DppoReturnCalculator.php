@@ -269,12 +269,20 @@ final class DppoReturnCalculator
             $nextAdvances['filing_deadline'] = $filingDeadline;
         }
 
+        // Mezisoučet zvýšení HV se nikdy nevyplňoval, přestože XSD atribut má
+        // (kc_ii80_70) a základ se z něj počítá. Zkušební EPO to 30. 8. 2026 vytklo
+        // dvakrát: „Řádek 70 II. oddílu není naplněn" a „Hodnota ř.200 se nerovná
+        // správné (ř.10+70-170)". Číslo bylo správné, chyběl součtový řádek, na
+        // kterém stojí křížová kontrola příjemce.
+        $line70Reported = round($line40Reported + $depIncrease + $line62Reported, 2);
+
         $lines = [
             $this->line(10, '10', 'Výsledek hospodaření před zdaněním', $vh, 'deník: Σ 6xx − Σ 5xx (mimo 59x)'),
             $this->line(40, '40', 'Výdaje neuznávané za náklady (§25)', $line40Reported, 'nedaňové účty + neuznatelná ZC vyřazení'
                 . ($flatRateTravelAddback > 0 ? ' + add-back PHM při paušálu na dopravu (§24/2/zt)' : '')),
             $this->line(50, '50', 'Účetní odpisy převyšující daňové', $depIncrease, 'rozdíl odpisů (zvýšení)'),
             $this->line(62, '62', 'Ostatní částky zvyšující základ (§23)', $line62Reported, 'ruční vstupy (mimo paušál dopravy) + můstek účetní/daňové ZC'),
+            $this->line(70, '70', 'Souhrn částek zvyšujících výsledek hospodaření', $line70Reported, 'mezisoučet ř. 20–62 (ř.40 + ř.50 + ř.62)'),
             $this->line(112, '112', 'Doplňková informace (§23/3 písm. c) — např. paušální výdaj na dopravu', $line112Reported, 'ruční položka rozpoznaná dle textu (§24/2/zt paušál dopravy)'),
             $this->line(150, '150', 'Daňové odpisy převyšující účetní', $depDecrease, 'rozdíl odpisů (snížení)'),
             $this->line(162, '162', 'Ostatní částky snižující základ (§23)', $line162Reported, 'ruční vstupy (mimo paušál dopravy) + můstek účetní/daňové ZC'),

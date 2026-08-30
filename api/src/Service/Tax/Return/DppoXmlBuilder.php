@@ -37,6 +37,7 @@ final class DppoXmlBuilder
         40 => 'kc_ii50_40',
         50 => 'kc_ii60_50',
         62 => 'kc_ii72_62',
+        70 => 'kc_ii80_70',
         112 => 'kc_ii_112',
         150 => 'kc_ii170_150',
         162 => 'kc_ii182_162',
@@ -154,6 +155,10 @@ final class DppoXmlBuilder
         $nace = EpoSupplierBlockBuilder::normalizeOkec((string) ($supplier['cz_nace_code'] ?? ''));
         if ($nace !== null) {
             $vetaD->setAttribute('c_nace', $nace);
+        }
+        $naceWarning = EpoSupplierBlockBuilder::okecWarning((string) ($supplier['cz_nace_code'] ?? ''));
+        if ($naceWarning !== null) {
+            $warnings[] = $naceWarning;
         }
 
         // Dodatečné/opravné přiznání (dapdpp_forma = O/D/E). U dodatečného (D/E)
@@ -365,31 +370,65 @@ final class DppoXmlBuilder
             $byCode[(string) $row['row_code']] = $row;
         }
 
+        // Součtová kontrola příjemce: PASIVA CELKEM = A. + (B.+C.) + D. Každý řádek se
+        // ale zaokrouhluje na tisíce zvlášť, takže součet zaokrouhlených částí se od
+        // zaokrouhleného celku umí lišit o tisícikorunu — a EPO to vytkne (chyba 2408
+        // „Hodnota řádku PASIVA CELKEM rozvahy není rovna součtu řádků pasiv
+        // A.+(B.+C.)+D."). Nejde o chybu účetnictví, jen o rozjetí při zaokrouhlení,
+        // proto se rozdíl absorbuje do největší složky, ne do celku: celek musí sedět
+        // na rozvahu a na stranu aktiv.
+        $parts = [
+            2 => [(float) ($byCode['P.A.']['amount'] ?? 0.0), (float) ($byCode['P.A.']['prev_amount'] ?? 0.0)],
+            24 => [
+                (float) ($byCode['P.B.']['amount'] ?? 0.0) + (float) ($byCode['P.C.']['amount'] ?? 0.0),
+                (float) ($byCode['P.B.']['prev_amount'] ?? 0.0) + (float) ($byCode['P.C.']['prev_amount'] ?? 0.0),
+            ],
+            64 => [(float) ($byCode['P.D.']['amount'] ?? 0.0), (float) ($byCode['P.D.']['prev_amount'] ?? 0.0)],
+        ];
+        $partsT = [];
+        foreach ($parts as $cRadku => [$sled, $min]) {
+            $partsT[$cRadku] = [$this->toThousands($sled), $this->toThousands($min)];
+        }
+        if (isset($byCode['PASIVA'])) {
+            foreach ([0, 1] as $column) {
+                $totalT = $this->toThousands((float) $byCode['PASIVA'][$column === 0 ? 'amount' : 'prev_amount']);
+                $sum = 0;
+                foreach ($partsT as $values) {
+                    $sum += $values[$column];
+                }
+                $diff = $totalT - $sum;
+                if ($diff === 0) {
+                    continue;
+                }
+                $largest = null;
+                foreach ($partsT as $cRadku => $values) {
+                    if ($largest === null || abs($values[$column]) > abs($partsT[$largest][$column])) {
+                        $largest = $cRadku;
+                    }
+                }
+                $partsT[$largest][$column] += $diff;
+            }
+        }
+
         $rows = [];
         if (isset($byCode['PASIVA'])) {
-            $rows[] = [1, (float) $byCode['PASIVA']['amount'], (float) $byCode['PASIVA']['prev_amount']];
+            $rows[] = [1, $this->toThousands((float) $byCode['PASIVA']['amount']), $this->toThousands((float) $byCode['PASIVA']['prev_amount'])];
         }
         if (isset($byCode['P.A.'])) {
-            $rows[] = [2, (float) $byCode['P.A.']['amount'], (float) $byCode['P.A.']['prev_amount']];
+            $rows[] = [2, $partsT[2][0], $partsT[2][1]];
         }
         if (isset($byCode['P.B.']) || isset($byCode['P.C.'])) {
-            $bAmount = (float) ($byCode['P.B.']['amount'] ?? 0.0);
-            $bPrev   = (float) ($byCode['P.B.']['prev_amount'] ?? 0.0);
-            $cAmount = (float) ($byCode['P.C.']['amount'] ?? 0.0);
-            $cPrev   = (float) ($byCode['P.C.']['prev_amount'] ?? 0.0);
-            $rows[] = [24, $bAmount + $cAmount, $bPrev + $cPrev];
+            $rows[] = [24, $partsT[24][0], $partsT[24][1]];
         }
         if (isset($byCode['P.C.'])) {
-            $rows[] = [30, (float) $byCode['P.C.']['amount'], (float) $byCode['P.C.']['prev_amount']];
+            $rows[] = [30, $this->toThousands((float) $byCode['P.C.']['amount']), $this->toThousands((float) $byCode['P.C.']['prev_amount'])];
         }
         if (isset($byCode['P.D.'])) {
-            $rows[] = [64, (float) $byCode['P.D.']['amount'], (float) $byCode['P.D.']['prev_amount']];
+            $rows[] = [64, $partsT[64][0], $partsT[64][1]];
         }
 
         $elements = [];
-        foreach ($rows as [$cRadku, $sled, $min]) {
-            $sledT = $this->toThousands($sled);
-            $minT = $this->toThousands($min);
+        foreach ($rows as [$cRadku, $sledT, $minT]) {
             if ($sledT === 0 && $minT === 0) {
                 continue;
             }
@@ -439,6 +478,13 @@ final class DppoXmlBuilder
     {
         $vetaP = $dom->createElement('VetaP');
 
+        // Územní pracoviště FÚ. Sdílený EpoSupplierBlockBuilder::fillVetaP() ho plní,
+        // tahle vlastní kopie věty P na něj zapomněla — DPH přiznání ho tedy posílá,
+        // přiznání k dani z příjmů ne, a zkušební EPO 30. 8. 2026 to vytklo („Číslo
+        // územního pracoviště není vyplněno"). Hodnota v databázi přitom byla.
+        if (!empty($supplier['workplace_code'])) {
+            $vetaP->setAttribute('c_pracufo', (string) $supplier['workplace_code']);
+        }
         $dic = EpoSupplierBlockBuilder::normalizeDic($supplier['dic'] ?? null);
         if ($dic !== '') {
             $vetaP->setAttribute('dic', $dic);
@@ -462,14 +508,21 @@ final class DppoXmlBuilder
         $vetaP->setAttribute('naz_obce', (string) ($supplier['city'] ?? ''));
         $vetaP->setAttribute('psc', preg_replace('/\s/', '', (string) ($supplier['zip'] ?? '')) ?? '');
         $iso2 = (string) ($supplier['country_iso2'] ?? 'CZ');
-        $vetaP->setAttribute('k_stat', $iso2);
+        // Stát se vyplňuje JEN u zahraniční právnické osoby — u tuzemské ho zkušební
+        // EPO 30. 8. 2026 vytklo jako propustnou chybu 300 („Kód státu vyplňují pouze
+        // zahraniční právnické osoby"). Tuzemskému poplatníkovi tedy oba atributy
+        // vynecháváme; prázdné se neposílají vůbec, ne jako prázdný řetězec.
+        $foreign = $iso2 !== '' && strtoupper($iso2) !== 'CZ';
+        if ($foreign) {
+            $vetaP->setAttribute('k_stat', $iso2);
+        }
         // `stat` = NÁZEV státu z číselníku Země, NE ISO2 kód — to je přesně chyba #201,
         // opravená v EpoSupplierBlockBuilder, ale v téhle větvi přežila: zahraniční
         // subjekt sem dostal 'SK' místo 'SLOVENSKO' a i tuzemský 'Česká republika'
         // místo číselníkového 'ČESKÁ REPUBLIKA'. Číselník je jediný zdroj pravdy;
         // neznámou zemi raději vynecháme (atribut je optional) než poslat neplatnou hodnotu.
         $statName = EpoSupplierBlockBuilder::countryName($iso2);
-        if ($statName !== null) {
+        if ($foreign && $statName !== null) {
             $vetaP->setAttribute('stat', $statName);
         }
 

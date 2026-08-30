@@ -280,6 +280,10 @@ final class DphPriznaniBuilder
         if ($okec !== null) {
             $vetaD->setAttribute('c_okec', $okec);
         }
+        $okecWarning = EpoSupplierBlockBuilder::okecWarning((string) ($supplier['cz_nace_code'] ?? ''));
+        if ($okecWarning !== null) {
+            $warnings[] = $okecWarning;
+        }
         $vetaD->setAttribute('d_poddp', date('d.m.Y')); // datum podání (dnes)
         // trans: „existují údaje pro oddíl C?" — spočteme níže, až budou
         // Veta1-5 sestavené, a setneme přes setAttribute.

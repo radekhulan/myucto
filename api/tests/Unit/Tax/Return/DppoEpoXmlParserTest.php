@@ -95,9 +95,9 @@ XML;
         self::assertSame(45000.0, $parsed['lines'][170]);
         self::assertArrayHasKey(112, $parsed['lines']);
         self::assertSame(45000.0, $parsed['lines'][112]);
-        // kc_ii80_70 (souhrn zvyšujících, ř.70) zůstává mimo náš LINE_ATTR — jiný rozpad
-        // formuláře, který kalkulátor nepočítá zvlášť — skončí v extra (informativní, bez diffu).
-        self::assertArrayHasKey('kc_ii80_70', $parsed['extra']);
+        // kc_ii80_70 (souhrn zvyšujících, ř.70) do LINE_ATTR přibyl 30. 8. 2026: bez něj
+        // zkušební EPO vytklo „Řádek 70 II. oddílu není naplněn" i nesouhlas ř.200.
+        self::assertArrayHasKey(70, $parsed['lines']);
         self::assertArrayHasKey('kc_ii_220', $parsed['extra']); // má vlastní popisek, ne surové jméno
         self::assertSame('Základ daně před odečtem ztráty a darů (ř. 220)', $parsed['extra']['kc_ii_220']['label']);
     }
