@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { clientsApi, TAX_NUMBER_LABELS, type ClientPayload, type Client, type ClientEmailContact, type EmailContactUsageCode, type EmailContactRecipient, type ClientDuplicateMatch } from '@/api/clients'
@@ -200,6 +200,20 @@ const revenueCategories = ref<RevenueCategory[]>([])
 const submitting = ref(false)
 const error = ref('')
 const errors = ref<Record<string, string[]>>({})
+const formEl = ref<HTMLFormElement | null>(null)
+
+// Pole, u kterých se serverová chyba vykresluje přímo pod vstupem. Co v seznamu
+// není, vypíše se u tlačítka Uložit — jinak by uživatel viděl jen „Validace
+// selhala" a netušil, které pole vadí (tak zapadala chyba IČO i povinné adresy).
+const INLINE_ERROR_FIELDS = [
+  'company_name', 'first_name', 'last_name', 'main_email', 'hourly_rate',
+  'ic', 'street', 'zip', 'city', 'phone',
+]
+const unplacedErrors = computed(() =>
+  Object.entries(errors.value)
+    .filter(([field]) => !INLINE_ERROR_FIELDS.includes(field))
+    .flatMap(([, messages]) => messages),
+)
 const aresLoading = ref(false)
 // Chyby lookupů patří k příslušnému poli, ne do globálního `error` u tlačítka
 // Uložit dole na stránce — tam je uživatel u dlouhého formuláře nevidí (#120).
@@ -467,7 +481,19 @@ async function submit() {
   } catch (e: any) {
     const data = e?.response?.data?.error
     error.value = data?.message || t('errors.generic')
-    if (data?.fields) errors.value = data.fields
+    if (data?.fields) {
+      errors.value = data.fields
+      // Uložit je na patě dlouhého formuláře, chybné pole bývá nahoře mimo
+      // obraz — bez odskoku uživatel vidí jen „Validace selhala" (#120).
+      // Hledá se uvnitř TOHOHLE formuláře: v embedded módu běží komponenta
+      // v modálu nad jiným formulářem, takže dokumentový dotaz by mohl
+      // odskočit na cizí chybu.
+      // Bez `behavior: 'smooth'` schválně: plynulou animaci přeruší překreslení
+      // formuláře a odskok skončí na půl cesty s chybou nad viewportem
+      // (ověřeno v prohlížeči — zastavilo se 195 px nad cílem).
+      await nextTick()
+      formEl.value?.querySelector('[data-field-error]')?.scrollIntoView({ block: 'center' })
+    }
   } finally {
     submitting.value = false
   }
@@ -484,7 +510,7 @@ async function submit() {
       <RouterLink to="/clients" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('client.back_to_list') }}</RouterLink>
     </div>
 
-    <form @submit.prevent="submit" autocomplete="off" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+    <form ref="formEl" @submit.prevent="submit" autocomplete="off" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <div class="p-5 space-y-4">
         <!-- Lookup helpers -->
         <div class="bg-primary-50 border border-primary-200 rounded-md p-3">
@@ -501,6 +527,7 @@ async function submit() {
                   {{ aresLoading ? '…' : 'ARES' }}
                 </button>
               </div>
+              <p data-field-error v-if="errors.ic" class="text-xs text-danger-500 mt-1">{{ errors.ic[0] }}</p>
               <!-- Chyba ARES lookupu přímo u pole (#120) — ne v globálním erroru dole -->
               <p v-if="aresError" class="text-xs text-danger-500 mt-1">✗ {{ aresError }}</p>
               <p v-if="duplicateIc" class="text-xs text-warning-600 mt-1">
@@ -603,7 +630,7 @@ async function submit() {
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.company_name') }} *</label>
           <input autocomplete="off" v-model="form.company_name" required
             class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
-          <p v-if="errors.company_name" class="text-xs text-danger-500 mt-1">{{ errors.company_name[0] }}</p>
+          <p data-field-error v-if="errors.company_name" class="text-xs text-danger-500 mt-1">{{ errors.company_name[0] }}</p>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -611,13 +638,13 @@ async function submit() {
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.first_name') }}</label>
             <input autocomplete="off" v-model="form.first_name" maxlength="60"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
-            <p v-if="errors.first_name" class="text-xs text-danger-500 mt-1">{{ errors.first_name[0] }}</p>
+            <p data-field-error v-if="errors.first_name" class="text-xs text-danger-500 mt-1">{{ errors.first_name[0] }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.last_name') }}</label>
             <input autocomplete="off" v-model="form.last_name" maxlength="60"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
-            <p v-if="errors.last_name" class="text-xs text-danger-500 mt-1">{{ errors.last_name[0] }}</p>
+            <p data-field-error v-if="errors.last_name" class="text-xs text-danger-500 mt-1">{{ errors.last_name[0] }}</p>
           </div>
         </div>
 
@@ -626,12 +653,13 @@ async function submit() {
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.main_email') }}</label>
             <input autocomplete="off" v-model="form.main_email" type="email"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
-            <p v-if="errors.main_email" class="text-xs text-danger-500 mt-1">{{ errors.main_email[0] }}</p>
+            <p data-field-error v-if="errors.main_email" class="text-xs text-danger-500 mt-1">{{ errors.main_email[0] }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.phone') }}</label>
             <input autocomplete="off" v-model="form.phone"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            <p data-field-error v-if="errors.phone" class="text-xs text-danger-500 mt-1">{{ errors.phone[0] }}</p>
           </div>
         </div>
 
@@ -706,11 +734,13 @@ async function submit() {
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.street') }} *</label>
             <input autocomplete="off" v-model="form.street" required
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            <p data-field-error v-if="errors.street" class="text-xs text-danger-500 mt-1">{{ errors.street[0] }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.zip') }} *</label>
             <input autocomplete="off" v-model="form.zip" required
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            <p data-field-error v-if="errors.zip" class="text-xs text-danger-500 mt-1">{{ errors.zip[0] }}</p>
           </div>
         </div>
 
@@ -719,6 +749,7 @@ async function submit() {
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.city') }} *</label>
             <input autocomplete="off" v-model="form.city" required
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+            <p data-field-error v-if="errors.city" class="text-xs text-danger-500 mt-1">{{ errors.city[0] }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.country') }}</label>
@@ -785,7 +816,7 @@ async function submit() {
             <input autocomplete="off" v-model.number="form.hourly_rate" type="number" step="0.01" min="0" placeholder="0"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('client.hourly_rate_hint') }}</p>
-            <p v-if="errors.hourly_rate" class="text-xs text-danger-500 mt-1">{{ errors.hourly_rate[0] }}</p>
+            <p data-field-error v-if="errors.hourly_rate" class="text-xs text-danger-500 mt-1">{{ errors.hourly_rate[0] }}</p>
           </div>
         </div>
 
@@ -972,6 +1003,11 @@ async function submit() {
 
         <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           {{ error }}
+          <!-- Pojistka: chyba pole, které nemá vlastní místo ve formuláři, by
+               jinak zmizela a zůstalo by jen „Validace selhala". -->
+          <ul v-if="unplacedErrors.length" class="mt-1 list-disc pl-5">
+            <li v-for="message in unplacedErrors" :key="message">{{ message }}</li>
+          </ul>
         </div>
       </div>
 
