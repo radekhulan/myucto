@@ -3,26 +3,35 @@
 declare(strict_types=1);
 
 /**
- * Vyčíslení rozdílu u zákonného pojištění odpovědnosti předepsaného ze
- * zastropovaného vyměřovacího základu.
+ * Vyčíslení rozdílu u zákonného pojištění odpovědnosti předepsaného starým
+ * pravidlem pro vyměřovací základ.
  *
- * Materializér do 31. 8. 2026 bral `capped_assessment_base_minor_units`, tedy
- * základ PO ročním maximu podle § 15a zákona č. 589/1992 Sb. Roční maximum se
- * ale na zákonné pojištění odpovědnosti nevztahuje: § 12 odst. 2 vyhlášky
- * č. 125/1993 Sb. přebírá z toho zákona jen § 5 odst. 1 písm. a), tedy KTERÉ
- * příjmy do základu patří. Shodně to vykládají Kooperativa i Generali Česká
- * pojišťovna a stanovisko Ministerstva financí z 20. 5. 2008.
+ * Materializér do 31. 8. 2026 sčítal `capped_assessment_base_minor_units` přes
+ * celou firmu. To je vadné ve dvou ohledech, které táhnou OPAČNÝM směrem:
  *
- * Firmy, které nikoho nad ročním stropem nemají, rozdíl nemají — u nich se oba
- * základy rovnají a skript nevypíše nic. Kde rozdíl je, je předepsané pojistné
- * NIŽŠÍ, než mělo být, a § 12 odst. 9 vyhlášky zvyšuje nedoplatek o 10 % za
- * každý započatý měsíc prodlení. Proto se to vyčísluje po čtvrtletích: nedoplatek
- * u každého z nich stárne zvlášť.
+ *  - **roční maximum** podle § 15a zákona č. 589/1992 Sb. se na tohle pojištění
+ *    nevztahuje. § 12 odst. 2 vyhlášky č. 125/1993 Sb. z toho zákona přebírá jen
+ *    § 5 odst. 1 písm. a), tedy KTERÉ příjmy do základu patří; maximum je
+ *    samostatné omezení až v § 15a. Shodně to vykládají Kooperativa i Generali
+ *    Česká pojišťovna a stanovisko Ministerstva financí z 20. 5. 2008.
+ *    Zastropováním se pojistné PODHODNOCOVALO;
+ *  - **vztahy druhu `corporate_body`** (příjem společníka a odměna za výkon
+ *    funkce) do základu nepatří — pojištěni jsou zaměstnanci pro případ
+ *    pracovního úrazu a nemoci z povolání a Kooperativa je ze základu výslovně
+ *    vylučuje, přestože se za ně sociální pojistné odvádí. Jejich započtením se
+ *    pojistné NADHODNOCOVALO.
+ *
+ * Čtvrtletí proto může skončit nedoplatkem i přeplatkem podle toho, která z vad
+ * převáží. Skript obojí rozlišuje a u každého čtvrtletí vypíše, kolik odměn
+ * orgánů ze základu vypadlo. Vyčísluje se po čtvrtletích: nedoplatek u každého
+ * z nich stárne zvlášť (§ 12 odst. 9 přidává 10 % za každý započatý měsíc
+ * prodlení) a přeplatek se podle § 12 odst. 6 vrací jen na žádost plátce.
  *
  * Skript je READ-ONLY. Nic nepředepisuje ani neopravuje — rozdíl se doplňuje
  * opravnou revizí dotčeného čtvrtletí a řeší se s pojišťovnou. Přepsat už
  * předepsaný závazek na místě by smazalo stopu, podle které se dohledá, co se
- * pojišťovně skutečně poslalo.
+ * pojišťovně skutečně poslalo, a databáze to stejně nedovolí; závazky jsou
+ * neměnné.
  *
  * Použití:
  *   php api/bin/audit-accident-insurance-base.php               # všechny tenanty
@@ -63,10 +72,15 @@ $statement = $pdo->prepare($sql);
 $statement->execute($params);
 
 /**
- * Nezastropovaný základ měsíce ze schváleného výsledku sociálního pojištění.
- * Čte se stejnou cestou jako v materializéru, aby se čísla nerozešla.
+ * Základ měsíce rozpadlý na to, co do pojištění patří, a na odměny orgánů.
+ *
+ * Zaměstnanecká část se sčítá stejným pravidlem jako v materializéru: základ
+ * vztahu PŘED ročním maximem a jen účastnící se vztahy. Kdyby se tu sčítalo
+ * jinak, vyčíslený rozdíl by neodpovídal tomu, co aplikace předepíše.
+ *
+ * @return array{employment:int,corporate_body:int}|null
  */
-$monthBase = static function (PDO $pdo, int $supplierId, string $monthStart): ?int {
+$monthBase = static function (PDO $pdo, int $supplierId, string $monthStart): ?array {
     $sql = 'SELECT result.result_snapshot_json
               FROM payroll_statutory_results result
               JOIN payroll_run_revisions revision
@@ -96,39 +110,45 @@ $monthBase = static function (PDO $pdo, int $supplierId, string $monthStart): ?i
         return null;
     }
 
-    // Stejné pravidlo jako v materializéru: základ vztahu před ročním maximem,
-    // jen účastnící se vztahy a bez druhu corporate_body (příjem společníka a
-    // odměna za výkon funkce do základu tohoto pojištění nepatří). Kdyby se tu
-    // sčítalo jinak, vyčíslený rozdíl by neodpovídal tomu, co appka předepíše.
-    $base = 0;
+    $employment = 0;
+    $corporateBody = 0;
     foreach ($snapshot['people'] as $person) {
         $relationships = is_array($person) ? ($person['relationships'] ?? null) : null;
         if (!is_array($relationships)) {
             continue;
         }
         foreach ($relationships as $relationship) {
-            if (!is_array($relationship) || ($relationship['kind'] ?? null) === 'corporate_body') {
+            if (!is_array($relationship)) {
                 continue;
             }
             $participation = $relationship['participation'] ?? null;
             if (!is_array($participation) || ($participation['status'] ?? null) !== 'participates') {
                 continue;
             }
-            $relationshipBase = $relationship['assessment_base_minor_units'] ?? null;
-            if (!is_int($relationshipBase) || $relationshipBase < 0) {
+            $base = $relationship['assessment_base_minor_units'] ?? null;
+            if (!is_int($base) || $base < 0) {
                 return null;
             }
-            $base += $relationshipBase;
+            // Odměny orgánů se sčítají zvlášť: do základu nepatří, ale u
+            // čtvrtletí předepsaných starým pravidlem se z nich pojistné
+            // odvedlo, takže je potřeba je vyčíslit.
+            if (($relationship['kind'] ?? null) === 'corporate_body') {
+                $corporateBody += $base;
+                continue;
+            }
+            $employment += $base;
         }
     }
 
-    return $base;
+    return ['employment' => $employment, 'corporate_body' => $corporateBody];
 };
 
 $money = static fn (int $minor): string => number_format($minor / 100, 2, ',', ' ') . ' Kč';
 
 $affected = 0;
 $unresolved = 0;
+$underpaid = 0;
+$overpaid = 0;
 $totalDifference = 0;
 $perSupplier = [];
 
@@ -148,13 +168,14 @@ foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
 
     $quarterStart = $source['quarter_start'] ?? null;
     $rate = $source['rate_per_mille'] ?? null;
-    $cappedBase = $source['assessment_base_minor_units'] ?? null;
-    if (!is_string($quarterStart) || !is_string($rate) || !is_int($cappedBase)) {
+    $oldBase = $source['assessment_base_minor_units'] ?? null;
+    if (!is_string($quarterStart) || !is_string($rate) || !is_int($oldBase)) {
         $unresolved++;
         continue;
     }
 
-    $uncappedBase = 0;
+    $correctBase = 0;
+    $corporateBodyBase = 0;
     $complete = true;
     for ($offset = 0; $offset < 3; $offset++) {
         $month = (new DateTimeImmutable($quarterStart))
@@ -165,11 +186,12 @@ foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $complete = false;
             break;
         }
-        $uncappedBase += $base;
+        $correctBase += $base['employment'];
+        $corporateBodyBase += $base['corporate_body'];
     }
     if (!$complete) {
         printf(
-            "tenant %d  %s  NELZE VYČÍSLIT — měsíc čtvrtletí nemá schválený výsledek sociálního pojištění%s",
+            'tenant %d  %s  NELZE VYČÍSLIT — měsíc čtvrtletí nemá schválený výsledek sociálního pojištění%s',
             (int) $row['supplier_id'],
             $quarterStart,
             PHP_EOL,
@@ -177,11 +199,8 @@ foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $unresolved++;
         continue;
     }
-    if ($uncappedBase === $cappedBase) {
-        continue;
-    }
 
-    $shouldBe = $calculator->premiumMinor($uncappedBase, $rate);
+    $shouldBe = $calculator->premiumMinor($correctBase, $rate);
     $difference = $shouldBe - (int) $row['amount_minor'];
     if ($difference === 0) {
         continue;
@@ -189,35 +208,51 @@ foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
 
     $affected++;
     $totalDifference += $difference;
-    $perSupplier[(int) $row['supplier_id']] = ($perSupplier[(int) $row['supplier_id']] ?? 0) + $difference;
+    if ($difference > 0) {
+        $underpaid += $difference;
+    } else {
+        $overpaid += -$difference;
+    }
+    $perSupplier[(int) $row['supplier_id']] =
+        ($perSupplier[(int) $row['supplier_id']] ?? 0) + $difference;
 
     printf(
-        'tenant %d  čtvrtletí od %s  splatnost %s  sazba %s ‰%s',
+        'tenant %d  čtvrtletí od %s  splatnost %s  sazba %s ‰  %s%s',
         (int) $row['supplier_id'],
         $quarterStart,
         (string) $row['due_on'],
         $rate,
+        $difference > 0 ? 'NEDOPLATEK' : 'PŘEPLATEK',
         PHP_EOL,
     );
     printf(
-        '    základ zastropovaný %s → bez maxima %s%s',
-        $money($cappedBase),
-        $money($uncappedBase),
+        '    základ podle starého pravidla %s → správně %s%s',
+        $money($oldBase),
+        $money($correctBase),
         PHP_EOL,
     );
+    // Obě příčiny táhnou opačným směrem, takže samotný rozdíl neřekne, co se
+    // stalo. Bez tohohle řádku by účetní nevěděla, o čem s pojišťovnou mluví.
+    if ($corporateBodyBase > 0) {
+        printf(
+            '    z toho vyloučeny odměny orgánů a příjmy společníků: %s%s',
+            $money($corporateBodyBase),
+            PHP_EOL,
+        );
+    }
     printf(
         '    předepsáno %s → mělo být %s → rozdíl %s%s%s',
         $money((int) $row['amount_minor']),
         $money($shouldBe),
-        $difference > 0 ? '+' : '',
-        $money($difference),
+        $difference > 0 ? '+' : '−',
+        $money(abs($difference)),
         PHP_EOL,
     );
 }
 
 echo PHP_EOL;
 if ($affected === 0 && $unresolved === 0) {
-    echo 'ČISTÉ — žádné čtvrtletí nestojí na zastropovaném základu s odlišným výsledkem.' . PHP_EOL;
+    echo 'ČISTÉ — žádné čtvrtletí nestojí na starém pravidle s odlišným výsledkem.' . PHP_EOL;
     exit(0);
 }
 printf('Dotčených čtvrtletí: %d%s', $affected, PHP_EOL);
@@ -225,10 +260,20 @@ if ($unresolved > 0) {
     printf('Nevyčíslených (chybí podklad): %d%s', $unresolved, PHP_EOL);
 }
 foreach ($perSupplier as $tenant => $difference) {
-    printf('  tenant %d: %s%s', $tenant, $money($difference), PHP_EOL);
+    printf(
+        '  tenant %d: %s %s%s',
+        $tenant,
+        $difference >= 0 ? 'nedoplatek' : 'přeplatek',
+        $money(abs($difference)),
+        PHP_EOL,
+    );
 }
-printf('Celkem: %s%s', $money($totalDifference), PHP_EOL);
+printf('Nedoplatky celkem: %s%s', $money($underpaid), PHP_EOL);
+printf('Přeplatky celkem:  %s%s', $money($overpaid), PHP_EOL);
+printf('Netto: %s%s%s', $totalDifference >= 0 ? '+' : '−', $money(abs($totalDifference)), PHP_EOL);
 echo PHP_EOL;
 echo 'Rozdíl doplňte opravnou revizí dotčeného čtvrtletí a projednejte ho s pojišťovnou.' . PHP_EOL;
-echo 'U nedoplatku § 12 odst. 9 vyhlášky č. 125/1993 Sb. přidává 10 % za každý započatý měsíc prodlení.' . PHP_EOL;
-exit($affected > 0 || $unresolved > 0 ? 1 : 0);
+echo 'Nedoplatek: § 12 odst. 9 vyhlášky č. 125/1993 Sb. ho zvyšuje o 10 % za každý započatý' . PHP_EOL;
+echo 'měsíc prodlení, takže každé čtvrtletí stárne zvlášť a čekáním se prodraží.' . PHP_EOL;
+echo 'Přeplatek: § 12 odst. 6 ho vrací jen na žádost plátce. Sám se nevrátí.' . PHP_EOL;
+exit(1);
