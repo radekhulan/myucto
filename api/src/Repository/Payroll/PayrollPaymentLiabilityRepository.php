@@ -461,6 +461,7 @@ final class PayrollPaymentLiabilityRepository
                 $row,
                 'source_snapshot_hash',
             ),
+            'source_snapshot_json' => self::string($row, 'source_snapshot_json'),
             'idempotency_key_hash' => $idempotencyHash,
         ];
     }

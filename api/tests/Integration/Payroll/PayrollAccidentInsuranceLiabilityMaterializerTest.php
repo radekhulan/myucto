@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
@@ -298,6 +299,93 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         self::assertArrayNotHasKey('assessment_base_minor_units', $source);
     }
 
+    /**
+     * Odměna za výkon funkce a příjem společníka do základu zákonného pojištění
+     * odpovědnosti nepatří — pojištěni jsou zaměstnanci pro případ pracovního
+     * úrazu a nemoci z povolání a Kooperativa je ze základu vylučuje, přestože
+     * se za ně sociální pojistné odvádí. Celofiremní součty ve výsledku je
+     * obsahují, takže tenhle test zároveň hlídá, že se z nich nebere.
+     */
+    public function testCorporateBodyRelationshipIsExcludedFromLiabilityBase(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00, 20_000_00, 90_000_00);
+        $this->createMonth('2026-02-01', 30_000_00, 30_000_00, 90_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00, 50_000_00, 90_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+
+        // Jen zaměstnanecký vztah: 100 000 Kč × 4,20 ‰ = 420 Kč. S odměnami
+        // orgánu by vyšlo 370 000 Kč × 4,20 ‰ = 1 554 Kč.
+        self::assertSame(42_000, (int) $this->liability($result['liability_ids'][0])['amount_minor']);
+    }
+
+    /**
+     * Opravná revize NAD závazkem v aktuálním schématu. Dokud řetěz oprav
+     * uznával jen staré schéma, skončila první oprava kteréhokoli nově
+     * předepsaného čtvrtletí výjimkou — a to je jediná cesta, jak se rozdíl
+     * v pojistném dostane k pojišťovně.
+     */
+    public function testCorrectionRevisionChainsOnCurrentSourceSchema(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00);
+        $first = $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+        self::assertSame(1, $first['created_count']);
+
+        // Oprava března nahoru: 50 000 → 100 000 Kč, čtvrtletí tedy 150 000 Kč.
+        $correctionId = $this->createCorrectionRevision('2026-03-01', $marchRevisionId, 100_000_00);
+        $correction = $this->materializer->materialize(
+            $this->supplierId,
+            $correctionId,
+            $this->actorId,
+        );
+
+        self::assertSame(1, $correction['created_count']);
+        $row = $this->liability($correction['liability_ids'][0]);
+        self::assertSame('outgoing', $row['direction']);
+        // Doměřuje se jen rozdíl: čtvrtletí ze 100 000 na 150 000 Kč, tedy
+        // 630 − 420 = 210 Kč.
+        self::assertSame(21_000, (int) $row['amount_minor']);
+        self::assertSame($first['liability_ids'][0], (int) $row['previous_liability_id']);
+    }
+
+    /**
+     * Čtvrtletí předepsané ze zastropovaného základu se nepřepisuje na místě -
+     * hláška musí pojmenovat důvod a poslat účetní na opravnou revizi. Obecné
+     * "idempotentní replay nesouhlasí" by ji poslalo hledat rozbitý zápis.
+     */
+    public function testQuarterBuiltOnCappedBaseExplainsItselfInsteadOfGenericReplayError(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00);
+
+        // Závazek v podobě, jakou nesou čtvrtletí předepsaná starým pravidlem.
+        // Vkládá se přímo: závazky jsou v databázi neměnné (trigger) a
+        // materializér staré schéma už nikdy nezapíše.
+        $this->insertCappedBaseLiability($marchRevisionId, '2026-01-01');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessageMatches('/zastropovaného|opravnou revizí/u');
+        $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+    }
+
     public function testAppliesMinimumQuarterlyPremiumWhenComputedAmountIsLower(): void
     {
         $this->rates->insert($this->supplierId, 'KOOP', '0.10', '2026-01-01', $this->actorId);
@@ -348,6 +436,141 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         );
     }
 
+    /**
+     * Opravná revize měsíce: nové revision_no, `correction`, ukazatel na
+     * předchozí revizi a přepočtený vyměřovací základ. Běh se přepne na novou
+     * revizi, protože materializér bere jen tu aktuální schválenou.
+     */
+    private function createCorrectionRevision(
+        string $periodStart,
+        int $previousRevisionId,
+        int $participatingAssessmentBaseMinor,
+    ): int {
+        $pdo = $this->db->pdo();
+        $statement = $pdo->prepare(
+            'SELECT id, payment_date, current_revision_no FROM payroll_runs
+              WHERE supplier_id = ? AND period_start = ?',
+        );
+        $statement->execute([$this->supplierId, $periodStart]);
+        $run = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($run);
+        $runId = (int) $run['id'];
+        $revisionNo = (int) $run['current_revision_no'] + 1;
+
+        $input = json_encode([
+            'schema_version' => 'payroll-run-input.v2',
+            'supplier_id' => $this->supplierId,
+            'period_start' => $periodStart,
+            'payment_date' => $run['payment_date'],
+            'office_id' => $this->officeId,
+            'people' => [],
+            'correction_of' => $previousRevisionId,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $result = '{"schema_version":"payroll-run-result.v2"}';
+        $pdo->prepare(
+            'INSERT INTO payroll_run_revisions
+                (supplier_id, run_id, revision_no, previous_revision_id,
+                 revision_kind, status, schema_version,
+                 ruleset_manifest_hash, input_snapshot_json,
+                 input_snapshot_hash, result_snapshot_json,
+                 result_snapshot_hash, idempotency_key_hash, approved_at)
+             VALUES (?, ?, ?, ?, "correction", "approved",
+                     "payroll-run-input.v2", ?, ?, ?, ?, ?, ?, NOW())',
+        )->execute([
+            $this->supplierId,
+            $runId,
+            $revisionNo,
+            $previousRevisionId,
+            str_repeat('a', 64),
+            $input,
+            hash('sha256', $input),
+            $result,
+            hash('sha256', $result),
+            hash('sha256', "synthetic-accident-correction:{$runId}:{$revisionNo}", true),
+        ]);
+        $revisionId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'UPDATE payroll_runs SET current_revision_no = ?
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$revisionNo, $this->supplierId, $runId]);
+
+        $socialResult = [
+            'calculation_date' => (new \DateTimeImmutable($periodStart))
+                ->modify('last day of this month')->format('Y-m-d'),
+            'status' => 'calculated',
+            'participating_assessment_base_minor_units' => $participatingAssessmentBaseMinor,
+            'capped_assessment_base_minor_units' => $participatingAssessmentBaseMinor,
+            'employee_contribution_minor_units' => 0,
+            'employer_contribution_before_discount_minor_units' => 0,
+            'part_time_discount_assessment_base_minor_units' => 0,
+            'part_time_discount_minor_units' => 0,
+            'employer_contribution_minor_units' => 0,
+            'people' => [[
+                'person_id' => 'p1',
+                'relationships' => [[
+                    'relationship_id' => 'r-employment',
+                    'kind' => 'employment',
+                    'participation' => ['status' => 'participates'],
+                    'assessment_base_minor_units' => $participatingAssessmentBaseMinor,
+                    'capped_assessment_base_minor_units' => $participatingAssessmentBaseMinor,
+                ]],
+            ]],
+            'issues' => [],
+            'ruleset_id' => 'cz-social-2026',
+            'ruleset_hash' => str_repeat('b', 64),
+        ];
+        (new PayrollStatutoryResultRepository($this->db))->store(
+            $this->supplierId,
+            $revisionId,
+            'social_insurance',
+            'payroll-social-result.v1',
+            'calculated',
+            'cz-social-2026',
+            str_repeat('b', 64),
+            json_decode($input, true, flags: JSON_THROW_ON_ERROR),
+            $socialResult,
+            [],
+            $this->actorId,
+        );
+
+        return $revisionId;
+    }
+
+    /**
+     * Vloží závazek se schématem v1 (zastropovaný základ) rovnou do databáze.
+     *
+     * @param string $quarterStart první měsíc čtvrtletí
+     */
+    private function insertCappedBaseLiability(int $revisionId, string $quarterStart): void
+    {
+        $reference = 'accident-insurance:quarter:' . substr($quarterStart, 0, 7);
+        $source = CanonicalJson::encode([
+            'schema_reference' => 'payroll-payment-accident-insurance-source.v1',
+            'assessment_base_minor_units' => 60_000_00,
+            'quarter_start' => $quarterStart,
+            'rate_per_mille' => '4.20',
+        ]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_payment_liabilities
+                (supplier_id, revision_id, employee_id, liability_reference,
+                 liability_kind, direction, recipient_reference, due_on,
+                 currency_code, amount_minor, previous_liability_id,
+                 source_snapshot_json, source_snapshot_hash,
+                 idempotency_key_hash, created_by)
+             VALUES (?, ?, NULL, ?, "statutory_insurance", "outgoing",
+                     "institution:KOOP", "2026-04-30", "CZK", 25200, NULL,
+                     ?, ?, ?, ?)',
+        )->execute([
+            $this->supplierId,
+            $revisionId,
+            $reference,
+            $source,
+            hash('sha256', $source),
+            hash('sha256', "synthetic-capped-liability:{$revisionId}", true),
+            $this->actorId,
+        ]);
+    }
+
     private function revisionIdFor(string $periodStart): int
     {
         $statement = $this->db->pdo()->prepare(
@@ -375,6 +598,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         string $periodStart,
         int $participatingAssessmentBaseMinor,
         ?int $cappedAssessmentBaseMinor = null,
+        int $corporateBodyAssessmentBaseMinor = 0,
     ): int {
         $cappedAssessmentBaseMinor ??= $participatingAssessmentBaseMinor;
         $pdo = $this->db->pdo();
@@ -422,13 +646,37 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             'calculation_date' => (new \DateTimeImmutable($periodStart))
                 ->modify('last day of this month')->format('Y-m-d'),
             'status' => 'calculated',
-            'participating_assessment_base_minor_units' => $participatingAssessmentBaseMinor,
-            'capped_assessment_base_minor_units' => $cappedAssessmentBaseMinor,
+            'participating_assessment_base_minor_units' =>
+                $participatingAssessmentBaseMinor + $corporateBodyAssessmentBaseMinor,
+            'capped_assessment_base_minor_units' =>
+                $cappedAssessmentBaseMinor + $corporateBodyAssessmentBaseMinor,
             'employee_contribution_minor_units' => 0,
             'employer_contribution_before_discount_minor_units' => 0,
             'part_time_discount_assessment_base_minor_units' => 0,
             'part_time_discount_minor_units' => 0,
             'employer_contribution_minor_units' => 0,
+            // Materializér nesmí brát celofiremní součty výše — sčítá si vztahy
+            // sám, aby mohl vynechat corporate_body. Proto tu musí být obojí
+            // a odměna orgánu je ZÁMĚRNĚ započtená i v celofiremních číslech.
+            'people' => [[
+                'person_id' => 'p1',
+                'relationships' => [
+                    [
+                        'relationship_id' => 'r-employment',
+                        'kind' => 'employment',
+                        'participation' => ['status' => 'participates'],
+                        'assessment_base_minor_units' => $participatingAssessmentBaseMinor,
+                        'capped_assessment_base_minor_units' => $cappedAssessmentBaseMinor,
+                    ],
+                    ...($corporateBodyAssessmentBaseMinor > 0 ? [[
+                        'relationship_id' => 'r-corporate-body',
+                        'kind' => 'corporate_body',
+                        'participation' => ['status' => 'participates'],
+                        'assessment_base_minor_units' => $corporateBodyAssessmentBaseMinor,
+                        'capped_assessment_base_minor_units' => $corporateBodyAssessmentBaseMinor,
+                    ]] : []),
+                ],
+            ]],
             'issues' => [],
             'ruleset_id' => 'cz-social-2026',
             'ruleset_hash' => str_repeat('b', 64),

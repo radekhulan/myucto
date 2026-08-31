@@ -37,6 +37,29 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
 {
     private const LIABILITY_KIND = 'statutory_insurance';
 
+    /**
+     * Druh vztahu, který do základu zákonného pojištění odpovědnosti nepatří.
+     * Projekt sem mapuje příjem společníka i odměnu za výkon funkce.
+     */
+    private const EXCLUDED_RELATIONSHIP_KIND = 'corporate_body';
+
+    /** Otisk zdroje ze zastropovaného základu — předchází opravě výkladu § 15a. */
+    private const SOURCE_SCHEMA_CAPPED = 'payroll-payment-accident-insurance-source.v1';
+
+    /** Aktuální otisk: základ bez ročního maxima, s vlastním názvem. */
+    private const SOURCE_SCHEMA_CURRENT = 'payroll-payment-accident-insurance-source.v2';
+
+    /**
+     * Schémata, která smí nést dřívější závazek v řetězu oprav. Musí tu zůstat
+     * i to staré — opravná revize se dělá i po letech.
+     *
+     * @var list<string>
+     */
+    private const SOURCE_SCHEMA_REFERENCES = [
+        self::SOURCE_SCHEMA_CAPPED,
+        self::SOURCE_SCHEMA_CURRENT,
+    ];
+
     public function __construct(
         private readonly PayrollPaymentLiabilityRepository $liabilities,
         private readonly PayrollStatutoryResultRepository $statutoryResults,
@@ -129,7 +152,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 // vlastní název, aby z otisku bylo poznat, kterým pravidlem
                 // závazek vznikl. Starší závazky s klíčem `assessment_base_…`
                 // stojí na zastropovaném základu.
-                'schema_reference' => 'payroll-payment-accident-insurance-source.v2',
+                'schema_reference' => self::SOURCE_SCHEMA_CURRENT,
                 'run_id' => $revision['run_id'],
                 'revision_id' => $revisionId,
                 'revision_no' => $revision['revision_no'],
@@ -272,8 +295,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         }
 
         return is_array($source)
-            && ($source['schema_reference'] ?? null)
-                === 'payroll-payment-accident-insurance-source.v1';
+            && ($source['schema_reference'] ?? null) === self::SOURCE_SCHEMA_CAPPED;
     }
 
     /**
@@ -282,9 +304,12 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
      * pojištění — nepočítá se znovu vlastní cestou a nikdy se nebere z hrubé
      * mzdy, která započitatelnému základu odpovídat nemusí.
      *
-     * ⚠️ NENÍ to základ sociálního pojištění. Bere se
-     * `participating_assessment_base_minor_units`, tedy základ PŘED ročním
-     * maximem. § 12 odst. 2 vyhlášky č. 125/1993 Sb. přebírá ze zákona
+     * ⚠️ NENÍ to základ sociálního pojištění, a to ze dvou nezávislých důvodů:
+     * bere se PŘED ročním maximem a bez vztahů druhu `corporate_body`
+     * (viz {@see self::sumLiabilityRelationships()}). Celofiremní součet ve
+     * výsledku se proto použít nedá, ani ten nezastropovaný.
+     *
+     * § 12 odst. 2 vyhlášky č. 125/1993 Sb. přebírá ze zákona
      * č. 589/1992 Sb. jen to, KTERÉ příjmy do základu patří (§ 5 odst. 1
      * písm. a) — roční maximum je samostatné omezení až v § 15a a součástí
      * definice základu není. Shodně to vykládají Kooperativa i Generali Česká
@@ -342,11 +367,64 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         ) {
             throw new \DomainException('Otisk výsledku sociálního pojištění nesouhlasí.');
         }
-        $base = $root['participating_assessment_base_minor_units'] ?? null;
-        if (!is_int($base) || $base < 0) {
-            throw new \DomainException(
-                'Vyměřovací základ zákonného pojištění odpovědnosti není platné číslo.',
-            );
+        return $this->sumLiabilityRelationships($root, $monthStart);
+    }
+
+    /**
+     * Sečte základ přes JEDNOTLIVÉ vztahy, ne přes celofiremní součet.
+     *
+     * Celofiremní `participating_assessment_base_minor_units` zahrnuje i vztahy
+     * druhu `corporate_body`, kam projekt mapuje příjem společníka a odměnu za
+     * výkon funkce. Ty do základu zákonného pojištění odpovědnosti nepatří:
+     * pojištěni jsou zaměstnanci pro případ pracovního úrazu a nemoci
+     * z povolání, a Kooperativa je jako provozovatel pojištění ze základu
+     * výslovně vylučuje, přestože se za ně sociální pojistné odvádí.
+     *
+     * Bere se `assessment_base_minor_units` vztahu, tedy hodnota PŘED ročním
+     * maximem podle § 15a - to se na tohle pojištění nevztahuje. Vztahy, které
+     * se sociálního pojištění neúčastní, se nepočítají stejně jako u
+     * celofiremního součtu.
+     *
+     * @param array<string,mixed> $root
+     */
+    private function sumLiabilityRelationships(array $root, string $monthStart): int
+    {
+        $people = $root['people'] ?? null;
+        if (!is_array($people)) {
+            throw new \DomainException(sprintf(
+                'Výsledek sociálního pojištění za %s neobsahuje pracovní vztahy.',
+                $monthStart,
+            ));
+        }
+
+        $base = 0;
+        foreach ($people as $person) {
+            $relationships = is_array($person) ? ($person['relationships'] ?? null) : null;
+            if (!is_array($relationships)) {
+                continue;
+            }
+            foreach ($relationships as $relationship) {
+                if (!is_array($relationship)) {
+                    continue;
+                }
+                if (($relationship['kind'] ?? null) === self::EXCLUDED_RELATIONSHIP_KIND) {
+                    continue;
+                }
+                $participation = $relationship['participation'] ?? null;
+                if (!is_array($participation)
+                    || ($participation['status'] ?? null) !== 'participates'
+                ) {
+                    continue;
+                }
+                $relationshipBase = $relationship['assessment_base_minor_units'] ?? null;
+                if (!is_int($relationshipBase) || $relationshipBase < 0) {
+                    throw new \DomainException(sprintf(
+                        'Vyměřovací základ pracovního vztahu za %s není platné číslo.',
+                        $monthStart,
+                    ));
+                }
+                $base += $relationshipBase;
+            }
         }
 
         return $base;
@@ -476,9 +554,15 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 continue;
             }
             $source = json_decode($row['source_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            // Obě schémata, ne jen v1. Řetěz oprav běží přes roky a po přechodu
+            // na v2 by jinak PRVNÍ oprava jakéhokoli nově předepsaného čtvrtletí
+            // skončila výjimkou — dřívějším závazkem už by byl v2.
             if (!is_array($source)
-                || ($source['schema_reference'] ?? null)
-                    !== 'payroll-payment-accident-insurance-source.v1'
+                || !in_array(
+                    $source['schema_reference'] ?? null,
+                    self::SOURCE_SCHEMA_REFERENCES,
+                    true,
+                )
                 || CanonicalJson::encode($source) !== $row['source_snapshot_json']
                 || !hash_equals($row['source_snapshot_hash'], hash('sha256', $row['source_snapshot_json']))
             ) {

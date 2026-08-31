@@ -92,11 +92,37 @@ $monthBase = static function (PDO $pdo, int $supplierId, string $monthStart): ?i
     } catch (JsonException) {
         return null;
     }
-    $base = is_array($snapshot)
-        ? ($snapshot['participating_assessment_base_minor_units'] ?? null)
-        : null;
+    if (!is_array($snapshot) || !is_array($snapshot['people'] ?? null)) {
+        return null;
+    }
 
-    return is_int($base) && $base >= 0 ? $base : null;
+    // Stejné pravidlo jako v materializéru: základ vztahu před ročním maximem,
+    // jen účastnící se vztahy a bez druhu corporate_body (příjem společníka a
+    // odměna za výkon funkce do základu tohoto pojištění nepatří). Kdyby se tu
+    // sčítalo jinak, vyčíslený rozdíl by neodpovídal tomu, co appka předepíše.
+    $base = 0;
+    foreach ($snapshot['people'] as $person) {
+        $relationships = is_array($person) ? ($person['relationships'] ?? null) : null;
+        if (!is_array($relationships)) {
+            continue;
+        }
+        foreach ($relationships as $relationship) {
+            if (!is_array($relationship) || ($relationship['kind'] ?? null) === 'corporate_body') {
+                continue;
+            }
+            $participation = $relationship['participation'] ?? null;
+            if (!is_array($participation) || ($participation['status'] ?? null) !== 'participates') {
+                continue;
+            }
+            $relationshipBase = $relationship['assessment_base_minor_units'] ?? null;
+            if (!is_int($relationshipBase) || $relationshipBase < 0) {
+                return null;
+            }
+            $base += $relationshipBase;
+        }
+    }
+
+    return $base;
 };
 
 $money = static fn (int $minor): string => number_format($minor / 100, 2, ',', ' ') . ' Kč';
