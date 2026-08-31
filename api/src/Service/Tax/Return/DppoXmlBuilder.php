@@ -227,7 +227,23 @@ final class DppoXmlBuilder
         $vetaD->setAttribute('dokument', 'DP9');    // fixní
         $vetaD->setAttribute('typ_dapdpp', (string) ($meta['typ_dapdpp'] ?? 'A'));   // A = za zdaňovací období
         $vetaD->setAttribute('dapdpp_forma', (string) ($meta['dapdpp_forma'] ?? 'B')); // B = řádné
-        $vetaD->setAttribute('typ_popldpp', (string) ($meta['typ_popldpp'] ?? '1'));  // 1 = ostatní poplatník
+        // Typ poplatníka (§ 17): 1 = ostatní, tedy běžná obchodní korporace. Ostatní kódy
+        // (veřejně prospěšný poplatník, daňový nerezident, investiční fond, penzijní
+        // společnost, nositel investiční pobídky) aplikace neeviduje a nepodporuje — viz
+        // private/DANE-PODPORA-HRANICE.md, kategorie C. Kód je přebitelný z `$meta`, ale
+        // nikdo ho zatím nepředává, takže se u nestandardního poplatníka musí ověřit ručně.
+        $typPoplatnika = (string) ($meta['typ_popldpp'] ?? '1');
+        $vetaD->setAttribute('typ_popldpp', $typPoplatnika);
+        // Jediný signál, který z dat máme: sídlo mimo ČR. Nerezident má vlastní kód 2
+        // a přiznání se mu počítá jinak, takže tiše tvrdit „ostatní poplatník" by bylo
+        // nepravdivé. Nepřepisujeme to automaticky — sídlo v cizině samo o sobě
+        // nerezidenta nedělá (rozhoduje místo vedení podle § 17 odst. 3).
+        $seat = strtoupper(trim((string) ($supplier['country_iso2'] ?? 'CZ')));
+        if ($typPoplatnika === '1' && $seat !== '' && $seat !== 'CZ') {
+            $warnings[] = 'Sídlo poplatníka je mimo ČR (' . $seat . '), ale v přiznání je uvedený '
+                . 'typ poplatníka „ostatní" (kód 1). Daňový nerezident má kód 2 a jiný rozsah '
+                . 'zdanění (§ 17 odst. 4) — ověřte, zda je poplatník daňovým rezidentem ČR.';
+        }
         // typ_zo dle §21a: A = kalendářní rok, B = hospodářský rok, D = období > 12 měsíců.
         // Velké písmeno dle reálně podaného přiznání (EPO konvence) — malé „a" bylo chybně.
         $vetaD->setAttribute('typ_zo', (string) ($meta['typ_zo'] ?? 'A'));

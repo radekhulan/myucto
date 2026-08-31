@@ -180,4 +180,33 @@ final class DppoXmlBuilderVetaEAndRTest extends TestCase
         self::assertGreaterThan($vetaSPos, $vetaRPos);
         self::assertGreaterThan($vetaRPos, $vetaUAPos);
     }
+
+    /**
+     * Sídlo mimo ČR neznamená automaticky nerezidenta (rozhoduje místo vedení podle
+     * § 17 odst. 3), ale tiše tvrdit „ostatní poplatník" u zahraničního sídla je
+     * nepravdivé. Kód se proto nepřepisuje, jen se varuje.
+     */
+    public function testForeignSeatWarnsAboutTaxpayerType(): void
+    {
+        $supplier = $this->sampleSupplier();
+        $supplier['country_iso2'] = 'SK';
+
+        $result = (new DppoXmlBuilder())->build($supplier, 2025, $this->calc(), []);
+
+        self::assertStringContainsString('typ_popldpp="1"', $result['xml']);
+        self::assertNotEmpty(array_filter(
+            $result['warnings'],
+            static fn (string $w): bool => str_contains($w, 'nerezident'),
+        ));
+    }
+
+    public function testCzechSeatDoesNotWarn(): void
+    {
+        $result = (new DppoXmlBuilder())->build($this->sampleSupplier(), 2025, $this->calc(), []);
+
+        self::assertSame([], array_values(array_filter(
+            $result['warnings'],
+            static fn (string $w): bool => str_contains($w, 'nerezident'),
+        )));
+    }
 }
