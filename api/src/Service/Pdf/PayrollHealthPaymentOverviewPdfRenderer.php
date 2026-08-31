@@ -4,18 +4,35 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Pdf;
 
-use DragonOfMercy\PhpPdf\Form\Fill\FormFieldInfo;
-use DragonOfMercy\PhpPdf\Form\Fill\FormFieldType;
-use DragonOfMercy\PhpPdf\PdfEditor;
-use MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthPaymentOverviewPdfTemplateProvider;
-use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthOfficialFormProvider;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormCatalog;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormDecision;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPayload;
-use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPdfTemplateProvider;
 
+/**
+ * Přehled o platbě pojistného zaměstnavatele (PPZ) v PDF.
+ *
+ * Stejné rozhodování jako u hromadného oznámení
+ * ({@see PayrollHealthBulkNotificationPdfRenderer}) a stejný vyplňovač —
+ * jednotné vydání tiskopisu 2026 nese pro PPZ číslo `UNI 76.51/2026`
+ * a jména polí přesně podle XDP šablony (`ZamNaz`, `ObdHla`, `VymZak`, …).
+ *
+ * ⚠️ Do 2026 se tenhle tiskopis vyplňoval jako AcroForm: hodnoty se zapsaly
+ * do polí a generátor vzhledu je vykreslil. Kontrola po zápisu porovnávala
+ * `/V`, takže vypadala zeleně — jenže vložené písmo tiskopisu je WinAnsi,
+ * takže z „Řepařská" byla na papíře „?epa?ská". Proto se dnes hodnoty kreslí
+ * (viz {@see HealthOfficialFormFiller}) a proti komolení stojí test, který
+ * vytěžuje text z hotového PDF.
+ */
 final class PayrollHealthPaymentOverviewPdfRenderer extends ReportPdfRendererBase
 {
+    private const FORM_ID = CachedHealthOfficialFormProvider::FORM_PAYMENT_OVERVIEW;
+
     public function __construct(
-        private readonly ?HealthPaymentOverviewPdfTemplateProvider $templates = null,
+        private readonly ?HealthOfficialFormCatalog $forms = null,
+        private readonly ?HealthOfficialFormProvider $templates = null,
+        private readonly ?HealthOfficialFormFiller $filler = null,
     ) {}
 
     public function render(array $data): string
@@ -42,13 +59,24 @@ final class PayrollHealthPaymentOverviewPdfRenderer extends ReportPdfRendererBas
         return $mpdf->Output('', 'S');
     }
 
+    /** Použije se u tohohle přehledu úřední tiskopis? A když ne, proč. */
+    public function decide(string $insurerCode): HealthOfficialFormDecision
+    {
+        return ($this->forms ?? new HealthOfficialFormCatalog())->decide(
+            $insurerCode,
+            self::FORM_ID,
+            1,
+        );
+    }
+
     public function renderPayload(
         HealthPaymentOverviewPayload $payload,
         ?string $insurerName,
         string $filledOn,
     ): string {
-        if ($payload->insurerCode === '111') {
-            return $this->renderOfficialVzpForm($payload, $filledOn);
+        $decision = $this->decide($payload->insurerCode);
+        if ($decision->usesOfficialForm()) {
+            return $this->renderOfficialForm($payload, $filledOn);
         }
 
         return $this->render([
@@ -63,6 +91,7 @@ final class PayrollHealthPaymentOverviewPdfRenderer extends ReportPdfRendererBas
             'contribution_czk' => $payload->contributionCzk,
             'internal_reference' => $payload->internalReference,
             'filled_on' => $filledOn,
+            'official_form_reason' => $decision->reason,
             'insurer_short_name' => match ($payload->insurerCode) {
                 '209' => 'ZPŠ',
                 '211' => 'ZP MV ČR',
@@ -74,102 +103,54 @@ final class PayrollHealthPaymentOverviewPdfRenderer extends ReportPdfRendererBas
 
     public function templateReference(string $insurerCode): string
     {
-        return $insurerCode === '111'
-            ? 'vzp-ppz:' . CachedHealthPaymentOverviewPdfTemplateProvider::VZP_SHA256
-            : 'payroll-health-payment-overview.v1:' . $insurerCode;
+        if (!$this->decide($insurerCode)->usesOfficialForm()) {
+            return 'payroll-health-payment-overview.v2:' . $insurerCode;
+        }
+
+        return ($this->templates ?? new CachedHealthOfficialFormProvider())
+            ->form(self::FORM_ID)
+            ->reference();
     }
 
-    private function renderOfficialVzpForm(
+    private function renderOfficialForm(
         HealthPaymentOverviewPayload $payload,
         string $filledOn,
     ): string {
-        if ($payload->assessmentBaseMinorUnits % 100 !== 0) {
-            throw new HealthNotificationException(
-                'zp_vzp_assessment_base_not_whole_crowns',
-                'Oficiální formulář VZP přijímá vyměřovací základ v celých korunách.',
-            );
-        }
+        $form = ($this->templates ?? new CachedHealthOfficialFormProvider())
+            ->form(self::FORM_ID);
         $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $filledOn);
         if ($date === false || $date->format('Y-m-d') !== $filledOn) {
-            throw new HealthNotificationException(
-                'zp_vzp_filled_on_invalid',
-                'Datum vyplnění formuláře VZP není platné.',
+            throw new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthNotificationException(
+                'zp_official_form_filled_on_invalid',
+                'Datum vyplnění úředního tiskopisu není platné.',
             );
         }
+        $employer = $payload->employer;
 
-        $template = ($this->templates ?? new CachedHealthPaymentOverviewPdfTemplateProvider())
-            ->vzpPaymentOverview();
-        if (!str_starts_with($template->bytes, '%PDF-')
-            || !hash_equals($template->sha256, hash('sha256', $template->bytes))
-        ) {
-            throw new HealthNotificationException(
-                'zp_vzp_pdf_template_integrity_failed',
-                'Oficiální formulář VZP neprošel kontrolou integrity.',
-            );
-        }
-
-        try {
-            $editor = PdfEditor::fromBytes($template->bytes);
-            $fields = $editor->formFields();
-            $this->assertOfficialVzpFields($fields);
-            $values = [
-                $payload->overviewKind === HealthPaymentOverviewPayload::KIND_CORRECTIVE,
-                $payload->employer->city,
-                $payload->employer->normalizedPhone(),
-                $payload->employer->name,
-                $payload->employer->street,
-                $payload->employer->houseNumber,
-                $payload->employer->payerNumber,
-                $payload->employer->postalCode,
-                $date->format('j.n.Y'),
-                (string) $payload->employeeCount,
-                (string) intdiv($payload->assessmentBaseMinorUnits, 100),
-                (string) $payload->contributionCzk,
-                sprintf('%02d/%04d', $payload->month, $payload->year),
-                $payload->overviewKind === HealthPaymentOverviewPayload::KIND_REGULAR,
-            ];
-            foreach ($fields as $index => $field) {
-                $editor->setField($field->name, $values[$index], force: true);
-            }
-            $pdf = $editor->output();
-            $filledFields = PdfEditor::fromBytes($pdf)->formFields();
-            $this->assertOfficialVzpFields($filledFields);
-            foreach ($values as $index => $value) {
-                if ($filledFields[$index]->value !== $value) {
-                    throw new \RuntimeException('Vyplněná hodnota formuláře se po uložení změnila.');
-                }
-            }
-        } catch (HealthNotificationException $e) {
-            throw $e;
-        } catch (\Throwable) {
-            throw new HealthNotificationException(
-                'zp_vzp_pdf_form_invalid',
-                'Oficiální formulář VZP se nepodařilo bezpečně vyplnit a ověřit.',
-            );
-        }
-
-        return $pdf;
-    }
-
-    /** @param list<FormFieldInfo> $fields */
-    private function assertOfficialVzpFields(array $fields): void
-    {
-        if (count($fields) !== 14) {
-            throw new HealthNotificationException(
-                'zp_vzp_pdf_form_changed',
-                'Struktura oficiálního formuláře VZP se změnila.',
-            );
-        }
-        foreach ($fields as $index => $field) {
-            $expected = $index === 0 || $index === 13
-                ? FormFieldType::Checkbox
-                : FormFieldType::Text;
-            if ($field->type !== $expected) {
-                throw new HealthNotificationException(
-                    'zp_vzp_pdf_form_changed',
-                    'Struktura oficiálního formuláře VZP se změnila.',
-                );
-            }
-        }
+        return ($this->filler ?? new HealthOfficialFormFiller())->fill(
+            $form,
+            [
+                'ZamNaz' => $employer->name,
+                'ZamUli' => $employer->street,
+                'ZamCpCo' => $employer->houseNumber,
+                'ZamIC' => $employer->payerNumber,
+                'ZamPSC' => $employer->postalCode,
+                'ZamObe' => $employer->city,
+                'ZamTel' => $employer->normalizedPhone(),
+                'ObdHla' => sprintf('%02d/%04d', $payload->month, $payload->year),
+                'PocZam' => (string) $payload->employeeCount,
+                // Vyměřovací základ se tiskne přesně tak, jak jde do datové
+                // věty, jen s desetinnou čárkou — halíře se nezaokrouhlují.
+                'VymZak' => str_replace('.', ',', $payload->assessmentBaseDecimal()),
+                'SumPoj' => (string) $payload->contributionCzk,
+                'DatVyp' => $date->format('d.m.Y'),
+            ],
+            [
+                $payload->overviewKind === HealthPaymentOverviewPayload::KIND_CORRECTIVE
+                    ? 'Typ:/1'
+                    : 'Typ:/0',
+            ],
+            'Přehled o platbě pojistného zaměstnavatele',
+        );
     }
 }

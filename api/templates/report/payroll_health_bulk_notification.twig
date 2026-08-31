@@ -16,6 +16,7 @@
     table.changes td { font-size: 9pt; padding: 1.5mm 2mm; }
     table.changes tr:nth-child(even) td { background: #f8f8f8; }
     .notice { margin-top: 8mm; padding: 3mm; background: #f4f4f4; font-size: 8.5pt; color: #555; }
+    .reason { margin-top: 6mm; padding: 3mm; border-left: 1.2mm solid #8a5a00; background: #fdf6e6; font-size: 8.5pt; color: #4a3300; }
     .signature { height: 22mm; border: 0.5px solid #aaa; padding: 2mm; color: #777; }
     .footer { margin-top: 5mm; font-size: 8pt; color: #777; }
 </style>
@@ -68,6 +69,12 @@
             <td class="signature">Jméno, podpis nebo elektronické potvrzení odesílatele</td>
         </tr>
     </table>
+
+    {% if official_form_reason %}
+    <div class="reason">
+        <strong>Proč to není úřední tiskopis:</strong> {{ official_form_reason }}
+    </div>
+    {% endif %}
 
     <div class="notice">
         Vytěžitelný PDF podklad vytvořený ze stejné zmrazené datové věty jako XML hromadného oznámení.

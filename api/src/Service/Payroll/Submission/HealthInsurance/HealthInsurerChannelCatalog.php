@@ -109,10 +109,11 @@ final class HealthInsurerChannelCatalog
                 automatedDispatchDocumented: false,
                 undocumentedReasonCode:
                     self::REASON_TRANSPORT_UNDOCUMENTED,
-                note: 'VZP zveřejňuje aktuální formulář i XDP šablonu pro '
-                    . 'hromadné vyplnění. Pro datovou schránku MyÚčto '
-                    . 'vyplní přímo připnutý oficiální PDF formulář a před '
-                    . 'odesláním ověří jeho integritu i hodnoty polí.',
+                note: 'VZP zveřejňuje jednotné vydání tiskopisů 2026 '
+                    . '(UNI 73.51 a UNI 76.51) i XDP šablonu pro hromadné '
+                    . 'vyplnění z účetních systémů. Pro datovou schránku '
+                    . 'MyÚčto vyplní přímo připnutý úřední tiskopis a jeho '
+                    . 'integritu ověří proti připnutému otisku.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '201',
@@ -126,8 +127,9 @@ final class HealthInsurerChannelCatalog
                 undocumentedReasonCode:
                     self::REASON_PORTAL_GATEWAY_ON_REQUEST,
                 note: 'VoZP výslovně umožňuje podání datovou schránkou '
-                    . 'a zveřejňuje formulář i XDP šablonu. MyÚčto pro '
-                    . 'ISDS připraví strojově čitelné PDF.',
+                    . 'a čísluje své tiskopisy 73.51 a 76.51 stejně jako '
+                    . 'jednotné vydání 2026; XDP šablonu zveřejňuje shodnou '
+                    . 's VZP. MyÚčto pro ISDS vyplní tentýž úřední tiskopis.',
             ),
             new HealthInsurerChannel(
                 insurerCode: '205',

@@ -1359,6 +1359,21 @@ onMounted(() => {
           </div>
         </dl>
         <p
+          v-if="preparedBulk.official_form"
+          class="mt-3 rounded-lg border border-neutral-300 bg-white p-3 text-sm text-neutral-700"
+          data-test="health-prepare-bulk-official-form"
+        >
+          <span class="font-medium text-neutral-900">
+            {{ preparedBulk.official_form.used
+              ? t('payroll.health_notifications.prepare_bulk.official_form_used')
+              : t('payroll.health_notifications.prepare_bulk.official_form_own') }}
+          </span>
+          —
+          {{ preparedBulk.official_form.used
+            ? t('payroll.health_notifications.prepare_bulk.official_form_used_hint')
+            : preparedBulk.official_form.reason }}
+        </p>
+        <p
           v-if="downloadBulkError"
           class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
           role="alert"

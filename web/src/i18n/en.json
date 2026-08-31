@@ -6890,7 +6890,10 @@
         "download": "Download HOZ",
         "downloading": "Downloading…",
         "download_failed": "The HOZ could not be downloaded.",
-        "failed": "The HOZ could not be built."
+        "failed": "The HOZ could not be built.",
+        "official_form_used": "Official form filled in",
+        "official_form_used_hint": "The PDF attachment is the insurer official form, filled in.",
+        "official_form_own": "Own readable report"
       }
     },
     "benefit_baskets": {

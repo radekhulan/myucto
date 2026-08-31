@@ -142,9 +142,9 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Submission\CompositeSubmissionInboxMessageProcessor::class,
                 ),
-            \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthPaymentOverviewPdfTemplateProvider::class =>
+            \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthOfficialFormProvider::class =>
                 fn (ContainerInterface $c) => $c->get(
-                    \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthPaymentOverviewPdfTemplateProvider::class,
+                    \MyInvoice\Service\Payroll\Submission\HealthInsurance\CachedHealthOfficialFormProvider::class,
                 ),
             \MyInvoice\Service\Payroll\Garnishment\EnforcementCaseSource::class =>
                 fn (ContainerInterface $c) => $c->get(

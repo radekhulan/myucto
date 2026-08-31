@@ -957,12 +957,14 @@ final readonly class HealthInsuranceSubmissionService
         $window = $bundle['window'];
         $xml = $this->serializer->serializeBulkNotification($payload);
         $channel = $this->channelDescription($supplierId, $insurerCode);
+        $officialForm = $this->bulkPdfRenderer->decide($payload);
         $pdf = $this->bulkPdfRenderer->renderPayload(
             $payload,
             is_string($channel['insurer_name'] ?? null)
                 ? $channel['insurer_name']
                 : null,
             $this->today(),
+            $period,
         );
         $isdsAttachmentFormat = HealthInsurerIsdsAttachmentFormat::tryFrom(
             (string) ($channel['isds_attachment_format'] ?? ''),
@@ -983,7 +985,7 @@ final readonly class HealthInsuranceSubmissionService
             // replay, ale jako nové podání — stejná past, které se vyhýbá
             // `preparePaymentOverview()`. Verze šablony postačí, protože
             // sama o sobě určuje tvar PDF.
-            'pdf_template_reference' => $this->bulkPdfRenderer->templateReference(),
+            'pdf_template_reference' => $this->bulkPdfRenderer->templateReference($payload),
             'isds_attachment_rules' => $channel['isds_attachment_rules'],
             'isds_attachment_format' => $isdsAttachmentFormat->value,
         ]));
@@ -996,6 +998,7 @@ final readonly class HealthInsuranceSubmissionService
             $payload,
             $xml,
             $pdf,
+            $officialForm,
             $isdsAttachmentFormat,
             $window,
             $subjectReference,
@@ -1092,6 +1095,7 @@ final readonly class HealthInsuranceSubmissionService
                     'pdf_artifact_sha256' => (string) $pdfArtifact['artifact_sha256'],
                     'changes_count' => count($payload->changes),
                     'created' => false,
+                    'official_form' => $officialForm->toArray(),
                     'deadline' => $window->toArray(),
                     'schema_validated' => $this->isSchemaValidatedStatus(
                         (string) $submission['status'],
@@ -1231,6 +1235,7 @@ final readonly class HealthInsuranceSubmissionService
                 'pdf_artifact_sha256' => (string) $pdfArtifact['artifact_sha256'],
                 'changes_count' => count($payload->changes),
                 'created' => true,
+                'official_form' => $officialForm->toArray(),
                 'deadline' => $window->toArray(),
                 'schema_validated' => $validated,
                 'dispatch' => $this->dispatchDescription(

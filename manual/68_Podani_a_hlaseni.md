@@ -12,7 +12,7 @@ Je nutné oprávnění `payroll.submissions`, způsobilý uzavřený běh nebo s
 
 1. Otevřete **Mzdy → Podání a hlášení**, vyberte typ, období a schválenou revizi.
 2. Spusťte náhled nebo kontrolní přípravu a odstraňte blokující chyby. Řádné JMHZ vzniká ze způsobilé běžné revize. Opravu nebo storno již připraveného JMHZ založte z jeho historie řízenou akcí; nejde o ruční nepodporovaný scénář.
-3. Vytvořte výstup. U zdravotního PPZ aplikace podle pojišťovny připraví podporovaný XML nebo vytěžitelný PDF; XDP není odesílaný formulář. HOZ a další nepokryté životní události dokončete ručně na oficiálním kanálu.
+3. Vytvořte výstup. U zdravotního PPZ i HOZ aplikace podle pojišťovny připraví podporovaný XML nebo vytěžitelný PDF; XDP není odesílaný formulář. Kde je doložený úřední tiskopis, vyplní se rovnou on, jinak vznikne vlastní čitelná sestava s uvedeným důvodem. Životní události, které datová věta nepokrývá, dokončete ručně na oficiálním kanálu.
 4. Pro ISDS stiskněte **Odeslat přes ISDS**. Aplikace vytvoří záznam v outboxu a provede předběžnou kontrolu, ale zprávu sama neodešle.
 5. Otevřete koncept na oficiálním rozhraní ISDS, přihlaste se metodou, kterou ISDS v daném prostředí skutečně nabídne, zkontrolujte adresáta a přílohy a odeslání výslovně potvrďte.
 6. Alternativně použijte podporovaný profil VREP pro ČSSZ. Přihlašovací a certifikační údaje zadávejte jen do určených polí, nikdy do poznámek.
@@ -515,13 +515,27 @@ se nevykazuje jako odeslané.
 
 Záložky zdravotních pojišťoven oddělují dvě povinnosti:
 
-- **HOZ** je přehled oznamovaných životních událostí a lhůt. Aplikace povinnosti
-  odvodí a umí je idempotentně propsat do pracovního inboxu, ale nevytváří ani
-  neodesílá domnělý HOZ artefakt. Podání dokončete ručně na oficiálním kanálu
-  a teprve potom položku v inboxu výslovně potvrďte.
+- **HOZ** je hromadné oznámení zaměstnavatele. Aplikace povinnosti odvodí,
+  sestaví z nich datovou větu XML i PDF a obojí zmrazí. Připravený soubor není
+  odeslaný — odeslání datovou schránkou musíte potvrdit sami.
 - **PPZ** je měsíční přehled o platbě pojistného. Ze schválené revize se
   sestaví a zmrazí pouze formát doložený pro vybranou pojišťovnu. Připravený
   soubor není odeslaný.
+
+### Kdy vyjde úřední tiskopis a kdy vlastní sestava
+
+Vydání tiskopisů z roku 2026 je jednotné: hromadné oznámení má číslo
+`UNI 73.51/2026`, přehled o platbě `UNI 76.51/2026`, ani jeden nemá logo nebo
+kód konkrétní pojišťovny. Zveřejňuje je zatím jen VZP; VoZP používá stejná
+čísla tiskopisů a stejnou XDP šablonu, takže MyÚčto vyplňuje úřední tiskopis
+**pro VZP (111) a VoZP (201)**. Ostatní pojišťovny dál zveřejňují vlastní starší
+formuláře, proto pro ně vzniká vlastní čitelná sestava se stejnými údaji.
+
+Vlastní sestava vznikne také tehdy, když se oznámení na tiskopis nevejde:
+úřední tiskopis má čtyři bloky vět a natištěné „1/1“ v poli počtu listů, takže
+od páté věty se použít nedá. Ve všech případech aplikace důvod pojmenuje —
+uvidíte ho u výsledku sestavení i v patce vytištěného dokumentu, nikdy se
+nezamlčí.
 
 Formát připravené přílohy se řídí pojišťovnou a obdobím:
 

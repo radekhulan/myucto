@@ -6890,7 +6890,10 @@
         "download": "Stáhnout HOZ",
         "downloading": "Stahuji…",
         "download_failed": "HOZ se nepodařilo stáhnout.",
-        "failed": "HOZ se nepodařilo sestavit."
+        "failed": "HOZ se nepodařilo sestavit.",
+        "official_form_used": "Vyplněn úřední tiskopis",
+        "official_form_used_hint": "PDF přílohy je vyplněný úřední tiskopis pojišťovny.",
+        "official_form_own": "Vlastní čitelná sestava"
       }
     },
     "benefit_baskets": {

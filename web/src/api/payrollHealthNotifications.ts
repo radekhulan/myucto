@@ -252,6 +252,17 @@ export interface HealthPreparedOverview {
  * Zmrazuje se OBOJÍ, XML i PDF — stejně jako u PPZ — protože formát přílohy
  * ISDS je pravidlo per pojišťovna (viz `dispatch`), ne per agenda.
  */
+/**
+ * Vyšel z podání vyplněný úřední tiskopis, nebo vlastní čitelná sestava?
+ * Když vlastní, `reason` je jednovětné vysvětlení proč — nikdy se nezamlčí.
+ */
+export interface HealthOfficialFormOutcome {
+  used: boolean
+  form_id: string | null
+  reason_code: string | null
+  reason: string | null
+}
+
 export interface HealthPreparedBulkNotification {
   submission_id: number
   obligation_id: number
@@ -268,6 +279,7 @@ export interface HealthPreparedBulkNotification {
   /** Kolik vět `zmenaZamestance` dávka obsahuje. */
   changes_count: number
   created: boolean
+  official_form?: HealthOfficialFormOutcome
   deadline: HealthDeadlineWindow
   schema_validated: boolean
   dispatch?: HealthDispatchDescription
