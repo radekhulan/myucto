@@ -36,6 +36,14 @@ api/resources/payroll/cz-isco/**/*.json text eol=lf
 api/resources/payroll/cssz-insurance-rates/**/*.csv -text -diff
 api/resources/payroll/cssz-insurance-rates/SHA256SUMS text eol=lf
 
+# Sazby zákonného pojištění odpovědnosti (příloha 2 vyhlášky 125/1993) se pinují
+# přes api/resources/payroll/accident-insurance-rates/SHA256SUMS. Bez těchhle
+# pravidel dostal Windows checkout manifest s CRLF, otisk přestal sedět a
+# integritní test padal na koncích řádků místo na obsahu — na CI (LF) přitom
+# procházel, takže to vypadalo jako lokální šum.
+api/resources/payroll/accident-insurance-rates/SHA256SUMS text eol=lf
+api/resources/payroll/accident-insurance-rates/**/*.json text eol=lf
+
 # CA bundle pro ověření pečeti dodejek EPO je vendorovaný artefakt stažený
 # z I.CA a PostSignum. Konce řádků drží tak, jak přišly, a do diffů nepatří —
 # je to 500 řádků base64, ne text k revizi.
