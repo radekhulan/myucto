@@ -241,8 +241,18 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
     /**
      * Vyměřovací základ sociálního pojištění celé firmy za JEDEN měsíc
      * čtvrtletí, čtený ze schváleného a otiskem ověřeného výsledku — nepočítá
-     * se znovu vlastní cestou (§ 3 odst. 1 vyhlášky odkazuje na vyměřovací
+     * se znovu vlastní cestou (§ 12 odst. 2 vyhlášky odkazuje na vyměřovací
      * základ sociálního pojištění, ne na vlastní definici).
+     *
+     * OTEVŘENÝ NÁLEZ, rešerše 31. 8. 2026: bere se `capped_…`, tedy základ PO
+     * ročním maximu podle § 15a zákona č. 589/1992 Sb. Kooperativa i Generali
+     * Česká pojišťovna ale shodně uvádějí, že se maximální vyměřovací základ
+     * na zákonné pojištění odpovědnosti NEVZTAHUJE — § 12 odst. 2 odkazuje jen
+     * na § 5 odst. 1 písm. a) toho zákona, ne na § 15a. U firem se zaměstnanci
+     * nad ročním stropem tak vychází pojistné nižší, než má být. Správně by se
+     * měl brát `participating_assessment_base_minor_units`; oprava se ale
+     * promítne do už zmaterializovaných závazků, takže je to samostatné
+     * rozhodnutí, ne vedlejší efekt doplnění sazebníku.
      */
     private function monthAssessmentBase(int $supplierId, string $monthStart): int
     {

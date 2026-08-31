@@ -1,0 +1,606 @@
+{
+    "manifest_sha256": "6a8117f291d1d34f7d6ebbcb49ac3f91c94d83ef4641bb967e9d6a9ffc7d09f4",
+    "payload": {
+        "schema_version": "accident-insurance-rate-schedule.v1",
+        "package_key": "cz-accident-insurance-annex-2-v1",
+        "parser_version": 1,
+        "legal": {
+            "decree": "125/1993 Sb.",
+            "decree_title": "Vyhláška ministerstva financí, kterou se stanoví podmínky a sazby zákonného pojištění odpovědnosti zaměstnavatele za škodu při pracovním úrazu nebo nemoci z povolání",
+            "annex": "Příloha č. 2",
+            "annex_title": "Sazby pojistného podle převažující činnosti vykonávané zaměstnavatelem",
+            "activity_list_source": "původní znění vyhlášky č. 125/1993 Sb.",
+            "activity_list_effective_from": "1993-04-22",
+            "rates_source": "vyhláška č. 487/2001 Sb., čl. I bod 3",
+            "rates_effective_from": "2002-01-01",
+            "consolidated_version": 6,
+            "consolidated_effective_from": "2012-01-01",
+            "consolidated_amendment": "vyhláška č. 365/2011 Sb.",
+            "rate_selection_rule": "§ 12 odst. 2 vyhlášky — sazba přílohy pro kategorii určenou podle převažující základní činnosti tvořící předmět podnikání zaměstnavatele",
+            "minimum_quarterly_premium_czk": 100,
+            "minimum_quarterly_premium_source": "poslední věta přílohy č. 2 („Minimální pojistné za kalendářní čtvrtletí je 100 Kč.\")",
+            "classification": "OKEČ",
+            "classification_note": "Členění ekonomických činností bylo převzato z Odvětvové klasifikace ekonomických činností (OKEČ) zpracované Českým statistickým úřadem.",
+            "classification_retired_on": "2007-12-31",
+            "classification_successor": "CZ-NACE",
+            "source_url": "https://www.zakonyprolidi.cz/cs/1993-125"
+        },
+        "groups": [
+            {
+                "ordinal": 1,
+                "key": "rate-50-40",
+                "rate_per_mille": "50.40",
+                "kind": "classified",
+                "label": null,
+                "activities": [
+                    {
+                        "ordinal": 1,
+                        "okec_code": "10.1",
+                        "label": "Dobývání černého uhlí včetně výroby černouhelných briket"
+                    },
+                    {
+                        "ordinal": 2,
+                        "okec_code": "12",
+                        "label": "Dobývání a úprava uranových a thoriových rud"
+                    },
+                    {
+                        "ordinal": 3,
+                        "okec_code": "13",
+                        "label": "Dobývání rud"
+                    }
+                ]
+            },
+            {
+                "ordinal": 2,
+                "key": "rate-9-80",
+                "rate_per_mille": "9.80",
+                "kind": "classified",
+                "label": null,
+                "activities": [
+                    {
+                        "ordinal": 1,
+                        "okec_code": "15.1",
+                        "label": "Výroba masa a masných výrobků (vč. drůbeže)"
+                    },
+                    {
+                        "ordinal": 2,
+                        "okec_code": "15.2",
+                        "label": "Zpracování ryb a rybích výrobků (vč. konzervování)"
+                    },
+                    {
+                        "ordinal": 3,
+                        "okec_code": "15.4",
+                        "label": "Výroba rostlinných a živočišných olejů a tuků"
+                    },
+                    {
+                        "ordinal": 4,
+                        "okec_code": "20.1",
+                        "label": "Výroba pilařská a impregnace dřeva"
+                    },
+                    {
+                        "ordinal": 5,
+                        "okec_code": "24.11",
+                        "label": "Výroba technických plynů"
+                    },
+                    {
+                        "ordinal": 6,
+                        "okec_code": "26.11",
+                        "label": "Výroba plochého skla"
+                    },
+                    {
+                        "ordinal": 7,
+                        "okec_code": "26.7",
+                        "label": "Zpracování přírodního kamene"
+                    },
+                    {
+                        "ordinal": 8,
+                        "okec_code": "27.5",
+                        "label": "Odlévání kovů (slévárenství)"
+                    },
+                    {
+                        "ordinal": 9,
+                        "okec_code": "37.1",
+                        "label": "Zpracování kovového odpadu a šrotu"
+                    },
+                    {
+                        "ordinal": 10,
+                        "okec_code": "45",
+                        "label": "Stavebnictví"
+                    },
+                    {
+                        "ordinal": 11,
+                        "okec_code": "75.25",
+                        "label": "Protipožární ochrana a ostatní záchranné práce"
+                    }
+                ]
+            },
+            {
+                "ordinal": 3,
+                "key": "rate-8-40",
+                "rate_per_mille": "8.40",
+                "kind": "classified",
+                "label": null,
+                "activities": [
+                    {
+                        "ordinal": 1,
+                        "okec_code": "02",
+                        "label": "Lesnictví, těžba dřeva a přidružené služby"
+                    },
+                    {
+                        "ordinal": 2,
+                        "okec_code": "10.2",
+                        "label": "Dobývání hnědého uhlí včetně výroby hnědouhelných briket"
+                    },
+                    {
+                        "ordinal": 3,
+                        "okec_code": "11",
+                        "label": "Dobývání ropy a zemního plynu a související služby"
+                    },
+                    {
+                        "ordinal": 4,
+                        "okec_code": "14.1",
+                        "label": "Dobývání a úprava kameniva"
+                    },
+                    {
+                        "ordinal": 5,
+                        "okec_code": "15.5",
+                        "label": "Úprava a zpracování mléka"
+                    },
+                    {
+                        "ordinal": 6,
+                        "okec_code": "15.83",
+                        "label": "Výroba cukru"
+                    },
+                    {
+                        "ordinal": 7,
+                        "okec_code": "15.9",
+                        "label": "Výroba nápojů"
+                    },
+                    {
+                        "ordinal": 8,
+                        "okec_code": "17.14",
+                        "label": "Úprava a spřádání lnářských vláken"
+                    },
+                    {
+                        "ordinal": 9,
+                        "okec_code": "17.25.4",
+                        "label": "Tkaní jutařských tkanin"
+                    },
+                    {
+                        "ordinal": 10,
+                        "okec_code": "17.53",
+                        "label": "Výroba netkaných textilií a výrobků z nich (kromě oděvů)"
+                    },
+                    {
+                        "ordinal": 11,
+                        "okec_code": "20.2",
+                        "label": "Výroba dýh, překližkových výrobků a aglomerovaných dřevařských výrobků"
+                    },
+                    {
+                        "ordinal": 12,
+                        "okec_code": "20.3",
+                        "label": "Výroba stavebně truhlářská a tesařská"
+                    },
+                    {
+                        "ordinal": 13,
+                        "okec_code": "20.4",
+                        "label": "Výroba dřevěných obalů"
+                    },
+                    {
+                        "ordinal": 14,
+                        "okec_code": "21.1",
+                        "label": "Výroba vlákniny, papíru a lepenky"
+                    },
+                    {
+                        "ordinal": 15,
+                        "okec_code": "24.3",
+                        "label": "Výroba nátěrových hmot, laků a podobných ochranných vrstev, tiskařských černí a tmelů"
+                    },
+                    {
+                        "ordinal": 16,
+                        "okec_code": "24.64",
+                        "label": "Výroba chemických výrobků pro fotografické účely"
+                    },
+                    {
+                        "ordinal": 17,
+                        "okec_code": "24.7",
+                        "label": "Výroba chemických vláken"
+                    },
+                    {
+                        "ordinal": 18,
+                        "okec_code": "25.11",
+                        "label": "Výroba pryžových pneumatik"
+                    },
+                    {
+                        "ordinal": 19,
+                        "okec_code": "24.12",
+                        "label": "Protektorování a opravy pryžových pneumatik"
+                    },
+                    {
+                        "ordinal": 20,
+                        "okec_code": "26.13",
+                        "label": "Výroba dutého skla"
+                    },
+                    {
+                        "ordinal": 21,
+                        "okec_code": "26.26",
+                        "label": "Výroba žáruvzdorných keramických výrobků"
+                    },
+                    {
+                        "ordinal": 22,
+                        "okec_code": "26.3",
+                        "label": "Výroba keramických obkládaček a dlaždic"
+                    },
+                    {
+                        "ordinal": 23,
+                        "okec_code": "26.5",
+                        "label": "Výroba cementu, vápna a sádry"
+                    },
+                    {
+                        "ordinal": 24,
+                        "okec_code": "26.6",
+                        "label": "Výroba výrobků z betonu, cementu a sádry"
+                    },
+                    {
+                        "ordinal": 25,
+                        "okec_code": "26.81",
+                        "label": "Výroba brusiv"
+                    },
+                    {
+                        "ordinal": 26,
+                        "okec_code": "27.1-27.4",
+                        "label": "Výroba kovů (kromě slévárenství)"
+                    },
+                    {
+                        "ordinal": 27,
+                        "okec_code": "28",
+                        "label": "Výroba kovových konstrukcí a kovodělných výrobků kromě výroby strojů a nářadí"
+                    },
+                    {
+                        "ordinal": 28,
+                        "okec_code": "29",
+                        "label": "Výroba strojů a přístrojů"
+                    },
+                    {
+                        "ordinal": 29,
+                        "okec_code": "31.3",
+                        "label": "Výroba kabelů a vodičů"
+                    },
+                    {
+                        "ordinal": 30,
+                        "okec_code": "35.1",
+                        "label": "Stavba lodí a člunů (vč. oprav)"
+                    },
+                    {
+                        "ordinal": 31,
+                        "okec_code": "36.1",
+                        "label": "Výroba nábytku"
+                    },
+                    {
+                        "ordinal": 32,
+                        "okec_code": "37.2",
+                        "label": "Zpracování nekovového starého materiálu a zbytkového materiálu"
+                    },
+                    {
+                        "ordinal": 33,
+                        "okec_code": "60.2",
+                        "label": "Pozemní doprava (mimo potrubní a železniční) vč. MHD"
+                    },
+                    {
+                        "ordinal": 34,
+                        "okec_code": "85.2",
+                        "label": "Veterinární činnosti"
+                    },
+                    {
+                        "ordinal": 35,
+                        "okec_code": "90",
+                        "label": "Odstraňování odpadu a odvod odpadních vod"
+                    }
+                ]
+            },
+            {
+                "ordinal": 4,
+                "key": "rate-7-00",
+                "rate_per_mille": "7.00",
+                "kind": "classified",
+                "label": null,
+                "activities": [
+                    {
+                        "ordinal": 1,
+                        "okec_code": "01",
+                        "label": "Zemědělství"
+                    }
+                ]
+            },
+            {
+                "ordinal": 5,
+                "key": "rate-4-20",
+                "rate_per_mille": "4.20",
+                "kind": "classified",
+                "label": null,
+                "activities": [
+                    {
+                        "ordinal": 1,
+                        "okec_code": "16",
+                        "label": "Zpracování tabáku"
+                    },
+                    {
+                        "ordinal": 2,
+                        "okec_code": "17.23",
+                        "label": "Tkaní česaných vlnařských tkanin"
+                    },
+                    {
+                        "ordinal": 3,
+                        "okec_code": "17.24",
+                        "label": "Tkaní hedvábnických tkanin"
+                    },
+                    {
+                        "ordinal": 4,
+                        "okec_code": "17.25.3",
+                        "label": "Tkaní lnářských tkanin"
+                    },
+                    {
+                        "ordinal": 5,
+                        "okec_code": "17.25.5",
+                        "label": "Tkaní vigoňových tkanin"
+                    },
+                    {
+                        "ordinal": 6,
+                        "okec_code": "17.4",
+                        "label": "Výroba konfekčního textilního zboží (kromě oděvů) - koberce, ložní prádlo aj."
+                    },
+                    {
+                        "ordinal": 7,
+                        "okec_code": "17.52.1",
+                        "label": "Výroba provaznická"
+                    },
+                    {
+                        "ordinal": 8,
+                        "okec_code": "17.54.1",
+                        "label": "Výroba stuh a prýmků"
+                    },
+                    {
+                        "ordinal": 9,
+                        "okec_code": "17.54.2",
+                        "label": "Výroba tylů, krajek, záclon a výšivek"
+                    },
+                    {
+                        "ordinal": 10,
+                        "okec_code": "17.6",
+                        "label": "Výroba pletených materiálů"
+                    },
+                    {
+                        "ordinal": 11,
+                        "okec_code": "17.7",
+                        "label": "Výroba pleteného zboží"
+                    },
+                    {
+                        "ordinal": 12,
+                        "okec_code": "18",
+                        "label": "Oděvní průmysl, zpracování a barvení kožešin"
+                    },
+                    {
+                        "ordinal": 13,
+                        "okec_code": "19",
+                        "label": "Výroba usní a úprava kůží; výroba brašnářského a sedlářského zboží a obuvi"
+                    },
+                    {
+                        "ordinal": 14,
+                        "okec_code": "26.21",
+                        "label": "Výroba keramických a porcelánových výrobků pro domácnost a ozdobných předmětů"
+                    },
+                    {
+                        "ordinal": 15,
+                        "okec_code": "26.22",
+                        "label": "Výroba keramických výrobků pro sanitární účely"
+                    },
+                    {
+                        "ordinal": 16,
+                        "okec_code": "30.02",
+                        "label": "Výroba počítačů aj. přístrojů a zařízení na zpracování dat"
+                    },
+                    {
+                        "ordinal": 17,
+                        "okec_code": "32",
+                        "label": "Výroba rádiových, televizních a spojovacích zařízení a přístrojů"
+                    },
+                    {
+                        "ordinal": 18,
+                        "okec_code": "33",
+                        "label": "Výroba zdravotnických, přesných a optických přístrojů a hodin"
+                    },
+                    {
+                        "ordinal": 19,
+                        "okec_code": "35.3",
+                        "label": "Výroba letadel a kosmických lodí"
+                    },
+                    {
+                        "ordinal": 20,
+                        "okec_code": "36.2",
+                        "label": "Výroba zlatnických a šperkařských předmětů"
+                    },
+                    {
+                        "ordinal": 21,
+                        "okec_code": "41",
+                        "label": "Výroba a rozvod vody"
+                    },
+                    {
+                        "ordinal": 22,
+                        "okec_code": "55",
+                        "label": "Pohostinství a ubytování"
+                    },
+                    {
+                        "ordinal": 23,
+                        "okec_code": "60.3",
+                        "label": "Potrubní doprava"
+                    },
+                    {
+                        "ordinal": 24,
+                        "okec_code": "61.11",
+                        "label": "Námořní doprava"
+                    },
+                    {
+                        "ordinal": 25,
+                        "okec_code": "62",
+                        "label": "Letecká doprava"
+                    },
+                    {
+                        "ordinal": 26,
+                        "okec_code": "63.3",
+                        "label": "Cestovní kanceláře, průvodcovská činnost"
+                    },
+                    {
+                        "ordinal": 27,
+                        "okec_code": "64.2",
+                        "label": "Telekomunikace"
+                    },
+                    {
+                        "ordinal": 28,
+                        "okec_code": "70",
+                        "label": "Činnosti v oblasti nemovitostí (nákup, prodej, pronájem, správa, realitní agentury)"
+                    },
+                    {
+                        "ordinal": 29,
+                        "okec_code": "73.1",
+                        "label": "Výzkum a vývoj v oblasti přírodních a technických věd"
+                    },
+                    {
+                        "ordinal": 30,
+                        "okec_code": "74.1",
+                        "label": "Právní, daňové a podnikatelské poradenství; Účetnictví a jeho revize; Výzkum trhu a veřejného mínění; Správa cenných papírů"
+                    },
+                    {
+                        "ordinal": 31,
+                        "okec_code": "74.2",
+                        "label": "Architektonické a inženýrské poradenství a podobné technické služby"
+                    },
+                    {
+                        "ordinal": 32,
+                        "okec_code": "75 (kromě 75.25)",
+                        "label": "Veřejná správa; Obrana; Povinné sociální pojištění (kromě protipožární ochrany a ostatních záchranářských prací)"
+                    },
+                    {
+                        "ordinal": 33,
+                        "okec_code": "80",
+                        "label": "Školství"
+                    },
+                    {
+                        "ordinal": 34,
+                        "okec_code": "85.1",
+                        "label": "Zdravotnictví"
+                    },
+                    {
+                        "ordinal": 35,
+                        "okec_code": "85.3",
+                        "label": "Sociální činnosti"
+                    },
+                    {
+                        "ordinal": 36,
+                        "okec_code": "91",
+                        "label": "Činnosti organizací společenských"
+                    },
+                    {
+                        "ordinal": 37,
+                        "okec_code": "92.2",
+                        "label": "Provoz rozhlasu a televize"
+                    }
+                ]
+            },
+            {
+                "ordinal": 6,
+                "key": "rate-2-80",
+                "rate_per_mille": "2.80",
+                "kind": "classified",
+                "label": null,
+                "activities": [
+                    {
+                        "ordinal": 1,
+                        "okec_code": "22.1",
+                        "label": "Vydavatelské činnosti"
+                    },
+                    {
+                        "ordinal": 2,
+                        "okec_code": "65",
+                        "label": "Peněžnictví"
+                    },
+                    {
+                        "ordinal": 3,
+                        "okec_code": "66",
+                        "label": "Pojišťovnictví kromě povinného sociálního zabezpečení"
+                    },
+                    {
+                        "ordinal": 4,
+                        "okec_code": "67",
+                        "label": "Činnosti související s úvěry a pojišťovnictvím"
+                    },
+                    {
+                        "ordinal": 5,
+                        "okec_code": "72",
+                        "label": "Zpracování dat a související činnosti (poradenská činnost, opravy, databanky aj.)"
+                    },
+                    {
+                        "ordinal": 6,
+                        "okec_code": "73.2",
+                        "label": "Výzkum a vývoj v oblasti humanitních, společenských věd a nauk o literatuře"
+                    },
+                    {
+                        "ordinal": 7,
+                        "okec_code": "74.4",
+                        "label": "Reklamní činnosti"
+                    },
+                    {
+                        "ordinal": 8,
+                        "okec_code": "74.81",
+                        "label": "Fotografické služby"
+                    },
+                    {
+                        "ordinal": 9,
+                        "okec_code": "92.1",
+                        "label": "Výroba, půjčování a distribuce filmů a videa"
+                    },
+                    {
+                        "ordinal": 10,
+                        "okec_code": "92.5 (kromě 92.53)",
+                        "label": "Činnosti knihoven, veřejných archivů muzeí a jiných kulturních zařízení (kromě činnosti botanických a zoologických zahrad a přírodních rezervací)"
+                    },
+                    {
+                        "ordinal": 11,
+                        "okec_code": "93.02",
+                        "label": "Kadeřnické a jiné služby pro ošetření těla (manikura, pedikura, kosmetické úkony)"
+                    }
+                ]
+            },
+            {
+                "ordinal": 7,
+                "key": "rate-10-50",
+                "rate_per_mille": "10.50",
+                "kind": "hazard",
+                "label": "Činnosti nezařazené do jiných sazbových skupin (s výjimkou skupiny „Ostatní ekonomické činnosti\"), ve kterých se zejména pracuje s výbušninami, radioaktivními látkami, radonem, infekčním materiálem, jedy, činnosti ve velkých výškách nebo hloubkách",
+                "activities": []
+            },
+            {
+                "ordinal": 8,
+                "key": "rate-5-60",
+                "rate_per_mille": "5.60",
+                "kind": "residual",
+                "label": "Ostatní ekonomické činnosti",
+                "activities": []
+            }
+        ],
+        "counts": {
+            "groups": 8,
+            "activities": 98,
+            "activities_by_group": {
+                "rate-50-40": 3,
+                "rate-9-80": 11,
+                "rate-8-40": 35,
+                "rate-7-00": 1,
+                "rate-4-20": 37,
+                "rate-2-80": 11,
+                "rate-10-50": 0,
+                "rate-5-60": 0
+            }
+        },
+        "content_hash": "8edfb8203fdfa558f3476492fb175de77ace4d417cf58633f21e34a5fc91451b"
+    }
+}

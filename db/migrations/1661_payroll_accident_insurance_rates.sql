@@ -1,10 +1,14 @@
 -- MyÚčto.cz — zákonné pojištění odpovědnosti zaměstnavatele (vyhláška č. 125/1993 Sb.).
 --
 -- Sazba se podle přílohy č. 2 vyhlášky odvíjí od PŘEVAŽUJÍCÍ ČINNOSTI
--- zaměstnavatele. Tenhle katalog (číselník OKEČ/CZ-NACE × sazba) v aplikaci
--- VĚDOMĚ není — je to samostatný pozdější úkol. Účetní sazbu zná z výměru
--- pojišťovny (Kooperativa, u zaměstnavatelů registrovaných u ní před
--- 1. 1. 1993 Česká pojišťovna) a zadává ji ručně jako nastavení firmy.
+-- zaměstnavatele. Sazebník přílohy č. 2 aplikace zná (viz
+-- `api/resources/payroll/accident-insurance-rates`), ale jen jako PODKLAD:
+-- příloha člení činnosti podle OKEČ zrušené k 31. 12. 2007 a závazný převodník
+-- na CZ-NACE neexistuje, takže se sazba nabízí k ověření a ukládá se sem to,
+-- co potvrdí účetní. Pojistitel je Kooperativa, u zaměstnavatelů
+-- registrovaných u ní před 1. 1. 1993 Česká pojišťovna; výměr ani předpis
+-- pojistného nikdo neposílá — § 12 odst. 2 vyhlášky ukládá výpočet i platbu
+-- zaměstnavateli.
 --
 -- Sazba (a případně i pojistitel, mění-li firma pojišťovnu) se v čase mění,
 -- proto je to DATOVANÁ položka (append-only historie podle `effective_from`),

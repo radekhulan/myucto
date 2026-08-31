@@ -61,6 +61,46 @@ final class PayrollAccidentInsuranceCalculatorTest extends TestCase
         );
     }
 
+    /**
+     * Zaokrouhlení nahoru je VĚDOMÉ rozhodnutí, ne citace — vyhláška o něm mlčí
+     * a nemají ho ani metodiky obou pojišťoven. Drží se proto, že § 12 odst. 9
+     * zvyšuje nedoplatek o 10 % za každý započatý měsíc, kdežto přeplatek do
+     * koruny stojí korunu. Tenhle test tu volbu fixuje: kdyby se přepnula na
+     * matematické zaokrouhlení nebo dolů, padne.
+     */
+    public function testRoundsUpEvenOneHellerAboveWholeCrown(): void
+    {
+        // 250 000,01 Kč × 4,00 ‰ = 1 000,00004 Kč → 1 001 Kč.
+        self::assertSame(
+            100_100,
+            $this->calculator->premiumMinor(25_000_001, '4.00'),
+        );
+        // Matematické zaokrouhlení by dalo 1 000 Kč, dolů také.
+        self::assertNotSame(
+            100_000,
+            $this->calculator->premiumMinor(25_000_001, '4.00'),
+        );
+    }
+
+    public function testHandlesTheHighestAnnexRate(): void
+    {
+        // 1 000 000 Kč × 50,40 ‰ = 50 400 Kč přesně (nejvyšší sazba přílohy).
+        self::assertSame(
+            5_040_000,
+            $this->calculator->premiumMinor(100_000_000, '50.40'),
+        );
+    }
+
+    public function testHandlesTheResidualAnnexRate(): void
+    {
+        // Zbytková skupina „Ostatní ekonomické činnosti": 5,6 ‰.
+        // 1 234 567 Kč × 5,60 ‰ = 6 913,5752 Kč → 6 914 Kč.
+        self::assertSame(
+            691_400,
+            $this->calculator->premiumMinor(123_456_700, '5.60'),
+        );
+    }
+
     public function testRejectsNegativeAssessmentBase(): void
     {
         $this->expectException(\InvalidArgumentException::class);

@@ -1671,6 +1671,7 @@ final class Routes
             $g->post('/settings/offices/{officeId:[0-9]+}/registrations', [PayrollOfficeRegistrationAction::class, 'create']);
             $g->get('/settings/accident-insurance-rates', [PayrollAccidentInsuranceRateAction::class, 'list']);
             $g->post('/settings/accident-insurance-rates', [PayrollAccidentInsuranceRateAction::class, 'create']);
+            $g->get('/settings/accident-insurance-rate-schedule', [PayrollAccidentInsuranceRateAction::class, 'schedule']);
             $g->get('/settings/policies', [PayrollEmployerPolicyAction::class, 'list']);
             $g->post('/settings/policies', [PayrollEmployerPolicyAction::class, 'create']);
             $g->get('/settings/policies/{id:[0-9]+}', [PayrollEmployerPolicyAction::class, 'detail']);

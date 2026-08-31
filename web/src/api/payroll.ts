@@ -2117,6 +2117,78 @@ export interface PayrollAccidentInsuranceRate {
   created_at: string
 }
 
+/** Jedna činnost sazebníku přílohy č. 2 — kód OKEČ, ne CZ-NACE. */
+export interface PayrollAccidentInsuranceActivity {
+  ordinal: number
+  okec_code: string
+  label: string
+}
+
+/**
+ * Sazbová skupina přílohy č. 2 vyhlášky č. 125/1993 Sb.
+ *
+ * `kind` rozlišuje, čím je skupina daná: `classified` výčtem kódů OKEČ,
+ * `hazard` věcným kritériem nebezpečnosti (10,5 ‰) a `residual` zbytkově
+ * (5,6 ‰). Poslední dvě žádný kód nemají a `label` u nich nese text kritéria.
+ */
+export interface PayrollAccidentInsuranceRateGroup {
+  ordinal: number
+  key: string
+  rate_per_mille: string
+  kind: 'classified' | 'hazard' | 'residual'
+  label: string | null
+  activities: PayrollAccidentInsuranceActivity[]
+}
+
+/** Právní identita sazebníku — co, z jaké novely a od kdy platí. */
+export interface PayrollAccidentInsuranceRateLegal {
+  decree: string
+  annex: string
+  annex_title: string
+  rates_source: string
+  rates_effective_from: string
+  activity_list_source: string
+  activity_list_effective_from: string
+  classification: string
+  classification_note: string
+  classification_retired_on: string
+  classification_successor: string
+  minimum_quarterly_premium_czk: number
+  minimum_quarterly_premium_source: string
+  rate_selection_rule: string
+  source_url: string
+}
+
+/**
+ * NEZÁVAZNÝ návrh sazby. Hledá se podle názvu činnosti CZ-NACE, nikdy podle
+ * čísla kódu — příloha používá zrušenou OKEČ, kde stejné číslo znamená jinou
+ * činnost (OKEČ 62 = letecká doprava, CZ-NACE 62 = IT).
+ */
+export interface PayrollAccidentInsuranceRateSuggestion {
+  group_key: string
+  rate_per_mille: string
+  okec_code: string
+  label: string
+  score: number
+}
+
+export interface PayrollAccidentInsuranceRateSchedule {
+  schedule: {
+    groups: PayrollAccidentInsuranceRateGroup[]
+    legal: PayrollAccidentInsuranceRateLegal
+    codebook: {
+      package_key: string
+      manifest_sha256: string
+      schema_version: string
+      group_count: number
+      activity_count: number
+    }
+  }
+  nace: { code: string; display: string; name: string | null; status: string } | null
+  suggestions: PayrollAccidentInsuranceRateSuggestion[]
+  suggestions_binding: false
+}
+
 export interface PayrollEmployerSettings {
   supplier_id: number
   row_version: number
@@ -5516,6 +5588,11 @@ export const payrollApi = {
     'institution_code' | 'rate_per_mille' | 'effective_from'>) =>
     api.post<{ rate: PayrollAccidentInsuranceRate }>('/payroll/settings/accident-insurance-rates', payload)
       .then(response => response.data.rate),
+  // Celý sazebník přílohy č. 2 najednou — 8 skupin a 98 činností se do jedné
+  // odpovědi vejdou, takže filtrování běží v prohlížeči a endpoint nemá dotaz.
+  accidentInsuranceRateSchedule: () =>
+    api.get<PayrollAccidentInsuranceRateSchedule>('/payroll/settings/accident-insurance-rate-schedule')
+      .then(response => response.data),
   /**
    * `agenda_group` filtruje na SERVERU. Odfiltrovat si skupinu až z přijaté
    * stránky by znamenalo pager počítaný přes všechny agendy nad tabulkou,

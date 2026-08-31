@@ -87,6 +87,36 @@ instituce či začátku platnosti založ jako nový historický záznam; u exist
 záznamu lze bezpečně upravit název, platební symboly, konec platnosti a údaje
 o ověření. Období stejné instituce a měny se nesmějí překrývat.
 
+Pod účty institucí se nastavuje **sazba zákonného pojištění odpovědnosti
+zaměstnavatele** (vyhláška č. 125/1993 Sb.). Sazba se ukládá s datem, od kdy
+platí, a s kódem pojistitele — ten musí odpovídat kódu instituce zadanému
+u účtu typu Zákonné pojištění. Sazbu určuje a pojistné počítá i platí sám
+zaměstnavatel; pojišťovna neposílá výměr ani předpis pojistného.
+
+K výběru slouží rozbalovací **sazebník přílohy č. 2 vyhlášky** — všech osm
+sazbových skupin a 98 vyjmenovaných činností tak, jak je uvádí předpis, včetně
+dvou skupin bez kódu: 10,5 ‰ pro činnosti, při kterých se pracuje s výbušninami,
+radioaktivními látkami, radonem, infekčním materiálem nebo jedy a pro práci ve
+velkých výškách či hloubkách, a 5,6 ‰ pro ostatní ekonomické činnosti. Kliknutím
+na řádek se sazba předvyplní do formuláře; uloží se až tlačítkem Přidat sazbu
+a lze ji předtím přepsat.
+
+Sazebník je **podklad, ne odpověď**. Příloha č. 2 člení činnosti podle
+klasifikace OKEČ, kterou Český statistický úřad zrušil k 31. 12. 2007 a nahradil
+ji CZ-NACE; vyhláška se od té doby nezměnila, takže závazná je stále OKEČ.
+Stejné číslo přitom v obou klasifikacích znamená jinou činnost (OKEČ 62 je
+letecká doprava, CZ-NACE 62 jsou činnosti v oblasti informačních technologií),
+a závazný převodník mezi nimi neobsahuje žádný právní předpis. MyÚčto proto
+čísla kódů nepáruje: má-li firma vyplněný kód CZ-NACE, nabídne řádky sazebníku
+podobné **názvem** činnosti a označí je jako nezávazný návrh. Rozhoduje
+skutečná převažující základní činnost tvořící předmět podnikání.
+
+Zadá-li se sazba, která v příloze č. 2 není, formulář na to upozorní, ale
+uložení nezablokuje — doložená odlišná sazba má přednost před číselníkem.
+Z uložené sazby se čtvrtletně počítá pojistné z vyměřovacího základu sociálního
+pojištění; minimum je 100 Kč za kalendářní čtvrtletí a výsledek se zaokrouhluje
+nahoru na celé koruny.
+
 Osobní variabilní symbol ČSSZ a číslo pojištěnce OSVČ v obecném nastavení firmy
 zůstávají určena pro vlastní odvody fyzické osoby. Platby zaměstnavatele je
 nepřebírají. U právnické osoby se tato osobní pole v obecném nastavení

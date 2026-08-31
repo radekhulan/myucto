@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { payrollApi, type PayrollAccidentInsuranceRate } from '@/api/payroll'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
+import AccidentInsuranceRatePicker from '@/components/payroll/AccidentInsuranceRatePicker.vue'
 
 const props = defineProps<{ canWrite: boolean }>()
 
@@ -14,6 +15,19 @@ const loading = ref(true)
 const saving = ref(false)
 const showValidation = ref(false)
 const rates = ref<PayrollAccidentInsuranceRate[]>([])
+
+/**
+ * Sazby přílohy č. 2 vyhlášky č. 125/1993 Sb. ve znění vyhlášky č. 487/2001 Sb.
+ *
+ * Slouží JEN k nezávaznému upozornění „tohle v příloze není" — sazba se
+ * neomezuje na tenhle výčet. Sazebník je pravda o příloze, ne o tom, co smí
+ * účetní zadat: může mít od pojišťovny doloženo něco jiného a aplikace jí do
+ * toho nemá mluvit. Autoritativní zdroj hodnot je připnutý číselník na serveru
+ * (`AccidentInsuranceRateSchedule`), tenhle seznam je jeho zrcadlo pro rychlou
+ * kontrolu bez čekání na odpověď; že se obě strany nerozejdou, hlídá
+ * AccidentInsuranceRateScheduleIntegrityTest.
+ */
+const ANNEX_RATES = [50.4, 10.5, 9.8, 8.4, 7, 5.6, 4.2, 2.8]
 
 function localDate(): string {
   const now = new Date()
@@ -38,6 +52,16 @@ const rateValid = computed(() => {
 const dateValid = computed(() => form.effective_from !== '')
 const formValid = computed(() => institutionCodeValid.value && rateValid.value && dateValid.value)
 
+/**
+ * Sazba je platné číslo, ale žádná ze sazeb přílohy č. 2. Není to chyba —
+ * uložit ji jde. Je to jen upozornění, protože nejčastější příčinou je překlep.
+ */
+const rateOutsideAnnex = computed(() => {
+  if (!rateValid.value) return false
+  const value = Number(form.rate_per_mille.trim().replace(',', '.'))
+  return !ANNEX_RATES.includes(value)
+})
+
 async function load() {
   loading.value = true
   try {
@@ -47,6 +71,11 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/** Sazebník sazbu jen vloží do pole — uloží se až tlačítkem „Přidat sazbu". */
+function applyRate(rate: string): void {
+  form.rate_per_mille = rate
 }
 
 async function addRate() {
@@ -114,6 +143,13 @@ onMounted(load)
         </table>
       </div>
 
+      <AccidentInsuranceRatePicker
+        class="mb-5"
+        :can-write="canWrite"
+        :current-rate="form.rate_per_mille"
+        @select="applyRate"
+      />
+
       <!-- `items-start`, ne `items-end`: pod prvním polem visí vysvětlivka, takže
            zarovnání na spodní hranu posunulo jeho input nahoru a popisky sloupců
            se rozešly. Zarovnáním na horní hranu sedí popisky i vstupy v řadě. -->
@@ -140,6 +176,11 @@ onMounted(load)
             :aria-invalid="showValidation && !rateValid"
             class="h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900 outline-none focus:border-payroll-500 focus:ring-2 focus:ring-payroll-500/20"
           >
+          <span
+            v-if="rateOutsideAnnex"
+            class="mt-1 block text-xs text-warning-700"
+            data-testid="accident-rate-outside-annex"
+          >{{ t('payroll.employer.accident_insurance.rate_outside_annex') }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-sm font-medium text-neutral-700">{{ t('payroll.employer.accident_insurance.effective_from') }}</span>

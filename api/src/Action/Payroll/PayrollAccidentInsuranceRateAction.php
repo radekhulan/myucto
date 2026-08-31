@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Service\Payroll\AccidentInsuranceRateAdvisor;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -26,6 +27,7 @@ final class PayrollAccidentInsuranceRateAction
     public function __construct(
         private readonly PayrollAccidentInsuranceRateRepository $rates,
         private readonly PayrollModuleAccess $access,
+        private readonly AccidentInsuranceRateAdvisor $advisor,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -37,6 +39,30 @@ final class PayrollAccidentInsuranceRateAction
         return Json::ok($response, [
             'rates' => $this->rates->list($this->currentSupplierId($request)),
         ]);
+    }
+
+    /**
+     * GET /payroll/settings/accident-insurance-rate-schedule — celá příloha
+     * č. 2 vyhlášky č. 125/1993 Sb. plus nezávazný návrh podle CZ-NACE firmy.
+     *
+     * Vrací se celý sazebník najednou (8 skupin, 98 činností ≈ pár kilobajtů),
+     * takže filtrování běží v prohlížeči a endpoint nemá vyhledávací parametr —
+     * na rozdíl od CZ-ISCO, které má skoro dva tisíce položek a hledá na
+     * serveru.
+     *
+     * `suggestions_binding` je v odpovědi natvrdo `false`: sazba, za kterou se
+     * ručí, je ta, kterou účetní určí podle skutečné převažující činnosti.
+     */
+    public function schedule(Request $request, Response $response): Response
+    {
+        if (($error = $this->guard($request, $response, AccessLevel::READ)) !== null) {
+            return $error;
+        }
+
+        return Json::ok(
+            $response,
+            $this->advisor->advise($this->currentSupplierId($request)),
+        );
     }
 
     public function create(Request $request, Response $response): Response

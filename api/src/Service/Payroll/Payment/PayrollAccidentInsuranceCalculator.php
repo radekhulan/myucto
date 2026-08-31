@@ -6,23 +6,51 @@ namespace MyInvoice\Service\Payroll\Payment;
 
 /**
  * Zákonné pojištění odpovědnosti zaměstnavatele za škodu při pracovním úrazu
- * a nemoci z povolání — vyhláška č. 125/1993 Sb.
+ * a nemoci z povolání — vyhláška č. 125/1993 Sb., ve znění účinném od
+ * 1. 1. 2012 (verze 6; sazby přílohy č. 2 platí ve znění vyhlášky
+ * č. 487/2001 Sb. od 1. 1. 2002).
  *
- * § 3 odst. 1: vyměřovacím základem je souhrn vyměřovacích základů pro
- * pojistné na sociální zabezpečení zaměstnanců za uplynulé kalendářní
- * čtvrtletí. § 5: pojistné za kalendářní čtvrtletí činí nejméně 100 Kč, i
- * kdyby výpočet ze sazby vyšel nižší.
+ * § 12 odst. 2: „Základem pro výpočet pojistného je souhrn vyměřovacích
+ * základů za uplynulé kalendářní čtvrtletí všech zaměstnanců, které v tomto
+ * období zaměstnavatel zaměstnával. K výpočtu použije sazbu uvedenou v příloze
+ * této vyhlášky pro příslušnou kategorii určenou podle převažující základní
+ * činnosti tvořící předmět podnikání zaměstnavatele."
  *
- * Vyhláška výslovně neuvádí zaokrouhlení pojistného na celé koruny — na
- * rozdíl od měsíčního sociálního a zdravotního pojištění, kde je zaokrouhlení
- * nahoru dané zákonem. PŘEDPOKLAD K OVĚŘENÍ: pojistné se tu zaokrouhluje na
- * celé koruny nahoru analogicky k ostatním odvodům, aby platba i předpis vyšly
- * na celé koruny. Než se to ověří proti výměru konkrétní pojišťovny, nechte
- * tenhle docblock jako varování.
+ * Minimum 100 Kč za kalendářní čtvrtletí je poslední větou PŘÍLOHY č. 2, ne
+ * paragrafu — celé pojistné řeší jediný § 12. Předchozí verze tohohle
+ * docblocku citovala § 3 odst. 1 (náklady soudního projednávání) a § 5 (měna
+ * pojistného plnění); obojí bylo špatně a je opravené proti úplnému znění
+ * předpisu. Sazebník přílohy č. 2 drží
+ * {@see \MyInvoice\Service\Payroll\AccidentInsuranceRateSchedule}.
+ *
+ * ── ZAOKROUHLENÍ ──────────────────────────────────────────────────────────
+ *
+ * Vyhláška o zaokrouhlení MLČÍ: slovo „zaokrouhl" se v celém úplném znění
+ * (§ 1 až § 19 včetně přílohy č. 2 a poznámek pod čarou) nevyskytuje ani
+ * jednou. Nemá ho ani metodika Kooperativy nebo Generali České pojišťovny,
+ * které pojištění provozují. Pravidla o zaokrouhlení nahoru v zákonech
+ * č. 589/1992 Sb. a č. 592/1992 Sb. platí pro sociální a zdravotní pojistné,
+ * ne pro tuhle vyhlášku — nelze je sem přenést.
+ *
+ * Zaokrouhlujeme proto NAHORU na celé koruny, a to jako vědomé rozhodnutí,
+ * ne jako citaci:
+ *   - § 12 odst. 2 ukládá výpočet i platbu ZAMĚSTNAVATELI; pojišťovna žádný
+ *     výměr ani předpis pojistného neposílá, takže musí vzniknout částka
+ *     v celých korunách, kterou lze odeslat,
+ *   - § 12 odst. 9 zvyšuje nedoplatek o 10 % za každý započatý měsíc.
+ *     Zaokrouhlení nahoru nedoplatek vytvořit nemůže, dolů ano.
+ *   - Cenou je přeplatek do 1 Kč za čtvrtletí, který se podle § 12 odst. 6
+ *     („Nespotřebované pojistné se nevrací.") nevrací. Proti riziku sankce
+ *     podle odstavce 9 je to zanedbatelné.
  */
 final class PayrollAccidentInsuranceCalculator
 {
-    /** § 5 vyhlášky č. 125/1993 Sb. — 100 Kč za čtvrtletí. */
+    /**
+     * Poslední věta přílohy č. 2 vyhlášky č. 125/1993 Sb. — „Minimální
+     * pojistné za kalendářní čtvrtletí je 100 Kč." Hodnota je i v připnutém
+     * sazebníku (`legal.minimum_quarterly_premium_czk`); že se obě strany
+     * neprocházejí, hlídá AccidentInsuranceRateScheduleTest.
+     */
     public const MINIMUM_QUARTERLY_PREMIUM_MINOR = 10_000;
 
     /**
@@ -45,9 +73,12 @@ final class PayrollAccidentInsuranceCalculator
         $premiumCzk = $numerator === 0
             ? 0
             : intdiv($numerator + 9_999_999, 10_000_000);
-        $premiumCzk = max($premiumCzk, self::MINIMUM_QUARTERLY_PREMIUM_MINOR / 100);
+        $premiumCzk = max(
+            $premiumCzk,
+            intdiv(self::MINIMUM_QUARTERLY_PREMIUM_MINOR, 100),
+        );
 
-        return (int) $premiumCzk * 100;
+        return $premiumCzk * 100;
     }
 
     private static function rateHundredths(string $ratePerMille): int
