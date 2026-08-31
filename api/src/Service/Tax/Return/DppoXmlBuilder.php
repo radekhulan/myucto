@@ -66,10 +66,11 @@ final class DppoXmlBuilder
 
     /**
      * Příloha účetní závěrky — mapa `row_code` (FinancialStatementService::balanceSheet,
-     * section AKTIVA) → `c_radku` EPO tiskopisu. Jen mikro-ÚJ ověřené řádky, číselně
-     * ověřeno proti dvěma reálně podaným přiznáním (viz private/APPENDIX-XML-MAPPING-SPEC.md
-     * §1.1). Hlubší úrovně (level ≥ 2) NEJSOU ověřené a záměrně chybí (spec §7.a) —
-     * doplnit až po dohledání oficiálního tiskopisu „Rozvaha v plném rozsahu".
+     * section AKTIVA) → `c_radku` EPO tiskopisu, úroveň 1 (souhrnné řádky). Číselně
+     * ověřeno proti dvěma reálně podaným přiznáním (private/APPENDIX-XML-MAPPING-SPEC.md
+     * §1.1) i proti oficiálnímu číselníku MF ČR (daňový portál, idpr_pub/hlib/uv_info,
+     * tabulka 23810 „Rozvaha", platnost=2026 — stejný zdroj, na který odkazuje
+     * dokumentace atributu c_radku v dppdp9_epo2.xsd).
      */
     private const AKTIVA_C_RADKU = [
         ['AKTIVA', 1],
@@ -79,14 +80,76 @@ final class DppoXmlBuilder
     ];
 
     /**
+     * Úroveň 2 rozvahy-aktiv pod souhrnnými řádky B./C./D. — dřív záměrně chyběla
+     * (komentář „Hlubší úrovně (level ≥ 2) NEJSOU ověřené"), zkušební EPO 31. 8. 2026 ji
+     * vytklo jako křížovou kontrolu součtu („Hodnota řádku B. rozvahy-aktiv není rovna
+     * součtu řádků aktiv B.I.+B.II.+B.III." a obdobně pro C./D.). Čísla řádků ze stejného
+     * číselníku (tabulka 23810, platnost=2026) jako AKTIVA_C_RADKU výše — NE z pořadí v
+     * `statement_rows` (to má mezery oproti oficiálnímu číselníku, např. C.II.1. má
+     * v oficiálním číselníku 9 podpoložek, my mapujeme jen 3 — proto NELZE čísla řádků
+     * odvodit aritmeticky z naší position, jen vyhledat v číselníku pro každý řádek zvlášť).
+     * Klíč = row_code rodiče (musí být v AKTIVA_C_RADKU); hodnota = děti v pořadí, v jakém
+     * je číselník vypisuje.
+     */
+    private const AKTIVA_DETAIL_C_RADKU = [
+        'B.' => [['B.I.', 4], ['B.II.', 14], ['B.III.', 27]],
+        'C.' => [['C.I.', 38], ['C.II.', 46], ['C.III.', 68], ['C.IV.', 71]],
+        'D.' => [['D.1.', 75], ['D.2.', 76], ['D.3.', 77]],
+        // Úroveň 3 pod C.II. — {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService::$smallExtraRows}
+        // je vrací i pro scope='small' jako výslovnou výjimku z „jen do úrovně 2" (§3a
+        // odst. 2 písm. b) vyhl. 500/2002 Sb.), takže data pro malou ÚJ existují stejně
+        // jako pro plný rozsah. Bez nich zkušební EPO 31. 8. 2026 vytklo „Hodnota řádku
+        // C.II. rozvahy-aktiv není rovna součtu řádků aktiv C.II.1 + C.II.2. + C.II.3."
+        // — C.II.3. v `statement_rows` nemáme (viz PASIVA_C_C_RADKU komentář k obdobné
+        // mezeře u pasiv), posílá se tedy jen C.II.1.+C.II.2., což na součet stačí (chybí
+        // třetí složka přispívá nulou, ne chybou).
+        'C.II.' => [['C.II.1.', 47], ['C.II.2.', 57]],
+    ];
+
+    /**
+     * Úroveň 2 rozvahy-pasiv — stejný důvod a stejný zdroj čísel (tabulka 24810
+     * „Rozvaha-pasiva", platnost=2026) jako AKTIVA_DETAIL_C_RADKU výše. U `P.A.V.`
+     * (Výsledek hospodaření běžného účetního období) je klíčové, že zaokrouhlovací
+     * rozdíl součtu A.I.–A.VI. se do něj NIKDY nesmí absorbovat (viz buildVetaUD) — jeho
+     * hodnota musí zůstat přesně stejná jako `VH` z výkazu zisku a ztráty (buildVetaUB),
+     * na kterou navazuje samostatná křížová kontrola EPO („Hodnota řádku 'Výsledek
+     * hospodaření za účetní období' … se nerovná …").
+     */
+    private const PASIVA_A_C_RADKU = [
+        ['P.A.I.', 3], ['P.A.II.', 7], ['P.A.III.', 15], ['P.A.IV.', 18], ['P.A.V.', 22], ['P.A.VI.', 23],
+    ];
+
+    /** Úroveň 2 pod P.C. (Závazky) — tabulka 24810, platnost=2026. */
+    private const PASIVA_C_C_RADKU = [
+        ['P.C.I.', 31], ['P.C.II.', 46],
+    ];
+
+    /** Úroveň 2 pod P.D. (Časové rozlišení pasiv) — tabulka 24810, platnost=2026. */
+    private const PASIVA_D_C_RADKU = [
+        ['P.D.1.', 65], ['P.D.2.', 66],
+    ];
+
+    /**
      * Příloha — mapa `row_code` (FinancialStatementService::incomeStatement) → `c_radku`
-     * EPO tiskopisu VZZ (druhové členění, plný rozsah) — kompletně ověřeno, 27 řádků vč.
-     * 4 computed mezisoučtů (spec §3). `VI.` se v tiskopisu tiskne dvakrát (ř.39 „VI." celkem,
-     * ř.41 „VI.2. Ostatní") — náš statement_rows seed nerozlišuje VI.1./VI.2. (spec §3 pozn.,
-     * §7.d): VI.1. (úroky od ovládané/ovládající osoby) je v ověřených datech vždy 0 a nemáme
-     * jej v chart_of_accounts odděleně, proto oba řádky čerpají ze stejné hodnoty `VI.`.
-     * Neověřené řádky (v obou letech vždy nulové, tudíž bez kotvy: B., C., E.1.2., E.2., E.3.,
-     * III., III.1-3., F.1., F.2., F.4., IV., G., V., H., I.n, J.) záměrně chybí (spec §7.a).
+     * EPO tiskopisu VZZ (druhové členění, plný rozsah), tabulka 25810, platnost=2026
+     * (stejný číselník jako AKTIVA_C_RADKU výše). `VI.` se v tiskopisu tiskne dvakrát
+     * (ř.39 „VI." celkem, ř.41 „VI.2. Ostatní") — náš statement_rows seed nerozlišuje
+     * VI.1./VI.2. (spec §3 pozn., §7.d): VI.1. (úroky od ovládané/ovládající osoby) je
+     * v ověřených datech vždy 0 a nemáme jej v chart_of_accounts odděleně, proto oba
+     * řádky čerpají ze stejné hodnoty `VI.`. Obdobně `I.n` (interní row_code, viz
+     * {@see \MyInvoice\Service\Accounting\Reports\FinancialStatementService::DISPLAY_CODE_ALIAS})
+     * je v tiskopisu znovu jen „I." (ř.42) — druhý výskyt písmene I. ve VZZ.
+     *
+     * Zkušební EPO 31. 8. 2026 vytklo chybějící řádky II./B./C./III./IV./G./V./H./I.n/J.
+     * jako křížové kontroly „Provozní/Finanční výsledek hospodaření neodpovídá výpočtu"
+     * — bez nich formule (I.+II.-A.-B.-C.-D.-E.+III.-F. a IV.-G.+V.-H.+VI.-I.n-J.+VII.-K.)
+     * neměla co sečíst. Doplněno; zaokrouhlovací absorpce součtu do PVH/FVH viz
+     * buildVetaUB/absorbRoundingDiff.
+     *
+     * Zbývající neověřené řádky (v obou referenčních letech vždy nulové, bez kotvy —
+     * E.1.2., E.2., E.3., III.1.-III.3., F.1., F.2., F.4., M.) záměrně chybí (spec §7.a);
+     * nejde o formulové součty, které EPO cituje, jen o dílčí rozpady již pokrytých
+     * mezisoučtů.
      *
      * `L.2.` (odložená daň) mezi nimi BÝVALO — a to jen proto, že o odložené dani systém
      * neúčtoval, takže řádek vycházel vždy nulový. Po doplnění kroku uzávěrky (ČÚS 003,
@@ -94,16 +157,32 @@ final class DppoXmlBuilder
      * do přílohy přiznání vůbec nepřenesla.
      */
     private const VZZ_C_RADKU = [
-        ['I.', 1], ['A.', 3], ['A.2.', 5], ['A.3.', 6],
+        ['I.', 1], ['II.', 2], ['A.', 3], ['A.2.', 5], ['A.3.', 6],
+        ['B.', 7], ['C.', 8],
         ['D.', 9], ['D.1.', 10], ['D.2.', 11], ['D.2.1.', 12], ['D.2.2.', 13],
         ['E.', 14], ['E.1.', 15], ['E.1.1.', 16],
+        ['III.', 20],
         ['F.', 24], ['F.3.', 27], ['F.5.', 29],
         ['PVH', 30],
+        ['IV.', 31], ['G.', 34], ['V.', 35], ['H.', 38],
         ['VI.', 39], ['VI.', 41],
+        ['I.n', 42], ['J.', 43],
         ['VII.', 46], ['K.', 47],
         ['FVH', 48], ['VHPZ', 49],
         ['L.', 50], ['L.1.', 51], ['L.2.', 52],
         ['VHPO', 53], ['VH', 55], ['OBRAT', 56],
+    ];
+
+    /**
+     * Řádky vzorce, který EPO doslova cituje v chybové hlášce (viz VZZ_C_RADKU výše):
+     * klíč = row_code mezisoučtu, hodnota = [row_code složky => znaménko ve vzorci].
+     * Používá se jen k zaokrouhlovací absorpci (buildVetaUB) — PVH/FVH samy o sobě se
+     * NIKDY neupravují (z nich se navíc dopočítává VHPZ = PVH+FVH), rozdíl mezi jejich
+     * nezávisle zaokrouhlenou hodnotou a součtem složek se absorbuje do největší složky.
+     */
+    private const VZZ_FORMULA_PARTS = [
+        'PVH' => ['I.' => 1, 'II.' => 1, 'A.' => -1, 'B.' => -1, 'C.' => -1, 'D.' => -1, 'E.' => -1, 'III.' => 1, 'F.' => -1],
+        'FVH' => ['IV.' => 1, 'G.' => -1, 'V.' => 1, 'H.' => -1, 'VI.' => 1, 'I.n' => -1, 'J.' => -1, 'VII.' => 1, 'K.' => -1],
     ];
 
     /**
@@ -297,13 +376,20 @@ final class DppoXmlBuilder
         if ($hasAppendix) {
             $balanceSheet = (array) $appendix['balance_sheet'];
             $incomeStatement = (array) $appendix['income_statement'];
+            // VZZ se počítá JEDNOU (computeVzzThousands) a sdílí se s VetaUD: 'VH' musí
+            // sedět bit přesně na 'P.A.V.' rozvahy (křížová kontrola EPO), a jediný způsob,
+            // jak to garantovat i po dopočtu VHPZ/VHPO (viz computeVzzThousands), je nechat
+            // P.A.V. PŘEVZÍT stejnou (už zaokrouhlenou) hodnotu, ne počítat obě strany
+            // nezávisle — dvě nezávislá zaokrouhlení stejného reálného čísla se od sebe
+            // uměla lišit o tisícikorunu.
+            $vzz = $this->computeVzzThousands($incomeStatement);
             foreach ($this->buildVetaUA($dom, $balanceSheet) as $el) {
                 $root->appendChild($el);
             }
-            foreach ($this->buildVetaUB($dom, $incomeStatement) as $el) {
+            foreach ($this->buildVetaUB($dom, $vzz['sled'], $vzz['min']) as $el) {
                 $root->appendChild($el);
             }
-            foreach ($this->buildVetaUD($dom, $balanceSheet) as $el) {
+            foreach ($this->buildVetaUD($dom, $balanceSheet, $vzz['sled']['VH'] ?? null, $vzz['min']['VH'] ?? null) as $el) {
                 $root->appendChild($el);
             }
             $root->appendChild($this->buildVetaUZ(
@@ -409,18 +495,96 @@ final class DppoXmlBuilder
             }
             $netto = $this->toThousands((float) $row['net']);
             $nettoMin = $this->toThousands((float) $row['prev_net']);
-            if ($netto === 0 && $nettoMin === 0) {
-                continue;
+            if ($netto !== 0 || $nettoMin !== 0) {
+                $elements[] = $this->vetaUaElement(
+                    $dom,
+                    $cRadku,
+                    $this->toThousands((float) $row['gross']),
+                    $this->toThousands((float) $row['correction']),
+                    $netto,
+                    $nettoMin,
+                );
             }
-            $el = $dom->createElement('VetaUA');
-            $el->setAttribute('c_radku', (string) $cRadku);
-            $el->setAttribute('kc_brutto', (string) $this->toThousands((float) $row['gross']));
-            $el->setAttribute('kc_korekce', (string) $this->toThousands((float) $row['correction']));
-            $el->setAttribute('kc_netto', (string) $netto);
-            $el->setAttribute('kc_netto_min', (string) $nettoMin);
-            $elements[] = $el;
+            foreach ($this->buildAktivaDetailElements($dom, $byCode, $rowCode, $netto, $nettoMin) as $detailEl) {
+                $elements[] = $detailEl;
+            }
         }
         return $elements;
+    }
+
+    /**
+     * Úroveň 2 rozvahy-aktiv (AKTIVA_DETAIL_C_RADKU) pod jedním souhrnným řádkem —
+     * zaokrouhlovací past (viz absorbRoundingDiff) se řeší stejně jako u VetaUD: rodič
+     * (`$parentNetto`/`$parentNettoMin`, už zaokrouhlený, případně sám absorbovaný o
+     * úroveň výš) se NEMĚNÍ, rozdíl jde do dítěte s největší abs. hodnotou. Brutto se
+     * upraví o STEJNÝ rozdíl jako netto (korekce beze změny), aby uvnitř upraveného
+     * řádku dál platilo netto = brutto − korekce.
+     *
+     * @param array<string,array<string,mixed>> $byCode
+     * @return list<\DOMElement>
+     */
+    private function buildAktivaDetailElements(\DOMDocument $dom, array $byCode, string $parentRowCode, int $parentNetto, int $parentNettoMin): array
+    {
+        $children = self::AKTIVA_DETAIL_C_RADKU[$parentRowCode] ?? [];
+        if ($children === []) {
+            return [];
+        }
+
+        $gross = [];
+        $correction = [];
+        $netto = [];
+        $nettoMin = [];
+        foreach ($children as [$rowCode, ]) {
+            $row = $byCode[$rowCode] ?? null;
+            if ($row === null) {
+                continue;
+            }
+            $n = $this->toThousands((float) $row['net']);
+            $nMin = $this->toThousands((float) $row['prev_net']);
+            if ($n === 0 && $nMin === 0) {
+                continue;
+            }
+            $gross[$rowCode] = $this->toThousands((float) $row['gross']);
+            $correction[$rowCode] = $this->toThousands((float) $row['correction']);
+            $netto[$rowCode] = $n;
+            $nettoMin[$rowCode] = $nMin;
+        }
+        if ($netto === []) {
+            return [];
+        }
+
+        $originalNetto = $netto;
+        $netto = $this->absorbRoundingDiff($parentNetto, $netto);
+        $nettoMin = $this->absorbRoundingDiff($parentNettoMin, $nettoMin);
+        foreach ($netto as $rowCode => $n) {
+            $gross[$rowCode] += $n - $originalNetto[$rowCode];
+        }
+
+        $elements = [];
+        foreach ($children as [$rowCode, $cRadku]) {
+            if (!isset($netto[$rowCode])) {
+                continue;
+            }
+            $elements[] = $this->vetaUaElement($dom, $cRadku, $gross[$rowCode], $correction[$rowCode], $netto[$rowCode], $nettoMin[$rowCode]);
+            // Úroveň 3 (jen C.II. — viz AKTIVA_DETAIL_C_RADKU komentář): cíl je hodnota
+            // TOHOTO řádku PO absorpci na úrovni 2, ne jeho nezávisle zaokrouhlená hodnota
+            // — jinak by se součet C.II.1.+C.II.2. mohl rozejít i s absorbovaným C.II.
+            foreach ($this->buildAktivaDetailElements($dom, $byCode, $rowCode, $netto[$rowCode], $nettoMin[$rowCode]) as $nestedEl) {
+                $elements[] = $nestedEl;
+            }
+        }
+        return $elements;
+    }
+
+    private function vetaUaElement(\DOMDocument $dom, int $cRadku, int $gross, int $correction, int $netto, int $nettoMin): \DOMElement
+    {
+        $el = $dom->createElement('VetaUA');
+        $el->setAttribute('c_radku', (string) $cRadku);
+        $el->setAttribute('kc_brutto', (string) $gross);
+        $el->setAttribute('kc_korekce', (string) $correction);
+        $el->setAttribute('kc_netto', (string) $netto);
+        $el->setAttribute('kc_netto_min', (string) $nettoMin);
+        return $el;
     }
 
     /**
@@ -430,31 +594,107 @@ final class DppoXmlBuilder
      * @param array<string,mixed> $incomeStatement výstup FinancialStatementService::incomeStatement()
      * @return list<\DOMElement>
      */
-    private function buildVetaUB(\DOMDocument $dom, array $incomeStatement): array
+    private function buildVetaUB(\DOMDocument $dom, array $sled, array $min): array
+    {
+        $elements = [];
+        foreach (self::VZZ_C_RADKU as [$rowCode, $cRadku]) {
+            $s = $sled[$rowCode] ?? null;
+            $m = $min[$rowCode] ?? null;
+            if ($s === null || $m === null || ($s === 0 && $m === 0)) {
+                continue;
+            }
+            $el = $dom->createElement('VetaUB');
+            $el->setAttribute('c_radku', (string) $cRadku);
+            $el->setAttribute('kc_min', (string) $m);
+            $el->setAttribute('kc_sled', (string) $s);
+            $elements[] = $el;
+        }
+        return $elements;
+    }
+
+    /**
+     * Tisíce po zaokrouhlovací absorpci pro VZZ — společné jádro pro buildVetaUB i pro
+     * P.A.V. z buildVetaUD (viz volání v build()). Řetězec dopočtů PVH→VHPZ→VHPO→VH drží
+     * VZZ vnitřně konzistentní (každý mezisoučtový vzorec, který EPO cituje, sedí přesně
+     * — „Výsledek hospodaření za účetní období neodpovídá výpočtu (Výsledek hospodaření
+     * po zdanění − M.)" zjištěno křížovým ověřením proti zkušebnímu EPO 31. 8. 2026, když
+     * `VH` zůstávalo nezávisle zaokrouhlené). Křížová kontrola vůči `P.A.V.` v rozvaze
+     * (VetaUD) tím NENÍ ohrožena, protože P.A.V. tuhle (dopočítanou) hodnotu `VH` prostě
+     * PŘEVEZME místo vlastního nezávislého zaokrouhlení — obě věty tak vždy nesou stejné
+     * číslo, ať dopočet dopadne jakkoli.
+     *
+     * @param array<string,mixed> $incomeStatement výstup FinancialStatementService::incomeStatement()
+     * @return array{sled: array<string,int>, min: array<string,int>}
+     */
+    private function computeVzzThousands(array $incomeStatement): array
     {
         $byCode = [];
         foreach ((array) ($incomeStatement['rows'] ?? []) as $row) {
             $byCode[(string) $row['row_code']] = $row;
         }
 
-        $elements = [];
-        foreach (self::VZZ_C_RADKU as [$rowCode, $cRadku]) {
+        // Tisíce PŘED absorpcí; 'VI.' se v poli vyskytuje 2× (viz VZZ_C_RADKU) — hodnota
+        // se počítá jen jednou, oba c_radku ji pak níže sdílí.
+        $sled = [];
+        $min = [];
+        foreach (self::VZZ_C_RADKU as [$rowCode, ]) {
+            if (array_key_exists($rowCode, $sled)) {
+                continue;
+            }
             $row = $byCode[$rowCode] ?? null;
             if ($row === null) {
                 continue;
             }
-            $sled = $this->toThousands((float) $row['amount']);
-            $min = $this->toThousands((float) $row['prev_amount']);
-            if ($sled === 0 && $min === 0) {
+            $sled[$rowCode] = $this->toThousands((float) $row['amount']);
+            $min[$rowCode] = $this->toThousands((float) $row['prev_amount']);
+        }
+
+        // Zaokrouhlovací past (stejný princip jako VetaUD/absorbRoundingDiff): PVH a FVH
+        // zůstávají nezávisle zaokrouhlené beze změny — do NICH se rozdíl neabsorbuje,
+        // protože z nich se níže dopočítává VHPZ. Rozdíl mezi PVH/FVH a součtem jejich
+        // vlastních složek (VZZ_FORMULA_PARTS) se naopak absorbuje do největší složky.
+        foreach (self::VZZ_FORMULA_PARTS as $totalCode => $signs) {
+            if (!isset($sled[$totalCode])) {
                 continue;
             }
-            $el = $dom->createElement('VetaUB');
-            $el->setAttribute('c_radku', (string) $cRadku);
-            $el->setAttribute('kc_min', (string) $min);
-            $el->setAttribute('kc_sled', (string) $sled);
-            $elements[] = $el;
+            $parts = array_intersect_key($sled, $signs);
+            if ($parts !== []) {
+                $sled = array_replace($sled, $this->absorbRoundingDiff($sled[$totalCode], $parts, $signs));
+            }
+            $partsMin = array_intersect_key($min, $signs);
+            if ($partsMin !== [] && isset($min[$totalCode])) {
+                $min = array_replace($min, $this->absorbRoundingDiff($min[$totalCode], $partsMin, $signs));
+            }
         }
-        return $elements;
+
+        // VHPZ = PVH + FVH musí sedět přesně (chyba EPO „Výsledek hospodaření před
+        // zdaněním neodpovídá výpočtu") — místo nezávislého zaokrouhlení skutečné hodnoty
+        // VHPZ se proto DOPOČÍTÁ z už zaokrouhlených (a případně absorbovaných) PVH/FVH.
+        if (isset($sled['PVH'], $sled['FVH'])) {
+            $sled['VHPZ'] = $sled['PVH'] + $sled['FVH'];
+        }
+        if (isset($min['PVH'], $min['FVH'])) {
+            $min['VHPZ'] = $min['PVH'] + $min['FVH'];
+        }
+        // VHPO = VHPZ − L. a VH = VHPO − M. musí sedět přesně stejně (chyby EPO „Výsledek
+        // hospodaření po zdanění/za účetní období neodpovídá výpočtu"), obě zjištěné
+        // křížovým ověřením proti zkušebnímu EPO 31. 8. 2026 poté, co předchozí oprava
+        // nechala vždy jen NÁSLEDUJÍCÍ řádek řetězce nezávisle zaokrouhlený. M. se
+        // nemapuje (viz VZZ_C_RADKU) — chybí-li, přispívá nulou, ne chybou.
+        if (isset($sled['VHPZ'], $sled['L.'])) {
+            $sled['VHPO'] = $sled['VHPZ'] - $sled['L.'];
+        }
+        if (isset($min['VHPZ'], $min['L.'])) {
+            $min['VHPO'] = $min['VHPZ'] - $min['L.'];
+        }
+        if (isset($sled['VHPO'])) {
+            $sled['VH'] = $sled['VHPO'] - ($sled['M.'] ?? 0);
+        }
+        if (isset($min['VHPO'])) {
+            $min['VH'] = $min['VHPO'] - ($min['M.'] ?? 0);
+        }
+
+        return ['sled' => $sled, 'min' => $min];
     }
 
     /**
@@ -463,9 +703,13 @@ final class DppoXmlBuilder
      * jako samostatný uzel (spec §2.1, §7.e) — musí se dopočítat P.B.+P.C. za běhu.
      *
      * @param array<string,mixed> $balanceSheet výstup FinancialStatementService::balanceSheet()
+     * @param ?int $vhSled `VH` (VetaUB, kc_sled) po zaokrouhlovací absorpci VZZ — je-li
+     *   k dispozici, PŘEVEZME ho `P.A.V.` místo nezávislého zaokrouhlení vlastní hodnoty
+     *   (viz computeVzzThousands docblock a build()).
+     * @param ?int $vhMin totéž pro `kc_min` (minulé období)
      * @return list<\DOMElement>
      */
-    private function buildVetaUD(\DOMDocument $dom, array $balanceSheet): array
+    private function buildVetaUD(\DOMDocument $dom, array $balanceSheet, ?int $vhSled = null, ?int $vhMin = null): array
     {
         $byCode = [];
         foreach ((array) ($balanceSheet['liabilities'] ?? []) as $row) {
@@ -512,6 +756,31 @@ final class DppoXmlBuilder
             }
         }
 
+        // „B." (Rezervy, řádek 25) samostatně — bez ní zkušební EPO u kontroly „B.+C. =
+        // B. + C." předpokládá B.=0, což při nenulových rezervách rozjede součet, i když
+        // je řádek 24 sám o sobě spočítaný správně (obsahuje P.B.+P.C. dohromady). „C."
+        // (řádek 30) zůstává STABILNÍ — na něm navazuje i skupina C.I.+C.II. níže — rozdíl
+        // proto absorbuje jen „B.".
+        $bSled = $bMin = null;
+        if (isset($byCode['P.B.'])) {
+            $cSledForB = $this->toThousands((float) ($byCode['P.C.']['amount'] ?? 0.0));
+            $cMinForB = $this->toThousands((float) ($byCode['P.C.']['prev_amount'] ?? 0.0));
+            $bSledParts = $this->absorbRoundingDiff(
+                $partsT[24][0],
+                ['B.' => $this->toThousands((float) $byCode['P.B.']['amount']), 'C.' => $cSledForB],
+                [],
+                ['C.'],
+            );
+            $bMinParts = $this->absorbRoundingDiff(
+                $partsT[24][1],
+                ['B.' => $this->toThousands((float) $byCode['P.B.']['prev_amount']), 'C.' => $cMinForB],
+                [],
+                ['C.'],
+            );
+            $bSled = $bSledParts['B.'];
+            $bMin = $bMinParts['B.'];
+        }
+
         $rows = [];
         if (isset($byCode['PASIVA'])) {
             $rows[] = [1, $this->toThousands((float) $byCode['PASIVA']['amount']), $this->toThousands((float) $byCode['PASIVA']['prev_amount'])];
@@ -521,6 +790,9 @@ final class DppoXmlBuilder
         }
         if (isset($byCode['P.B.']) || isset($byCode['P.C.'])) {
             $rows[] = [24, $partsT[24][0], $partsT[24][1]];
+        }
+        if ($bSled !== null) {
+            $rows[] = [25, $bSled, $bMin];
         }
         if (isset($byCode['P.C.'])) {
             $rows[] = [30, $this->toThousands((float) $byCode['P.C.']['amount']), $this->toThousands((float) $byCode['P.C.']['prev_amount'])];
@@ -534,13 +806,142 @@ final class DppoXmlBuilder
             if ($sledT === 0 && $minT === 0) {
                 continue;
             }
-            $el = $dom->createElement('VetaUD');
-            $el->setAttribute('kc_sled', (string) $sledT);
-            $el->setAttribute('c_radku', (string) $cRadku);
-            $el->setAttribute('kc_min', (string) $minT);
-            $elements[] = $el;
+            $elements[] = $this->vetaUdElement($dom, $cRadku, $sledT, $minT);
+        }
+
+        // Úroveň 2 (spec doplněk 2026-08-31): A.I.–A.VI. musí sedět na finální
+        // reportovanou hodnotu „A." (tj. $partsT[2], po případné absorpci na úrovni
+        // PASIVA CELKEM výše) — 'P.A.V.' je z absorpce VYLOUČENO, viz PASIVA_A_C_RADKU.
+        // C.I.+C.II. sedí přímo na „C." (řádek 30 výše, ten se top-level absorpcí nikdy
+        // nemění). D.1.+D.2. sedí na finální „D." ($partsT[64]).
+        if (isset($byCode['P.A.'])) {
+            // P.A.V. přebírá 'VH' z VZZ, je-li k dispozici (viz docblock computeVzzThousands
+            // — proč se to řeší převzetím hodnoty, ne dvěma nezávislými zaokrouhleními).
+            $overrides = ($vhSled !== null && $vhMin !== null) ? ['P.A.V.' => [$vhSled, $vhMin]] : [];
+            foreach ($this->buildPasivaDetailElements($dom, $byCode, self::PASIVA_A_C_RADKU, $partsT[2][0], $partsT[2][1], ['P.A.V.'], $overrides) as $el) {
+                $elements[] = $el;
+            }
+        }
+        if (isset($byCode['P.C.'])) {
+            $cSled = $this->toThousands((float) $byCode['P.C.']['amount']);
+            $cMin = $this->toThousands((float) $byCode['P.C.']['prev_amount']);
+            foreach ($this->buildPasivaDetailElements($dom, $byCode, self::PASIVA_C_C_RADKU, $cSled, $cMin) as $el) {
+                $elements[] = $el;
+            }
+        }
+        if (isset($byCode['P.D.'])) {
+            foreach ($this->buildPasivaDetailElements($dom, $byCode, self::PASIVA_D_C_RADKU, $partsT[64][0], $partsT[64][1]) as $el) {
+                $elements[] = $el;
+            }
+        }
+
+        return $elements;
+    }
+
+    /**
+     * Úroveň 2 rozvahy-pasiv pod jedním souhrnným řádkem (A./C./D.) — stejná
+     * zaokrouhlovací absorpce jako buildAktivaDetailElements, jen bez brutto/korekce
+     * (VetaUD schéma je nemá). `$exclude` chrání řádky s vlastní křížovou vazbou (viz
+     * PASIVA_A_C_RADKU) před tím, aby do nich absorpce zasáhla. `$overrides` (row_code =>
+     * [sled, min]) nahradí nezávisle zaokrouhlenou hodnotu řádku, který ji MUSÍ převzít
+     * odjinud (jen `P.A.V.` ← `VH`, viz build()) — řádek pak dál neúčastní na absorpci
+     * jinak (musí být zároveň v `$exclude`), jen v ní figuruje jako pevný bod součtu.
+     *
+     * @param array<string,array<string,mixed>> $byCode
+     * @param list<array{0:string,1:int}>       $children
+     * @param list<string>                      $exclude
+     * @param array<string,array{0:int,1:int}>  $overrides
+     * @return list<\DOMElement>
+     */
+    private function buildPasivaDetailElements(\DOMDocument $dom, array $byCode, array $children, int $targetSled, int $targetMin, array $exclude = [], array $overrides = []): array
+    {
+        $sled = [];
+        $min = [];
+        foreach ($children as [$rowCode, ]) {
+            $row = $byCode[$rowCode] ?? null;
+            if ($row === null) {
+                continue;
+            }
+            if (isset($overrides[$rowCode])) {
+                [$s, $m] = $overrides[$rowCode];
+            } else {
+                $s = $this->toThousands((float) $row['amount']);
+                $m = $this->toThousands((float) $row['prev_amount']);
+            }
+            if ($s === 0 && $m === 0) {
+                continue;
+            }
+            $sled[$rowCode] = $s;
+            $min[$rowCode] = $m;
+        }
+        if ($sled === []) {
+            return [];
+        }
+
+        $sled = $this->absorbRoundingDiff($targetSled, $sled, [], $exclude);
+        $min = $this->absorbRoundingDiff($targetMin, $min, [], $exclude);
+
+        $elements = [];
+        foreach ($children as [$rowCode, $cRadku]) {
+            if (!isset($sled[$rowCode])) {
+                continue;
+            }
+            $elements[] = $this->vetaUdElement($dom, $cRadku, $sled[$rowCode], $min[$rowCode]);
         }
         return $elements;
+    }
+
+    private function vetaUdElement(\DOMDocument $dom, int $cRadku, int $sled, int $min): \DOMElement
+    {
+        $el = $dom->createElement('VetaUD');
+        $el->setAttribute('kc_sled', (string) $sled);
+        $el->setAttribute('c_radku', (string) $cRadku);
+        $el->setAttribute('kc_min', (string) $min);
+        return $el;
+    }
+
+    /**
+     * Zaokrouhlovací past mezisoučtů (spec §2.1 u VetaUD, teď konzistentně i pro nově
+     * doplněné úrovně VetaUA/VetaUB — „jádro úkolu" 2026-08-31): každá hodnota jde do XML
+     * zaokrouhlená na tisíce ZVLÁŠŤ (viz toThousands), takže součet zaokrouhlených dětí se
+     * umí od zaokrouhleného rodiče lišit o tisícikorunu — EPO to vytkne jako „hodnota
+     * řádku X se nerovná součtu". Rodič (`$target`) se NIKDY neupravuje — může na něj
+     * navazovat další křížová kontrola o úroveň výš (P.A. → PASIVA CELKEM) nebo úplně
+     * jinde (P.A.V. → VH z VetaUB). Rozdíl se přičte k té složce z `$parts`, která smí
+     * být upravena (mimo `$exclude`) a má největší absolutní hodnotu.
+     *
+     * @param int                $target  zaokrouhlený rodič (tisíce Kč)
+     * @param array<string,int>  $parts   row_code => zaokrouhlená hodnota (tisíce Kč)
+     * @param array<string,int>  $signs   row_code => +1/-1 dle vzorce; chybějící klíč = +1
+     *                                    (prostý součet, jako u rozvahy)
+     * @param list<string>       $exclude row_code, které absorpci nesmí přijmout
+     * @return array<string,int> $parts s absorbovaným rozdílem
+     */
+    private function absorbRoundingDiff(int $target, array $parts, array $signs = [], array $exclude = []): array
+    {
+        if ($parts === []) {
+            return $parts;
+        }
+        $sum = 0;
+        foreach ($parts as $code => $value) {
+            $sum += $value * ($signs[$code] ?? 1);
+        }
+        $diff = $target - $sum;
+        if ($diff === 0) {
+            return $parts;
+        }
+        $candidates = $exclude === [] ? $parts : array_diff_key($parts, array_flip($exclude));
+        if ($candidates === []) {
+            $candidates = $parts;
+        }
+        $largest = array_key_first($candidates);
+        foreach ($candidates as $code => $value) {
+            if (abs($value) > abs($candidates[$largest])) {
+                $largest = $code;
+            }
+        }
+        $parts[$largest] += $diff * ($signs[$largest] ?? 1);
+        return $parts;
     }
 
     /**
