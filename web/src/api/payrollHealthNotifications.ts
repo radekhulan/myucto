@@ -4,17 +4,19 @@ import { api } from './client'
 // Modul mluví o dvou různých věcech a nesmí je slít:
 //
 // * **HOZ** (hromadné oznámení zaměstnavatele) — oznamovací povinnost z § 10
-//   zákona č. 48/1997 Sb. Aplikace ji umí VYHODNOTIT, připomenout lhůtu a
-//   SESTAVIT za období a pojišťovnu do XML ověřeného proti připnutému XSD —
-//   ke stažení, ne k automatickému odeslání (ISDS frontu HOZ nepoužívá,
-//   viz `HealthInsuranceSubmissionService`, bod 5 docblocku třídy).
+//   zákona č. 48/1997 Sb. Aplikace ji umí VYHODNOTIT, připomenout lhůtu,
+//   SESTAVIT za období a pojišťovnu (XML i PDF ověřené proti připnutému XSD)
+//   a zařadit do obecné ISDS fronty stejnou cestou jako PPZ — přes
+//   `enqueuePaymentOverviewIsds`, který je submissionId/insurerCode generický.
 // * **PPZ** (přehled o platbě pojistného) — měsíční přehled podle § 25 odst. 3
 //   zákona č. 592/1992 Sb. Ten aplikace umí i SESTAVIT do odesílatelné podoby
 //   a vydat jako XML ověřené proti připnutému XSD.
 //
-// Portálové API se bez doložené obálky nevolá. Validované XML lze u pojišťovny
-// s doloženou schránkou připravit do obecné ISDS fronty; odeslání vždy
-// potvrzuje uživatel.
+// Portálové API (přímé napojení na portál pojišťovny) se bez doložené obálky
+// nevolá — to je jiná osa než ISDS. Formát PŘÍLOHY datové zprávy (XML/PDF) je
+// pravidlo per pojišťovna z `HealthInsurerChannelCatalog`, ne per agenda;
+// KANÁL odeslání (brána/Mobilní klíč/ručně) počítá sdílený
+// `IsdsTransportAvailabilityResolver` na backendu a vrací ho `transport`.
 
 /** Proč aplikace nesmí odeslat sama. Nikdy to není prázdno — vždy je to kód. */
 export type HealthDispatchReasonCode =
@@ -244,23 +246,31 @@ export interface HealthPreparedOverview {
   dispatch: HealthDispatchDescription
 }
 
-/** Výsledek sestavení HOZ. `schema_validated:false` = výhrada (viz PPZ). */
+/**
+ * Výsledek sestavení HOZ. `schema_validated:false` = výhrada (viz PPZ).
+ *
+ * Zmrazuje se OBOJÍ, XML i PDF — stejně jako u PPZ — protože formát přílohy
+ * ISDS je pravidlo per pojišťovna (viz `dispatch`), ne per agenda.
+ */
 export interface HealthPreparedBulkNotification {
   submission_id: number
   obligation_id: number
   part_id?: number
   artifact_id?: number
+  pdf_artifact_id?: number
   status: string
   row_version: number
   insurer_code: string
   period: string
   agenda_code: string
   artifact_sha256: string
+  pdf_artifact_sha256?: string
   /** Kolik vět `zmenaZamestance` dávka obsahuje. */
   changes_count: number
   created: boolean
   deadline: HealthDeadlineWindow
   schema_validated: boolean
+  dispatch?: HealthDispatchDescription
 }
 
 export interface HealthIsdsEnqueueResult {
@@ -277,7 +287,12 @@ export interface HealthIsdsEnqueueResult {
   }
   transport: {
     automatic: boolean
-    channel: 'gateway' | 'manual_upload'
+    /**
+     * `gateway` — odejde bez součinnosti, `mobile_key` — odejde po potvrzení
+     * relace v Mobilním klíči, `manual_upload` — ani jedno, stáhnout a poslat
+     * ručně. Rozdíl mezi `mobile_key` a `manual_upload` se nesmí v UI ztratit.
+     */
+    channel: 'gateway' | 'mobile_key' | 'manual_upload'
     reason: string | null
   }
   outbox_url: string
@@ -327,6 +342,17 @@ export const payrollHealthNotificationApi = {
     ).then(response => response.data),
 
   enqueuePaymentOverviewIsds: (submissionId: number, insurerCode: string) =>
+    api.post<HealthIsdsEnqueueResult>(
+      `/payroll/submissions/${submissionId}/health-isds/${insurerCode}`,
+    ).then(response => response.data),
+
+  /**
+   * Zařadí PŘIPRAVENÉ hromadné oznámení do ISDS fronty. Je to TENTÝŽ endpoint
+   * jako {@link enqueuePaymentOverviewIsds} — backend rozlišuje agendu podle
+   * `submissionId`, ne podle cesty — jmenovaný alias je tu jen proto, aby
+   * volání na místě volání říkalo pravdu o tom, co odesílá.
+   */
+  enqueueBulkNotificationIsds: (submissionId: number, insurerCode: string) =>
     api.post<HealthIsdsEnqueueResult>(
       `/payroll/submissions/${submissionId}/health-isds/${insurerCode}`,
     ).then(response => response.data),

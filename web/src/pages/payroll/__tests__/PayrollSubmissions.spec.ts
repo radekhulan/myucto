@@ -638,7 +638,7 @@ describe('PayrollSubmissions', () => {
     expect(wrapper.get('[data-test="health-payment-overviews"]').text())
       .toContain('payroll.submissions.overview.health_description')
 
-    const download = wrapper.get('[data-test="health-payment-overviews"] button')
+    const download = wrapper.get('[data-test="health-overview-download"]')
     await download.trigger('click')
     await flushPromises()
     expect(m.prepareHealthOverview).toHaveBeenCalledWith(18, '111', 'production')

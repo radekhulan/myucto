@@ -6,11 +6,20 @@ namespace MyInvoice\Service\Payroll\Submission\HealthInsurance;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
-use MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService;
+use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 
-/** Zařazení ověřeného přehledu zdravotní pojišťovny do obecné ISDS fronty. */
+/**
+ * Zařazení ověřeného přehledu zdravotní pojišťovny do obecné ISDS fronty.
+ *
+ * Kanál pro ODESLÁNÍ (na rozdíl od formátu přílohy, viz
+ * {@see HealthInsurerChannelCatalog}) je stejný pro všechny pojišťovny —
+ * je to obecná fronta {@see SubmissionOutboxService}, stejně jako u JMHZ.
+ * Dostupnost brány/mobilního klíče/ruční cesty počítá sdílené
+ * {@see IsdsTransportAvailabilityResolver}, ať se s
+ * `JmhzIsdsSubmissionService` znovu nerozejdou dvě kopie téhož výpočtu.
+ */
 final readonly class HealthInsuranceIsdsSubmissionService
 {
     private const CHANNEL = 'isds';
@@ -21,7 +30,11 @@ final readonly class HealthInsuranceIsdsSubmissionService
         private SubmissionRecipientRepository $recipients,
         private SubmissionOutboxService $outbox,
         private HealthInsurerChannelCatalog $channels,
-        private ?IsdsGatewayRegistrationService $gateway = null,
+        /**
+         * Volitelně schválně, stejně jako u JMHZ: bez resolveru (typicky
+         * v testech, které si službu staví ručně) se dostupnost nesmí hádat.
+         */
+        private ?IsdsTransportAvailabilityResolver $transportAvailability = null,
     ) {}
 
     /**
@@ -68,9 +81,12 @@ final readonly class HealthInsuranceIsdsSubmissionService
             $environment,
             $submissionId,
         );
+        $agendaCode = $obligation !== null ? (string) $obligation['agenda_code'] : null;
         if ($obligation === null
-            || (string) $obligation['agenda_code']
-                !== HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW
+            || !in_array($agendaCode, [
+                HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+                HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+            ], true)
             || !str_ends_with(
                 (string) $obligation['subject_reference'],
                 ':' . $insurerCode,
@@ -78,7 +94,7 @@ final readonly class HealthInsuranceIsdsSubmissionService
         ) {
             throw new SubmissionChannelException(
                 'health_submission_scope_mismatch',
-                'Podání nepatří zvolené zdravotní pojišťovně nebo agendě PPZ.',
+                'Podání nepatří zvolené zdravotní pojišťovně nebo agendě PPZ/HOZ.',
                 409,
             );
         }
@@ -111,8 +127,16 @@ final readonly class HealthInsuranceIsdsSubmissionService
 
         $recipient = $this->recipient($supplierId, $insurerCode);
         $period = substr((string) $obligation['period_start'], 0, 7);
+        // Předmět zprávy nese label agendy, protože podklady u ní PPPZ
+        // výslovně žádají (viz `HealthInsurerChannelCatalog`); pro HOZ
+        // dokument doložený není, ale zaměnit ho za PPPZ by byla lež o tom,
+        // co zpráva nese.
+        $subjectLabel = $agendaCode === HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION
+            ? 'HOZ'
+            : 'PPPZ';
         $subject = sprintf(
-            'PPPZ %s — zdravotní pojišťovna %s',
+            '%s %s — zdravotní pojišťovna %s',
+            $subjectLabel,
             $period,
             $insurerCode,
         );
@@ -120,7 +144,7 @@ final readonly class HealthInsuranceIsdsSubmissionService
             $supplierId,
             $environment,
             self::CHANNEL,
-            HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW,
+            $agendaCode,
             self::ARTIFACT_KIND,
             $artifactId,
             (int) $recipient['id'],
@@ -145,7 +169,7 @@ final readonly class HealthInsuranceIsdsSubmissionService
                 'bytes' => (int) $artifact['byte_size'],
                 'format' => $format->value,
             ],
-            'transport' => $this->transportAvailability($environment),
+            'transport' => $this->transportAvailability($supplierId, $environment),
         ];
     }
 
@@ -221,18 +245,21 @@ final readonly class HealthInsuranceIsdsSubmissionService
         );
     }
 
-    /** @return array{automatic:bool,channel:string,reason:?string} */
-    private function transportAvailability(string $environment): array
+    /**
+     * Jde přehled odeslat bez ručního opisování do datové schránky, a pokud
+     * jen po potvrzení, KDO ho potvrzuje? Viz {@see IsdsTransportAvailabilityResolver}.
+     *
+     * @return array{automatic:bool,channel:string,reason:?string}
+     */
+    private function transportAvailability(int $supplierId, string $environment): array
     {
-        if ($this->gateway !== null && $this->gateway->isUsable($environment)) {
-            return ['automatic' => true, 'channel' => 'gateway', 'reason' => null];
-        }
-
-        return [
-            'automatic' => false,
-            'channel' => 'manual_upload',
-            'reason' => 'isds_gateway_unavailable',
-        ];
+        return $this->transportAvailability !== null
+            ? $this->transportAvailability->resolve($supplierId, $environment)
+            : [
+                'automatic' => false,
+                'channel' => 'manual_upload',
+                'reason' => 'isds_transport_unavailable',
+            ];
     }
 
 }

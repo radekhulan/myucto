@@ -49,6 +49,27 @@ final readonly class SubmissionCredentialService
     }
 
     /**
+     * Má firma v tomhle prostředí vůbec nastavenou datovou schránku
+     * (Firma → Datová schránka)?
+     *
+     * Slouží jako doklad dostupnosti Mobilního klíče, ne systémového
+     * certifikátu — ten se u ODESÍLÁNÍ nepoužije nikdy, viz
+     * {@see \MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport::assertConfirmedSession()}.
+     * Mobilní klíč přitom na tomhle záznamu technicky nezávisí (přihlašuje se
+     * jako osoba, ne certifikátem) — ale bez uloženého ID schránky nemáme
+     * ŽÁDNÝ doklad, že firma datovku vůbec má, a bez živé relace ho jinak
+     * zjistit nejde. Fail-closed by tu znamenalo tvrdit „ručně", i když
+     * odeslání ve skutečnosti jde; tenhle proxy signál je proto vědomý
+     * kompromis, ne jistota.
+     */
+    public function hasDataBox(int $supplierId, string $environment): bool
+    {
+        $this->assertEnvironment($environment);
+
+        return $this->repository->findPublic($supplierId, 'isds', $environment) !== null;
+    }
+
+    /**
      * Uloží systémový certifikát. `$certificateBytes` i `$certificatePassphrase`
      * se ihned zašifrují a dál nikam nepokračují.
      *

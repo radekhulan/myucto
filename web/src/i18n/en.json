@@ -4286,7 +4286,7 @@
       "jmhz_title": "Unified monthly employer report",
       "jmhz_fail_closed": "Prepare JMHZ from an approved immutable revision and, after a validation dry run, submit it through ISDS or VREP. Production filing becomes available when the statutory window opens.",
       "health_title": "Health-insurer reports",
-      "health_fail_closed": "Direct health-insurer submissions are not available yet. The system will not mark them as sent or accepted without a verified channel and receipt.",
+      "health_fail_closed": "Prepare the payment overview or the bulk notification from a frozen calculation and, for an insurer with a documented attachment format, send it by data box — through the gateway, or after confirming a Mobile Key session. Without a documented format or a known data box, it stays download-and-send-yourself. Nothing is marked as sent or accepted without a verified channel and receipt.",
       "statutory": {
         "title": "Sickness and other statutory obligations",
         "description": "A truthful capability matrix for the selected period. NEMPRI and HZUPN currently require a manual official-channel workflow; MyÚčto only preserves an immutable link to a real DMS receipt. Nothing is transmitted here.",
@@ -4711,7 +4711,7 @@
         "period": "Reporting period",
         "environment": "Evidence environment",
         "transport_unavailable": "No direct submission",
-        "transport_available": "Submit through ISDS or VREP",
+        "transport_available": "Submit by data box from the app",
         "load_failed": "The obligation and submission overview could not be loaded.",
         "jmhz_load_failed": "The PVPOJ control preview is unavailable for one or more approved revisions.",
         "jmhz_download_failed": "The PVPOJ control preview could not be downloaded.",
@@ -4816,7 +4816,8 @@
         "jmhz_dispatch_failed": "JMHZ could not be frozen or handed to the selected channel.",
         "jmhz_dispatch_vrep_started": "VREP accepted attempt #{id} in status {status}. Follow its result and protocol on the Submission status tab.",
         "jmhz_dispatch_isds_queued": "The data message is ready for {name}, data box ID {box}.",
-        "jmhz_dispatch_manual": "The sending gateway is not active for this environment. Open the ISDS outbox, send the prepared file from your data box, then record the message ID and upload its delivery receipt.",
+        "jmhz_dispatch_manual": "Neither the sending gateway nor Mobile Key is available for this company. Open the ISDS outbox, send the prepared file from your data box, then record the message ID and upload its delivery receipt.",
+        "jmhz_dispatch_mobile_key": "The sending gateway is not active, but the filing can be sent directly from the app once you confirm the session in Mobile Key.",
         "jmhz_dispatch_open_outbox": "Open ISDS outbox",
         "jmhz_gateway_title": "Before leaving for ISDS",
         "jmhz_gateway_credentials": "You enter credentials only on the ISDS page. MyÚčto neither sees nor stores them, and the message is sent only after you approve the draft.",
@@ -4878,6 +4879,13 @@
         "health_send_failed": "The overview could not be prepared for Data Box submission.",
         "health_download_official": "Download PDF/XML",
         "health_send_isds": "Submit via Data Box",
+        "mobile_key_batch": {
+          "select": "Select for bulk sending",
+          "selected": "Selected: {count}",
+          "action": "Send selected filings ({count}) via Mobile Key",
+          "intro": "One Mobile Key session sends all {count} selected filings at once — a single confirmation in the app covers them all.",
+          "sent_summary": "Sent {dispatched} of {total} selected filings. Check the status of any that were not sent."
+        },
         "empty": "There are no recorded obligations of this type for the selected period.",
         "health_title": "Monthly overviews by insurer",
         "health_description": "Overviews are built only from the current approved immutable revision. The application prepares and archives XML or PDF according to the insurer's requirements; sending is a separate action that the user must always confirm.",
@@ -6690,8 +6698,8 @@
       "alternative_route": "ISDS attachment format undocumented",
       "limits": {
         "title": "Electronic filing options",
-        "no_transport": "Only PPZ can be placed into the ISDS outbox, and only where the attachment format is documented — shared XML or extractable PDF. The user always explicitly confirms the send.",
-        "manual_delivery": "HOZ can be built and downloaded as XML validated against the pinned XSD, but the application does not send it and does not place it into the ISDS outbox. File the downloaded file with the insurer manually and confirm completion in the obligation inbox.",
+        "no_transport": "Both PPZ and HOZ can be placed into the ISDS outbox, but only where the attachment format is documented for that insurer — shared XML or extractable PDF. The user always explicitly confirms the send — through the gateway, or after confirming a Mobile Key session.",
+        "manual_delivery": "Without a documented attachment format or a known data box ID for the insurer, both PPZ and HOZ stay download-and-file-yourself. File the downloaded file with the insurer manually and confirm completion in the obligation inbox.",
         "undocumented_codes": "For these duty kinds the pinned schema does not determine a single change code, so none is issued at all: {kinds}. Guessing one would mean filing a record with a code that follows from nothing.",
         "capability_failed": "The insurer channel list could not be loaded. The limits above still apply — they did not disappear, only their detail is missing."
       },
@@ -6800,7 +6808,7 @@
       },
       "prepare_bulk": {
         "title": "Build the bulk notification (HOZ)",
-        "description": "Builds HOZ for the selected period and insurer from every obligation the employer reports and for which the schema documents a change code — undocumented codes (correction, insurer transfer, data change) are left out of the batch. The XML is validated against the pinned XSD. The application does not place the file into the ISDS outbox or send it — it only issues it for download.",
+        "description": "Builds HOZ for the selected period and insurer from every obligation the employer reports and for which the schema documents a change code — undocumented codes (correction, insurer transfer, data change) are left out of the batch. Both XML and PDF are produced, each validated against the pinned XSD or frozen computation. For an insurer with a documented attachment format and a known data box, HOZ can be queued into the ISDS outbox and sent the same way as the payment overview; otherwise it stays download-and-send-yourself.",
         "action": "Build HOZ",
         "insurer": "Insurer",
         "insurer_placeholder": "Pick an insurer",

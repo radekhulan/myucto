@@ -2439,6 +2439,11 @@ final class Routes
         // je JEDEN endpoint schválně: potvrzení se dá vyzvednout jen jednou.
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mobile-key/start',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyStart']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/mobile-key/confirm', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyConfirm']);
+        // Dávka: JEDNO potvrzení v mobilu pošle VÍC podání (typicky ČSSZ +
+        // víc zdravotních pojišťoven za týž měsíc). Bez `{id}` schválně —
+        // přihlášení k ISDS není vázané na jedno konkrétní podání.
+        $app->post   ('/api/submissions/outbox/mobile-key/start-batch',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyStartBatch']);
+        $app->post   ('/api/submissions/outbox/mobile-key/confirm-batch', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyConfirmBatch']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
         // Ruční cesta: uživatel odešle zprávu ze své datové schránky a přinese

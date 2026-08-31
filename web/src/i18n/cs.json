@@ -4286,7 +4286,7 @@
       "jmhz_title": "Jednotné měsíční hlášení zaměstnavatele",
       "jmhz_fail_closed": "JMHZ připravíte ze schválené neměnné revize, otestujete jeho XML a poté je odešlete přes ISDS nebo VREP. Ostré podání je dostupné až od začátku zákonné lhůty.",
       "health_title": "Hlášení zdravotním pojišťovnám",
-      "health_fail_closed": "Přímá podání zdravotním pojišťovnám zatím nejsou zpřístupněná. Systém je nebude označovat jako odeslaná ani přijatá bez ověřeného kanálu a dodejky.",
+      "health_fail_closed": "Přehled o platbě i hromadné oznámení připravíte ze zmrazeného výpočtu a u pojišťovny s doloženým formátem přílohy je odešlete datovkou — bránou, nebo po potvrzení v Mobilním klíči. Bez doloženého formátu nebo ID schránky zůstává stažení a ruční odeslání. Systém nic neoznačí jako odeslané ani přijaté bez ověřeného kanálu a dodejky.",
       "statutory": {
         "title": "Nemocenské a další zákonné povinnosti",
         "description": "Pravdivá matice rozsahu pro zvolené období. U každé povinnosti je vidět, co za vás MyÚčto udělá a co musíte dokončit jinde. Nic se odsud neodešle samo — odeslání vždy potvrzujete vy.",
@@ -4711,7 +4711,7 @@
         "period": "Věcné období",
         "environment": "Prostředí evidence",
         "transport_unavailable": "Bez přímého odeslání",
-        "transport_available": "Odeslání přes ISDS nebo VREP",
+        "transport_available": "Odeslání datovkou z aplikace",
         "load_failed": "Přehled povinností a podání se nepodařilo načíst.",
         "jmhz_load_failed": "Kontrolní náhled PVPOJ není pro některou schválenou revizi dostupný.",
         "jmhz_download_failed": "Kontrolní náhled PVPOJ se nepodařilo stáhnout.",
@@ -4816,7 +4816,8 @@
         "jmhz_dispatch_failed": "JMHZ se nepodařilo zmrazit nebo předat zvolenému kanálu.",
         "jmhz_dispatch_vrep_started": "VREP převzal pokus č. {id} ve stavu {status}. Výsledek a protokol se zobrazí na záložce Stav odeslání.",
         "jmhz_dispatch_isds_queued": "Datová zpráva je připravená pro {name}, ID schránky {box}.",
-        "jmhz_dispatch_manual": "Odesílací brána není pro toto prostředí aktivní. Otevřete odchozí frontu, odešlete připravený soubor ze své datové schránky a poté doplňte ID zprávy a doručenku.",
+        "jmhz_dispatch_manual": "Odesílací brána ani Mobilní klíč pro tuto firmu nejsou k dispozici. Otevřete odchozí frontu, odešlete připravený soubor ze své datové schránky a poté doplňte ID zprávy a doručenku.",
+        "jmhz_dispatch_mobile_key": "Odesílací brána není aktivní, ale podání jde odeslat přímo z aplikace po potvrzení relace v Mobilním klíči.",
         "jmhz_dispatch_open_outbox": "Otevřít odchozí frontu ISDS",
         "jmhz_gateway_title": "Před odchodem do ISDS",
         "jmhz_gateway_credentials": "Přihlašovací údaje zadáváte pouze na stránce ISDS. MyÚčto je nevidí ani neukládá a zpráva odejde až po Vašem schválení konceptu.",
@@ -4878,6 +4879,13 @@
         "health_send_failed": "Přehled se nepodařilo připravit k podání datovou schránkou.",
         "health_download_official": "Stáhnout PDF/XML",
         "health_send_isds": "Podat datovkou",
+        "mobile_key_batch": {
+          "select": "Vybrat k hromadnému odeslání",
+          "selected": "Vybráno: {count}",
+          "action": "Odeslat vybraná podání ({count}) Mobilním klíčem",
+          "intro": "V jedné relaci Mobilního klíče odešlete najednou {count} vybraných podání — jedno potvrzení v mobilu stačí na všechna.",
+          "sent_summary": "Odesláno {dispatched} z {total} vybraných podání. Zkontrolujte stav u těch, které se neodeslaly."
+        },
         "empty": "Pro zvolené období tu nejsou žádné evidované povinnosti tohoto druhu.",
         "health_title": "Měsíční přehledy po pojišťovnách",
         "health_description": "Přehledy vycházejí pouze z aktuální schválené neměnné revize. Aplikace připraví a archivuje XML nebo PDF podle požadavku pojišťovny; odeslání je samostatná akce, kterou vždy potvrzuje uživatel.",
@@ -6690,8 +6698,8 @@
       "alternative_route": "Formát přílohy ISDS nedoložen",
       "limits": {
         "title": "Možnosti elektronického podání",
-        "no_transport": "Do odchozí fronty ISDS lze připravit pouze PPZ a jen tam, kde je doložený formát přílohy — společné XML nebo vytěžitelné PDF. Odeslání vždy výslovně potvrzuje uživatel.",
-        "manual_delivery": "HOZ lze sestavit a stáhnout jako XML ověřené proti připnutému XSD, ale aplikace ho neodesílá a do fronty ISDS nezařazuje. Stažený soubor podejte pojišťovně ručně a splnění potvrďte v inboxu povinností.",
+        "no_transport": "Do odchozí fronty ISDS lze zařadit PPZ i HOZ, ale jen tam, kde je pro danou pojišťovnu doložený formát přílohy — společné XML nebo vytěžitelné PDF. Odeslání vždy výslovně potvrzuje uživatel — bránou, nebo po potvrzení v Mobilním klíči.",
+        "manual_delivery": "Bez doloženého formátu přílohy nebo bez ID datové schránky pojišťovny zůstává i u PPZ a HOZ jen stažení a ruční podání. Stažený soubor podejte pojišťovně ručně a splnění potvrďte v inboxu povinností.",
         "undocumented_codes": "U těchto druhů povinnosti neplyne z připnutého schématu jediný kód změny, takže se nevydá vůbec: {kinds}. Odhadnout ho by znamenalo podat větu s kódem, který neplyne z ničeho.",
         "capability_failed": "Seznam kanálů pojišťoven se nepodařilo načíst. Omezení výše platí i tak — nezmizela, jen k nim chybí detail."
       },
@@ -6800,7 +6808,7 @@
       },
       "prepare_bulk": {
         "title": "Sestavení hromadného oznámení (HOZ)",
-        "description": "Sestaví HOZ za zvolené období a pojišťovnu ze všech povinností, které hlásí zaměstnavatel a má pro ně schéma doložený kód změny — nedoložené kódy (oprava, přestup, změna údajů) se do dávky nezahrnou. XML se ověří proti připnutému XSD. Aplikace soubor nezařazuje do fronty ISDS ani ho neodesílá — vydá ho jen ke stažení.",
+        "description": "Sestaví HOZ za zvolené období a pojišťovnu ze všech povinností, které hlásí zaměstnavatel a má pro ně schéma doložený kód změny — nedoložené kódy (oprava, přestup, změna údajů) se do dávky nezahrnou. Vyrobí se XML i PDF, oba ověřené proti připnutému XSD nebo zmrazenému výpočtu. U pojišťovny s doloženým formátem přílohy a schránkou jde HOZ zařadit do fronty ISDS a odeslat stejně jako přehled o platbě; jinak zůstává stažení a ruční odeslání.",
         "action": "Sestavit HOZ",
         "insurer": "Pojišťovna",
         "insurer_placeholder": "Vyberte pojišťovnu",

@@ -351,6 +351,60 @@ final readonly class SubmissionOutboxService
     }
 
     /**
+     * Potvrzení JEDNOU relací pro VÍC podání najednou.
+     *
+     * ── Proč tohle vůbec je ──────────────────────────────────────────────────
+     * Relaci Mobilního klíče vyzvedne {@see \MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator::continue()}
+     * jen JEDNOU — druhé volání narazí na spotřebovaný flow token. Účetní má
+     * ale každý měsíc až osm podání (ČSSZ + sedm zdravotních pojišťoven);
+     * potvrzovat v mobilu zvlášť pro každé by bylo nepoužitelné. Tahle metoda
+     * proto v JEDNÉ už vyzvednuté relaci pošle víc podání za sebou — cookie tím
+     * neopouští jeden PHP požadavek o nic víc, než u jednotlivého odeslání.
+     *
+     * ── Jedno selže, ostatní pokračují ──────────────────────────────────────
+     * Odesílá se po jednom přes {@see confirmAndSend()} a výsledek (i chyba)
+     * se sbírá per položka. Kdyby jedna vyjímka zastavila celou smyčku, zbylá
+     * podání by zůstala nevyřízená, aniž by o tom účetní věděla proč zrovna ta.
+     *
+     * @param list<int> $ids
+     * @return list<array{id:int,dispatched:bool,row:?array<string,mixed>,error_code:?string,error_message:?string}>
+     */
+    public function confirmAndSendBatch(int $supplierId, array $ids, int $userId, ChannelContext $context): array
+    {
+        $results = [];
+        foreach ($ids as $id) {
+            try {
+                $outcome = $this->confirmAndSend($supplierId, $id, $userId, $context);
+                $results[] = [
+                    'id' => $id,
+                    'dispatched' => $outcome['dispatched'],
+                    'row' => $outcome['row'],
+                    'error_code' => null,
+                    'error_message' => null,
+                ];
+            } catch (SubmissionChannelException $e) {
+                $results[] = [
+                    'id' => $id,
+                    'dispatched' => false,
+                    'row' => null,
+                    'error_code' => $e->errorCode,
+                    'error_message' => $e->getMessage(),
+                ];
+            } catch (\DomainException $e) {
+                $results[] = [
+                    'id' => $id,
+                    'dispatched' => false,
+                    'row' => null,
+                    'error_code' => 'submission_conflict',
+                    'error_message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
      * Zaznamená odeslání, které člověk provedl ve své vlastní datové schránce.
      *
      * ── Proč to tu vůbec je ─────────────────────────────────────────────────

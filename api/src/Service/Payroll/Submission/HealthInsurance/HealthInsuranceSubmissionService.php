@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
+use MyInvoice\Service\Pdf\PayrollHealthBulkNotificationPdfRenderer;
 use MyInvoice\Service\Pdf\PayrollHealthPaymentOverviewPdfRenderer;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\InstitutionAccountType;
@@ -35,22 +36,24 @@ use Psr\Clock\ClockInterface;
  *    celý zhroutil, nezůstalo by po něm nic a povinnost by se tvářila jako
  *    nezpracovaná.
  * 3. **Kanál se nehádá.** Portálové API bez veřejně popsané transportní
- *    obálky se nevolá. Doložený formát přílohy PPZ lze u pojišťoven s
+ *    obálky se nevolá. Doložený formát přílohy PPZ i HOZ lze u pojišťoven s
  *    ověřeným příjemcem připravit do obecné ISDS fronty; odeslání vždy
  *    potvrzuje uživatel a firma může výchozího příjemce překrýt.
  * 4. **Stav `ready` znamená „lze odeslat", ne „odesláno".** Přechod dál patří
  *    potvrzenému ISDS transportu; samotné zařazení do fronty stav nemění.
- * 5. **HOZ se do ISDS fronty NEZAŘAZUJE — a zůstane tak.** ISDS fronta
- *    ({@see PayrollAgendaCorrectionPolicy}, {@see HealthInsurerChannelCatalog})
- *    je dnes doložená jen pro PPZ (podklady mluví o „PPPZ"); pro HOZ rešerše
- *    transportní obálku nedokládá o nic líp, takže by vynucení agendy PPZ
- *    v {@see \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService::enqueue()}
- *    znamenalo odeslání datovou zprávou bez dokladu, jak má vypadat příloha.
- *    Vydání souboru ke stažení naproti tomu takový doklad NEPOTŘEBUJE — formát
- *    HOZ je doložený tímtéž připnutým XSD jako PPZ, jen jinou strukturou. Proto
- *    HOZ umí `prepareBulkNotification()`/`bulkNotificationDownload()`, ale ne
- *    ISDS enqueue; kdyby se pro HOZ někdy dohledala transportní obálka, patří
- *    rozšíření do `HealthInsuranceIsdsSubmissionService`, ne sem.
+ * 5. **HOZ se do ISDS fronty ZAŘAZUJE, stejně jako PPZ.** Formát přílohy podle
+ *    {@see HealthInsurerChannelCatalog} je pravidlo per pojišťovna, ne per
+ *    agenda: `prepareBulkNotification()` proto zmrazuje OBOJÍ (XML i PDF)
+ *    přesně jako `preparePaymentOverview()`, a
+ *    {@see \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService::enqueue()}
+ *    přijímá obě agendy. Dřívější zákaz vycházel z toho, že XSD anotace pro
+ *    HOZ nebyla doložená o nic líp než pro PPZ — jenže transportní OBÁLKA
+ *    (co je uvnitř zprávy) je oddělená otázka od formátu PŘÍLOHY (v čem se to
+ *    posílá), kterou katalog řeší per pojišťovna. Co doložené NENÍ, je
+ *    oficiální formulář HOZ jako AcroForm — proto
+ *    {@see \MyInvoice\Service\Pdf\PayrollHealthBulkNotificationPdfRenderer}
+ *    vydává vlastní čitelný dokument, ne vyplněný cizí formulář (viz její
+ *    docblock).
  */
 final readonly class HealthInsuranceSubmissionService
 {
@@ -87,6 +90,7 @@ final readonly class HealthInsuranceSubmissionService
         private HealthInsuranceXmlSerializer $serializer,
         private HealthInsuranceXmlValidator $validator,
         private PayrollHealthPaymentOverviewPdfRenderer $pdfRenderer,
+        private PayrollHealthBulkNotificationPdfRenderer $bulkPdfRenderer,
         private ClockInterface $clock,
         private HealthPaymentOverviewService $overviews,
         private PayrollObligationService $obligations,
@@ -927,10 +931,15 @@ final readonly class HealthInsuranceSubmissionService
     }
 
     /**
-     * Zmrazí hromadné oznámení HOZ do odesílatelné podoby. Neodesílá — ISDS
-     * frontu HOZ záměrně nepoužívá, viz bod 5 v docblocku třídy.
+     * Zmrazí hromadné oznámení HOZ do odesílatelné podoby.
      *
-     * @return array<string,mixed>
+     * Vyrábí a zmrazí OBOJÍ, XML i PDF, přesně jako
+     * {@see preparePaymentOverview()} — kterou z obou příloh datová schránka
+     * u konkrétní pojišťovny přijímá, říká
+     * {@see HealthInsurerChannelCatalog}. Bez zmrazeného PDF by odeslání
+     * u pojišťoven s doloženým PDF formátem (111, 201, 209, 211) nemělo co
+     * poslat: {@see \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService::enqueue()}
+     * hledá právě jeden zmrazený kandidát podle formátu, ne podle typu podání.
      */
     public function prepareBulkNotification(
         int $supplierId,
@@ -947,16 +956,36 @@ final readonly class HealthInsuranceSubmissionService
         $payload = $bundle['payload'];
         $window = $bundle['window'];
         $xml = $this->serializer->serializeBulkNotification($payload);
+        $channel = $this->channelDescription($supplierId, $insurerCode);
+        $pdf = $this->bulkPdfRenderer->renderPayload(
+            $payload,
+            is_string($channel['insurer_name'] ?? null)
+                ? $channel['insurer_name']
+                : null,
+            $this->today(),
+        );
+        $isdsAttachmentFormat = HealthInsurerIsdsAttachmentFormat::tryFrom(
+            (string) ($channel['isds_attachment_format'] ?? ''),
+        ) ?? HealthInsurerIsdsAttachmentFormat::None;
 
         $subjectReference =
             'health_bulk_notification:' . $period . ':' . $insurerCode;
         $bounds = $this->periodBounds($period);
         $sourceHash = hash('sha256', CanonicalJson::encode([
             'schema_reference' =>
-                'payroll-health-bulk-notification-submission.v1',
+                'payroll-health-bulk-notification-submission.v2',
             'period' => $period,
             'insurer_code' => $insurerCode,
             'xml_sha256' => hash('sha256', $xml),
+            // ⚠️ ZÁMĚRNĚ ne `hash('sha256', $pdf)`: mPDF vkládá časové
+            // razítko do metadat, takže by dvě volání se STEJNÝM obsahem
+            // vyrobila JINÝ otisk a druhé zařazení by se netvářilo jako
+            // replay, ale jako nové podání — stejná past, které se vyhýbá
+            // `preparePaymentOverview()`. Verze šablony postačí, protože
+            // sama o sobě určuje tvar PDF.
+            'pdf_template_reference' => $this->bulkPdfRenderer->templateReference(),
+            'isds_attachment_rules' => $channel['isds_attachment_rules'],
+            'isds_attachment_format' => $isdsAttachmentFormat->value,
         ]));
 
         return $this->submissionRepository->transaction(function () use (
@@ -966,6 +995,8 @@ final readonly class HealthInsuranceSubmissionService
             $insurerCode,
             $payload,
             $xml,
+            $pdf,
+            $isdsAttachmentFormat,
             $window,
             $subjectReference,
             $bounds,
@@ -1022,16 +1053,28 @@ final readonly class HealthInsuranceSubmissionService
                         $environment,
                         (int) $submission['id'],
                     );
+                $pdfArtifactId = $this->submissionRepository
+                    ->findOutboundPdfArtifactId(
+                        $supplierId,
+                        $environment,
+                        (int) $submission['id'],
+                    );
                 $artifact = $artifactId === null
                     ? null
                     : $this->submissionRepository->findArtifact(
                         $supplierId,
                         $artifactId,
                     );
-                if ($artifact === null) {
+                $pdfArtifact = $pdfArtifactId === null
+                    ? null
+                    : $this->submissionRepository->findArtifact(
+                        $supplierId,
+                        $pdfArtifactId,
+                    );
+                if ($artifact === null || $pdfArtifact === null) {
                     throw new HealthNotificationException(
                         'zp_submission_artifact_missing',
-                        'Dříve připravené hromadné oznámení nemá zmrazený podklad.',
+                        'Dříve připravené hromadné oznámení nemá oba zmrazené podklady.',
                     );
                 }
 
@@ -1039,17 +1082,23 @@ final readonly class HealthInsuranceSubmissionService
                     'submission_id' => (int) $submission['id'],
                     'obligation_id' => $obligation['id'],
                     'artifact_id' => $artifactId,
+                    'pdf_artifact_id' => $pdfArtifactId,
                     'status' => (string) $submission['status'],
                     'row_version' => (int) $submission['row_version'],
                     'insurer_code' => $insurerCode,
                     'period' => $period,
                     'agenda_code' => self::AGENDA_BULK_NOTIFICATION,
                     'artifact_sha256' => (string) $artifact['artifact_sha256'],
+                    'pdf_artifact_sha256' => (string) $pdfArtifact['artifact_sha256'],
                     'changes_count' => count($payload->changes),
                     'created' => false,
                     'deadline' => $window->toArray(),
                     'schema_validated' => $this->isSchemaValidatedStatus(
                         (string) $submission['status'],
+                    ),
+                    'dispatch' => $this->dispatchDescription(
+                        $supplierId,
+                        $insurerCode,
                     ),
                 ];
             }
@@ -1075,7 +1124,9 @@ final readonly class HealthInsuranceSubmissionService
                 'application/xml',
                 $xml,
                 HealthInsuranceSchemaCatalog::XSD_VERSION,
-                null,
+                $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::Xml
+                    ? self::isdsAttachmentCatalogVersion($isdsAttachmentFormat)
+                    : null,
                 self::CHANNEL,
                 'health-bulk-notification-xml-artifact:' . $environment . ':'
                     . $sourceHash,
@@ -1091,7 +1142,40 @@ final readonly class HealthInsuranceSubmissionService
                 );
             }
 
-            $rowVersion = (int) $xmlArtifact['submission_row_version'];
+            // PDF se zmrazuje VŽDY, ne jen u pojišťoven s doloženým PDF
+            // formátem — stejně jako u PPZ (viz `preparePaymentOverview()`):
+            // slouží i jako čitelný podklad ke stažení, a `outbound_pdf`
+            // dostane odesílatelný `isds_attachment_catalog_version` jen
+            // tehdy, když je zrovna PDF ta dokumentovaná příloha.
+            $pdfArtifact = $this->submissions->storeArtifact(
+                $supplierId,
+                (int) $submission['id'],
+                (int) $xmlArtifact['submission_row_version'],
+                (int) $part['id'],
+                'outbound_pdf',
+                'outbound',
+                'application/pdf',
+                $pdf,
+                null,
+                $isdsAttachmentFormat === HealthInsurerIsdsAttachmentFormat::TextPdf
+                    ? self::isdsAttachmentCatalogVersion($isdsAttachmentFormat)
+                    : null,
+                self::CHANNEL,
+                'health-bulk-notification-pdf-artifact:' . $environment . ':'
+                    . $sourceHash,
+                $createdBy,
+            );
+            if (!hash_equals(
+                hash('sha256', $pdf),
+                (string) $pdfArtifact['artifact_sha256'],
+            )) {
+                throw new HealthNotificationException(
+                    'zp_pdf_artifact_mismatch',
+                    'Otisk uloženého PDF neodpovídá zmrazenému hromadnému oznámení.',
+                );
+            }
+
+            $rowVersion = (int) $pdfArtifact['submission_row_version'];
             $status = (string) $submission['status'];
             $validated = false;
             try {
@@ -1137,16 +1221,22 @@ final readonly class HealthInsuranceSubmissionService
                 'obligation_id' => $obligation['id'],
                 'part_id' => (int) $part['id'],
                 'artifact_id' => (int) $xmlArtifact['id'],
+                'pdf_artifact_id' => (int) $pdfArtifact['id'],
                 'status' => $status,
                 'row_version' => $rowVersion,
                 'insurer_code' => $insurerCode,
                 'period' => $period,
                 'agenda_code' => self::AGENDA_BULK_NOTIFICATION,
                 'artifact_sha256' => (string) $xmlArtifact['artifact_sha256'],
+                'pdf_artifact_sha256' => (string) $pdfArtifact['artifact_sha256'],
                 'changes_count' => count($payload->changes),
                 'created' => true,
                 'deadline' => $window->toArray(),
                 'schema_validated' => $validated,
+                'dispatch' => $this->dispatchDescription(
+                    $supplierId,
+                    $insurerCode,
+                ),
             ];
         });
     }

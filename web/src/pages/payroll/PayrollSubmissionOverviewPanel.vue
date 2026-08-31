@@ -2,9 +2,10 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
-import { dataBoxApi } from '@/api/dataBox'
+import { dataBoxApi, type MobileKeyBatchItemResult } from '@/api/dataBox'
 import {
   payrollHealthNotificationApi,
+  type HealthIsdsEnqueueResult,
   type HealthPreparedOverview,
 } from '@/api/payrollHealthNotifications'
 import {
@@ -21,6 +22,8 @@ import {
 } from '@/api/payroll'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
+import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
@@ -88,6 +91,19 @@ const jmhzPreviews = ref<PayrollJmhzPvpojPreview[]>([])
 const jmhzApprovedRuns = ref<PayrollRun[]>([])
 const downloadingHealthKey = ref<string | null>(null)
 const sendingHealthKey = ref<string | null>(null)
+/** Naposled zařazený výsledek pro kartu — určuje, jakou akci (brána/mobilní klíč/ručně) karta nabídne. */
+const healthQueuedByKey = ref<Record<string, HealthIsdsEnqueueResult>>({})
+const healthMobileKeySentKey = ref<string | null>(null)
+/**
+ * Hromadné odeslání: transportní kanál je vlastnost FIRMY, ne jednotlivého
+ * podání, takže se u vybraných karet chová stejně — buď u všech projde brána,
+ * nebo u všech Mobilní klíč, nebo u všech zůstane ruční cesta.
+ */
+const selectedHealthKeys = ref<Set<string>>(new Set())
+const healthBatchBusy = ref(false)
+const healthBatchError = ref('')
+const healthBatchQueuedIds = ref<number[]>([])
+const healthBatchSentResults = ref<MobileKeyBatchItemResult[] | null>(null)
 const downloadingJmhzKey = ref<string | null>(null)
 const jmhzError = ref('')
 /**
@@ -394,7 +410,9 @@ async function downloadHealth(overview: PayrollHealthPaymentOverview) {
 
 async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
   healthError.value = ''
-  sendingHealthKey.value = healthOverviewKey(overview)
+  const key = healthOverviewKey(overview)
+  sendingHealthKey.value = key
+  healthMobileKeySentKey.value = null
   try {
     const prepared = await prepareHealth(overview)
     if (!prepared.schema_validated || prepared.status !== 'ready') {
@@ -409,6 +427,12 @@ async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
       window.location.assign(gateway.redirect_url)
       return
     }
+    // `mobile_key` NENÍ totéž jako „ručně" — nabídne se tlačítko rovnou tady,
+    // ne jen přesměrování do fronty, kde by účetní musela hledat, co dál.
+    if (queued.transport.channel === 'mobile_key') {
+      healthQueuedByKey.value = { ...healthQueuedByKey.value, [key]: queued }
+      return
+    }
     window.location.assign(queued.outbox_url)
   } catch (exception) {
     healthError.value = apiErrorMessage(
@@ -418,6 +442,72 @@ async function sendHealthViaDataBox(overview: PayrollHealthPaymentOverview) {
   } finally {
     sendingHealthKey.value = null
   }
+}
+
+function healthMobileKeySent(overview: PayrollHealthPaymentOverview) {
+  healthMobileKeySentKey.value = healthOverviewKey(overview)
+}
+
+function toggleHealthSelection(overview: PayrollHealthPaymentOverview) {
+  const key = healthOverviewKey(overview)
+  const next = new Set(selectedHealthKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  selectedHealthKeys.value = next
+}
+
+/**
+ * Zařadí do fronty všechny vybrané přehledy a podle SPOLEČNÉHO kanálu (viz
+ * komentář u `selectedHealthKeys`) buď rovnou otevře bránu, nebo nabídne
+ * dávkové odeslání Mobilním klíčem, nebo pošle na ruční frontu.
+ */
+async function sendSelectedHealthViaDataBox() {
+  const selected = healthOverviews.value.filter(overview =>
+    selectedHealthKeys.value.has(healthOverviewKey(overview)),
+  )
+  if (selected.length === 0) return
+  healthBatchError.value = ''
+  healthBatchQueuedIds.value = []
+  healthBatchSentResults.value = null
+  healthBatchBusy.value = true
+  try {
+    const queued: HealthIsdsEnqueueResult[] = []
+    for (const overview of selected) {
+      const prepared = await prepareHealth(overview)
+      if (!prepared.schema_validated || prepared.status !== 'ready') continue
+      queued.push(await payrollHealthNotificationApi.enqueuePaymentOverviewIsds(
+        prepared.submission_id,
+        prepared.insurer_code,
+      ))
+    }
+    if (queued.length === 0) {
+      throw new Error('health_batch_nothing_ready')
+    }
+    const first = queued[0]!
+    if (first.transport.automatic) {
+      const gateway = await dataBoxApi.gatewayStartPayroll(first.outbox_id)
+      window.location.assign(gateway.redirect_url)
+      return
+    }
+    if (first.transport.channel === 'mobile_key') {
+      healthBatchQueuedIds.value = queued.map(item => item.outbox_id)
+      return
+    }
+    window.location.assign(first.outbox_url)
+  } catch (exception) {
+    healthBatchError.value = apiErrorMessage(
+      exception,
+      t('payroll.submissions.overview.health_send_failed'),
+    )
+  } finally {
+    healthBatchBusy.value = false
+  }
+}
+
+function healthBatchSent(results: MobileKeyBatchItemResult[]) {
+  healthBatchSentResults.value = results
+  healthBatchQueuedIds.value = []
+  selectedHealthKeys.value = new Set()
 }
 
 async function load() {
@@ -479,13 +569,13 @@ onMounted(load)
             </h2>
             <span
               class="rounded-full px-2.5 py-1 text-xs font-medium"
-              :class="mode === 'jmhz'
-                ? 'bg-primary-50 text-primary-700'
-                : 'bg-warning-50 text-warning-700'"
+              :class="mode === 'other'
+                ? 'bg-warning-50 text-warning-700'
+                : 'bg-primary-50 text-primary-700'"
             >
-              {{ mode === 'jmhz'
-                ? t('payroll.submissions.overview.transport_available')
-                : t('payroll.submissions.overview.transport_unavailable') }}
+              {{ mode === 'other'
+                ? t('payroll.submissions.overview.transport_unavailable')
+                : t('payroll.submissions.overview.transport_available') }}
             </span>
           </div>
           <p class="mt-2 text-sm text-neutral-600">
@@ -1036,25 +1126,84 @@ onMounted(load)
           {{ t('payroll.submissions.overview.health_empty') }}
         </div>
 
-        <div v-else-if="healthOverviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
+        <div
+          v-if="healthOverviews.length > 1"
+          class="flex flex-wrap items-center gap-3 border-b border-neutral-200 bg-neutral-50 px-4 py-3"
+          data-test="health-batch-toolbar"
+        >
+          <span class="text-sm text-neutral-600">
+            {{ t('payroll.submissions.overview.mobile_key_batch.selected', { count: selectedHealthKeys.size }) }}
+          </span>
+          <button
+            type="button"
+            :class="btnFilledSm('primary')"
+            :disabled="selectedHealthKeys.size === 0 || healthBatchBusy"
+            data-test="health-batch-send"
+            @click="sendSelectedHealthViaDataBox"
+          >
+            {{ t('payroll.submissions.overview.mobile_key_batch.action', { count: selectedHealthKeys.size }) }}
+          </button>
+        </div>
+        <p
+          v-if="healthBatchError"
+          class="m-4 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="health-batch-error"
+        >
+          {{ healthBatchError }}
+        </p>
+        <div
+          v-if="healthBatchQueuedIds.length"
+          class="m-4 rounded-lg border border-primary-200 bg-primary-50/40 p-3"
+          data-test="health-batch-mobile-key"
+        >
+          <MobileKeyBatchSendButton
+            :outbox-ids="healthBatchQueuedIds"
+            environment="production"
+            @sent="healthBatchSent"
+          />
+        </div>
+        <p
+          v-if="healthBatchSentResults"
+          class="m-4 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+          data-test="health-batch-sent-result"
+        >
+          {{ t('payroll.submissions.overview.mobile_key_batch.sent_summary', {
+            dispatched: healthBatchSentResults.filter(item => item.dispatched).length,
+            total: healthBatchSentResults.length,
+          }) }}
+        </p>
+
+        <div v-if="healthOverviews.length" class="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
           <article
             v-for="overview in healthOverviews"
             :key="healthOverviewKey(overview)"
             class="rounded-lg border border-neutral-200 p-4"
           >
             <div class="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h3 class="font-semibold text-neutral-900">
-                  {{ t('payroll.submissions.overview.health_insurer', { code: overview.insurer.code }) }}
-                </h3>
-                <p class="mt-1 text-xs text-neutral-500">
-                  {{ overview.period }} ·
-                  {{ t('payroll.submissions.overview.health_people', { count: overview.totals.person_count }) }} ·
-                  {{ t('payroll.submissions.overview.health_run_revision', {
-                    run: overview.run_id,
-                    revision: overview.revision_no,
-                  }) }}
-                </p>
+              <div class="flex items-start gap-2">
+                <input
+                  v-if="healthOverviews.length > 1"
+                  type="checkbox"
+                  class="mt-1"
+                  :checked="selectedHealthKeys.has(healthOverviewKey(overview))"
+                  :aria-label="t('payroll.submissions.overview.mobile_key_batch.select')"
+                  data-test="health-overview-select"
+                  @change="toggleHealthSelection(overview)"
+                >
+                <div>
+                  <h3 class="font-semibold text-neutral-900">
+                    {{ t('payroll.submissions.overview.health_insurer', { code: overview.insurer.code }) }}
+                  </h3>
+                  <p class="mt-1 text-xs text-neutral-500">
+                    {{ overview.period }} ·
+                    {{ t('payroll.submissions.overview.health_people', { count: overview.totals.person_count }) }} ·
+                    {{ t('payroll.submissions.overview.health_run_revision', {
+                      run: overview.run_id,
+                      revision: overview.revision_no,
+                    }) }}
+                  </p>
+                </div>
               </div>
               <div class="flex flex-wrap items-center justify-end gap-2">
                 <button
@@ -1070,6 +1219,7 @@ onMounted(load)
                   {{ t('payroll.submissions.overview.health_download_official') }}
                 </button>
                 <button
+                  v-if="!healthQueuedByKey[healthOverviewKey(overview)] && healthMobileKeySentKey !== healthOverviewKey(overview)"
                   type="button"
                   :class="btnFilledSm('primary')"
                   :disabled="sendingHealthKey === healthOverviewKey(overview) || downloadingHealthKey === healthOverviewKey(overview)"
@@ -1083,6 +1233,20 @@ onMounted(load)
                 </button>
               </div>
             </div>
+            <p
+              v-if="healthMobileKeySentKey === healthOverviewKey(overview)"
+              class="mt-3 text-sm font-medium text-success-800"
+              data-test="health-overview-mobile-key-sent"
+            >
+              {{ t('databox.outbox.mobileKey.sent') }}
+            </p>
+            <MobileKeySendButton
+              v-else-if="healthQueuedByKey[healthOverviewKey(overview)]"
+              class="mt-3"
+              :outbox-id="healthQueuedByKey[healthOverviewKey(overview)]!.outbox_id"
+              environment="production"
+              @sent="healthMobileKeySent(overview)"
+            />
             <dl class="mt-4 grid grid-cols-2 gap-3 text-xs">
               <div>
                 <dt class="text-neutral-500">{{ t('payroll.submissions.overview.health_base') }}</dt>

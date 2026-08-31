@@ -38,6 +38,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
@@ -113,6 +114,7 @@ const isdsBusy = ref(false)
 const isdsError = ref('')
 const isdsResult = ref<HealthIsdsEnqueueResult | null>(null)
 const isdsGateway = ref<GatewayStart | null>(null)
+const isdsMobileKeySent = ref(false)
 const syncingObligations = ref(false)
 const obligationSyncError = ref('')
 const synchronizedObligationCount = ref<number | null>(null)
@@ -123,6 +125,11 @@ const preparedBulk = ref<HealthPreparedBulkNotification | null>(null)
 const prepareBulkError = ref('')
 const downloadingBulk = ref(false)
 const downloadBulkError = ref('')
+const isdsBulkBusy = ref(false)
+const isdsBulkError = ref('')
+const isdsBulkResult = ref<HealthIsdsEnqueueResult | null>(null)
+const isdsBulkGateway = ref<GatewayStart | null>(null)
+const isdsBulkMobileKeySent = ref(false)
 
 const currentPage = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
 
@@ -199,6 +206,28 @@ const canQueueIsds = computed(() => Boolean(
   && preparedChannel.value.data_box_id
   && !isdsBusy.value
   && isdsResult.value === null
+))
+
+const preparedBulkChannel = computed(() => {
+  const insurerCode = preparedBulk.value?.insurer_code
+  return insurerCode
+    ? capability.value?.channels[insurerCode] ?? null
+    : null
+})
+
+/**
+ * Stejná podmínka jako {@link canQueueIsds} u PPZ: bez doloženého formátu
+ * přílohy a ID schránky by tlačítko slibovalo odeslání, které nemá kam jít.
+ */
+const canQueueBulkIsds = computed(() => Boolean(
+  canWrite.value
+  && preparedBulk.value?.schema_validated
+  && preparedBulk.value.status === 'ready'
+  && preparedBulkChannel.value
+  && preparedBulkChannel.value.isds_attachment_format !== 'none'
+  && preparedBulkChannel.value.data_box_id
+  && !isdsBulkBusy.value
+  && isdsBulkResult.value === null
 ))
 
 function deadlineClass(item: HealthDutyItem): string {
@@ -303,6 +332,10 @@ async function prepareBulk() {
   if (prepareBulkInsurer.value === null) return
   prepareBulkError.value = ''
   downloadBulkError.value = ''
+  isdsBulkError.value = ''
+  isdsBulkResult.value = null
+  isdsBulkGateway.value = null
+  isdsBulkMobileKeySent.value = false
   preparedBulk.value = null
   preparingBulk.value = true
   try {
@@ -377,6 +410,54 @@ async function enqueueIsds() {
   } finally {
     isdsBusy.value = false
   }
+}
+
+async function enqueueBulkIsds() {
+  const result = preparedBulk.value
+  if (!result || !canQueueBulkIsds.value) return
+  isdsBulkError.value = ''
+  isdsBulkResult.value = null
+  isdsBulkGateway.value = null
+  isdsBulkMobileKeySent.value = false
+  isdsBulkBusy.value = true
+  try {
+    const queued = await payrollHealthNotificationApi.enqueueBulkNotificationIsds(
+      result.submission_id,
+      result.insurer_code,
+    )
+    isdsBulkResult.value = queued
+    if (queued.transport.automatic) {
+      try {
+        isdsBulkGateway.value = await dataBoxApi.gatewayStartPayroll(queued.outbox_id)
+      } catch (exception) {
+        isdsBulkError.value = apiErrorMessage(
+          exception,
+          t('payroll.health_notifications.prepare.gateway_failed'),
+        )
+      }
+    }
+  } catch (exception) {
+    isdsBulkError.value = apiErrorMessage(
+      exception,
+      t('payroll.health_notifications.prepare.isds_failed'),
+    )
+  } finally {
+    isdsBulkBusy.value = false
+  }
+}
+
+function continueIsdsBulkGateway() {
+  if (isdsBulkGateway.value) {
+    window.location.assign(isdsBulkGateway.value.redirect_url)
+  }
+}
+
+function bulkMobileKeySent() {
+  isdsBulkMobileKeySent.value = true
+}
+
+function mobileKeySent() {
+  isdsMobileKeySent.value = true
 }
 
 async function synchronizeObligations() {
@@ -1094,8 +1175,18 @@ onMounted(() => {
               id: isdsResult.recipient.box_id,
             }) }}
           </p>
+          <p v-if="isdsMobileKeySent" class="mt-2 font-semibold">
+            {{ t('databox.outbox.mobileKey.sent') }}
+          </p>
+          <MobileKeySendButton
+            v-else-if="!isdsResult.transport.automatic && isdsResult.transport.channel === 'mobile_key'"
+            class="mt-2"
+            :outbox-id="isdsResult.outbox_id"
+            environment="production"
+            @sent="mobileKeySent"
+          />
           <a
-            v-if="!isdsResult.transport.automatic"
+            v-else-if="!isdsResult.transport.automatic"
             :href="isdsResult.outbox_url"
             class="mt-2 inline-flex font-semibold underline"
           >
@@ -1275,7 +1366,80 @@ onMounted(() => {
         >
           {{ downloadBulkError }}
         </p>
-        <div class="mt-3">
+        <p
+          v-if="isdsBulkError"
+          class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          role="alert"
+          data-test="health-prepare-bulk-isds-error"
+        >
+          {{ isdsBulkError }}
+        </p>
+        <div
+          v-if="isdsBulkResult"
+          class="mt-3 rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+          data-test="health-prepare-bulk-isds-result"
+        >
+          <p class="font-semibold">
+            {{ isdsBulkResult.created
+              ? t('payroll.health_notifications.prepare.isds_ready')
+              : t('payroll.health_notifications.prepare.isds_already_ready') }}
+          </p>
+          <p class="mt-1">
+            {{ t('payroll.health_notifications.prepare.isds_recipient', {
+              name: isdsBulkResult.recipient.name,
+              id: isdsBulkResult.recipient.box_id,
+            }) }}
+          </p>
+          <p v-if="isdsBulkMobileKeySent" class="mt-2 font-semibold">
+            {{ t('databox.outbox.mobileKey.sent') }}
+          </p>
+          <MobileKeySendButton
+            v-else-if="!isdsBulkResult.transport.automatic && isdsBulkResult.transport.channel === 'mobile_key'"
+            class="mt-2"
+            :outbox-id="isdsBulkResult.outbox_id"
+            environment="production"
+            @sent="bulkMobileKeySent"
+          />
+          <a
+            v-else-if="!isdsBulkResult.transport.automatic"
+            :href="isdsBulkResult.outbox_url"
+            class="mt-2 inline-flex font-semibold underline"
+          >
+            {{ t('payroll.health_notifications.prepare.open_outbox') }}
+          </a>
+        </div>
+        <div
+          v-if="isdsBulkGateway"
+          class="mt-3 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm text-primary-900"
+          data-test="health-prepare-bulk-isds-gateway"
+        >
+          <p class="font-semibold">
+            {{ t('payroll.health_notifications.prepare.gateway_title') }}
+          </p>
+          <p class="mt-1">{{ isdsBulkGateway.login_guidance }}</p>
+          <p class="mt-2 text-xs">
+            {{ t('payroll.health_notifications.prepare.gateway_credentials') }}
+          </p>
+          <button
+            type="button"
+            :class="[btnFilledSm('primary'), 'mt-3']"
+            data-test="health-prepare-bulk-isds-continue"
+            @click="continueIsdsBulkGateway"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            {{ t('payroll.health_notifications.prepare.gateway_continue') }}
+          </button>
+        </div>
+        <p
+          v-if="preparedBulk.schema_validated && !canQueueBulkIsds && !isdsBulkBusy && !isdsBulkResult"
+          class="mt-3 text-xs text-neutral-600"
+          data-test="health-prepare-bulk-isds-unavailable"
+        >
+          {{ t('payroll.health_notifications.prepare.isds_unavailable') }}
+        </p>
+        <div class="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
             :class="btnOutlineSm('neutral')"
@@ -1289,6 +1453,20 @@ onMounted(() => {
             {{ downloadingBulk
               ? t('payroll.health_notifications.prepare_bulk.downloading')
               : t('payroll.health_notifications.prepare_bulk.download') }}
+          </button>
+          <button
+            type="button"
+            :class="btnFilledSm('primary')"
+            :disabled="!canQueueBulkIsds"
+            data-test="health-prepare-bulk-isds"
+            @click="enqueueBulkIsds"
+          >
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            {{ isdsBulkBusy
+              ? t('payroll.health_notifications.prepare.isds_preparing')
+              : t('payroll.health_notifications.prepare.isds_action') }}
           </button>
         </div>
       </div>

@@ -12,6 +12,7 @@ import {
   type PayrollSubmissionOverviewItem,
 } from '@/api/payroll'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import MobileKeySendButton from '@/components/submission/MobileKeySendButton.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{
@@ -31,6 +32,7 @@ interface DispatchState {
   isds: PayrollJmhzIsdsEnqueueResult | null
   vrep: PayrollJmhzTransportPoll | null
   gateway: GatewayStart | null
+  mobileKeySent: boolean
 }
 
 const states = ref<Record<string, DispatchState>>({})
@@ -46,7 +48,13 @@ function state(preview: PayrollJmhzPvpojPreview): DispatchState {
     isds: null,
     vrep: null,
     gateway: null,
+    mobileKeySent: false,
   }
+}
+
+function mobileKeySent(preview: PayrollJmhzPvpojPreview) {
+  setState(preview, { ...state(preview), mobileKeySent: true })
+  emit('refresh')
 }
 
 function setState(preview: PayrollJmhzPvpojPreview, next: DispatchState) {
@@ -268,15 +276,36 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           <p class="mt-1 text-xs">
             {{ state(preview).isds!.attachment.filename }} · {{ state(preview).isds!.subject }}
           </p>
-          <p v-if="!state(preview).isds!.transport.automatic" class="mt-2 text-xs">
-            {{ t('payroll.submissions.overview.jmhz_dispatch_manual') }}
-          </p>
-          <a
-            href="/admin/databox?tab=outbox"
-            :class="[btnOutline('neutral'), 'mt-3 inline-flex']"
-          >
-            {{ t('payroll.submissions.overview.jmhz_dispatch_open_outbox') }}
-          </a>
+          <template v-if="!state(preview).isds!.transport.automatic">
+            <p
+              v-if="state(preview).mobileKeySent"
+              class="mt-2 text-xs font-medium text-success-800"
+            >
+              {{ t('databox.outbox.mobileKey.sent') }}
+            </p>
+            <template v-else-if="state(preview).isds!.transport.channel === 'mobile_key'">
+              <p class="mt-2 text-xs">
+                {{ t('payroll.submissions.overview.jmhz_dispatch_mobile_key') }}
+              </p>
+              <MobileKeySendButton
+                class="mt-3"
+                :outbox-id="state(preview).isds!.outbox_id"
+                :environment="environment"
+                @sent="mobileKeySent(preview)"
+              />
+            </template>
+            <template v-else>
+              <p class="mt-2 text-xs">
+                {{ t('payroll.submissions.overview.jmhz_dispatch_manual') }}
+              </p>
+              <a
+                href="/admin/databox?tab=outbox"
+                :class="[btnOutline('neutral'), 'mt-3 inline-flex']"
+              >
+                {{ t('payroll.submissions.overview.jmhz_dispatch_open_outbox') }}
+              </a>
+            </template>
+          </template>
         </div>
 
         <div

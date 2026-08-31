@@ -7,7 +7,11 @@ const m = vi.hoisted(() => ({
   registerPeriod: vi.fn(),
   prepare: vi.fn(),
   enqueueIsds: vi.fn(),
+  enqueueBulkIsds: vi.fn(),
   gatewayStart: vi.fn(),
+  mobileKeyProfile: vi.fn(),
+  startMobileKeyOutbox: vi.fn(),
+  mobileKeyOutboxConfirm: vi.fn(),
   runs: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
@@ -16,7 +20,12 @@ const m = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/dataBox', () => ({
-  dataBoxApi: { gatewayStartPayroll: m.gatewayStart },
+  dataBoxApi: {
+    gatewayStartPayroll: m.gatewayStart,
+    mobileKeyProfile: m.mobileKeyProfile,
+    startMobileKeyOutbox: m.startMobileKeyOutbox,
+    mobileKeyOutboxConfirm: m.mobileKeyOutboxConfirm,
+  },
 }))
 
 vi.mock('@/api/payrollHealthNotifications', () => ({
@@ -26,6 +35,7 @@ vi.mock('@/api/payrollHealthNotifications', () => ({
     registerPeriodObligations: m.registerPeriod,
     preparePaymentOverview: m.prepare,
     enqueuePaymentOverviewIsds: m.enqueueIsds,
+    enqueueBulkNotificationIsds: m.enqueueBulkIsds,
     prepareBulkNotification: m.prepareBulk,
     downloadBulkNotification: m.downloadBulk,
   },
@@ -250,6 +260,11 @@ function setup() {
     revision_no: 1,
     revision_status: 'approved',
   }])
+  m.mobileKeyProfile.mockResolvedValue({
+    saved: false,
+    username: null,
+    environment: 'production',
+  })
   m.gatewayStart.mockResolvedValue({
     session_id: 1,
     app_token: 'token',
@@ -639,6 +654,95 @@ describe('PayrollHealthNotificationPanel', () => {
     expect(m.enqueueIsds).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * `mobile_key` NENÍ totéž jako `manual_upload` — místo odkazu na frontu se
+   * musí nabídnout rovnou tlačítko, protože podání jde poslat z aplikace.
+   */
+  it('u kanálu mobile_key nabídne rovnou odeslání z aplikace, ne jen odkaz do fronty', async () => {
+    m.prepare.mockResolvedValue({
+      submission_id: 57,
+      obligation_id: 7,
+      artifact_id: 11,
+      status: 'ready',
+      row_version: 4,
+      insurer_code: '205',
+      period: '2026-06',
+      agenda_code: 'PPZ_2026',
+      artifact_sha256: 'd'.repeat(64),
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-30',
+        due_on: '2026-07-20',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 25 odst. 3 zákona č. 592/1992 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: true,
+      dispatch: {
+        supported: false,
+        reason_code: 'zp_portal_gateway_description_on_request',
+        reason: 'Automatické portálové API není doložené.',
+        channel: CHANNEL_205,
+      },
+    })
+    m.enqueueIsds.mockResolvedValue({
+      outbox_id: 91,
+      created: true,
+      recipient: { box_id: 'mk5ab8i', name: 'ČPZP (205)' },
+      subject: 'PPPZ 2026-06 — zdravotní pojišťovna 205',
+      attachment: {
+        filename: 'mzdove-podani-57-11.xml',
+        mime: 'application/xml',
+        sha256: 'd'.repeat(64),
+        bytes: 512,
+        format: 'xml',
+      },
+      transport: { automatic: false, channel: 'mobile_key', reason: null },
+      outbox_url: '/admin/databox?tab=outbox',
+    })
+    m.startMobileKeyOutbox.mockResolvedValue({
+      flow_token: 'flow-1',
+      state: 1,
+      description: 'Čeká se na potvrzení.',
+      expires_at: '2026-08-25T15:00:00Z',
+    })
+    m.mobileKeyOutboxConfirm.mockResolvedValue({
+      state: 2,
+      description: 'Potvrzeno.',
+      result: { row: { id: 91 }, dispatched: true },
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-revision', 12)
+    pick(wrapper, 'health-prepare-insurer', '205')
+    await flushPromises()
+    const prepareButton = wrapper.findAll('button')
+      .find(button => button.text()
+        .includes('payroll.health_notifications.prepare.action'))
+    await prepareButton!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="health-prepare-isds"]').trigger('click')
+    await flushPromises()
+
+    // Kanál mobile_key nabídne přímo tlačítko — ne odkaz do fronty.
+    expect(wrapper.find('a[href="/admin/databox?tab=outbox"]').exists()).toBe(false)
+    const sendButton = wrapper.get('[data-test="mobile-key-send-action"]')
+
+    await sendButton.trigger('click')
+    await flushPromises()
+    const form = wrapper.get('[data-test="mobile-key-send-form"]')
+    await form.find('input[type="text"]').setValue('jan.novak')
+    await form.find('input[type="password"]').setValue('kod123')
+    await wrapper.get('[data-test="mobile-key-send-request"]').trigger('click')
+    await flushPromises()
+
+    expect(m.startMobileKeyOutbox).toHaveBeenCalledWith(91, 'production', 'jan.novak', 'kod123', false)
+    expect(wrapper.text()).toContain('databox.outbox.mobileKey.sent')
+  })
+
   it('po zařazení PPZ zahájí dostupnou bránu a přesměruje až po potvrzení', async () => {
     const assign = vi.fn()
     Object.defineProperty(window, 'location', {
@@ -892,6 +996,77 @@ describe('PayrollHealthNotificationPanel', () => {
     const result = wrapper.get('[data-test="health-prepare-bulk-result"]')
     expect(result.text()).toContain('payroll.health_notifications.prepare_bulk.valid')
     expect(result.text()).toContain('5')
+  })
+
+  /**
+   * Jádro rozšíření zadání: HOZ dřív šlo jen stáhnout, teď se dá u doložené
+   * pojišťovny zařadit do ISDS stejnou cestou jako PPZ.
+   */
+  it('u platného HOZ nabídne zařazení do ISDS, ne jen stažení', async () => {
+    m.prepareBulk.mockResolvedValue({
+      submission_id: 62,
+      obligation_id: 9,
+      part_id: 3,
+      artifact_id: 15,
+      pdf_artifact_id: 16,
+      status: 'ready',
+      row_version: 3,
+      insurer_code: '205',
+      period: localPayrollPeriod(),
+      agenda_code: 'HOZ_2026',
+      artifact_sha256: 'b2'.repeat(32),
+      pdf_artifact_sha256: 'c3'.repeat(32),
+      changes_count: 5,
+      created: true,
+      deadline: {
+        earliest_submission_on: '2026-06-03',
+        due_on: '2026-06-11',
+        calendar_basis: 'calendar_days',
+        ruleset_id: 'cz-health-insurance-notification-deadlines.v1',
+        ruleset_hash: 'a'.repeat(64),
+        source: '§ 10 zákona č. 48/1997 Sb.',
+        source_status: 'statute_verified',
+      },
+      schema_validated: true,
+      dispatch: {
+        supported: false,
+        reason_code: 'zp_portal_gateway_description_on_request',
+        reason: 'Automatické portálové API není doložené.',
+        channel: CHANNEL_205,
+      },
+    })
+    m.enqueueBulkIsds.mockResolvedValue({
+      outbox_id: 92,
+      created: true,
+      recipient: { box_id: 'mk5ab8i', name: 'ČPZP (205)' },
+      subject: 'HOZ 2026-06 — zdravotní pojišťovna 205',
+      attachment: {
+        filename: 'hoz-62-15.xml',
+        mime: 'application/xml',
+        sha256: 'b2'.repeat(32),
+        bytes: 900,
+        format: 'xml',
+      },
+      transport: { automatic: false, channel: 'manual_upload', reason: 'isds_transport_unavailable' },
+      outbox_url: '/admin/databox?tab=outbox',
+    })
+
+    const wrapper = mount(PayrollHealthNotificationPanel)
+    await flushPromises()
+    pick(wrapper, 'health-prepare-bulk-insurer', '205')
+    await flushPromises()
+    await wrapper.get('[data-test="health-prepare-bulk-action"]').trigger('click')
+    await flushPromises()
+
+    const isdsButton = wrapper.get('[data-test="health-prepare-bulk-isds"]')
+    expect(isdsButton.attributes('disabled')).toBeUndefined()
+    await isdsButton.trigger('click')
+    await flushPromises()
+
+    expect(m.enqueueBulkIsds).toHaveBeenCalledWith(62, '205')
+    const result = wrapper.get('[data-test="health-prepare-bulk-isds-result"]')
+    expect(result.text()).toContain('payroll.health_notifications.prepare.isds_ready')
+    expect(result.text()).toContain('mk5ab8i')
   })
 
   it('konkrétní důvod selhání sestavení HOZ se propíše na obrazovku', async () => {

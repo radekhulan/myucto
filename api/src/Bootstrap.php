@@ -756,6 +756,35 @@ final class Bootstrap
             \MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationSource::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Service\Submission\Channel\Isds\Gateway\IsdsGatewayRegistrationService::class),
 
+            // ── Past PHP-DI: nullable parametr S výchozí hodnotou se NEautowiruje ──
+            // `JmhzIsdsSubmissionService` a `HealthInsuranceIsdsSubmissionService`
+            // mají poslední konstruktorový parametr `?IsdsTransportAvailabilityResolver
+            // $transportAvailability = null` — schválně, aby si je testy mohly stavět
+            // ručně bez plné DI grafu (viz docblock u parametru). Jenže PHP-DI
+            // autowiring parametr s VÝCHOZÍ HODNOTOU nikdy nezkouší dosadit typem,
+            // i když je třída bez problému sestavitelná — prostě použije `null`.
+            // Bez tohohle bindu by tedy `transportAvailability` bylo v PRODUKCI vždycky
+            // `null` a dostupnost datovky by tiše spadla na `manual_upload`, přestože
+            // testy (které si závislost předávají explicitně) by zůstaly zelené.
+            // Ověřeno reflexí nad reálným kontejnerem, ne jen testem.
+            \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService(
+                    $c->get(\MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader::class),
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Repository\Submission\SubmissionRecipientRepository::class),
+                    $c->get(\MyInvoice\Service\Submission\SubmissionOutboxService::class),
+                    new \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder(),
+                    $c->get(\MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver::class),
+                ),
+            \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService(
+                    $c->get(\MyInvoice\Repository\Payroll\PayrollSubmissionRepository::class),
+                    $c->get(\MyInvoice\Repository\Submission\SubmissionRecipientRepository::class),
+                    $c->get(\MyInvoice\Service\Submission\SubmissionOutboxService::class),
+                    $c->get(\MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsurerChannelCatalog::class),
+                    $c->get(\MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver::class),
+                ),
+
             \MyInvoice\Service\Submission\Channel\Isds\IsdsAuthFlowStore::class => fn (ContainerInterface $c)
                 => $c->get(\MyInvoice\Repository\Submission\IsdsAuthFlowRepository::class),
 

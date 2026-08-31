@@ -309,6 +309,40 @@ final class SubmissionOutboxServiceTest extends TestCase
         self::assertSame('artifact_changed', $result['row']['last_error_code']);
     }
 
+    /**
+     * Dávkové odeslání v jedné relaci Mobilního klíče: víc podání se pošle
+     * po jednom a pád jednoho nesmí zastavit ani schovat ostatní.
+     */
+    public function testBatchConfirmationSendsEachIdSeparatelyAndKeepsGoingAfterAFailure(): void
+    {
+        $first = $this->enqueue('HOZ')['row'];
+        $second = $this->enqueue('PPZ')['row'];
+        $missingId = 987654321;
+
+        $results = $this->service->confirmAndSendBatch(
+            $this->supplierId,
+            [(int) $first['id'], $missingId, (int) $second['id']],
+            $this->userId,
+            $this->context(),
+        );
+
+        self::assertCount(3, $results);
+        self::assertSame((int) $first['id'], $results[0]['id']);
+        self::assertTrue($results[0]['dispatched']);
+        self::assertNull($results[0]['error_code']);
+
+        self::assertSame($missingId, $results[1]['id']);
+        self::assertFalse($results[1]['dispatched']);
+        self::assertSame('submission_not_found', $results[1]['error_code']);
+
+        self::assertSame((int) $second['id'], $results[2]['id']);
+        self::assertTrue($results[2]['dispatched']);
+        self::assertNull($results[2]['error_code']);
+
+        // Obě platná podání skutečně odešla, ta chybějící nevyrobila nic.
+        self::assertCount(2, $this->transport->sentMessages);
+    }
+
     // ───────────────────────── pomocné ─────────────────────────
 
     private string $artifactBytes = '<neco/>';

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 10pt; color: #171717; }
+    h1 { font-size: 16pt; margin: 0 0 2mm; }
+    h2 { font-size: 11.5pt; margin: 6mm 0 2mm; padding-bottom: 1mm; border-bottom: 1px solid #444; }
+    .sub { color: #555; margin-bottom: 5mm; }
+    table { width: 100%; border-collapse: collapse; }
+    td { padding: 2mm; border-bottom: 0.5px solid #ddd; vertical-align: top; }
+    td.label { width: 43%; color: #444; }
+    td.value { font-weight: 600; }
+    table.changes { margin-top: 2mm; }
+    table.changes th { text-align: left; font-size: 8.5pt; color: #555; padding: 1.5mm 2mm; border-bottom: 1px solid #333; }
+    table.changes td { font-size: 9pt; padding: 1.5mm 2mm; }
+    table.changes tr:nth-child(even) td { background: #f8f8f8; }
+    .notice { margin-top: 8mm; padding: 3mm; background: #f4f4f4; font-size: 8.5pt; color: #555; }
+    .signature { height: 22mm; border: 0.5px solid #aaa; padding: 2mm; color: #777; }
+    .footer { margin-top: 5mm; font-size: 8pt; color: #777; }
+</style>
+</head>
+<body>
+    <h1>Hromadné oznámení zaměstnavatele</h1>
+    <div class="sub">
+        Zdravotní pojišťovna {{ insurer_code }}{% if insurer_name %} — {{ insurer_name }}{% endif %}
+    </div>
+
+    <h2>Zaměstnavatel</h2>
+    <table>
+        <tr><td class="label">Název</td><td class="value">{{ employer.name }}</td></tr>
+        <tr><td class="label">Identifikační číslo plátce</td><td class="value">{{ employer.payer_number }}</td></tr>
+        <tr><td class="label">Adresa</td><td class="value">{{ employer.street }} {{ employer.house_number }}, {{ employer.postal_code }} {{ employer.city }}</td></tr>
+        {% if employer.phone %}<tr><td class="label">Telefon</td><td class="value">{{ employer.phone }}</td></tr>{% endif %}
+        {% if internal_reference %}<tr><td class="label">Interní reference</td><td class="value">{{ internal_reference }}</td></tr>{% endif %}
+    </table>
+
+    <h2>Věty oznámení ({{ changes|length }})</h2>
+    <table class="changes">
+        <thead>
+            <tr>
+                <th>Příjmení a jméno</th>
+                <th>Číslo pojištěnce</th>
+                <th>Kód změny</th>
+                <th>Datum změny</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for change in changes %}
+            <tr>
+                <td>{{ change.last_name }} {{ change.first_name }}</td>
+                <td>{{ change.insurance_number }}</td>
+                <td>{{ change.change_code }}</td>
+                <td>{{ change.changed_on|cz_date }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Datum vyplnění a potvrzení zaměstnavatele</h2>
+    <table>
+        <tr>
+            <td class="label">Vyplněno dne</td>
+            <td class="value">{{ filled_on|cz_date }}</td>
+        </tr>
+        <tr>
+            <td class="label">Potvrzení odpovědné osoby</td>
+            <td class="signature">Jméno, podpis nebo elektronické potvrzení odesílatele</td>
+        </tr>
+    </table>
+
+    <div class="notice">
+        Vytěžitelný PDF podklad vytvořený ze stejné zmrazené datové věty jako XML hromadného oznámení.
+        Význam jednotlivých písmenných kódů změny udává jednotná datová věta HOZ — nejde o potvrzení
+        přijetí ani zpracování pojišťovnou. Odeslání datovou schránkou musí výslovně potvrdit uživatel.
+    </div>
+    <div class="footer">Vygenerováno systémem MyÚčto.cz.</div>
+</body>
+</html>

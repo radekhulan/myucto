@@ -13,18 +13,21 @@ const appLayout = readFileSync(
 )
 
 describe('navigace datové schránky', () => {
-  it('nabízí firemní stránku superadminovi i oprávněné neadmin roli', () => {
-    expect(appLayout.match(/to: '\/admin\/databox'/g)).toHaveLength(2)
-    expect(appLayout).toContain("if (payrollEnabled && auth.canWrite('settings.signing'))")
+  // Položka je JEDNA, uvnitř sekce Mzdy — dřív byla zdvojená (Firma pro superadmina,
+  // vlastní blok pro neadmin roli) a rozešly se. Sekce Mzdy se staví pro obě role,
+  // takže jeden záznam s právem `settings.signing` pokrývá obojí.
+  it('nabízí schránku v jedné položce pod Mzdami, s právem na zápis', () => {
+    expect(appLayout.match(/to: '\/admin\/databox'/g)).toHaveLength(1)
     expect(appLayout).toContain("label: t('nav.databox')")
-    expect(appLayout).toContain("key: 'company_databox'")
-    expect(appLayout).toContain("title: t('nav.section_company')")
+    expect(appLayout).toContain("permission: 'settings.signing' as PermissionKey, dividerBefore: true")
   })
 
-  it('vede globální bránu zvlášť v systémové sekci', () => {
+  // Brána stojí vedle schránky pod Mzdami: přes ISDS chodí prakticky jen mzdová
+  // podání, takže rozdělení mezi Firmu a Systém uživateli nedávalo smysl.
+  it('vede odesílací bránu vedle schránky, jen pro superadmina', () => {
     expect(appLayout).toContain("to: '/admin/isds-gateway'")
     expect(appLayout).toContain("label: t('nav.isds_gateway')")
-    expect(appLayout).toContain("key: 'system_global'")
+    expect(appLayout).toContain("...(isAdmin ? [{ to: '/admin/isds-gateway'")
   })
 
   it('skrývá položku bez práva k zápisu stejně jako samotná routa', () => {
@@ -33,8 +36,10 @@ describe('navigace datové schránky', () => {
   })
 
   it('mizí spolu s vypnutými mzdami — schránka slouží mzdovým podáním', () => {
-    expect(appLayout).toContain("...(payrollEnabled ? [{ to: '/admin/databox'")
-    expect(appLayout).toContain("if (payrollEnabled && auth.canWrite('settings.signing'))")
+    // Položka je uvnitř bloku `if (payrollEnabled)`, takže s vypnutými mzdami
+    // nevznikne — dřív to zajišťoval ternární výraz ve firemní sekci.
+    const payrollSection = appLayout.slice(appLayout.indexOf('if (payrollEnabled) {'))
+    expect(payrollSection).toContain("to: '/admin/databox'")
     // Skrytá položka v menu nestačí — bez guardu na routě by se na stránku dalo
     // dostat přímou adresou. `requiresPayroll` řeší router/index.ts stejně jako
     // u skladu a mzdových stránek.

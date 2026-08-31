@@ -238,6 +238,131 @@ final class SubmissionOutboxAction
     }
 
     /**
+     * Zahájí přihlášení Mobilním klíčem pro HROMADNÉ odeslání víc podání
+     * v JEDNÉ relaci — viz {@see mobileKeyConfirmBatch()}.
+     *
+     * Cesta je BEZ `{id}` schválně: přihlášení k ISDS není vázané na
+     * konkrétní podání (`mobileKeyStart()` výš `id` taky nikam nepoužívá,
+     * jen ho ověří jako hlídku), takže dávka nemá důvod jedno předstírat.
+     */
+    public function mobileKeyStartBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $supplierId = SupplierGuard::currentId($request);
+            $userId = $this->userId($request);
+            $environment = (string) ($body['environment'] ?? 'production');
+            $result = ($body['use_saved_credentials'] ?? false) === true
+                ? $this->mobileKey->startWithCredentials(
+                    $supplierId,
+                    $userId,
+                    $environment,
+                    $this->mobileCredentials->unlock($supplierId, $userId, $environment),
+                )
+                : $this->mobileKey->start(
+                    $supplierId,
+                    $userId,
+                    $environment,
+                    (string) ($body['username'] ?? ''),
+                    (string) ($body['communication_code'] ?? ''),
+                );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Ověří potvrzení relace a v NÍ odešle VÍC vybraných podání najednou.
+     *
+     * ── Proč dávka, a ne opakované volání {@see mobileKeyConfirm()} ─────────
+     * Relaci vydá `continue()` jen JEDNOU — druhé volání se stejným tokenem by
+     * narazilo na spotřebovaný flow. Účetní má ale měsíčně až osm podání
+     * (ČSSZ + sedm zdravotních pojišťoven) a osm potvrzení v mobilu je
+     * nepoužitelné. `outbox_ids` proto nese všechno, co se má v TÉTO relaci
+     * odeslat, a {@see SubmissionOutboxService::confirmAndSendBatch()} to
+     * pošle po jednom se svým vlastním výsledkem — pád jednoho podání
+     * nezastaví ostatní.
+     *
+     * Relace se explicitně ODHLAŠUJE (`logout()`) v `finally`, i když
+     * jednotlivé {@see mobileKeyConfirm()} to dnes nedělá (spoléhá na
+     * 30minutové vypršení nečinností): dávka během jedné relace provede víc
+     * citlivých operací za sebou, takže nemá důvod žít o nic déle, než musí.
+     *
+     * Limit počtu položek je bezpečnostní pojistka, ne provozní překážka —
+     * měsíční dávka má v praxi nejvýš jednotky položek.
+     */
+    public function mobileKeyConfirmBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $flowToken = (string) ($body['flow_token'] ?? '');
+        if ($flowToken === '' || strlen($flowToken) > 8192) {
+            return Json::error($response, 'isds_mobile_flow_invalid', 'Přihlášení Mobilním klíčem není platné. Spusťte ho znovu.', 400);
+        }
+        $ids = [];
+        foreach ((array) ($body['outbox_ids'] ?? []) as $raw) {
+            $id = (int) $raw;
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return Json::error($response, 'submission_not_found', 'Nevybrali jste žádné podání k odeslání.', 400);
+        }
+        if (count($ids) > 50) {
+            return Json::error($response, 'validation_failed', 'Najednou lze odeslat nejvýš 50 podání.', 422);
+        }
+
+        try {
+            $result = $this->mobileKey->continue(
+                $flowToken,
+                $supplierId,
+                $userId,
+                (string) ($body['environment'] ?? 'production'),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        $context = $result['context'];
+        if ($context === null) {
+            // Čeká se na potvrzení v mobilu — žádné podání se nedotýkáme.
+            return Json::ok($response, [
+                'state' => $result['state'],
+                'description' => $result['description'],
+                'results' => null,
+            ]);
+        }
+
+        try {
+            $results = $this->outbox->confirmAndSendBatch($supplierId, $ids, $userId, $context);
+        } finally {
+            $this->mobileKey->logout($context);
+        }
+
+        foreach ($results as $item) {
+            if ($item['dispatched']) {
+                $this->logger->log('submission_outbox_sent', $userId, 'submission_outbox', $item['id'], null, null, null, $supplierId);
+            }
+        }
+
+        return Json::ok($response, [
+            'state' => $result['state'],
+            'description' => $result['description'],
+            'results' => $results,
+        ]);
+    }
+
+    /**
      * Dořešení podání, u kterého se odeslání přerušilo.
      *
      * @param array<string,string> $args

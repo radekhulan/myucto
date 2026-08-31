@@ -10,11 +10,13 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
+use MyInvoice\Repository\Submission\SubmissionChannelCredentialRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
 use MyInvoice\Repository\Submission\SubmissionRecipientRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsMessageBuilder;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
@@ -22,8 +24,10 @@ use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
+use MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\Channel\InboxMessageHeader;
+use MyInvoice\Service\Submission\SubmissionCredentialService;
 use MyInvoice\Service\Submission\SubmissionOutboxService;
 use MyInvoice\Service\Document\ZfoExtractor;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -161,6 +165,48 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         self::assertFalse($result['transport']['automatic']);
         self::assertSame('manual_upload', $result['transport']['channel']);
         self::assertSame('isds_transport_unavailable', $result['transport']['reason']);
+    }
+
+    /**
+     * Bez brány, ale s dokladem, že firma má datovou schránku (záznam
+     * z Firma → Datová schránka), se dostupnost hlásí jako „po potvrzení
+     * v mobilu" — ne jako plné „automaticky", ale ani jako „nejde to".
+     */
+    public function testMobileKeyIsOfferedOnceCompanyHasADataBoxOnFile(): void
+    {
+        $credentials = new SubmissionChannelCredentialRepository($this->db);
+        $credentials->save($this->supplierId, 'isds', 'test', [
+            'label' => 'Testovací schránka',
+            'box_id' => 'zzzzzzz',
+            // Musí splňovat `chk_submission_credentials_certificate_encrypted`
+            // (`SecretEncryption` razítkuje `enc:v1:`/`enc:v2:`) — obsah se v
+            // téhle metodě nikdy nedešifruje, takže na skutečném šifrování
+            // nezáleží.
+            'certificate_ciphertext' => 'enc:v1:synthetic-ciphertext',
+            'certificate_passphrase_ciphertext' => null,
+            'certificate_fingerprint' => null,
+            'certificate_valid_to' => null,
+        ], null);
+
+        $repository = new PayrollSubmissionRepository($this->db);
+        $isdsWithResolver = new JmhzIsdsSubmissionService(
+            new JmhzFrozenPayloadReader($repository, $this->submissions),
+            $repository,
+            new SubmissionRecipientRepository($this->db),
+            $this->outboxService,
+            new JmhzIsdsMessageBuilder(),
+            new IsdsTransportAvailabilityResolver(
+                null,
+                new SubmissionCredentialService($credentials, $this->createStub(SecretEncryption::class)),
+            ),
+        );
+
+        $submissionId = $this->frozenSubmission('mobile-key-g');
+        $result = $isdsWithResolver->enqueue($this->supplierId, 'test', $submissionId, null);
+
+        self::assertFalse($result['transport']['automatic']);
+        self::assertSame('mobile_key', $result['transport']['channel']);
+        self::assertNull($result['transport']['reason']);
     }
 
     /**

@@ -26,14 +26,19 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Co tenhle endpoint dělá a co NE
  * ═══════════════════════════════════════════════════════════════════════════
  * Zařadí zmrazené podání do obecné fronty podání a vrátí hotovou datovou zprávu:
- * příjemce, věc, spisovou značku a přílohu. NEODESÍLÁ.
+ * příjemce, věc, spisovou značku a přílohu. NEODESÍLÁ SÁM — odeslání dál řeší
+ * obecná fronta (`SubmissionOutboxService`), přes bránu, Mobilní klíč, nebo
+ * ručně.
  *
- * Odeslat ho totiž dnes automaticky nejde a předstírat opak by bylo horší než
- * to přiznat: `IsdsTransport` je nabindovaný na `UnavailableIsdsTransport`,
- * protože není rozhodnuté, jak se do datové schránky přihlašujeme. Odpověď
- * proto nese `transport.automatic = false` s pojmenovaným důvodem
- * `isds_transport_unavailable`, aby UI mohlo říct pravdu místo aby čekalo na
- * odeslání, které nepřijde.
+ * Kterou z těch tří cest to půjde, vrací `transport`
+ * ({@see \MyInvoice\Service\Submission\Channel\Isds\IsdsTransportAvailabilityResolver}):
+ * `automatic: true, channel: "gateway"` bez součinnosti účetní, `automatic:
+ * false, channel: "mobile_key"` po potvrzení relace v mobilu
+ * (`POST /api/submissions/outbox/{id}/mobile-key/{start,confirm}`), nebo
+ * `automatic: false, channel: "manual_upload"` s důvodem
+ * `isds_transport_unavailable`, když firma nemá doloženou ani jednu z nich.
+ * Odpověď se nesmí hádat ani nadhodnocovat — proto počítá dostupnost tahle
+ * sdílená třída, ne odhad ve frontendu.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * Odsud dál se pokračuje EXISTUJÍCÍ ruční cestou

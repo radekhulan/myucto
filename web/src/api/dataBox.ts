@@ -454,6 +454,27 @@ export interface MobileKeyInboxStatus {
   result: InboxPollResult | null
 }
 
+/** Výsledek JEDNOHO podání uvnitř dávkového odeslání — pád jednoho neschová ostatní. */
+export interface MobileKeyBatchItemResult {
+  id: number
+  dispatched: boolean
+  row: OutboxSubmission | null
+  error_code: string | null
+  error_message: string | null
+}
+
+/**
+ * Dávkové odeslání: JEDNO potvrzení Mobilního klíče pošle víc podání za sebou
+ * (typicky ČSSZ + víc zdravotních pojišťoven za týž měsíc). `results` je
+ * `null`, dokud relaci člověk v mobilu nepotvrdí — do té doby se nic
+ * neodeslalo.
+ */
+export interface MobileKeyOutboxConfirmBatch {
+  state: number
+  description: string
+  results: MobileKeyBatchItemResult[] | null
+}
+
 export interface IsdsMobileCredentialProfile {
   id?: number
   saved: boolean
@@ -694,6 +715,27 @@ export const dataBoxApi = {
 
   mobileKeyOutboxConfirm: (id: number, flowToken: string, environment: string) =>
     api.post<MobileKeyOutboxConfirm>(`/submissions/outbox/${id}/mobile-key/confirm`, {
+      flow_token: flowToken,
+      environment,
+    }).then(r => r.data),
+
+  /**
+   * Zahájí přihlášení pro DÁVKOVÉ odeslání — stejné jako {@link startMobileKeyOutbox},
+   * jen bez vazby na jedno konkrétní podání (přihlášení k ISDS na jednom podání
+   * nezávisí, viz backend).
+   */
+  startMobileKeyOutboxBatch: (environment: string, username: string, communicationCode: string, useSaved = false) =>
+    api.post<MobileKeyInboxStart>('/submissions/outbox/mobile-key/start-batch', {
+      environment,
+      username,
+      communication_code: communicationCode,
+      use_saved_credentials: useSaved,
+    }).then(r => r.data),
+
+  /** Potvrdí relaci a odešle v ní VŠECHNA vybraná podání — jedno potvrzení v mobilu, víc zpráv. */
+  mobileKeyOutboxConfirmBatch: (outboxIds: number[], flowToken: string, environment: string) =>
+    api.post<MobileKeyOutboxConfirmBatch>('/submissions/outbox/mobile-key/confirm-batch', {
+      outbox_ids: outboxIds,
       flow_token: flowToken,
       environment,
     }).then(r => r.data),

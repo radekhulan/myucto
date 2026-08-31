@@ -2846,7 +2846,11 @@ export interface PayrollJmhzIsdsEnqueueResult {
   }
   transport: {
     automatic: boolean
-    channel: 'gateway' | 'manual_upload'
+    /**
+     * `mobile_key` = odešle se z aplikace, ale až po potvrzení relace
+     * v Mobilním klíči — jiný stav než „nejde to" (`manual_upload`).
+     */
+    channel: 'gateway' | 'mobile_key' | 'manual_upload'
     reason: string | null
   }
   response_hint: {

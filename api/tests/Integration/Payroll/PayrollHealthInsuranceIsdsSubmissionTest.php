@@ -444,6 +444,105 @@ final class PayrollHealthInsuranceIsdsSubmissionTest extends TestCase
         }
     }
 
+    /**
+     * Jádro rozšíření zadání: HOZ šlo dřív jen stáhnout, teď se zařazuje do
+     * ISDS fronty stejnou cestou jako PPZ — jen s jiným předmětem zprávy
+     * (`HOZ`, ne `PPPZ`, protože ta zkratka je doložená jen pro přehled).
+     */
+    public function testBulkNotificationCanBeEnqueuedIntoIsdsQueueTooWithDistinctSubject(): void
+    {
+        $submissionId = $this->readyBulkNotificationSubmission('hoz-a');
+
+        $result = $this->isds->enqueue(
+            $this->supplierId,
+            $submissionId,
+            self::INSURER,
+            null,
+        );
+
+        self::assertSame('mk5ab8i', $result['recipient']['box_id']);
+        self::assertStringStartsWith('HOZ ', $result['subject']);
+        self::assertStringNotContainsString('PPPZ', $result['subject']);
+        self::assertSame(
+            HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+            $result['row']['agenda_code'],
+        );
+    }
+
+    public function testBulkNotificationForAnotherInsurerCannotBeAdopted(): void
+    {
+        $submissionId = $this->readyBulkNotificationSubmission('hoz-b');
+
+        $this->expectException(SubmissionChannelException::class);
+        $this->expectExceptionMessage('nepatří zvolené zdravotní pojišťovně');
+        $this->isds->enqueue($this->supplierId, $submissionId, '207', null);
+    }
+
+    private function readyBulkNotificationSubmission(
+        string $key,
+        string $insurer = self::INSURER,
+    ): int {
+        $obligation = $this->obligations->register(
+            $this->supplierId,
+            HealthInsuranceSubmissionService::AGENDA_BULK_NOTIFICATION,
+            'employer',
+            'health_bulk_notification:2026-07:' . $insurer,
+            '2026-07-01',
+            '2026-07-31',
+            'regular',
+            'health_portal',
+            HealthInsuranceSubmissionService::SOURCE_EVENT_BULK_NOTIFICATION,
+            'synthetic-hoz:' . $key . ':' . $insurer,
+            str_repeat('a', 64),
+            '2026-07-05',
+            '2026-07-13',
+            'calendar_days',
+            'health-bulk-notification-test',
+            str_repeat('b', 64),
+            'health-hoz-isds-obligation:' . $key . ':' . $insurer,
+            environment: 'production',
+        );
+        $submission = $this->submissions->prepare(
+            $this->supplierId,
+            $obligation['id'],
+            'regular',
+            'health_portal',
+            str_repeat('c', 64),
+            'health-hoz-isds-submission:' . $key . ':' . $insurer,
+            environment: 'production',
+        );
+        $artifact = $this->submissions->storeArtifact(
+            $this->supplierId,
+            (int) $submission['id'],
+            (int) $submission['row_version'],
+            null,
+            'outbound_xml',
+            'outbound',
+            'application/xml',
+            self::XML,
+            '2026.1',
+            $insurer === '205' || $insurer === '207' || $insurer === '213'
+                ? 'health-isds-attachment.v1:xml'
+                : null,
+            'health_portal',
+            'health-hoz-isds-artifact:' . $key . ':' . $insurer,
+        );
+        $validated = $this->submissions->transition(
+            $this->supplierId,
+            (int) $submission['id'],
+            (int) $artifact['submission_row_version'],
+            'validated',
+        );
+        $this->submissions->transition(
+            $this->supplierId,
+            (int) $submission['id'],
+            (int) $validated['row_version'],
+            'ready',
+        );
+
+        return (int) $submission['id'];
+    }
+
     private function readySubmission(
         string $key,
         string $insurer = self::INSURER,
