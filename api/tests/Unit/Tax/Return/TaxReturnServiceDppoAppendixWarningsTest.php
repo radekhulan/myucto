@@ -64,4 +64,26 @@ final class TaxReturnServiceDppoAppendixWarningsTest extends TestCase
         self::assertNotEmpty($result['warnings']);
         self::assertStringContainsString('2602', $result['warnings'][0]);
     }
+
+    /**
+     * `buildStatementNotesAttachment()` — chyba 2602 se (ověřeno proti zkušebnímu EPO,
+     * AUDIT-DPPO-XML.md §9.4c) neváže na VetaUA/UB/UD/UZ výše, ale na SKUTEČNĚ přiložený
+     * soubor. Test ověřuje, že selhání `StatementNotesService::build()` (final třída,
+     * nejde mockovat — stejný trik jako testStatementErrorWarnsInsteadOfSilentlyDroppingAppendix:
+     * neinicializovaná `readonly` vlastnost vyhodí Error při prvním sáhnutí) skončí jako
+     * warning s cestou k doplnění, ne jako tiché vynechání přílohy.
+     */
+    public function testStatementNotesAttachmentErrorWarnsInsteadOfSilentlyDropping(): void
+    {
+        $ref = new ReflectionClass(TaxReturnService::class);
+        $service = $ref->newInstanceWithoutConstructor();
+
+        $method = new ReflectionMethod($service, 'buildStatementNotesAttachment');
+        $result = $method->invoke($service, 1, 42, ['starts_on' => '2025-01-01', 'ends_on' => '2025-12-31']);
+
+        self::assertNull($result['file']);
+        self::assertNotNull($result['warning']);
+        self::assertStringContainsString('Příloha v účetní závěrce', $result['warning']);
+        self::assertStringContainsString('/accounting/periods/42/statement-notes', $result['warning']);
+    }
 }

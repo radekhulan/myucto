@@ -53,6 +53,11 @@ final class TaxReturnService
         private readonly FinancialStatementService $statements,
         private readonly EntityCategoryService $categories,
         private readonly AccountingSupplierSettingsRepository $supplierSettings,
+        // Příloha v účetní závěrce (§39 vyhl. 500/2002) jako SKUTEČNĚ připojený soubor
+        // (Prilohy/ObecnaPriloha), ne jen strukturovaná data VetaUA/UB/UD/UZ — viz
+        // buildStatementNotesAttachment(). NEŘEŠÍ sama o sobě EPO chybu 2602, viz tam.
+        private readonly \MyInvoice\Service\Accounting\Reports\StatementNotesService $statementNotes,
+        private readonly \MyInvoice\Service\Pdf\StatementNotesPdfRenderer $statementNotesPdf,
         // Zastoupení daňovým poradcem (§29/2 DŘ) do dan_por/pln_moc — viz representationMeta().
         private readonly TaxRepresentationService $representation,
     ) {}
@@ -989,8 +994,21 @@ final class TaxReturnService
      * podání 30. 8. 2026). Důvod vynechání teď jde ven přes `warnings`, ať to účetní vidí
      * v UI dřív, než podá.
      *
-     * @param array{id?:int} $period
-     * @return array{balance_sheet?:array<string,mixed>,income_statement?:array<string,mixed>,category?:array<string,mixed>,settings?:array<string,mixed>,warnings:list<string>}
+     * Přílohu v účetní závěrce (§ 39 vyhlášky — souvislý text: účetní metody, události po
+     * rozvahovém dni…, kterou účetní vyplňuje v Účetnictví → Uzávěrka → Příloha v účetní
+     * závěrce, {@see \MyInvoice\Service\Accounting\Reports\StatementNotesService}) proto
+     * podání nese i jako SKUTEČNĚ PŘILOŽENÝ SOUBOR (`Prilohy/ObecnaPriloha`, dppdp9.xsd:6180)
+     * — jiný obsah než rozpad rozvahy/VZZ po řádcích výše. Samostatný krok, viz
+     * {@see buildStatementNotesAttachment()}.
+     *
+     * POZOR — tohle NEODSTRAŇUJE chybu 2602: ověřeno proti zkušebnímu EPO 31. 8. 2026,
+     * výtka „Není vložena příloha účetní závěrky" se s přiloženým souborem i bez něj
+     * chová IDENTICKY (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčinu se nepodařilo zjistit
+     * (viz tam), přiložení souboru zůstává správné samo o sobě (§39 vyhláška), jen to není
+     * lék na 2602.
+     *
+     * @param array{id?:int,starts_on?:string,ends_on?:string} $period
+     * @return array{balance_sheet?:array<string,mixed>,income_statement?:array<string,mixed>,category?:array<string,mixed>,settings?:array<string,mixed>,statement_notes_attachment?:array{content:string,filename:string,label:string},warnings:list<string>}
      */
     private function buildDppoAppendix(int $supplierId, array $period): array
     {
@@ -1004,7 +1022,7 @@ final class TaxReturnService
             ]];
         }
         try {
-            return [
+            $appendix = [
                 'balance_sheet' => $this->statements->balanceSheet($supplierId, $periodId, null, 'auto'),
                 'income_statement' => $this->statements->incomeStatement($supplierId, $periodId, null, 'full'),
                 'category' => $this->categories->evaluate($supplierId, $periodId),
@@ -1020,6 +1038,98 @@ final class TaxReturnService
                 . 'vygenerujte znovu.',
             ]];
         }
+
+        $attachment = $this->buildStatementNotesAttachment($supplierId, $periodId, $period);
+        if ($attachment['file'] !== null) {
+            $appendix['statement_notes_attachment'] = $attachment['file'];
+        }
+        if ($attachment['warning'] !== null) {
+            $appendix['warnings'][] = $attachment['warning'];
+        }
+
+        return $appendix;
+    }
+
+    /**
+     * Součet velikosti všech e-příloh (`Prilohy/ObecnaPriloha`) v JEDNOM podání smí být
+     * podle dokumentace XSD (dppdp9.xsd:6211) nejvýš 10 240 kB — kontroluje se na velikost
+     * SOUBORU (před base64), protože to je částka, kterou dokumentace jmenuje.
+     */
+    private const STATEMENT_NOTES_MAX_BYTES = 10_240 * 1024;
+
+    /**
+     * Vyrobí PDF „Příloha v účetní závěrce" (§ 18/1/c ZoÚ, § 39/39a/39b vyhl. 500/2002,
+     * {@see \MyInvoice\Service\Accounting\Reports\StatementNotesService::build()} +
+     * {@see \MyInvoice\Service\Pdf\StatementNotesPdfRenderer}) pro vložení do podání jako
+     * `Prilohy/ObecnaPriloha` — dokument, který zákon k závěrce žádá (viz
+     * {@see buildDppoAppendix()} nad touto metodou).
+     *
+     * NEŘEŠÍ EPO chybu 2602 „Není vložena příloha účetní závěrky" — ověřeno proti
+     * zkušebnímu EPO 31. 8. 2026, výtka se s přiloženým souborem i bez něj chová
+     * IDENTICKY (AUDIT-DPPO-XML.md dodatek 13). Přiložit soubor je přesto správné samo o
+     * sobě (dokumentuje splnění § 39), varovné texty níže proto NEslibují, že 2602 zmizí.
+     *
+     * Dvě situace soubor VĚDOMĚ nevloží (vrátí `file: null` + `warning`), místo aby ho
+     * tiše ořízly/vynechaly:
+     *   1) příloha není kompletní (účetní nevyplnila některou z povinných sekcí) —
+     *      vložit prázdný/poloprázdný dokument do ostrého podání by bylo HORŠÍ než ho
+     *      nevložit vůbec (vypadalo by to jako splněná povinnost, ačkoli není);
+     *   2) vyrenderované PDF přesahuje limit e-příloh (10 240 kB) — tiché uříznutí by
+     *      poslalo poškozený/nečitelný soubor, raději žádný + jasné varování.
+     *
+     * @param array{starts_on?:string,ends_on?:string} $period
+     * @return array{file:?array{content:string,filename:string,label:string},warning:?string}
+     */
+    private function buildStatementNotesAttachment(int $supplierId, int $periodId, array $period): array
+    {
+        $path = sprintf(
+            'Účetnictví → Uzávěrka a přiznání → Příloha v účetní závěrce (/accounting/periods/%d/statement-notes).',
+            $periodId,
+        );
+        try {
+            $notes = $this->statementNotes->build($supplierId, $periodId);
+        } catch (\Throwable $e) {
+            return ['file' => null, 'warning' =>
+                'Příloha v účetní závěrce (§ 39 vyhlášky 500/2002 Sb.) se nepodařilo načíst ('
+                . $e->getMessage() . ') — k přiznání se PŘIPOJIT NEMOHLA jako soubor. Ověřte v: ' . $path];
+        }
+
+        if ($notes['missing'] !== []) {
+            return ['file' => null, 'warning' =>
+                'Příloha v účetní závěrce (§ 39 vyhlášky 500/2002 Sb.) není vyplněná celá — chybí '
+                . count($notes['missing']) . ' povinných sekcí, proto se k přiznání NEPŘIPOJILA jako '
+                . 'soubor. Doplňte v: ' . $path];
+        }
+
+        try {
+            $pdf = $this->statementNotesPdf->render([
+                'notes'  => $notes,
+                'entity' => $this->statements->entityHeader($supplierId),
+                'period' => ['starts_on' => $period['starts_on'] ?? null, 'ends_on' => $period['ends_on'] ?? null],
+            ]);
+        } catch (\Throwable $e) {
+            return ['file' => null, 'warning' =>
+                'Příloha v účetní závěrce (§ 39 vyhlášky 500/2002 Sb.) se nepodařilo vyrenderovat '
+                . 'do PDF (' . $e->getMessage() . ') — k přiznání se NEPŘIPOJILA jako soubor. '
+                . 'Vygenerujte přiznání znovu; opakuje-li se to, ověřte obsah v: ' . $path];
+        }
+
+        if (strlen($pdf) > self::STATEMENT_NOTES_MAX_BYTES) {
+            return ['file' => null, 'warning' => sprintf(
+                'Příloha v účetní závěrce má %s kB — EPO povoluje nejvýše 10 240 kB součtu všech '
+                . 'e-příloh podání, soubor se proto K PŘIZNÁNÍ NEPŘIPOJIL (raději vůbec než '
+                . 'oříznutý/poškozený). Podejte přiznání a přílohu doručte finančnímu úřadu '
+                . 'samostatně (mimo XML podání).',
+                number_format(strlen($pdf) / 1024, 0, ',', ' '),
+            )];
+        }
+
+        $fiscalYear = (int) ($notes['fiscal_year'] ?? 0);
+        return ['file' => [
+            'content'  => $pdf,
+            'filename' => sprintf('priloha-ucetni-zaverky-%d.pdf', $fiscalYear),
+            'label'    => sprintf('Příloha v účetní závěrce za rok %d (§ 39 vyhl. 500/2002 Sb.)', $fiscalYear),
+        ], 'warning' => null];
     }
 
     /** Přehledy pojistného OSVČ (jen FO). @return array<string,mixed> */

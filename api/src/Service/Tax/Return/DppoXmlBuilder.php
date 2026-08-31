@@ -281,8 +281,11 @@ final class DppoXmlBuilder
      *   volitelné): {balance_sheet: array (FinancialStatementService::balanceSheet výstup),
      *   income_statement: array (…::incomeStatement výstup), category: array
      *   (EntityCategoryService::evaluate výstup), settings: array
-     *   (AccountingSupplierSettingsRepository::get výstup)}. Prázdné (default) = appendix se
-     *   nevygeneruje (zpětná kompatibilita se stávajícími voláními/testy).
+     *   (AccountingSupplierSettingsRepository::get výstup), statement_notes_attachment?:
+     *   array{content:string,filename:string,label:string} — SKUTEČNĚ přiložený soubor
+     *   (viz buildPrilohy()), ne strukturovaná data; volitelné i s appendixem, když příloha
+     *   v účetní závěrce není kompletní}. Prázdné (default) = appendix se nevygeneruje
+     *   (zpětná kompatibilita se stávajícími voláními/testy).
      * @return array{xml:string,warnings:list<string>}
      */
     public function build(array $supplier, int $year, array $calc, array $meta = [], array $appendix = []): array
@@ -519,7 +522,58 @@ final class DppoXmlBuilder
             $root->appendChild($vetaNP);
         }
 
+        // ── Prilohy/ObecnaPriloha — SKUTEČNĚ přiložený soubor (dppdp9.xsd:6180), poslední
+        // element sekvence. Viz buildPrilohy(): dokládá přílohu v účetní závěrce (§39 vyhl.
+        // 500/2002) jako dokument, což VetaUA/UB/UD/UZ výše NEDĚLAJÍ (jsou to strukturovaná
+        // data, ne dokument). NEŘEŠÍ ale EPO chybu 2602 „Není vložena příloha účetní
+        // závěrky" — ověřeno proti zkušebnímu EPO 31. 8. 2026, výtka je se souborem i bez
+        // něj identická (AUDIT-DPPO-XML.md dodatek 13, §13.3) — příčina zůstává neznámá
+        // (viz tam), přiložení souboru je i tak samostatně správné.
+        $prilohy = $this->buildPrilohy($dom, $appendix);
+        if ($prilohy !== null) {
+            $root->appendChild($prilohy);
+        }
+
         return ['xml' => $dom->saveXML() ?: '', 'warnings' => $warnings];
+    }
+
+    /**
+     * `Prilohy/ObecnaPriloha` — skutečně přiložený soubor (base64), NE strukturovaná data.
+     * Jediný zdroj obsahu dnes je „Příloha v účetní závěrce" (§ 39 vyhl. 500/2002,
+     * {@see \MyInvoice\Service\Tax\Return\TaxReturnService::buildStatementNotesAttachment()}),
+     * která už prošla kontrolou kompletnosti a limitu velikosti PŘED tím, než se sem vůbec
+     * dostala — builder tu žádnou z těch kontrol neopakuje, jen mechanicky sestaví větu.
+     * Chybí-li `$appendix['statement_notes_attachment']` (nevyplněná příloha, chyba
+     * renderu, překročený limit — vždy s warningem z volajícího), `Prilohy` se vůbec
+     * nepostaví — prázdná/poloprázdná příloha v ostrém podání je horší než žádná.
+     *
+     * `cislo` (pořadové číslo přílohy) musí být v rámci podání unikátní (XSD) — dnes je
+     * jen jeden možný zdroj e-přílohy, takže je vždy `'1'`; přibude-li druhý zdroj, číslování
+     * bude nutné sjednotit na jedno místo.
+     *
+     * @param array<string,mixed> $appendix volitelně nese `statement_notes_attachment`:
+     *   {content:string (syrový binární obsah PDF, NE base64), filename:string, label:string}
+     */
+    private function buildPrilohy(\DOMDocument $dom, array $appendix): ?\DOMElement
+    {
+        $attachment = $appendix['statement_notes_attachment'] ?? null;
+        if (!is_array($attachment) || !isset($attachment['content']) || $attachment['content'] === '') {
+            return null;
+        }
+        $prilohy = $dom->createElement('Prilohy');
+        $obecna = $dom->createElement('ObecnaPriloha', base64_encode((string) $attachment['content']));
+        $obecna->setAttribute('cislo', '1');
+        $nazev = mb_substr((string) ($attachment['label'] ?? ''), 0, 255);
+        if ($nazev !== '') {
+            $obecna->setAttribute('nazev', $nazev);
+        }
+        $jmSouboru = mb_substr((string) ($attachment['filename'] ?? ''), 0, 255);
+        if ($jmSouboru !== '') {
+            $obecna->setAttribute('jm_souboru', $jmSouboru);
+        }
+        $obecna->setAttribute('kodovani', 'base64');
+        $prilohy->appendChild($obecna);
+        return $prilohy;
     }
 
     /**
@@ -1084,8 +1138,29 @@ final class DppoXmlBuilder
      * VetaUZ — žádost o předání účetní závěrky do sbírky listin veřejného rejstříku
      * (spec §4). Ne totéž jako „co je součástí přiznání" — rozvaha se předává vždy,
      * VZZ jen u ÚJ s povinným auditem (přesné pravidlo pro small/medium bez auditu
-     * k ověření, spec §7.g). `pr11_puz` (příloha k účetní závěrce, volný text/soubor) je
-     * feature, kterou zatím nemáme (spec §6.d) — vždy 'N', dokud nebude implementována.
+     * k ověření, spec §7.g).
+     *
+     * `pr11_puz` (má se „Příloha účetní závěrky" zahrnout do ŽÁDOSTI o předání do sbírky
+     * listin) ZŮSTÁVÁ 'N', i teď, když appendix umí přílohu jako soubor skutečně přiložit
+     * (viz buildPrilohy() / TaxReturnService::buildStatementNotesAttachment()) — je to JINÁ
+     * otázka, ne totéž rozhodnuté podruhé:
+     *   - Připojení souboru (`Prilohy/ObecnaPriloha`) je o tom, aby DPPDP9 neslo přílohu
+     *     v účetní závěrce jako dokument (§39 vyhl. 500/2002) — samo o sobě NEŘEŠÍ EPO
+     *     chybu 2602 „Není vložena příloha účetní závěrky" (ověřeno proti zkušebnímu EPO
+     *     31. 8. 2026: se souborem i bez něj vrací IDENTICKOU výtku — viz AUDIT-DPPO-XML.md
+     *     dodatek 13, §13.3). Přiložit ho je přesto správné (dokumentuje se, o co jde), jen
+     *     to není lék na 2602.
+     *   - `pr11_puz` je VOLITELNÁ žádost, aby FÚ tenhle konkrétní dokument JEŠTĚ NAVÍC
+     *     přeposlal do sbírky listin veřejného rejstříku MÍSTO toho, aby ho poplatník podal
+     *     zvlášť u rejstříkového soudu — samostatný právní úkon s vlastními důsledky
+     *     (dokument se zveřejní), ne mechanický důsledek toho, že teď máme PDF po ruce.
+     *     Experiment (dočasně `pr11_puz='A'`, zkušební EPO, dodatek 13 §13.4) navíc ukázal,
+     *     že zapnutí vyvolá VLASTNÍ novou výtku („Chcete odeslat žádost… není však přiložen
+     *     odpovídající počet příloh") nezávislou na 2602 — další důvod nechat 'N', dokud
+     *     appka nenabídne vědomou volbu (checkbox „požádat o předání do sbírky listin") a
+     *     neumí spočítat, kolik příloh EPO pro tuhle žádost očekává. Stejně jako
+     *     `pr11_pzvk`/`pr11_ppt`/`pr11_uzmus` níže (ty navíc nemají ani obsah, který by šlo
+     *     nabídnout).
      *
      * @param array<string,mixed> $settings výstup AccountingSupplierSettingsRepository::get()
      * @param array<string,mixed> $supplier
