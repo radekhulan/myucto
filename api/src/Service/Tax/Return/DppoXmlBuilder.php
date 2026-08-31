@@ -104,6 +104,35 @@ final class DppoXmlBuilder
         // mezeře u pasiv), posílá se tedy jen C.II.1.+C.II.2., což na součet stačí (chybí
         // třetí složka přispívá nulou, ne chybou).
         'C.II.' => [['C.II.1.', 47], ['C.II.2.', 57]],
+        // Dodatek 2026-08-31 (pokračování, úroveň 3 zbytku rozvahy-aktiv) — jakmile
+        // předchozí doplnění poslalo B./C. skupiny jako hodnoty, zkušební EPO u `large`
+        // začalo navíc vytýkat i JEJICH vlastní součty: „Hodnota řádku B.I./B.II./B.III./
+        // C.I./C.III./C.IV. rozvahy-aktiv není rovna součtu…". `buildAktivaDetailElements`
+        // je čistě rekurzivní podle téhle mapy (rowCode → děti), takže stačí doplnit klíče
+        // — žádná změna kódu. Čísla řádků ověřena stejným zdrojem (tabulka 23810 „Rozvaha —
+        // A K T I V A", platnost stabilní napříč roky — anchor hodnoty B./C./D./B.I./B.II./
+        // B.III./C.I./C.II./C.III./C.IV./D.1.-D.3./C.II.1./C.II.2. výše se shodují přesně).
+        'B.I.'   => [['B.I.1.', 5], ['B.I.2.', 6], ['B.I.3.', 9], ['B.I.4.', 10], ['B.I.5.', 11]],
+        'B.II.'  => [['B.II.1.', 15], ['B.II.2.', 18], ['B.II.3.', 19], ['B.II.4.', 20], ['B.II.5.', 24]],
+        'B.III.' => [
+            ['B.III.1.', 28], ['B.III.2.', 29], ['B.III.3.', 30], ['B.III.4.', 31],
+            ['B.III.5.', 32], ['B.III.6.', 33], ['B.III.7.', 34],
+        ],
+        'C.I.'   => [['C.I.1.', 39], ['C.I.2.', 40], ['C.I.3.', 41], ['C.I.4.', 44], ['C.I.5.', 45]],
+        'C.III.' => [['C.III.1.', 69], ['C.III.2.', 70]],
+        'C.IV.'  => [['C.IV.1.', 72], ['C.IV.2.', 73]],
+        // Úroveň 4 — pod řádky výše, které jsou samy podřádkem se svými vlastními
+        // podřádky (B.I.2./B.I.5./B.II.1./B.II.4./B.II.5./B.III.7./C.I.3.). Data pro ně v
+        // `statement_rows` existují (viz migrace 1012), takže jde stále o skupinu (a) —
+        // bez nich by se stejná past jen posunula o úroveň hlouběji, jakmile výše uvedené
+        // řádky začnou nést nenulovou hodnotu.
+        'B.I.2.'   => [['B.I.2.1.', 7], ['B.I.2.2.', 8]],
+        'B.I.5.'   => [['B.I.5.1.', 12], ['B.I.5.2.', 13]],
+        'B.II.1.'  => [['B.II.1.1.', 16], ['B.II.1.2.', 17]],
+        'B.II.4.'  => [['B.II.4.1.', 21], ['B.II.4.2.', 22], ['B.II.4.3.', 23]],
+        'B.II.5.'  => [['B.II.5.1.', 25], ['B.II.5.2.', 26]],
+        'B.III.7.' => [['B.III.7.1.', 35], ['B.III.7.2.', 36]],
+        'C.I.3.'   => [['C.I.3.1.', 42], ['C.I.3.2.', 43]],
     ];
 
     /**
@@ -127,6 +156,50 @@ final class DppoXmlBuilder
     /** Úroveň 2 pod P.D. (Časové rozlišení pasiv) — tabulka 24810, platnost=2026. */
     private const PASIVA_D_C_RADKU = [
         ['P.D.1.', 65], ['P.D.2.', 66],
+    ];
+
+    /**
+     * Úroveň 2 pod P.B. (Rezervy) — tabulka 24810, platnost=2026. `P.B.1.` (Rezerva na
+     * důchody a podobné závazky, ř. 26) v `statement_rows` nemáme (žádná mapa účtů na ni
+     * neukazuje — chybějící DATA, ne chybějící mapování, viz AUDIT-DPPO-XML.md dodatek 11),
+     * posílají se tedy jen tři ze čtyř oficiálních podřádků; chybějící přispívá součtu
+     * nulou, ne chybou (stejný princip jako C.II.3. u aktiv/C.III. u pasiv výše).
+     */
+    private const PASIVA_B_C_RADKU = [
+        ['P.B.2.', 27], ['P.B.3.', 28], ['P.B.4.', 29],
+    ];
+
+    /**
+     * Dodatek 2026-08-31 (pokračování, úroveň 3 zbytku rozvahy-pasiv) — stejný nález a
+     * stejný zdroj čísel jako u AKTIVA_DETAIL_C_RADKU výše: jakmile PASIVA_A_C_RADKU/
+     * PASIVA_C_C_RADKU/PASIVA_B_C_RADKU začaly posílat A.I.–A.VI./C.I./C.II./B. jako
+     * hodnoty, zkušební EPO u `large` navíc vytklo JEJICH vlastní součty („Hodnota řádku
+     * A.I./A.II./A.III./A.IV./B./C.I./C.II. rozvahy-pasiv není rovna součtu…"). Klíč =
+     * row_code rodiče; `buildPasivaDetailElements` do téhle mapy rekurzivně nahlíží pro
+     * KAŽDÝ řádek, který sama vypíše (stejný princip jako AKTIVA_DETAIL_C_RADKU), takže
+     * pokrývá i úroveň 4 (A.II.2./C.II.8.) jedním mechanismem beze změny volajícího kódu.
+     * `A.IV.2.` (ř. 21, „Jiný výsledek hospodaření minulých let") a `C.I.4./C.I.5./C.I.7.`/
+     * `C.II.7.`/`P.B.1.` chybí ve `statement_rows` (skupina (b), viz AUDIT-DPPO-XML.md
+     * dodatek 11) — u nich se posílá jen to, co v datech je; chybějící přispívá nulou.
+     */
+    private const PASIVA_DETAIL_C_RADKU = [
+        'P.A.I.'    => [['P.A.I.1.', 4], ['P.A.I.2.', 5], ['P.A.I.3.', 6]],
+        'P.A.II.'   => [['P.A.II.1.', 8], ['P.A.II.2.', 9]],
+        'P.A.II.2.' => [['P.A.II.2.1.', 10], ['P.A.II.2.2.', 11]],
+        'P.A.III.'  => [['P.A.III.1.', 16], ['P.A.III.2.', 17]],
+        'P.A.IV.'   => [['P.A.IV.1.', 19]],
+        'P.C.I.'    => [
+            ['P.C.I.1.', 32], ['P.C.I.2.', 35], ['P.C.I.3.', 36],
+            ['P.C.I.6.', 39], ['P.C.I.8.', 41], ['P.C.I.9.', 42],
+        ],
+        'P.C.II.'   => [
+            ['P.C.II.1.', 47], ['P.C.II.2.', 50], ['P.C.II.3.', 51], ['P.C.II.4.', 52],
+            ['P.C.II.5.', 53], ['P.C.II.6.', 54], ['P.C.II.8.', 56],
+        ],
+        'P.C.II.8.' => [
+            ['P.C.II.8.1.', 57], ['P.C.II.8.2.', 58], ['P.C.II.8.3.', 59], ['P.C.II.8.4.', 60],
+            ['P.C.II.8.5.', 61], ['P.C.II.8.6.', 62], ['P.C.II.8.7.', 63],
+        ],
     ];
 
     /**
@@ -876,18 +949,33 @@ final class DppoXmlBuilder
                 $elements[] = $el;
             }
         }
+        // „B." (Rezervy) samostatně — cíl je $bSled/$bMin, TÍŽ hodnota, do které se výše
+        // (řádek 25) absorbuje případný rozdíl vůči „B.+C.", ne nezávisle zaokrouhlené P.B.
+        if ($bSled !== null) {
+            foreach ($this->buildPasivaDetailElements($dom, $byCode, self::PASIVA_B_C_RADKU, $bSled, $bMin) as $el) {
+                $elements[] = $el;
+            }
+        }
 
         return $elements;
     }
 
     /**
-     * Úroveň 2 rozvahy-pasiv pod jedním souhrnným řádkem (A./C./D.) — stejná
+     * Úroveň 2 rozvahy-pasiv pod jedním souhrnným řádkem (A./B./C./D.) — stejná
      * zaokrouhlovací absorpce jako buildAktivaDetailElements, jen bez brutto/korekce
      * (VetaUD schéma je nemá). `$exclude` chrání řádky s vlastní křížovou vazbou (viz
      * PASIVA_A_C_RADKU) před tím, aby do nich absorpce zasáhla. `$overrides` (row_code =>
      * [sled, min]) nahradí nezávisle zaokrouhlenou hodnotu řádku, který ji MUSÍ převzít
      * odjinud (jen `P.A.V.` ← `VH`, viz build()) — řádek pak dál neúčastní na absorpci
      * jinak (musí být zároveň v `$exclude`), jen v ní figuruje jako pevný bod součtu.
+     *
+     * Dodatek 2026-08-31 (pokračování): PO absorpci se metoda REKURZIVNĚ zavolá sama pro
+     * každý vypsaný řádek, který je zároveň klíčem v PASIVA_DETAIL_C_RADKU (úroveň 3/4,
+     * viz komentář u konstanty) — stejný princip jako buildAktivaDetailElements, jen bez
+     * brutto/korekce. Cíl vnořeného volání je hodnota TOHOTO řádku PO absorpci na úrovni
+     * výš, ne jeho nezávisle zaokrouhlená hodnota (jinak by se součet dětí mohl rozejít i
+     * s absorbovaným rodičem). `$exclude`/`$overrides` se do rekurze nepředávají — týkají
+     * se výhradně `P.A.V.`, což je vždy list (žádné vlastní podřádky v PASIVA_DETAIL_C_RADKU).
      *
      * @param array<string,array<string,mixed>> $byCode
      * @param list<array{0:string,1:int}>       $children
@@ -929,6 +1017,12 @@ final class DppoXmlBuilder
                 continue;
             }
             $elements[] = $this->vetaUdElement($dom, $cRadku, $sled[$rowCode], $min[$rowCode]);
+            $nested = self::PASIVA_DETAIL_C_RADKU[$rowCode] ?? [];
+            if ($nested !== []) {
+                foreach ($this->buildPasivaDetailElements($dom, $byCode, $nested, $sled[$rowCode], $min[$rowCode]) as $nestedEl) {
+                    $elements[] = $nestedEl;
+                }
+            }
         }
         return $elements;
     }
