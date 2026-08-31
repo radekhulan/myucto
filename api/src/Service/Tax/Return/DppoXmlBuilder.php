@@ -336,6 +336,18 @@ final class DppoXmlBuilder
         $vetaF = $this->buildVetaF($dom, $calc, $warnings);
         $vetaD->setAttribute('p_pr_2od', (string) (($vetaE !== null ? 1 : 0) + ($vetaF !== null ? 1 : 0)));
 
+        // sam_pr — počet samostatných příloh. VetaA (přehled transakcí se spojenými osobami)
+        // NENÍ ani „příloha II. oddílu" (p_pr_2od výše — to jsou tabulky a)-j) VetaE/F/G/…,
+        // XSD sekvence je řadí PŘED VetaS), ani „zvláštní příloha" (zvl_pr — VetaR, volný
+        // text). Ověřeno na zkušebním EPO 31. 8. 2026 (private/AUDIT-DPPO-XML.md §11): reálné
+        // odpovědi VetaA výslovně jmenují „List č. N sam. přílohy k pol. 12" — VetaA PATŘÍ do
+        // sam_pr (samostatné přílohy, položka 12 I. oddílu), dřív natvrdo '0' (VetaZ/T/B/C/H,
+        // které nestavíme, jsou taky sam_pr, ale jediná sam_pr věta, kterou builder skutečně
+        // staví, je VetaA). Musí se plnit počtem SKUTEČNĚ vygenerovaných vět, ne odhadem —
+        // proto až po sestavení $vetaAList níže.
+        $vetaAList = $this->buildVetaA($dom, $calc, $warnings);
+        $vetaD->setAttribute('sam_pr', (string) count($vetaAList));
+
         $root->appendChild($vetaD);
 
         if (empty($supplier['financial_office_code'])) {
@@ -389,6 +401,11 @@ final class DppoXmlBuilder
         // ── Příloha účetní závěrky (Epic DP) — VetaUA (aktiva) + VetaUB (VZZ) +
         // VetaUD (pasiva) + VetaUZ (sbírka listin). XSD sekvence vyžaduje přesně toto
         // pořadí bloků (ověřeno na reálném podání: …VetaUA*, VetaUB*, VetaUD*, VetaUZ).
+        // VetaA (přehled transakcí se spojenými osobami) patří v sekvenci schématu AŽ ZA
+        // celý blok VetaUA–VetaUU (dppdp9_epo2.xsd:4083, hned před VetaB/VetaC, které
+        // nestavíme) — tedy před VetaUZ, ne za ni. Je NEZÁVISLÁ na appendixu (staví se,
+        // i když se příloha účetní závěrky vůbec negeneruje) — $vetaAList je už sestavený
+        // výš (sam_pr na VetaD ho potřeboval dřív), sem se jen vkládá na svou sekvenční pozici.
         if ($hasAppendix) {
             $balanceSheet = (array) $appendix['balance_sheet'];
             $incomeStatement = (array) $appendix['income_statement'];
@@ -408,11 +425,18 @@ final class DppoXmlBuilder
             foreach ($this->buildVetaUD($dom, $balanceSheet, $vzz['sled']['VH'] ?? null, $vzz['min']['VH'] ?? null) as $el) {
                 $root->appendChild($el);
             }
+            foreach ($vetaAList as $vetaA) {
+                $root->appendChild($vetaA);
+            }
             $root->appendChild($this->buildVetaUZ(
                 $dom,
                 (array) ($appendix['settings'] ?? []),
                 $supplier,
             ));
+        } else {
+            foreach ($vetaAList as $vetaA) {
+                $root->appendChild($vetaA);
+            }
         }
 
         // ── VetaNP — žádost o vrácení přeplatku (§155 DŘ) — poslední věta před Přílohy,
@@ -486,7 +510,9 @@ final class DppoXmlBuilder
         $vetaD->setAttribute('uv_mena', 'CZK'); // multi-currency účetnictví zatím nemáme
         $vetaD->setAttribute('uz_dle_mus', 'N'); // IFRS nepodporujeme
         $vetaD->setAttribute('uz_rad', 'T'); // T = řádná závěrka (mimořádná/mezitímní mimo MVP)
-        $vetaD->setAttribute('sam_pr', '0'); // „samostatné přílohy" (zápočet daně ze zahraničí) mimo rozsah
+        // sam_pr (počet samostatných příloh) se plní JEDNOU, v build() podle $vetaAList —
+        // viz komentář tam. Dřív se přepisovalo natvrdo na '0' TADY, což by při appendixu +
+        // VetaA přepsalo správný počet zpátky na nulu; proto se tu už nenastavuje vůbec.
     }
 
     /**
@@ -1179,6 +1205,98 @@ final class DppoXmlBuilder
         }
 
         return $any ? $vetaF : null;
+    }
+
+    /**
+     * VetaA — přehled transakcí se spojenými osobami (§ 23 odst. 7 ZDP, převodní ceny),
+     * dppdp9_epo2.xsd:4083, `maxOccurs="unbounded"` — jedna věta na spojenou osobu, žádný
+     * atribut v XSD není `use="required"`, ale dokumentace `naz_spojos`/`stat_spojos` nese
+     * vlastní kritickou kontrolu ("musí být vyplněn"/"musí být vyplněna") a zákaz duplicitní
+     * dvojice (naz_spojos, stat_spojos) — v praxi tedy oba atributy vyplňujeme VŽDY, ne
+     * podmíněně. Podklad: {@see DppoReturnDataProvider::relatedPartyAppendix()} (přes
+     * DppoReturnCalculator::compute, klíč `related_party_appendix`) — objem transakcí PO
+     * PROTISTRANĚ ze stejné množiny dokladů jako `spoj_zahr` (VetaD), aby si příznak a
+     * příloha nikdy neodporovaly.
+     *
+     * Aplikace transakci NEKATEGORIZUJE podle vzoru přílohy (služby/licence/úroky/nájem/
+     * úvěry/dlouhodobý majetek/zásoby/pohledávky-závazky/podíly na zisku — 30+ specifických
+     * atributů) — na fakturách ani na přijatých dokladech není žádný takový druhový příznak.
+     * Jediné pole, které bez odhadu sedí, je katalogové „ostatní transakce" (ost_trans_sl1 =
+     * výnos, ost_trans_sl2 = náklad, v tis. Kč jako zbytek VetaA). Bezúplatná plnění (A/N),
+     * záruky (A/N), cash-pooling (A/N) a stavy pohledávek/závazků appka neeviduje vůbec —
+     * zůstávají v XML prázdné (nikdy '' ani 'N' naslepo, viz DANE-PODPORA-HRANICE.md zásada
+     * „raději prázdný atribut a varování než odhadnutá hodnota"), varování níže to shrnuje.
+     *
+     * Dvojice (naz_spojos, stat_spojos) se dedupuje SEM — dva klientské záznamy stejné
+     * protistrany (stejný název i stát, např. duplicitně založený kontakt) by jinak porušily
+     * XSD kritickou kontrolu proti duplicitám; částky se v tom případě sečtou.
+     *
+     * @param array<string,mixed> $calc     výstup DppoReturnCalculator::compute (nese related_party_appendix)
+     * @param list<string>        $warnings
+     * @return list<\DOMElement>
+     */
+    private function buildVetaA(\DOMDocument $dom, array $calc, array &$warnings): array
+    {
+        $rows = (array) ($calc['related_party_appendix'] ?? []);
+        if ($rows === []) {
+            return [];
+        }
+
+        $merged = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $name = trim((string) ($row['name'] ?? ''));
+            $country = strtoupper(trim((string) ($row['country_iso2'] ?? '')));
+            if ($name === '' || $country === '') {
+                continue;
+            }
+            $key = mb_strtolower($name) . '|' . $country;
+            if (!isset($merged[$key])) {
+                $merged[$key] = ['name' => $name, 'country' => $country, 'ic' => '', 'issued' => 0.0, 'received' => 0.0];
+            }
+            $merged[$key]['issued'] += (float) ($row['issued_total'] ?? 0);
+            $merged[$key]['received'] += (float) ($row['received_total'] ?? 0);
+            $ic = trim((string) ($row['ic'] ?? ''));
+            if ($merged[$key]['ic'] === '' && $ic !== '') {
+                $merged[$key]['ic'] = $ic;
+            }
+        }
+
+        $elements = [];
+        foreach ($merged as $partner) {
+            $sl1 = $this->toThousands($partner['issued']);
+            $sl2 = $this->toThousands($partner['received']);
+            if ($sl1 === 0 && $sl2 === 0) {
+                continue;
+            }
+            $vetaA = $dom->createElement('VetaA');
+            $vetaA->setAttribute('naz_spojos', mb_substr($partner['name'], 0, 255)); // XSD maxLength 255
+            $vetaA->setAttribute('stat_spojos', $partner['country']);
+            if ($partner['ic'] !== '') {
+                $vetaA->setAttribute('ic_spojos', mb_substr($partner['ic'], 0, 20)); // XSD maxLength 20
+            }
+            if ($sl1 !== 0) {
+                $vetaA->setAttribute('ost_trans_sl1', (string) $sl1);
+            }
+            if ($sl2 !== 0) {
+                $vetaA->setAttribute('ost_trans_sl2', (string) $sl2);
+            }
+            $elements[] = $vetaA;
+        }
+
+        if ($elements !== []) {
+            $warnings[] = 'Přehled transakcí se spojenými osobami (VetaA, ' . count($elements) . 'x) nese jen '
+                . 'souhrn objemu transakcí za protistranu, rozdělený na výnos/náklad do pole „ostatní '
+                . 'transakce" (ost_trans_sl1/sl2) — účetnictví nerozlišuje jednotlivé druhy podle vzoru '
+                . 'přílohy (služby, licence, úroky, nájem, úvěry, dlouhodobý majetek, zásoby, '
+                . 'pohledávky/závazky, podíly na zisku). Bezúplatná plnění, záruky, cash-pooling a stavy '
+                . 'pohledávek/závazků appka neeviduje — tyto atributy zůstávají prázdné. Ověřte a doplňte '
+                . 'ručně, je-li to pro danou spojenou osobu relevantní.';
+        }
+
+        return $elements;
     }
 
     /**

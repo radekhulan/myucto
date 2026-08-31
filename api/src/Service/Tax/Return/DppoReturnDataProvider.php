@@ -55,6 +55,7 @@ final class DppoReturnDataProvider
      *   depreciation: array{tax:float,accounting:float},
      *   depreciation_by_group: array{tangible:array<int,float>,intangible:float,unclassified:float},
      *   related_party_country_flag: 'N'|'T'|'Z'|'A',
+     *   related_party_appendix: list<array{name:string,country_iso2:string,ic:?string,issued_total:float,received_total:float}>,
      *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
      *   disposal_nondeductible_residual: float,
      *   disposal_tax_increase: float, disposal_tax_decrease: float,
@@ -76,6 +77,7 @@ final class DppoReturnDataProvider
                 'depreciation' => ['tax' => 0.0, 'accounting' => 0.0],
                 'depreciation_by_group' => ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0],
                 'related_party_country_flag' => 'N',
+                'related_party_appendix' => [],
                 'bank_account' => $this->bankAccount($supplierId),
                 'disposal_nondeductible_residual' => 0.0,
                 'disposal_tax_increase' => 0.0,
@@ -95,6 +97,7 @@ final class DppoReturnDataProvider
         $dep = $this->depreciation($supplierId, $year);
         $depByGroup = $this->depreciationByGroup($supplierId, $year);
         $relatedPartyFlag = $this->relatedPartyCountryFlag($supplierId, $startsOn, $endsOn);
+        $relatedPartyAppendix = $this->relatedPartyAppendix($supplierId, $startsOn, $endsOn);
         $bankAccount = $this->bankAccount($supplierId);
         [$disposalIncrease, $disposalDecrease, $disposals, $disposalWarnings] = $this->disposalResiduals($supplierId, $startsOn, $endsOn);
         $projection = $this->closingProjection($supplierId, (int) $period['id'], $endsOn, $vh);
@@ -121,6 +124,7 @@ final class DppoReturnDataProvider
             'depreciation' => $dep,
             'depreciation_by_group' => $depByGroup,
             'related_party_country_flag' => $relatedPartyFlag,
+            'related_party_appendix' => $relatedPartyAppendix,
             'bank_account' => $bankAccount,
             'disposal_nondeductible_residual' => 0.0,
             'disposal_tax_increase' => $disposalIncrease,
@@ -473,6 +477,70 @@ final class DppoReturnDataProvider
             return 'T';
         }
         return 'N';
+    }
+
+    /**
+     * § 23 odst. 7 ZDP (VetaA) — objem transakcí se spojenými osobami PO PROTISTRANĚ, podklad
+     * pro přehled transakcí se spojenými osobami (příloha DPPDP9). Vlastní dotaz místo
+     * agregace {@see \MyInvoice\Service\Tax\RelatedPartyService::transactions()} ze stejného
+     * důvodu jako u {@see relatedPartyCountryFlag()} — ta vrací transakce k lidskému náhledu
+     * (bez ic/země protistrany), přidávat tam sloupce navíc kvůli jednomu DPPO volajícímu by
+     * rozšiřovalo cizí rozhraní. Stejné filtry (status, typ dokladu, datumový rozsah) jako
+     * {@see relatedPartyCountryFlag()}, aby `spoj_zahr` (VetaD) a VetaA vycházely ze STEJNÉ
+     * množiny dokladů — jinak by si mohly odporovat (příznak tvrdí zahraniční spojenou osobu,
+     * příloha ji ale nenese, nebo naopak).
+     *
+     * Aplikace NEROZLIŠUJE druh transakce (služby/licence/úroky/nájem/úvěry/dlouhodobý
+     * majetek/zásoby/pohledávky-závazky/podíly na zisku) — na fakturách a přijatých dokladech
+     * není žádný takový příznak. Souhrn jde do jediného pole VetaA, které bez odhadu sedí:
+     * katalogové „ostatní transakce" (ost_trans_sl1/2 — výnos/náklad, viz DppoXmlBuilder::buildVetaA).
+     * Bezúplatná plnění, záruky, cash-pooling a stavy pohledávek/závazků ke konci období
+     * (dlouhodobé i krátkodobé) appka neeviduje vůbec — zůstávají v XML prázdné, ne odhadnuté.
+     *
+     * @return list<array{name:string, country_iso2:string, ic:?string, issued_total:float, received_total:float}>
+     */
+    private function relatedPartyAppendix(int $supplierId, string $startsOn, string $endsOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 'issued' AS direction, c.id AS partner_id, c.company_name AS name, c.ic AS ic,
+                    co.iso2 AS country_iso2, ROUND(i.total_without_vat, 2) AS amount
+               FROM invoices i
+               JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
+               JOIN countries co ON co.id = c.country_id
+              WHERE i.supplier_id = ? AND c.related_party = 1
+                AND i.status NOT IN ('draft','cancelled')
+                AND i.invoice_type IN ('invoice','credit_note','tax_document')
+                AND i.effective_tax_date BETWEEN ? AND ?
+              UNION ALL
+             SELECT 'received', v.id, v.company_name, v.ic, co.iso2, ROUND(p.total_without_vat, 2)
+               FROM purchase_invoices p
+               JOIN clients v ON v.id = p.vendor_id AND v.supplier_id = p.supplier_id
+               JOIN countries co ON co.id = v.country_id
+              WHERE p.supplier_id = ? AND v.related_party = 1
+                AND p.status NOT IN ('draft','cancelled')
+                AND p.document_kind IN ('invoice','receipt','credit_note','tax_document')
+                AND p.effective_cost_date BETWEEN ? AND ?"
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn, $supplierId, $startsOn, $endsOn]);
+
+        $byPartner = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $id = (int) $row['partner_id'];
+            if (!isset($byPartner[$id])) {
+                $ic = trim((string) ($row['ic'] ?? ''));
+                $byPartner[$id] = [
+                    'name' => (string) ($row['name'] ?? ''),
+                    'country_iso2' => strtoupper((string) $row['country_iso2']),
+                    'ic' => $ic !== '' ? $ic : null,
+                    'issued_total' => 0.0,
+                    'received_total' => 0.0,
+                ];
+            }
+            $key = (string) $row['direction'] === 'issued' ? 'issued_total' : 'received_total';
+            $byPartner[$id][$key] = round($byPartner[$id][$key] + (float) $row['amount'], 2);
+        }
+
+        return array_values($byPartner);
     }
 
     /**

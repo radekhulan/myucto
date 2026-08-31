@@ -58,6 +58,7 @@ final class DppoReturnCalculator
      *   summary: array<string,float>,
      *   depreciation_by_group: array{tangible:array<int,float>,intangible:float,unclassified:float},
      *   related_party_country_flag: 'N'|'T'|'Z'|'A',
+     *   related_party_appendix: list<array{name:string,country_iso2:string,ic:?string,issued_total:float,received_total:float}>,
      *   bank_account: array{account_number:?string,bank_code:?string,bank_name:?string,iban:?string}|null,
      *   manual_increase_items_line62: list<array{text:string,amount:float}>,
      *   warnings: list<string>
@@ -322,6 +323,7 @@ final class DppoReturnCalculator
             // kalkulátor je nepočítá, jen je nese dál, aby builder nemusel dostávat $data zvlášť.
             'depreciation_by_group' => (array) ($data['depreciation_by_group'] ?? ['tangible' => [], 'intangible' => 0.0, 'unclassified' => 0.0]),
             'related_party_country_flag' => (string) ($data['related_party_country_flag'] ?? 'N'),
+            'related_party_appendix' => (array) ($data['related_party_appendix'] ?? []),
             'bank_account' => $data['bank_account'] ?? null,
             'manual_increase_items_line62' => $line62Items,
             'summary' => [

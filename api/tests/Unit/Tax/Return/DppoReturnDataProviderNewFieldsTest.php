@@ -115,6 +115,83 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
         self::assertSame('N', $result['related_party_country_flag']);
     }
 
+    public function testRelatedPartyAppendixEmptyWithoutTransactions(): void
+    {
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame([], $result['related_party_appendix']);
+    }
+
+    public function testRelatedPartyAppendixAggregatesIssuedAndReceivedPerPartner(): void
+    {
+        $this->country(1, 'CZ');
+        $this->client(1, 1, 1, 1, 'Dcera s.r.o.', '27604977');
+        $this->invoice(1, 1, 1, 'issued', '2025-03-01', 500_000.0);
+        $this->invoice(2, 1, 1, 'issued', '2025-06-01', 250_000.0);
+        $this->purchaseInvoice(1, 1, 1, '2025-04-01', 300_000.0);
+
+        $rows = $this->provider->gather(1, 2025)['related_party_appendix'];
+        self::assertCount(1, $rows);
+        self::assertSame('Dcera s.r.o.', $rows[0]['name']);
+        self::assertSame('CZ', $rows[0]['country_iso2']);
+        self::assertSame('27604977', $rows[0]['ic']);
+        self::assertSame(750_000.0, $rows[0]['issued_total'], 'Dvě vydané faktury sečtené dohromady.');
+        self::assertSame(300_000.0, $rows[0]['received_total']);
+    }
+
+    public function testRelatedPartyAppendixOneRowPerPartnerAcrossCountries(): void
+    {
+        $this->country(1, 'CZ');
+        $this->country(2, 'DE');
+        $this->client(1, 1, 1, 1, 'Dcera s.r.o.', null);
+        $this->client(2, 1, 2, 1, 'Sister GmbH', 'DE123456789');
+        $this->invoice(1, 1, 1, 'issued', '2025-03-01', 500_000.0);
+        $this->purchaseInvoice(1, 1, 2, '2025-04-01', 87_500.0);
+
+        $rows = $this->provider->gather(1, 2025)['related_party_appendix'];
+        self::assertCount(2, $rows);
+        $byName = [];
+        foreach ($rows as $r) {
+            $byName[$r['name']] = $r;
+        }
+        self::assertSame('CZ', $byName['Dcera s.r.o.']['country_iso2']);
+        self::assertNull($byName['Dcera s.r.o.']['ic']);
+        self::assertSame(500_000.0, $byName['Dcera s.r.o.']['issued_total']);
+        self::assertSame('DE', $byName['Sister GmbH']['country_iso2']);
+        self::assertSame('DE123456789', $byName['Sister GmbH']['ic']);
+        self::assertSame(87_500.0, $byName['Sister GmbH']['received_total']);
+    }
+
+    public function testRelatedPartyAppendixIgnoresNonRelatedClients(): void
+    {
+        $this->country(1, 'CZ');
+        $this->client(1, 1, 1, 0, 'Nespojená firma s.r.o.', null); // related_party=0
+        $this->invoice(1, 1, 1, 'issued', '2025-03-01', 500_000.0);
+
+        self::assertSame([], $this->provider->gather(1, 2025)['related_party_appendix']);
+    }
+
+    /**
+     * `spoj_zahr` (relatedPartyCountryFlag) a VetaA (relatedPartyAppendix) MUSÍ vycházet ze
+     * STEJNÉ množiny dokladů — jinak by si příznak a příloha v XML odporovaly. Obojí tu
+     * vzniká ze stejné (jediné) sady faktur, takže flag 'A' (tuzemská i zahraniční) musí
+     * přesně odpovídat tomu, že příloha nese jednu CZ a jednu DE položku.
+     */
+    public function testRelatedPartyCountryFlagAndAppendixAgreeOnSameData(): void
+    {
+        $this->country(1, 'CZ');
+        $this->country(2, 'DE');
+        $this->client(1, 1, 1, 1, 'Dcera s.r.o.', null);
+        $this->client(2, 1, 2, 1, 'Sister GmbH', null);
+        $this->invoice(1, 1, 1, 'issued', '2025-03-01', 500_000.0);
+        $this->purchaseInvoice(1, 1, 2, '2025-04-01', 87_500.0);
+
+        $result = $this->provider->gather(1, 2025);
+        self::assertSame('A', $result['related_party_country_flag']);
+        $countries = array_column($result['related_party_appendix'], 'country_iso2');
+        sort($countries);
+        self::assertSame(['CZ', 'DE'], $countries, 'Příloha musí nést přesně ty státy, co tvrdí spoj_zahr=A.');
+    }
+
     public function testBankAccountReturnsDefaultCzkAccount(): void
     {
         $this->currency(1, 1, 'CZK', '19-2000145399', '0800', 'Česká spořitelna', null, 0, 1);
@@ -152,10 +229,10 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
         $this->pdo->prepare('INSERT INTO countries (id, iso2) VALUES (?,?)')->execute([$id, $iso2]);
     }
 
-    private function client(int $id, int $supplierId, int $countryId, int $relatedParty): void
+    private function client(int $id, int $supplierId, int $countryId, int $relatedParty, string $companyName = '', ?string $ic = null): void
     {
-        $this->pdo->prepare('INSERT INTO clients (id, supplier_id, country_id, related_party) VALUES (?,?,?,?)')
-            ->execute([$id, $supplierId, $countryId, $relatedParty]);
+        $this->pdo->prepare('INSERT INTO clients (id, supplier_id, country_id, related_party, company_name, ic) VALUES (?,?,?,?,?,?)')
+            ->execute([$id, $supplierId, $countryId, $relatedParty, $companyName, $ic]);
     }
 
     private function invoice(int $id, int $supplierId, int $clientId, string $status, string $taxDate, float $amount): void
@@ -190,7 +267,7 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
         $this->pdo->exec('CREATE TABLE asset_improvements (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, amount REAL)');
         $this->pdo->exec('CREATE TABLE depreciation_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, asset_id INTEGER, kind TEXT, fiscal_year INTEGER, amount REAL, residual_value_end REAL)');
         $this->pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, client_id INTEGER, status TEXT, invoice_type TEXT, effective_tax_date TEXT, total_without_vat REAL)');
-        $this->pdo->exec('CREATE TABLE clients (id INTEGER PRIMARY KEY, supplier_id INTEGER, country_id INTEGER, related_party INTEGER)');
+        $this->pdo->exec('CREATE TABLE clients (id INTEGER PRIMARY KEY, supplier_id INTEGER, country_id INTEGER, related_party INTEGER, company_name TEXT, ic TEXT)');
         $this->pdo->exec('CREATE TABLE countries (id INTEGER PRIMARY KEY, iso2 TEXT)');
         $this->pdo->exec('CREATE TABLE currencies (id INTEGER PRIMARY KEY, supplier_id INTEGER, code TEXT, account_number TEXT, bank_code TEXT, bank_name TEXT, iban TEXT, is_default INTEGER, is_active INTEGER)');
     }
