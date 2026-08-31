@@ -416,6 +416,19 @@ final class DpfoReturnCalculator
                 'decrease' => $s7Decrease,
                 'closing' => $data['closing'] ?? null,
             ],
+            // Hrubé §9/§10 podklady pro Přílohu č. 2 (VetaV/VetaJ, {@see DpfoXmlBuilder}) —
+            // 'fields' nese jen NET dílčí základ (kc_zd9/kc_zd10), ale VetaV chce hrubé
+            // kc_prij9/kc_vyd9/kc_prij10/kc_vyd10 zvlášť (analogie 's7' výše).
+            's9' => [
+                'income' => $s9Income,
+                'expenses' => $s9Expenses,
+                'base' => $s9,
+            ],
+            's10' => [
+                'income' => $s10Income,
+                'expenses' => $s10Expenses,
+                'base' => $s10,
+            ],
             's10_items' => $s10Items,
             'family' => ['children' => $children, 'spouse' => $spouseClaim],
             'tax' => $taxAfterChildren,

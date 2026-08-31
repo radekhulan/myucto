@@ -246,6 +246,32 @@ final class DpfoReturnCalculatorTest extends TestCase
         self::assertSame(40000.0, (float) $r['s10_items'][1]['disallowed_expenses']);
     }
 
+    /**
+     * §9/§10 hrubé podklady pro Přílohu č. 2 (VetaV/VetaJ, {@see DpfoXmlBuilder}) — 'fields'
+     * nese jen NET dílčí základ (kc_zd9/kc_zd10), builder ale potřebuje hrubé kc_prij9/
+     * kc_vyd9/kc_prij10/kc_vyd10 zvlášť (viz private/AUDIT-DPFO-XML.md mezera č. 3).
+     */
+    public function testGrossSection9And10AreExposedForXmlBuilder(): void
+    {
+        $r = $this->calcRun(['s7_base' => 0], [
+            's9_rental' => ['income' => 180000, 'expenses' => 60000],
+            's10_items' => [
+                ['kind' => 'Prodej movité věci', 'income' => 150000, 'expenses' => 90000],
+                ['kind' => 'Příležitostný příjem', 'income' => 25000, 'expenses' => 40000],
+            ],
+        ]);
+
+        self::assertSame(180000.0, (float) $r['s9']['income']);
+        self::assertSame(60000.0, (float) $r['s9']['expenses']);
+        self::assertSame(120000.0, (float) $r['s9']['base']);
+
+        // Hrubý úhrn §10 nekrátí výdaje na výši příjmu položky (to dělá až kc_zd10p/'base') —
+        // 'income' = 150000+25000, 'expenses' = 90000+25000 (druhá položka omezena na příjem).
+        self::assertSame(175000.0, (float) $r['s10']['income']);
+        self::assertSame(115000.0, (float) $r['s10']['expenses']);
+        self::assertSame(60000.0, (float) $r['s10']['base']);
+    }
+
     public function testSpouseAndChildClaimsAreProratedByMonth(): void
     {
         $months = [];

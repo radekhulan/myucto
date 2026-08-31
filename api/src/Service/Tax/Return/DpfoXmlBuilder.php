@@ -13,7 +13,7 @@ use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
  *
  * Struktura dle `api/xsd/dpfdp7_epo2.xsd` (bez namespace, xs:sequence — pořadí vět!):
  *   Pisemnost(nazevSW,verzeSW) > DPFDP7(verzePis) > VetaD, VetaP, VetaO, VetaS, VetaA,
- *   VetaB, VetaT, Vetac, VetaU, VetaN
+ *   VetaB, VetaT, Vetac, VetaU, VetaV, VetaJ, VetaN
  *
  * - VetaD: povinné (fixní k_uladis="DPF", dokument="DP7", rok, dap_typ, c_ufo_cil,
  *   pln_moc, audit) + slevy/zvýhodnění/zálohy/doplatek (kc_op15_1a, da_slevy35ba, kc_danbonus,
@@ -21,8 +21,12 @@ use MyInvoice\Service\Report\EpoSupplierBlockBuilder;
  * - VetaP: identifikace FO (jmeno/prijmeni, rod_c, dic, adresa).
  * - VetaO: dílčí základy §6–§10 + úhrn + základ daně.
  * - VetaS: §15 nezdanitelné části + daň (da_dan16 se 2 desetinnými místy).
- * - VetaB: příznaky vložených příloh (priloha1 — Příloha 1 §7, staví se vždy s VetaT).
+ * - VetaB: příznaky vložených příloh (priloha1 — Příloha 1 §7, staví se vždy s VetaT;
+ *   priloha2 — Příloha 2 §9/§10, staví se jen s VetaV, {@see buildAppendix2}).
  * - VetaT: Příloha 1 §7 (kc_prij7, kc_vyd7, kc_zd7p, vyd7proc, pr_sazba).
+ * - VetaV/VetaJ: Příloha 2 — §9 nájem (souhrn) a §10 ostatní příjmy (souhrn + položky
+ *   podle druhu), {@see buildAppendix2}. Staví se JEN když poplatník má skutečnou
+ *   aktivitu §9/§10 (hrubé příjmy nebo výdaje > 0) — prázdná příloha nevzniká.
  * - VetaN: žádost o vrácení přeplatku (jen když vyjde přeplatek, {@see buildVetaN}).
  *
  * Hodnoty mapuje z výstupu {@see DpfoReturnCalculator} (klíč fields + s7 + bank_account).
@@ -69,6 +73,17 @@ final class DpfoXmlBuilder
             'DPFDP7',
             (string) ($meta['verze_pis'] ?? self::VERZE_PIS),
             isset($meta['verze_sw']) ? (string) $meta['verze_sw'] : null,
+        );
+
+        // Příloha 2 (VetaV/VetaJ) se rozhoduje předem — jde o `null`, dokud poplatník
+        // nemá skutečnou aktivitu §9/§10, viz {@see buildAppendix2}. Výsledek se použije
+        // dvakrát: pro příznak VetaB.priloha2 (níže) a pro samotné vložení vět za VetaU.
+        $appendix2 = $this->buildAppendix2(
+            $dom,
+            (array) ($calc['s9'] ?? []),
+            (array) ($calc['s10'] ?? []),
+            (array) ($calc['s10_items'] ?? []),
+            $warnings,
         );
 
         // ── VetaD — hlavička (povinné) + slevy/zálohy/doplatek ──────────────
@@ -217,6 +232,11 @@ final class DpfoXmlBuilder
         if (array_key_exists('kc_zd7', $fields)) {
             $vetaB = $dom->createElement('VetaB');
             $vetaB->setAttribute('priloha1', '1');
+            // priloha2 — stejná kritická kontrola jako priloha1, ale vázaná na to, jestli
+            // VetaV skutečně vzniká (viz $appendix2 výše); prázdnou Přílohu 2 netvrdíme.
+            if ($appendix2 !== null) {
+                $vetaB->setAttribute('priloha2', '1');
+            }
             $root->appendChild($vetaB);
         }
         // Zkušební EPO 30. 8. 2026 (po zavedení VetaB výše) nově hlásí: „Jsou vykázány
@@ -326,6 +346,14 @@ final class DpfoXmlBuilder
             $root->appendChild($vetaU);
         }
 
+        // ── VetaV/VetaJ — Příloha 2 (§9 nájem, §10 ostatní příjmy) ──────────────
+        if ($appendix2 !== null) {
+            $root->appendChild($appendix2['veta_v']);
+            foreach ($appendix2['veta_j'] as $vetaJ) {
+                $root->appendChild($vetaJ);
+            }
+        }
+
         // ── VetaN — žádost o vrácení přeplatku (§155 DŘ) — poslední věta, staví se
         // jen když z přiznání vyjde přeplatek (viz buildVetaN).
         $vetaN = $this->buildVetaN($dom, $calc, $warnings);
@@ -394,6 +422,147 @@ final class DpfoXmlBuilder
         $vetaN->setAttribute('kc_preplatek', (string) $overpayment);
 
         return $vetaN;
+    }
+
+    /**
+     * VetaV/VetaJ — Příloha č. 2 (§9 nájem, §10 ostatní příjmy). XSD (VetaB.priloha2,
+     * kritická kontrola): "pokud jsou vyplněny hodnoty kc_zd9 nebo kc_zd10 věty O, musí
+     * být naplněny položky věty V pro Přílohu č. 2 a položka priloha2 musí být naplněna
+     * hodnotou 1." Věta V (a případně J) proto vzniká JEN když poplatník má skutečnou
+     * hrubou aktivitu §9/§10 (příjem nebo výdaj > 0) — ne jen podle toho, že VetaO.kc_zd9/
+     * kc_zd10 mají hodnotu, protože ty se do XML posílají vždy (i jako "0", viz VETA_O).
+     * Nulová aktivita by tak jinak vyrobila prázdnou Přílohu 2, což zadání výslovně
+     * zakazuje.
+     *
+     * kod_dr_prij10 (číselník A–H, §10 odst. 1 ZDP) a kod10 (P/S/Z/N) NEplníme vůbec —
+     * appka nevede číselník druhů ostatních příjmů, jen volný text (`kind`/`kind_code`
+     * z formuláře, viz DpfoReturnDataProvider/TaxReturnService::section10Items). Doplnění
+     * naslepo by bylo hádání zákonné klasifikace, ne přenos existujícího údaje — proto jen
+     * varujeme (viz private/AUDIT-DPFO-XML.md, mezera č. 3 dodatek).
+     *
+     * @param array<string,mixed>       $s9      DpfoReturnCalculator výstup, klíč 's9' (income/expenses/base)
+     * @param array<string,mixed>       $s10     klíč 's10' (income/expenses/base)
+     * @param list<array<string,mixed>> $s10Items klíč 's10_items'
+     * @param list<string>              $warnings
+     * @return array{veta_v:\DOMElement,veta_j:list<\DOMElement>}|null
+     */
+    private function buildAppendix2(\DOMDocument $dom, array $s9, array $s10, array $s10Items, array &$warnings): ?array
+    {
+        $s9Income = (float) ($s9['income'] ?? 0);
+        $s9Expenses = (float) ($s9['expenses'] ?? 0);
+        $hasRental = $s9Income > 0.0 || $s9Expenses > 0.0;
+
+        $s10Income = (float) ($s10['income'] ?? 0);
+        $s10Expenses = (float) ($s10['expenses'] ?? 0);
+        // POZOR: §10 se do Přílohy 2 zapisuje JEN když je vstup položkový (s10_items).
+        // Zkušební EPO 31. 8. 2026 (bisekce): souhrnné kc_prij10/kc_vyd10/kc_zd10p BEZ
+        // alespoň jedné VetaJ položky odmítne třemi křížovými kontrolami ("hodnota
+        // úhrnu příjmů/výdajů/rozdílů dle § 10 ... neodpovídá součtu hodnot uvedeného
+        // sloupce") — tabulka je prázdná, součet nuly nikdy nesedí na nenulový souhrn.
+        // Appka má i legacy jednořádkový vstup (`s10_other`, bez rozpadu podle druhu) —
+        // pro ten Přílohu 2 vůbec nesestavíme, jen varujeme (viz níže).
+        $hasOther = $s10Items !== [];
+
+        if (!$hasRental && !$hasOther) {
+            if ($s10Income > 0.0 || $s10Expenses > 0.0) {
+                $warnings[] = 'Ostatní příjmy (§10) jsou zadány jako jedno souhrnné číslo bez rozpadu podle '
+                    . 'druhu. Zkušební EPO odmítá souhrn v Příloze č. 2 bez podkladových položek (VetaJ) — '
+                    . 'appka proto Přílohu č. 2 vůbec nesestavila a dílčí základ §10 v přiznání (VetaO.kc_zd10) '
+                    . 'zůstává BEZ POVINNÉHO PODKLADU. Přepněte na položkový vstup (druh/příjem/výdaj u každé '
+                    . 'položky) a přiznání vygenerujte znovu — jinak ostré podání EPO odmítne.';
+            }
+            return null;
+        }
+
+        $vetaV = $dom->createElement('VetaV');
+
+        if ($hasRental) {
+            $vetaV->setAttribute('kc_prij9', $this->int($s9Income));
+            $vetaV->setAttribute('kc_vyd9', $this->int($s9Expenses));
+            $rozdil9 = round($s9Income - $s9Expenses, 2);
+            $vetaV->setAttribute('kc_rozdil9', $this->int($rozdil9));
+            // Appka nesleduje úpravy dílčího základu §9 podle § 5/§ 23 (na rozdíl od §7,
+            // kde s7_increase/s7_decrease existují) — rozdíl je proto zároveň konečným
+            // dílčím základem, shodně s VetaO.kc_zd9 (DpfoReturnCalculator::$s9).
+            $vetaV->setAttribute('kc_zd9p', $this->int((float) ($s9['base'] ?? $rozdil9)));
+            // Appka neeviduje, zda poplatník uplatňuje výdaje procentem z příjmů (§9
+            // odst. 4 zákona) — do formuláře se zadává jen absolutní částka výdajů,
+            // proto vždy N (výdaje ve skutečné výši).
+            $vetaV->setAttribute('vyd9proc', 'N');
+        }
+
+        // Řádky VetaJ se sestaví PŘED souhrnem VetaV.kc_vyd10, protože ten musí být
+        // doslovný součet sloupce 3 (vydaje10) — viz komentář u kc_vyd10 níže.
+        $vetaJElements = [];
+        $missingKind = [];
+        $itemsIncome = 0.0;
+        $itemsExpensesClaimed = 0.0; // nekrácené (= doslovný sloupec 3, ne DpfoReturnCalculator's $s10Expenses)
+        foreach ($s10Items as $index => $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $income = (float) ($item['income'] ?? 0);
+            $allowed = (float) ($item['allowed_expenses'] ?? $item['expenses'] ?? 0);
+            $disallowed = (float) ($item['disallowed_expenses'] ?? 0);
+            // vydaje10 dle XSD = výdaje "ve skutečné výši" (nekrácené) — $allowed+$disallowed
+            // obnoví původní částku před krácením v DpfoReturnCalculator::compute().
+            $expensesClaimed = $allowed + $disallowed;
+            $itemsIncome += $income;
+            $itemsExpensesClaimed += $expensesClaimed;
+            $label = trim((string) ($item['kind_code'] ?? $item['kind'] ?? $item['text'] ?? ''));
+
+            $vetaJ = $dom->createElement('VetaJ');
+            $vetaJ->setAttribute('prijmy10', $this->int($income));
+            $vetaJ->setAttribute('vydaje10', $this->int($expensesClaimed));
+            $vetaJ->setAttribute('rozdil10', $this->int(round($income - $expensesClaimed, 2)));
+            if ($label !== '') {
+                $vetaJ->setAttribute('druh_prij10', mb_substr($label, 0, 50));
+            } else {
+                $missingKind[] = $index + 1;
+            }
+            $vetaJElements[] = $vetaJ;
+        }
+
+        if ($hasOther) {
+            $vetaV->setAttribute('kc_prij10', $this->int($itemsIncome));
+            // kc_vyd10/uhrn_vydaje10 MUSÍ být doslovný součet sloupce 3 (VetaJ.vydaje10),
+            // NE součet krácený na výši příjmu jednotlivé položky. XSD dokumentace textově
+            // popisuje krácení při součtu ("zahrňte do součtu výdaje maximálně do výše
+            // příjmů"), ale skutečná křížová kontrola zkušebního EPO (31. 8. 2026, bisekce)
+            // to nedělá — s kráceným součtem hlásila "hodnota úhrnu výdajů dle § 10 ...
+            // neodpovídá součtu hodnot uvedeného sloupce". $s10Expenses z
+            // DpfoReturnCalculator (krácený) se proto NEpoužívá.
+            $vetaV->setAttribute('kc_vyd10', $this->int($itemsExpensesClaimed));
+            // kc_zd10p (ř.40, konečný dílčí základ) NAOPAK je součet jen KLADNÝCH rozdílů
+            // (§10 odst. 4 zákona) — matematicky shodné s DpfoReturnCalculator's $s10
+            // (sum(max(0, income_i − expenses_i))), tuhle hodnotu EPO nerozporovalo.
+            $zd10p = $this->int((float) ($s10['base'] ?? max(0.0, $s10Income - $s10Expenses)));
+            $vetaV->setAttribute('kc_zd10p', $zd10p);
+            // uhrn_prijmy10/uhrn_vydaje10/uhrn_rozdil10 nemá XSD zdokumentované (žádná
+            // xs:documentation) — stejná třída nejistoty jako VetaD.kc_dan_celk nebo
+            // VetaT.celk_pr_prij7/vyd7 jinde v tomto builderu. Zkušební EPO na ně žádnou
+            // samostatnou výtku nedalo, jen na kc_vyd10 — proto totožné hodnoty jako
+            // kc_prij10/kc_vyd10/kc_zd10p (riziko zapsáno v private/AUDIT-DPFO-XML.md).
+            $vetaV->setAttribute('uhrn_prijmy10', $this->int($itemsIncome));
+            $vetaV->setAttribute('uhrn_vydaje10', $this->int($itemsExpensesClaimed));
+            $vetaV->setAttribute('uhrn_rozdil10', $zd10p);
+        }
+
+        if ($missingKind !== []) {
+            $warnings[] = 'Položka(y) ostatních příjmů §10 č. ' . implode(', ', $missingKind) . ' nemá(jí) '
+                . 'vyplněný druh příjmu (VetaJ.druh_prij10) — doplňte popis v přiznání před podáním.';
+        }
+        if ($vetaJElements !== []) {
+            $warnings[] = 'Zákonnou klasifikaci druhu ostatních příjmů podle číselníku EPO '
+                . '(VetaJ.kod_dr_prij10, A–H dle § 10 odst. 1 zákona) appka nevyplňuje — nevede číselník, '
+                . 'jen volný popisný text. Totéž platí pro kod10 (P/S/Z/N — zemědělská výroba paušálem, '
+                . 'společné jmění manželů, zahraniční zdroj, bezúplatný příjem nemovitosti). Přiřaďte '
+                . 'správné písmeno ručně u každé položky v portálu EPO před podáním (zkušební EPO 31. 8. 2026 '
+                . 'to hlásí jako kritickou výtku: „na ř. … ve sloupci 1 tabulky … není vyplněn kód druhu '
+                . 'příjmu podle § 10 ZDP").';
+        }
+
+        return ['veta_v' => $vetaV, 'veta_j' => $vetaJElements];
     }
 
     /**
