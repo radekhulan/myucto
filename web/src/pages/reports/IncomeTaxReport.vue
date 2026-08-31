@@ -310,7 +310,7 @@ function enableSpouse() {
 }
 function addS10Item() {
   if (!Array.isArray(inputs.s10_items)) inputs.s10_items = []
-  inputs.s10_items.push({ kind: '', income: 0, expenses: 0 })
+  inputs.s10_items.push({ text: '', income: 0, expenses: 0 })
 }
 function addClosingAdjustment() {
   closing.value?.adjustments.push({ adjustment_on: `${year.value}-12-31`, kind: 'section23_other',
@@ -949,7 +949,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
               <div class="flex flex-wrap items-center justify-between gap-2"><div class="text-sm font-semibold">{{ t('taxReturn.s10_items_title') }}</div>
                 <button type="button" @click="addS10Item" class="h-9 px-3 rounded-md bg-primary-600 text-white text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_item') }}</button></div>
               <div v-for="(item, index) in (inputs.s10_items || [])" :key="index" class="grid grid-cols-1 md:grid-cols-4 gap-2">
-                <input v-model="item.kind" :placeholder="t('taxReturn.s10_kind')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <input v-model="item.text" :placeholder="t('taxReturn.s10_kind')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input type="number" v-model.number="item.income" :placeholder="t('taxReturn.s10_income')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input type="number" v-model.number="item.expenses" :placeholder="t('taxReturn.s10_expenses')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <button type="button" @click="inputs.s10_items.splice(index, 1)" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button>

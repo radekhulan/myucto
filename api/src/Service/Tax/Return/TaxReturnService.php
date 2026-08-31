@@ -1365,7 +1365,12 @@ final class TaxReturnService
             $income = $this->money($item['income'] ?? 0);
             $expenses = $this->money($item['expenses'] ?? 0);
             $kind = $this->text($item['kind_code'] ?? '', 30);
-            $text = $this->text($item['text'] ?? '', 255);
+            // `kind` je historický název pole z formuláře: ten posílal popis druhu
+            // příjmu pod klíčem, který se tady nikdy nečetl, takže se text při uložení
+            // tiše zahodil. Formulář posílá `text`, tohle je pojistka pro rozeditované
+            // koncepty. `kind_code` je písmenný číselník druhu příjmu, který aplikace
+            // neeviduje — nechává se prázdný a Příloha č. 2 na to upozorní.
+            $text = $this->text($item['text'] ?? ($item['kind'] ?? ''), 255);
             if ($income === 0.0 && $expenses === 0.0 && $kind === '' && $text === '') {
                 continue;
             }
