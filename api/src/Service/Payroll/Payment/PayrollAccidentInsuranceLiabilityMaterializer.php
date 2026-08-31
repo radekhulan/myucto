@@ -89,9 +89,9 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
             }
             $year = (int) substr($periodStart, 0, 4);
             $quarterMonths = [$month - 2, $month - 1, $month];
-            $assessmentBaseMinor = 0;
+            $liabilityBaseMinor = 0;
             foreach ($quarterMonths as $quarterMonth) {
-                $assessmentBaseMinor += $this->monthAssessmentBase(
+                $liabilityBaseMinor += $this->monthLiabilityAssessmentBase(
                     $supplierId,
                     sprintf('%04d-%02d-01', $year, $quarterMonth),
                 );
@@ -106,7 +106,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 );
             }
             $premiumMinor = $this->calculator->premiumMinor(
-                $assessmentBaseMinor,
+                $liabilityBaseMinor,
                 $rate['rate_per_mille'],
             );
             $dueOn = $this->deadlines->dueOn(
@@ -125,13 +125,17 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                 $dueOn,
             );
             $source = [
-                'schema_reference' => 'payroll-payment-accident-insurance-source.v1',
+                // v2: základ se počítá bez ročního maxima podle § 15a a nese
+                // vlastní název, aby z otisku bylo poznat, kterým pravidlem
+                // závazek vznikl. Starší závazky s klíčem `assessment_base_…`
+                // stojí na zastropovaném základu.
+                'schema_reference' => 'payroll-payment-accident-insurance-source.v2',
                 'run_id' => $revision['run_id'],
                 'revision_id' => $revisionId,
                 'revision_no' => $revision['revision_no'],
                 'quarter_start' => $quarterStart,
                 'quarter_end' => $periodStart,
-                'assessment_base_minor_units' => $assessmentBaseMinor,
+                'employer_liability_assessment_base_minor_units' => $liabilityBaseMinor,
                 'rate_per_mille' => $rate['rate_per_mille'],
                 'rate_effective_from' => $rate['effective_from'],
                 'logical_reference' => $reference,
@@ -208,7 +212,15 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
                     || !hash_equals($existing['idempotency_key_hash'], $idempotencyHash)
                 ) {
                     throw new \DomainException(
-                        'Idempotentní replay zákonného pojištění odpovědnosti nesouhlasí.',
+                        $this->wasBuiltOnCappedBase($existing)
+                            ? 'Toto čtvrtletí bylo předepsáno ze zastropovaného '
+                                . 'vyměřovacího základu (roční maximum podle § 15a). '
+                                . 'Zákonné pojištění odpovědnosti se počítá ze základu '
+                                . 'bez ročního maxima, takže je předepsaná částka nižší, '
+                                . 'než má být. Rozdíl doplňte opravnou revizí — přepsat '
+                                . 'už předepsaný závazek na místě by smazalo stopu, '
+                                . 'podle které se dohledá, co se pojišťovně poslalo.'
+                            : 'Idempotentní replay zákonného pojištění odpovědnosti nesouhlasí.',
                     );
                 }
 
@@ -239,22 +251,53 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
     }
 
     /**
-     * Vyměřovací základ sociálního pojištění celé firmy za JEDEN měsíc
-     * čtvrtletí, čtený ze schváleného a otiskem ověřeného výsledku — nepočítá
-     * se znovu vlastní cestou (§ 12 odst. 2 vyhlášky odkazuje na vyměřovací
-     * základ sociálního pojištění, ne na vlastní definici).
+     * Vznikl už existující závazek na starém pravidle (zastropovaný základ)?
      *
-     * OTEVŘENÝ NÁLEZ, rešerše 31. 8. 2026: bere se `capped_…`, tedy základ PO
-     * ročním maximu podle § 15a zákona č. 589/1992 Sb. Kooperativa i Generali
-     * Česká pojišťovna ale shodně uvádějí, že se maximální vyměřovací základ
-     * na zákonné pojištění odpovědnosti NEVZTAHUJE — § 12 odst. 2 odkazuje jen
-     * na § 5 odst. 1 písm. a) toho zákona, ne na § 15a. U firem se zaměstnanci
-     * nad ročním stropem tak vychází pojistné nižší, než má být. Správně by se
-     * měl brát `participating_assessment_base_minor_units`; oprava se ale
-     * promítne do už zmaterializovaných závazků, takže je to samostatné
-     * rozhodnutí, ne vedlejší efekt doplnění sazebníku.
+     * Rozlišuje se kvůli hlášce: „idempotentní replay nesouhlasí" by účetní
+     * poslalo hledat rozbitý zápis, přestože jde o doložený rozdíl ve výkladu,
+     * který se řeší opravnou revizí, ne opravou dat.
+     *
+     * @param array<string,mixed> $existing
      */
-    private function monthAssessmentBase(int $supplierId, string $monthStart): int
+    private function wasBuiltOnCappedBase(array $existing): bool
+    {
+        $json = $existing['source_snapshot_json'] ?? null;
+        if (!is_string($json)) {
+            return false;
+        }
+        try {
+            $source = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return false;
+        }
+
+        return is_array($source)
+            && ($source['schema_reference'] ?? null)
+                === 'payroll-payment-accident-insurance-source.v1';
+    }
+
+    /**
+     * Vyměřovací základ zákonného pojištění odpovědnosti za JEDEN měsíc
+     * čtvrtletí, čtený ze schváleného a otiskem ověřeného výsledku sociálního
+     * pojištění — nepočítá se znovu vlastní cestou a nikdy se nebere z hrubé
+     * mzdy, která započitatelnému základu odpovídat nemusí.
+     *
+     * ⚠️ NENÍ to základ sociálního pojištění. Bere se
+     * `participating_assessment_base_minor_units`, tedy základ PŘED ročním
+     * maximem. § 12 odst. 2 vyhlášky č. 125/1993 Sb. přebírá ze zákona
+     * č. 589/1992 Sb. jen to, KTERÉ příjmy do základu patří (§ 5 odst. 1
+     * písm. a) — roční maximum je samostatné omezení až v § 15a a součástí
+     * definice základu není. Shodně to vykládají Kooperativa i Generali Česká
+     * pojišťovna a stanovisko Ministerstva financí z 20. 5. 2008: shoda se
+     * sociálním pojištěním se týká složek příjmu, ne maximálního základu.
+     *
+     * Praktický důsledek, na kterém ten rozdíl stojí: zaměstnanci nad ročním
+     * stropem mají od překročení `capped_…` nulové, ale do základu zákonného
+     * pojištění se počítají celý rok dál. Čtení `capped_…` proto předepisovalo
+     * nižší pojistné, než má být, a u nedoplatku § 12 odst. 9 přidává 10 % za
+     * každý započatý měsíc prodlení.
+     */
+    private function monthLiabilityAssessmentBase(int $supplierId, string $monthStart): int
     {
         $statement = $this->db->pdo()->prepare(
             'SELECT revision.id
@@ -299,10 +342,10 @@ final class PayrollAccidentInsuranceLiabilityMaterializer
         ) {
             throw new \DomainException('Otisk výsledku sociálního pojištění nesouhlasí.');
         }
-        $base = $root['capped_assessment_base_minor_units'] ?? null;
+        $base = $root['participating_assessment_base_minor_units'] ?? null;
         if (!is_int($base) || $base < 0) {
             throw new \DomainException(
-                'Vyměřovací základ sociálního pojištění není platné číslo.',
+                'Vyměřovací základ zákonného pojištění odpovědnosti není platné číslo.',
             );
         }
 

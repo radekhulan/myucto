@@ -419,7 +419,7 @@ final class PayrollPaymentLiabilityRepository
             'SELECT id, employee_id, liability_kind, direction,
                     recipient_reference, due_on, amount_minor,
                     previous_liability_id, source_snapshot_hash,
-                    idempotency_key_hash
+                    source_snapshot_json, idempotency_key_hash
                FROM payroll_payment_liabilities
               WHERE supplier_id = ? AND revision_id = ?
                 AND liability_reference = ?

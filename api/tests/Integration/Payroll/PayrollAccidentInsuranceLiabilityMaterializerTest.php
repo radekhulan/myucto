@@ -170,6 +170,134 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         self::assertSame('2026-04-30', $accident[0]['due_on']);
     }
 
+    /**
+     * Pod ročním maximem se oba základy rovnají — tenhle test je kontrolní
+     * skupina pro tři následující. Kdyby padl, není chyba v maximu, ale
+     * v základu jako takovém.
+     */
+    public function testBelowAnnualCapBothBasesAgree(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00, 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00, 30_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00, 50_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+
+        // 100 000 Kč × 4,20 ‰ = 420 Kč.
+        self::assertSame(42_000, (int) $this->liability($result['liability_ids'][0])['amount_minor']);
+    }
+
+    /**
+     * Měsíc, ve kterém se maximum překročí: sociální základ se usekne, základ
+     * zákonného pojištění zůstává celý. Pojistné proto musí vyjít z vyšší
+     * částky — právě tenhle rozdíl se dřív tiše ztrácel.
+     */
+    public function testMonthThatCrossesAnnualCapUsesUncappedBase(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00, 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00, 30_000_00);
+        // Březen: do maxima se vejde jen 10 000 z 50 000.
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00, 10_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+
+        // Ze zastropovaného základu by vyšlo (20+30+10) × 4,20 ‰ = 252 Kč.
+        self::assertSame(42_000, (int) $this->liability($result['liability_ids'][0])['amount_minor']);
+    }
+
+    /**
+     * Měsíce PO překročení maxima. Sociální základ je nulový, ale zaměstnanec
+     * se do zákonného pojištění počítá dál celý rok — celé čtvrtletí by jinak
+     * vyšlo na minimálních 100 Kč místo skutečného pojistného.
+     */
+    public function testMonthsAfterCapKeepFullLiabilityBaseEvenWhenSocialBaseIsZero(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-04-01', 60_000_00, 0);
+        $this->createMonth('2026-05-01', 60_000_00, 0);
+        $juneRevisionId = $this->createMonth('2026-06-01', 60_000_00, 0);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $juneRevisionId,
+            $this->actorId,
+        );
+
+        // 180 000 Kč × 4,20 ‰ = 756 Kč. Ze zastropovaného základu by zbylo
+        // minimální čtvrtletní pojistné 100 Kč.
+        self::assertSame(75_600, (int) $this->liability($result['liability_ids'][0])['amount_minor']);
+    }
+
+    /**
+     * Reset maxima od ledna. Prosincové čtvrtletí jede na useknutém sociálním
+     * základu, lednové už zase na plném — a základ zákonného pojištění je
+     * v obou stejný, protože roční maximum se ho netýká vůbec.
+     */
+    public function testAnnualCapResetInJanuaryDoesNotChangeLiabilityBase(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-10-01', 60_000_00, 0);
+        $this->createMonth('2026-11-01', 60_000_00, 0);
+        $decemberRevisionId = $this->createMonth('2026-12-01', 60_000_00, 0);
+        $december = $this->materializer->materialize(
+            $this->supplierId,
+            $decemberRevisionId,
+            $this->actorId,
+        );
+
+        $this->createMonth('2027-01-01', 60_000_00, 60_000_00);
+        $this->createMonth('2027-02-01', 60_000_00, 60_000_00);
+        $marchRevisionId = $this->createMonth('2027-03-01', 60_000_00, 60_000_00);
+        $march = $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+
+        self::assertSame(
+            (int) $this->liability($december['liability_ids'][0])['amount_minor'],
+            (int) $this->liability($march['liability_ids'][0])['amount_minor'],
+        );
+    }
+
+    /**
+     * Otisk musí prozradit, kterým pravidlem závazek vznikl. Bez toho by po
+     * opravě výkladu nešlo v datech rozeznat čtvrtletí spočtená ze
+     * zastropovaného základu od těch správných.
+     */
+    public function testSourceSnapshotNamesTheLiabilityBaseAndItsSchema(): void
+    {
+        $this->rates->insert($this->supplierId, 'KOOP', '4.20', '2026-01-01', $this->actorId);
+        $this->createMonth('2026-01-01', 20_000_00, 20_000_00);
+        $this->createMonth('2026-02-01', 30_000_00, 30_000_00);
+        $marchRevisionId = $this->createMonth('2026-03-01', 50_000_00, 10_000_00);
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $marchRevisionId,
+            $this->actorId,
+        );
+        $source = json_decode(
+            (string) $this->liability($result['liability_ids'][0])['source_snapshot_json'],
+            true,
+            flags: JSON_THROW_ON_ERROR,
+        );
+
+        self::assertSame('payroll-payment-accident-insurance-source.v2', $source['schema_reference']);
+        self::assertSame(100_000_00, $source['employer_liability_assessment_base_minor_units']);
+        self::assertArrayNotHasKey('assessment_base_minor_units', $source);
+    }
+
     public function testAppliesMinimumQuarterlyPremiumWhenComputedAmountIsLower(): void
     {
         $this->rates->insert($this->supplierId, 'KOOP', '0.10', '2026-01-01', $this->actorId);
@@ -237,8 +365,18 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
         return (int) $id;
     }
 
-    private function createMonth(string $periodStart, int $cappedAssessmentBaseMinor): int
-    {
+    /**
+     * Oba základy zvlášť. Zákonné pojištění odpovědnosti stojí na
+     * `participating_…` (bez ročního maxima podle § 15a), sociální pojištění na
+     * `capped_…`. Dokud si je pomocník držel stejné, nemohl žádný test poznat,
+     * že materializér bere ten druhý.
+     */
+    private function createMonth(
+        string $periodStart,
+        int $participatingAssessmentBaseMinor,
+        ?int $cappedAssessmentBaseMinor = null,
+    ): int {
+        $cappedAssessmentBaseMinor ??= $participatingAssessmentBaseMinor;
         $pdo = $this->db->pdo();
         $paymentDate = (new \DateTimeImmutable($periodStart))
             ->modify('+1 month')->modify('10 days')->format('Y-m-d');
@@ -284,7 +422,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
             'calculation_date' => (new \DateTimeImmutable($periodStart))
                 ->modify('last day of this month')->format('Y-m-d'),
             'status' => 'calculated',
-            'participating_assessment_base_minor_units' => $cappedAssessmentBaseMinor,
+            'participating_assessment_base_minor_units' => $participatingAssessmentBaseMinor,
             'capped_assessment_base_minor_units' => $cappedAssessmentBaseMinor,
             'employee_contribution_minor_units' => 0,
             'employer_contribution_before_discount_minor_units' => 0,
