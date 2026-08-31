@@ -138,7 +138,7 @@ final class EmailProfilesAction
             return $locked;
         }
         try {
-            $this->profiles->updateProfile($supplierId, $profileId, $body);
+            $this->profiles->updateProfile($supplierId, $profileId, $body, RequestAuthorization::isClientType($request));
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         } catch (\PDOException $e) {
@@ -210,9 +210,20 @@ final class EmailProfilesAction
         if (($restricted = $this->denyClientRestrictedFields($request, $response, $profileData)) !== null) {
             return $restricted;
         }
+        // Zámek vlastního transportu musí platit i tady. Bez něj by šlo ve
+        // spravované instalaci protlačit vlastní SMTP testem, který `create`
+        // a `update` odmítají.
+        if (($locked = $this->denyCustomTransport($response, $profileData)) !== null) {
+            return $locked;
+        }
 
         try {
-            $profile = $this->profiles->profileForDraftTest($supplierId, $profileData, $profileId);
+            $profile = $this->profiles->profileForDraftTest(
+                $supplierId,
+                $profileData,
+                $profileId,
+                RequestAuthorization::isClientType($request),
+            );
         } catch (\InvalidArgumentException $e) {
             if ($profileId !== null && $this->profiles->findProfile($supplierId, $profileId) === null) {
                 return Json::error($response, 'not_found', 'E-mailový profil nenalezen.', 404);
@@ -284,7 +295,12 @@ final class EmailProfilesAction
             : $body;
         unset($profileData['id'], $profileData['profile_id'], $profileData['profile']);
 
-        return $this->profiles->imapProbeSettingsForDraft($supplierId, $profileData, $profileId);
+        return $this->profiles->imapProbeSettingsForDraft(
+            $supplierId,
+            $profileData,
+            $profileId,
+            RequestAuthorization::isClientType($request),
+        );
     }
 
     private function imapProbeError(Request $request, Response $response, array $args, \InvalidArgumentException $e): Response

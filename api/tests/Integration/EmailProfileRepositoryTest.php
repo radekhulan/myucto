@@ -360,6 +360,102 @@ final class EmailProfileRepositoryTest extends TestCase
         self::assertSame('imap-base.example.test', $stored['imap_host'] ?? null);
     }
 
+    /**
+     * Klientská role si nesmí uložené heslo přesměrovat na vlastní server —
+     * ani zápisem, ani testovacím odesláním, ani IMAP sondou.
+     */
+    public function testStrictSecretReuseRefusesToForwardStoredPasswordToAnotherServer(): void
+    {
+        $profileId = $this->profiles->createProfile($this->supplierId, [
+            'name' => 'Strict reuse base',
+            'code' => 'itest_strict_reuse_' . bin2hex(random_bytes(4)),
+            'from_email' => 'strict-base@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'smtp-base.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'base-user',
+            'smtp_password' => 'stored-secret',
+            'imap_sent_enabled' => true,
+            'imap_host' => 'imap-base.example.test',
+            'imap_username' => 'base-imap-user',
+            'imap_password' => 'stored-imap-secret',
+            'imap_folder' => 'Sent',
+        ], $this->userId);
+        $this->createdEmailProfiles[] = $profileId;
+
+        $draftPayload = [
+            'name' => 'Strict reuse draft',
+            'code' => 'itest_strict_draft_' . bin2hex(random_bytes(4)),
+            'from_email' => 'strict-draft@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'attacker.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'base-user',
+            'smtp_password' => '',
+        ];
+
+        try {
+            $this->profiles->profileForDraftTest($this->supplierId, $draftPayload, $profileId, true);
+            self::fail('Přesměrovaný testovací profil měl být odmítnut.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('smtp_password', $e->getMessage());
+        }
+
+        try {
+            $this->profiles->imapProbeSettingsForDraft($this->supplierId, [
+                'imap_host' => 'attacker.example.test',
+                'imap_username' => 'base-imap-user',
+                'imap_password' => '',
+                'imap_folder' => 'Sent',
+            ], $profileId, true);
+            self::fail('Přesměrovaná IMAP sonda měla být odmítnuta.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('imap_password', $e->getMessage());
+        }
+
+        try {
+            $this->profiles->updateProfile($this->supplierId, $profileId, [
+                'smtp_host' => 'attacker.example.test',
+                'smtp_password' => '',
+            ], true);
+            self::fail('Přesměrovaný zápis profilu měl být odmítnut.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('smtp_password', $e->getMessage());
+        }
+
+        $stored = $this->profiles->findProfile($this->supplierId, $profileId);
+        self::assertSame('smtp-base.example.test', $stored['smtp_host'] ?? null);
+    }
+
+    public function testStrictSecretReuseKeepsWorkingWhenTheTargetIsUnchanged(): void
+    {
+        $profileId = $this->profiles->createProfile($this->supplierId, [
+            'name' => 'Strict reuse unchanged',
+            'code' => 'itest_strict_same_' . bin2hex(random_bytes(4)),
+            'from_email' => 'strict-same@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'smtp-base.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'base-user',
+            'smtp_password' => 'stored-secret',
+        ], $this->userId);
+        $this->createdEmailProfiles[] = $profileId;
+
+        $draft = $this->profiles->profileForDraftTest($this->supplierId, [
+            'name' => 'Strict reuse unchanged draft',
+            'code' => 'itest_strict_same_draft_' . bin2hex(random_bytes(4)),
+            'from_email' => 'strict-same-draft@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'smtp-base.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'base-user',
+            'smtp_password' => '',
+        ], $profileId, true);
+
+        self::assertSame('stored-secret', $draft['smtp_password']);
+        self::assertSame('strict-same-draft@example.test', $draft['from_email']);
+    }
+
     public function testImapProbeSettingsCanReuseStoredSecretWithoutWholeProfile(): void
     {
         $profileId = $this->profiles->createProfile($this->supplierId, [

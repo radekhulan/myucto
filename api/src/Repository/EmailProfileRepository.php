@@ -22,10 +22,66 @@ final class EmailProfileRepository
     private const IMAP_ON_FAILURES = ['log_only', 'fail_send'];
     private const SMTP_AUTH_TYPES = ['LOGIN', 'PLAIN', 'CRAM-MD5', 'XOAUTH2'];
 
+    /**
+     * Údaje, které určují, KAM se uložené heslo pošle. Změní-li se kterýkoli
+     * z nich, přestává být domergování uloženého tajemství bezpečné.
+     *
+     * @var list<string>
+     */
+    private const SMTP_SECRET_TARGET = ['smtp_host', 'smtp_port', 'smtp_username', 'smtp_encryption', 'smtp_auth_type'];
+
+    /** @var list<string> */
+    private const IMAP_SECRET_TARGET = ['imap_host', 'imap_port', 'imap_username', 'imap_encryption'];
+
     public function __construct(
         private readonly Connection $db,
         private readonly SecretEncryption $secrets,
     ) {}
+
+    /**
+     * Uložené heslo se smí domergovat jen do PŮVODNÍHO cíle.
+     *
+     * Bez téhle podmínky stačí poslat `id` existujícího profilu, přepsat host na
+     * vlastní server a nechat pole hesla prázdné — server se k cizímu serveru
+     * připojí a autentizuje uloženým tajemstvím, které API samo nikdy nevrátí.
+     * Zápis i testovací odeslání tak obchází „write-only" povahu hesla.
+     *
+     * Přísný režim platí pro klientskou roli: ta na profilu často zdědí přístup
+     * účetní kanceláře a je ze všech rolí nejméně důvěryhodná. Interní role si
+     * ponechávají dosavadní chování (stěhování na nový server bez přepisování
+     * hesla), protože ty už `settings.company.write` mají.
+     *
+     * @param array<string,mixed> $current
+     * @param array<string,mixed> $data
+     * @param list<string> $targetFields
+     */
+    private function assertSecretTargetUnchanged(
+        bool $strict,
+        array $current,
+        array $data,
+        ?string $storedSecret,
+        array $targetFields,
+        string $passwordField,
+    ): void {
+        if (!$strict || trim((string) $storedSecret) === '') {
+            return;
+        }
+
+        foreach ($targetFields as $field) {
+            if (!array_key_exists($field, $data)) continue;
+            if ($this->secretTargetValue($data[$field]) === $this->secretTargetValue($current[$field] ?? null)) continue;
+
+            throw new \InvalidArgumentException(
+                'Měníš server, port nebo přihlašovací jméno — pole ' . $passwordField . ' je proto nutné vyplnit znovu.'
+            );
+        }
+    }
+
+    private function secretTargetValue(mixed $value): string
+    {
+        if (is_bool($value)) return $value ? '1' : '0';
+        return trim((string) ($value ?? ''));
+    }
 
     /** @return list<string> */
     public function brandingProfileUsages(int $supplierId, int $profileId): array
@@ -169,8 +225,12 @@ final class EmailProfileRepository
     /**
      * @param array<string,mixed> $changes
      */
-    public function updateProfile(int $supplierId, int $profileId, array $changes): bool
-    {
+    public function updateProfile(
+        int $supplierId,
+        int $profileId,
+        array $changes,
+        bool $strictSecretReuse = false,
+    ): bool {
         $current = $this->findProfile($supplierId, $profileId);
         if ($current === null) {
             return false;
@@ -184,11 +244,27 @@ final class EmailProfileRepository
         if ($currentWithSecret !== null
             && (!array_key_exists('smtp_password', $changes) || trim((string) ($changes['smtp_password'] ?? '')) === '')
         ) {
+            $this->assertSecretTargetUnchanged(
+                $strictSecretReuse,
+                $current,
+                $changes,
+                $currentWithSecret['smtp_password'] ?? null,
+                self::SMTP_SECRET_TARGET,
+                'smtp_password',
+            );
             $merged['smtp_password'] = $currentWithSecret['smtp_password'] ?? null;
         }
         if ($currentWithSecret !== null
             && (!array_key_exists('imap_password', $changes) || trim((string) ($changes['imap_password'] ?? '')) === '')
         ) {
+            $this->assertSecretTargetUnchanged(
+                $strictSecretReuse,
+                $current,
+                $changes,
+                $currentWithSecret['imap_password'] ?? null,
+                self::IMAP_SECRET_TARGET,
+                'imap_password',
+            );
             $merged['imap_password'] = $currentWithSecret['imap_password'] ?? null;
         }
         if (!array_key_exists('reply_to_enabled', $changes) && array_key_exists('reply_to_email', $changes)) {
@@ -276,8 +352,12 @@ final class EmailProfileRepository
      * @param array<string,mixed> $data
      * @return array<string,mixed>
      */
-    public function profileForDraftTest(int $supplierId, array $data, ?int $profileId = null): array
-    {
+    public function profileForDraftTest(
+        int $supplierId,
+        array $data,
+        ?int $profileId = null,
+        bool $strictSecretReuse = false,
+    ): array {
         $draft = $data;
         if ($profileId !== null) {
             $current = $this->findProfile($supplierId, $profileId);
@@ -293,11 +373,27 @@ final class EmailProfileRepository
             if ($currentWithSecret !== null
                 && (!array_key_exists('smtp_password', $data) || trim((string) ($data['smtp_password'] ?? '')) === '')
             ) {
+                $this->assertSecretTargetUnchanged(
+                    $strictSecretReuse,
+                    $current,
+                    $data,
+                    $currentWithSecret['smtp_password'] ?? null,
+                    self::SMTP_SECRET_TARGET,
+                    'smtp_password',
+                );
                 $draft['smtp_password'] = $currentWithSecret['smtp_password'] ?? null;
             }
             if ($currentWithSecret !== null
                 && (!array_key_exists('imap_password', $data) || trim((string) ($data['imap_password'] ?? '')) === '')
             ) {
+                $this->assertSecretTargetUnchanged(
+                    $strictSecretReuse,
+                    $current,
+                    $data,
+                    $currentWithSecret['imap_password'] ?? null,
+                    self::IMAP_SECRET_TARGET,
+                    'imap_password',
+                );
                 $draft['imap_password'] = $currentWithSecret['imap_password'] ?? null;
             }
         }
@@ -331,8 +427,12 @@ final class EmailProfileRepository
      *   imap_timeout:int,imap_on_failure:string
      * }
      */
-    public function imapProbeSettingsForDraft(int $supplierId, array $data, ?int $profileId = null): array
-    {
+    public function imapProbeSettingsForDraft(
+        int $supplierId,
+        array $data,
+        ?int $profileId = null,
+        bool $strictSecretReuse = false,
+    ): array {
         $draft = $data;
         if ($profileId !== null) {
             $current = $this->findProfile($supplierId, $profileId);
@@ -347,6 +447,14 @@ final class EmailProfileRepository
             if ($currentWithSecret !== null
                 && (!array_key_exists('imap_password', $data) || trim((string) ($data['imap_password'] ?? '')) === '')
             ) {
+                $this->assertSecretTargetUnchanged(
+                    $strictSecretReuse,
+                    $current,
+                    $data,
+                    $currentWithSecret['imap_password'] ?? null,
+                    self::IMAP_SECRET_TARGET,
+                    'imap_password',
+                );
                 $draft['imap_password'] = $currentWithSecret['imap_password'] ?? null;
             }
         }

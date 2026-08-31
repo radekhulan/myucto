@@ -208,6 +208,69 @@ final class RbacHttpRoleMatrixTest extends TestCase
         self::assertSame('field_not_delegable', $this->json($brandingMassAssignment)['error']['code'] ?? null);
     }
 
+    /**
+     * Uložené SMTP heslo API nevrací — a nesmí ho jít ani „vytáhnout" tím, že si
+     * klient přepíše host na vlastní server a pole hesla nechá prázdné.
+     */
+    public function testClientCannotForwardStoredSmtpSecretToItsOwnServer(): void
+    {
+        $userId = $this->createUser('client_secret_forward', 'client', 2, true);
+        $session = $this->createSession($userId);
+        $code = 'client-fwd-' . bin2hex(random_bytes(5));
+
+        $created = $this->request('POST', '/api/settings/client/email-profiles', $session, [
+            'name' => '__TEST client smtp profile',
+            'code' => $code,
+            'from_email' => 'forward@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'smtp-legit.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'legit-user',
+            'smtp_password' => '__TEST_SMTP_SECRET_' . bin2hex(random_bytes(8)),
+            'is_default' => false,
+            'is_active' => true,
+        ]);
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $profileId = (int) ($this->json($created)['id'] ?? 0);
+        self::assertGreaterThan(0, $profileId);
+        $this->emailProfileIds[] = $profileId;
+
+        $redirectedSave = $this->request('PUT', "/api/settings/client/email-profiles/{$profileId}", $session, [
+            'transport_type' => 'smtp',
+            'smtp_host' => 'attacker.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'legit-user',
+            'smtp_password' => '',
+        ]);
+        self::assertSame(400, $redirectedSave->getStatusCode());
+        self::assertSame('validation_failed', $this->json($redirectedSave)['error']['code'] ?? null);
+
+        $redirectedTest = $this->request('POST', '/api/settings/client/email-profiles/test', $session, [
+            'id' => $profileId,
+            'name' => '__TEST redirected draft',
+            'code' => $code . '-draft',
+            'from_email' => 'forward@example.test',
+            'transport_type' => 'smtp',
+            'smtp_host' => 'attacker.example.test',
+            'smtp_auth_enabled' => true,
+            'smtp_username' => 'legit-user',
+            'smtp_password' => '',
+        ]);
+        self::assertSame(400, $redirectedTest->getStatusCode());
+        self::assertSame('validation_failed', $this->json($redirectedTest)['error']['code'] ?? null);
+
+        $stored = $this->request('GET', '/api/settings/client/email-profiles', $session);
+        self::assertSame(200, $stored->getStatusCode());
+        $row = null;
+        foreach ($this->json($stored) as $profile) {
+            if (is_array($profile) && (int) ($profile['id'] ?? 0) === $profileId) $row = $profile;
+        }
+        self::assertIsArray($row);
+        self::assertSame('smtp-legit.example.test', $row['smtp_host'] ?? null);
+        self::assertArrayNotHasKey('smtp_password', $row);
+        self::assertTrue($row['has_smtp_password'] ?? false);
+    }
+
     private function createUser(string $variant, string $roleType, int $level, bool $hasSupplier): int
     {
         if ($variant === 'superadmin') {
