@@ -138,7 +138,13 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             $data['counterparty_account'] = $counterpartyLineAccount;
         }
 
-        foreach (['variable_symbol', 'amount', 'currency', 'posted_at', 'recipient_account'] as $required) {
+        // VS je VOLITELNÝ (#45). Banka ho u odchozích plateb, poplatků a karetních
+        // transakcí legitimně neposílá — ČSOB CEB („CEB Info: Zaúčtování platby") je
+        // přesně ten případ. Zahodit kvůli tomu celé avízo znamená díru v posloupnosti
+        // zůstatků; správně se pohyb zaeviduje bez VS a párování skončí na
+        // `no_invoice_with_vs`, což je korektní stav (StatementMatcher s prázdným VS počítá).
+        // Zbytek povinný zůstává: bez částky, měny, data a cílového účtu není co založit.
+        foreach (['amount', 'currency', 'posted_at', 'recipient_account'] as $required) {
             if (trim((string) ($data[$required] ?? '')) === '') {
                 throw new \RuntimeException("Parser nenašel povinné pole {$required}.");
             }
@@ -148,7 +154,7 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         $postedAt = $this->parseDate((string) $data['posted_at']);
 
         return new ParsedBankEmailNotice(
-            variableSymbol: $this->digitsOnly((string) $data['variable_symbol']),
+            variableSymbol: $this->digitsOnly((string) ($data['variable_symbol'] ?? '')),
             amount: $this->applyDirection($this->parseAmount((string) $data['amount']), (string) ($data['direction'] ?? '')),
             currency: $this->normalizeCurrency((string) $data['currency']),
             postedAt: $postedAt,

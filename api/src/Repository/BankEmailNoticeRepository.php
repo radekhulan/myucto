@@ -627,7 +627,11 @@ final class BankEmailNoticeRepository
             $notice->amount,
             $notice->balance,
             $currency,
-            $notice->variableSymbol,
+            // Avízo bez VS (odchozí platba, poplatek, karetní transakce) ukládáme jako
+            // NULL, ne jako prázdný řetězec — sloupec je nullable a párování i sestavy
+            // testují „VS není". Parsery vracejí '' a bez tohohle převodu by v DB vznikly
+            // dvě různé reprezentace téhož „nemá VS" (#45).
+            $notice->variableSymbol !== '' ? $notice->variableSymbol : null,
             $notice->constantSymbol,
             $notice->counterpartyAccount,
             $notice->counterpartyBank,

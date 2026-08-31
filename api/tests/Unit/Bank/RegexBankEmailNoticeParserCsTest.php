@@ -349,4 +349,52 @@ TEXT;
         self::assertSame('2801836907', $parsed->counterpartyAccount);
         self::assertSame('2010', $parsed->counterpartyBank);
     }
+
+    /**
+     * #45: avízo BEZ variabilního symbolu se nesmí zahodit. Banky VS neposílají
+     * u odchozích plateb, poplatků a karetních transakcí (ČSOB CEB „Zaúčtování
+     * platby" je přesně ten případ) — dřív na tom parser padal na
+     * „Parser nenašel povinné pole variable_symbol" a pohyb se vůbec nezaevidoval,
+     * takže se rozpadla posloupnost zůstatků.
+     */
+    public function testParsesNoticeWithoutVariableSymbol(): void
+    {
+        $body = <<<TEXT
+Dobrý den,
+
+Směr platby: odchozí
+Číslo účtu: 6509175329/0800
+Částka v měně účtu: 250,00 Kč
+Konstantní symbol: 0308
+Popis: Poplatek za vedení účtu
+TEXT;
+
+        $parser = new RegexBankEmailNoticeParser();
+        $parsed = $parser->parse($this->csMessage($body), $this->csProvider());
+
+        self::assertSame('', $parsed->variableSymbol, 'Chybějící VS = prázdno, ne výjimka.');
+        self::assertSame(-250.0, $parsed->amount);
+        self::assertSame('CZK', $parsed->currency);
+        self::assertSame('6509175329/0800', $parsed->recipientAccount);
+        self::assertSame('0308', $parsed->constantSymbol);
+    }
+
+    /** Částka, měna, datum a cílový účet povinné zůstávají — bez nich není co založit. */
+    public function testStillFailsWithoutAmount(): void
+    {
+        $body = <<<TEXT
+Dobrý den,
+
+Směr platby: odchozí
+Číslo účtu: 6509175329/0800
+Variabilní symbol: 555
+TEXT;
+
+        $parser = new RegexBankEmailNoticeParser();
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Parser nenašel povinné pole amount.');
+        $parser->parse($this->csMessage($body), $this->csProvider());
+    }
+
 }
