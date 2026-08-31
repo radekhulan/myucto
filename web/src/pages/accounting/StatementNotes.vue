@@ -183,6 +183,9 @@ onMounted(load)
               </span>
             </div>
             <p class="text-xs text-neutral-500 mt-0.5">{{ s.legal }}</p>
+            <!-- Upozornění stojí u sekce, ne v nápovědě stránky: účetní ho musí
+                 vidět ve chvíli, kdy tu sekci píše, ne až po odevzdání výkazu. -->
+            <p v-if="s.hint" class="text-xs text-warning-700 mt-1 max-w-2xl">{{ s.hint }}</p>
           </div>
           <span class="text-xs font-semibold px-2 py-0.5 rounded shrink-0"
             :class="s.filled ? 'bg-success-100 text-success-700' : 'bg-warning-100 text-warning-700'">

@@ -89,6 +89,17 @@ final class StatementNotesService
         ],
         'receivables_payables_over_5y' => [
             'scope' => self::SCOPE_ALL, 'auto' => false,
+            // Rozvaha dělí pohledávky a závazky na dlouhodobé a krátkodobé podle
+            // zbytkové splatnosti, ale ze zůstatku syntetiky to poznat nejde -
+            // 321 je jeden účet pro obojí. Aplikace to proto nedopočítává a
+            // dlouhodobé řádky zůstávají nulové, dokud firma nepoužije analytiku
+            // (321D, 322D, 311D). Účetní to musí vědět dřív, než výkaz odevzdá,
+            // takže to stojí přímo u sekce, kde se splatnost popisuje.
+            'hint' => 'MyÚčto nedopočítává zbytkovou splatnost ze zůstatků účtů. '
+                . 'Dlouhodobé řádky rozvahy zůstávají nulové, pokud dlouhodobou část '
+                . 'nevedete na analytice (321D, 322D, 311D). Uveďte tady, že se '
+                . 'závazky a pohledávky se zbytkovou splatností nad jeden rok '
+                . 'nevykazují samostatně, nebo analytiku doplňte.',
             'label' => 'Pohledávky a závazky se splatností delší než 5 let a kryté zárukou',
             'legal' => '§ 39 odst. 1 písm. d) a e)',
         ],
@@ -198,6 +209,7 @@ final class StatementNotesService
                 'key'     => $key,
                 'label'   => $def['label'],
                 'legal'   => $def['legal'],
+                'hint'    => $def['hint'] ?? null,
                 'scope'   => $def['scope'],
                 'auto'    => $def['auto'],
                 'content' => $content,

@@ -180,4 +180,93 @@ final class StatementSeedTest extends TestCase
         }
         return false;
     }
+    /**
+     * Rozvaha musí mít všechny řádky, které vyhláška č. 500/2002 Sb. v příloze 1
+     * předepisuje na třetí a čtvrté úrovni. Chyběly a účetní tak viděla některé
+     * zůstatky jen sloučené v nadřazené položce, bez možnosti je vykázat zvlášť.
+     */
+    public function testBalanceSheetHasAllLevelThreeRowsRequiredByTheDecree(): void
+    {
+        $required = [
+            'P.B.1.', 'P.C.I.4.', 'P.C.I.5.', 'P.C.I.7.',
+            'P.C.I.9.1.', 'P.C.I.9.2.', 'P.C.I.9.3.', 'P.C.II.7.',
+            'C.II.1.2.', 'C.II.1.3.',
+            'C.II.1.5.1.', 'C.II.1.5.2.', 'C.II.1.5.3.', 'C.II.1.5.4.',
+        ];
+        $statement = $this->db->pdo()->prepare(
+            'SELECT row_code FROM statement_rows WHERE version_id = ?',
+        );
+        $statement->execute([$this->bsVersionId]);
+        $present = $statement->fetchAll(PDO::FETCH_COLUMN);
+
+        self::assertSame([], array_values(array_diff($required, $present)));
+    }
+
+    /**
+     * Mezisoučet nesmí mít vlastní BRUTTO účty — částka by se započítala dvakrát,
+     * jednou přes vlastní mapování a podruhé přes součet podřádků. Korekce
+     * (oprávky, opravné položky) na mezisoučtu naopak viset SMÍ a visí: netto
+     * hodnota se snižuje za celou skupinu, ne po jednotlivých řádcích.
+     */
+    public function testSubtotalRowsCarryNoGrossAccountsOfTheirOwn(): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT DISTINCT r.row_code
+               FROM statement_rows r
+               JOIN statement_account_map m
+                 ON m.version_id = r.version_id AND m.row_code = r.row_code
+              WHERE r.version_id = ? AND r.row_type = "subtotal"
+                AND m.target = "gross"
+              ORDER BY r.row_code',
+        );
+        $statement->execute([$this->bsVersionId]);
+
+        self::assertSame([], $statement->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Účet nesmí viset na dvou řádcích téže délky prefixu ve stejné sekci —
+     * mapovač vybírá VŠECHNY nejdelší shody, takže by se zůstatek přičetl do
+     * obou řádků a rozvaha by přestala sedět.
+     */
+    public function testNoAccountPrefixFeedsTwoRowsAtOnce(): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT m.account_prefix, COUNT(DISTINCT m.row_code) AS rows_hit
+               FROM statement_account_map m
+               JOIN statement_rows r
+                 ON r.version_id = m.version_id AND r.row_code = m.row_code
+              WHERE m.version_id = ? AND m.target = "gross"
+              GROUP BY m.account_prefix, m.balance_condition, r.section
+             HAVING rows_hit > 1',
+        );
+        $statement->execute([$this->bsVersionId]);
+
+        self::assertSame([], $statement->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Podstatný vliv není totéž co ovládaná osoba. Obojí viselo na jednom řádku,
+     * takže výkaz tvrdil jiný vztah, než jaký ve skutečnosti byl.
+     */
+    public function testSignificantInfluenceAccountsSitOnTheirOwnRows(): void
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT account_prefix, row_code FROM statement_account_map
+              WHERE version_id = ? AND account_prefix IN ("472", "362", "478")
+              ORDER BY account_prefix',
+        );
+        $statement->execute([$this->bsVersionId]);
+        $map = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $map[(string) $row['account_prefix']] = (string) $row['row_code'];
+        }
+
+        self::assertSame([
+            '362' => 'P.C.II.7.',
+            '472' => 'P.C.I.7.',
+            '478' => 'P.C.I.5.',
+        ], $map);
+    }
+
 }

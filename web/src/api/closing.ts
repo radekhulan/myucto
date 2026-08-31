@@ -665,6 +665,8 @@ export interface StatementNotesSection {
   key: string
   label: string
   legal: string
+  /** Upozornění k sekci: co aplikace nedopočítává a co proto musí doplnit účetní. */
+  hint: string | null
   scope: 'all' | 'audited' | 'large'
   auto: boolean
   content: string | null
