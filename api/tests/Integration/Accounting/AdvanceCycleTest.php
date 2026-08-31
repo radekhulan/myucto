@@ -497,6 +497,51 @@ final class AdvanceCycleTest extends BankPostingTestCase
         );
     }
 
+    /**
+     * Rok vedený v daňové evidenci mluví jazykem evidence, ne deníku. Doporučení spárovat
+     * platí dál (bez něj se záloha započítá do výdajů dvakrát a DPH z DDKP zůstane bez
+     * konečné faktury), ale čísla účtů 314/343 v daňové evidenci neexistují a hláška by
+     * odkazovala na neexistující místo.
+     *
+     * Stav je dosažitelný přesně tehdy, když firma rok zaúčtovaný podvojně přepne zpátky
+     * na daňovou evidenci: zápisy v deníku zůstanou, režim už ne.
+     */
+    public function testUnsettledNoticeDropsAccountNumbersInTaxEvidenceYear(): void
+    {
+        $vendor = $this->client('Dodavatel karta N2');
+        $ddkp   = $this->purchaseWithItem('DDKP-N2', $vendor, 500.00, 105.00, 'tax_document', null);
+        $this->payAdvancePfViaBank($ddkp, 605.00);
+        $this->purchaseWithItem('PF-N2', $vendor, 1000.00, 210.00, 'invoice', null);
+
+        $repo = $this->container->get(PurchaseInvoiceRepository::class);
+
+        $this->accountingModeForTestYear('double_entry');
+        $posted = $repo->find($ddkp, $this->supplierId)['unsettled_notice'];
+        self::assertNotNull($posted);
+        self::assertStringContainsString('Na účtu 314', $posted['message']);
+        self::assertStringContainsString('na 343 doúčtovat', $posted['message']);
+
+        $this->accountingModeForTestYear('tax_evidence');
+        $evidence = $repo->find($ddkp, $this->supplierId)['unsettled_notice'];
+        self::assertNotNull($evidence, 'Doporučení spárovat platí i v daňové evidenci.');
+        self::assertStringNotContainsString('314', $evidence['message']);
+        self::assertStringNotContainsString('343', $evidence['message']);
+        self::assertStringContainsString('spárujte je tlačítkem výše', $evidence['message']);
+        self::assertStringContainsString('105,00', $evidence['message'],
+            'Zbývající DPH se uvádí dál — jen bez čísla účtu.');
+        self::assertEqualsWithDelta(105.00, $evidence['remaining_vat_on_343'], 0.01,
+            'Datová část odpovědi se nemění, mění se jen text hlášky.');
+    }
+
+    /** Režim účetnictví platný pro rok testovacích dokladů (rollback per test to uklidí). */
+    private function accountingModeForTestYear(string $mode): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO supplier_accounting_modes (supplier_id, effective_from, accounting_mode)
+             VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE accounting_mode = VALUES(accounting_mode)'
+        )->execute([$this->supplierId, self::YEAR . '-01-01', $mode]);
+    }
+
     // ── fixtury ──────────────────────────────────────────────────────────────
 
     /** @param array<string,mixed> $account */

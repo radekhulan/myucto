@@ -183,6 +183,11 @@ final class PurchaseInvoiceRepository
             $row['has_settlement_candidates'] = (bool) $q->fetchColumn();
         }
 
+        // Režim účetnictví K ROKU DOKLADU (ne k dnešku) — rozhoduje o obou hláškách níž.
+        // Po přechodu z daňové evidence na podvojné účetnictví musí starší doklady mluvit
+        // jazykem evidence a novější jazykem deníku. Jedno čtení pro celý find().
+        $isDoubleEntry = $this->accountingModes->forYear($supplierId, $this->documentYear($row)) === 'double_entry';
+
         // Upozornění na dokladu se zálohou/DDKP, který zůstává NESPÁROVANÝ, i když k němu
         // pravděpodobně patří konkrétní nespárovaná faktura téhož dodavatele: dnes se rozdíl
         // (zaplaceno kartou/zálohou vs. co fakturuje konečná faktura) tiše drží na 314 beze
@@ -208,12 +213,21 @@ final class PurchaseInvoiceRepository
                         ? round((float) $candidate['total_vat'] - (float) $row['total_vat'], 2)
                         : null;
                     $label = $candidate['varsymbol'] ?? $candidate['vendor_invoice_number'] ?? ('#' . $candidate['id']);
-                    $message = 'Na účtu 314 zůstává z tohoto dokladu otevřených '
+                    // Samotné doporučení spárovat platí v obou režimech (bez něj se záloha
+                    // započítá do výdajů dvakrát a DPH z DDKP zůstane bez konečné faktury).
+                    // Čísla účtů ale patří jen do podvojného účetnictví — v daňové evidenci
+                    // 314 ani 343 neexistují a hláška by odkazovala na neexistující místo.
+                    $message = ($isDoubleEntry
+                            ? 'Na účtu 314 zůstává z tohoto dokladu otevřených '
+                            : 'Z tohoto dokladu zůstává nevypořádaných ')
                         . number_format($paid, 2, ',', ' ') . ' Kč. Od stejného dodavatele existuje '
                         . 'nespárovaná faktura ' . $label . ' (' . number_format((float) $candidate['total_with_vat'], 2, ',', ' ')
                         . ' Kč) — pravděpodobně k sobě patří, spárujte je tlačítkem výše.';
                     if ($remainingVat !== null) {
-                        $message .= ' Po spárování zbývá na 343 doúčtovat ' . number_format($remainingVat, 2, ',', ' ')
+                        $message .= ($isDoubleEntry
+                                ? ' Po spárování zbývá na 343 doúčtovat '
+                                : ' Po spárování zbývá uplatnit DPH ')
+                            . number_format($remainingVat, 2, ',', ' ')
                             . ' Kč (DPH faktury ' . number_format((float) $candidate['total_vat'], 2, ',', ' ')
                             . ' Kč − už uplatněná DPH z DDKP ' . number_format((float) $row['total_vat'], 2, ',', ' ') . ' Kč).';
                     }
@@ -249,14 +263,13 @@ final class PurchaseInvoiceRepository
         //
         // Jen pro rok vedený v podvojném účetnictví. V daňové evidenci / paušálu žádný deník
         // ani účet 321 neexistuje, ruční „Uhrazeno" je tam jediný způsob, jak úhradu
-        // zaznamenat — varování by hlásilo závadu, která nemůže nastat. Režim bereme k roku
-        // dokladu (ne k dnešku): po přechodu na podvojné účetnictví musí starší doklady
-        // zůstat tiše v evidenci a novější dál hlásit.
+        // zaznamenat — varování by hlásilo závadu, která nemůže nastat. Režim viz
+        // $isDoubleEntry výš (k roku dokladu, ne k dnešku).
         $row['mark_paid_unposted'] = ($row['status'] === 'paid')
             && $row['bank_payments'] === []
             && $row['cash_payments'] === []
             && $row['settlement_payments'] === []
-            && $this->accountingModes->forYear($supplierId, $this->documentYear($row)) === 'double_entry';
+            && $isDoubleEntry;
         return $row;
     }
 
